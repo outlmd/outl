@@ -189,3 +189,81 @@ pub fn reconcile_orphan_md(workspace: &mut Workspace, hlc: &HlcGenerator, storag
         }
     }
 }
+
+/// Yield the disk for as long as the work just took, so a background
+/// pass never competes with the user for it.
+///
+/// ## Why this exists
+///
+/// outl's premise is that it opens fast and is ready for input, and that
+/// promise is about the *device*, not about thread count. A batch pass
+/// on a worker thread still breaks it if it saturates I/O, because the
+/// UI reads the same disk to paint.
+///
+/// Measured on the boot after a `CURRENT_PIPELINE_VERSION` bump, which
+/// makes every sidecar stale by pipeline: 2,827 files, **24.7 seconds at
+/// 8% CPU**. Not computation — `write_atomic`'s two `fsync`s per
+/// sidecar, 5,656 of them back to back, for 44 ops of actual content.
+///
+/// ## Why not the cheaper fix
+///
+/// Dropping the sidecar `fsync` takes those 24.7s to 0.3s, and it is the
+/// wrong trade. A rename that lands before its data leaves a sidecar of
+/// garbage, which reads as a *missing* one, which mints a fresh ULID per
+/// block: the page duplicates and every `((blk-…))` handle breaks.
+/// Skipping the migration is worse still, since the parser fix then
+/// never reaches pages nobody opens.
+///
+/// ## What this does instead
+///
+/// Nobody needs the migration to be *fast*. It needs to be invisible.
+/// Sleeping for exactly as long as the last unit of work took holds the
+/// pass to about half the device and leaves the rest to whoever is
+/// typing. A slow disk makes it yield more, not stutter more, because
+/// the ratio is what stays fixed, not the delay.
+///
+/// Call it **outside** the workspace lock — sleeping while holding it is
+/// the same stall with extra steps.
+pub fn yield_to_user(work: std::time::Duration) {
+    std::thread::sleep(work);
+}
+
+#[cfg(test)]
+mod pace_tests {
+    use super::yield_to_user;
+    use std::time::{Duration, Instant};
+
+    /// The pass yields as long as it worked, so it uses about half the
+    /// device and leaves the rest to whoever is typing.
+    #[test]
+    fn the_pass_yields_as_long_as_it_worked() {
+        let started = Instant::now();
+        yield_to_user(Duration::from_millis(20));
+        let slept = started.elapsed();
+        assert!(
+            slept >= Duration::from_millis(15),
+            "yielded {slept:?}, expected roughly the 20ms it worked"
+        );
+        assert!(
+            slept < Duration::from_millis(120),
+            "yielded {slept:?}, far past the work — the ratio is what stays fixed, not the delay"
+        );
+    }
+
+    /// A slow disk must make the pass yield *more*, not stutter more.
+    #[test]
+    fn the_yield_scales_with_the_work_not_a_fixed_delay() {
+        let quick = Instant::now();
+        yield_to_user(Duration::from_millis(4));
+        let quick = quick.elapsed();
+
+        let slow = Instant::now();
+        yield_to_user(Duration::from_millis(40));
+        let slow = slow.elapsed();
+
+        assert!(
+            slow > quick * 3,
+            "a 10x slower page yielded {slow:?} vs {quick:?} — the share is not being held"
+        );
+    }
+}

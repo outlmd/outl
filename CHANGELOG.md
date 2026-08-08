@@ -25,6 +25,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The first boot after an upgrade froze the app for 24 seconds.**
+  outl's premise is that it opens fast and is ready for input, and the `CURRENT_PIPELINE_VERSION` bump broke it: every sidecar goes stale by pipeline, so the first boot re-reconciles the whole graph.
+  Measured on a 2,827-file workspace: **24.7 seconds at 8% CPU** — not computation, but `write_atomic`'s two `fsync`s per sidecar, 5,656 of them back to back, for 44 ops of actual content.
+
+  Being on a worker thread was not enough. The pass reacquired the lock immediately after each page and kept the disk saturated for the whole batch, and the UI reads that same disk to paint, so the app felt frozen regardless of which thread the work was on.
+
+  Dropping the sidecar `fsync` would take it to 0.3 seconds and is the wrong trade: a rename landing before its data leaves a sidecar of garbage, which reads as a *missing* one, which mints a fresh ULID per block — the page duplicates and every `((blk-…))` handle breaks.
+  Skipping the migration is worse, since the parser fix then never reaches pages nobody opens.
+
+  So the pass yields instead. `BackgroundPace` sleeps in proportion to the work each page cost, holding a bounded share of the device, and the loop takes the workspace lock with `try_lock` so a click never waits behind a migration.
+  A slow disk makes it yield more rather than stutter more, because the ratio is the constant, not the delay.
+  Nobody needed the migration to be fast; it needed to be invisible.
+
+
 - **Markdown containing a blank line inside a block, or a block whose text carried its own indentation, lost everything after that point — silently, and then permanently.**
   This is the producer behind [issue #210](https://github.com/avelino/outl/issues/210), and it was not where [RFC 0210](docs/rfcs/0210-md-content-outside-op-log.md) guessed.
   `render → parse` was not a roundtrip:

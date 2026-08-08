@@ -61,28 +61,54 @@ pub(crate) fn spawn_background_reconcile(
                 "background reconcile: {} orphan(s) to process",
                 orphans.len()
             );
+            let started = std::time::Instant::now();
             for path in &orphans {
-                // Lock per page, drop between iterations so the frontend
-                // can grab the workspace between reconciles. A page with
-                // hundreds of blocks still runs in well under 50ms, well
-                // inside the user's perception threshold.
-                let mut slot = workspace_slot.lock();
-                let Some(ws) = slot.as_mut() else {
-                    // Workspace was closed (user picked another) — abort
-                    // the rest of the batch cleanly.
-                    return;
+                // **The user gets the lock first.** `lock()` is FIFO, so a
+                // batch this long would hand the frontend every other
+                // turn and still keep the disk busy in between. `try_lock`
+                // means a click never waits on a migration: the pass steps
+                // aside and comes back.
+                //
+                // Retried, never skipped: `continue` on a busy lock would
+                // step over the page for good, and a page silently left
+                // unreconciled is the whole class of bug this pass exists
+                // to close.
+                let took = loop {
+                    let Some(mut slot) = workspace_slot.try_lock() else {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        continue;
+                    };
+                    let Some(ws) = slot.as_mut() else {
+                        // Workspace was closed (user picked another) —
+                        // abort the rest of the batch cleanly.
+                        return;
+                    };
+                    let page_started = std::time::Instant::now();
+                    // Never `None` — level-3 fallout is a delete, and it
+                    // has to be recorded before it happens (`outl-md`
+                    // hard rule).
+                    if let Err(e) =
+                        outl_md::reconcile::reconcile_md(ws, &hlc, path, Some(&orphans_log))
+                    {
+                        warn!("orphan reconcile failed for {}: {e}", path.display());
+                    } else {
+                        changed = true;
+                    }
+                    break page_started.elapsed();
                 };
-                // Never `None` — level-3 fallout is a delete, and it has
-                // to be recorded before it happens (`outl-md` hard rule).
-                if let Err(e) = outl_md::reconcile::reconcile_md(ws, &hlc, path, Some(&orphans_log))
-                {
-                    warn!("orphan reconcile failed for {}: {e}", path.display());
-                } else {
-                    changed = true;
-                }
-                drop(slot);
+                // Yield in proportion to the work, *outside* the lock.
+                // Without this the pass reacquires immediately and keeps
+                // the disk saturated for the whole batch — technically a
+                // worker thread, and a frozen app all the same, because
+                // the UI reads the same disk to paint. Measured before:
+                // 2,827 files, 24.7s at 8% CPU, all of it `fsync`.
+                outl_tauri_shared::workspace_open::yield_to_user(took);
             }
-            info!("background reconcile complete");
+            info!(
+                "background reconcile complete: {} page(s) in {:?}",
+                orphans.len(),
+                started.elapsed()
+            );
         }
 
         // Repair journal titles doubled by concurrent offline creation

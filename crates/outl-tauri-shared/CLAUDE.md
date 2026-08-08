@@ -19,6 +19,19 @@ Before this crate existed, both clients kept near-identical copies of the same n
 | `plugin_service.rs` + `plugin_thread.rs` | `PluginService` — the dedicated plugin thread (Boa `Context` is `!Send`), parametrized by client id + capability set + `StorageRootProvider` |
 | `plugin_dto.rs` | Plugin wire shapes (`PluginCommandDto`, `ToolbarButtonDto`, …) |
 
+## Background passes yield, they do not race
+
+A batch pass on a worker thread is **not** automatically invisible. The UI reads the same disk to paint, so a pass that saturates I/O freezes the app whatever thread it runs on. outl's premise is that it opens fast and is ready for input, and that premise is about the *device*, not about thread count.
+
+Measured, on the boot after a `CURRENT_PIPELINE_VERSION` bump: 2,827 files, **24.7 seconds at 8% CPU**. All of it `write_atomic`'s two `fsync`s per sidecar, 5,656 of them, for 44 ops of real content.
+
+Two rules came out of that:
+
+- **Yield in proportion to the work.** `BackgroundPace::COOPERATIVE` sleeps as long as the page took, so the pass holds about half the device and a slow disk makes it yield more rather than stutter more. Sleep *outside* the lock; sleeping while holding it is the same stall with extra steps.
+- **Take the lock with `try_lock`, and retry the page — never skip it.** `lock()` is FIFO, which hands the frontend every other turn and keeps the disk busy in between. And a `continue` on a busy lock steps over the page permanently, which is the silent-skip class of bug this whole area exists to close.
+
+What is **not** the answer: dropping the sidecar `fsync`. It takes 24.7s to 0.3s and trades the one failure the project cannot afford — a rename landing before its data leaves a sidecar of garbage, read as missing, minting a fresh ULID per block, duplicating the page and breaking every `((blk-…))` handle.
+
 ## Async projection writes
 
 `finish_in_page_with` (the tail every mutating command calls to build its reply) branches on `state.projection_writer()`:
