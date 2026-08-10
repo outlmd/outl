@@ -62,7 +62,10 @@ pub fn outl_peer_status(state: State<'_, AppState>) -> Result<Vec<PeerStatusDto>
 /// that is the user's own choice, not a degraded state.
 #[tauri::command]
 pub fn outl_sync_now(state: State<'_, AppState>) -> Result<(), String> {
-    if state.iroh_transport.lock().is_none() && endpoint_held_by_another_process() {
+    if state.iroh_transport.lock().is_none()
+        && endpoint_held_by_another_process()
+        && !outl_sync_iroh::endpoint_available()
+    {
         return Err(ENDPOINT_BUSY_NOTICE.to_string());
     }
     shared::sync_now(state.inner())

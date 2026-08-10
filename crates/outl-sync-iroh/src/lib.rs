@@ -64,7 +64,10 @@ mod status;
 #[doc(hidden)]
 pub mod test_support;
 
-pub use device::{build_default_transport, build_transport, default_device_dir, TransportOutcome};
+pub use device::{
+    build_default_transport, build_transport, default_device_dir, endpoint_available,
+    TransportOutcome,
+};
 pub use engine::IrohSyncTransport;
 pub use identity::IrohIdentity;
 pub use lease::EndpointLease;

@@ -70,13 +70,40 @@ pub enum TransportOutcome {
 /// a persistent path (not a fresh tmpdir per run) if you want a stable node id
 /// under it, and re-pair once after the move.
 pub fn default_device_dir() -> anyhow::Result<PathBuf> {
+    let home = dirs::home_dir().context("$HOME is not set; cannot locate ~/.outl")?;
     if let Ok(custom) = std::env::var("OUTL_DEVICE_DIR") {
         if !custom.is_empty() {
-            return Ok(PathBuf::from(custom).join("iroh"));
+            let dir = PathBuf::from(custom).join("iroh");
+            let new_identity = dir.join("identity.key");
+            let legacy_identity = home.join(".outl").join("identity.key");
+            if !new_identity.exists() && legacy_identity.exists() {
+                if std::fs::create_dir_all(&dir).is_ok()
+                    && std::fs::copy(&legacy_identity, &new_identity).is_ok()
+                {
+                    tracing::info!(
+                        "migrated iroh identity from {} to {}",
+                        legacy_identity.display(),
+                        new_identity.display()
+                    );
+                } else {
+                    tracing::warn!(
+                        "could not migrate legacy iroh identity from {}; node id may change",
+                        legacy_identity.display()
+                    );
+                }
+            }
+            return Ok(dir);
         }
     }
-    let home = dirs::home_dir().context("$HOME is not set; cannot locate ~/.outl")?;
     Ok(home.join(".outl"))
+}
+
+/// Probe whether this process can currently claim the device endpoint.
+pub fn endpoint_available() -> bool {
+    default_device_dir()
+        .ok()
+        .map(|dir| EndpointLease::try_acquire(&dir.join("identity.key")).is_some())
+        .unwrap_or(false)
 }
 
 /// [`build_transport`] against this device's usual identity,
