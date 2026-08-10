@@ -8,6 +8,12 @@
 # developer's config directory, and two test binaries would share the machine
 # id that arbitrates actor-claim migration.
 #
+# `outl_sync_iroh::default_device_dir` honours it too, under an `iroh/` subdir.
+# Its two files are worse to share than an actor binding: the identity key IS
+# this device's node id, and the endpoint lease is what decides which process
+# binds it — so a suite on the real `~/.outl` would mint keys in the
+# developer's home and arbitrate against their running desktop app.
+#
 # An installed `outl` binary is unaffected — cargo only exports this to
 # processes it launches itself.
 OUTL_DEVICE_DIR = { value = "target/device-store", relative = true }

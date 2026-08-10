@@ -5,33 +5,44 @@
 //!
 //! ## Quick start
 //!
+//! [`build_default_transport`] is the whole recipe: it reads the `[sync]`
+//! config, takes the device endpoint lease, and loads the device identity
+//! (`~/.outl/identity.key`) plus the per-workspace peer store. Never
+//! assemble those pieces by hand — a device may bind **one** iroh endpoint, and
+//! a second one on the same node id breaks the holder's sync in both
+//! directions (see [`EndpointLease`]).
+//!
 //! ```ignore
-//! use outl_sync_iroh::{IrohSyncTransport, IrohIdentity, PeersStore};
+//! use outl_sync_iroh::{build_default_transport, TransportOutcome};
 //! use outl_actions::SyncEngine;
 //! use std::sync::mpsc;
 //!
-//! // Identity is per-DEVICE (one node id per machine) → global `~/.outl/`.
-//! let identity = IrohIdentity::load_or_generate(
-//!     &dirs::home_dir().unwrap().join(".outl/identity.key")
-//! ).unwrap();
-//! // The peer list is per-GRAPH → `<workspace>/.outl/peers.json`.
-//! outl_sync_iroh::migrate_global_peers_if_absent(&workspace_root);
-//! let peers = PeersStore::load_or_default(
-//!     &outl_sync_iroh::workspace_peers_path(&workspace_root)
-//! ).unwrap();
-//! // `relay_url`: `None` uses outl's default relay (`use1-1.relay.avelino.outl.iroh.link`); `Some(url)`
-//! // (from `[sync] relay_url` in the user config) points the endpoint at a custom one.
-//! let transport = IrohSyncTransport::new(identity, peers, None);
-//! let engine = SyncEngine::with_transport(workspace_root, actor, Box::new(transport));
-//! let (tx, rx) = mpsc::channel();
-//! engine.start_transport(tx);
-//! // Now rx fires whenever peer ops arrive and the workspace is ready to reload.
+//! match build_default_transport(&workspace_root)? {
+//!     TransportOutcome::Ready(transport) => {
+//!         let engine =
+//!             SyncEngine::with_transport(workspace_root, actor, Box::new(transport));
+//!         let (tx, rx) = mpsc::channel();
+//!         engine.start_transport(tx);
+//!         // Now rx fires whenever peer ops arrive and the workspace is ready to reload.
+//!     }
+//!     // Another outl process on this device got the endpoint first. Not a
+//!     // failure: run `outl_actions::FileSyncTransport` instead and converge
+//!     // through the shared `ops/` dir. Tell the user who has it.
+//!     TransportOutcome::EndpointBusy => { /* fall back to the file transport */ }
+//!     // `[sync] transport = "file"` — the user opted out of P2P.
+//!     TransportOutcome::Disabled => {}
+//! }
 //! ```
+//!
+//! A caller with its own identity (mobile, whose key lives in the app sandbox
+//! rather than `~/.outl`) passes that path to [`build_transport`] instead;
+//! everything else is identical.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod bind;
+mod device;
 mod engine;
 mod engine_assets;
 mod engine_catchup;
@@ -42,6 +53,7 @@ mod engine_snapshot;
 mod engine_sync;
 mod health;
 mod identity;
+mod lease;
 mod pairing;
 mod peers;
 mod peers_lock;
@@ -52,9 +64,11 @@ mod status;
 #[doc(hidden)]
 pub mod test_support;
 
+pub use device::{build_default_transport, build_transport, default_device_dir, TransportOutcome};
 pub use engine::IrohSyncTransport;
 pub use identity::IrohIdentity;
+pub use lease::EndpointLease;
 pub use pairing::{host_pairing, join_pairing, WorkspaceAdoption};
 pub use peers::{migrate_global_peers_if_absent, workspace_peers_path, PeerEntry, PeersStore};
 pub use protocol::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};
-pub use status::{probe_peers, probe_peers_blocking, PeerStatus};
+pub use status::{probe_peers, probe_peers_blocking, PeerProbe, PeerStatus};

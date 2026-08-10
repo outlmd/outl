@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::thread;
 
 use outl_actions::SyncTransport;
-use outl_config::SyncTransportKind;
 use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
 use parking_lot::Mutex;
@@ -150,7 +149,6 @@ pub(crate) fn spawn_workspace_opener(
     fs_watcher_slot: Arc<Mutex<Option<WatcherHandle>>>,
     iroh_transport_slot: Arc<Mutex<Option<Arc<dyn SyncTransport>>>>,
     iroh_pairing_slot: Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>>,
-    sync_transport_kind: SyncTransportKind,
     last_workspace: PathBuf,
     hlc: HlcGenerator,
     app: tauri::AppHandle,
@@ -201,7 +199,6 @@ pub(crate) fn spawn_workspace_opener(
         // reload path is identical whichever wins the race. A `File`
         // config or any build failure is a silent no-op here.
         crate::iroh_sync::wire_iroh_transport(
-            sync_transport_kind,
             &iroh_transport_slot,
             &iroh_pairing_slot,
             last_workspace.clone(),

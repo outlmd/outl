@@ -411,6 +411,29 @@ Only `identity.key` stays global (`~/.outl/`).
 
 `commands/peers.rs` also exposes `outl_sync_now()` (reads `state.iroh_transport`, the `Arc<dyn SyncTransport>`, and calls the trait's `sync_now()`) — the force-sync trigger behind the Sync panel's Refresh.
 
+### When this window does not hold the device endpoint
+
+A device binds **one** iroh endpoint, and which process gets it is decided by a lease, not by being the GUI ([`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "One endpoint per identity, elected not assigned").
+So the desktop can now be running with `iroh_transport` / `iroh_pairing` empty while sync works fine through the shared `ops/` dir — a co-resident `outl mcp serve` that started first is the ordinary case, since Claude Desktop launches it at login.
+
+`iroh_sync::endpoint_held_by_another_process()` separates the two reasons those slots can be empty, because they deserve opposite answers.
+It is an `AtomicBool` rewritten on every `wire_iroh_transport`, so a workspace swap that wins the endpoint clears the previous warning.
+
+- **Pairing.**
+  With no endpoint of its own, `outl_peer_pair_host` / `outl_peer_pair_join` fall back to `outl_sync_iroh::host_pairing` / `join_pairing` — the one-shot helpers the CLI uses, which bind their own endpoint and close it before returning.
+  For the seconds that handshake runs it **does** take the relay route from the lease holder.
+  Accepted deliberately: pairing is rare, explicitly user-initiated and short, the holder recovers when the one-shot closes, and the alternative is a user who cannot add a device at all.
+  It is not a precedent — no other path in the GUI may bind an endpoint.
+  When P2P is simply **off** (`transport = "file"`) pairing is **refused** instead, because binding there would override the setting the user picked on the one path where we know they are looking at the app.
+- **Refresh.**
+  `outl_sync_now` returns an error naming the holder rather than an `Ok(())` that did nothing.
+  The silent no-op was the actual defect: the dot stays orange, Refresh appears to work, and nothing says why.
+  `transport = "file"` stays a quiet no-op — the user's own choice is not a degraded state.
+
+**Still missing:** the status dot itself cannot tell "every device is offline" from "another local process holds the endpoint".
+`PeerStatusDto` lives in `outl-tauri-shared` and `peersOnline` (`@outl/shared/peers`) is the one owner of reachability across desktop and mobile, so teaching it this state means a shared DTO change, not a desktop-local one.
+Until then the Refresh error is the surface that explains it.
+
 ### Sync panel dot + refresh (iroh-driven)
 
 `components/SyncPanel.tsx` (the "Sync" section of `SettingsModal`) is the only place the desktop surfaces sync state; there is **no** always-on chrome dot (`StatusBar` / `ChromeToggleBar` carry none).

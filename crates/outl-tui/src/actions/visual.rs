@@ -220,7 +220,6 @@ mod tests {
             actor,
             crate::theme::default_theme(),
             false,
-            outl_config::SyncConfig::default(),
         )
         .unwrap();
         app.page.blocks = vec![leaf("a"), leaf("b"), leaf("c"), leaf("d")];

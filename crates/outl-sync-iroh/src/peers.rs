@@ -89,9 +89,10 @@ pub fn workspace_peers_path(workspace_root: &Path) -> PathBuf {
 }
 
 /// One-time migration: when a workspace has no `peers.json` yet but the legacy
-/// **global** `~/.outl/peers.json` exists, copy the global list into the
-/// workspace so an already-paired user keeps their peers after the move from
-/// device-global to per-workspace storage.
+/// **global** peers file exists — [`crate::default_device_dir`]`/peers.json`,
+/// which is where `$OUTL_DEVICE_DIR` moves it, NOT a hand-rolled `~/.outl` —
+/// copy the global list into the workspace so an already-paired user keeps
+/// their peers after the move from device-global to per-workspace storage.
 ///
 /// Best-effort: any failure is logged and swallowed (the workspace just starts
 /// with an empty peer list, recoverable by re-pairing). The global file is
@@ -105,10 +106,10 @@ pub fn migrate_global_peers_if_absent(workspace_root: &Path) {
     if dest.exists() {
         return;
     }
-    let Some(home) = dirs::home_dir() else {
+    let Ok(device_dir) = crate::device::default_device_dir() else {
         return;
     };
-    let global = home.join(".outl").join("peers.json");
+    let global = device_dir.join("peers.json");
     if !global.exists() {
         return;
     }

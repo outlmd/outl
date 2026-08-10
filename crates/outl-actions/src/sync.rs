@@ -45,7 +45,8 @@ use crate::journal::apply_page_md_with_sidecar;
 /// (`peer_health`) instead of binding a second iroh endpoint with the
 /// device identity — two endpoints sharing one `node_id` make the relay
 /// route the inbound sync to the wrong one (see
-/// `outl-sync-iroh/CLAUDE.md` → "One endpoint per identity").
+/// `outl-sync-iroh/CLAUDE.md` → "One endpoint per identity, elected not
+/// assigned").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerHealthSnapshot {
     /// Peer's node id (string form), as stored in `peers.json`.

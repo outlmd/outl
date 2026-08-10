@@ -46,7 +46,6 @@ impl App {
         actor: ActorId,
         theme: Theme,
         shared_workspace: bool,
-        sync_cfg: outl_config::SyncConfig,
     ) -> Result<Self> {
         let orphans_log = workspace_root.join(".outl").join("orphans.log");
         let mut s = Self {
@@ -142,7 +141,7 @@ impl App {
         // Wire the optional iroh transport BEFORE spawning the poller —
         // `spawn_jsonl_poller` reads `sync_transport` to decide between
         // iroh-driven detection and the FileSyncTransport fallback.
-        s.wire_sync_transport(&sync_cfg);
+        s.wire_sync_transport();
         // Build the workspace index off the critical path so the TUI
         // can paint immediately. Backlinks/icons fill in once the
         // worker thread completes (usually < 100ms for small

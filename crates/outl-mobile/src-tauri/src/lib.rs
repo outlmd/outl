@@ -243,13 +243,8 @@ pub fn run() {
             // `transport = "file"`. A bind/identity failure logs and
             // returns `None` — the app still runs on the native iCloud
             // watcher, so iroh trouble never blocks startup.
-            let sync_cfg = outl_config::load().sync;
-            let iroh = iroh_sync::wire_iroh_transport(
-                &app.handle().clone(),
-                storage_root.clone(),
-                actor,
-                sync_cfg.transport,
-            );
+            let iroh =
+                iroh_sync::wire_iroh_transport(&app.handle().clone(), storage_root.clone(), actor);
 
             // Plugin host runs on its own thread (Boa `Context` is
             // `!Send`, so it can't live in `AppState`). It shares the same

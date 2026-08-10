@@ -15,40 +15,36 @@
 
 use crate::state::App;
 use outl_actions::SyncTransport;
-use outl_config::{SyncConfig, SyncTransportKind};
+use outl_sync_iroh::TransportOutcome;
 
 impl App {
-    /// Wire an optional [`outl_actions::SyncTransport`] into the app
-    /// based on the `[sync]` section of the global config.
+    /// Wire an optional [`outl_actions::SyncTransport`] into the app.
     ///
-    /// When `sync_cfg.transport` is [`SyncTransportKind::Iroh`] (and the
-    /// workspace is shared), build an
-    /// [`outl_sync_iroh::IrohSyncTransport`] from the on-disk device
-    /// identity (`~/.outl/identity.key`, per-device) and the
-    /// per-workspace peer store (`<workspace>/.outl/peers.json`). On any
-    /// failure we log and leave
-    /// `sync_transport` as `None`, so `spawn_jsonl_poller` falls back
-    /// to the filesystem/iCloud poller — sync degrades, the editor
-    /// still works.
+    /// Every decision — is P2P enabled, may this process bind the device's one
+    /// iroh endpoint, which identity / peer store / relay — belongs to
+    /// [`outl_sync_iroh::build_transport`]. What is left here is the TUI's own
+    /// gate (a non-shared workspace has no `ops/` to sync) and how each outcome
+    /// is worded on screen.
     ///
-    /// When `transport` is [`SyncTransportKind::File`] (the default)
-    /// this is a no-op and the TUI keeps the `FileSyncTransport`
-    /// behaviour.
-    pub(crate) fn wire_sync_transport(&mut self, sync_cfg: &SyncConfig) {
+    /// Every path that doesn't produce a transport leaves `sync_transport` as
+    /// `None`, and `spawn_jsonl_poller` then runs the filesystem poller alone —
+    /// sync degrades to disk, the editor is untouched.
+    pub(crate) fn wire_sync_transport(&mut self) {
         if !self.shared_workspace {
             return;
         }
-        if sync_cfg.transport != SyncTransportKind::Iroh {
-            return;
-        }
-        match build_iroh_transport(
-            &self.workspace_root,
-            sync_cfg.relay_url().map(str::to_string),
-        ) {
-            Ok(transport) => {
-                self.sync_transport = Some(transport);
+        match outl_sync_iroh::build_default_transport(&self.workspace_root) {
+            Ok(TransportOutcome::Ready(transport)) => {
+                self.sync_transport = Some(std::sync::Arc::new(transport));
                 self.status = "iroh sync enabled".to_string();
             }
+            Ok(TransportOutcome::EndpointBusy) => {
+                // Another outl process on this device owns the endpoint. It
+                // pushes our ops out of the shared `ops/` dir on its catch-up
+                // pass, so this is a working state, not a failure.
+                self.status = "iroh sync held by another local outl process".to_string();
+            }
+            Ok(TransportOutcome::Disabled) => {}
             Err(e) => {
                 // Best-effort: degrade to the filesystem poller.
                 self.toast(
@@ -306,38 +302,4 @@ impl App {
         let slug = self.current_slug();
         outl_actions::find_by_slug(&self.workspace, &slug)
     }
-}
-
-/// Build an [`outl_sync_iroh::IrohSyncTransport`] from the device's
-/// on-disk identity and peer store under `~/.outl/`.
-///
-/// `relay_url` is the configured `[sync] relay_url` (normalized to `None`
-/// for the empty string by `SyncConfig::relay_url`); `None` uses outl's
-/// default relay (`use1-1.relay.avelino.outl.iroh.link`), `Some(url)` points the sync endpoint
-/// at a different one.
-///
-/// Returns the transport behind an `Arc` so the poller thread can hold
-/// its own handle. Errors (no `$HOME`, unreadable identity / peers
-/// files) bubble up to `wire_sync_transport`, which degrades to the
-/// filesystem poller instead of aborting startup.
-///
-/// The device **identity** is per-machine (`~/.outl/identity.key`); the
-/// **peer list** is per-graph (`<workspace_root>/.outl/peers.json`). A
-/// one-time migration copies any legacy global peer list into the workspace
-/// on first open.
-fn build_iroh_transport(
-    workspace_root: &std::path::Path,
-    relay_url: Option<String>,
-) -> anyhow::Result<std::sync::Arc<dyn SyncTransport>> {
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("$HOME is not set; cannot locate ~/.outl"))?;
-    let outl_dir = home.join(".outl");
-    let identity = outl_sync_iroh::IrohIdentity::load_or_generate(&outl_dir.join("identity.key"))?;
-    outl_sync_iroh::migrate_global_peers_if_absent(workspace_root);
-    let peers = outl_sync_iroh::PeersStore::load_or_default(
-        &outl_sync_iroh::workspace_peers_path(workspace_root),
-    )?;
-    let transport = outl_sync_iroh::IrohSyncTransport::new(identity, peers, relay_url);
-    Ok(std::sync::Arc::new(transport))
 }

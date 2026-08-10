@@ -26,7 +26,7 @@
 //! The asymmetric read/write order keeps the single stream from deadlocking
 //! (the joiner, which opened the stream, speaks first).
 //!
-//! ## One endpoint per identity (load-bearing)
+//! ## One endpoint per identity, elected not assigned (load-bearing)
 //!
 //! The pairing endpoint binds the **device identity** (same `SecretKey` as the
 //! long-lived sync endpoint). In iroh the relay keeps a single
@@ -34,15 +34,26 @@
 //! it; the newest registration wins and the other stops receiving inbound
 //! traffic.
 //!
-//! **GUI clients (mobile / desktop) never call [`host_pairing`] /
-//! [`join_pairing`].** Their sync transport is already running, so binding a
-//! second endpoint here would hijack the relay route and silently kill sync
-//! (the "Another endpoint connected with the same endpoint id" relay error).
-//! Instead, the GUI drives pairing through the *live* sync endpoint:
-//! [`crate::IrohSyncTransport::pair_host`] / [`crate::IrohSyncTransport::pair_join`]
-//! reuse the sync endpoint and its [`PAIRING_ALPN`] router handler (see
-//! [`accept_host_handshake`] / [`run_join_handshake`], the endpoint-agnostic
-//! handshake halves both paths share).
+//! **A client whose own sync transport is running never calls [`host_pairing`]
+//! / [`join_pairing`].** Binding a second endpoint would hijack the relay route
+//! and silently kill that transport's sync (the "Another endpoint connected
+//! with the same endpoint id" relay error). It pairs through the *live* sync
+//! endpoint instead: [`crate::IrohSyncTransport::pair_host`] /
+//! [`crate::IrohSyncTransport::pair_join`] reuse the sync endpoint and its
+//! [`PAIRING_ALPN`] router handler (see [`accept_host_handshake`] /
+//! [`run_join_handshake`], the endpoint-agnostic handshake halves both paths
+//! share).
+//!
+//! The rule is about **holding an endpoint**, not about being a GUI. A client
+//! that lost the device endpoint lease ([`crate::EndpointLease`]) has no live
+//! endpoint to pair through, so it uses these one-shot helpers exactly like the
+//! CLI does — a desktop coexisting with an `outl mcp serve` that got the lease
+//! first is the case that matters. That one-shot bind *does* take the relay
+//! route from the lease holder for the seconds the handshake runs, and the
+//! holder gets it back when the endpoint closes. Accepted deliberately:
+//! pairing is rare, explicit and short, and the alternative is a user who
+//! cannot add a device at all. It is not licence to bind an endpoint on any
+//! other path.
 //!
 //! These standalone [`host_pairing`] / [`join_pairing`] functions survive only
 //! for the **CLI** (`outl peer pair`), which has *no* running transport — so

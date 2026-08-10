@@ -89,7 +89,8 @@ pub async fn outl_peer_pair_host(
     // with the device identity. A second endpoint hijacks the relay route from
     // the running transport and silently kills sync (the "Another endpoint
     // connected with the same endpoint id" relay error). See
-    // `outl-sync-iroh/CLAUDE.md` → "One endpoint per identity".
+    // `outl-sync-iroh/CLAUDE.md` → "One endpoint per identity, elected not
+    // assigned".
     let transport = state
         .iroh
         .clone()

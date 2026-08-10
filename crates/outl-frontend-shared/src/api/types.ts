@@ -364,7 +364,8 @@ export interface PeerDto {
  * On GUI clients this reads the running transport's `peer_health()` snapshot
  * (populated by the transport's own boot / catch-up / gossip dials), NOT a
  * transient probe endpoint — a second endpoint with the device identity would
- * hijack the relay route (see outl-sync-iroh "One endpoint per identity").
+ * hijack the relay route (see outl-sync-iroh "One endpoint per identity,
+ * elected not assigned").
  * Only the CLI `outl peer status`, which has no running transport, probes.
  *
  * - `online` is `true` when the peer is currently reachable.

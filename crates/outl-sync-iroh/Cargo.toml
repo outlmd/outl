@@ -9,6 +9,10 @@ publish = false
 
 [dependencies]
 outl-actions = { workspace = true }
+# `[sync] transport` + `[sync] relay_url` are read by `build_transport`, the one
+# owner of "may this process bind an endpoint, and with what". Every client used
+# to read them itself and pass the result in — three copies of the same recipe.
+outl-config = { workspace = true }
 outl-core = { workspace = true }
 # `outl_md::asset::hash_bytes` re-computes an asset's sha-256 to verify the
 # pulled bytes match the content-addressed filename (defense in depth against a

@@ -71,9 +71,11 @@ pub fn call(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
 
     if outcome.is_ok() && MUTATING.contains(&name) {
         ctx.invalidate_index();
-        // No peer announce here: the MCP is a passive writer (file transport,
-        // no iroh endpoint), so a co-resident GUI syncs these ops out. See
+        // Wake peers now instead of on their next catch-up tick. A no-op when
+        // this process didn't win the device endpoint lease — then a
+        // co-resident holder pushes these ops out for us. See
         // `ServerCtx::ensure_transport`.
+        ctx.announce_local_ops();
     }
 
     Ok(match outcome {

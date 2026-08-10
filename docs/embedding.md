@@ -131,18 +131,18 @@ These are the [repo invariants](contributing.md) as seen from the outside:
 - Never write `id::`, UUIDs, or any metadata into the `.md` — IDs live in the `.outl` sidecar only.
 - Never edit a `.md` and its sidecar by hand to "fix" state; the op log is the source of truth.
 - Never share an `ops-<actor>.jsonl` between two writers; `outl-ws` already guarantees this, don't work around it.
-- Never bind an iroh endpoint from an embedder; the running GUI owns the device's relay route ([one endpoint per identity](sync.md)).
-  Your writes land on disk and reach peers through the co-resident app's transport or the next maintenance resync, exactly like the CLI and the MCP server behave.
+- Never bind an iroh endpoint from an embedder; a device binds one, taken by whichever long-lived outl process got there first ([one endpoint per identity](sync.md)).
+  Your writes land on disk and reach peers through that process's transport or the next maintenance resync, exactly like the ephemeral CLI behaves.
 
 ## Coexisting with a running app
 
-An embedder is a **passive writer**, same policy as `outl mcp serve` and the ephemeral CLI (see [CLI](cli.md) → passive writers).
+An embedder is a **passive writer**, same as the ephemeral CLI (see [CLI](cli.md)).
 Practical consequences:
 
 - Your process may get an ephemeral actor when the app holds this device's actor.
   That is normal, not an error.
   (The device actor itself comes from the device store outside the workspace, not from `.outl/config.toml` — see [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).)
-- Ops you write while the GUI is open are picked up by its file watcher and shipped to peers by its transport.
+- Ops you write while a long-lived outl process runs (a GUI, the TUI, `outl mcp serve`) are picked up by its watcher and shipped to peers by its transport.
 - Ops written while nothing else runs sit on disk until any long-lived surface opens, then converge.
 - Reads see whatever the log held when you called `open`.
   A long-running embedder that needs fresh peer state reopens, or wires `outl_actions::sync::SyncEngine` the way the MCP server does.

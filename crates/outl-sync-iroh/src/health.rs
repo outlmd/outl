@@ -11,7 +11,8 @@
 //! probe endpoint sharing the device's `SecretKey` hijacks the relay route
 //! from the long-lived sync endpoint, and inbound sync connections land on an
 //! endpoint that doesn't accept `SYNC_ALPN` ("the server refused to accept a
-//! new connection"). One endpoint per identity is the invariant; status now
+//! new connection"). One endpoint per identity, elected not assigned, is the
+//! invariant; status now
 //! reads from this shared map instead of binding its own.
 
 use std::collections::HashMap;

@@ -255,7 +255,6 @@ mod tests {
             actor,
             crate::theme::default_theme(),
             false,
-            outl_config::SyncConfig::default(),
         )
         .unwrap();
         (app, dir)

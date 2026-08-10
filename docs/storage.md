@@ -134,6 +134,13 @@ The full table is in `crates/outl-ws/src/actor.rs`.
 
 `$OUTL_DEVICE_DIR` overrides the location — used by the test suite (via the repo's `.cargo/config.toml`) and by containers that need a throwaway identity without discarding the user's preferences.
 
+**It also moves the iroh identity now, and that rotates the device's node id.**
+`outl_sync_iroh::default_device_dir` (`crates/outl-sync-iroh/src/device.rs`) honors the same variable, joining an `iroh/` subdir, so `~/.outl/identity.key` moves to `$OUTL_DEVICE_DIR/iroh/identity.key` too.
+The iroh identity key **is** the device's node id, so a deployment that already exports `$OUTL_DEVICE_DIR` — a container, a sandboxed CI job — comes back up under a **new** node id the first time it runs a build carrying this change.
+Every peer's `peers.json` still lists the old one, so the device reads as permanently offline until it is re-paired.
+This is deliberate: the actor binding and the iroh identity are both device-local state about the same device-local resource, so a variable that says "this process is a different device" has to move both, or it isn't isolating anything.
+Point the variable at a persistent path (not a fresh tmpdir per run) if you want a stable node id under it, and re-pair once after the move.
+
 ### Why JSONL specifically
 
 - **Append-only writes** map to the filesystem cleanly.

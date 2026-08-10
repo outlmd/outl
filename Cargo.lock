@@ -6422,6 +6422,7 @@ dependencies = [
  "iroh-gossip",
  "n0-future",
  "outl-actions",
+ "outl-config",
  "outl-core",
  "outl-md",
  "qrcode",

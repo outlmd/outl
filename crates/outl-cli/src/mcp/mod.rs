@@ -14,6 +14,7 @@
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -24,6 +25,7 @@ use crate::output::{codes, ApiError, Envelope};
 use crate::ws::{self, WsCtx};
 use outl_actions::SyncTransport;
 use outl_md::index::WorkspaceIndex;
+use outl_sync_iroh::TransportOutcome;
 
 mod prompts;
 mod protocol;
@@ -108,14 +110,23 @@ pub(crate) struct ServerCtx {
 struct ServerState {
     workspace: Option<WsCtx>,
     index: Option<WorkspaceIndex>,
-    /// The iroh P2P transport, brought up lazily on the first workspace
-    /// open (once we know the resolved actor + root). `None` means either
-    /// "not opened yet" or "this device has no paired peers, so there is
-    /// nothing to sync and we stay off the wire". Brought up at most once.
+    /// The iroh P2P transport, brought up on a workspace open once this
+    /// process holds the device endpoint lease. `None` means this session is
+    /// a passive writer — see [`ServerCtx::build_peer_transport`] for the four
+    /// reasons, all of which are working states.
     transport: Option<Arc<dyn SyncTransport>>,
-    /// Whether we already attempted to bring the transport up (so a device
-    /// with no peers doesn't retry every call).
-    transport_tried: bool,
+    /// Sender every transport we start signals peer arrivals on, kept alive
+    /// here so later starts can clone it. `Some` also means the always-on file
+    /// poller and its drain thread (which owns the matching receiver) are
+    /// running — unlike the endpoint, they start exactly once.
+    ///
+    /// One channel for the whole session, not one per call: the receiver lives
+    /// in the drain thread, so a channel built on a later call would hand the
+    /// transport a sender nobody is listening to. That is precisely the call
+    /// that matters — the endpoint is asked for again on every reopen, so the
+    /// one path where the MCP wins the lease late is the one that would lose
+    /// every signal, silently ([`ServerCtx::ensure_transport`]).
+    peer_ready_tx: Option<Sender<()>>,
 }
 
 impl ServerCtx {
@@ -161,46 +172,109 @@ impl ServerCtx {
         f(wc)
     }
 
-    /// Bring up a **passive, file-poll** transport so the MCP notices ops that
-    /// other processes (a co-resident GUI, the `outl` CLI, the mobile app via
-    /// the GUI's sync) wrote to the shared `ops/` dir — keeping its cached reads
-    /// fresh. No-op if already tried.
+    /// Bring the MCP's sync transports up on a workspace open.
     ///
-    /// It deliberately does **NOT** bind an iroh endpoint. The MCP shares the
-    /// device identity (`~/.outl/identity.key`) with the desktop GUI, and iroh's
-    /// relay routes only ONE endpoint per node_id: a second endpoint (the MCP)
-    /// steals the active relay route, and the GUI then loses BOTH inbound and
-    /// outbound sync to any relay-reachable peer (an off-LAN iPhone). That is
-    /// not the "benign hijack" the docs once claimed — it breaks the GUI's sync
-    /// whenever a dual-write tool fires. So the MCP stays a PASSIVE WRITER: it
-    /// writes `ops-<actor>.jsonl` to the shared dir, the sole long-lived
-    /// endpoint (the GUI) announces/serves them to remote peers, and this file
-    /// poller only flips `peer_dirty` when the on-disk ops change so the next
-    /// tool call reopens. A headless MCP (no GUI) still converges via each
-    /// peer's `MAINTENANCE_RESYNC` when a long-lived endpoint next runs, or an
-    /// explicit `outl sync`.
+    /// **The file poller always runs.** It notices ops that other processes on
+    /// this machine (a co-resident GUI, the `outl` CLI) wrote to the shared
+    /// `ops/` dir and flips `peer_dirty`, so the next tool call reopens and
+    /// serves them. iroh only signals on its own wire receipts, so it does not
+    /// subsume this — same reasoning as the TUI's always-on poller.
+    ///
+    /// **The iroh endpoint runs when this process wins the device lease.**
+    /// iroh's relay routes one endpoint per node_id, and every outl process
+    /// here shares `~/.outl/identity.key`, so a second endpoint would steal the
+    /// route and break the holder's sync in both directions. The MCP used to be
+    /// hard-coded as the loser of that contest, which works right up until
+    /// there is nobody else: on a headless machine (an agent driving
+    /// `outl mcp serve`, no GUI anywhere) nothing ever bound an endpoint, so
+    /// the device's ops never left and no peer's ops ever arrived (issue #220).
+    /// [`outl_sync_iroh::build_default_transport`] arbitrates instead — first
+    /// process in wins, and a GUI that got there first still leaves the MCP exactly
+    /// where it was, a passive writer converging through disk.
     fn ensure_transport(self: &Arc<Self>, state: &mut ServerState, wc: &WsCtx) {
-        if state.transport_tried {
+        // The transports signal on this channel each time peer ops land; a tiny
+        // drain thread flips `peer_dirty` so the next access reopens and
+        // replays them. Built on the first call and kept in `state` from then
+        // on, because the drain thread owns the only receiver — see
+        // `ServerState::peer_ready_tx`.
+        let tx = match &state.peer_ready_tx {
+            Some(tx) => tx.clone(),
+            None => {
+                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                let dirty = self.peer_dirty.clone();
+                std::thread::Builder::new()
+                    .name("outl-mcp-peer-ready".into())
+                    .spawn(move || {
+                        while rx.recv().is_ok() {
+                            dirty.store(true, Ordering::Release);
+                        }
+                    })
+                    .ok();
+                outl_actions::FileSyncTransport.start(wc.root.clone(), wc.actor, tx.clone());
+                state.peer_ready_tx = Some(tx.clone());
+                tx
+            }
+        };
+        if state.transport.is_some() {
             return;
         }
-        state.transport_tried = true;
-        let transport: Arc<dyn SyncTransport> = Arc::new(outl_actions::FileSyncTransport);
-        // The transport signals on this channel each time a peer's ops file
-        // changes on disk; a tiny drain thread flips `peer_dirty` so the next
-        // access reopens and replays the freshly-written ops.
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
-        let dirty = self.peer_dirty.clone();
-        std::thread::Builder::new()
-            .name("outl-mcp-peer-ready".into())
-            .spawn(move || {
-                while rx.recv().is_ok() {
-                    dirty.store(true, Ordering::Release);
-                }
-            })
-            .ok();
-        transport.start(wc.root.clone(), wc.actor, tx);
-        state.transport = Some(transport);
-        debug!("mcp: passive file-poll transport up (no iroh endpoint — see doc)");
+        // Asked again on every workspace reopen while we have no endpoint,
+        // because every reason to decline is a state the user can change from
+        // outside this process: pairing a first device, or closing the GUI that
+        // holds the lease. Answering once would strand an MCP session that
+        // started before its device was paired.
+        state.transport = self.build_peer_transport(wc).inspect(|transport| {
+            transport.start(wc.root.clone(), wc.actor, tx);
+        });
+    }
+
+    /// Ask for this device's iroh endpoint. `None` means the MCP stays a
+    /// passive writer — P2P is off, someone else holds the endpoint, there is
+    /// nothing paired to sync with, or the identity / peer store could not be
+    /// read (all four are working states, never fatal to a tool call).
+    fn build_peer_transport(self: &Arc<Self>, wc: &WsCtx) -> Option<Arc<dyn SyncTransport>> {
+        match outl_sync_iroh::build_default_transport(&wc.root) {
+            Ok(TransportOutcome::Ready(t)) if t.peers().is_empty() => {
+                // Nothing paired: binding an endpoint (and a relay connection)
+                // would buy nothing, and dropping `t` here hands the lease
+                // straight back to a GUI that may want it for pairing.
+                debug!("mcp: no paired devices; staying off the wire");
+                None
+            }
+            Ok(TransportOutcome::Ready(t)) => {
+                debug!("mcp: iroh endpoint bound (this process holds the device lease)");
+                Some(Arc::new(t) as Arc<dyn SyncTransport>)
+            }
+            Ok(TransportOutcome::EndpointBusy) => {
+                debug!("mcp: another local outl process holds the iroh endpoint; passive writer");
+                None
+            }
+            Ok(TransportOutcome::Disabled) => None,
+            Err(e) => {
+                warn!("mcp: iroh unavailable ({e}); syncing through ops/ only");
+                None
+            }
+        }
+    }
+
+    /// Tell peers a mutation landed, so they pull now instead of on their next
+    /// catch-up tick. A no-op when this process is a passive writer.
+    ///
+    /// Latency only: correctness rides on every device's `MAINTENANCE_RESYNC`
+    /// re-pull, which converges an unannounced write regardless.
+    pub(crate) fn announce_local_ops(self: &Arc<Self>) {
+        let mut state = self.state.lock();
+        let Some(transport) = state.transport.clone() else {
+            return;
+        };
+        let Some(wc) = state.workspace.as_mut() else {
+            return;
+        };
+        // The first argument is a hint the gossip drain discards — it announces
+        // under the canonical `WorkspaceId` it already holds, precisely because
+        // clients kept passing something else (a page slug). Naming the source
+        // is more honest than inventing a slug the MCP would have to look up.
+        transport.announce_local_ops("mcp", wc.hlc.next());
     }
 
     /// Tear the transport down (called when the stdio pipe closes).
@@ -350,4 +424,61 @@ fn preferred_text_for(tool_name: &str, payload: &Value) -> String {
     .unwrap_or_else(|| {
         serde_json::to_string_pretty(payload).unwrap_or_else(|_| payload.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// A transport that does nothing, so the test can pre-fill
+    /// `ServerState::transport` and keep `ensure_transport` off the network.
+    struct NoopTransport;
+
+    impl SyncTransport for NoopTransport {
+        fn start(&self, _: PathBuf, _: outl_core::id::ActorId, _: Sender<()>) {}
+        fn announce_local_ops(&self, _: &str, _: outl_core::hlc::Hlc) {}
+        fn shutdown(&self) {}
+    }
+
+    /// The peer-ready channel must survive a second `ensure_transport`.
+    ///
+    /// It runs again on every workspace reopen — the only path by which an MCP
+    /// session that started before its device was paired (or before the GUI
+    /// holding the lease closed) ever wins the endpoint. Building a fresh
+    /// channel per call left the drain thread holding the *first* receiver, so
+    /// from the second call on every `peer_ready_tx.send(())` landed in a
+    /// closed channel without a single log line: the reopen that finally got
+    /// an endpoint was exactly the one that could not signal through it.
+    #[test]
+    fn the_peer_ready_channel_survives_a_second_ensure_transport() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::cmd::init::run(dir.path(), "global").expect("init workspace");
+        let wc = ws::open(dir.path()).expect("open workspace");
+        let ctx = Arc::new(ServerCtx::new(dir.path().to_path_buf()));
+
+        // Pre-filled so `ensure_transport` returns before asking iroh for an
+        // endpoint; the channel wiring under test runs before that point.
+        let mut state = ServerState {
+            transport: Some(Arc::new(NoopTransport)),
+            ..Default::default()
+        };
+        ctx.ensure_transport(&mut state, &wc);
+        ctx.ensure_transport(&mut state, &wc);
+
+        let tx = state
+            .peer_ready_tx
+            .clone()
+            .expect("the channel is built on the first call");
+        tx.send(()).expect("its receiver must still be alive");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ctx.peer_dirty.load(Ordering::Acquire) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            ctx.peer_dirty.load(Ordering::Acquire),
+            "a signal sent after the second call must reach the drain thread"
+        );
+    }
 }

@@ -25,6 +25,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A machine running only `outl mcp serve` never synced with anything.**
+  It wrote its ops to disk and no peer ever saw them; peers' ops never arrived either, and `outl peer status` on the other device just said "offline" with nothing to explain it.
+  Running the TUI once made the device appear, which is what made it look like the MCP server was broken rather than deliberately silent (issue #220).
+
+  It was deliberate, and the reasoning was sound as far as it went: iroh routes one endpoint per device identity, and every outl process here shares one, so a second endpoint steals the relay route and breaks the holder's sync **in both directions**.
+  The fix for that was to name the MCP server the loser — the GUI binds, everyone else writes to disk and lets it push.
+  That works right up until there is no GUI, and an agent driving `outl mcp serve` on a dedicated machine is a normal way to run outl.
+
+  The constraint was never "only the GUI" — it is "one live endpoint per device", which is a question about who got there first, so it is now answered by a lease (an advisory lock next to `identity.key`) instead of by client type.
+  Every long-lived client asks `outl_sync_iroh::build_transport`; the winner binds the endpoint and announces its writes, and the losers run the file poller and converge through the shared `ops/` dir exactly as before.
+  A GUI opened at login still keeps the endpoint, so nothing changes on a desktop machine.
+  With no GUI, the MCP server is the peer.
+  `outl sync` joins the same election and now stands down when it loses, instead of taking the route from a running process for 25 seconds — the process it would be taking it from was already pushing those ops out.
+  `outl peer status` takes the same lease for its probe and reports whoever already holds it, instead of racing a live transport for the endpoint.
+
+  **This moves the iroh identity under `$OUTL_DEVICE_DIR`, and that rotates the device's node id for anyone already setting that variable.**
+  `~/.outl/identity.key` now lives at `$OUTL_DEVICE_DIR/iroh/identity.key` when the variable is set — a container or sandboxed CI job that exports it comes back up under a new node id on first run and reads as offline to every existing peer until it is re-paired.
+  See [`docs/storage.md`](docs/storage.md) → `$OUTL_DEVICE_DIR`.
+
 - **The first boot after an upgrade froze the app for 24 seconds.**
   outl's premise is that it opens fast and is ready for input, and the `CURRENT_PIPELINE_VERSION` bump broke it: every sidecar goes stale by pipeline, so the first boot re-reconciles the whole graph.
   Measured on a 2,827-file workspace: **24.7 seconds at 8% CPU** — not computation, but `write_atomic`'s two `fsync`s per sidecar, 5,656 of them back to back, for 44 ops of actual content.

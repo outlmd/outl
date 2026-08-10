@@ -80,6 +80,10 @@ Exit codes follow:
 | 0    | Success                                       |
 | 1    | User error (bad input, not found, conflict)   |
 | 2    | Internal error (bug, broken invariant, panic) |
+| 3    | Nothing was done, and that is not a failure    |
+
+Exit 3 exists for `outl sync`, which can legitimately do nothing: another process on this device holds the sync endpoint, P2P is off, or no device is paired.
+A script can then tell "I flushed" from "someone else will" without reading either as an error.
 
 Add `--json` to any command to force JSON.
 Without the flag, output is human-readable (tables, colored).
@@ -361,6 +365,7 @@ It defaults to the machine hostname; the GUI clients default it to "desktop" / "
 `outl sync` forces a one-shot P2P sync pass (bring the iroh transport up, exchange ops with every paired device, exit).
 It's for scripts that mutate via the CLI and must flush to peers before the process dies — a normal short-lived CLI mutation can't keep a connection alive long enough.
 The long-lived surfaces (`outl mcp serve`, the desktop/TUI apps) sync continuously and don't need it.
+If one of them is running on this machine, `outl sync` says so and exits without doing anything: a device binds one sync endpoint at a time, and that process is already pushing your ops out.
 
 ### `outl doctor`
 

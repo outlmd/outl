@@ -115,12 +115,18 @@ Every new feature lands once, as a function in `outl-actions`, and is exposed in
 
 ## Sync: edits made through MCP reach your other devices
 
-`outl mcp serve` is **long-lived**, so it participates in P2P sync as a first-class peer — no GUI needs to be open.
+`outl mcp serve` is **long-lived**, so it can be this device's peer — no GUI needs to be open.
 When the device has paired peers (`outl peer pair`), the server brings the iroh transport up on first use and, after every mutating tool, wakes connected peers so they pull the change in real time.
 So an edit you make through Claude lands on your laptop/phone the same way an edit in the desktop app would.
 With no paired peers it stays fully local (nothing to sync) and never touches the network.
-A short-lived `outl <subcommand>` CLI call can't do this (it exits before a connection is even established); for scripts that must flush, run `outl sync` after the mutations.
-See [`crates/outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) → "Passive writers vs the MCP peer".
+
+**One process per device holds the endpoint.**
+iroh routes one endpoint per device identity, so if a GUI is already running here it keeps the endpoint and the MCP server writes its ops to the shared `ops/` dir instead — the GUI pushes them out on its own pass, and everything still converges.
+Whichever process started first wins; nothing is lost either way.
+This is what a headless setup (a machine running only `outl mcp serve`) depends on: with no GUI to defer to, the MCP server *is* the peer.
+
+A short-lived `outl <subcommand>` CLI call can never take the endpoint (it exits before a connection is even established); for scripts that must flush, run `outl sync` after the mutations.
+See [`crates/outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) → "One endpoint per identity, elected not assigned".
 
 ## Troubleshooting
 

@@ -233,7 +233,6 @@ pub fn run() {
             // opens and renders today's journal (#107). No `[calendar]
             // timezone` → OS local, as before.
             outl_actions::clock::init(global_cfg.calendar.timezone.as_deref());
-            let sync_transport_kind = global_cfg.sync.transport;
 
             let workspace: Arc<Mutex<Option<Workspace>>> = Arc::new(Mutex::new(None));
             let storage_root: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
@@ -252,7 +251,6 @@ pub fn run() {
                     fs_watcher.clone(),
                     iroh_transport.clone(),
                     iroh_pairing.clone(),
-                    sync_transport_kind,
                     path,
                     hlc.clone(),
                     app.handle().clone(),

@@ -96,6 +96,37 @@ pub struct IrohSyncTransport {
     /// the initiator-side sync paths. `None` (no GUI, or the CLI/tests) makes
     /// every progress emit a no-op — it is purely cosmetic, never load-bearing.
     progress_tx: Arc<Mutex<Option<std::sync::mpsc::Sender<outl_actions::SyncProgress>>>>,
+    /// This device's endpoint claim, attached by [`crate::build_transport`].
+    ///
+    /// **`start()` takes it out of here and moves it into the `outl-iroh-sync`
+    /// thread**, so the claim ends exactly when `run_iroh` returns — and the
+    /// reason is that neither neighbour of that instant is safe.
+    ///
+    /// *Released too early* — the transport holding it and being dropped while
+    /// the thread is still inside `router.shutdown()` + `endpoint.close()`.
+    /// [`SyncTransport::shutdown`] only sends the oneshot and returns, so a
+    /// desktop workspace switch drops the transport immediately afterwards:
+    /// another process could take the lease and bind while the outgoing
+    /// endpoint is still registered on the relay. Two endpoints on one node id
+    /// is the collision this lease exists to prevent.
+    ///
+    /// *Released too late* — the transport holding it after the thread is gone.
+    /// `bind()` is the only `?` in `run_iroh`, so a failed bind kills the thread
+    /// while the client keeps the transport in its slot for the rest of the
+    /// process. Nothing on the device could ever bind again, and the MCP server
+    /// never re-asks (it early-returns on a populated slot): issue #220 back,
+    /// this time with a padlock on it.
+    ///
+    /// Owning the lease from the thread makes both impossible: the endpoint and
+    /// the claim on it live and die in the same scope.
+    ///
+    /// `None` for a transport built directly through [`IrohSyncTransport::new`]
+    /// (tests, `pair`), which is the caller promising no other endpoint is up,
+    /// and `None` again once `start()` has taken it. A transport that is built
+    /// but **never** started keeps holding it (the `outl sync` path that exits
+    /// early), which is what we want: no other process may bind while this one
+    /// still might.
+    endpoint_lease: Arc<Mutex<Option<crate::lease::EndpointLease>>>,
 }
 
 /// Process-wide guard serializing every op-log append performed by the iroh
@@ -194,7 +225,24 @@ impl IrohSyncTransport {
             pairing_hub: Arc::new(Mutex::new(None)),
             sync_passes: Arc::new(AtomicU64::new(0)),
             progress_tx: Arc::new(Mutex::new(None)),
+            endpoint_lease: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Attach the device endpoint lease this transport was authorised by.
+    ///
+    /// Called only from [`crate::build_transport`], which is the one place that
+    /// acquires a lease. The transport parks it until `start()` hands it to the
+    /// endpoint thread, so a client never has to keep a separate guard alive —
+    /// and never gets the chance to drop one while its endpoint keeps running.
+    /// See the `endpoint_lease` field for why the thread, and not the
+    /// transport, is where the claim ends.
+    pub(crate) fn with_endpoint_lease(self, lease: crate::lease::EndpointLease) -> Self {
+        *self
+            .endpoint_lease
+            .lock()
+            .expect("endpoint lease mutex poisoned") = Some(lease);
+        self
     }
 
     /// How many forced sync passes have **completed** since the transport was
@@ -283,6 +331,17 @@ impl SyncTransport for IrohSyncTransport {
         let relay_url = self.relay_url.clone();
         let sync_passes = self.sync_passes.clone();
 
+        // The one field that is MOVED, not cloned: the device endpoint lease
+        // belongs to the endpoint, and the endpoint lives on the thread below.
+        // Leaving it on the transport strands it when `run_iroh` dies on a
+        // failed `bind()`, and releases it too early when the client drops the
+        // transport right after `shutdown()`. See the field doc.
+        let endpoint_lease = self
+            .endpoint_lease
+            .lock()
+            .expect("endpoint lease mutex poisoned")
+            .take();
+
         // Snapshot the progress sink registered by the GUI bridge (if any).
         // Purely cosmetic: a missing sink makes every progress emit a no-op.
         let progress = match self
@@ -324,6 +383,11 @@ impl SyncTransport for IrohSyncTransport {
         std::thread::Builder::new()
             .name("outl-iroh-sync".into())
             .spawn(move || {
+                // Declared FIRST so it is dropped LAST: the runtime below drops
+                // before it, so the endpoint is closed and its tasks are gone by
+                // the time the device's claim is released.
+                let _endpoint_lease = endpoint_lease;
+
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
                     .enable_all()
@@ -399,6 +463,12 @@ impl SyncTransport for IrohSyncTransport {
     }
 
     fn shutdown(&self) {
+        // Signal only — the teardown (`router.shutdown()` + `endpoint.close()`)
+        // happens on the sync thread after this returns, and the endpoint lease
+        // is released there, at the end of it. Callers routinely drop the
+        // transport the moment this returns (desktop workspace switch); that
+        // must NOT hand the device's endpoint to another process while this one
+        // is still on the relay. See the `endpoint_lease` field.
         if let Some(tx) = self
             .shutdown_tx
             .lock()

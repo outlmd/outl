@@ -533,7 +533,7 @@ When the iroh transport is running, the desktop / mobile "online / offline" dot 
 The GUI must **never** stand up a second iroh endpoint to probe peers: a second endpoint sharing the device identity hijacks the relay route from the live sync endpoint, and inbound sync gets refused.
 The `outl_peer_status` command merges the snapshot onto the full `peers.json` list, so a peer the transport hasn't dialed yet shows offline.
 The CLI's `outl peer status` is the lone exception (no running transport), so it keeps the transient-endpoint probe.
-See `crates/outl-sync-iroh/CLAUDE.md` → "One endpoint per identity".
+See `crates/outl-sync-iroh/CLAUDE.md` → "One endpoint per identity, elected not assigned".
 
 ### Sync progress feed (pairing screen)
 

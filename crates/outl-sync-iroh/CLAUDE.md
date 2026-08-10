@@ -9,10 +9,15 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
 - `PeersStore` — known paired peers, stored at `<workspace>/.outl/peers.json` (per **graph**, the pair belongs to the workspace, not the OS).
   `workspace_peers_path(root)` builds the path; `migrate_global_peers_if_absent(root)` does a one-time best-effort copy of any legacy global `~/.outl/peers.json` into the workspace on first open (never deletes the global).
   Every client calls `migrate_*` then `PeersStore::load_or_default(workspace_peers_path(root))`.
+- `build_transport(identity_path, workspace_root) -> TransportOutcome` (`device.rs`) — the **single owner** of "may this process bind an endpoint, and with what".
+  It reads `[sync] transport` + `[sync] relay_url`, takes the endpoint lease, loads the identity + peer store, and returns `Ready` / `EndpointBusy` / `Disabled`.
+  Every client calls it; the identity + peers + relay recipe used to be written out in the TUI, the shared Tauri backend and `outl sync` separately, and the MCP server skipped it entirely (issue #220).
+  `build_default_transport(workspace_root)` is the form every client but mobile calls — it fills in `~/.outl/identity.key`; mobile passes its sandbox path to `build_transport` instead.
+- `EndpointLease` (`lease.rs`) — the device-wide election backing it (see "One endpoint per identity, elected not assigned")
 - `IrohSyncTransport` — implements `SyncTransport` trait, including the
   gossip-backed `announce_local_ops` hook (sync side → tokio task via an
   `mpsc` channel set up in `start()`) and the `peer_health()` reachability
-  snapshot (see "One endpoint per identity" below)
+  snapshot (see "One endpoint per identity, elected not assigned" below)
 - Wire protocol — ALPN `b"outl-sync/2"`, vector-clock delta sync with per-actor `ActorClock { max, count }` gap detection (see "Sync invariants"; the v2 bump makes an old↔new dial fail cleanly, no compat shim)
 - Pairing (`pairing` module, ALPN `b"outl-sync/pair/1"`) — the two-sided handshake.
   The "ticket" is a base64 `EndpointAddr` (id + relay + direct addrs).
@@ -20,7 +25,7 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   **Two drivers, one handshake:**
   - **CLI** (`outl peer pair`, no running transport) → `host_pairing` / `join_pairing` bind a one-shot endpoint.
     No relay route to steal.
-  - **GUI** (mobile / desktop, transport already running) → `IrohSyncTransport::pair_host` / `pair_join` reuse the **live sync endpoint** (see "One endpoint per identity").
+  - **GUI** (mobile / desktop, transport already running) → `IrohSyncTransport::pair_host` / `pair_join` reuse the **live sync endpoint** (see "One endpoint per identity, elected not assigned").
     They never call `host_pairing` / `join_pairing`.
   The endpoint-agnostic handshake halves (`accept_host_handshake` / `run_join_handshake` in `pairing`) are shared by both paths.
   The GUI side is wired through `engine_pairing` (the `PairingHub` + `PairingProtocolHandler` mounted on the sync router).
@@ -56,23 +61,48 @@ Devices live at different paths (desktop `~/outl-p2p`, mobile `…/app.outl.mobi
   Without it, the post-pair `delta_sync` marked the peer synced forever and later host edits never pulled (gossip was the only live path, dead per the point above).
   A dropped signal is safe — the `RwLock` is the source of truth; the signal only fixes the *real-time* + *re-dial* gaps.
 
-## One endpoint per identity (load-bearing invariant)
+## One endpoint per identity, elected not assigned (load-bearing invariant)
 
-**Only endpoints that SERVE the sync ALPN may share a device identity.**
-A non-sync endpoint (status probe, a pairing-only endpoint) must NOT bind the device `SecretKey` while the transport is running.
-
-The nuance (verified against the iroh 1.0.0 source — `endpoint.rs::same_endpoint_id_relay` + `iroh-relay` `clients.rs`):
-
-- **Two endpoints with the same `node_id` that BOTH serve `SYNC_ALPN` coexist fine.**
-  The relay keeps one `node_id → endpoint` route; the last to register holds it, the other loses *inbound* but keeps *outbound* dials (catch-up).
-  The loser never steals back (the holder's socket keeps answering pings) — a **stable hijack, not a flap** — and the route returns when the holder leaves.
-  This lets the **GUI and the MCP server both bind the device identity at once** (see "Passive writers"): whichever holds the route serves inbound from the same `ops-*.jsonl`, the other pushes/pulls on its own dials.
-- **An endpoint that does NOT serve `SYNC_ALPN` is the dangerous case.**
-  If the newcomer can't accept `SYNC_ALPN`, a dialer routed to it gets `CONNECTION_REFUSED` — sync breaks for real (the original device↔device bug, detailed below).
+**A device binds at most ONE iroh endpoint at a time, and which process gets it is decided by a lease, not by what kind of client it is.**
 
 **Why the route is single:** a second endpoint registering the same secret key *replaces* the active client in the relay's `DashMap<EndpointId, ClientState>`.
 All inbound datagrams then route to the newcomer and the original silently stops receiving (`endpoint.rs::same_endpoint_id_relay` asserts this).
-If the newcomer doesn't accept `SYNC_ALPN`, the dialer gets `quinn` `CONNECTION_REFUSED` — the "connection refused, nothing syncs" bug (a transient status-probe or the GUI's old pairing endpoint stealing the route).
+The demoted endpoint's *outbound* catch-up stalls too for any relay-only peer, because that peer's QUIC return traffic is addressed to the node id and lands on whoever is ACTIVE.
+So a second endpoint breaks the first's sync in **both** directions.
+This is not the "stable, benign hijack" an earlier version of this document claimed; believing it is what let `outl mcp serve` silently kill the desktop's sync to an off-LAN iPhone.
+If the newcomer doesn't accept `SYNC_ALPN` at all, the dialer additionally gets `quinn` `CONNECTION_REFUSED` — the older "connection refused, nothing syncs" bug (a transient status-probe or the GUI's old pairing endpoint stealing the route).
+
+**The lease (`lease::EndpointLease`).**
+An advisory `flock` on `endpoint.lock`, a **sibling of the identity key**, so the arbitration scope follows the node id automatically (desktop / TUI / CLI / MCP share `~/.outl/`; mobile's sandbox identity never contends).
+`build_transport` (`device.rs`) is the one place that takes it, so no client has to remember to.
+Released by the kernel when the holder exits: no TTL, no stale lease, no daemon.
+
+**The endpoint thread owns the lease, and the two ways of getting that wrong are opposite.**
+`start()` moves it into the `outl-iroh-sync` thread, where it is bound first and therefore dropped last, so the claim ends exactly when `run_iroh` returns.
+Leave it on the struct instead and a failed `.bind()` kills the thread while the transport keeps the claim, locking every other process on the device out of an endpoint forever — issue #220 again, this time with a padlock.
+Drop it any earlier and you reopen the reverse.
+`shutdown()` only sends a oneshot.
+A client that drops the transport right after (the desktop, on a workspace swap) would free the lease while `run_iroh` is still closing the endpoint, and a second endpoint could bind onto the same node id in that window.
+A transport that was built but never started still holds it, which is what `outl sync` needs when it exits early.
+
+Two failure modes at acquire time, deliberately opposite (`lease.rs`).
+The lease file failing to **open** (permission, read-only mount) is **fail-closed**: there is no arbiter and no way to know whether someone is already bound, so granting would grant to everyone.
+The file opening but refusing to **lock** (`ENOLCK`, a mount with no locking) is **fail-open** with a warning.
+The file is ours, only the locking is missing, and refusing everyone leaves the device with no endpoint at all, which is the failure the lease exists to remove.
+
+**Why a lease and not a policy.**
+The rule used to be "only the GUI binds; the MCP server and the CLI are passive writers".
+That kept two endpoints apart, but it assumed a GUI exists.
+On a headless machine (an agent driving `outl mcp serve`) *nobody* bound an endpoint, so the device's ops never left and no peer's ops ever arrived — silently, with `outl peer status` on the other device just showing "offline" (issue #220).
+The constraint was never "only the GUI"; it is "one live endpoint per identity", and that is a question about **who got here first**, which only a lock can answer.
+Losing the election is a working state, not a failure: the loser runs `outl_actions::FileSyncTransport` and converges through the shared `ops/` dir, which the holder pushes out on its `MAINTENANCE_RESYNC` pass.
+
+Pinned by `tests/endpoint_lease.rs` (`one_process_binds_the_device_endpoint_and_the_next_one_is_told_to_stay_off_the_wire`) plus the unit tests in `lease.rs`.
+
+**Non-sync endpoints are the sharper case, and they take the lease too.**
+An endpoint that does NOT serve `SYNC_ALPN` is worse than a competing one: a dialer routed to it gets `CONNECTION_REFUSED` instead of a working peer.
+The status probe (`status::probe_peers`) is the only one left, and it now asks for the lease like everything else, returning `PeerProbe::EndpointBusy` instead of binding when it loses.
+It used to be exempt on the grounds that "the CLI has no running transport to conflict with", which stopped being true the moment `outl mcp serve` could hold the endpoint — and `outl peer status` is precisely the command a user runs to diagnose sync, so it must not be the thing that breaks it.
 
 **Three call sites, three rules:**
 
@@ -257,7 +287,7 @@ So the new peer's op-log history is never pulled (only brand-new ops would trick
 - **Maintenance re-sync (the convergence safety net)**: each peer's last clean sync is timestamped in a `HashMap<EndpointId, Instant>`.
   A peer is (re)dialed when new this session, when its last attempt failed (absent from the map), or when its last success is older than `MAINTENANCE_RESYNC` (10s).
   `delta_sync` is a cheap no-op on matching vector clocks and the in-flight guard collapses a slow re-dial into the previous one, so the short interval doesn't thunder.
-  **Load-bearing**: convergence must not depend on the real-time gossip path, since the announce may never cross (flaky cross-network iroh) or never be sent at all (the ephemeral CLI, see "Passive writers").
+  **Load-bearing**: convergence must not depend on the real-time gossip path, since the announce may never cross (flaky cross-network iroh) or never be sent at all (the ephemeral CLI, see "Who ends up with the endpoint").
   The loop re-pulls every known peer within `MAINTENANCE_RESYNC` regardless.
   The earlier "synced once, never re-dial" design broke exactly there ("paired, first sync worked, then nothing propagates"); regression: `catch_up_resyncs_peer_after_interval`.
   **The map is cleared when the workspace id changes** (`run_catch_up` `select!`s on the `wid_changed` broadcast), forcing an immediate re-dial of every peer under the adopted id.
@@ -267,25 +297,33 @@ So the new peer's op-log history is never pulled (only brand-new ops would trick
 
 `run_catch_up` is parameterized over `period`, `resync_after`, and a `resolve_peers` closure so `test_support::run_catch_up_loop` drives it over loopback (regressions `catch_up_syncs_peer_paired_after_boot`, `catch_up_resyncs_peer_after_interval`).
 
-## Passive writers vs the MCP peer
+## Who ends up with the endpoint
 
-Since two sync-serving endpoints can share the device identity without breaking (see "One endpoint per identity"), the rule splits by **process lifetime**, not by "is it a GUI":
+The lease decides (see "One endpoint per identity, elected not assigned"), so this is a description of what typically happens, not a policy anyone hard-codes:
 
-- **The MCP server brings a real transport up.**
-  `outl mcp serve` is long-lived (the whole Claude Desktop session), so it CAN hold an endpoint and push in real time.
-  On first workspace open it spins up `IrohSyncTransport` (shared `~/.outl/identity.key` + workspace `.outl/peers.json`) **when the workspace has paired peers**.
-  It announces after every mutating tool, drains peer pushes (reopening the workspace so it serves fresh ops), and shuts down on stdin close.
-  If a GUI is also running, the two share the identity — stable hijack, both serve.
-  Wired in `outl-cli` `mcp/mod.rs` (`ServerCtx::ensure_transport` / `announce_after_mutation` / `shutdown_transport`).
-- **The ephemeral CLI stays a passive writer.**
-  A `page`/`block`/`daily`/`batch`/`import` command runs in ~200ms — too short to establish a QUIC connection (seconds), so it writes `ops-<actor>.jsonl` and exits without touching iroh.
-  Its ops converge via a co-resident long-lived peer (GUI / MCP) plus every device's `MAINTENANCE_RESYNC` re-pull.
-  `outl sync` is the explicit flush: it brings a transport up, forces a push/pull pass, waits, and exits.
-- **`outl peer pair` / `status`** use a transient endpoint they close before returning.
-  `status`'s `probe_peers` is the one non-sync endpoint, so it is CLI-only and must stay off while any sync transport is live (see "One endpoint per identity").
+- **Long-lived processes contend.**
+  A GUI (desktop / mobile), the TUI, and `outl mcp serve` all call `build_transport` and take whatever it grants.
+  The winner binds the endpoint, announces after each local mutation, and serves inbound.
+  The losers run `outl_actions::FileSyncTransport` alone and stay off the wire.
+  A GUI opened at login therefore keeps the endpoint and an MCP server started later stays passive — the pre-lease behaviour, now a consequence rather than a rule.
+  With no GUI at all, the MCP server is the peer, which is the whole point.
+- **Every long-lived client runs the file poller too, endpoint or not.**
+  iroh signals only on its own wire receipts; the poller signals on ANY growth of a peer's `ops-<actor>.jsonl`, including ops a **co-resident** process wrote.
+  Neither subsumes the other, so both always run.
+- **The ephemeral CLI never contends.**
+  A `page`/`block`/`daily`/`batch`/`import` command runs in ~200ms — too short to establish a QUIC connection (seconds) — so it writes `ops-<actor>.jsonl` and exits without touching iroh.
+  Its ops converge via whichever process holds the endpoint plus every device's `MAINTENANCE_RESYNC` re-pull.
+- **`outl sync` contends, and stands down when it loses.**
+  It is the explicit flush for scripts: bring a transport up, force a push/pull pass, wait, exit.
+  When another local process already holds the endpoint it prints who has it and exits instead — that process is already pushing these ops out, and taking the route from it for 25s would break the sync it was asked to help.
+- **`outl peer status` asks for the lease, and reports instead of probing when it loses.**
+  `probe_peers` binds the one non-sync endpoint in the crate, so it is the last thing that may fight a live transport for the route.
+- **`outl peer pair` binds a one-shot endpoint and closes it before returning**, lease or no lease.
+  It is the deliberate exception: a device that cannot pair is a device the user cannot add, and the handshake is rare, explicit and seconds long, after which the holder gets its route back.
+  A client that *does* hold an endpoint still pairs through it (`IrohSyncTransport::pair_host`) rather than binding a second one.
 
 Correctness never depends on the announce: the `MAINTENANCE_RESYNC` catch-up is the safety net that converges any writer's ops, announced or not.
-The transport on MCP/GUI is a **latency** optimization (real-time vs next catch-up tick), now safe to run everywhere because the hijack is benign.
+Holding the endpoint is a **latency** win (real-time vs next catch-up tick); losing it costs latency, never convergence.
 
 ## Reachability: full `EndpointAddr` in `PeerEntry` (load-bearing)
 

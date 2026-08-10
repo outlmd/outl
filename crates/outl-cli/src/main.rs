@@ -318,8 +318,15 @@ enum Command {
     ///
     /// For scripts that mutate via the CLI and must flush to peers before the
     /// process dies — a normal `outl page/block/...` command is too short-lived
-    /// to bind an iroh endpoint, so it relies on a long-lived peer (GUI / MCP)
-    /// plus the catch-up re-sync instead. `outl sync` is the explicit flush.
+    /// to bind an iroh endpoint, so it relies on whichever long-lived process
+    /// on this device holds the endpoint (a GUI, or `outl mcp serve`) plus the
+    /// catch-up re-sync instead. `outl sync` is the explicit flush; if one of
+    /// those already holds the endpoint it says so and exits, since that
+    /// process is already pushing these ops out.
+    ///
+    /// Exit codes: 0 a flush ran; 3 nothing was flushed (endpoint held
+    /// elsewhere, P2P off, or no paired device) so the ops are still local
+    /// until another process converges them; 1/2 the command failed.
     Sync,
 }
 
@@ -516,10 +523,10 @@ fn main() -> Result<()> {
         },
         Some(Command::Peer { cmd }) => {
             // Identity is per-DEVICE → global `~/.outl/identity.key`.
-            let outl_dir = dirs::home_dir().expect("home dir").join(".outl");
+            let outl_dir = outl_sync_iroh::default_device_dir()?;
             std::fs::create_dir_all(&outl_dir)?;
-            let identity =
-                outl_sync_iroh::IrohIdentity::load_or_generate(&outl_dir.join("identity.key"))?;
+            let id_path = outl_dir.join("identity.key");
+            let identity = outl_sync_iroh::IrohIdentity::load_or_generate(&id_path)?;
             // The peer list is per-GRAPH → `<workspace>/.outl/peers.json`. Pairing
             // writes the new peer into the workspace the user is operating on, so
             // it needs the resolved workspace root (not the OS home).
@@ -608,23 +615,28 @@ fn main() -> Result<()> {
                     false => println!("No peer matching '{id}' found."),
                 },
                 PeerCommand::Status => {
-                    let statuses = outl_sync_iroh::probe_peers_blocking(&identity, &peers)?;
-                    if statuses.is_empty() {
-                        println!("No paired devices.");
-                    } else {
-                        println!("{:<22} {:<16} STATUS", "NODE ID (prefix)", "ALIAS");
-                        for s in statuses {
-                            let short = &s.node_id[..s.node_id.len().min(22)];
-                            let alias = s.alias.as_deref().unwrap_or("-");
-                            let state = if s.online {
-                                match s.rtt_ms {
-                                    Some(ms) => format!("online ({ms}ms)"),
-                                    None => "online".into(),
-                                }
-                            } else {
-                                "offline".into()
-                            };
-                            println!("{short:<22} {alias:<16} {state}");
+                    use outl_sync_iroh::PeerProbe;
+                    match outl_sync_iroh::probe_peers_blocking(&id_path, &peers)? {
+                        PeerProbe::EndpointBusy => println!(
+                            "Another outl process holds this device's sync endpoint, so \
+                             reachability here is unknown rather than offline."
+                        ),
+                        PeerProbe::Probed(s) if s.is_empty() => println!("No paired devices."),
+                        PeerProbe::Probed(statuses) => {
+                            println!("{:<22} {:<16} STATUS", "NODE ID (prefix)", "ALIAS");
+                            for s in statuses {
+                                let short = &s.node_id[..s.node_id.len().min(22)];
+                                let alias = s.alias.as_deref().unwrap_or("-");
+                                let state = if s.online {
+                                    match s.rtt_ms {
+                                        Some(ms) => format!("online ({ms}ms)"),
+                                        None => "online".into(),
+                                    }
+                                } else {
+                                    "offline".into()
+                                };
+                                println!("{short:<22} {alias:<16} {state}");
+                            }
                         }
                     }
                 }
@@ -633,40 +645,62 @@ fn main() -> Result<()> {
         }
         Some(Command::Sync) => {
             let p = resolve_path(cli.workspace.as_ref(), None)?;
-            run_sync(&p)
+            // Exit here, not inside `run_sync`: it has already dropped its
+            // transport (and the endpoint lease with it), so nothing is skipped.
+            std::process::exit(run_sync(&p)?);
         }
     }
 }
+
+/// Exit code for an `outl sync` that flushed nothing. Not [`output::EXIT_OK`]:
+/// `outl page create … && outl sync` cannot otherwise tell a real push from a
+/// "trust the neighbour process to push within `MAINTENANCE_RESYNC`". Not
+/// `EXIT_USER` / `EXIT_INTERNAL` either — nothing is wrong. So: the next free
+/// number after [`output`]'s 0/1/2.
+const EXIT_NOTHING_FLUSHED: i32 = 3;
 
 /// Force a one-shot P2P sync pass: bring a transport up, let the boot-time +
 /// catch-up sync exchange ops with every paired device, then shut down.
 ///
 /// An ephemeral CLI mutation can't keep a QUIC connection alive long enough to
-/// push, so this is the explicit flush. It binds the device identity briefly;
-/// the relay-route hijack against a co-resident GUI/MCP is benign (both serve
-/// the sync ALPN), and the route returns to the long-lived holder on shutdown.
-fn run_sync(path: &std::path::Path) -> anyhow::Result<()> {
+/// push, so this is the explicit flush.
+///
+/// It takes the device endpoint lease like any other client, and **stands down
+/// when it can't get it**. A second endpoint on this device's node id steals
+/// the relay route from the process that already has it and breaks that
+/// process's sync in both directions for the 25s this command runs — while the
+/// holder was already going to push these ops on its next catch-up pass. So the
+/// honest answer there is to say who has it and exit, not to flush by breaking
+/// the thing doing the flushing. Returns [`output::EXIT_OK`] when a pass ran and
+/// [`EXIT_NOTHING_FLUSHED`] when it stood down: printing the reason is not
+/// enough for a command built to be scripted, and stdout is not what `&&` reads.
+fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::{Duration, Instant};
 
     use outl_actions::SyncTransport;
+    use outl_sync_iroh::TransportOutcome;
 
     let wc = ws::open(path).map_err(|e| anyhow::anyhow!("{}: {}", e.code, e.message))?;
-    let outl_dir = dirs::home_dir().expect("home dir").join(".outl");
-    // Peer list is per-GRAPH (`<workspace>/.outl/peers.json`); identity is global.
-    outl_sync_iroh::migrate_global_peers_if_absent(path);
-    let peers =
-        outl_sync_iroh::PeersStore::load_or_default(&outl_sync_iroh::workspace_peers_path(path))?;
-    if peers.list().is_empty() {
+    let transport = match outl_sync_iroh::build_default_transport(path)? {
+        TransportOutcome::Ready(t) => t,
+        TransportOutcome::EndpointBusy => {
+            println!(
+                "Another outl process on this device holds the sync endpoint \
+                 (a GUI, or `outl mcp serve`).\nIt pushes these ops out on its own \
+                 pass — nothing to flush here."
+            );
+            return Ok(EXIT_NOTHING_FLUSHED);
+        }
+        TransportOutcome::Disabled => {
+            println!("`[sync] transport` is \"file\"; P2P sync is off. Nothing to flush.");
+            return Ok(EXIT_NOTHING_FLUSHED);
+        }
+    };
+    if transport.peers().is_empty() {
         println!("No paired devices. Use `outl peer pair` to add one.");
-        return Ok(());
+        return Ok(EXIT_NOTHING_FLUSHED);
     }
-    let identity = outl_sync_iroh::IrohIdentity::load_or_generate(&outl_dir.join("identity.key"))?;
-    // `[sync] relay_url` from the global config: `None` (or empty) uses outl's
-    // default relay (`use1-1.relay.avelino.outl.iroh.link`), `Some(url)` points the sync endpoint at
-    // a different relay.
-    let relay_url = outl_config::load().sync.relay_url().map(str::to_string);
-    let transport = outl_sync_iroh::IrohSyncTransport::new(identity, peers, relay_url);
 
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     transport.start(wc.root.clone(), wc.actor, tx);
@@ -700,7 +734,7 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<()> {
         "Sync pass complete — {online}/{} peer(s) reachable.",
         health.len()
     );
-    Ok(())
+    Ok(output::EXIT_OK)
 }
 
 /// Resolve which workspace path to operate on.

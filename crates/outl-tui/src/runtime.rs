@@ -127,7 +127,6 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         global_cfg.backup.interval_minutes,
     );
     let theme = resolve_theme(theme_override, &cfg, &global_cfg);
-    let sync_cfg = global_cfg.sync.clone();
     // Backlinks list direction (issue #142). Read once at boot; the
     // `Ctrl+O` toggle persists changes back to `config.toml`.
     let backlinks_newest_first = global_cfg.display.backlinks_order.newest_first();
@@ -200,7 +199,6 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         actor,
         theme,
         shared_workspace,
-        sync_cfg,
         backlinks_newest_first,
     );
 
@@ -403,17 +401,9 @@ fn event_loop(
     actor: ActorId,
     theme: Theme,
     shared_workspace: bool,
-    sync_cfg: outl_config::SyncConfig,
     backlinks_newest_first: bool,
 ) -> Result<()> {
-    let mut app = App::new(
-        workspace_root,
-        workspace,
-        actor,
-        theme,
-        shared_workspace,
-        sync_cfg,
-    )?;
+    let mut app = App::new(workspace_root, workspace, actor, theme, shared_workspace)?;
     // Apply the persisted backlinks direction (issue #142); the field
     // only feeds the render path, so setting it post-construction is
     // enough and keeps it out of `App::new`'s already-long signature.

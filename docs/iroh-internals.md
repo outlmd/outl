@@ -62,6 +62,9 @@ Shared seed/read/wait helpers stay in `tests/common/mod.rs` (read-only); saga-sp
 | 3b. Removed/unknown peer denied (issue #158) | `removed_peer_is_denied_sync` | `tests/regression.rs` |
 | 4. Pairing adoption — joiner adopts host id (GUI + CLI, #197) | `gui_pairing_over_live_sync_endpoint` + `pairing_roundtrip` (CLI: shared on-disk id, returns `Adopted`) | `tests/integration.rs` |
 | 5. Single endpoint per identity (pair AND sync over the live sync endpoint, no relay hijack) | `gui_pairing_over_live_sync_endpoint` (pre-existing; pairing rides the live sync endpoint, no second bind) | `tests/integration.rs` |
+| 5b. Endpoint lease — one process binds, the loser is told to stay off the wire, not silently offline (issue #220) | `one_process_binds_the_device_endpoint_and_the_next_one_is_told_to_stay_off_the_wire` | `tests/endpoint_lease.rs` |
+| 5c. A lease file that cannot be opened denies the endpoint (no arbiter must not mean everyone binds) | `a_lease_file_that_cannot_be_opened_denies_the_endpoint_instead_of_granting_it` | `src/lease.rs` |
+| 5d. The status probe stands down instead of stealing the route it was run to diagnose | `the_probe_stands_down_when_another_process_holds_the_endpoint` | `src/status.rs` |
 | 6. Reachability resolution + off-LAN/IPv6 direct-addr filter (issue #133) | `iroh_endpoint_addr_*` + `is_reachable_lan_ipv4_*` (keep on-LAN IPv4, drop IPv6 + stale VPN IPs, fall back stored/bare/corrupt) | `src/peers.rs` |
 | 7. Bidirectional push materializes on BOTH sides AND fires BOTH reload signals | `bidirectional_sync_fires_reload_signal_on_both_sides` (set convergence + `peer_ready_tx` on initiator AND responder) | `tests/regression.rs` |
 | 7. (set-convergence half) both sides hold all ops | `bidirectional_delta_sync` (pre-existing) | `tests/integration.rs` |

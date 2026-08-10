@@ -28,10 +28,9 @@
 
 use std::path::PathBuf;
 
-use outl_config::SyncTransportKind;
 use outl_core::id::ActorId;
-use outl_sync_iroh::IrohSyncTransport;
-use outl_tauri_shared::iroh_sync::{build_iroh_transport, start_with_reload_bridge};
+use outl_sync_iroh::{IrohSyncTransport, TransportOutcome};
+use outl_tauri_shared::iroh_sync::start_with_reload_bridge;
 use tauri::Manager;
 use tracing::{info, warn};
 
@@ -59,20 +58,16 @@ pub(crate) fn identity_path(dir: &std::path::Path) -> PathBuf {
 /// `AppState` (keeping its background tokio runtime alive). Returns
 /// `None` when:
 ///
-/// - the config selects the file transport (`transport = "file"`), or
+/// - the config selects the file transport (`transport = "file"`),
+/// - another process on this device already holds the endpoint (never on iOS
+///   today — one app, one sandbox — but the decision has one owner), or
 /// - the app local data dir / identity / peer store can't be resolved
 ///   (logged, never fatal).
 pub(crate) fn wire_iroh_transport(
     app: &tauri::AppHandle,
     workspace_root: PathBuf,
     actor: ActorId,
-    transport_kind: SyncTransportKind,
 ) -> Option<IrohSyncTransport> {
-    if transport_kind == SyncTransportKind::File {
-        info!("sync transport = file; iroh disabled by config");
-        return None;
-    }
-
     let dir = match iroh_dir(app) {
         Ok(d) => d,
         Err(e) => {
@@ -85,8 +80,16 @@ pub(crate) fn wire_iroh_transport(
         return None;
     }
 
-    let transport = match build_iroh_transport(&identity_path(&dir), &workspace_root) {
-        Ok(t) => t,
+    let transport = match outl_sync_iroh::build_transport(&identity_path(&dir), &workspace_root) {
+        Ok(TransportOutcome::Ready(t)) => t,
+        Ok(TransportOutcome::EndpointBusy) => {
+            info!("another local outl process holds the iroh endpoint; iroh disabled here");
+            return None;
+        }
+        Ok(TransportOutcome::Disabled) => {
+            info!("sync transport = file; iroh disabled by config");
+            return None;
+        }
         Err(e) => {
             warn!("iroh disabled: {e}");
             return None;

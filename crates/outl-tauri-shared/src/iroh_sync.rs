@@ -1,45 +1,24 @@
-//! iroh P2P transport primitives shared by the GUI clients.
+//! iroh P2P transport wiring shared by the GUI clients.
 //!
-//! The clients diverge on *where the identity lives* (desktop:
+//! Whether a transport may be built at all — the configured transport kind, the
+//! device endpoint lease, the identity / peers / relay recipe — belongs to
+//! `outl_sync_iroh::build_transport`, the one owner every client calls.
+//! What is left here is the half that is genuinely Tauri: turning the
+//! transport's two internal signals into app events.
+//!
+//! The clients still diverge on *where the identity lives* (desktop:
 //! `~/.outl/identity.key`, shared with the CLI/TUI; mobile: the Tauri app
 //! local data dir — iOS has no meaningful home) and on *which Tauri event
 //! signals a reload* (`peer-ops-changed` on desktop, `workspace-ready` on
-//! mobile). Both are parameters here; the build + start + bridge-thread
-//! machinery is identical and lives once.
+//! mobile). Both are parameters at the call site.
 
-use std::path::Path;
 use std::sync::mpsc;
 
 use outl_actions::{SyncProgress, SyncTransport};
 use outl_core::id::ActorId;
-use outl_sync_iroh::{
-    migrate_global_peers_if_absent, workspace_peers_path, IrohIdentity, IrohSyncTransport,
-    PeersStore,
-};
+use outl_sync_iroh::IrohSyncTransport;
 use tauri::{AppHandle, Emitter};
 use tracing::{info, warn};
-
-/// Build an [`IrohSyncTransport`] from the device's on-disk identity and
-/// the per-workspace peer store (`<workspace_root>/.outl/peers.json`).
-///
-/// Runs the one-time global → workspace peers migration first, and reads
-/// `[sync] relay_url` from the global config (`None` / empty uses outl's
-/// default relay, `use1-1.relay.avelino.outl.iroh.link`).
-///
-/// Returns the **concrete** transport (cheaply `Clone`, internally
-/// `Arc`-backed) so the caller can keep one handle for pairing and wrap
-/// another as `Arc<dyn SyncTransport>` for announce / shutdown /
-/// peer-health.
-pub fn build_iroh_transport(
-    identity_path: &Path,
-    workspace_root: &Path,
-) -> anyhow::Result<IrohSyncTransport> {
-    let identity = IrohIdentity::load_or_generate(identity_path)?;
-    migrate_global_peers_if_absent(workspace_root);
-    let peers = PeersStore::load_or_default(&workspace_peers_path(workspace_root))?;
-    let relay_url = outl_config::load().sync.relay_url().map(str::to_string);
-    Ok(IrohSyncTransport::new(identity, peers, relay_url))
-}
 
 /// The Tauri event carrying [`SyncProgress`] updates to the frontend's
 /// pairing-screen progress feed. Same name on both clients (unlike the

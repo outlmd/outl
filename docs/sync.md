@@ -466,7 +466,7 @@ Syncing with paired devices…
 Your host's pages and journals now appear in the joiner's folder.
 From here on, edits on either device propagate automatically whenever both are online.
 A running GUI/TUI syncs continuously.
-A bare CLI edit converges on the next `outl sync`, or the next time a long-lived client (GUI, TUI, or `outl mcp serve`) opens the workspace — the ephemeral CLI is a passive writer, documented in `crates/outl-cli/CLAUDE.md`.
+A bare CLI edit converges on the next `outl sync`, or the next time a long-lived client (GUI, TUI, or `outl mcp serve`) opens the workspace — the ephemeral CLI never binds an endpoint, documented in `crates/outl-cli/CLAUDE.md`.
 
 > The ticket is **not** an iroh `NodeTicket` — that type doesn't exist in iroh 1.0.0.
 > It is a base64 of `serde_json(EndpointAddr)` (node id + relay + direct addrs), which feeds straight back into `endpoint.connect`.
@@ -508,7 +508,9 @@ Run `outl sync` on the device that's missing notes, or open a GUI/TUI client (it
 
 **`outl peer status` says a peer is offline.**
 The other device has to be running a long-lived client (GUI, TUI, or `outl mcp serve`) to answer.
-A device that only ever runs one-shot CLI commands has no endpoint to reach — the ephemeral CLI is a passive writer, documented in `crates/outl-cli/CLAUDE.md`.
+A device that only ever runs one-shot CLI commands has no endpoint to reach — the ephemeral CLI never binds one, documented in `crates/outl-cli/CLAUDE.md`.
+A device runs **one** sync endpoint at a time, taken by whichever long-lived process started first; the others sync through the shared `ops/` dir behind it.
+So a machine running only `outl mcp serve` does answer, and a machine where a GUI is already open answers through the GUI.
 
 ---
 

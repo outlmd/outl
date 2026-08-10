@@ -126,7 +126,9 @@ relay_url = "https://use1-1.relay.avelino.outl.iroh.link"   # this is the defaul
 Leave `relay_url` empty (or omit it) and you get outl's dedicated relay — that's the built-in default.
 Point it at any other `iroh-relay` URL to override, and that endpoint uses your relay for home registration, hole-punch coordination, and fallback.
 
-How it threads through: each client reads `[sync] relay_url` from the global config and passes it to `IrohSyncTransport::new`, which hands it to the endpoint builder (`bind::n0_builder_ipv4_only`).
+How it threads through: `outl_sync_iroh::build_transport` (`crates/outl-sync-iroh/src/device.rs`) is the single reader of `[sync] relay_url`.
+Every client (TUI, the shared Tauri backend, `outl sync`, the MCP server) calls it instead of reading the config itself.
+`build_transport` passes the value to `IrohSyncTransport::new`, which hands it to the endpoint builder (`bind::n0_builder_ipv4_only`).
 An empty / `None` value resolves to the built-in `DEFAULT_RELAY_URL` (`https://use1-1.relay.avelino.outl.iroh.link`); a non-empty value swaps in that `RelayMode::Custom` relay.
 A malformed URL logs a warning and falls back to iroh's `presets::N0` (n0) relay rather than failing the bind, so a typo degrades gracefully instead of taking sync down.
 Every endpoint (the long-lived **sync** endpoint plus the short-lived pairing / status / test endpoints) resolves the same default, so a device coordinates through one relay end to end.

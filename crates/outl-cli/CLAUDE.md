@@ -202,31 +202,37 @@ The full mapping (CLI ↔ MCP tool) is documented in [`docs/cli.md`](../../docs/
 - `outl mcp serve [--workspace=…]` — JSON-RPC 2.0 over stdio implementing the MCP protocol surface Claude Desktop expects (`initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`).
   Every tool is a thin router that delegates to the same handler the CLI subcommand calls — there is no second business-logic path.
 
-## P2P sync: the MCP and the ephemeral CLI are BOTH passive writers
+## P2P sync: the MCP takes the endpoint when nobody else has it
 
 iroh's relay routes only ONE endpoint per `node_id` at a time.
-The old design here claimed a second endpoint sharing the device identity was a *benign, stable* hijack (the loser keeps working via outbound dial).
-**That is false for relay-dependent peers.**
-Reading the iroh-relay source: the demoted endpoint goes *inactive* — it can still send, but **receives nothing**.
-And since QUIC return traffic for a relay-only peer (an off-LAN iPhone) is addressed to the node_id → routed to whoever is ACTIVE on that relay, the demoted endpoint's **outbound catch-up also stalls**.
-So a second endpoint breaks the first's sync **in both directions** for any peer not reachable on the LAN.
-This is exactly what broke sync when `outl mcp serve` and the desktop GUI ran together.
-The GUI held the route at boot; the first dual-write tool call spun up the MCP's endpoint and stole it; the GUI silently lost the iPhone (the "sync funciona 1-2 min, depois cai" symptom).
-See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "One endpoint per identity".
+A second endpoint on that id breaks the holder's sync **in both directions** for any relay-reachable peer.
+The demoted endpoint receives nothing, and its outbound catch-up stalls too, because the peer's return traffic follows the node id to whoever is ACTIVE.
+That is real, and it is why `outl mcp serve` + the desktop GUI used to break each other.
 
-So **neither** the MCP nor the ephemeral CLI binds an iroh endpoint — the GUI is the sole owner of the device identity's relay route:
+The fix for *that* was to hard-code the MCP as a passive writer.
+It removed the collision and introduced a worse one.
+On a machine with **no GUI** — an agent driving `outl mcp serve`, which is a normal way to run outl — nothing bound an endpoint at all, so the device's ops never left and no peer's ops ever arrived.
+The other device just showed "offline" (issue #220).
 
-- **The MCP server is a passive writer with a file poller.**
-  `outl mcp serve` is long-lived, but on first workspace open it brings up **`outl_actions::FileSyncTransport`**, NOT `IrohSyncTransport` — a disk poller that binds no endpoint (`mcp/mod.rs::ensure_transport`).
-  It writes `ops-<actor>.jsonl` to the shared `ops/` dir; a co-resident GUI's fs-watcher picks those up and **its** transport announces/serves them to remote peers.
-  The file poller only flips the `peer_dirty` flag when another process (GUI / CLI / a GUI-delivered peer op) changes the on-disk ops, so the next tool call reopens and the MCP's reads stay fresh.
-  There is no peer announce after a mutation (the file transport has nothing to announce); `shutdown_transport` is a clean no-op on it.
-  A **headless** MCP (no GUI running) therefore has no real-time push — its ops sit on disk until a long-lived endpoint (the GUI) opens or the user runs `outl sync`, then converge via each peer's `MAINTENANCE_RESYNC`.
-  That's the accepted trade-off for never breaking a running GUI's sync.
-- **The ephemeral CLI stays a passive writer.**
-  A `page`/`block`/`daily`/`batch`/`import` command runs in ~200ms — far too short to establish a QUIC connection (which takes seconds), so binding a transport just to drop it would steal the relay route from a running GUI/MCP for nothing.
-  These commands write `ops-<actor>.jsonl` and rely on a co-resident long-lived peer (GUI / MCP) plus every device's catch-up re-sync (`MAINTENANCE_RESYNC`) to converge.
-  `outl sync` is the explicit escape hatch: it brings a transport up, forces a push/pull pass against every peer, waits, and exits — for scripts that must flush before the process dies.
+The constraint was never "only the GUI"; it is "one live endpoint per device identity".
+So the answer is a lease, not a policy: `outl_sync_iroh::build_transport` hands the endpoint to whichever process asked first, and everyone else degrades.
+Full mechanism: [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "One endpoint per identity, elected not assigned".
+
+What that means for the surfaces in this crate:
+
+- **The MCP server contends, and runs the file poller either way.**
+  On first workspace open (`mcp/mod.rs::ensure_transport`) it always starts `outl_actions::FileSyncTransport` — a disk poller that flips `peer_dirty` when a co-resident process changes `ops/`, so the next tool call reopens and its reads stay fresh.
+  It *also* asks `build_transport` for the endpoint, and takes it when granted: then it announces after every mutating tool (`tools/dispatch.rs` → `ServerCtx::announce_local_ops`) and serves inbound, shutting down on stdin close.
+  Refused — a GUI got there first — it is exactly the passive writer it was before, and that GUI pushes its ops out.
+  It also declines the endpoint when the workspace has **no paired peers**: nothing to sync, and dropping the lease leaves it free for a GUI that wants it for pairing.
+  The ask is repeated on every workspace reopen while it has no endpoint, because every reason to decline is something the user changes from outside this process (pairing a first device, closing the GUI).
+  Answering once would strand a session that started before its device was paired — an MCP server lives for hours.
+- **The ephemeral CLI never contends.**
+  A `page`/`block`/`daily`/`batch`/`import` command runs in ~200ms — far too short to establish a QUIC connection (which takes seconds), so binding a transport just to drop it would steal the relay route for nothing.
+  These commands write `ops-<actor>.jsonl` and rely on whichever process holds the endpoint plus every device's catch-up re-sync (`MAINTENANCE_RESYNC`) to converge.
+- **`outl sync` contends and stands down when it loses.**
+  It is the explicit flush for scripts: bring a transport up, force a push/pull pass against every peer, wait, exit.
+  When another local process already holds the endpoint it says so and exits, because that process is already pushing these ops out and a 25s route steal would break the sync `outl sync` was asked to help.
 - **`outl peer pair`/`status`** use a transient endpoint they close before returning (CLI-only, no long-lived client should be mid-pair at the same time).
 
 ## JSON envelope (CLI + MCP)
@@ -244,6 +250,8 @@ Exit codes follow:
 - `0` success
 - `1` user error (`ApiError` with non-`INTERNAL` code)
 - `2` internal error (`ApiError::INTERNAL`)
+- `3` nothing was done, and that is not a failure.
+  `outl sync` returns it when it stood down instead of flushing (another local process holds the endpoint, P2P is off, no device paired), so a script can tell "I pushed" from "someone else will" without treating either as broken.
 
 ## Layout
 

@@ -75,7 +75,6 @@ pub(crate) fn set_workspace(
     // shut-down transport. `wire_iroh_transport` republishes a fresh one.
     *state.iroh_pairing.lock() = None;
     crate::iroh_sync::wire_iroh_transport(
-        outl_config::load().sync.transport,
         &state.iroh_transport,
         &state.iroh_pairing,
         path.clone(),
