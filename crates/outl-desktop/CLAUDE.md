@@ -430,6 +430,8 @@ Only `P2pDisabled` is the user's choice, and it is the only one that refuses to 
   `outl_sync_now` returns an error naming the reason (the holder, or what stopped this window from claiming the endpoint) rather than an `Ok(())` that did nothing.
   The silent no-op was the actual defect: the dot stays orange, Refresh appears to work, and nothing says why.
   `transport = "file"` stays a quiet no-op — the user's own choice is not a degraded state.
+  Refresh also **re-runs the election** before reporting that (`retry_endpoint`): the recorded reason is a snapshot of login, the holder can exit at any time afterwards, and nothing in this process notices, so without a retry the window would explain a dead process for the rest of the session.
+  It re-contends only from `HeldByAnotherProcess` / `Unavailable` — `P2pDisabled` is a setting rather than a race, and a `None` reason with no transport means the boot opener has not wired yet and a second pass would race it for the same lease.
 
 **Still missing:** the status dot itself cannot tell "every device is offline" from "another local process holds the endpoint".
 `PeerStatusDto` lives in `outl-tauri-shared` and `peersOnline` (`@outl/shared/peers`) is the one owner of reachability across desktop and mobile, so teaching it this state means a shared DTO change, not a desktop-local one.

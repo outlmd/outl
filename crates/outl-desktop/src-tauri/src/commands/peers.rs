@@ -62,14 +62,52 @@ pub fn outl_peer_status(state: State<'_, AppState>) -> Result<Vec<PeerStatusDto>
 /// reported as an error, which the Sync panel already surfaces via
 /// `appState.lastError`. `[sync] transport = "file"` stays a quiet no-op —
 /// that is the user's own choice, not a degraded state.
+///
+/// Before reporting that, it contends for the endpoint once more; see
+/// [`retry_endpoint`] for why Refresh is the right place to re-run the
+/// election.
 #[tauri::command]
-pub fn outl_sync_now(state: State<'_, AppState>) -> Result<(), String> {
-    if state.iroh_transport.lock().is_none() {
+pub fn outl_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Read and release: `retry_endpoint` writes the same slot.
+    let wired = state.iroh_transport.lock().is_some();
+    if !wired {
+        retry_endpoint(&app, state.inner());
         if let Some(notice) = degraded_endpoint_notice() {
             return Err(notice);
         }
     }
     shared::sync_now(state.inner())
+}
+
+/// Contend for the device endpoint one more time, when this window has none.
+///
+/// The recorded reason is a snapshot of a single moment, usually login. The
+/// process that won the lease then (typically `outl mcp serve`) can exit at any
+/// point afterwards, and nothing in this process notices: the endpoint stays
+/// free, this window keeps no transport, and Refresh keeps printing "another
+/// process holds it" about a process that is gone. Refresh is an explicit
+/// user request and one `flock` attempt is cheap, so it is where the election
+/// is re-run.
+///
+/// Two states are left alone. `P2pDisabled` is a setting, not a race, and
+/// re-contending there would bind an endpoint the user switched off. A `None`
+/// reason with no transport means the boot opener has not wired yet, and a
+/// second concurrent pass would race it for the same lease.
+fn retry_endpoint(app: &AppHandle, state: &AppState) {
+    match no_endpoint_reason() {
+        Some(NoEndpoint::HeldByAnotherProcess) | Some(NoEndpoint::Unavailable(_)) => {}
+        None | Some(NoEndpoint::P2pDisabled) => return,
+    }
+    let Some(root) = state.storage_root.lock().clone() else {
+        return;
+    };
+    crate::iroh_sync::wire_iroh_transport(
+        &state.iroh_transport,
+        &state.iroh_pairing,
+        root,
+        state.hlc.actor(),
+        app.clone(),
+    );
 }
 
 /// The Refresh error for a window with no transport, or `None` when the state
@@ -97,7 +135,8 @@ const ENDPOINT_BUSY_NOTICE: &str =
     "Another outl process on this device (usually `outl mcp serve`) \
      holds the P2P endpoint, so this window syncs through the shared ops/ \
      folder instead. Edits still converge; live peer status and Refresh stay \
-     unavailable until that process exits.";
+     unavailable until that process exits. Press Refresh again once it has: \
+     each press re-runs the election.";
 
 /// Why pairing refuses when P2P is off, rather than quietly turning it on for
 /// one handshake.

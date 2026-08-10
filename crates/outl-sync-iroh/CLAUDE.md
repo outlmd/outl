@@ -102,6 +102,13 @@ On a headless machine (an agent driving `outl mcp serve`) *nobody* bound an endp
 The constraint was never "only the GUI"; it is "one live endpoint per identity", and that is a question about **who got here first**, which only a lock can answer.
 Losing the election is a working state, not a failure: the loser runs `outl_actions::FileSyncTransport` and converges through the shared `ops/` dir, which the holder pushes out on its `MAINTENANCE_RESYNC` pass.
 
+**Known limitation: the lease is per device, so it is also per *workspace holder*.**
+The lock is a sibling of `identity.key`, not of the workspace, because the thing being arbitrated is the node id and there is exactly one of those per device.
+A process holding the endpoint for workspace A therefore keeps a process on workspace B off the wire, and B's ops only leave the machine when a process that *does* hold the endpoint opens B — the shared `ops/` fallback converges B across local processes, not across devices.
+Scoping the lease per workspace would not fix this; it would let two endpoints bind the same node id, which is the exact failure this section exists to prevent.
+The real fix is one endpoint multiplexing every open workspace (the sync protocol already carries `WorkspaceId` per request), and that is a redesign of `engine::run_iroh`, not a change to the lease.
+Until then, a user running two workspaces at once P2P-syncs the one whose process got there first.
+
 Pinned by `tests/endpoint_lease.rs` (`one_process_binds_the_device_endpoint_and_the_next_one_is_told_to_stay_off_the_wire`) plus the unit tests in `lease.rs`.
 
 **Non-sync endpoints are the sharper case, and they take the lease too.**
