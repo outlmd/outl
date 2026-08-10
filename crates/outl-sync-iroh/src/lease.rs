@@ -117,10 +117,10 @@ impl EndpointLease {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => None,
             Err(e) => {
                 warn!(
-                    "endpoint lease: {} cannot be locked ({e}); proceeding unarbitrated",
+                    "endpoint lease: {} cannot be locked ({e}); staying off the wire",
                     path.display()
                 );
-                Some(Self { file: None, path })
+                None
             }
         }
     }
