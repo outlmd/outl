@@ -416,8 +416,9 @@ Only `identity.key` stays global (`~/.outl/`).
 A device binds **one** iroh endpoint, and which process gets it is decided by a lease, not by being the GUI ([`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "One endpoint per identity, elected not assigned").
 So the desktop can now be running with `iroh_transport` / `iroh_pairing` empty while sync works fine through the shared `ops/` dir — a co-resident `outl mcp serve` that started first is the ordinary case, since Claude Desktop launches it at login.
 
-`iroh_sync::endpoint_held_by_another_process()` separates the two reasons those slots can be empty, because they deserve opposite answers.
-It is an `AtomicBool` rewritten on every `wire_iroh_transport`, so a workspace swap that wins the endpoint clears the previous warning.
+`iroh_sync::no_endpoint_reason()` separates the reasons those slots can be empty, because they deserve opposite answers: `NoEndpoint::P2pDisabled` (the user's own opt-out), `HeldByAnotherProcess` (lost the election), or `Unavailable(why)` (the lease could not be arbitrated, or the transport failed to build).
+It is rewritten on every `wire_iroh_transport`, so a workspace swap that wins the endpoint clears the previous warning.
+Only `P2pDisabled` is the user's choice, and it is the only one that refuses to pair; collapsing the others into it told a user whose transport failed to build to switch on a setting that was already on.
 
 - **Pairing.**
   With no endpoint of its own, `outl_peer_pair_host` / `outl_peer_pair_join` fall back to `outl_sync_iroh::host_pairing` / `join_pairing` — the one-shot helpers the CLI uses, which bind their own endpoint and close it before returning.
@@ -426,7 +427,7 @@ It is an `AtomicBool` rewritten on every `wire_iroh_transport`, so a workspace s
   It is not a precedent — no other path in the GUI may bind an endpoint.
   When P2P is simply **off** (`transport = "file"`) pairing is **refused** instead, because binding there would override the setting the user picked on the one path where we know they are looking at the app.
 - **Refresh.**
-  `outl_sync_now` returns an error naming the holder rather than an `Ok(())` that did nothing.
+  `outl_sync_now` returns an error naming the reason (the holder, or what stopped this window from claiming the endpoint) rather than an `Ok(())` that did nothing.
   The silent no-op was the actual defect: the dot stays orange, Refresh appears to work, and nothing says why.
   `transport = "file"` stays a quiet no-op — the user's own choice is not a degraded state.
 

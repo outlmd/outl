@@ -31,6 +31,7 @@
 //! resource, so it must never ride the sync surface — see root `CLAUDE.md`
 //! invariant 9.
 
+use std::fmt;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,47 @@ use tracing::warn;
 
 /// File name of the lease, created next to `identity.key`.
 const LEASE_FILE: &str = "endpoint.lock";
+
+/// Why [`EndpointLease::try_acquire`] refused to grant the endpoint.
+///
+/// Both answers keep the caller off the wire, so the *behaviour* is the same
+/// either way — but they are not the same sentence to a user, and collapsing
+/// them into one is how a device with an unwritable `~/.outl` gets told to go
+/// find an `outl mcp serve` that isn't running. Every caller that words this
+/// for a human reads the variant; a caller that only degrades can ignore it.
+#[derive(Debug)]
+pub enum LeaseDenied {
+    /// Another outl process on this device already holds the lease. The
+    /// ordinary outcome of the election, and a working state: the holder
+    /// pushes this process's ops out on its own catch-up pass.
+    HeldByAnotherProcess,
+    /// The lease file itself could not be opened (permission denied,
+    /// read-only mount, the parent is not a directory), so nothing on this
+    /// device can arbitrate — see the fail-closed rule on
+    /// [`EndpointLease::try_acquire`]. Nobody holds the endpoint here; the
+    /// device directory is broken.
+    LeaseFileUnusable {
+        /// The lease file we could not open.
+        path: PathBuf,
+        /// What the open failed with.
+        error: std::io::Error,
+    },
+}
+
+impl fmt::Display for LeaseDenied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HeldByAnotherProcess => {
+                write!(f, "another outl process on this device holds the endpoint")
+            }
+            Self::LeaseFileUnusable { path, error } => write!(
+                f,
+                "the endpoint lease file {} cannot be opened ({error})",
+                path.display()
+            ),
+        }
+    }
+}
 
 /// Exclusive, advisory claim on this device's iroh endpoint.
 ///
@@ -62,12 +104,12 @@ pub struct EndpointLease {
 impl EndpointLease {
     /// Try to claim this device's endpoint, keyed off `identity_path`.
     ///
-    /// - `Some(lease)` — the caller owns the endpoint and may bind it.
-    /// - `None` — the caller must **not** bind an endpoint; it should fall back
-    ///   to [`outl_actions::FileSyncTransport`], which converges through the
-    ///   shared `ops/` dir with no wire presence of its own. Either another
-    ///   process on this device already holds the lease, or the lease file
-    ///   could not be opened at all.
+    /// - `Ok(lease)` — the caller owns the endpoint and may bind it.
+    /// - `Err(denied)` — the caller must **not** bind an endpoint; it should
+    ///   fall back to [`outl_actions::FileSyncTransport`], which converges
+    ///   through the shared `ops/` dir with no wire presence of its own.
+    ///   [`LeaseDenied`] says which of the two refusals below happened, so a
+    ///   caller reporting it to a user doesn't have to guess.
     ///
     /// The two failure modes are deliberately opposite, because they say
     /// different things about the arbiter:
@@ -86,7 +128,7 @@ impl EndpointLease {
     ///   contention it re-admits is only possible between processes on one
     ///   machine. This mirrors `outl_core::lock`'s rule that only `WouldBlock`
     ///   means "someone else has it".
-    pub fn try_acquire(identity_path: &Path) -> Option<Self> {
+    pub fn try_acquire(identity_path: &Path) -> Result<Self, LeaseDenied> {
         let path = lease_path(identity_path);
         if let Some(parent) = path.parent() {
             // A failure here needs no branch of its own: the open below fails
@@ -101,26 +143,28 @@ impl EndpointLease {
             .open(&path)
         {
             Ok(f) => f,
-            Err(e) => {
+            Err(error) => {
                 warn!(
-                    "endpoint lease: cannot open {} ({e}); staying off the wire",
+                    "endpoint lease: cannot open {} ({error}); staying off the wire",
                     path.display()
                 );
-                return None;
+                return Err(LeaseDenied::LeaseFileUnusable { path, error });
             }
         };
         match file.try_lock_exclusive() {
-            Ok(()) => Some(Self {
+            Ok(()) => Ok(Self {
                 file: Some(file),
                 path,
             }),
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => None,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(LeaseDenied::HeldByAnotherProcess)
+            }
             Err(e) => {
                 warn!(
                     "endpoint lease: {} cannot be locked ({e}); proceeding unarbitrated",
                     path.display()
                 );
-                Some(Self { file: None, path })
+                Ok(Self { file: None, path })
             }
         }
     }
@@ -158,13 +202,17 @@ mod tests {
 
         let first = EndpointLease::try_acquire(&identity).expect("first claim wins");
         assert!(
-            EndpointLease::try_acquire(&identity).is_none(),
-            "a second claim on the same identity must not be granted"
+            matches!(
+                EndpointLease::try_acquire(&identity),
+                Err(LeaseDenied::HeldByAnotherProcess)
+            ),
+            "a second claim on the same identity must not be granted, and must \
+             say a process holds it rather than leaving the caller to guess"
         );
 
         drop(first);
         assert!(
-            EndpointLease::try_acquire(&identity).is_some(),
+            EndpointLease::try_acquire(&identity).is_ok(),
             "releasing the lease must hand the endpoint to the next process"
         );
     }
@@ -177,7 +225,7 @@ mod tests {
 
         let _a = EndpointLease::try_acquire(&desktop).expect("desktop claim");
         assert!(
-            EndpointLease::try_acquire(&mobile).is_some(),
+            EndpointLease::try_acquire(&mobile).is_ok(),
             "a different identity is a different node id, so it is a different endpoint"
         );
     }
@@ -195,9 +243,14 @@ mod tests {
         std::fs::write(&blocked, b"").expect("write blocker");
 
         assert!(
-            EndpointLease::try_acquire(&blocked.join("identity.key")).is_none(),
+            matches!(
+                EndpointLease::try_acquire(&blocked.join("identity.key")),
+                Err(LeaseDenied::LeaseFileUnusable { .. })
+            ),
             "an unopenable lease file must keep the caller off the wire, not \
-             wave every process through unarbitrated"
+             wave every process through unarbitrated — and it must not be \
+             reported as another process holding the endpoint, because there \
+             is no such process to wait for"
         );
     }
 

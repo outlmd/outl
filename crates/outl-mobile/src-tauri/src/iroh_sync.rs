@@ -82,8 +82,8 @@ pub(crate) fn wire_iroh_transport(
 
     let transport = match outl_sync_iroh::build_transport(&identity_path(&dir), &workspace_root) {
         Ok(TransportOutcome::Ready(t)) => t,
-        Ok(TransportOutcome::EndpointBusy) => {
-            info!("another local outl process holds the iroh endpoint; iroh disabled here");
+        Ok(TransportOutcome::EndpointBusy(why)) => {
+            info!("no iroh endpoint here ({why}); iroh disabled");
             return None;
         }
         Ok(TransportOutcome::Disabled) => {

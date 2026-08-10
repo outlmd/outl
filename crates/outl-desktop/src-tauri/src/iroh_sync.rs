@@ -22,40 +22,68 @@
 //! abort the boot path.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use outl_actions::SyncTransport;
 use outl_core::id::ActorId;
-use outl_sync_iroh::TransportOutcome;
+use outl_sync_iroh::{LeaseDenied, TransportOutcome};
 use outl_tauri_shared::iroh_sync::start_with_reload_bridge;
 use parking_lot::Mutex;
 use tauri::AppHandle;
 use tracing::{info, warn};
 
-/// `true` while this process lost the device endpoint election to another
-/// local outl process (typically `outl mcp serve`, which Claude Desktop
-/// launches at login and which therefore gets there first).
+/// Why this window has no iroh transport wired, when it has none.
 ///
-/// It exists because "no iroh transport wired" has two very different causes
-/// that the empty `AppState` slots cannot tell apart: the user opted out
-/// (`[sync] transport = "file"`), or a co-resident process holds the endpoint.
-/// Only the second one deserves an explanation in the UI — see
-/// [`endpoint_held_by_another_process`].
+/// The empty `AppState` slots cannot tell these apart, and they want opposite
+/// answers from `commands::peers`: only [`Self::P2pDisabled`] is the user's own
+/// choice, and it is the only one where refusing to pair is right. Collapsing
+/// the rest into it told a user whose transport failed to build to go switch on
+/// a setting that was already on.
+#[derive(Clone, Debug)]
+pub(crate) enum NoEndpoint {
+    /// `[sync] transport = "file"`: the user opted out of P2P.
+    P2pDisabled,
+    /// Another local outl process won the endpoint election, typically
+    /// `outl mcp serve`, which Claude Desktop launches at login and which
+    /// therefore gets there first.
+    HeldByAnotherProcess,
+    /// We could not get an endpoint for any other reason: the lease file could
+    /// not be opened (permission, read-only mount), or building the transport
+    /// failed (unreadable identity or peer store). Carries the rendered reason.
+    /// Nobody holds the endpoint in this state, so no process exiting fixes it.
+    Unavailable(String),
+}
+
+/// The current reason, or `None` while this process holds the endpoint (or has
+/// not tried yet, before the first workspace opens).
 ///
 /// A process global rather than an `AppState` field, and the four questions
 /// root `CLAUDE.md` invariant 9 asks of state that leaves its old home:
 /// **written** only by [`wire_iroh_transport`] (one writer, one call per
 /// wiring pass), **read** by `commands::peers`, **isolated** trivially because
 /// it is per-process and no test binds a transport, and **cleaned up** by
-/// being *rewritten* on every call — a workspace swap that wins the endpoint
+/// being *rewritten* on every call, so a workspace swap that wins the endpoint
 /// clears it instead of leaving a stale warning behind.
-static ENDPOINT_BUSY: AtomicBool = AtomicBool::new(false);
+static NO_ENDPOINT: std::sync::Mutex<Option<NoEndpoint>> = std::sync::Mutex::new(None);
 
-/// Whether the missing iroh transport is explained by another local process
-/// holding the device endpoint (as opposed to P2P being switched off).
-pub(crate) fn endpoint_held_by_another_process() -> bool {
-    ENDPOINT_BUSY.load(Ordering::Relaxed)
+/// Record (or clear, with `None`) why this window has no endpoint.
+///
+/// A poisoned lock is recovered rather than propagated: this is one advisory
+/// string for the UI, and losing it would turn a degraded sync into a panic.
+fn set_no_endpoint(reason: Option<NoEndpoint>) {
+    match NO_ENDPOINT.lock() {
+        Ok(mut slot) => *slot = reason,
+        Err(poisoned) => *poisoned.into_inner() = reason,
+    }
+}
+
+/// Why the iroh transport is missing, for the commands that have to explain it.
+/// `None` means this process holds the endpoint (nothing to explain).
+pub(crate) fn no_endpoint_reason() -> Option<NoEndpoint> {
+    match NO_ENDPOINT.lock() {
+        Ok(slot) => slot.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
 }
 
 /// Wire the iroh transport into the running app when it is this process's
@@ -73,10 +101,11 @@ pub(crate) fn endpoint_held_by_another_process() -> bool {
 /// this device already holds the endpoint, or when any step fails — the
 /// filesystem watcher already covers detection in all three cases.
 ///
-/// The endpoint-busy case additionally flips [`endpoint_held_by_another_process`]
-/// so the peer commands can explain the dark sync dot instead of reporting
-/// every paired device as offline, and so the pairing commands know to fall
-/// back to a one-shot endpoint (`commands::peers`).
+/// Every no-transport path additionally records *why* in
+/// [`no_endpoint_reason`], so the peer commands can explain the dark sync dot
+/// instead of reporting every paired device as offline, and so the pairing
+/// commands can tell the user's own opt-out (refuse) from a lost election or a
+/// broken build (fall back to a one-shot endpoint) in `commands::peers`.
 pub(crate) fn wire_iroh_transport(
     slot: &Arc<Mutex<Option<Arc<dyn SyncTransport>>>>,
     pairing_slot: &Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>>,
@@ -84,16 +113,16 @@ pub(crate) fn wire_iroh_transport(
     actor: ActorId,
     app: AppHandle,
 ) {
-    // Rewritten on every pass, not just set — a swap that wins the endpoint has
+    // Rewritten on every pass, not just set: a swap that wins the endpoint has
     // to clear a warning left by the workspace before it.
-    ENDPOINT_BUSY.store(false, Ordering::Relaxed);
+    set_no_endpoint(None);
 
     let transport = match outl_sync_iroh::build_default_transport(&workspace_root) {
         Ok(TransportOutcome::Ready(t)) => t,
-        Ok(TransportOutcome::EndpointBusy) => {
-            ENDPOINT_BUSY.store(true, Ordering::Relaxed);
+        Ok(TransportOutcome::EndpointBusy(LeaseDenied::HeldByAnotherProcess)) => {
+            set_no_endpoint(Some(NoEndpoint::HeldByAnotherProcess));
             // `warn!`, not `info!`: this is a degraded mode with two effects the
-            // user can see and would otherwise have no explanation for — the
+            // user can see and would otherwise have no explanation for. The
             // sync dot never turns green (no live transport means no
             // `peer_health()`), and Refresh cannot force a P2P pass. Both are
             // reported back through `commands::peers`.
@@ -105,9 +134,23 @@ pub(crate) fn wire_iroh_transport(
             );
             return;
         }
-        Ok(TransportOutcome::Disabled) => return,
+        Ok(TransportOutcome::EndpointBusy(denied)) => {
+            // No holder to wait for: the lease could not be arbitrated at all,
+            // so this window stays off the wire until the device directory is
+            // fixed. Same degradation, different sentence for the user.
+            warn!(
+                "this window has no iroh endpoint: {denied}; syncing through the shared ops/ dir"
+            );
+            set_no_endpoint(Some(NoEndpoint::Unavailable(denied.to_string())));
+            return;
+        }
+        Ok(TransportOutcome::Disabled) => {
+            set_no_endpoint(Some(NoEndpoint::P2pDisabled));
+            return;
+        }
         Err(e) => {
             warn!("iroh sync unavailable, using filesystem watcher: {e}");
+            set_no_endpoint(Some(NoEndpoint::Unavailable(e.to_string())));
             return;
         }
     };

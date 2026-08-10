@@ -29,7 +29,8 @@
 //! the probe — so the diagnostic command would be the thing that broke sync.
 //!
 //! So the probe asks for the same lease every transport asks for, and reports
-//! [`PeerProbe::EndpointBusy`] rather than binding behind the holder's back.
+//! [`PeerProbe::EndpointBusy`] (carrying which refusal it hit) rather than
+//! binding behind the holder's back.
 //! It is not a transport, so it can't fall back to one: the honest answer is
 //! that this process cannot measure reachability, and the holder's own status
 //! surface can.
@@ -44,7 +45,7 @@ use anyhow::{Context, Result};
 use iroh::Endpoint;
 
 use crate::identity::IrohIdentity;
-use crate::lease::EndpointLease;
+use crate::lease::{EndpointLease, LeaseDenied};
 use crate::peers::{PeerEntry, PeersStore};
 use crate::protocol::SYNC_ALPN;
 
@@ -76,11 +77,16 @@ pub struct PeerStatus {
 pub enum PeerProbe {
     /// The probe ran: one [`PeerStatus`] per peer, in the store's order.
     Probed(Vec<PeerStatus>),
-    /// Another outl process on this device holds the endpoint lease, so this
-    /// process cannot bind one to measure with. Reachability is unknown here;
-    /// the holder's own status surface (the GUI Sync panel, backed by
-    /// `IrohSyncTransport::peer_health`) is the one that knows.
-    EndpointBusy,
+    /// This process could not take the endpoint lease, so it cannot bind an
+    /// endpoint to measure with. Reachability is unknown here — not offline.
+    ///
+    /// The [`LeaseDenied`] payload separates the two reasons, which deserve
+    /// opposite advice: another local process holds the endpoint (its own
+    /// status surface, the GUI Sync panel backed by
+    /// `IrohSyncTransport::peer_health`, is the one that knows), or the lease
+    /// file could not be opened at all (nobody holds the endpoint, the device
+    /// directory is broken, and waiting for a holder to exit never helps).
+    EndpointBusy(LeaseDenied),
 }
 
 /// Probe every peer in `peers` by attempting a short-timeout iroh connection
@@ -89,9 +95,10 @@ pub enum PeerProbe {
 /// `identity_path` picks the device identity to probe with **and** the lease
 /// that arbitrates it (the lease file is a sibling — see
 /// [`crate::EndpointLease`]), exactly like [`crate::build_transport`]. The
-/// lease is held for the whole probe and released when it returns; when
-/// another process already holds it the answer is [`PeerProbe::EndpointBusy`]
-/// and nothing is bound.
+/// lease is held for the whole probe and released when it returns; when it is
+/// refused — someone else holds it, or the lease file cannot be opened at all
+/// — the answer is [`PeerProbe::EndpointBusy`] carrying which, and nothing is
+/// bound.
 ///
 /// Builds one transient endpoint and probes all peers concurrently. A peer that
 /// fails to connect (timeout, no route, refused) is reported as
@@ -108,8 +115,9 @@ pub async fn probe_peers(identity_path: &Path, peers: &PeersStore) -> Result<Pee
     // `build_transport`: a losing process does no work it throws away. The
     // guard lives until this function returns, which is what keeps the
     // transient endpoint inside the lease it was granted under.
-    let Some(_lease) = EndpointLease::try_acquire(identity_path) else {
-        return Ok(PeerProbe::EndpointBusy);
+    let _lease = match EndpointLease::try_acquire(identity_path) {
+        Ok(lease) => lease,
+        Err(denied) => return Ok(PeerProbe::EndpointBusy(denied)),
     };
     let identity = IrohIdentity::load_or_generate(identity_path)?;
 
@@ -213,7 +221,9 @@ mod tests {
     fn probed(outcome: PeerProbe) -> Vec<PeerStatus> {
         match outcome {
             PeerProbe::Probed(statuses) => statuses,
-            PeerProbe::EndpointBusy => panic!("nothing else holds this tempdir's lease"),
+            PeerProbe::EndpointBusy(denied) => {
+                panic!("nothing else holds this tempdir's lease: {denied}")
+            }
         }
     }
 
@@ -251,7 +261,7 @@ mod tests {
         assert!(
             matches!(
                 probe_peers_blocking(&identity_path, &peers).expect("probe"),
-                PeerProbe::EndpointBusy
+                PeerProbe::EndpointBusy(LeaseDenied::HeldByAnotherProcess)
             ),
             "probing behind the lease holder's back breaks its sync in both directions"
         );

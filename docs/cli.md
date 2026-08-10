@@ -82,7 +82,7 @@ Exit codes follow:
 | 2    | Internal error (bug, broken invariant, panic) |
 | 3    | Nothing was done, and that is not a failure    |
 
-Exit 3 exists for `outl sync`, which can legitimately do nothing: another process on this device holds the sync endpoint, P2P is off, or no device is paired.
+Exit 3 exists for `outl sync`, which can legitimately do nothing: another process on this device holds the sync endpoint (or the endpoint lease could not be claimed at all), P2P is off, or no device is paired.
 A script can then tell "I flushed" from "someone else will" without reading either as an error.
 
 Add `--json` to any command to force JSON.

@@ -11,9 +11,11 @@
 //! ## Pairing without an endpoint of our own
 //!
 //! `AppState::iroh_pairing` is empty whenever this process didn't get the
-//! device endpoint — P2P switched off, or another local outl process (usually
-//! `outl mcp serve`, launched at login) won the lease. Refusing to pair there
-//! would leave a user who runs both unable to add a device at all, so both
+//! device endpoint: P2P switched off, another local outl process (usually
+//! `outl mcp serve`, launched at login) won the lease, the lease could not be
+//! arbitrated, or the transport failed to build. `iroh_sync::NoEndpoint` says
+//! which, and only the first refuses to pair. Refusing to pair in the others
+//! would leave a user who runs two outl processes unable to add a device, so both
 //! pairing commands fall back to the CLI's one-shot helpers
 //! (`outl_sync_iroh::host_pairing` / `join_pairing`), which bind their own
 //! endpoint and close it before returning. The cost of that fallback, and why
@@ -25,7 +27,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, State};
 
-use crate::iroh_sync::endpoint_held_by_another_process;
+use crate::iroh_sync::{no_endpoint_reason, NoEndpoint};
 use crate::state::AppState;
 use outl_tauri_shared::commands::peers::{self as shared, PeerDto, PeerStatusDto};
 use outl_tauri_shared::AppHost;
@@ -62,13 +64,34 @@ pub fn outl_peer_status(state: State<'_, AppState>) -> Result<Vec<PeerStatusDto>
 /// that is the user's own choice, not a degraded state.
 #[tauri::command]
 pub fn outl_sync_now(state: State<'_, AppState>) -> Result<(), String> {
-    if state.iroh_transport.lock().is_none() && endpoint_held_by_another_process() {
-        return Err(ENDPOINT_BUSY_NOTICE.to_string());
+    if state.iroh_transport.lock().is_none() {
+        if let Some(notice) = degraded_endpoint_notice() {
+            return Err(notice);
+        }
     }
     shared::sync_now(state.inner())
 }
 
-/// One wording for the degraded-endpoint state, so the Refresh error and any
+/// The Refresh error for a window with no transport, or `None` when the state
+/// needs no explanation (`transport = "file"`, or we hold the endpoint).
+///
+/// One place so the wording can't drift across surfaces, and one place so the
+/// "another process has it" sentence is never printed for a state where no
+/// such process exists.
+fn degraded_endpoint_notice() -> Option<String> {
+    match no_endpoint_reason()? {
+        // The user's own choice is not a degraded state.
+        NoEndpoint::P2pDisabled => None,
+        NoEndpoint::HeldByAnotherProcess => Some(ENDPOINT_BUSY_NOTICE.to_string()),
+        NoEndpoint::Unavailable(why) => Some(format!(
+            "This window could not claim the device's P2P endpoint ({why}), so it \
+             syncs through the shared ops/ folder instead. Edits still converge; \
+             live peer status and Refresh stay unavailable."
+        )),
+    }
+}
+
+/// One wording for the lost-the-election state, so the Refresh error and any
 /// later surface can't drift apart.
 const ENDPOINT_BUSY_NOTICE: &str =
     "Another outl process on this device (usually `outl mcp serve`) \
@@ -111,19 +134,28 @@ impl From<outl_sync_iroh::PeerEntry> for PairedPeerDto {
 fn one_shot_pairing_inputs(
     state: &AppState,
 ) -> Result<(Arc<outl_sync_iroh::IrohIdentity>, PathBuf, PathBuf), String> {
-    // Two reasons land here and only one of them justifies binding an endpoint.
-    //
-    // Lost the election: pair over a one-shot endpoint. The user asked to add a
-    // device and the alternative is being unable to.
+    // Several reasons land here and only one of them forbids binding an
+    // endpoint.
     //
     // P2P switched off (`[sync] transport = "file"`): refuse. Binding an
     // endpoint would override the setting the user chose, on the one path where
     // we know they are looking at the app. Say what to do instead of doing it
     // for them.
-    if !endpoint_held_by_another_process() {
+    //
+    // Anything else (lost the election, an unarbitrable lease, a transport that
+    // failed to build): pair over a one-shot endpoint. The user asked to add a
+    // device and the alternative is being unable to. A cause that also breaks
+    // the one-shot path, an unreadable identity say, surfaces its own error
+    // below, which beats telling the user to switch on a setting that is
+    // already on.
+    let reason = no_endpoint_reason();
+    if matches!(reason, Some(NoEndpoint::P2pDisabled)) {
         return Err(P2P_DISABLED_NOTICE.to_string());
     }
-    tracing::info!("another local process holds the endpoint; pairing over a one-shot endpoint");
+    tracing::info!(
+        ?reason,
+        "no endpoint of our own; pairing over a one-shot endpoint"
+    );
     let root = AppHost::storage_root(state)?;
     let device_dir = outl_sync_iroh::default_device_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&device_dir).map_err(|e| e.to_string())?;

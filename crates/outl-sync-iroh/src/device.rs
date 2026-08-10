@@ -19,7 +19,7 @@ use outl_config::SyncTransportKind;
 
 use crate::engine::IrohSyncTransport;
 use crate::identity::IrohIdentity;
-use crate::lease::EndpointLease;
+use crate::lease::{EndpointLease, LeaseDenied};
 use crate::peers::{migrate_global_peers_if_absent, workspace_peers_path, PeersStore};
 
 /// What [`build_transport`] decided this process may do.
@@ -29,13 +29,19 @@ pub enum TransportOutcome {
     /// it to the endpoint thread, which holds it for exactly as long as the
     /// endpoint runs. A transport built and never started keeps it.
     Ready(IrohSyncTransport),
-    /// Another outl process on this device already holds the endpoint.
+    /// This process may not bind the device endpoint.
     ///
     /// Do **not** bind one: a second endpoint on the same node id steals the
     /// relay route and breaks the holder's sync in both directions. Fall back
     /// to [`outl_actions::FileSyncTransport`] — ops still converge, through the
     /// shared `ops/` dir and the holder's catch-up pass.
-    EndpointBusy,
+    ///
+    /// The [`LeaseDenied`] payload says *why*, because the two reasons read
+    /// very differently to a user: the ordinary one is that another local
+    /// process won the election, but a lease file that cannot be opened denies
+    /// everybody (fail-closed, see [`EndpointLease::try_acquire`]) and names no
+    /// holder to wait for. A caller that only degrades can ignore it.
+    EndpointBusy(LeaseDenied),
     /// `[sync] transport = "file"` — the user opted out of P2P.
     Disabled,
 }
@@ -110,8 +116,9 @@ pub fn build_transport(
     }
     // Claim the endpoint BEFORE touching the identity file, so a losing process
     // does no work it is going to throw away.
-    let Some(lease) = EndpointLease::try_acquire(identity_path) else {
-        return Ok(TransportOutcome::EndpointBusy);
+    let lease = match EndpointLease::try_acquire(identity_path) {
+        Ok(lease) => lease,
+        Err(denied) => return Ok(TransportOutcome::EndpointBusy(denied)),
     };
     let identity = IrohIdentity::load_or_generate(identity_path)?;
     // The peer list is per-GRAPH; the identity is per-DEVICE. The migration

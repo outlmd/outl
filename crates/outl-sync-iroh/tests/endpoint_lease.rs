@@ -20,7 +20,7 @@
 
 use std::path::Path;
 
-use outl_sync_iroh::{build_transport, EndpointLease, TransportOutcome};
+use outl_sync_iroh::{build_transport, EndpointLease, LeaseDenied, TransportOutcome};
 
 /// Named for the bug it was written against (issue #220) and referenced by name
 /// from the crate `CLAUDE.md` and the regression table in
@@ -50,7 +50,7 @@ fn first_process_in_wins(identity: &Path, workspace: &Path) {
     assert!(
         matches!(
             build_transport(identity, workspace).expect("build"),
-            TransportOutcome::EndpointBusy
+            TransportOutcome::EndpointBusy(LeaseDenied::HeldByAnotherProcess)
         ),
         "a second process must be refused the endpoint, not handed one that \
          would steal the first's relay route"
@@ -82,14 +82,14 @@ fn first_process_in_wins(identity: &Path, workspace: &Path) {
 fn an_unstarted_transport_still_holds_it(identity: &Path, workspace: &Path) {
     let idle = expect_ready(identity, workspace);
     assert!(
-        EndpointLease::try_acquire(identity).is_none(),
+        EndpointLease::try_acquire(identity).is_err(),
         "a built-but-unstarted transport is still deciding; the device's \
          endpoint is not free while it holds one"
     );
 
     drop(idle);
     assert!(
-        EndpointLease::try_acquire(identity).is_some(),
+        EndpointLease::try_acquire(identity).is_ok(),
         "dropping the transport must release the device's endpoint claim"
     );
 }
@@ -114,7 +114,7 @@ fn opting_out_of_p2p_never_takes_the_lease(identity: &Path, workspace: &Path, co
         "`transport = \"file\"` is the explicit P2P opt-out"
     );
     assert!(
-        EndpointLease::try_acquire(identity).is_some(),
+        EndpointLease::try_acquire(identity).is_ok(),
         "a process that will never bind must leave the device's endpoint free"
     );
 }

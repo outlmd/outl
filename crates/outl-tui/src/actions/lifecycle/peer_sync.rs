@@ -38,11 +38,14 @@ impl App {
                 self.sync_transport = Some(std::sync::Arc::new(transport));
                 self.status = "iroh sync enabled".to_string();
             }
-            Ok(TransportOutcome::EndpointBusy) => {
-                // Another outl process on this device owns the endpoint. It
-                // pushes our ops out of the shared `ops/` dir on its catch-up
-                // pass, so this is a working state, not a failure.
-                self.status = "iroh sync held by another local outl process".to_string();
+            Ok(TransportOutcome::EndpointBusy(why)) => {
+                // No endpoint for this process: usually another outl process on
+                // this device owns it and pushes our ops out of the shared
+                // `ops/` dir on its catch-up pass, which is a working state
+                // rather than a failure. `why` is what keeps the status line
+                // from claiming that when the real reason is a lease file the
+                // device cannot open.
+                self.status = format!("iroh sync off here: {why}");
             }
             Ok(TransportOutcome::Disabled) => {}
             Err(e) => {

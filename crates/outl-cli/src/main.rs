@@ -615,11 +615,19 @@ fn main() -> Result<()> {
                     false => println!("No peer matching '{id}' found."),
                 },
                 PeerCommand::Status => {
-                    use outl_sync_iroh::PeerProbe;
+                    use outl_sync_iroh::{LeaseDenied, PeerProbe};
                     match outl_sync_iroh::probe_peers_blocking(&id_path, &peers)? {
-                        PeerProbe::EndpointBusy => println!(
+                        PeerProbe::EndpointBusy(LeaseDenied::HeldByAnotherProcess) => println!(
                             "Another outl process holds this device's sync endpoint, so \
                              reachability here is unknown rather than offline."
+                        ),
+                        // Nobody holds it: the lease could not be arbitrated at
+                        // all, so pointing the user at a co-resident process to
+                        // shut down would send them hunting for one that does
+                        // not exist.
+                        PeerProbe::EndpointBusy(denied) => println!(
+                            "Cannot measure reachability here: {denied}. Peers are \
+                             unknown rather than offline."
                         ),
                         PeerProbe::Probed(s) if s.is_empty() => println!("No paired devices."),
                         PeerProbe::Probed(statuses) => {
@@ -679,16 +687,26 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
     use std::time::{Duration, Instant};
 
     use outl_actions::SyncTransport;
-    use outl_sync_iroh::TransportOutcome;
+    use outl_sync_iroh::{LeaseDenied, TransportOutcome};
 
     let wc = ws::open(path).map_err(|e| anyhow::anyhow!("{}: {}", e.code, e.message))?;
     let transport = match outl_sync_iroh::build_default_transport(path)? {
         TransportOutcome::Ready(t) => t,
-        TransportOutcome::EndpointBusy => {
+        TransportOutcome::EndpointBusy(LeaseDenied::HeldByAnotherProcess) => {
             println!(
                 "Another outl process on this device holds the sync endpoint \
                  (a GUI, or `outl mcp serve`).\nIt pushes these ops out on its own \
                  pass — nothing to flush here."
+            );
+            return Ok(EXIT_NOTHING_FLUSHED);
+        }
+        // Not "someone else has it": there is no arbiter, so no process on this
+        // device can bind. Saying "busy" here would promise a holder that will
+        // eventually exit and free it, and nothing ever would.
+        TransportOutcome::EndpointBusy(denied) => {
+            println!(
+                "No P2P endpoint here: {denied}.\nOps stay in ops/ and converge \
+                 through the file transport; nothing was flushed."
             );
             return Ok(EXIT_NOTHING_FLUSHED);
         }

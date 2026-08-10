@@ -25,10 +25,11 @@
 //!         engine.start_transport(tx);
 //!         // Now rx fires whenever peer ops arrive and the workspace is ready to reload.
 //!     }
-//!     // Another outl process on this device got the endpoint first. Not a
+//!     // No endpoint for this process: another one got here first, or the
+//!     // lease file could not be opened at all (`why` says which). Not a
 //!     // failure: run `outl_actions::FileSyncTransport` instead and converge
-//!     // through the shared `ops/` dir. Tell the user who has it.
-//!     TransportOutcome::EndpointBusy => { /* fall back to the file transport */ }
+//!     // through the shared `ops/` dir. Tell the user which of the two it is.
+//!     TransportOutcome::EndpointBusy(why) => { /* fall back to the file transport */ }
 //!     // `[sync] transport = "file"` — the user opted out of P2P.
 //!     TransportOutcome::Disabled => {}
 //! }
@@ -67,7 +68,7 @@ pub mod test_support;
 pub use device::{build_default_transport, build_transport, default_device_dir, TransportOutcome};
 pub use engine::IrohSyncTransport;
 pub use identity::IrohIdentity;
-pub use lease::EndpointLease;
+pub use lease::{EndpointLease, LeaseDenied};
 pub use pairing::{host_pairing, join_pairing, WorkspaceAdoption};
 pub use peers::{migrate_global_peers_if_absent, workspace_peers_path, PeerEntry, PeersStore};
 pub use protocol::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};

@@ -90,6 +90,11 @@ The lease file failing to **open** (permission, read-only mount) is **fail-close
 The file opening but refusing to **lock** (`ENOLCK`, a mount with no locking) is **fail-open** with a warning.
 The file is ours, only the locking is missing, and refusing everyone leaves the device with no endpoint at all, which is the failure the lease exists to remove.
 
+**A refusal says which one it is.**
+`try_acquire` returns `Result<EndpointLease, LeaseDenied>`, and `LeaseDenied` is `HeldByAnotherProcess` or `LeaseFileUnusable { path, error }`; `TransportOutcome::EndpointBusy` and `PeerProbe::EndpointBusy` carry it through to the client.
+The degradation is identical either way (file transport, stay off the wire), so a caller that only degrades ignores the payload.
+Every caller that words this for a **human** must read it: "another outl process holds the endpoint" sends a user whose `~/.outl` is read-only hunting for an `outl mcp serve` that is not running, and no process exiting will ever free a lease nobody took.
+
 **Why a lease and not a policy.**
 The rule used to be "only the GUI binds; the MCP server and the CLI are passive writers".
 That kept two endpoints apart, but it assumed a GUI exists.

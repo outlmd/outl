@@ -245,8 +245,12 @@ impl ServerCtx {
                 debug!("mcp: iroh endpoint bound (this process holds the device lease)");
                 Some(Arc::new(t) as Arc<dyn SyncTransport>)
             }
-            Ok(TransportOutcome::EndpointBusy) => {
-                debug!("mcp: another local outl process holds the iroh endpoint; passive writer");
+            Ok(TransportOutcome::EndpointBusy(why)) => {
+                // `why` distinguishes "another local process got here first"
+                // (the ordinary election outcome) from "the lease file cannot
+                // be opened at all", which no exiting process ever fixes. The
+                // lease itself already warns on the second one.
+                debug!("mcp: no iroh endpoint here ({why}); passive writer");
                 None
             }
             Ok(TransportOutcome::Disabled) => None,
