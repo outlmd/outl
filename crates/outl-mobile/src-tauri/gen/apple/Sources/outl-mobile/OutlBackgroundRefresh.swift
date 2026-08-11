@@ -234,7 +234,12 @@ public final class OutlBackgroundRefresh: NSObject {
         // `isFinite` only catches an actual infinity or NaN.
         let budget = UIApplication.shared.backgroundTimeRemaining
         let usable = budget.isFinite ? budget - handlerReserve : Double(maxFlushSeconds)
-        let cap = UInt32(max(Double(minFlushSeconds), min(Double(maxFlushSeconds), usable)))
+        guard usable >= Double(minFlushSeconds) else {
+            endFlush(matching: id)
+            NSLog("[outl] bg flush: insufficient budget, skipping final sync pass")
+            return
+        }
+        let cap = UInt32(min(Double(maxFlushSeconds), usable))
 
         DispatchQueue.global(qos: .utility).async {
             // Read the peer list HERE, not before taking the assertion: it
