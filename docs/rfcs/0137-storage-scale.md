@@ -7,7 +7,7 @@
 | **PR** | 11 PRs across two phases (A done, B pending) — branch `feat/storage-scale-rfc-137` |
 | **Date** | 2026-07-04 |
 | **Reference doc** | [storage.md § Boot reads an index](../storage.md#boot-reads-an-index-not-the-whole-log-rfc-137-front-a) |
-| **Invariant** | none (perf work; `outl-core/CLAUDE.md` → "Snapshot boot cache" describes the resulting rules) |
+| **Invariant** | none (perf work; `outl-core/CLAUDE.md` → "Snapshot dir has exactly one owner" describes the resulting rules) |
 | **Guarded by** | `boot_scale_bench.rs` (bench, not a test — see Scope) |
 
 ## Why

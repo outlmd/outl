@@ -114,24 +114,25 @@ Pinned by `tests/endpoint_lease.rs` (`one_process_binds_the_device_endpoint_and_
 **Non-sync endpoints are the sharper case, and they take the lease too.**
 An endpoint that does NOT serve `SYNC_ALPN` is worse than a competing one: a dialer routed to it gets `CONNECTION_REFUSED` instead of a working peer.
 The status probe (`status::probe_peers`) is the only one left, and it now asks for the lease like everything else, returning `PeerProbe::EndpointBusy` instead of binding when it loses.
-It used to be exempt on the grounds that "the CLI has no running transport to conflict with", which stopped being true the moment `outl mcp serve` could hold the endpoint — and `outl peer status` is precisely the command a user runs to diagnose sync, so it must not be the thing that breaks it.
+It used to be exempt on the grounds that "the CLI has no running transport to conflict with".
+That stopped being true the moment `outl mcp serve` could hold the endpoint, and `outl peer status` is precisely the command a user runs to diagnose sync, so it must not be the thing that breaks it.
 
 **Three call sites, three rules:**
 
 1. **Sync endpoint (`engine::run_iroh`)** — the one allowed long-lived endpoint.
-   Router accepts `SYNC_ALPN` + gossip ALPN **+ `PAIRING_ALPN`** (rule 3) **+ `SNAPSHOT_ALPN`** (see "Snapshot sync"), all advertised in its `.alpns()`.
+   Router accepts `SYNC_ALPN` + gossip ALPN **+ `PAIRING_ALPN`** (rule 3) **+ `SNAPSHOT_ALPN`** (see "Phase-2 blob transfer"), all advertised in its `.alpns()`.
    All catch-up / boot / gossip / pairing dials go out through *this* endpoint (the one bound in `run_iroh`); no helper spins up a second.
-2. **Status (`status::probe_peers`)** — binds a transient endpoint with the device identity.
-   **CLI-only — forbidden from the GUI.**
-   The desktop / mobile `outl_peer_status` commands read reachability from the running transport's `peer_health()` instead (see below).
-   `probe_peers` survives only for `outl peer status` in the CLI, which has no running transport.
-3. **Pairing** — two paths, never a second endpoint while the transport runs:
-   - **GUI** (mobile / desktop, transport running) → `IrohSyncTransport::pair_host` / `pair_join` reuse the **live sync endpoint**.
+2. **Status (`status::probe_peers`)** — binds a transient endpoint, and **only if it wins the lease**.
+   It returns `PeerProbe::EndpointBusy` rather than binding when it loses, so it can never demote the transport it was run to inspect.
+   A client that has its own running transport reads `peer_health()` instead and never calls this at all.
+3. **Pairing** — the split is about **holding an endpoint**, not about being a GUI:
+   - **Transport running** → `IrohSyncTransport::pair_host` / `pair_join` reuse the **live sync endpoint**.
      The host (accept) side is the `PAIRING_ALPN` router handler (`engine_pairing::PairingProtocolHandler`), armed by `pair_host` via a shared `PairingHub`; the join side dials out on the same endpoint.
      After a successful pair the new peer is persisted to `peers.json` and an **immediate** `delta_sync` is fired against it (`engine_pairing::drain_pair_completions`) — no app restart, no 8s catch-up wait.
-   - **CLI** (`outl peer pair`, no running transport) → `pairing::host_pairing` / `join_pairing` bind a one-shot endpoint with the device identity, then **close it** (`endpoint.close().await`) before returning.
-     There is no live endpoint to conflict with, so the one-shot bind is safe; the close keeps the overlap with any concurrent endpoint bounded.
-     **The GUI never calls these.**
+   - **No transport of our own** (the ephemeral CLI, or a GUI that lost the lease) → `pairing::host_pairing` / `join_pairing` bind a one-shot endpoint and **close it** (`endpoint.close().await`) before returning.
+     This is the **one** sanctioned exception to the lease.
+     It does take the route from the holder for the length of the handshake, and it is worth it because pairing is rare, explicit and short, while the alternative is a user who cannot add a device.
+     Nothing else may bind around the lease.
 
 ## Status from the transport (`peer_health`)
 
@@ -308,6 +309,23 @@ So the new peer's op-log history is never pulled (only brand-new ops would trick
   see "Reachability: full `EndpointAddr`" below.
 
 `run_catch_up` is parameterized over `period`, `resync_after`, and a `resolve_peers` closure so `test_support::run_catch_up_loop` drives it over loopback (regressions `catch_up_syncs_peer_paired_after_boot`, `catch_up_resyncs_peer_after_interval`).
+
+## What breaks when this process has no endpoint
+
+**Read this list before changing anything about who wins the lease.**
+Five things need a live local endpoint, and every one of them fails *quietly* — a `None` slot, an empty `Vec`, a `let _ = tx.send(...)`.
+Root `CLAUDE.md` invariant 10 exists because a change to the election shipped without checking them, and the desktop lost the ability to pair.
+
+| Needs a live endpoint | Without one | Who covers it |
+|---|---|---|
+| `IrohSyncTransport::pair_host` / `pair_join` | GUI pairing has nothing to pair *through* | the client falls back to the one-shot `host_pairing` / `join_pairing`, the CLI's path |
+| `sync_now()` | force-refresh is a no-op | nothing — the desktop reports it instead of returning `Ok(())` |
+| `peer_health()` | empty, so every peer reads offline | nothing yet; the status dot cannot tell this from "all peers down" |
+| `announce_local_ops` | peers wake on their next catch-up tick | `MAINTENANCE_RESYNC`, at a latency cost |
+| inbound `serve` | this device answers no dials | the holder serves the same `ops-*.jsonl` from the same disk |
+
+Only the last two degrade on their own.
+The top three need a decision written down, because "the GUI always has a transport" stopped being true.
 
 ## Who ends up with the endpoint
 

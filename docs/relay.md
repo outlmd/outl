@@ -173,7 +173,7 @@ No action needed.
 **Relay WebSocket upgrade returns `502` (self-host the workaround).**
 Some proxies allow plain HTTPS but block or rewrite the HTTP `Upgrade: websocket` the relay needs, so the connection fails with `expected HTTP 101 Switching Protocols, got status code 502`.
 iroh 1.0.0 has no non-WebSocket relay transport to fall back to, so there is no code fix.
-Point `[sync] relay_url` at a relay on a domain/port the proxy doesn't intercept (see "It's already a config flip" above) — a self-hosted `iroh-relay` on your own domain sidesteps the interception.
+Point `[sync] relay_url` at a relay on a domain/port the proxy doesn't intercept (see "Relay config" above) — a self-hosted `iroh-relay` on your own domain sidesteps the interception.
 
 **Direct LAN sync stalls after pairing on a VPN (`MultipathNotNegotiated`).**
 If you pair two devices while one is on a VPN, the captured peer address in `peers.json` picks up the VPN's tunnel IPs (`10.x`, `100.x` CGNAT, a public WAN addr) alongside the real `192.168.x` LAN address.

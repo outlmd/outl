@@ -120,6 +120,46 @@ Violating any one breaks user trust irreversibly.
    After "did I fix it?" comes **"where does the problem live now, and what does that place require that the old one did not?"**
    Three separate defects in this codebase came from skipping that question — a divergence fixed in one direction only (invariant 8), state moved without an isolation story (this one), and a size guard with no escape hatch that turned into a wall.
 
+10. **When you change who decides, enumerate who was standing on the old decision.**
+    Replacing a hardcoded policy with a runtime one is usually the right fix, and it is also the change most likely to break something that policy was quietly holding up.
+    A policy has beneficiaries that never had to declare themselves, because under the old rule they always won.
+
+    Not theory.
+    Issue #220: "only the GUI binds the iroh endpoint" was a policy that fixed a real collision and assumed a GUI exists, so a headless `outl mcp serve` machine synced with nobody, silently.
+    Replacing it with a lease was correct.
+    What the change missed was everyone leaning on "the GUI always wins":
+
+    - **Desktop pairing** read the transport straight out of app state, because a GUI that always held the endpoint always had one.
+      Losing the election made adding a device impossible.
+    - **`outl peer status`** was documented as exempt from "never bind a second endpoint", on the grounds that the CLI has no running transport to conflict with.
+      True under the old policy.
+      False the moment the MCP server could hold the endpoint — and status is the command a user runs *to diagnose sync*.
+    - **`$OUTL_DEVICE_DIR`** already meant "throwaway actor".
+      Giving it a second job (moving the iroh identity) silently rotated the node id for anyone already exporting it.
+
+    Then the guard itself.
+    The lease was stored on the transport rather than on the endpoint thread, so a failed `bind()` killed the thread while the transport kept the claim, locking every process on the device out of an endpoint.
+    That is the #220 bug again, this time with a padlock.
+    Releasing it any earlier reopens the mirror image: two endpoints on one node id while the first is still closing.
+
+    Before merging a change that moves authority, answer:
+
+    1. **Who consumed the winner?**
+       Grep the consumers of the resource, not just its producers.
+       Every caller that assumed a particular process would own it is a caller you just broke.
+    2. **What does each loser do now?**
+       "Degrades gracefully" is a claim, not a design — name the path, and check it is reachable.
+    3. **Does the guard die with the thing it authorises?**
+       Too late strands the resource forever, too early admits a second owner, and both fail silently.
+    4. **Which exemptions existed because the old rule held?**
+       An exception is an argument and arguments have premises.
+       Re-check them; the exemption may have outlived its reason.
+    5. **Did the name already mean something?**
+       A flag, env var or file you are giving a second job still has its first one, and somebody is depending on it.
+
+    **The general rule:** invariant 9 asks where the problem moved to.
+    This one asks **who was standing on the thing you moved.**
+
 ## Repo layout
 
 ```

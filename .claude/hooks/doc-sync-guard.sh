@@ -310,6 +310,217 @@ if [ ${#docs_to_check[@]} -gt 0 ]; then
 fi
 
 # --------------------------------------------------------------------
+# Rule 4 — doc examples rustdoc never compiles.
+# --------------------------------------------------------------------
+#
+# `cargo test --doc` compiles every doc example EXCEPT ```ignore and
+# ```compile_fail. Those blocks can reference symbols that no longer
+# exist, or teach a recipe the codebase just replaced, and nothing in
+# CI notices. The whole repo has 3 of them today, so this rule is
+# cheap and its blast radius is tiny.
+#
+# The incident: outl-sync-iroh's `//! ## Quick start` kept teaching
+# the 4-step "assemble identity + peers + relay by hand" recipe after
+# `build_default_transport` became the one owner. Every symbol in the
+# stale example still existed and was still `pub`, so no
+# symbol-existence check could have caught it — 4b is the sub-rule
+# that would have.
+#
+#   4a  DANGLING SYMBOL. A reference the example itself declares as
+#       coming from this workspace (`use outl_x::{A, b}`, `outl_x::A`,
+#       or `Type::method(` where `Type` is defined here) that no longer
+#       resolves.
+#   4b  STALE RECIPE. The file's module-level (`//!`) example is
+#       unchecked, the diff moved the crate's public surface, and the
+#       diff touched no doc-comment line at all — so nobody re-read the
+#       recipe rustdoc cannot check.
+#   4c  DELETED SYMBOL STILL DOCUMENTED. A `pub` item the diff removed
+#       that exists nowhere in the workspace anymore but is still named
+#       inside a doc comment somewhere in the repo.
+#
+# Deliberately NOT checked (each would cost false positives worth more
+# than the coverage): bare calls `foo(`, method calls on a local
+# `recv.method(`, `std::`/third-party paths, enum variants, and a
+# method that vanished from its own type but survives elsewhere in the
+# owning crate (a blanket/derive impl could legitimately supply it).
+
+ws_grep() {  # $1 = grep flags, $2 = ERE
+  [ -d "$repo_root/crates" ] || return 1
+  grep -r $1 -E --include='*.rs' \
+    --exclude-dir=target --exclude-dir=node_modules \
+    "$2" "$repo_root/crates" 2>/dev/null
+}
+
+# Filter a newline-separated list of names down to the ones the workspace
+# defines nowhere. One grep for the whole batch (a per-symbol sweep cost
+# ~200ms each and the examples name half a dozen).
+#
+# Kind is deliberately not tracked: the only question asked here is "does
+# this name still exist at all". A fn that became a type is a refactor,
+# not a dangling doc reference.
+undefined_names() {
+  local names alt defined kinds
+  names=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*$' <<< "${1:-}" | sort -u)
+  [ -z "$names" ] && return 0
+  alt=$(tr '\n' '|' <<< "$names" | sed 's/|$//')
+  kinds='(async[[:space:]]+)?fn|struct|enum|trait|type|union|const|static|mod|macro_rules!'
+  defined=$(ws_grep -ho \
+    "^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?(${kinds})[[:space:]]+(${alt})\b" \
+    | sed -E 's/.*[[:space:]]//' | sort -u)
+  comm -23 <(printf '%s\n' "$names") <(printf '%s\n' "$defined")
+}
+
+# File declaring `struct|enum|trait|type NAME`. Only reached for a type the
+# batch above already confirmed exists, so it runs at most a couple of times.
+type_file() {
+  ws_grep -l \
+    "^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?(struct|enum|trait|type|union)[[:space:]]+$1\b" \
+    | head -1
+}
+
+# Body of every ```ignore / ```compile_fail doc block in $1, comment
+# markers stripped. $2 = "module" restricts to `//!` blocks.
+unchecked_examples() {
+  awk -v only_mod="${2:-}" '
+    BEGIN { marker = (only_mod == "module") ? "//!" : "//[/!]" }
+    $0 ~ ("^[[:space:]]*" marker "[[:space:]]*```") {
+      if (!inblk) {
+        lang = $0; sub(/.*```/, "", lang); gsub(/[[:space:],]/, "", lang)
+        if (lang == "ignore" || lang == "compile_fail") inblk = 1
+        next
+      }
+      inblk = 0; next
+    }
+    inblk {
+      line = $0
+      sub(/^[[:space:]]*\/\/[\/!][[:space:]]?/, "", line)
+      print line
+    }
+  ' "$1"
+}
+
+dangling=()
+stale_recipe=0
+deleted_documented=()
+
+example_body=$(unchecked_examples "$file_path" 2>/dev/null)
+
+if [ -n "$example_body" ]; then
+  # -- 4a.1: names the example imports from a workspace crate. -------
+  claimed=$(
+    {
+      printf '%s\n' "$example_body" \
+        | grep -oE 'outl_[a-z0-9_]+::\{[^}]*\}' \
+        | sed -E 's/^[^{]*\{//; s/\}$//' \
+        | tr ',' '\n'
+      printf '%s\n' "$example_body" \
+        | grep -oE 'outl_[a-z0-9_]+::[A-Za-z_][A-Za-z0-9_]*' \
+        | sed -E 's/^[^:]*:://'
+    } 2>/dev/null \
+      | sed -E 's/[[:space:]]//g; s/\bas[A-Za-z0-9_]*$//' \
+      | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' \
+      | grep -vxE 'self|super|crate' \
+      | sort -u
+  )
+  # -- 4a.2: `Type::method(` where Type belongs to this workspace. ---
+  # Skipped for methods a derive or std trait can supply.
+  derive_provided='default|from|try_from|into|try_into|clone|fmt|parse|to_string|to_owned|as_ref|as_mut|borrow|eq|ne|cmp|partial_cmp|hash|drop|next|into_iter|deserialize|serialize'
+  calls=$(printf '%s\n' "$example_body" \
+    | grep -oE '\b[A-Z][A-Za-z0-9_]*::[a-z_][A-Za-z0-9_]*[[:space:]]*\(' \
+    | sed -E 's/[[:space:]]*\($//' | sort -u)
+  call_types=$(sed -E 's/::.*//' <<< "$calls")
+
+  # One batch resolves both 4a.1's imports and 4a.2's receiver types
+  # (`Box::new`, `PathBuf::from`, … drop out here and never reach the
+  # per-type sweep below).
+  unresolved=$(undefined_names "$(printf '%s\n%s\n' "$claimed" "$call_types")")
+
+  while IFS= read -r sym; do
+    [ -z "$sym" ] && continue
+    grep -qxF "$sym" <<< "$unresolved" \
+      && dangling+=("${sym} (imported from a workspace crate, defined nowhere)")
+  done <<< "$claimed"
+
+  while IFS= read -r call; do
+    [ -z "$call" ] && continue
+    ty=${call%%::*}
+    method=${call##*::}
+    grep -qxE "$derive_provided" <<< "$method" && continue
+    grep -qxF "$ty" <<< "$unresolved" && continue  # not ours — unresolvable
+    ty_file=$(type_file "$ty")
+    [ -z "$ty_file" ] && continue
+    owning_crate=$(printf '%s' "$ty_file" | sed -E 's|^.*(crates/[^/]+)/.*|\1|')
+    # Warn only when the method is absent from the ENTIRE owning crate:
+    # a blanket or trait impl can legitimately live away from `impl Type`.
+    if ! grep -rqE "fn[[:space:]]+${method}\b" "$repo_root/$owning_crate/src" 2>/dev/null; then
+      dangling+=("${ty}::${method}() — no \`fn ${method}\` anywhere in ${owning_crate}")
+    fi
+  done <<< "$calls"
+
+  # -- 4b: module-level recipe left unread while the API moved. ------
+  if [ -n "$(unchecked_examples "$file_path" module 2>/dev/null)" ] \
+     && git ls-files --error-unmatch -- "$file_path" >/dev/null 2>&1; then
+    diff_body=$(git diff --no-color -U0 -- "$file_path" 2>/dev/null)
+    pub_moved=$(printf '%s\n' "$diff_body" \
+      | grep -cE '^[+-](pub use |pub(\([^)]*\))? (fn|struct|enum|trait|const|type) )' || true)
+    docs_moved=$(printf '%s\n' "$diff_body" \
+      | grep -cE '^[+-][[:space:]]*//[/!]' || true)
+    if [ "${pub_moved:-0}" -gt 0 ] && [ "${docs_moved:-0}" -eq 0 ]; then
+      stale_recipe=1
+    fi
+  fi
+fi
+
+# -- 4c: a pub item this diff deleted that docs still name. ----------
+if git ls-files --error-unmatch -- "$file_path" >/dev/null 2>&1; then
+  removed=$(git diff --no-color -U0 -- "$file_path" 2>/dev/null \
+    | grep -oE '^-pub(\([^)]*\))? (async )?(fn|struct|enum|trait|const|type) [A-Za-z_][A-Za-z0-9_]*' \
+    | sed -E 's/.* //' | sort -u)
+  bt='`'
+  # Only names that survive nowhere in the workspace: a `pub fn` that moved
+  # file or lost `pub` is a refactor, and its docs are still accurate.
+  while IFS= read -r sym; do
+    [ -z "$sym" ] && continue
+    mention=$(ws_grep -l "^[[:space:]]*//[/!].*(${bt}${sym}${bt}|\b${sym}\()" \
+      | head -3 | sed "s|^${repo_root}/||")
+    [ -n "$mention" ] && deleted_documented+=("${sym} — still named in: $(printf '%s' "$mention" | tr '\n' ' ')")
+  done <<< "$(undefined_names "$removed")"
+fi
+
+if [ ${#dangling[@]} -gt 0 ]; then
+  msg="rule 4a — dangling symbol in an unchecked doc example: %s has a \`\`\`ignore / \`\`\`compile_fail block referencing:\n"
+  for d in "${dangling[@]}"; do
+    msg+="    - ${d}\n"
+  done
+  msg+="  why it matters: rustdoc never compiles those blocks, so \`cargo test --doc\` is blind to them.\n"
+  msg+="  fix: update the example to the current API, or drop the reference. If the symbol is genuinely\n"
+  msg+="       external (re-exported from a dependency), say so and continue."
+  warnings+=("$(printf "$msg" "$rel")")
+fi
+
+if [ "$stale_recipe" = "1" ]; then
+  msg="rule 4b — unchecked module doc may be stale: %s changed its public surface (pub use / pub item)\n"
+  msg+="  but no doc-comment line in the file changed, and its \`//! \`\`\`ignore\` example is a recipe rustdoc\n"
+  msg+="  never compiles.\n"
+  msg+="  why it matters: outl-sync-iroh's Quick start kept teaching the hand-assembled iroh transport after\n"
+  msg+="  \`build_default_transport\` became the one owner. Every symbol in it still existed and was still pub,\n"
+  msg+="  so nothing mechanical flagged it — the example just taught the anti-pattern the change removed.\n"
+  msg+="  fix: re-read the module example against the new public surface and update it, OR state explicitly\n"
+  msg+="       that the example is still the recommended path and continue."
+  warnings+=("$(printf "$msg" "$rel")")
+fi
+
+if [ ${#deleted_documented[@]} -gt 0 ]; then
+  msg="rule 4c — deleted symbol still documented: %s removed public item(s) that exist nowhere in the\n"
+  msg+="  workspace anymore, yet doc comments still name them:\n"
+  for d in "${deleted_documented[@]}"; do
+    msg+="    - ${d}\n"
+  done
+  msg+="  fix: update or delete those doc references in the same change."
+  warnings+=("$(printf "$msg" "$rel")")
+fi
+
+# --------------------------------------------------------------------
 # Emit.
 # --------------------------------------------------------------------
 

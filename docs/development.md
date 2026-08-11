@@ -261,6 +261,12 @@ The expected per-edit cycle:
 - **fmt + clippy** on the touched crate (faster than `/check`, runs per save).
 - **`file-size-guard.sh`** — informational at 400–600 lines, warns at 600–900, blocks at 900+.
   When it fires, invoke the `refactor-architect` agent to propose a split.
+- **`section-ref-guard.sh`** — flags a quoted section title that no longer exists.
+  `doc-sync-guard.sh` reasons about *files touched*, so renaming a heading passes it clean while leaving the old title quoted in every file that pointed at it.
+  This one resolves `` `path.md` → "Title" `` and `see "Title"` against the target's headings, bold labels and table rows.
+  Editing a `.md` also checks the references aimed **at** it, which is the direction a rename breaks.
+  Full sweep on demand: `.claude/hooks/section-ref-guard.sh --all`.
+  Its deliberate blind spots are listed in the script header — most importantly, a rename that only *appends* to the old title stays silent, because this repo quotes shortened titles on purpose.
 
 If you're not using Claude Code, run `cargo fmt -p <crate> && cargo clippy -p <crate> -- -D warnings` manually after edits.
 
