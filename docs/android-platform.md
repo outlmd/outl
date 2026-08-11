@@ -13,7 +13,7 @@ Six files, none of which holds business logic — the same rule as every other c
 | Piece | Path | Job |
 |---|---|---|
 | JNI bootstrap | `crates/outl-mobile/src-tauri/src/android_jni.rs` | Prime the JVM globals iroh's TLS + DNS need |
-| Background sync (Rust) | `crates/outl-mobile/src-tauri/src/bg_sync.rs` | Three JNI entry points over a shared, platform-agnostic core |
+| Background sync (Rust) | `crates/outl-mobile/src-tauri/src/bg_sync.rs` | Two JNI entry points over a shared, platform-agnostic core |
 | Activity | `gen/android/app/src/main/java/app/outl/mobile_app/MainActivity.kt` | Calls `NativeSetup.install` + `OutlBackgroundSync.install` before Tauri boots |
 | Native binding | `gen/android/…/NativeSync.kt` | `external fun` declarations matching the JNI symbols |
 | Scheduler | `gen/android/…/OutlBackgroundSync.kt` | Lifecycle observer + the two WorkManager schedules |
@@ -119,7 +119,7 @@ Closing it needs a headless transport bootstrap — open the workspace and start
 
 ## The Rust ↔ Kotlin contract
 
-`bg_sync.rs` exposes three JNI entry points; `NativeSync.kt` declares the matching `external fun`s.
+`bg_sync.rs` exposes two JNI entry points; `NativeSync.kt` declares the matching `external fun`s.
 
 | Kotlin | JNI symbol | Returns |
 |---|---|---|
@@ -181,7 +181,7 @@ Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same t
 ## What can only be checked on a device
 
 The whole background path.
-Host and CI can prove the pieces fit — the `.so` exports exactly the three `Java_app_outl_mobile_1app_NativeSync_*` symbols `NativeSync.kt` declares, the Kotlin compiles, the manifest merges — but none of that exercises a single scheduled job.
+Host and CI can prove the pieces fit — the `.so` exports exactly the two `Java_app_outl_mobile_1app_NativeSync_*` symbols `NativeSync.kt` declares, the Kotlin compiles, the manifest merges — but none of that exercises a single scheduled job.
 
 To validate for real, on a device or emulator:
 

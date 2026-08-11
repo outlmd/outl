@@ -10,8 +10,10 @@ import androidx.work.WorkerParameters
  *
  * One class serves both schedules ([OutlBackgroundSync] enqueues it as the
  * expedited handover flush and as the 15-minute periodic catch-up) because
- * the work is identical: call into Rust, block until the pass lands, report
- * done. Only the log line differs, so the caller passes its reason as input
+ * the work is identical: call into Rust, block until the pass lands or the
+ * Rust-side cap (~20s) elapses, report done. Which of the two happened is in
+ * the Rust `bg-sync:` log line, not in the return value.
+ * Only the log line differs, so the caller passes its reason as input
  * data rather than the codebase carrying two near-identical Worker classes
  * that will drift.
  *
@@ -49,7 +51,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
     }
 
     if (synced) {
-      Log.i(TAG, "bg-sync: $reason pass finished")
+      // `true` means the pass was driven — it settled OR the Rust-side cap
+      // elapsed first. The Rust `bg-sync:` log line says which.
+      Log.i(TAG, "bg-sync: $reason pass returned (settled or cap elapsed)")
     } else {
       Log.i(TAG, "bg-sync: $reason pass skipped, no transport in this process")
     }

@@ -264,7 +264,17 @@ impl IrohSyncTransport {
         // through a narrower window. And the window is not as narrow as it
         // looks: the caller that most needs this is a phone being suspended,
         // and the OS can freeze it between the two statements.
-        let guard = self.sync_now_tx.lock().expect("sync_now mutex poisoned");
+        //
+        // A poisoned mutex is treated as "runtime down" (return 0), never a
+        // panic: this method is transitively reachable from the mobile
+        // background FFI (`bg_sync::drive_sync`), where an unwind across the
+        // C ABI / JNI boundary aborts the app. Poison means a thread already
+        // panicked mid-send, so the honest answer is the same one a torn-down
+        // runtime gives.
+        let Ok(guard) = self.sync_now_tx.lock() else {
+            warn!("sync_now mutex poisoned; reporting runtime down (seq 0)");
+            return 0;
+        };
         let Some(tx) = guard.as_ref() else {
             return 0;
         };

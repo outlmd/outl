@@ -17,6 +17,10 @@
 -keep class org.rustls.platformverifier.** { *; }
 # JNI bootstrap called from MainActivity.onCreate (see android_jni.rs).
 -keep class app.outl.mobile_app.NativeSetup { *; }
+# Background-sync JNI (see bg_sync.rs): the Rust .so exports symbols derived
+# from this exact class + method names (Java_app_outl_mobile_1app_NativeSync_*),
+# so R8 renaming either one breaks background sync in release builds only.
+-keep class app.outl.mobile_app.NativeSync { *; }
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
