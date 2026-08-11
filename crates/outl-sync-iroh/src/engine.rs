@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -127,6 +127,8 @@ pub struct IrohSyncTransport {
     /// zero as well, or it releases while the dial it skipped is still on the
     /// wire.
     in_flight: InFlightPeers,
+    /// Inbound responder exchanges currently being served.
+    inbound_in_flight: Arc<AtomicUsize>,
     /// Sink for [`outl_actions::SyncProgress`] updates, registered by the GUI
     /// bridge via `set_progress_sink` **before** `start()`. Read once in
     /// `start()` to build the [`crate::progress::ProgressSink`] threaded through
@@ -202,6 +204,7 @@ impl IrohSyncTransport {
             sync_passes: Arc::new(AtomicU64::new(0)),
             sync_requests: Arc::new(AtomicU64::new(0)),
             in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            inbound_in_flight: Arc::new(AtomicUsize::new(0)),
             progress_tx: Arc::new(Mutex::new(None)),
             endpoint_lease: Arc::new(Mutex::new(None)),
         }
@@ -264,17 +267,7 @@ impl IrohSyncTransport {
         // through a narrower window. And the window is not as narrow as it
         // looks: the caller that most needs this is a phone being suspended,
         // and the OS can freeze it between the two statements.
-        //
-        // A poisoned mutex is treated as "runtime down" (return 0), never a
-        // panic: this method is transitively reachable from the mobile
-        // background FFI (`bg_sync::drive_sync`), where an unwind across the
-        // C ABI / JNI boundary aborts the app. Poison means a thread already
-        // panicked mid-send, so the honest answer is the same one a torn-down
-        // runtime gives.
-        let Ok(guard) = self.sync_now_tx.lock() else {
-            warn!("sync_now mutex poisoned; reporting runtime down (seq 0)");
-            return 0;
-        };
+        let guard = self.sync_now_tx.lock().expect("sync_now mutex poisoned");
         let Some(tx) = guard.as_ref() else {
             return 0;
         };
@@ -302,6 +295,7 @@ impl IrohSyncTransport {
             .lock()
             .map(|set| set.len())
             .unwrap_or(usize::MAX)
+            .saturating_add(self.inbound_in_flight.load(Ordering::Acquire))
     }
 
     /// Host one pairing session over the **live sync endpoint** and return the
@@ -376,6 +370,7 @@ impl SyncTransport for IrohSyncTransport {
         let relay_url = self.relay_url.clone();
         let sync_passes = self.sync_passes.clone();
         let in_flight = self.in_flight.clone();
+        let inbound_in_flight = self.inbound_in_flight.clone();
 
         // The one field that is MOVED, not cloned: the device endpoint lease
         // belongs to the endpoint, and the endpoint lives on the thread below.
@@ -450,6 +445,7 @@ impl SyncTransport for IrohSyncTransport {
                         relay_url,
                         sync_passes,
                         in_flight,
+                        inbound_in_flight,
                         runtime_handle,
                         workspace_root,
                         workspace_id,
@@ -553,6 +549,7 @@ async fn run_iroh(
     relay_url: Option<String>,
     sync_passes: Arc<AtomicU64>,
     in_flight: InFlightPeers,
+    inbound_in_flight: Arc<AtomicUsize>,
     runtime: tokio::runtime::Handle,
     workspace_root: PathBuf,
     workspace_id: WorkspaceId,
@@ -649,6 +646,7 @@ async fn run_iroh(
                 actor,
                 peer_ready_tx: peer_ready_tx.clone(),
                 append_lock: append_lock.clone(),
+                inbound_in_flight: inbound_in_flight.clone(),
             },
         )
         .accept(

@@ -663,6 +663,19 @@ pub(crate) async fn delta_sync(
 
 // ── Sync protocol handler ────────────────────────────────────────────────────
 
+struct InboundGuard<'a>(&'a std::sync::atomic::AtomicUsize);
+impl<'a> InboundGuard<'a> {
+    fn new(counter: &'a std::sync::atomic::AtomicUsize) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(counter)
+    }
+}
+impl Drop for InboundGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct SyncProtocolHandler {
     pub(crate) workspace_root: PathBuf,
@@ -677,6 +690,7 @@ pub(crate) struct SyncProtocolHandler {
     /// Same process-wide append guard the initiator side holds — the serve side
     /// writes received ops too, so it must serialize against `delta_sync`.
     pub(crate) append_lock: AppendLock,
+    pub(crate) inbound_in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for SyncProtocolHandler {
@@ -708,6 +722,7 @@ impl SyncProtocolHandler {
     /// 4. read the initiator's ops blob (ops we lack) and persist, firing
     ///    `peer_ready_tx`.
     async fn serve(&self, conn: Connection) -> Result<()> {
+        let _inbound = InboundGuard::new(&self.inbound_in_flight);
         let (mut send, mut recv) = conn.accept_bi().await.context("accept bi stream")?;
 
         // 1. read the initiator's vector clock (length-prefixed: the initiator
