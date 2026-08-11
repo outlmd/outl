@@ -30,6 +30,9 @@ brew install --cask outl-desktop-beta # GUI
 
 iOS beta on TestFlight: [join here](https://testflight.apple.com/join/P2GdWAMd). Point the TUI at the same iCloud Drive container _(`<container>/Documents/`)_ and both clients share a workspace.
 
+Android: a signed arm64 APK (`outl-android-arm64.apk`) rides every [release](https://github.com/avelino/outl/releases).
+Sideload-only for now — not on Play, and each release is signed with a fresh key, so a new build means uninstalling the old one first ([#171](https://github.com/avelino/outl/issues/171)).
+
 - **From source / channels:** → [getting started](https://outl.app/docs/getting-started.html), [homebrew](https://outl.app/docs/homebrew.html)
 
 ## Quick start

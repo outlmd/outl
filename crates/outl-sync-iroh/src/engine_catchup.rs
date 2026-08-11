@@ -492,4 +492,73 @@ mod tests {
         drop(tx);
         drain.await.expect("drain task join");
     }
+
+    /// The property `IrohSyncTransport::sync_now_seq` sells: the drain is FIFO
+    /// and bumps the counter **exactly once per request**, so "the counter
+    /// reached my sequence number" means *my* request ran — never merely that
+    /// somebody's did.
+    ///
+    /// Do not relax this into "the counter moved". That is what it used to be,
+    /// and the iOS background flush read a concurrent foreground pass (the
+    /// mobile client fires `sync_now` on a 3s timer) as its own completing,
+    /// released its `beginBackgroundTask` assertion ~250ms in, and let iOS
+    /// suspend the app with the flush's own request still queued — the flush
+    /// ending the sync it existed to finish.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn every_queued_request_advances_the_counter_by_exactly_one() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let identity = crate::IrohIdentity::load_or_generate(&tmp.path().join("identity.key"))
+            .expect("identity");
+        let endpoint = crate::test_support::bind_sync_endpoint(&identity)
+            .await
+            .expect("bind endpoint");
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (ready_tx, _ready_rx) = std::sync::mpsc::channel::<()>();
+        let passes = Arc::new(AtomicU64::new(0));
+        let wid: SharedWorkspaceId =
+            Arc::new(std::sync::RwLock::new(outl_core::WorkspaceId::new()));
+
+        let drain = tokio::spawn(drain_sync_now(
+            rx,
+            endpoint,
+            tmp.path().join("peers.json"),
+            tmp.path().to_path_buf(),
+            wid,
+            ActorId::new(),
+            ready_tx,
+            PeerHealthMap::default(),
+            Arc::new(tokio::sync::Mutex::new(())),
+            Arc::new(std::sync::Mutex::new(HashSet::new())),
+            passes.clone(),
+            crate::progress::ProgressSink::default(),
+        ));
+
+        // Queue a burst, the way a 3s foreground timer overlapping a
+        // backgrounding flush does.
+        const REQUESTS: u64 = 5;
+        for _ in 0..REQUESTS {
+            tx.send(()).expect("queue sync-now");
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while passes.load(Ordering::Acquire) < REQUESTS {
+            assert!(
+                Instant::now() < deadline,
+                "queued sync-now requests never all completed"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        drop(tx);
+        drain.await.expect("drain task join");
+
+        // Exactly `REQUESTS`, never more: an extra bump would make a waiter on
+        // sequence N stop early, which is the whole defect.
+        assert_eq!(
+            passes.load(Ordering::Acquire),
+            REQUESTS,
+            "the counter must advance once per request, no more"
+        );
+    }
 }

@@ -400,6 +400,18 @@ export type SyncProgress =
   | { phase: "received-ops"; peer: string; count: number; nodes: string[] }
   | { phase: "pushed-ops"; peer: string; count: number }
   | { phase: "synced"; peer: string }
+  /**
+   * The exchange was cut off before the peer confirmed, and this device will
+   * retry on its next pass. A phone that locked its screen, a laptop that
+   * slept, a dropped carrier-NAT flow — expected, transient, not a defect.
+   *
+   * Kept apart from `failed` because a responder only confirms durable ingest
+   * by closing cleanly, so a suspended peer produces an unconfirmed pass every
+   * single time; rendering that red made locking your phone look like breakage.
+   * Styled amber and deliberately NOT pushed into the feed — it updates
+   * `current` only, the way `connecting` does.
+   */
+  | { phase: "interrupted"; peer: string; reason: string }
   | { phase: "failed"; peer: string; error: string };
 
 export interface WorkspaceSummary {

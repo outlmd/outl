@@ -67,15 +67,26 @@ function phaseLabel(p: SyncProgress, peers: PeerDto[]): string {
       return `Sending ${fmtCount(p.count)} changes to ${who}`;
     case "synced":
       return "Synced";
+    case "interrupted":
+      return `${who} went away — will retry`;
     case "failed":
       return "Sync failed";
   }
 }
 
-/** Coarse state used for styling the pill (running vs done vs error). */
-function pillState(phase: SyncProgress["phase"]): "running" | "done" | "error" {
+/**
+ * Coarse state used for styling the pill.
+ *
+ * `interrupted` is its own state, not an error: the peer was suspended
+ * mid-exchange and the next pass re-sends. Folding it into `error` is what
+ * made a locked phone read as a broken sync.
+ */
+function pillState(
+  phase: SyncProgress["phase"],
+): "running" | "done" | "error" | "interrupted" {
   if (phase === "synced") return "done";
   if (phase === "failed") return "error";
+  if (phase === "interrupted") return "interrupted";
   return "running";
 }
 

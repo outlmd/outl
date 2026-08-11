@@ -58,6 +58,75 @@ use std::collections::HashMap;
 /// half-conversing.
 pub const SYNC_ALPN: &[u8] = b"outl-sync/2";
 
+/// Close code the responder uses to confirm **durable** ingest of the
+/// initiator's push. Any other close means the push may not have landed, so
+/// the initiator re-pushes; see `delta_sync`'s trailing `conn.closed()`.
+pub const CLOSE_DONE: u32 = 0;
+
+/// Close code: the dialer belongs to a different workspace (its
+/// `SyncRequest.workspace_id` does not match ours). Sent before any payload.
+pub const CLOSE_WORKSPACE_MISMATCH: u32 = 3;
+
+/// Close code: the dialer is not in our `peers.json` — unpaired, or revoked
+/// on this side. Sent before any payload.
+pub const CLOSE_UNKNOWN_PEER: u32 = 4;
+
+/// What a peer's close means for the pass that just ran.
+///
+/// The distinction is the difference between "your sync is broken" and "your
+/// phone locked", and only one of those is worth a red row in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseVerdict {
+    /// [`CLOSE_DONE`]: the responder durably has our push. The only success.
+    Confirmed,
+    /// The peer stopped answering rather than refusing — OS suspension, sleep,
+    /// a dropped carrier-NAT flow. Expected, transient, retried next tick.
+    Interrupted,
+    /// The peer answered and said no, or the transport itself failed. A real
+    /// problem the user may have to act on.
+    Failed,
+}
+
+/// Classify how a connection ended.
+///
+/// Split out of `delta_sync` so the table is a value one test can enumerate
+/// rather than a `match` reachable only over real QUIC. Getting a variant into
+/// the wrong bucket is silent by construction: both non-`Confirmed` verdicts
+/// return the same error and re-push, so nothing fails, the user just sees the
+/// wrong colour.
+pub fn classify_close(err: &iroh::endpoint::ConnectionError) -> CloseVerdict {
+    use iroh::endpoint::ConnectionError;
+    match err {
+        ConnectionError::ApplicationClosed(ac) if ac.error_code == CLOSE_DONE.into() => {
+            CloseVerdict::Confirmed
+        }
+        ConnectionError::TimedOut
+        | ConnectionError::Reset
+        | ConnectionError::LocallyClosed
+        | ConnectionError::ConnectionClosed(_) => CloseVerdict::Interrupted,
+        _ => CloseVerdict::Failed,
+    }
+}
+
+/// Human-readable reason a peer refused this connection, or `None` when it
+/// ended some other way — still open, timed out, reset, or closed with a code
+/// that is not a refusal.
+///
+/// A refusal reaches the initiator as a failed *read*, because the responder
+/// closes before writing a byte. Without translating the code, the one failure
+/// a user genuinely has to act on — this device is no longer paired — arrives
+/// as an unexplained dead peer.
+pub fn close_refusal_reason(conn: &iroh::endpoint::Connection) -> Option<&'static str> {
+    let iroh::endpoint::ConnectionError::ApplicationClosed(ac) = conn.close_reason()? else {
+        return None;
+    };
+    match u32::try_from(u64::from(ac.error_code)).ok()? {
+        CLOSE_WORKSPACE_MISMATCH => Some("peer refused: different workspace"),
+        CLOSE_UNKNOWN_PEER => Some("peer refused: this device is not paired with it"),
+        _ => None,
+    }
+}
+
 /// ALPN for device pairing.
 pub const PAIRING_ALPN: &[u8] = b"outl-sync/pair/1";
 
@@ -274,6 +343,65 @@ pub fn decode_asset_manifest(buf: &[u8]) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iroh::endpoint::ConnectionError;
+
+    fn app_close(code: u32) -> ConnectionError {
+        ConnectionError::ApplicationClosed(iroh::endpoint::ApplicationClose {
+            error_code: code.into(),
+            reason: Vec::new().into(),
+        })
+    }
+
+    /// The whole decision table, enumerated.
+    ///
+    /// Every arm here is silent when it is wrong: a misclassified close still
+    /// returns the same error and still re-pushes, so nothing fails and no
+    /// test over real QUIC would notice. The only symptom is the user being
+    /// told the wrong thing — which is exactly the bug this table was added to
+    /// fix, so the table is the thing worth pinning.
+    #[test]
+    fn close_classification_covers_every_variant() {
+        // Code 0 is the ONLY success: it is the responder's durable-ingest
+        // confirmation. Nothing else may report Confirmed.
+        assert_eq!(
+            classify_close(&app_close(CLOSE_DONE)),
+            CloseVerdict::Confirmed
+        );
+
+        // The peer went away mid-exchange. A locked phone, a sleeping laptop,
+        // a dropped carrier-NAT flow. Amber, retried, not the user's problem.
+        for err in [
+            ConnectionError::TimedOut,
+            ConnectionError::Reset,
+            ConnectionError::LocallyClosed,
+        ] {
+            assert_eq!(
+                classify_close(&err),
+                CloseVerdict::Interrupted,
+                "{err:?} is a peer going away, not a peer refusing"
+            );
+        }
+
+        // The peer answered and said no, or the two builds cannot talk. Red.
+        assert_eq!(
+            classify_close(&app_close(CLOSE_WORKSPACE_MISMATCH)),
+            CloseVerdict::Failed
+        );
+        assert_eq!(
+            classify_close(&app_close(CLOSE_UNKNOWN_PEER)),
+            CloseVerdict::Failed
+        );
+        assert_eq!(
+            classify_close(&ConnectionError::VersionMismatch),
+            CloseVerdict::Failed
+        );
+
+        // An application code we do not recognise is Failed, never Confirmed.
+        // `test_support::HalfResponder` closes with 9 to simulate the
+        // "completed the exchange but never ingested" peer, and reporting that
+        // as success is the desktop→mobile "synced ok but nothing arrived" bug.
+        assert_eq!(classify_close(&app_close(9)), CloseVerdict::Failed);
+    }
 
     #[test]
     fn request_roundtrips_through_length_prefix() {

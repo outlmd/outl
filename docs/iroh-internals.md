@@ -45,6 +45,19 @@ The 1.0.0 surface differs from older tutorials — pin these:
 
 ---
 
+## Module layout
+
+Every split below was forced by the file-size guard, but each one landed on a seam that was already there.
+
+| File | Owns | Why it is not in `engine.rs` |
+|---|---|---|
+| `engine_sync.rs` | The delta-sync wire protocol: `delta_sync` (initiator), `SyncProtocolHandler` (responder), the framing helpers (`read_frame` + typed `read_*`), and the op-log read/write helpers (`local_vector_clock`, `ops_missing_for`, `ingest_received_ops` — which owns the `AppendLock` write path). | "On the wire" and "stand it up" are different jobs, and only one of them changes when the protocol version moves. |
+| `engine.rs` | Boot orchestration: the `IrohSyncTransport` struct + channel wiring, `run_iroh`, the boot/catch-up/gossip task spawns, the router setup. | — |
+| `coordination.rs` | The handles concurrent tasks meet on: `AppendLock`, `InFlightPeers` (+ `InFlightGuard`, `try_acquire_in_flight`), `SharedWorkspaceId`. | Four dial paths and the inbound `serve` all reach for these, and none of them care how `run_iroh` works. |
+| `protocol.rs` | What the bytes mean: ALPNs, encode/decode, the close codes, and `classify_close` / `CloseVerdict`. | A misclassified close is invisible at runtime (both non-success verdicts return the same error and re-push), so the decision table has to be a value a test can enumerate, not a `match` reachable only over real QUIC. |
+
+`engine.rs` re-exports `delta_sync`, `SyncProtocolHandler` and the `coordination` types, so `crate::engine::delta_sync` and `crate::engine::AppendLock` keep resolving for `engine_catchup`, `engine_gossip`, `engine_pairing` and `test_support`.
+
 ## Regression suite (Pilar 2)
 
 Every bug hand-found during the sync saga has a NAMED, permanent test — the name IS the bug, so a failure is self-explanatory.
@@ -72,6 +85,7 @@ Shared seed/read/wait helpers stay in `tests/common/mod.rs` (read-only); saga-sp
 | 9. Watermark gap — ops below a receiver's max-HLC stayed permanently invisible after out-of-order ingest; the v2 `ActorClock` count detects the gap, the full-log fallback + ingest dedup converge without duplicating | `backlog_below_watermark_crosses_after_gap_detected` / `ingest_dedups_already_present_ops` / `full_actor_resend_converges_and_dedups` | `tests/regression.rs` |
 | 10. Snapshot sync — peer snapshot on pair (byte-identical, reload fired); absent harmless | `snapshot_transfers_from_peer_on_pair` / `snapshot_pull_absent_is_harmless` | `tests/regression.rs` |
 | 11. Asset sync — peer asset on pull (byte-identical, held file skipped); absent harmless | `assets_transfer_from_peer` / `asset_pull_from_peer_without_assets_is_harmless` | `tests/regression.rs` |
+| 12. Forced-pass completion is per REQUEST, not global — a waiter on sequence `n` must not stop when somebody else's pass lands (the iOS background flush released its OS window on the foreground timer's 3s pass and let the device suspend mid-exchange) | `every_queued_request_advances_the_counter_by_exactly_one` | `src/engine_catchup.rs` `#[cfg(test)]` |
 
 Names map 1:1 to the saga checklist; do NOT delete one without deleting the bug it guards.
 

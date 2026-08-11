@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use iroh::endpoint::{Connection, ConnectionError};
+use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
 use outl_actions::SyncProgress;
 use outl_core::hlc::Hlc;
@@ -33,8 +33,9 @@ use tracing::{debug, info, warn};
 
 use crate::engine::{AppendLock, SharedWorkspaceId};
 use crate::protocol::{
-    decode_ops_blob, decode_request, decode_response, encode_ops_blob, encode_request,
-    encode_response, ActorClock, SyncRequest, SyncResponse, SYNC_ALPN,
+    classify_close, close_refusal_reason, decode_ops_blob, decode_request, decode_response,
+    encode_ops_blob, encode_request, encode_response, ActorClock, CloseVerdict, SyncRequest,
+    SyncResponse, CLOSE_DONE, CLOSE_UNKNOWN_PEER, CLOSE_WORKSPACE_MISMATCH, SYNC_ALPN,
 };
 
 /// Per-actor census of the local op log: the set of DISTINCT HLCs held for
@@ -558,9 +559,25 @@ pub(crate) async fn delta_sync(
         .context("send sync request")?;
 
     // 2. read the peer's vector clock so we can compute the reverse delta.
-    let response = read_response(&mut recv)
-        .await
-        .context("read sync response")?;
+    //
+    // A REFUSAL lands here, not on the `conn.closed()` match at the end: the
+    // responder validates the workspace id and the peer allow-list *before*
+    // writing anything, so a rejected dial dies in this read. Left as a bare
+    // `?` it was the one failure that reached the user as nothing at all — a
+    // device revoked on the other end just showed "offline", panel silent,
+    // while a phone locking its screen painted red. Exactly backwards.
+    let response = match read_response(&mut recv).await {
+        Ok(response) => response,
+        Err(e) => {
+            if let Some(reason) = close_refusal_reason(&conn) {
+                progress.emit(SyncProgress::Failed {
+                    peer: peer_short.clone(),
+                    error: reason.to_string(),
+                });
+            }
+            return Err(e).context("read sync response");
+        }
+    };
     let peer_clock = response.vector_clock;
 
     // 3. read the peer's ops blob (ops we lack) and persist.
@@ -612,18 +629,33 @@ pub(crate) async fn delta_sync(
     // "synced ok but nothing arrived" bug). A lost close frame on an otherwise-
     // successful ingest only costs a redundant re-push next tick, which the
     // receiver's ingest dedup absorbs — far cheaper than silently losing ops.
-    match conn.closed().await {
-        ConnectionError::ApplicationClosed(ac) if ac.error_code == 0u32.into() => {
+    //
+    // The `Err` is identical in both unconfirmed arms below — only what the
+    // user is told differs. A peer that went away mid-exchange is a phone that
+    // locked its screen, and telling someone their sync is broken every time
+    // they pocket their phone is how a correct retry reads as a defect.
+    let closed = conn.closed().await;
+    match classify_close(&closed) {
+        CloseVerdict::Confirmed => {
             progress.emit(SyncProgress::Synced { peer: peer_short });
             Ok(())
         }
-        other => {
-            progress.emit(SyncProgress::Failed {
+        CloseVerdict::Interrupted => {
+            progress.emit(SyncProgress::Interrupted {
                 peer: peer_short,
-                error: format!("peer did not confirm durable ingest (closed: {other})"),
+                reason: closed.to_string(),
             });
             Err(anyhow::anyhow!(
-                "peer did not confirm durable ingest (closed: {other})"
+                "peer did not confirm durable ingest (interrupted: {closed})"
+            ))
+        }
+        CloseVerdict::Failed => {
+            progress.emit(SyncProgress::Failed {
+                peer: peer_short,
+                error: format!("peer did not confirm durable ingest (closed: {closed})"),
+            });
+            Err(anyhow::anyhow!(
+                "peer did not confirm durable ingest (closed: {closed})"
             ))
         }
     }
@@ -699,7 +731,7 @@ impl SyncProtocolHandler {
                 remote = %request.workspace_id,
                 "rejecting sync from peer on a different workspace"
             );
-            conn.close(3u32.into(), b"workspace-mismatch");
+            conn.close(CLOSE_WORKSPACE_MISMATCH.into(), b"workspace-mismatch");
             return Ok(());
         }
 
@@ -726,7 +758,7 @@ impl SyncProtocolHandler {
                     peer = %conn.remote_id().fmt_short(),
                     "rejecting sync: peers.json unreadable ({e:#})"
                 );
-                conn.close(4u32.into(), b"unknown-peer");
+                conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
                 return Ok(());
             }
             Err(e) => {
@@ -734,7 +766,7 @@ impl SyncProtocolHandler {
                     peer = %conn.remote_id().fmt_short(),
                     "rejecting sync: peers.json load task failed ({e})"
                 );
-                conn.close(4u32.into(), b"unknown-peer");
+                conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
                 return Ok(());
             }
         };
@@ -744,7 +776,7 @@ impl SyncProtocolHandler {
                 peer = %conn.remote_id().fmt_short(),
                 "rejecting sync from an unknown / revoked peer (not in peers.json)"
             );
-            conn.close(4u32.into(), b"unknown-peer");
+            conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
             return Ok(());
         }
 
@@ -781,36 +813,48 @@ impl SyncProtocolHandler {
             info!("delta sync: received {} ops (serve side)", received_count);
         }
 
-        // Self-heal a moved peer's stale stored address: this inbound dial
-        // arrived over the peer's CURRENT direct socket, so refresh
-        // `peers.json` with it (dropping any dead direct addr) — the next
-        // outbound dial then reaches the peer directly instead of stalling
-        // on the old IP. Only when there IS a direct (IP) path; a purely
-        // relayed connection carries no usable peer socket. Best-effort —
-        // never fail the sync over it.
+        // Snapshot the peer's current direct socket, but do NOT write it yet —
+        // see the close below.
         let direct_sock = conn.paths().iter().find_map(|p| match p.remote_addr() {
             iroh::TransportAddr::Ip(sock) => Some(*sock),
             _ => None,
         });
+
+        // We've now drained the initiator's pushed ops AND fsynced them, so
+        // it's safe to close. The initiator is parked on `conn.closed()`
+        // waiting for exactly this — code 0 is the signal that the responder
+        // durably has the push.
+        //
+        // Nothing may run between the fsync above and this line. Every
+        // instruction here is time in which a peer whose OS is suspending it
+        // (a locked iPhone, a dozing Android) dies *after* durably ingesting
+        // but *before* confirming — a false negative that costs the initiator
+        // a redundant re-push and paints the user's Sync panel red. The
+        // `peers.json` refresh below used to sit here, and it is blocking file
+        // I/O on the async task.
+        conn.close(CLOSE_DONE.into(), b"done");
+
+        // Self-heal a moved peer's stale stored address: this inbound dial
+        // arrived over the peer's CURRENT direct socket, so refresh
+        // `peers.json` with it (dropping any dead direct addr) — the next
+        // outbound dial then reaches the peer directly instead of stalling on
+        // the old IP. Only when there IS a direct (IP) path; a purely relayed
+        // connection carries no usable peer socket. Best-effort — never fail
+        // the sync over it, and now never delay the confirmation either.
         if let Some(sock) = direct_sock {
-            match crate::peers::refresh_peer_direct_addr(
-                &self.workspace_root,
-                conn.remote_id(),
-                sock,
-            ) {
-                Ok(true) => info!(
-                    "refreshed direct addr for {} → {sock}",
-                    conn.remote_id().fmt_short()
-                ),
-                Ok(false) => {}
-                Err(e) => debug!("peer addr refresh failed: {e}"),
+            let workspace_root = self.workspace_root.clone();
+            let remote = conn.remote_id();
+            let refreshed = tokio::task::spawn_blocking(move || {
+                crate::peers::refresh_peer_direct_addr(&workspace_root, remote, sock)
+            })
+            .await;
+            match refreshed {
+                Ok(Ok(true)) => info!("refreshed direct addr for {} → {sock}", remote.fmt_short()),
+                Ok(Ok(false)) => {}
+                Ok(Err(e)) => debug!("peer addr refresh failed: {e}"),
+                Err(e) => debug!("peer addr refresh task failed: {e}"),
             }
         }
-
-        // We've now drained the initiator's pushed ops, so it's safe to close.
-        // The initiator is parked on `conn.closed()` waiting for exactly this —
-        // closing here is the signal that the responder is done with the push.
-        conn.close(0u32.into(), b"done");
         Ok(())
     }
 }

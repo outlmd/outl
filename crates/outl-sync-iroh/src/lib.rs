@@ -43,6 +43,7 @@
 #![warn(missing_docs)]
 
 mod bind;
+mod coordination;
 mod device;
 mod engine;
 mod engine_assets;

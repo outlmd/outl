@@ -175,7 +175,9 @@ Trade-offs:
 - **Loss vs. uniffi:** the UI is webview-hosted, not native widgets.
   Acceptable for an outliner where the bulk of the UX is text and bullets; would be a worse trade for a graphics-heavy app.
 
-Android lands on the same Tauri 2 surface when it's prioritised; only the `main.mm`-equivalent layer (iCloud watcher) needs an Android counterpart.
+Android is on that same Tauri 2 surface today, not "when it's prioritised" — a signed APK ships with every release.
+The platform layer it needed turned out not to be an iCloud-watcher counterpart at all (mobile storage is a local folder synced by iroh, with no filesystem watcher in the Rust path).
+It was `android_jni.rs`: iroh's relay TLS and system-DNS reads both call into the JVM, and nothing in Tauri/wry primes the process-wide JNI context they expect, so the first QUIC connection used to abort the process.
 
 ---
 

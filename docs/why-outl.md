@@ -26,7 +26,7 @@ outl picks the parts that worked — the outliner UX, the bi-directional graph, 
 | **Time travel / history** | Paid tier | Per-file git, optional | Issue [#1][i1] tracks ChronDB |
 | **Open source** | No | Yes (frontend) | Yes (MIT) |
 | **Plugin system** | Yes (JS) | Yes (JS, complex) | Issue [#4][i4] tracks `rhai` |
-| **Mobile** | Native, fine | Native, known-bad | iOS app (Tauri 2), TestFlight beta; Android not yet |
+| **Mobile** | Native, fine | Native, known-bad | iOS (Tauri 2), TestFlight beta; Android APK per release |
 | **Desktop** | Electron | Electron | Issue [#2][i2] tracks Tauri |
 | **TUI** | No | No | Yes — first-class |
 | **Daily journal** | Yes | Yes | Yes |

@@ -75,10 +75,11 @@ const DEFAULT_RELAY_URL: &str = "https://use1-1.relay.avelino.outl.iroh.link";
 /// test-support harness) MUST go through this builder so the dial side and the
 /// accept side stay consistent: if only one side dropped IPv6, the other could
 /// still advertise a dead IPv6 path and re-trigger the stall. The **sync
-/// endpoint** is the one that threads the configured `relay_url`; pairing /
-/// status / test-support pass `None` (they ride whatever relay the n0 preset
-/// resolves, and a custom-relay deployment configures the long-lived sync
-/// endpoint, which is what matters for convergence).
+/// endpoint** is the only one that threads the *configured* `relay_url`;
+/// pairing / status / test-support pass `None`, which is not "the n0 preset"
+/// — it resolves to [`DEFAULT_RELAY_URL`] like everything else, so they ride
+/// outl's relay too. Only a deployment that overrides `[sync] relay_url` gets
+/// a split, and it is the long-lived sync endpoint that matters there.
 pub(crate) fn n0_builder_ipv4_only(relay_url: Option<&str>) -> Builder {
     // `clear_ip_transports()` drops the pre-configured 0.0.0.0 + [::] sockets;
     // `bind_addr("0.0.0.0:0")` re-adds IPv4 only. `bind_addr` only errors on an

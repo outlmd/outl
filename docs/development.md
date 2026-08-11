@@ -218,6 +218,31 @@ cargo tauri build
 
 The Vite dev server runs on **port 1421** so it can coexist with `outl-mobile` (port 1420) when both are running side by side.
 
+### Testing P2P sync from a source build
+
+**A binary cargo launches is a different device from the installed app.**
+The repo's `.cargo/config.toml` exports `OUTL_DEVICE_DIR = target/device-store` so the test suite stays off your real `~/.config/outl` and `~/.outl`.
+A suite that used them would mint keys in your home directory and arbitrate the endpoint lease against your running desktop app.
+Cargo exports that variable to **everything it launches**, `cargo run -p outl-desktop` included, so a source build gets its own actor id *and* its own iroh identity — a node id no peer has ever heard of.
+
+Two things follow, and both look like a transport bug when you hit them:
+
+- Devices paired with the installed app store that app's node id, so the source build reads as **offline** to them forever.
+- The identity lives under `target/`, so `cargo clean` deletes it and the next run mints a new node id — **every pairing made with the previous one is void.**
+
+`default_device_dir()` logs one `WARN` naming the directory at startup, so a source build always says which device it is.
+
+To exercise sync against real peers (a phone on TestFlight, another machine), clear the variable for that command so the build uses the machine's real identity:
+
+```bash
+OUTL_DEVICE_DIR= cargo run --release -p outl-desktop
+```
+
+Only do that for a run you want on the wire — it takes the endpoint lease from any installed client that is already running, and writes to your real device store.
+To keep a source build isolated *and* stably paired, point the variable at a persistent path outside `target/` instead (`OUTL_DEVICE_DIR=~/.outl-dev`) and pair once.
+
+Symptoms and network-side causes are in [sync.md → Troubleshooting sync](sync.md#troubleshooting-sync).
+
 ### Playground workspace
 
 Manual smoke tests share a fixture workspace at `./playground/`.

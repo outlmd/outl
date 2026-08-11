@@ -550,6 +550,11 @@ What each phase shows:
 | Asset | A real progress bar (%) for each binary asset (PDF / image) transferring, in bytes of the current file. Assets are content-addressed blobs replicated outside the op log; over iroh they travel on the `outl-asset/1` stream. |
 | Received ops / Pushed ops | A live count ("Receiving 42 changes from `<peer>`"), never a bar — a batch's size is only known once it finishes landing, so it can't be turned into a percentage. |
 | Synced / Failed | A one-line result for the pass. |
+| Interrupted | Amber, `"<peer> went away — will retry"`. Not in the feed. |
+
+`interrupted` changes **only the colour and the wording** — the pass is still an error internally and the peer is still re-pushed.
+It stays out of the activity feed (pill only, like `connecting`): an event that fires on every screen lock would bury the lines that matter.
+Why it is a separate phase, and the mirror-image bug where a *refused* dial showed nothing at all: [sync.md → Reading the Sync panel](sync.md#reading-the-sync-panel).
 
 Below the pill, an activity feed lists "device → page" lines as ops land.
 This is **best-effort**: the transport ships only the (capped) block ids a batch touched, and the client resolves them to page/journal slugs with a Tauri round-trip.

@@ -69,7 +69,18 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
+    // Background P2P sync (see `OutlBackgroundSync.kt`).
+    // `lifecycle-process` supplies `ProcessLifecycleOwner` — the app-level
+    // "went to background" signal, whose 700ms debounce is what keeps a screen
+    // rotation from being reported as a backgrounding.
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // `work-runtime`, NOT `work-runtime-ktx`: the -ktx artifact has been empty
+    // since 2.9.0 (CoroutineWorker and friends moved into work-runtime) and
+    // survives only for compatibility. It brings its own manifest entries —
+    // WAKE_LOCK, ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED,
+    // FOREGROUND_SERVICE, plus the androidx.startup initializer — so nothing
+    // has to be declared in AndroidManifest.xml for this to work.
+    implementation("androidx.work:work-runtime:2.10.5")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

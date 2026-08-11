@@ -337,7 +337,8 @@ The materialised `.md` + sidecar then get re-projected from the new tree.
 Syncthing, Dropbox, NFS, a shared volume and `git clone` all copy `.outl/` verbatim, so a device actor stored there is read identically on both machines — and the per-actor `flock` cannot arbitrate, being advisory and machine-local.
 Both devices then append to one `ops-<actor>.jsonl` and lose ops with no error raised.
 The actor therefore lives in the **device store** (`~/.config/outl/actors/`, or `$OUTL_DEVICE_DIR`), outside every workspace; see [storage.md → Where the actor id lives](storage.md#where-the-actor-id-lives--outside-the-workspace).
-Each binding is keyed by workspace id **and** the directory it lives in, because the workspace id is itself inside the copied bytes — `cp -R notes notes-backup` would otherwise give both copies one actor, and the P2P topic is keyed on that same id, so the two would dedup each other's distinct ops by `ts`.
+Each binding is keyed by workspace id **and** the directory it lives in, because the workspace id is itself inside the copied bytes.
+`cp -R notes notes-backup` would otherwise give both copies one actor, and the P2P topic is keyed on that same id, so the two would dedup each other's distinct ops by `ts`.
 A move or rename keeps its actor; a second copy that is still live forks.
 
 `.outl/config.toml`'s `actor_id` is a legacy value, adopted only by the device whose `actor_claimed_by` marker is already in the file when it is copied.
@@ -486,6 +487,57 @@ The host persists the joiner to *its* `peers.json` and keeps its own id.
 The same three read/probe operations are exposed to the GUI clients as Tauri commands — `outl_peer_list`, `outl_peer_remove`, `outl_peer_status` — so the mobile and desktop apps can show and prune the peer list and surface live status.
 **Pairing stays CLI-only**; there is no `outl_peer_pair` command, because the handshake's interactive ticket exchange has no good GUI surface yet.
 
+#### Which process holds the endpoint
+
+A device binds **one** iroh endpoint at a time, and which process gets it is decided by a lock, not by what kind of client it is.
+The list below is therefore a description of what usually happens, not a rule anyone hard-codes.
+Losing the election is a working state: the loser writes its ops to the shared `ops/` dir and the holder pushes them out on its next catch-up pass.
+
+- **Long-lived processes contend.**
+  A GUI (desktop / mobile), the TUI and `outl mcp serve` all ask, and take whatever they are granted.
+  The winner binds the endpoint, announces after each local mutation, and answers inbound dials.
+  A GUI opened at login therefore keeps the endpoint and an MCP server started later stays passive; with no GUI at all, the MCP server *is* the peer, which is the whole point.
+- **Every long-lived client polls `ops/` too, endpoint or not.**
+  iroh signals only on its own wire receipts; the poller signals on any growth of a peer's `ops-<actor>.jsonl`, including ops a co-resident process wrote.
+  Neither subsumes the other, so both always run.
+- **The ephemeral CLI never contends.**
+  A `page` / `block` / `daily` / `batch` / `import` command runs in ~200 ms, too short to establish a QUIC connection, so it writes its ops and exits without touching iroh.
+- **`outl sync` contends, and stands down when it loses.**
+  When another local process already holds the endpoint it prints who has it and exits — that process is already pushing these ops out, and taking the route from it would break the sync `outl sync` was asked to help.
+- **`outl peer status` asks too, and reports instead of probing when it loses.**
+  It binds the one non-sync endpoint outl has, so it is the last thing that may fight a live transport for the route.
+- **`outl peer pair` binds a one-shot endpoint regardless**, the one deliberate exception.
+  A device that cannot pair is a device you cannot add, and the handshake is rare, explicit and seconds long.
+  A client that already holds an endpoint pairs *through* it rather than binding a second one.
+
+Holding the endpoint is a **latency** win — real time instead of the next catch-up tick.
+It is never a correctness requirement: the catch-up pass converges any writer's ops, announced or not.
+
+#### Reading the Sync panel
+
+The panel distinguishes **interrupted** (amber) from **failed** (red), and the difference is not cosmetic politeness — it is which of the two you have to do something about.
+
+A responder confirms it has durably stored a push by closing the connection cleanly.
+Anything else is an *unconfirmed* pass, so the initiator re-pushes on its next tick.
+That is the right call — the alternative is assuming a push landed when it may not have — but it means a peer whose OS suspended it mid-exchange produces an unconfirmed pass **every single time**.
+A phone locking its screen is the common case, not an edge one.
+
+So the close reason is classified:
+
+| Close | Phase | Meaning |
+|---|---|---|
+| Clean, code 0 | `synced` | The peer durably has your ops. |
+| Timed out / reset / connection closed | `interrupted` (amber) | The peer went away mid-exchange. Nothing is wrong; the next pass re-sends. |
+| A refusal code, or a transport-level error | `failed` (red) | The peer answered and said no, or the two builds can't talk. |
+
+Only the presentation changed.
+The pass is still an error internally, the re-push still happens, and **an unconfirmed push is never reported as success** — that confirmation is the entire reason skipping a re-push is safe.
+
+**The failure that used to be invisible.**
+A peer that *refuses* the dial — you were removed from its `peers.json`, or the two devices are on different workspaces — closes before writing a single byte, so the initiator dies on a **read**, never reaching the close-reason check.
+That path emitted nothing at all: the one failure a user genuinely has to act on was the only one with no line in the panel, while a locked phone painted red.
+It now reports the refusal, and the fix for it is to re-pair.
+
 #### Troubleshooting sync
 
 **`rejecting sync from peer on a different workspace` (in a log or the GUI).**
@@ -511,6 +563,35 @@ The other device has to be running a long-lived client (GUI, TUI, or `outl mcp s
 A device that only ever runs one-shot CLI commands has no endpoint to reach — the ephemeral CLI never binds one, documented in `crates/outl-cli/CLAUDE.md`.
 A device runs **one** sync endpoint at a time, taken by whichever long-lived process started first; the others sync through the shared `ops/` dir behind it.
 So a machine running only `outl mcp serve` does answer, and a machine where a GUI is already open answers through the GUI.
+
+**Pairing or syncing fails only when you run outl from source.**
+The repo's `.cargo/config.toml` exports `$OUTL_DEVICE_DIR`, so **every** binary cargo launches — `cargo run -p outl-desktop` included — is a *separate device* from the installed app: its own actor, its own iroh identity, its own node id.
+It logs one `WARN` naming the directory at startup.
+Two consequences bite when testing sync:
+
+- Peers paired with the installed app list that app's node id and simply show this machine as offline.
+- The key lives under `target/`, so `cargo clean` deletes it and the next run mints a **new** node id, voiding every pairing made with the previous one.
+
+Run the machine's real identity instead by clearing the variable for that one command:
+
+```bash
+OUTL_DEVICE_DIR= cargo run --release -p outl-desktop
+```
+
+Full rationale and the test-isolation reason the variable exists: [development.md → Testing P2P sync from a source build](development.md#testing-p2p-sync-from-a-source-build).
+
+**Pairing hangs ~30 s and times out, but the relay is clearly up.**
+iroh 1.0.0 opens QUIC paths to **all** of a peer's advertised addresses at once, and a single unreachable one stalls the whole connect instead of falling back to a path that works.
+In the log it reads as `sendmsg error: … HostUnreachable` (or `Host is down`) toward one address, `MultipathNotNegotiated`, then a plain `timed out`.
+The usual sources of an unreachable address:
+
+- **Your machine advertises addresses the peer cannot reach** — VM bridges (`bridge100`, `vmenet*` from Parallels / UTM / Docker) and VPN interfaces (`utun*`) all become direct addrs in the pairing ticket.
+  Stop the VM / VPN interfaces and mint a fresh ticket.
+- **The peer's address is stale** — a phone that changed Wi-Fi, took a new DHCP lease or went to cellular still advertises the old LAN IP.
+  `arp -a | grep <ip>` showing `(incomplete)` confirms it; re-pair to refresh, or put both devices on the same network.
+- **The network blocks device-to-device traffic** — guest Wi-Fi and AP client isolation make the LAN path unreachable by design, even on the same subnet.
+
+outl already binds IPv4-only to remove the most common case (a dead global IPv6 addr); an unreachable IPv4 addr reproduces it exactly, and closing that for good needs the multipath fallback fix upstream.
 
 ---
 
@@ -583,6 +664,26 @@ The toggle only appears because the app declares `UIBackgroundModes` + `BGTaskSc
 There's no battery cost to speak of — the OS schedules the windows, and each pass is a short op-log diff, not a live connection.
 
 > Wiring (Info.plist → `OutlBackgroundRefresh.swift` → the `bg_sync.rs` FFI that drives `sync_now`) is documented in [ios-platform.md](ios-platform.md#background-sync-ios).
+
+### Background sync on Android
+
+Android doesn't suspend your sockets, but it does something with the same effect: a few seconds after the app leaves the screen its process is *frozen*, and a frozen app can't finish the exchange it was in the middle of.
+The peer sees that as a timeout and re-sends on its next tick, so nothing is lost — but until now it also meant a red row in the desktop Sync panel every time you pocketed your phone.
+
+Two things run now.
+The moment outl goes to the background it asks Android for a short expedited slot to finish the pass already in flight, and it keeps a 15-minute catch-up scheduled for later.
+Both are skipped entirely when you have no paired devices, so an unpaired install never wakes.
+
+Two honest limits, because Android is not iOS here:
+
+- The handover slot is a **request**, not an instant grant like iOS's.
+  If the system freezes the app before the slot starts, the interrupted pass is retried rather than finished, and you may still see one timed-out exchange.
+- The 15-minute catch-up only does real work while outl's process is **still alive** (frozen is fine, killed is not).
+  Android does not start the app for it the way iOS starts the app for a background task, so once the system has reclaimed the process, sync resumes when you next open outl.
+
+No notification, no foreground service, and no battery setting to turn on — Android schedules these windows the same way it schedules any app's background work.
+
+> Wiring, the freezer details, and what was rejected (a foreground service) are in [android-platform.md](android-platform.md#background-sync-android).
 
 ---
 

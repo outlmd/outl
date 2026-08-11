@@ -129,6 +129,28 @@ pub enum SyncProgress {
         /// Peer's short node id.
         peer: String,
     },
+    /// The exchange was cut off before the peer could confirm, and this device
+    /// will retry on its next pass.
+    ///
+    /// Distinct from [`Self::Failed`] because the *cause* is different and so
+    /// is the honest thing to show a user: a phone that locked its screen, a
+    /// laptop that slept, a carrier NAT that dropped the flow. Nothing is
+    /// wrong, nothing is lost, and the next catch-up tick re-pushes.
+    ///
+    /// It exists because the alternative reads as breakage. A responder
+    /// confirms durable ingest by closing with code 0, so a peer suspended
+    /// mid-exchange produces a failed pass **every time** — a user who locks
+    /// their phone watched their desktop paint a red row for a sync that was
+    /// working exactly as designed. Do NOT "fix" that by treating an
+    /// unconfirmed push as success; the confirmation is what makes the
+    /// re-push safe to skip (see `delta_sync`'s trailing `conn.closed()`).
+    /// Only the colour was ever wrong.
+    Interrupted {
+        /// Peer's short node id.
+        peer: String,
+        /// Human-readable description of how the connection ended.
+        reason: String,
+    },
     /// A sync pass with this peer failed.
     Failed {
         /// Peer's short node id.

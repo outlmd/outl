@@ -40,7 +40,7 @@ The shape of outl is settled:
 - **Storage is a trait, not a struct.** JSONL (one append-only file per device) ships today; [ChronDB][chrondb] is tracked publicly for when you want git-style history with branches and time travel.
 - **Every UI surface shares one core.** The TUI, the Tauri desktop, and the iOS app all reuse [`outl-core`][outl-core] and [`outl-md`][outl-md] —
   including the tokens, the index, the slugify rules.
-  Android is not built yet.
+  Android ships the same way — a signed APK on every release; see [android-platform.md](android-platform.md).
 
 [crdt]: crdt.md
 [chrondb]: https://github.com/avelino/outl/issues/1

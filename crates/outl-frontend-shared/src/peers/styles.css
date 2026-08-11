@@ -164,6 +164,14 @@
   color: rgb(185 28 28);
 }
 
+/* Peer suspended mid-exchange; the next pass re-sends. Amber, not red — this
+   fires every time a paired phone locks its screen, and red said "broken"
+   about a sync that was working. */
+.outl-syncprog__pill[data-state="interrupted"] {
+  background: rgb(245 158 11 / 0.14);
+  color: rgb(180 83 9);
+}
+
 .outl-syncprog__bar-row {
   display: flex;
   align-items: center;

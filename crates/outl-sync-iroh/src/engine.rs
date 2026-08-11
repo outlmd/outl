@@ -90,6 +90,43 @@ pub struct IrohSyncTransport {
     /// sleeping a fixed worst-case window. This is what lets the iOS background
     /// FFI return early and hand the unused window back to the OS.
     sync_passes: Arc<AtomicU64>,
+    /// Count of forced sync passes **requested** — bumped by
+    /// [`Self::sync_now_seq`] as it hands a request to the drain task.
+    ///
+    /// Paired with `sync_passes` this turns "a pass finished" into "**my** pass
+    /// finished". The drain is a FIFO unbounded channel that bumps
+    /// `sync_passes` exactly once per drained request, so request *n* is done
+    /// the moment `sync_passes >= n` — no correlation id, no per-request
+    /// channel.
+    ///
+    /// Without it a waiter can only poll "did the counter move", which any
+    /// *other* request satisfies. That is not hypothetical: the mobile client
+    /// fires `sync_now()` on a 3s foreground timer, so an iOS background flush
+    /// snapshotting the counter observed the in-flight foreground pass complete
+    /// ~250ms later, released its `beginBackgroundTask` assertion, and let iOS
+    /// suspend the process — with the pass it was waiting for still queued.
+    /// The mechanism built to finish the sync was ending it.
+    ///
+    /// **Neither counter is ever reset, and a transport is single-use.**
+    /// `start()` installs a fresh channel but keeps both `Arc`s, so a
+    /// `shutdown()` that leaves requests undrained shifts the two apart by
+    /// exactly that many, and every later waiter then sits until its cap.
+    /// Every client builds a new transport instead of restarting one
+    /// (`build_default_transport`), so this is a contract to keep rather than
+    /// a bug to fix — but it is a contract, so it is written down. Restarting
+    /// one means resetting both together, and only while no waiter is live.
+    sync_requests: Arc<AtomicU64>,
+    /// Peers with a `delta_sync` currently running (any origin: boot, catch-up,
+    /// gossip, forced). Owned here rather than inside `run_iroh` so
+    /// [`Self::peers_in_flight`] can read it.
+    ///
+    /// A forced pass **skips** a peer that already has a dial running (its
+    /// result lands anyway), so "my pass completed" does not imply "every peer
+    /// was dialed". A caller that is holding an OS resource open until the
+    /// device is settled — again, the iOS flush — has to wait for this to reach
+    /// zero as well, or it releases while the dial it skipped is still on the
+    /// wire.
+    in_flight: InFlightPeers,
     /// Sink for [`outl_actions::SyncProgress`] updates, registered by the GUI
     /// bridge via `set_progress_sink` **before** `start()`. Read once in
     /// `start()` to build the [`crate::progress::ProgressSink`] threaded through
@@ -129,74 +166,13 @@ pub struct IrohSyncTransport {
     endpoint_lease: Arc<Mutex<Option<crate::lease::EndpointLease>>>,
 }
 
-/// Process-wide guard serializing every op-log append performed by the iroh
-/// transport.
-///
-/// `ingest_received_ops` opens `ops-<actor>.jsonl` in append mode and writes a
-/// batch. Three concurrent paths reach it for the *same* file — boot connect,
-/// the 8s catch-up loop, gossip-triggered sync (all via `delta_sync`), plus the
-/// inbound `serve` side. Without serialization two `write_all`s interleave at
-/// the syscall layer and glue two ops together with no separating newline
-/// (`…}}}{"ts":…`), corrupting the log. A single global async mutex held across
-/// the open+write+flush of each batch closes that race. Batches are small and
-/// infrequent, so a global lock costs nothing measurable and correctness wins.
-pub(crate) type AppendLock = Arc<tokio::sync::Mutex<()>>;
-
-/// Process-wide set of peers with a `delta_sync` currently in flight.
-///
-/// Defense in depth on top of [`AppendLock`]: boot + catch-up + gossip can all
-/// launch a `delta_sync` for the same peer at once. Each redundant run dials,
-/// re-exchanges the full delta, and queues another writer behind the append
-/// lock. Skipping a dial when one is already running for that peer cuts the
-/// redundant relay traffic and the pile-up of writers.
-pub(crate) type InFlightPeers = Arc<std::sync::Mutex<HashSet<iroh::EndpointId>>>;
-
-/// Shared, mutable handle to this workspace's stable [`WorkspaceId`].
-///
-/// Read at call time by every `delta_sync` / serve so the value reflects the
-/// **current** workspace identity, and written by pairing adoption (the joiner
-/// overwrites its id with the host's — see `engine_pairing`). Because the
-/// initiator dials and the responder validates against this same live value, an
-/// adopted id takes effect for the immediate post-pair sync and every later sync
-/// without a transport restart. (The gossip *topic* is subscribed once at boot
-/// from the boot-time id; an adopted id reaches real-time gossip on the next
-/// start, but direct delta-sync — boot connect, 8s catch-up, immediate post-pair
-/// dial — carries it live, so content still converges immediately. See the
-/// crate `CLAUDE.md`.)
-pub(crate) type SharedWorkspaceId = Arc<std::sync::RwLock<WorkspaceId>>;
-
-/// RAII guard that removes a peer from the in-flight set on drop, so an early
-/// return or an error inside `delta_sync` never leaves a peer stuck "in flight".
-pub(crate) struct InFlightGuard {
-    peers: InFlightPeers,
-    nid: iroh::EndpointId,
-}
-
-impl Drop for InFlightGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = self.peers.lock() {
-            set.remove(&self.nid);
-        }
-    }
-}
-
-/// Try to mark `nid` in flight. Returns `Some(guard)` if it was free (caller
-/// proceeds and the guard clears it on drop), `None` if a sync is already
-/// running for that peer (caller skips).
-pub(crate) fn try_acquire_in_flight(
-    peers: &InFlightPeers,
-    nid: iroh::EndpointId,
-) -> Option<InFlightGuard> {
-    let mut set = peers.lock().ok()?;
-    if set.insert(nid) {
-        Some(InFlightGuard {
-            peers: peers.clone(),
-            nid,
-        })
-    } else {
-        None
-    }
-}
+// The concurrency handles these tasks coordinate through live in
+// `coordination`; re-exported so `crate::engine::AppendLock` and friends keep
+// resolving for `engine_sync` / `engine_catchup` / `engine_gossip` /
+// `engine_pairing` / `test_support`.
+pub(crate) use crate::coordination::{
+    try_acquire_in_flight, AppendLock, InFlightPeers, SharedWorkspaceId,
+};
 
 impl std::fmt::Debug for IrohSyncTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -224,6 +200,8 @@ impl IrohSyncTransport {
             health: PeerHealthMap::default(),
             pairing_hub: Arc::new(Mutex::new(None)),
             sync_passes: Arc::new(AtomicU64::new(0)),
+            sync_requests: Arc::new(AtomicU64::new(0)),
+            in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
             progress_tx: Arc::new(Mutex::new(None)),
             endpoint_lease: Arc::new(Mutex::new(None)),
         }
@@ -257,6 +235,63 @@ impl IrohSyncTransport {
     /// cycle ran after the request. Monotonic; `0` before the first pass.
     pub fn completed_sync_passes(&self) -> u64 {
         self.sync_passes.load(Ordering::Acquire)
+    }
+
+    /// Like [`SyncTransport::sync_now`], but returns the **sequence number** of
+    /// the request it enqueued, so the caller can wait for *its own* pass.
+    ///
+    /// Request *n* has completed once [`Self::completed_sync_passes`] reaches
+    /// `n`: the drain is a FIFO channel that bumps the completed counter
+    /// exactly once per drained request. Returns `0` when the runtime is down
+    /// (nothing was enqueued, so nothing will ever complete) — a caller must
+    /// treat `0` as "do not wait".
+    ///
+    /// Poll [`Self::peers_in_flight`] down to zero as well before concluding
+    /// the device is settled: a forced pass skips peers that already have a
+    /// dial running, so its completion says nothing about theirs.
+    pub fn sync_now_seq(&self) -> u64 {
+        // The lock is held across BOTH the numbering and the send, and that is
+        // the point — not just to reach `tx`.
+        //
+        // The drain assigns pass N to the Nth message it receives, so a
+        // sequence number only means anything if numbering order and enqueue
+        // order are the same. Number outside the lock and two concurrent
+        // callers can take seq 1 and 2 and then send in the other order; the
+        // holder of seq 2 sent first, so its request completes as pass 1,
+        // while it waits for pass 2 — which belongs to somebody else's
+        // request. That caller stops waiting before its own pass runs, which
+        // is precisely the defect this whole mechanism exists to close, just
+        // through a narrower window. And the window is not as narrow as it
+        // looks: the caller that most needs this is a phone being suspended,
+        // and the OS can freeze it between the two statements.
+        let guard = self.sync_now_tx.lock().expect("sync_now mutex poisoned");
+        let Some(tx) = guard.as_ref() else {
+            return 0;
+        };
+        let seq = self.sync_requests.fetch_add(1, Ordering::AcqRel) + 1;
+        if tx.send(()).is_err() {
+            // Receiver gone: the runtime is tearing down and this request will
+            // never be drained, so there is no pass to wait for.
+            return 0;
+        }
+        seq
+    }
+
+    /// How many peers currently have a `delta_sync` running, from any origin.
+    ///
+    /// Zero means no dial this transport knows about is on the wire. See the
+    /// `in_flight` field doc for why a completed forced pass is not enough on
+    /// its own.
+    ///
+    /// A poisoned mutex reports `usize::MAX`, not `0`. The caller uses zero as
+    /// permission to let the OS suspend this process, so "I cannot tell" has
+    /// to read as "not settled" — answering `0` would hand out that permission
+    /// on the strength of a lock nobody can inspect.
+    pub fn peers_in_flight(&self) -> usize {
+        self.in_flight
+            .lock()
+            .map(|set| set.len())
+            .unwrap_or(usize::MAX)
     }
 
     /// Host one pairing session over the **live sync endpoint** and return the
@@ -330,6 +365,7 @@ impl SyncTransport for IrohSyncTransport {
         let pairing_hub = self.pairing_hub.clone();
         let relay_url = self.relay_url.clone();
         let sync_passes = self.sync_passes.clone();
+        let in_flight = self.in_flight.clone();
 
         // The one field that is MOVED, not cloned: the device endpoint lease
         // belongs to the endpoint, and the endpoint lives on the thread below.
@@ -403,6 +439,7 @@ impl SyncTransport for IrohSyncTransport {
                         pairing_hub,
                         relay_url,
                         sync_passes,
+                        in_flight,
                         runtime_handle,
                         workspace_root,
                         workspace_id,
@@ -484,18 +521,11 @@ impl SyncTransport for IrohSyncTransport {
     }
 
     fn sync_now(&self) {
-        // Hand the request to the forced-sync drain task on the tokio runtime.
-        // A send error means the runtime is down (transport stopped or never
-        // started) — nothing to sync, so it's ignored. Same no-op-when-down
-        // contract as `announce_local_ops`.
-        if let Some(tx) = self
-            .sync_now_tx
-            .lock()
-            .expect("sync_now mutex poisoned")
-            .as_ref()
-        {
-            let _ = tx.send(());
-        }
+        // Fire-and-forget wrapper over `sync_now_seq`, which owns the enqueue
+        // (and the runtime-is-down no-op, same contract as `announce_local_ops`).
+        // Callers that need to know when *their* pass finished use the
+        // sequenced form directly.
+        let _ = self.sync_now_seq();
     }
 }
 
@@ -512,6 +542,7 @@ async fn run_iroh(
     pairing_hub_slot: Arc<Mutex<Option<Arc<PairingHub>>>>,
     relay_url: Option<String>,
     sync_passes: Arc<AtomicU64>,
+    in_flight: InFlightPeers,
     runtime: tokio::runtime::Handle,
     workspace_root: PathBuf,
     workspace_id: WorkspaceId,
@@ -566,8 +597,10 @@ async fn run_iroh(
     // corruption. See `AppendLock`.
     let append_lock: AppendLock = Arc::new(tokio::sync::Mutex::new(()));
     // Defense in depth: skip launching a second delta_sync for a peer that
-    // already has one running. See `InFlightPeers`.
-    let in_flight: InFlightPeers = Arc::new(std::sync::Mutex::new(HashSet::new()));
+    // already has one running. See `InFlightPeers`. Owned by the transport (not
+    // created here) so `peers_in_flight()` can observe it from outside the
+    // runtime — a background caller needs to know the device is settled, not
+    // just that its own pass returned.
 
     // Build gossip.
     let gossip = Gossip::builder().spawn(endpoint.clone());

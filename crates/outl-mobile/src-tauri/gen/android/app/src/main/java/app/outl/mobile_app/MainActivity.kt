@@ -13,6 +13,11 @@ class MainActivity : TauriActivity() {
     // (uninitialized rustls-platform-verifier / ndk_context) and the process
     // aborts with SIGABRT on a tokio worker thread. See android_jni.rs.
     NativeSetup.install(applicationContext)
+    // Arm the background-sync schedules (WorkManager + the ProcessLifecycle
+    // observer that fires the handover flush). Nothing is enqueued here — the
+    // workspace hasn't opened yet, so there are no peers to gate on; this only
+    // installs the observer, and it is idempotent across activity recreation.
+    OutlBackgroundSync.install(applicationContext)
     super.onCreate(savedInstanceState)
   }
 }

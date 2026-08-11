@@ -852,16 +852,26 @@ async fn removed_peer_is_denied_sync() {
 
     // (2) Removed peer: the sync must be REJECTED (unknown-peer close → the
     // initiator's durable-ingest confirmation never comes, so it errors).
+    //
+    // The progress sink is here because a refusal is the one failure a user
+    // has to ACT on (re-pair), and it was the one failure that reached them as
+    // nothing at all: the responder closes before writing a byte, so the
+    // initiator dies on a *read* and never reaches the close-reason check at
+    // the end. Meanwhile a phone locking its screen painted the panel red.
+    // Exactly backwards. Asserting only `result.is_err()` passes either way,
+    // which is how it stayed invisible.
     let (a_ready_tx2, _a_ready_rx2) = mpsc::channel::<()>();
+    let (progress_tx, progress_rx) = mpsc::channel::<outl_actions::SyncProgress>();
     let result = tokio::time::timeout(
         STEP_TIMEOUT,
-        test_support::run_delta_sync(
+        test_support::run_delta_sync_with_progress(
             &ep_a,
             b_addr,
             dir_a.path(),
             &shared_wid(),
             actor_a,
             a_ready_tx2,
+            progress_tx,
         ),
     )
     .await
@@ -869,6 +879,27 @@ async fn removed_peer_is_denied_sync() {
     assert!(
         result.is_err(),
         "a revoked peer's sync must be refused, not silently succeed"
+    );
+
+    let reported: Vec<outl_actions::SyncProgress> = progress_rx.try_iter().collect();
+    let refusal = reported.iter().find_map(|p| match p {
+        outl_actions::SyncProgress::Failed { error, .. } => Some(error.clone()),
+        _ => None,
+    });
+    let refusal = refusal.unwrap_or_else(|| {
+        panic!("a revoked peer must surface a Failed progress event, got: {reported:?}")
+    });
+    assert!(
+        refusal.contains("not paired"),
+        "the reason must name the fix (re-pair), not just say something broke: {refusal}"
+    );
+    // A refusal is NOT the suspended-peer case. Mixing them would paint the
+    // one actionable failure amber and bury it.
+    assert!(
+        !reported
+            .iter()
+            .any(|p| matches!(p, outl_actions::SyncProgress::Interrupted { .. })),
+        "a refusal must never be reported as a transient interruption: {reported:?}"
     );
 
     // B must NOT have ingested any of A's post-revocation ops.

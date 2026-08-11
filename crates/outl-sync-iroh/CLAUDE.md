@@ -13,6 +13,9 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   It reads `[sync] transport` + `[sync] relay_url`, takes the endpoint lease, loads the identity + peer store, and returns `Ready` / `EndpointBusy` / `Disabled`.
   Every client calls it; the identity + peers + relay recipe used to be written out in the TUI, the shared Tauri backend and `outl sync` separately, and the MCP server skipped it entirely (issue #220).
   `build_default_transport(workspace_root)` is the form every client but mobile calls — it fills in `~/.outl/identity.key`; mobile passes its sandbox path to `build_transport` instead.
+  `default_device_dir()` resolves that path, and **logs one `WARN` per process when `$OUTL_DEVICE_DIR` redirects it**.
+  The repo's `.cargo/config.toml` exports that variable, so a `cargo run` build is a *separate device* with its own node id, and `cargo clean` rotates it.
+  See [`docs/development.md` → Testing P2P sync from a source build](../../docs/development.md#testing-p2p-sync-from-a-source-build).
 - `EndpointLease` (`lease.rs`) — the device-wide election backing it (see "One endpoint per identity, elected not assigned")
 - `IrohSyncTransport` — implements `SyncTransport` trait, including the
   gossip-backed `announce_local_ops` hook (sync side → tokio task via an
@@ -93,7 +96,8 @@ The file is ours, only the locking is missing, and refusing everyone leaves the 
 **A refusal says which one it is.**
 `try_acquire` returns `Result<EndpointLease, LeaseDenied>`, and `LeaseDenied` is `HeldByAnotherProcess` or `LeaseFileUnusable { path, error }`; `TransportOutcome::EndpointBusy` and `PeerProbe::EndpointBusy` carry it through to the client.
 The degradation is identical either way (file transport, stay off the wire), so a caller that only degrades ignores the payload.
-Every caller that words this for a **human** must read it: "another outl process holds the endpoint" sends a user whose `~/.outl` is read-only hunting for an `outl mcp serve` that is not running, and no process exiting will ever free a lease nobody took.
+Every caller that words this for a **human** must read it.
+"Another outl process holds the endpoint" sends a user whose `~/.outl` is read-only hunting for an `outl mcp serve` that is not running, and no process exiting will ever free a lease nobody took.
 
 **Why a lease and not a policy.**
 The rule used to be "only the GUI binds; the MCP server and the CLI are passive writers".
@@ -104,7 +108,8 @@ Losing the election is a working state, not a failure: the loser runs `outl_acti
 
 **Known limitation: the lease is per device, so it is also per *workspace holder*.**
 The lock is a sibling of `identity.key`, not of the workspace, because the thing being arbitrated is the node id and there is exactly one of those per device.
-A process holding the endpoint for workspace A therefore keeps a process on workspace B off the wire, and B's ops only leave the machine when a process that *does* hold the endpoint opens B — the shared `ops/` fallback converges B across local processes, not across devices.
+A process holding the endpoint for workspace A therefore keeps a process on workspace B off the wire.
+B's ops only leave the machine when a process that *does* hold the endpoint opens B — the shared `ops/` fallback converges B across local processes, not across devices.
 Scoping the lease per workspace would not fix this; it would let two endpoints bind the same node id, which is the exact failure this section exists to prevent.
 The real fix is one endpoint multiplexing every open workspace (the sync protocol already carries `WorkspaceId` per request), and that is a redesign of `engine::run_iroh`, not a change to the lease.
 Until then, a user running two workspaces at once P2P-syncs the one whose process got there first.
@@ -192,17 +197,22 @@ It still honors `try_acquire_in_flight` (skip a peer already being dialed) and t
 The GUI commands are `outl_sync_now` in each client's `commands/peers.rs` (mobile reads `state.iroh`, desktop reads `state.iroh_transport` `Arc<dyn SyncTransport>`).
 The shared wrapper is `syncNow()` in `@outl/shared/api/commands`.
 
-**Observing completion:** `completed_sync_passes()` is a monotonic counter bumped after each finished pass (every peer dialed, succeeded *or* failed — no reachability promise).
-A waiter (the iOS `bg_sync.rs` FFI) snapshots it, fires `sync_now()`, and polls until it advances or a cap elapses; any pass after the snapshot counts.
+**Observing completion — wait for YOUR pass, not for A pass.**
+`completed_sync_passes()` is a monotonic counter bumped once per drained request (every peer dialed, succeeded *or* failed — no reachability promise).
+`sync_now_seq()` returns the **sequence number** of the request it enqueued (`0` = runtime down, nothing to wait for), and the drain is FIFO with a 1:1 bump, so request *n* is done exactly when `completed_sync_passes() >= n`.
+
+Polling "did the counter move" instead is a defect, not a style nit.
+Mobile fires `sync_now()` on a 3s foreground timer, so the iOS background flush read that *foreground* pass as its own ~250ms in, dropped its `beginBackgroundTask` assertion, and let iOS suspend with its own request still queued.
+Pinned by `every_queued_request_advances_the_counter_by_exactly_one` (`engine_catchup.rs`).
+
+**A completed pass is not a settled device.**
+`force_sync_all` *skips* a peer that already has a dial in flight, so a pass can complete having dialed nobody.
+A caller holding an OS resource open until sync quiesces must also poll `peers_in_flight()` to zero.
 
 ## Module layout (delta-sync wire vs. orchestration)
 
-The crate's delta-sync **wire protocol** lives in `engine_sync.rs`:
-`delta_sync` (initiator), `SyncProtocolHandler` (responder), and the framing helpers (`read_frame` + typed `read_*`).
-It also owns the op-log read/write helpers (`local_vector_clock`, `ops_missing_for`, and `ingest_received_ops`, which owns the `AppendLock` write path).
-`engine.rs` keeps **boot orchestration**: the `IrohSyncTransport` struct + channel wiring, `run_iroh`, the boot/catch-up/gossip task spawns, and the router setup.
-`engine.rs` re-exports `delta_sync` + `SyncProtocolHandler` (`pub(crate) use crate::engine_sync::…`) so `crate::engine::delta_sync` keeps resolving for `engine_catchup`, `engine_gossip`, `engine_pairing`, and `test_support`.
-The split was forced by the file-size guard; treat `engine_sync.rs` as the "on the wire" module and `engine.rs` as the "stand it up" module.
+Which file owns what, and why each split happened: [`docs/iroh-internals.md` → Module layout](../../docs/iroh-internals.md#module-layout).
+The one-line version: `engine_sync.rs` is "on the wire", `engine.rs` is "stand it up", `coordination.rs` is "what the concurrent tasks meet on", `protocol.rs` is "what the bytes mean".
 
 The **gossip supervisor** lives in `engine_gossip.rs` (`run_gossip` + `GossipCtx`).
 It is one task that `select!`s over the op-announce drain, the periodic membership broadcast, the inbound gossip stream, AND the `wid_changed` signal — re-subscribing to the new topic on an id change (see "Gossip re-subscribes on id change").
@@ -259,8 +269,7 @@ Fires after the post-pair snapshot pull and every catch-up `delta_sync` (`run_ca
 ## Test catalog (regression + chaos)
 
 Every bug hand-found during the sync saga has a NAMED, permanent test — the name IS the bug, so a failure is self-explanatory.
-The chaos battery hammers the same wire code under stress instead of pinning one bug per row.
-Both catalogs live in [`docs/iroh-internals.md`](../../docs/iroh-internals.md#regression-suite-pilar-2) — which name guards which bug, and where each test lives.
+Both catalogs (named guards + the chaos battery) live in [`docs/iroh-internals.md`](../../docs/iroh-internals.md#regression-suite-pilar-2).
 **Do NOT delete a named guard without deleting the bug it guards**, and add the row when you add the test.
 
 ## Sync invariants
@@ -329,28 +338,8 @@ The top three need a decision written down, because "the GUI always has a transp
 
 ## Who ends up with the endpoint
 
-The lease decides (see "One endpoint per identity, elected not assigned"), so this is a description of what typically happens, not a policy anyone hard-codes:
-
-- **Long-lived processes contend.**
-  A GUI (desktop / mobile), the TUI, and `outl mcp serve` all call `build_transport` and take whatever it grants.
-  The winner binds the endpoint, announces after each local mutation, and serves inbound.
-  The losers run `outl_actions::FileSyncTransport` alone and stay off the wire.
-  A GUI opened at login therefore keeps the endpoint and an MCP server started later stays passive — the pre-lease behaviour, now a consequence rather than a rule.
-  With no GUI at all, the MCP server is the peer, which is the whole point.
-- **Every long-lived client runs the file poller too, endpoint or not.**
-  iroh signals only on its own wire receipts; the poller signals on ANY growth of a peer's `ops-<actor>.jsonl`, including ops a **co-resident** process wrote.
-  Neither subsumes the other, so both always run.
-- **The ephemeral CLI never contends.**
-  A `page`/`block`/`daily`/`batch`/`import` command runs in ~200ms — too short to establish a QUIC connection (seconds) — so it writes `ops-<actor>.jsonl` and exits without touching iroh.
-  Its ops converge via whichever process holds the endpoint plus every device's `MAINTENANCE_RESYNC` re-pull.
-- **`outl sync` contends, and stands down when it loses.**
-  It is the explicit flush for scripts: bring a transport up, force a push/pull pass, wait, exit.
-  When another local process already holds the endpoint it prints who has it and exits instead — that process is already pushing these ops out, and taking the route from it for 25s would break the sync it was asked to help.
-- **`outl peer status` asks for the lease, and reports instead of probing when it loses.**
-  `probe_peers` binds the one non-sync endpoint in the crate, so it is the last thing that may fight a live transport for the route.
-- **`outl peer pair` binds a one-shot endpoint and closes it before returning**, lease or no lease.
-  It is the deliberate exception: a device that cannot pair is a device the user cannot add, and the handshake is rare, explicit and seconds long, after which the holder gets its route back.
-  A client that *does* hold an endpoint still pairs through it (`IrohSyncTransport::pair_host`) rather than binding a second one.
+Which process typically wins, and what each loser does instead, is one fact with one home: [`docs/sync.md` → Which process holds the endpoint](../../docs/sync.md#which-process-holds-the-endpoint).
+It is a *consequence* of the lease (see "One endpoint per identity, elected not assigned"), never a policy anyone hard-codes — the table above ("What breaks when this process has no endpoint") is the part you must read before changing the election.
 
 Correctness never depends on the announce: the `MAINTENANCE_RESYNC` catch-up is the safety net that converges any writer's ops, announced or not.
 Holding the endpoint is a **latency** win (real-time vs next catch-up tick); losing it costs latency, never convergence.
@@ -387,21 +376,21 @@ Regression: `refresh_peer_direct_addr_replaces_stale_keeps_relay_and_is_idempote
 
 ## STOPGAP: IPv4-only bind (iroh 1.0.0 multipath workaround)
 
-**All four endpoints bind IPv4-only** — a temporary workaround for an iroh 1.0.0 bug, owned by the `bind` module (`bind::n0_builder_ipv4_only`).
+**All four endpoints bind IPv4-only** through `bind::n0_builder_ipv4_only` — `run_iroh`, `bind_pairing_endpoint`, `probe_peers`, `bind_sync_endpoint`.
+The `bind` module owns the bug, the fix and the revert condition; dial and accept must both go through it, because dropping IPv6 on one side only lets the other advertise a dead path.
 
-**The bug + fix (full rationale in the `bind` module docs).**
-iroh 1.0.0 multipath opens paths to **all** of a peer's candidate addrs at once, so a dead global IPv6 direct addr stalls the whole connect/accept (`MultipathNotNegotiated`, ~30s) instead of converging on the working LAN-IPv4/relay path.
-The fix binds an **IPv4-only** socket (`clear_ip_transports().bind_addr("0.0.0.0:0")`) so the endpoint never advertises a global IPv6 direct addr; the relay transport is kept, so **LAN-IPv4 direct + relay fallback both survive**.
-
-Every endpoint goes through `bind::n0_builder_ipv4_only` so dial and accept stay consistent — `run_iroh`, `bind_pairing_endpoint`, `probe_peers`, `bind_sync_endpoint`.
-Dropping IPv6 on only one side would let the other advertise a dead path.
+**It narrows the bug, it does not close it.**
+Multipath opens paths to **all** of a peer's candidate addrs at once and one unreachable addr stalls the whole connect/accept (`MultipathNotNegotiated`, ~30s) rather than converging on a working path.
+Binding IPv4-only removes the usual offender (a global IPv6 addr that is "No route to host") but an unreachable **IPv4** addr stalls it identically — a VM bridge or VPN `utun` addr in our own ticket, or a peer's stale DHCP lease in theirs.
+Signature: `sendmsg error: … HostUnreachable` / `Host is down` toward one addr, then a connect timeout with the relay up the whole time.
 
 ### Configurable relay (default: outl's own)
 
 `n0_builder_ipv4_only(relay_url: Option<&str>)` picks the relay on top of the IPv4-only STOPGAP.
 Default is outl's own dedicated relay, `DEFAULT_RELAY_URL` (`use1-1.relay.avelino.outl.iroh.link`, via `RelayMode::custom`) — the n0 public relay proved slow/unreachable on some networks.
 A non-empty `[sync] relay_url` overrides it; a parse error falls back to `presets::N0` with a warning.
-Only the long-lived **sync** endpoint threads it (`run_iroh` ← `IrohSyncTransport::new` ← `outl_config::load().sync.relay_url()`); pairing/status/test pass `None`.
+Pairing / status / test pass `None`, which is **not** "the n0 preset" — `None` resolves to `DEFAULT_RELAY_URL` too, so every endpoint rides outl's relay by default.
+Only the long-lived **sync** endpoint threads the *configured* one (`run_iroh` ← `IrohSyncTransport::new` ← `outl_config::load().sync.relay_url()`), so only a deployment that overrides `[sync] relay_url` sees a split.
 See `docs/relay.md` / `docs/config.md`.
 
 **Revert condition:** delete the `bind` module once iroh > 1.0.0 ships the multipath fallback fix, and let every call site go back to the plain dual-stack `Endpoint::builder(presets::N0)` builder (details in the module docs).

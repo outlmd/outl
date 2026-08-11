@@ -44,6 +44,48 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `~/.outl/identity.key` now lives at `$OUTL_DEVICE_DIR/iroh/identity.key` when the variable is set — a container or sandboxed CI job that exports it comes back up under a new node id on first run and reads as offline to every existing peer until it is re-paired.
   See [`docs/storage.md`](docs/storage.md) → `$OUTL_DEVICE_DIR`.
 
+- **Locking your phone no longer cuts the sync off mid-exchange.**
+  iOS suspends an app's sockets within seconds of backgrounding, so the delta sync in flight when the screen locked simply died.
+  Nothing was lost — the responder confirms durable ingest by closing cleanly, so an unconfirmed push is re-sent — but the desktop reported `peer did not confirm durable ingest` every single time, and the ops waited for the next window.
+
+  The two `BGTaskScheduler` windows could never have covered this: both are requests for a window *later*, at the scheduler's discretion.
+  The missing piece was a `beginBackgroundTask` assertion taken on `didEnterBackground`, which keeps the process resident for one last pass — and, just as importantly, lets an **inbound** sync a peer is mid-way through reach its confirmation instead of dying with the frame unsent.
+
+  Getting the release condition right turned out to be the hard part, and the first version had it wrong.
+  It waited for the forced-pass counter to *advance*, but `sync_now()` was fire-and-forget with no identity and the counter is global, so the flush read the **foreground** pass (mobile fires one every 3s) as its own completing, released the window ~250ms in, and let iOS suspend with its own request still queued — ending the sync it existed to finish.
+  `sync_now_seq()` now returns the sequence number of the request it enqueued, and the caller waits for `completed_sync_passes() >= seq` **plus** `peers_in_flight() == 0`, since a forced pass skips peers that already have a dial running and can therefore complete having dialed nobody.
+  The window is sized from `backgroundTimeRemaining` rather than a constant: one unreachable peer costs 5s direct + 10s relay, so a fixed 20s cap blew past a real budget with two peers and guaranteed the tear-down it was meant to prevent.
+
+- **Android gets background sync too, and it is the first Android-specific feature in this changelog.**
+  Android doesn't suspend sockets — it *freezes* the cached process (cgroup freezer, API 30+, ~10s after caching on 34+) — which produces the identical torn-down exchange.
+  Going to the background now requests an expedited `OneTimeWorkRequest` to finish the pass in flight, and keeps a 15-minute `PeriodicWorkRequest` for catch-up; both are skipped with zero paired peers.
+
+  **It is weaker than the iOS path and the docs say so rather than implying parity.**
+  The handover is a *request*, not an instant grant: between `ON_STOP` and the job starting the process can already be frozen, so the pass gets restarted rather than finished and the peer may still log one timeout.
+  Expedited quota is finite (~30 min/24h on Active), below API 31 there is no expedited path at all (a foreground service for a 20s sync would need a permanent notification), and force-stop drops everything.
+  The periodic worker has a sharper limit worth knowing: unlike iOS's `BGProcessingTask`, WorkManager starts the *process* but no Activity, so Tauri never boots and no transport is registered — it is a catch-up for a **frozen** app, not a killed one.
+
+  `bg_sync.rs` is now one platform-agnostic core with `cfg`-gated exports (iOS C ABI, Android JNI), so the shared bodies stay covered by the host test suite where neither platform's exports compile.
+  `androidx.work` is pinned to **≤ 2.10.5**: 2.11.x pulls `kotlin-stdlib:2.1.20`, whose metadata the pinned Kotlin 1.9.25 compiler cannot read, and that breaks every file in the module including Tauri's generated ones.
+
+- **A peer that went away mid-sync is amber, not red — and a peer that *refused* you is no longer silent.**
+  The Sync panel's only red row was, in practice, the one a locked phone produced on every screen lock: a working sync, reported as a failure.
+  It now renders as `interrupted` ("went away — will retry"), stays out of the activity feed, and does not pretend to be success — the pass is still an error internally and the peer is still re-pushed.
+
+  The inverse was worse.
+  A peer that **refuses** the dial (you were removed from its `peers.json`, or the workspaces differ) closes before writing a byte, so the initiator failed on a *read* and never reached the close-reason check — emitting nothing at all.
+  The one failure a user has to act on was the only one with no line in the panel.
+
+  Also moved the responder's `peers.json` refresh to **after** it confirms ingest, and onto a blocking thread.
+  It was blocking file I/O sitting between the fsync and the confirmation, widening the exact window in which a suspending peer ingests durably but dies before saying so.
+
+- **A redirected `$OUTL_DEVICE_DIR` now says so, once, at startup.**
+  The rotation above is intended, and it was also completely silent: the node id is only announced when it is *generated*, and `iroh endpoint bound node_id=…` never says which key it came from.
+  The one place it bites hardest is this repo — `.cargo/config.toml` exports the variable so the suite stays off the developer's real store, and cargo exports it to `cargo run` too, so a desktop built from source is a **separate device** whose key lives under `target/` and dies with `cargo clean`.
+  Pairing a phone against that build works, then stops working after the next clean, with the phone reporting only "offline".
+  `default_device_dir()` now logs one `WARN` naming the directory and how to opt out (`OUTL_DEVICE_DIR=`).
+  See [`docs/development.md`](docs/development.md) → Testing P2P sync from a source build.
+
 - **The first boot after an upgrade froze the app for 24 seconds.**
   outl's premise is that it opens fast and is ready for input, and the `CURRENT_PIPELINE_VERSION` bump broke it: every sidecar goes stale by pipeline, so the first boot re-reconciles the whole graph.
   Measured on a 2,827-file workspace: **24.7 seconds at 8% CPU** — not computation, but `write_atomic`'s two `fsync`s per sidecar, 5,656 of them back to back, for 44 ops of actual content.

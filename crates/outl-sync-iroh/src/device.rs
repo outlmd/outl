@@ -75,14 +75,48 @@ pub enum TransportOutcome {
 /// has to move all three or it is not isolating anything. Point the variable at
 /// a persistent path (not a fresh tmpdir per run) if you want a stable node id
 /// under it, and re-pair once after the move.
+///
+/// **It says so out loud** — a redirection logs one `WARN`. A redirected
+/// identity is indistinguishable from a working one until a peer fails to
+/// reach it, and the peer's only symptom is "offline", which reads as a
+/// transport bug rather than as "you are a different device today".
 pub fn default_device_dir() -> anyhow::Result<PathBuf> {
     if let Ok(custom) = std::env::var("OUTL_DEVICE_DIR") {
         if !custom.is_empty() {
+            warn_redirected_device_dir(&custom);
             return Ok(PathBuf::from(custom).join("iroh"));
         }
     }
     let home = dirs::home_dir().context("$HOME is not set; cannot locate ~/.outl")?;
     Ok(home.join(".outl"))
+}
+
+/// Say once per process that this run is **not** the machine's usual device.
+///
+/// The repo's `.cargo/config.toml` exports `$OUTL_DEVICE_DIR = target/device-store`
+/// so the suite stays off the developer's `~/.outl`, and cargo exports it to
+/// everything it launches — including `cargo run -p outl-desktop`, which is how
+/// a developer tests P2P sync. That build therefore comes up as a **different
+/// device** (its own node id, its own actor) from the installed app, and
+/// `cargo clean` deletes the key, so the node id rotates on the next run. Every
+/// peer still lists the old id and simply shows this machine as offline.
+///
+/// Nothing in the logs said so: the identity is only announced when it is
+/// *generated*, and `iroh endpoint bound node_id=…` is equally quiet about
+/// which key it came from. One line at the point of redirection is the whole
+/// fix — the state is intended, the silence was not.
+fn warn_redirected_device_dir(custom: &str) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        tracing::warn!(
+            device_dir = %custom,
+            "$OUTL_DEVICE_DIR is set: this process is a SEPARATE device from ~/.outl, with \
+             its own iroh node id — peers paired with the machine's real identity will show \
+             it as offline, and deleting that directory (e.g. `cargo clean` when it lives \
+             under target/) rotates the node id and voids every existing pairing. Run with \
+             `OUTL_DEVICE_DIR=` to use the machine's real identity."
+        );
+    });
 }
 
 /// [`build_transport`] against this device's usual identity,

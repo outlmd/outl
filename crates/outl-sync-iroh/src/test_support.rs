@@ -292,6 +292,37 @@ pub async fn run_asset_pull(
     .await
 }
 
+/// [`run_delta_sync`] with a live progress sink, so a test can assert what the
+/// user is TOLD, not only whether the sync converged.
+///
+/// The two are different questions and the repo only ever tested the first.
+/// `SyncProgress` is cosmetic by design (a dropped update never breaks a sync),
+/// which is exactly why nothing else catches a wrong one: a pass classified as
+/// the wrong colour still errors, still re-pushes, still converges. The only
+/// symptom is on screen.
+pub async fn run_delta_sync_with_progress(
+    endpoint: &iroh::Endpoint,
+    peer: impl Into<iroh::EndpointAddr>,
+    workspace_root: &Path,
+    workspace_id: &WorkspaceId,
+    actor: ActorId,
+    peer_ready_tx: std::sync::mpsc::Sender<()>,
+    progress_tx: std::sync::mpsc::Sender<outl_actions::SyncProgress>,
+) -> Result<()> {
+    let append_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    delta_sync(
+        endpoint,
+        peer,
+        workspace_root,
+        workspace_id,
+        actor,
+        peer_ready_tx,
+        &append_lock,
+        &crate::progress::ProgressSink::new(progress_tx),
+    )
+    .await
+}
+
 /// Run the production `delta_sync` initiator against `peer` (a full
 /// [`iroh::EndpointAddr`] from the responder's `endpoint.addr()`).
 pub async fn run_delta_sync(

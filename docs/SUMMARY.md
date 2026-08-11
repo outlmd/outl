@@ -55,6 +55,7 @@
 
 * [Development guide](development.md)
 * [iOS platform integration](ios-platform.md)
+* [Android platform integration](android-platform.md)
 * [Contributing & code review](contributing.md)
 
 ## RFCs

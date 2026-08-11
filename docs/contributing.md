@@ -477,13 +477,16 @@ If a reviewer comments on one of these without a behavioural reason, push back p
 
 ## What we are not building yet
 
-outl ships continuously; the CRDT core, TUI, CLI, desktop, iOS mobile, plugins, and code-block execution are all in.
+outl ships continuously; the CRDT core, TUI, CLI, desktop, iOS **and Android** mobile, plugins, and code-block execution are all in.
 Reviewers will push back on PRs that try to introduce these without an explicit issue:
 
 - Query DSL (`{{query: ...}}`).
 - `ChronDbStorage` backend ([issue #1](https://github.com/avelino/outl/issues/1)).
-- Android mobile build (iOS only today).
 - Per-page op log shards ([Per-page op log shards](sync.md#per-page-op-log-shards-for-10k-pages) in `docs/sync.md`, only when the workspace hits 10k pages).
+
+**Android used to be on this list and no longer is.**
+It shipped — signed APK on every release, hand-written JNI bootstrap, Android branches in the frontend — while this page still told reviewers to reject work on it.
+Android PRs are ordinary PRs; what is open there is release plumbing, in [android-platform.md](android-platform.md).
 
 If your PR genuinely belongs to one of these, link the tracking issue.
 

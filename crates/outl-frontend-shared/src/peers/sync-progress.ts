@@ -81,6 +81,11 @@ export function createSyncProgress(): SyncProgressState {
         break;
       // `connecting` + `snapshot` + `asset` update `current` only (spinner /
       // progress bar); flooding the feed with per-chunk byte ticks would bury it.
+      //
+      // `interrupted` is deliberately in that group too. It fires every time a
+      // paired phone locks its screen, so feeding it would fill the panel with
+      // permanent rows about a sync that is working — the exact noise this
+      // phase was split off `failed` to stop.
     }
   });
 

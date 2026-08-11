@@ -17,7 +17,8 @@ outl-mobile (this crate)
    │   ├── workspace_open.rs       (boot orchestration over outl_tauri_shared::workspace_open primitives)
    │   ├── workspace_picker.rs     (set_workspace — folder choice + persistence; native picker deferred)
    │   ├── iroh_sync.rs            (wire_iroh_transport — boot the P2P transport, register the bg-sync handle)
-   │   ├── bg_sync.rs             (outl_ios_background_sync FFI — drives a forced sync from the iOS BGProcessingTask)
+   │   ├── bg_sync.rs              (one forced-sync core + per-platform exports: iOS C ABI, Android JNI)
+   │   ├── android_jni.rs          (Android-only: primes rustls-platform-verifier + ndk_context before iroh's first QUIC connect)
    │   ├── plugin_service.rs       (PluginService + dedicated plugin thread — Boa Context is !Send, so it can't live in AppState)
    │   └── commands/               (Tauri command surface — split mirrors outl-desktop)
    │       ├── mod.rs
@@ -28,6 +29,11 @@ outl-mobile (this crate)
    │       ├── plugin.rs           (plugin_list / plugin_run / plugin_sync_hooks — thin shims over PluginService)
    │       └── exec.rs             (run_code_block — thin shim over outl_actions::exec::run_code_block)
    ├── gen/apple/.../main.mm       (NSMetadataQuery + NSFileCoordinator iCloud watcher)
+   ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
+   ├── gen/android/.../MainActivity.kt            (NativeSetup.install + OutlBackgroundSync.install, before Tauri boots)
+   ├── gen/android/.../NativeSync.kt              (external fun bindings for the bg_sync JNI symbols)
+   ├── gen/android/.../OutlBackgroundSync.kt      (ProcessLifecycleOwner observer + the two WorkManager schedules)
+   ├── gen/android/.../SyncWorker.kt              (drives one forced pass, then finishes)
    └── (frontend in ../src)        (Solid components, Tailwind, Tauri bridge)
 ```
 
@@ -102,11 +108,36 @@ The iOS-native `OutlOpsWatcher.swift` (`NSMetadataQuery` + `NSFileCoordinator`),
 Because the chosen folder is now always local, the watcher's `NSMetadataQueryUbiquitousDocumentsScope` query matches nothing and stays **dormant** — it does nothing and breaks nothing.
 Removing it (watcher → no-op, strip the entitlements + plist keys) is a follow-up that touches code-signing, so it must be validated with a device build, not done blind.
 
-## Background sync (iOS)
+## Background sync (iOS + Android)
 
-iOS suspends the app's sockets the moment it backgrounds, so there is **no continuous background P2P**; the two opportunistic `BGTaskScheduler` windows are the sanctioned paths and **both** sync.
-The three-piece wiring (Info.plist identifiers, `OutlBackgroundRefresh.swift`, the `bg_sync.rs` FFIs) is in [`docs/ios-platform.md`](../../docs/ios-platform.md#background-sync-ios).
-It can only be validated with a **device build** — the simulator has no `BGTaskScheduler` daemon, so `submit` always fails there.
+Neither OS lets a backgrounded app keep syncing: iOS suspends the process and its sockets, Android freezes the cached process (cgroup freezer, API 30+, ~10s after caching on API 34+).
+Same outcome — an iroh delta sync in flight is torn down and the peer logs `peer did not confirm durable ingest (closed: timed out)`.
+So each platform gets a scheduler that **actively** drives a forced pass inside whatever window the OS grants.
+
+**`bg_sync.rs` is the one owner of that pass, for both.**
+`Registration` / `register` / `drive_sync` / `wait_until` / `registered_peer_count` are platform-agnostic and unconditional.
+Only the **exported symbols** are `cfg`-gated — `target_os = "ios"` for the C ABI `@_silgen_name` binds against, `target_os = "android"` for the JNI symbols `NativeSync.kt` declares.
+That split is deliberate and load-bearing: it is what keeps the shared bodies covered by the host test suite, where neither platform's exports compile.
+Adding a fourth operation means adding it to the core plus *both* export blocks — never to one platform's block alone.
+
+Two rules that outlive any refactor here:
+
+1. **Wait on your own pass, never on "the counter moved".**
+   `drive_sync` calls `IrohSyncTransport::sync_now_seq()` and waits for `completed_sync_passes() >= seq && peers_in_flight() == 0`.
+   The naive version shipped and was wrong.
+   The completed-pass counter is global and `Journal.tsx` fires `syncNow()` on a 3s foreground timer, so a background flush watched the *foreground* pass complete ~250ms later and released the OS window with its own request still queued.
+   A `seq` of `0` means the runtime is down — return immediately, do not burn the cap waiting for a request that was never enqueued.
+2. **Never panic or throw across the boundary.**
+   No `unwrap`/`expect` in this module; the JNI wrappers additionally go through `with_env` (`catch_unwind`) + `LogErrorAndDefault`, so a failure degrades to `JNI_FALSE` / `0` instead of failing the Kotlin job or aborting the process.
+
+Per-platform wiring, and what each one does **not** guarantee:
+[`docs/ios-platform.md`](../../docs/ios-platform.md#background-sync-ios) · [`docs/android-platform.md`](../../docs/android-platform.md#background-sync-android).
+
+The Android side needs `androidx.work:work-runtime` **≤ 2.10.5** until the Kotlin Gradle plugin moves off 1.9.25.
+2.11.x pulls `kotlin-stdlib:2.1.20`, whose metadata the 1.9 compiler cannot read — and that breaks every file in the module, including Tauri's generated ones.
+
+Neither path can be validated on a host or a simulator.
+iOS's simulator has no `BGTaskScheduler` daemon (`submit` always fails); Android's schedules need `adb shell cmd jobscheduler run`, and the real acceptance test is two paired devices with no timed-out-ingest row after locking the phone.
 
 ## Hard rule
 
