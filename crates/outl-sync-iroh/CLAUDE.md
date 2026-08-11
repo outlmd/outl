@@ -208,6 +208,7 @@ Pinned by `every_queued_request_advances_the_counter_by_exactly_one` (`engine_ca
 **A completed pass is not a settled device.**
 `force_sync_all` *skips* a peer that already has a dial in flight, so a pass can complete having dialed nobody.
 A caller holding an OS resource open until sync quiesces must also poll `peers_in_flight()` to zero.
+That count covers **inbound responder-side serves too** (`coordination::begin_inbound_serve`, RAII for the whole `serve` exchange), not just outbound dials — a peer mid-push appears in no outbound set, and releasing the OS window before its durable-ingest confirmation goes out suspends the exact exchange the background flush exists to finish.
 
 ## Module layout (delta-sync wire vs. orchestration)
 

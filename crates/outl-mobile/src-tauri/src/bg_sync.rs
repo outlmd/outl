@@ -306,9 +306,11 @@ fn drive_sync(cap: Duration) -> bool {
     }
     let settled = wait_until(cap, POLL_INTERVAL, || {
         // Both halves are needed. The first says our request drained; the
-        // second says no dial is still on the wire, because a forced pass
+        // second says no exchange is still on the wire, because a forced pass
         // skips a peer that already had one running and therefore completes
-        // without having reached it.
+        // without having reached it. `peers_in_flight` counts inbound
+        // responder-side serves too, so a peer mid-push through us keeps the
+        // window open until its durable-ingest confirmation goes out.
         transport.completed_sync_passes() >= seq && transport.peers_in_flight() == 0
     });
     if settled {

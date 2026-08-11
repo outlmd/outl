@@ -157,10 +157,12 @@ public final class OutlBackgroundRefresh: NSObject {
     /// `BGTaskScheduler` windows are for.
     private static let maxFlushSeconds: UInt32 = 20
 
-    /// Floor regardless of a stingy budget. Below this there is no point
-    /// starting: a same-LAN pass needs a couple of seconds, and returning
-    /// instantly would leave the exchange exactly as torn down as doing
-    /// nothing.
+    /// Threshold below which the pass is not started at all. A same-LAN pass
+    /// needs a couple of seconds, so a usable budget under this cannot finish
+    /// an exchange — it can only start one and hand the teardown to the
+    /// expiration handler, the very failure this flush exists to avoid. When
+    /// the budget is this stingy, [`flushOnBackground`] releases the
+    /// assertion immediately instead of inflating the cap to this floor.
     private static let minFlushSeconds: UInt32 = 3
 
     /// Hold a runtime assertion across one last forced sync pass when the app
@@ -226,15 +228,27 @@ public final class OutlBackgroundRefresh: NSObject {
         // overruns a short budget (the expiration handler then tears down the
         // very exchange we are protecting) and it under-uses a long one.
         //
-        // Two out-of-range answers, and it is `min`/`max` that handle both,
-        // not `isFinite`. While the app is not yet fully backgrounded,
-        // `backgroundTimeRemaining` is `.greatestFiniteMagnitude`, which IS
-        // finite — the `min` is what caps it. And a budget already smaller
-        // than the reserve makes `usable` negative, which the `max` floors.
-        // `isFinite` only catches an actual infinity or NaN.
+        // The high side is a `min`, not an `isFinite` check. While the app is
+        // not yet fully backgrounded, `backgroundTimeRemaining` is
+        // `.greatestFiniteMagnitude`, which IS finite — the `min` is what
+        // caps it; `isFinite` only catches an actual infinity or NaN.
+        //
+        // The low side is a guard, not a floor. A usable budget under
+        // `minFlushSeconds` (including the negative one a budget smaller than
+        // the reserve produces) cannot finish an exchange — inflating the cap
+        // to 3s would run the FFI PAST what iOS granted and hand the teardown
+        // to the expiration handler, the exact failure this flush exists to
+        // avoid. Skip the pass and release the assertion instead; the
+        // exchange is no worse off than with no flush at all, and the
+        // BGTaskScheduler windows remain the catch-up path.
         let budget = UIApplication.shared.backgroundTimeRemaining
         let usable = budget.isFinite ? budget - handlerReserve : Double(maxFlushSeconds)
-        let cap = UInt32(max(Double(minFlushSeconds), min(Double(maxFlushSeconds), usable)))
+        guard usable >= Double(minFlushSeconds) else {
+            NSLog("[outl] bg flush: budget too small (\(budget)s), skipping final sync pass")
+            endFlush(matching: id)
+            return
+        }
+        let cap = UInt32(min(Double(maxFlushSeconds), usable))
 
         DispatchQueue.global(qos: .utility).async {
             // Read the peer list HERE, not before taking the assertion: it

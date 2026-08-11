@@ -127,6 +127,16 @@ pub struct IrohSyncTransport {
     /// zero as well, or it releases while the dial it skipped is still on the
     /// wire.
     in_flight: InFlightPeers,
+    /// Count of inbound responder-side `serve` exchanges currently running,
+    /// bumped for the duration of every accepted sync (RAII, see
+    /// [`crate::coordination::begin_inbound_serve`]).
+    ///
+    /// Owned here for the same reason as `in_flight`:
+    /// [`Self::peers_in_flight`] must see it from outside the runtime. The
+    /// outbound set alone misses the exchange this PR's flush most wants to
+    /// finish — a peer mid-push whose durable-ingest confirmation has not
+    /// gone out yet appears nowhere in `in_flight`.
+    inbound_serves: InboundServes,
     /// Sink for [`outl_actions::SyncProgress`] updates, registered by the GUI
     /// bridge via `set_progress_sink` **before** `start()`. Read once in
     /// `start()` to build the [`crate::progress::ProgressSink`] threaded through
@@ -171,7 +181,7 @@ pub struct IrohSyncTransport {
 // resolving for `engine_sync` / `engine_catchup` / `engine_gossip` /
 // `engine_pairing` / `test_support`.
 pub(crate) use crate::coordination::{
-    try_acquire_in_flight, AppendLock, InFlightPeers, SharedWorkspaceId,
+    try_acquire_in_flight, AppendLock, InFlightPeers, InboundServes, SharedWorkspaceId,
 };
 
 impl std::fmt::Debug for IrohSyncTransport {
@@ -202,6 +212,7 @@ impl IrohSyncTransport {
             sync_passes: Arc::new(AtomicU64::new(0)),
             sync_requests: Arc::new(AtomicU64::new(0)),
             in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             progress_tx: Arc::new(Mutex::new(None)),
             endpoint_lease: Arc::new(Mutex::new(None)),
         }
@@ -287,21 +298,29 @@ impl IrohSyncTransport {
         seq
     }
 
-    /// How many peers currently have a `delta_sync` running, from any origin.
+    /// How many sync exchanges are currently running, from any origin:
+    /// outbound `delta_sync` dials (boot, catch-up, gossip, forced) **plus
+    /// inbound responder-side serves**.
     ///
-    /// Zero means no dial this transport knows about is on the wire. See the
-    /// `in_flight` field doc for why a completed forced pass is not enough on
-    /// its own.
+    /// Zero means no exchange this transport knows about is on the wire. See
+    /// the `in_flight` field doc for why a completed forced pass is not
+    /// enough on its own, and the `inbound_serves` field doc for why the
+    /// outbound set alone is not either — a peer mid-push appears only in the
+    /// inbound count, and releasing the OS window before its durable-ingest
+    /// confirmation goes out suspends the exact exchange the background
+    /// flush exists to finish.
     ///
     /// A poisoned mutex reports `usize::MAX`, not `0`. The caller uses zero as
     /// permission to let the OS suspend this process, so "I cannot tell" has
     /// to read as "not settled" — answering `0` would hand out that permission
     /// on the strength of a lock nobody can inspect.
     pub fn peers_in_flight(&self) -> usize {
+        let inbound = self.inbound_serves.load(Ordering::Acquire);
         self.in_flight
             .lock()
             .map(|set| set.len())
             .unwrap_or(usize::MAX)
+            .saturating_add(inbound)
     }
 
     /// Host one pairing session over the **live sync endpoint** and return the
@@ -376,6 +395,7 @@ impl SyncTransport for IrohSyncTransport {
         let relay_url = self.relay_url.clone();
         let sync_passes = self.sync_passes.clone();
         let in_flight = self.in_flight.clone();
+        let inbound_serves = self.inbound_serves.clone();
 
         // The one field that is MOVED, not cloned: the device endpoint lease
         // belongs to the endpoint, and the endpoint lives on the thread below.
@@ -450,6 +470,7 @@ impl SyncTransport for IrohSyncTransport {
                         relay_url,
                         sync_passes,
                         in_flight,
+                        inbound_serves,
                         runtime_handle,
                         workspace_root,
                         workspace_id,
@@ -553,6 +574,7 @@ async fn run_iroh(
     relay_url: Option<String>,
     sync_passes: Arc<AtomicU64>,
     in_flight: InFlightPeers,
+    inbound_serves: InboundServes,
     runtime: tokio::runtime::Handle,
     workspace_root: PathBuf,
     workspace_id: WorkspaceId,
@@ -649,6 +671,7 @@ async fn run_iroh(
                 actor,
                 peer_ready_tx: peer_ready_tx.clone(),
                 append_lock: append_lock.clone(),
+                inbound_serves,
             },
         )
         .accept(

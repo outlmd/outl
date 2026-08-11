@@ -677,6 +677,14 @@ pub(crate) struct SyncProtocolHandler {
     /// Same process-wide append guard the initiator side holds — the serve side
     /// writes received ops too, so it must serialize against `delta_sync`.
     pub(crate) append_lock: AppendLock,
+    /// Bumped for the duration of every accepted exchange (RAII, see
+    /// [`crate::coordination::begin_inbound_serve`]) so
+    /// `IrohSyncTransport::peers_in_flight` counts responder-side work too.
+    /// The mobile background flush waits on that count before releasing its
+    /// OS runtime assertion, and an inbound push still short of its
+    /// close-code-0 confirmation is precisely the exchange it holds the
+    /// window open to finish.
+    pub(crate) inbound_serves: crate::coordination::InboundServes,
 }
 
 impl std::fmt::Debug for SyncProtocolHandler {
@@ -708,6 +716,13 @@ impl SyncProtocolHandler {
     /// 4. read the initiator's ops blob (ops we lack) and persist, firing
     ///    `peer_ready_tx`.
     async fn serve(&self, conn: Connection) -> Result<()> {
+        // Held for the WHOLE exchange (RAII, so every early return, error and
+        // cancellation clears it): from here until after the durable-ingest
+        // confirmation close, this serve must be visible to
+        // `peers_in_flight()` — a background flush reading zero while a peer
+        // is mid-push would release the OS window and suspend the exact
+        // exchange it exists to finish.
+        let _serving = crate::coordination::begin_inbound_serve(&self.inbound_serves);
         let (mut send, mut recv) = conn.accept_bi().await.context("accept bi stream")?;
 
         // 1. read the initiator's vector clock (length-prefixed: the initiator

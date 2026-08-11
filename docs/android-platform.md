@@ -134,7 +134,8 @@ Rules that keep this from crashing:
    Both degrade instead to `JNI_FALSE` / `0`, which every caller already reads as "no transport, nothing done".
 2. **The Kotlin side wraps the *first* call anyway.**
    A `Worker` can be the first thing to touch the native library in a cold process, so `UnsatisfiedLinkError` and class-init failures surface there and nowhere else.
-   `SyncWorker` catches them and logs; a missed sync must not become a crash report.
+   `SyncWorker` catches them, logs, and returns `Result.failure()`; a missed sync must not become a crash report, but a defect that recurs on every run for this install must not read as success either.
+   Failure never retries one-time work, the periodic schedule stays in place, and the breakage is visible in WorkManager's bookkeeping instead of only in logcat.
 3. **There is no capped variant on Android, on purpose.**
    iOS has `outl_ios_background_sync_capped(seconds)` because Swift must clamp its wait against `UIApplication.backgroundTimeRemaining`, whose budget is not contractual.
    Android exposes no equivalent number — a `Worker` learns it is out of time through `isStopped`, never as a countdown it could pass down — so a capped JNI symbol would have no honest argument to receive.

@@ -154,6 +154,7 @@ pub fn spawn_responder(
                 // A fresh per-responder append guard: the test responder is the
                 // only writer to its workspace, so a standalone lock is enough.
                 append_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+                inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             },
         )
         .spawn()
@@ -206,6 +207,7 @@ pub fn spawn_sync_and_snapshot_responder(
                 actor,
                 peer_ready_tx,
                 append_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+                inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             },
         )
         .accept(

@@ -22,12 +22,16 @@ import androidx.work.WorkerParameters
  * background executor. Wrapping a blocking call in a coroutine would add a
  * dispatcher and change nothing.
  *
- * **Always returns success, including when nothing was synced.** The two
- * failure modes here are "no transport in this process" (a cold process — a
- * retry lands in the same one) and "the pass did not finish inside its cap"
- * (the transport re-pushes on its own next tick). Neither is fixed by
- * `Result.retry()`, and a retry is never expedited, so retrying would spend
- * quota to achieve nothing.
+ * **Returns success for both no-op outcomes, failure only when the native
+ * library is unreachable.** "No transport in this process" (a cold process —
+ * a retry lands in the same one) and "the pass did not finish inside its
+ * cap" (the transport re-pushes on its own next tick) are success: neither
+ * is fixed by `Result.retry()`, and a retry is never expedited, so retrying
+ * would spend quota to achieve nothing. An `UnsatisfiedLinkError` or
+ * class-init failure is different — it recurs on every run for this install,
+ * so it returns [Result.failure], which never retries one-time work (the
+ * periodic schedule stays in place) and makes the breakage visible in
+ * WorkManager's bookkeeping instead of only in logcat.
  *
  * Public, not `internal`, because WorkManager instantiates it reflectively
  * from the class name it persisted — and because work-runtime's consumer
@@ -44,10 +48,14 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
     // A Worker can be the first thing to touch the native library in a cold
     // process, so this is where an `UnsatisfiedLinkError` (missing .so for
     // this ABI) or a class-init failure would surface. Crashing the job would
-    // turn a missed sync into a crash report; log it and move on.
+    // turn a missed sync into a crash report — but swallowing it as success
+    // would hide a defect that recurs on every run for this install.
+    // `failure()` is the honest middle: it never retries one-time work, the
+    // periodic schedule stays in place, and the broken state shows up in
+    // WorkManager's bookkeeping instead of only in logcat.
     val synced = runCatching { NativeSync.backgroundSync() }.getOrElse { e ->
-      Log.w(TAG, "bg-sync: $reason pass could not reach the native library", e)
-      return Result.success()
+      Log.e(TAG, "bg-sync: $reason pass could not reach the native library", e)
+      return Result.failure()
     }
 
     if (synced) {
