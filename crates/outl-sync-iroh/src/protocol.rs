@@ -121,9 +121,8 @@ pub enum CloseVerdict {
 ///
 /// Split out of `delta_sync` so the table is a value one test can enumerate
 /// rather than a `match` reachable only over real QUIC. Getting a variant into
-/// the wrong bucket is silent by construction: both non-`Confirmed` verdicts
-/// return the same error and re-push, so nothing fails, the user just sees the
-/// wrong colour.
+/// the wrong bucket is silent by construction: both verdicts return the same
+/// error and re-push, so nothing fails, the user just sees the wrong colour.
 pub fn classify_close(err: &iroh::endpoint::ConnectionError) -> CloseVerdict {
     use iroh::endpoint::ConnectionError;
     match err {
@@ -392,8 +391,9 @@ mod tests {
     /// fix, so the table is the thing worth pinning.
     #[test]
     fn close_classification_covers_every_variant() {
-        // Code 0 is the ONLY success: it is the responder's durable-ingest
-        // confirmation. Nothing else may report Confirmed.
+        // Code 0 is a normal close, NOT a confirmation: v3 moved durable
+        // ingest onto the stream as `ACK_DURABLE`, so a peer closing with 0
+        // is just going away cleanly — amber, retried, never a red row.
         assert_eq!(
             classify_close(&app_close(CLOSE_NORMAL)),
             CloseVerdict::Interrupted

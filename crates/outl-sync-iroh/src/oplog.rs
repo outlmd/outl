@@ -276,25 +276,36 @@ pub(crate) async fn ingest_received_ops(
     peer_ready_tx: &std::sync::mpsc::Sender<()>,
     append_lock: &AppendLock,
 ) -> Result<(usize, Vec<outl_core::id::NodeId>)> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    // A local clock before UNIX_EPOCH cannot anchor "the future". Treating it
+    // as 0 (the old `unwrap_or_default()`) made the gate below classify every
+    // incoming op as >24h ahead and drop it — a sync black hole instead of a
+    // safety gate. Skip the gate for the batch instead: applying an op the
+    // gate cannot judge is recoverable (HLC ordering absorbs it), silently
+    // refusing all sync is not.
+    let now_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => Some(d.as_millis() as u64),
+        Err(e) => {
+            warn!("local clock is before UNIX_EPOCH ({e}); skipping the future-HLC gate");
+            None
+        }
+    };
 
     // HLC sanity gate (pure, no I/O): skip ops more than 24h in the future.
     let mut candidates: Vec<LogOp> = Vec::with_capacity(received.len());
     for op in received {
         let op_ms = op.ts.physical_ms;
-        if op_ms > now_ms + 86_400_000 {
-            // Log the op's HLC + actor (its identity) so a dropped op is
-            // traceable, not just "something 25h ahead vanished".
-            warn!(
-                ts = ?op.ts,
-                actor = ?op.actor,
-                "skipping op with future HLC ({}ms ahead)",
-                op_ms - now_ms
-            );
-            continue;
+        if let Some(now_ms) = now_ms {
+            if op_ms > now_ms + 86_400_000 {
+                // Log the op's HLC + actor (its identity) so a dropped op is
+                // traceable, not just "something 25h ahead vanished".
+                warn!(
+                    ts = ?op.ts,
+                    actor = ?op.actor,
+                    "skipping op with future HLC ({}ms ahead)",
+                    op_ms - now_ms
+                );
+                continue;
+            }
         }
         candidates.push(op.clone());
     }
