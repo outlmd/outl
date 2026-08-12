@@ -31,7 +31,8 @@ use crate::oplog::{ingest_received_ops, local_vector_clock, ops_missing_for};
 use crate::protocol::{
     classify_close, close_refusal_reason, decode_ops_blob, decode_request, decode_response,
     encode_blob_frame, encode_ops_blob, encode_request, encode_response, CloseVerdict, SyncRequest,
-    SyncResponse, ACK_DURABLE, CLOSE_UNKNOWN_PEER, CLOSE_WORKSPACE_MISMATCH, SYNC_ALPN,
+    SyncResponse, ACK_DURABLE, CLOSE_NORMAL, CLOSE_UNKNOWN_PEER, CLOSE_WORKSPACE_MISMATCH,
+    SYNC_ALPN,
 };
 
 /// Hard ceiling on a single sync frame's body, enforced before allocating.
@@ -45,6 +46,13 @@ use crate::protocol::{
 /// is generous; the incremental read in [`read_frame`] means we still only
 /// allocate as bytes actually arrive.
 const MAX_FRAME_BODY: usize = 256 * 1024 * 1024;
+
+/// Length of the big-endian length prefix [`read_frame`] leaves on the front
+/// of the buffer it returns. Every consumer that reaches past the prefix
+/// (rather than handing the whole `[prefix || body]` buffer to a `decode_*`
+/// helper) must offset by this, never by a bare literal, so a change to the
+/// framing shape has one name to chase.
+const FRAME_PREFIX_LEN: usize = 4;
 
 /// Validate a frame's declared body length against [`MAX_FRAME_BODY`] before we
 /// act on it. Split out from [`read_frame`] so the ceiling is unit-testable
@@ -178,7 +186,9 @@ async fn read_ack(recv: &mut iroh::endpoint::RecvStream) -> Result<(), AckError>
         .await
         .context("read durable-ingest ack")
         .map_err(AckError::Stream)?;
-    match frame.get(4) {
+    // `read_frame` returns `[prefix || body]`; the ack byte is the body's
+    // first byte, one prefix-length past the front.
+    match frame.get(FRAME_PREFIX_LEN) {
         Some(&ACK_DURABLE) => Ok(()),
         Some(other) => Err(AckError::Protocol(anyhow::anyhow!(
             "peer sent an unknown ack byte: {other}"
@@ -504,6 +514,15 @@ impl ProtocolHandler for SyncProtocolHandler {
     /// Looping until `accept_bi` errors is what makes the connection worth
     /// keeping: one connect, then a stream per sync.
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        // One bad exchange does not condemn the connection (the next stream
+        // may be fine, and tearing down puts us back to a connect per sync),
+        // but an unbroken run of failures means the peer is wedged — a
+        // protocol bug, a corrupt sender — and serving it forever keeps this
+        // task alive and logging with no exchange ever landing. Cap the RUN,
+        // not the total: any success proves the connection still works and
+        // resets the count.
+        const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+        let mut consecutive_failures = 0u32;
         loop {
             let (send, recv) = match conn.accept_bi().await {
                 Ok(streams) => streams,
@@ -515,12 +534,21 @@ impl ProtocolHandler for SyncProtocolHandler {
                 }
             };
             if let Err(e) = self.serve_exchange(&conn, send, recv).await {
-                warn!("sync serve failed: {e:#}");
-                // One bad exchange does not condemn the connection: the next
-                // stream may be fine, and tearing down here would put us back
-                // to a connect per sync.
+                consecutive_failures += 1;
+                warn!(
+                    "sync serve failed ({consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} in a row): {e:#}"
+                );
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    // CLOSE_NORMAL, so the initiator reads Interrupted (amber,
+                    // reconnect-and-retry), not a red refusal: the remedy for
+                    // a wedged pooled connection is a fresh one.
+                    warn!("closing sync connection after {MAX_CONSECUTIVE_FAILURES} consecutive failed exchanges");
+                    conn.close(CLOSE_NORMAL.into(), b"too-many-failed-exchanges");
+                    return Ok(());
+                }
                 continue;
             }
+            consecutive_failures = 0;
         }
     }
 }
