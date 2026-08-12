@@ -49,7 +49,7 @@ The rules that matter, each of which a first version got wrong:
   The expiration handler is a hard deadline — iOS *terminates* an app that overruns — and `endBackgroundTask` must never run twice on one identifier.
   `endFlush(matching:)` takes the identifier the caller owns, because a foreground bounce can end flush A while its worker still runs, and that worker would otherwise end **B's** assertion.
 - **Release on your own pass, not on any pass.**
-  The FFI waits for the sequence number `sync_now_seq()` returned *and* for `peers_in_flight()` to reach zero.
+  The FFI waits for the sequence number `sync_now_seq()` returned *and* for `inbound_serves()` to reach zero.
   Waiting on "the completed-pass counter moved" reads the foreground timer's pass (mobile fires one every 3s) as your own and releases the window ~250ms in.
 - **Size the window from `backgroundTimeRemaining`,** not a constant.
   One unreachable peer costs 5s direct + 10s relay, so a fixed 20s cap overran a real budget with two peers — guaranteeing the tear-down the assertion exists to prevent.

@@ -221,14 +221,17 @@ The Vite dev server runs on **port 1421** so it can coexist with `outl-mobile` (
 ### Testing P2P sync from a source build
 
 **A binary cargo launches is a different device from the installed app.**
-The repo's `.cargo/config.toml` exports `OUTL_DEVICE_DIR = target/device-store` so the test suite stays off your real `~/.config/outl` and `~/.outl`.
+The repo's `.cargo/config.toml` exports `OUTL_DEVICE_DIR = .dev-device-store` so the test suite stays off your real `~/.config/outl` and `~/.outl`.
 A suite that used them would mint keys in your home directory and arbitrate the endpoint lease against your running desktop app.
 Cargo exports that variable to **everything it launches**, `cargo run -p outl-desktop` included, so a source build gets its own actor id *and* its own iroh identity — a node id no peer has ever heard of.
 
 Two things follow, and both look like a transport bug when you hit them:
 
 - Devices paired with the installed app store that app's node id, so the source build reads as **offline** to them forever.
-- The identity lives under `target/`, so `cargo clean` deletes it and the next run mints a new node id — **every pairing made with the previous one is void.**
+- The identity is **not** under `target/`, and that is deliberate.
+  It was, and `cargo clean` deletes `target/` — which the size hooks run automatically — so every clean minted a new node id and voided every pairing made with the old one.
+  The peer then answers `peer refused: this device is not paired with it`, because pairing is bidirectional and the phone still lists an id that no longer exists.
+  Three node ids in one day before the store moved to `.dev-device-store/`, which survives a clean.
 
 `default_device_dir()` logs one `WARN` naming the directory at startup, so a source build always says which device it is.
 
@@ -239,7 +242,8 @@ OUTL_DEVICE_DIR= cargo run --release -p outl-desktop
 ```
 
 Only do that for a run you want on the wire — it takes the endpoint lease from any installed client that is already running, and writes to your real device store.
-To keep a source build isolated *and* stably paired, point the variable at a persistent path outside `target/` instead (`OUTL_DEVICE_DIR=~/.outl-dev`) and pair once.
+A source build is now stably paired by default.
+Pair the phone against `.dev-device-store`'s identity once and it stays paired across rebuilds and cleans; deleting that directory is the one thing that breaks it again.
 
 Symptoms and network-side causes are in [sync.md → Troubleshooting sync](sync.md#troubleshooting-sync).
 

@@ -43,7 +43,7 @@
 //! *foreground* pass complete ~250ms later, declare victory, and release the
 //! OS window with its own request still queued. The mechanism built to
 //! finish the sync was the thing ending it. Waiting on
-//! [`IrohSyncTransport::peers_in_flight`] too closes the companion hole: a
+//! [`IrohSyncTransport::inbound_serves`] too closes the companion hole: a
 //! forced pass skips a peer that already has a dial running, so its
 //! completion says nothing about that peer.
 //!
@@ -72,7 +72,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 // No `SyncTransport` import: this module deliberately drives the *concrete*
-// `IrohSyncTransport` rather than the trait. `sync_now_seq` / `peers_in_flight`
+// `IrohSyncTransport` rather than the trait. `sync_now_seq` / `inbound_serves`
 // are inherent methods, and the trait's fire-and-forget `sync_now` is exactly
 // the thing that cannot be waited on correctly.
 use outl_sync_iroh::{workspace_peers_path, IrohSyncTransport, PeersStore};
@@ -305,13 +305,24 @@ fn drive_sync(cap: Duration) -> bool {
         return true;
     }
     let settled = wait_until(cap, POLL_INTERVAL, || {
-        // Both halves are needed. The first says our request drained; the
-        // second says no exchange is still on the wire, because a forced pass
-        // skips a peer that already had one running and therefore completes
-        // without having reached it. `peers_in_flight` counts inbound
-        // responder-side serves too, so a peer mid-push through us keeps the
-        // window open until its durable-ingest confirmation goes out.
-        transport.completed_sync_passes() >= seq && transport.peers_in_flight() == 0
+        // Our own request drained, AND nobody is mid-push through us.
+        //
+        // `inbound_serves()` counts ONLY responder-side exchanges. Waiting on
+        // our outbound dials as well made the predicate unreachable exactly
+        // when the device was worst off: a dial to an
+        // unreachable peer costs 15s (5s direct + 10s relay) while the
+        // catch-up loop starts another every 8s, so with one peer offline the
+        // outbound set is never empty. On device that read as
+        // `window elapsed before pass #107 settled` — the full cap burned on
+        // a condition that could not become true, which iOS repays by
+        // granting fewer windows.
+        //
+        // Our dials do not need the wait: `completed_sync_passes() >= seq`
+        // already covers the pass we asked for, and one hung on a dead peer
+        // will not land inside any window. An inbound serve is the half worth
+        // holding the OS open for — someone else's ops, seconds from the
+        // durable-ingest confirmation that stops them being re-sent.
+        transport.completed_sync_passes() >= seq && transport.inbound_serves() == 0
     });
     if settled {
         info!("bg-sync: forced pass #{seq} completed, returning window early");

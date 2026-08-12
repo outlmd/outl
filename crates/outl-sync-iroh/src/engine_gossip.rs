@@ -44,6 +44,9 @@ use crate::peers::PeersStore;
 pub(crate) struct GossipCtx {
     pub(crate) gossip: Gossip,
     pub(crate) endpoint: iroh::Endpoint,
+    /// Shared connection pool, so a gossip-triggered sync reuses the same hot
+    /// connection the catch-up loop and forced passes use.
+    pub(crate) conns: crate::peer_conn::PeerConnections,
     pub(crate) workspace_root: PathBuf,
     pub(crate) workspace_id: SharedWorkspaceId,
     pub(crate) actor: ActorId,
@@ -130,7 +133,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         return;
     }
     let peer_node_id = msg.delivered_from;
-    let ep = ctx.endpoint.clone();
+    let conns = ctx.conns.clone();
     let wr = ctx.workspace_root.clone();
     let wid = ctx.workspace_id.clone();
     let actor = ctx.actor;
@@ -150,7 +153,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         let started = Instant::now();
         let wid_snapshot = wid.read().expect("workspace id rwlock poisoned").clone();
         match delta_sync(
-            &ep,
+            &conns,
             peer_node_id,
             &wr,
             &wid_snapshot,

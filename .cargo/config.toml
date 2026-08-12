@@ -16,4 +16,22 @@
 #
 # An installed `outl` binary is unaffected — cargo only exports this to
 # processes it launches itself.
-OUTL_DEVICE_DIR = { value = "target/device-store", relative = true }
+#
+# NOT under `target/`, and that is the whole point of this line.
+#
+# It was, and `cargo clean` deletes `target/` — including the iroh identity key,
+# which IS this device's node id. So every clean turned a `cargo run` desktop
+# into a brand-new device, and every device already paired with it started
+# refusing the connection: `peer refused: this device is not paired with it`,
+# because pairing is bidirectional and the peer still lists an id that no longer
+# exists. This repo cleans often (the file-size and disk hooks do it
+# automatically), so it happened three times in one day — three node ids,
+# three broken pairings, and a log that reads like a transport bug.
+#
+# `.dev-device-store/` is gitignored and survives a clean, so a source build
+# stays the same device across rebuilds. It is still NOT the machine's real
+# identity: run with `OUTL_DEVICE_DIR=` for that, or pair the phone against
+# this one once and it stays paired. See `outl_sync_iroh::default_device_dir`,
+# whose own docs asked for a persistent path while this file pointed at the one
+# directory guaranteed to be erased.
+OUTL_DEVICE_DIR = { value = ".dev-device-store", relative = true }

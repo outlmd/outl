@@ -364,11 +364,16 @@ export function Journal() {
       // us to pull. We call the full `pullAndReload` (not just `syncNow`):
       // relying on the `workspace-ready` event alone left the ops on disk
       // without re-rendering — the symptom was "only shows after I hit sync".
-      // Skipped mid-edit so it never resets the textarea; cheap no-op when the
-      // vector clocks already match. `background: true` keeps this silent — no
-      // sync spinner every tick, and it only swaps the view when the content
-      // actually changed, so a quiet poll never re-renders under the user.
-      if (!editingId()) void pullAndReload({ background: true });
+      //
+      // NOT guarded on `editingId()` here. `pullAndReload` already handles the
+      // editing case correctly — it pulls the peer's ops to disk and defers
+      // only the RE-RENDER, which the `editingId` effect drains the moment the
+      // user leaves the field. Testing it out here too made that branch
+      // unreachable and turned "don't reset the textarea" into "don't sync at
+      // all while a block is open", which is precisely the state a user is in
+      // while waiting for a desktop edit to show up. Same symptom the comment
+      // above says this poll exists to prevent, one layer up.
+      void pullAndReload({ background: true });
     }, 3000);
     // Reminder delivery. The backend decides what is due and remembers
     // what this device already delivered, so a poll that fires twice
@@ -721,10 +726,12 @@ export function Journal() {
     // "loading" window converges on the freshly opened workspace.
     import("@tauri-apps/api/event").then(({ listen }) => {
       listen("workspace-ready", async () => {
-        // Don't reopen the page out from under an in-flight edit — it would
-        // reset the textarea. The ops are already on disk; the next idle
-        // workspace-ready (or the user committing) picks them up.
-        if (editingId()) return;
+        // Mid-edit is handled inside `pullAndReload` (pull now, re-render when
+        // the field closes), so returning early here only threw the signal
+        // away. "The next idle workspace-ready picks them up" was the flaw:
+        // this event fires when peer ops LAND, so once they have landed there
+        // may not be another one, and the view then waits for the poll — or
+        // for the user to press Sync.
         if (!view()) {
           await loadTodayWithRetry();
           return;

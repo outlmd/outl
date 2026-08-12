@@ -306,7 +306,7 @@ impl PairingProtocolHandler {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drain_pair_completions(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<iroh::EndpointAddr>,
-    endpoint: iroh::Endpoint,
+    conns: crate::peer_conn::PeerConnections,
     workspace_root: std::path::PathBuf,
     workspace_id: SharedWorkspaceId,
     actor: outl_core::id::ActorId,
@@ -331,7 +331,7 @@ pub(crate) async fn drain_pair_completions(
             .expect("workspace id rwlock poisoned")
             .clone();
         match crate::engine::delta_sync(
-            &endpoint,
+            &conns,
             addr.clone(),
             &workspace_root,
             &wid_snapshot,
@@ -358,7 +358,7 @@ pub(crate) async fn drain_pair_completions(
         // source of truth and boot falls back to full replay. On success it fires
         // its own `peer_ready_tx` so the reload adopts the cached snapshot.
         match crate::engine_snapshot::pull_snapshot_from_peer(
-            &endpoint,
+            conns.endpoint(),
             addr.clone(),
             &workspace_root,
             &peer_ready_tx,
@@ -381,7 +381,7 @@ pub(crate) async fn drain_pair_completions(
         // not-yet-transferred asset just renders dead until the next pull. See
         // `crate::engine_assets`.
         match crate::engine_assets::pull_assets_from_peer(
-            &endpoint,
+            conns.endpoint(),
             addr,
             &workspace_root,
             &progress,

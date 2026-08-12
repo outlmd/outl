@@ -123,7 +123,7 @@ Adding a fourth operation means adding it to the core plus *both* export blocks 
 Two rules that outlive any refactor here:
 
 1. **Wait on your own pass, never on "the counter moved".**
-   `drive_sync` calls `IrohSyncTransport::sync_now_seq()` and waits for `completed_sync_passes() >= seq && peers_in_flight() == 0`.
+   `drive_sync` calls `IrohSyncTransport::sync_now_seq()` and waits for `completed_sync_passes() >= seq && inbound_serves() == 0`.
    The naive version shipped and was wrong.
    The completed-pass counter is global and `Journal.tsx` fires `syncNow()` on a 3s foreground timer, so a background flush watched the *foreground* pass complete ~250ms later and released the OS window with its own request still queued.
    A `seq` of `0` means the runtime is down — return immediately, do not burn the cap waiting for a request that was never enqueued.

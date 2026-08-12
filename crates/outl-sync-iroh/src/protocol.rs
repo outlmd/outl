@@ -1,6 +1,6 @@
 //! Wire protocol for the outl sync ALPN.
 //!
-//! ALPN: `b"outl-sync/2"`
+//! ALPN: `b"outl-sync/3"`
 //!
 //! ## Sync request (JSON, 4-byte length prefix)
 //!
@@ -38,9 +38,12 @@
 //!    below `A[actor].max` is detected — see `engine_sync::ops_missing_for`).
 //! 4. initiator → responder: ops blob — same rule under clock B, then
 //!    `finish()`.
+//! 5. responder → initiator: [`ACK_DURABLE`], written only after the batch is
+//!    fsynced, then `finish()`.
 //!
 //! Every step is length-prefixed, so both directions fully reconcile on one
-//! connection.
+//! stream — and step 5 is why the CONNECTION survives it. Confirming by
+//! closing (v2) meant a fresh QUIC connect per sync; see [`crate::peer_conn`].
 
 use anyhow::Result;
 use outl_core::hlc::Hlc;
@@ -56,12 +59,21 @@ use std::collections::HashMap;
 /// receiver's watermark. v1 and v2 clocks are wire-incompatible; the ALPN
 /// bump makes an old↔new dial fail cleanly at connect instead of
 /// half-conversing.
-pub const SYNC_ALPN: &[u8] = b"outl-sync/2";
+/// v3 moves the durable-ingest confirmation from the connection close code
+/// onto the stream (`ACK_DURABLE`), so a connection outlives the exchange
+/// and can be pooled. A v2 peer confirms by closing and a v3 peer waits for a
+/// frame that never arrives, so the two must not talk: the ALPN bump makes
+/// that a clean connect failure instead of a 30s hang on every sync.
+pub const SYNC_ALPN: &[u8] = b"outl-sync/3";
 
-/// Close code the responder uses to confirm **durable** ingest of the
-/// initiator's push. Any other close means the push may not have landed, so
-/// the initiator re-pushes; see `delta_sync`'s trailing `conn.closed()`.
-pub const CLOSE_DONE: u32 = 0;
+/// Close code for "I am ending this connection normally" — a shutdown, a
+/// finished snapshot or asset transfer, a completed pairing, a status probe.
+///
+/// It used to mean "durably ingested your push", which is why it was named
+/// `CLOSE_DONE`. That moved onto the stream as [`ACK_DURABLE`] so the
+/// connection could survive the exchange, and a close code that no longer
+/// confirms anything should not keep a name that says it does.
+pub const CLOSE_NORMAL: u32 = 0;
 
 /// Close code: the dialer belongs to a different workspace (its
 /// `SyncRequest.workspace_id` does not match ours). Sent before any payload.
@@ -71,16 +83,34 @@ pub const CLOSE_WORKSPACE_MISMATCH: u32 = 3;
 /// on this side. Sent before any payload.
 pub const CLOSE_UNKNOWN_PEER: u32 = 4;
 
+/// Durable-ingest confirmation, sent by the responder **on the stream** after
+/// its `sync_data()` returns.
+///
+/// This used to be a connection close code, and that choice cost more than it
+/// looked. Confirming by closing means the connection cannot survive the
+/// exchange, so every sync pays a fresh QUIC connect: ~5s burned on a stale
+/// direct address before the relay fallback, then the relay handshake. Two ops
+/// between two devices on one LAN measured 23 seconds, ~20 of them connection
+/// overhead. A frame costs one byte and leaves the connection hot, which is
+/// what makes [`crate::peer_conn`] pooling possible at all.
+///
+/// The guarantee is unchanged and the ordering is the point: this is written
+/// only after the batch is on disk and fsynced, so reading it still means "the
+/// peer durably has your push". Writing it any earlier turns a confirmation
+/// into a guess.
+pub const ACK_DURABLE: u8 = 1;
+
 /// What a peer's close means for the pass that just ran.
 ///
 /// The distinction is the difference between "your sync is broken" and "your
-/// phone locked", and only one of those is worth a red row in the UI.
+/// phone locked", and only one of those is worth a red row in the UI. There is
+/// no success variant: success is reading [`ACK_DURABLE`] off the stream, and
+/// by the time anyone asks this question that read has already failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseVerdict {
-    /// [`CLOSE_DONE`]: the responder durably has our push. The only success.
-    Confirmed,
     /// The peer stopped answering rather than refusing — OS suspension, sleep,
-    /// a dropped carrier-NAT flow. Expected, transient, retried next tick.
+    /// a dropped carrier-NAT flow, or a clean shutdown on its side. Expected,
+    /// transient, retried next tick.
     Interrupted,
     /// The peer answered and said no, or the transport itself failed. A real
     /// problem the user may have to act on.
@@ -97,13 +127,14 @@ pub enum CloseVerdict {
 pub fn classify_close(err: &iroh::endpoint::ConnectionError) -> CloseVerdict {
     use iroh::endpoint::ConnectionError;
     match err {
-        ConnectionError::ApplicationClosed(ac) if ac.error_code == CLOSE_DONE.into() => {
-            CloseVerdict::Confirmed
-        }
         ConnectionError::TimedOut
         | ConnectionError::Reset
         | ConnectionError::LocallyClosed
         | ConnectionError::ConnectionClosed(_) => CloseVerdict::Interrupted,
+        // A peer shutting down cleanly is going away, not refusing us.
+        ConnectionError::ApplicationClosed(ac) if ac.error_code == CLOSE_NORMAL.into() => {
+            CloseVerdict::Interrupted
+        }
         _ => CloseVerdict::Failed,
     }
 }
@@ -364,8 +395,8 @@ mod tests {
         // Code 0 is the ONLY success: it is the responder's durable-ingest
         // confirmation. Nothing else may report Confirmed.
         assert_eq!(
-            classify_close(&app_close(CLOSE_DONE)),
-            CloseVerdict::Confirmed
+            classify_close(&app_close(CLOSE_NORMAL)),
+            CloseVerdict::Interrupted
         );
 
         // The peer went away mid-exchange. A locked phone, a sleeping laptop,
@@ -396,10 +427,9 @@ mod tests {
             CloseVerdict::Failed
         );
 
-        // An application code we do not recognise is Failed, never Confirmed.
-        // `test_support::HalfResponder` closes with 9 to simulate the
-        // "completed the exchange but never ingested" peer, and reporting that
-        // as success is the desktop→mobile "synced ok but nothing arrived" bug.
+        // An application code we do not recognise is Failed. The peer answered
+        // with something this version has no meaning for, and guessing is how
+        // the desktop→mobile "synced ok but nothing arrived" bug happened.
         assert_eq!(classify_close(&app_close(9)), CloseVerdict::Failed);
     }
 

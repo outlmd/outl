@@ -111,10 +111,12 @@ fn warn_redirected_device_dir(custom: &str) {
         tracing::warn!(
             device_dir = %custom,
             "$OUTL_DEVICE_DIR is set: this process is a SEPARATE device from ~/.outl, with \
-             its own iroh node id — peers paired with the machine's real identity will show \
-             it as offline, and deleting that directory (e.g. `cargo clean` when it lives \
-             under target/) rotates the node id and voids every existing pairing. Run with \
-             `OUTL_DEVICE_DIR=` to use the machine's real identity."
+             its own iroh node id. Peers paired with the machine's real identity show it as \
+             offline, and DELETING this directory rotates the node id — every device already \
+             paired with it then answers `peer refused: this device is not paired with it`, \
+             because pairing is bidirectional and the peer still lists the old id. Keep the \
+             directory to keep the pairing, or run with `OUTL_DEVICE_DIR=` for the machine's \
+             real identity."
         );
     });
 }

@@ -40,6 +40,11 @@ lcov.info
 # macOS
 .DS_Store
 
+# Device store for cargo-launched builds (identity key, actor, endpoint lease).
+# Deliberately outside `target/`: `cargo clean` there rotates this machine's
+# iroh node id and silently voids every existing pairing. See .cargo/config.toml.
+/.dev-device-store/
+
 # Local outl workspace for dev/test
 /playground/
 /.outl-test/

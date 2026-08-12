@@ -116,26 +116,15 @@ pub struct IrohSyncTransport {
     /// a bug to fix — but it is a contract, so it is written down. Restarting
     /// one means resetting both together, and only while no waiter is live.
     sync_requests: Arc<AtomicU64>,
-    /// Peers with a `delta_sync` currently running (any origin: boot, catch-up,
-    /// gossip, forced). Owned here rather than inside `run_iroh` so
-    /// [`Self::peers_in_flight`] can read it.
-    ///
-    /// A forced pass **skips** a peer that already has a dial running (its
-    /// result lands anyway), so "my pass completed" does not imply "every peer
-    /// was dialed". A caller that is holding an OS resource open until the
-    /// device is settled — again, the iOS flush — has to wait for this to reach
-    /// zero as well, or it releases while the dial it skipped is still on the
-    /// wire.
-    in_flight: InFlightPeers,
     /// Count of inbound responder-side `serve` exchanges currently running,
     /// bumped for the duration of every accepted sync (RAII, see
     /// [`crate::coordination::begin_inbound_serve`]).
     ///
-    /// Owned here for the same reason as `in_flight`:
-    /// [`Self::peers_in_flight`] must see it from outside the runtime. The
-    /// outbound set alone misses the exchange this PR's flush most wants to
-    /// finish — a peer mid-push whose durable-ingest confirmation has not
-    /// gone out yet appears nowhere in `in_flight`.
+    /// Owned by the transport, not by `run_iroh`, because
+    /// [`Self::inbound_serves`] must read it from outside the runtime. The
+    /// outbound in-flight set stays inside `run_iroh`: nothing outside needs
+    /// it, and a background caller waiting on our own dials can never finish
+    /// while a peer is unreachable.
     inbound_serves: InboundServes,
     /// Sink for [`outl_actions::SyncProgress`] updates, registered by the GUI
     /// bridge via `set_progress_sink` **before** `start()`. Read once in
@@ -211,7 +200,6 @@ impl IrohSyncTransport {
             pairing_hub: Arc::new(Mutex::new(None)),
             sync_passes: Arc::new(AtomicU64::new(0)),
             sync_requests: Arc::new(AtomicU64::new(0)),
-            in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
             inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             progress_tx: Arc::new(Mutex::new(None)),
             endpoint_lease: Arc::new(Mutex::new(None)),
@@ -257,9 +245,9 @@ impl IrohSyncTransport {
     /// (nothing was enqueued, so nothing will ever complete) — a caller must
     /// treat `0` as "do not wait".
     ///
-    /// Poll [`Self::peers_in_flight`] down to zero as well before concluding
+    /// Poll [`Self::inbound_serves`] down to zero as well before concluding
     /// the device is settled: a forced pass skips peers that already have a
-    /// dial running, so its completion says nothing about theirs.
+    /// dial running, so its completion says nothing about a peer mid-push.
     pub fn sync_now_seq(&self) -> u64 {
         // The lock is held across BOTH the numbering and the send, and that is
         // the point — not just to reach `tx`.
@@ -298,29 +286,26 @@ impl IrohSyncTransport {
         seq
     }
 
-    /// How many sync exchanges are currently running, from any origin:
-    /// outbound `delta_sync` dials (boot, catch-up, gossip, forced) **plus
-    /// inbound responder-side serves**.
+    /// Inbound exchanges being served right now.
     ///
-    /// Zero means no exchange this transport knows about is on the wire. See
-    /// the `in_flight` field doc for why a completed forced pass is not
-    /// enough on its own, and the `inbound_serves` field doc for why the
-    /// outbound set alone is not either — a peer mid-push appears only in the
-    /// inbound count, and releasing the OS window before its durable-ingest
-    /// confirmation goes out suspends the exact exchange the background
-    /// flush exists to finish.
+    /// This is the half a background window must actually wait on, and the
+    /// two must not be conflated in that predicate. A dial to an unreachable
+    /// peer costs `DIRECT_CONNECT_TIMEOUT` + `RELAY_CONNECT_TIMEOUT` (15s)
+    /// while the catch-up loop starts another every `CATCH_UP_INTERVAL` (8s),
+    /// so with one peer offline the outbound set is **never** empty — and a
+    /// waiter on it can never finish. Observed on
+    /// device as `window elapsed before pass #107 settled`: the flush burned
+    /// its full 20s cap on a condition that could not become true, which iOS
+    /// answers by granting fewer windows later.
     ///
-    /// A poisoned mutex reports `usize::MAX`, not `0`. The caller uses zero as
-    /// permission to let the OS suspend this process, so "I cannot tell" has
-    /// to read as "not settled" — answering `0` would hand out that permission
-    /// on the strength of a lock nobody can inspect.
-    pub fn peers_in_flight(&self) -> usize {
-        let inbound = self.inbound_serves.load(Ordering::Acquire);
-        self.in_flight
-            .lock()
-            .map(|set| set.len())
-            .unwrap_or(usize::MAX)
-            .saturating_add(inbound)
+    /// Waiting on our own dials was never the point anyway. They are covered
+    /// by `completed_sync_passes() >= seq`, and one hung on a dead peer will
+    /// not land inside any window. An inbound push is different: it is
+    /// somebody else's ops arriving, seconds from a durable-ingest
+    /// confirmation, and suspending there is the exchange this mechanism
+    /// exists to protect.
+    pub fn inbound_serves(&self) -> usize {
+        self.inbound_serves.load(Ordering::Acquire)
     }
 
     /// Host one pairing session over the **live sync endpoint** and return the
@@ -394,7 +379,6 @@ impl SyncTransport for IrohSyncTransport {
         let pairing_hub = self.pairing_hub.clone();
         let relay_url = self.relay_url.clone();
         let sync_passes = self.sync_passes.clone();
-        let in_flight = self.in_flight.clone();
         let inbound_serves = self.inbound_serves.clone();
 
         // The one field that is MOVED, not cloned: the device endpoint lease
@@ -469,7 +453,6 @@ impl SyncTransport for IrohSyncTransport {
                         pairing_hub,
                         relay_url,
                         sync_passes,
-                        in_flight,
                         inbound_serves,
                         runtime_handle,
                         workspace_root,
@@ -573,7 +556,6 @@ async fn run_iroh(
     pairing_hub_slot: Arc<Mutex<Option<Arc<PairingHub>>>>,
     relay_url: Option<String>,
     sync_passes: Arc<AtomicU64>,
-    in_flight: InFlightPeers,
     inbound_serves: InboundServes,
     runtime: tokio::runtime::Handle,
     workspace_root: PathBuf,
@@ -629,12 +611,16 @@ async fn run_iroh(
     // corruption. See `AppendLock`.
     let append_lock: AppendLock = Arc::new(tokio::sync::Mutex::new(()));
     // Defense in depth: skip launching a second delta_sync for a peer that
-    // already has one running. See `InFlightPeers`. Owned by the transport (not
-    // created here) so `peers_in_flight()` can observe it from outside the
-    // runtime — a background caller needs to know the device is settled, not
-    // just that its own pass returned.
+    // already has one running. See `InFlightPeers`.
+    let in_flight: InFlightPeers = Arc::new(std::sync::Mutex::new(HashSet::new()));
 
     // Build gossip.
+    // One pool for every sync path. A connection opened by the boot connect is
+    // the same one the catch-up loop, gossip-triggered sync and forced passes
+    // reuse — which is the whole point: the connect is paid once per peer, not
+    // once per sync.
+    let conns = crate::peer_conn::PeerConnections::new(endpoint.clone());
+
     let gossip = Gossip::builder().spawn(endpoint.clone());
 
     // The on-disk path peers.json lives at, so the catch-up loop below can
@@ -700,7 +686,7 @@ async fn run_iroh(
     // map) so a new device syncs without waiting for the 8s catch-up tick.
     let pair_sync = tokio::spawn(drain_pair_completions(
         pair_done_rx,
-        endpoint.clone(),
+        conns.clone(),
         workspace_root.clone(),
         workspace_id.clone(),
         actor,
@@ -718,7 +704,7 @@ async fn run_iroh(
         let Ok(addr) = peer.iroh_endpoint_addr() else {
             continue;
         };
-        let ep = endpoint.clone();
+        let conns = conns.clone();
         let wr = workspace_root.clone();
         let wid = workspace_id.clone();
         let tx = peer_ready_tx.clone();
@@ -743,7 +729,7 @@ async fn run_iroh(
             );
             let started = Instant::now();
             let wid_snapshot = wid.read().expect("workspace id rwlock poisoned").clone();
-            match delta_sync(&ep, addr, &wr, &wid_snapshot, actor, tx, &lock, &prog).await {
+            match delta_sync(&conns, addr, &wr, &wid_snapshot, actor, tx, &lock, &prog).await {
                 Ok(()) => {
                     info!("boot: initial sync to {} ok", nid.fmt_short());
                     health.record_success(nid, started);
@@ -772,6 +758,7 @@ async fn run_iroh(
     let gossip_ctx = crate::engine_gossip::GossipCtx {
         gossip: gossip.clone(),
         endpoint: endpoint.clone(),
+        conns: conns.clone(),
         workspace_root: workspace_root.clone(),
         workspace_id: workspace_id.clone(),
         actor,
@@ -793,7 +780,7 @@ async fn run_iroh(
     // at start(); a device paired later writes to the same file but the running
     // transport never re-reads it, so its op-log history is never pulled (only
     // brand-new ops trickle in via gossip). This loop closes that gap.
-    let catchup_ep = endpoint.clone();
+    let catchup_conns = conns.clone();
     let catchup_wr = workspace_root.clone();
     let catchup_wid = workspace_id.clone();
     let catchup_tx = peer_ready_tx.clone();
@@ -810,7 +797,7 @@ async fn run_iroh(
     let catchup_wid_changed = pairing_hub.subscribe_wid_changed();
     let catchup = tokio::spawn(async move {
         catch_up_loop(
-            catchup_ep,
+            catchup_conns,
             catchup_peers_path,
             catchup_wr,
             catchup_wid,
@@ -834,7 +821,7 @@ async fn run_iroh(
     // `drain_sync_now`.
     let sync_now = tokio::spawn(drain_sync_now(
         sync_now_rx,
-        endpoint.clone(),
+        conns.clone(),
         peers_path,
         workspace_root.clone(),
         workspace_id.clone(),
@@ -858,6 +845,10 @@ async fn run_iroh(
     // `pair_host` / `pair_join` must error ("not started") rather than touch a
     // dead endpoint.
     *pairing_hub_slot.lock().expect("pairing hub mutex poisoned") = None;
+    // Close pooled connections before the endpoint goes: peers then see a
+    // clean close instead of waiting out an idle timeout, which is what makes
+    // a restarted device look offline to its peers for a minute.
+    conns.close_all();
     router.shutdown().await.ok();
     endpoint.close().await;
     Ok(())

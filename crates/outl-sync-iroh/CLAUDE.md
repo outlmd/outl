@@ -13,15 +13,15 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   It reads `[sync] transport` + `[sync] relay_url`, takes the endpoint lease, loads the identity + peer store, and returns `Ready` / `EndpointBusy` / `Disabled`.
   Every client calls it; the identity + peers + relay recipe used to be written out in the TUI, the shared Tauri backend and `outl sync` separately, and the MCP server skipped it entirely (issue #220).
   `build_default_transport(workspace_root)` is the form every client but mobile calls — it fills in `~/.outl/identity.key`; mobile passes its sandbox path to `build_transport` instead.
-  `default_device_dir()` resolves that path, and **logs one `WARN` per process when `$OUTL_DEVICE_DIR` redirects it**.
-  The repo's `.cargo/config.toml` exports that variable, so a `cargo run` build is a *separate device* with its own node id, and `cargo clean` rotates it.
+  `default_device_dir()` resolves that path and **logs one `WARN` per process when `$OUTL_DEVICE_DIR` redirects it** — a `cargo run` build is a *separate device*, and deleting its store voids every pairing.
   See [`docs/development.md` → Testing P2P sync from a source build](../../docs/development.md#testing-p2p-sync-from-a-source-build).
 - `EndpointLease` (`lease.rs`) — the device-wide election backing it (see "One endpoint per identity, elected not assigned")
 - `IrohSyncTransport` — implements `SyncTransport` trait, including the
   gossip-backed `announce_local_ops` hook (sync side → tokio task via an
   `mpsc` channel set up in `start()`) and the `peer_health()` reachability
   snapshot (see "One endpoint per identity, elected not assigned" below)
-- Wire protocol — ALPN `b"outl-sync/2"`, vector-clock delta sync with per-actor `ActorClock { max, count }` gap detection (see "Sync invariants"; the v2 bump makes an old↔new dial fail cleanly, no compat shim)
+- Wire protocol — ALPN `b"outl-sync/3"`, vector-clock delta sync with per-actor `ActorClock { max, count }` gap detection (see "Sync invariants").
+  v3 put the durable-ingest ack on the stream so a connection survives the exchange and can be pooled; a bump fails an old↔new dial cleanly at connect, no compat shim
 - Pairing (`pairing` module, ALPN `b"outl-sync/pair/1"`) — the two-sided handshake.
   The "ticket" is a base64 `EndpointAddr` (id + relay + direct addrs).
   Both sides exchange one pairing payload (carrying their **full** `EndpointAddr`) over a single bi stream and persist the remote to `peers.json`.
@@ -205,15 +205,19 @@ Polling "did the counter move" instead is a defect, not a style nit.
 Mobile fires `sync_now()` on a 3s foreground timer, so the iOS background flush read that *foreground* pass as its own ~250ms in, dropped its `beginBackgroundTask` assertion, and let iOS suspend with its own request still queued.
 Pinned by `every_queued_request_advances_the_counter_by_exactly_one` (`engine_catchup.rs`).
 
-**A completed pass is not a settled device.**
-`force_sync_all` *skips* a peer that already has a dial in flight, so a pass can complete having dialed nobody.
-A caller holding an OS resource open until sync quiesces must also poll `peers_in_flight()` to zero.
-That count covers **inbound responder-side serves too** (`coordination::begin_inbound_serve`, RAII for the whole `serve` exchange), not just outbound dials — a peer mid-push appears in no outbound set, and releasing the OS window before its durable-ingest confirmation goes out suspends the exact exchange the background flush exists to finish.
+**A completed pass is not a settled device, and the two counters answer different questions.**
+`force_sync_all` *skips* a peer that already has a dial running, so a pass can complete having dialed nobody.
+
+`inbound_serves()` is the only in-flight count a background window may wait on: responder-side exchanges (`coordination::begin_inbound_serve`, RAII across the whole `serve`), which is someone else's ops seconds from the durable-ingest confirmation that stops them being re-sent.
+
+**Never wait on the outbound dials.**
+A version that summed both was unreachable exactly when the device was worst off: an unreachable peer costs 15s per dial (5s direct + 10s relay) while the catch-up loop starts another every 8s, so the outbound set never empties.
+On device that read as `window elapsed before pass #107 settled` — the whole cap burned on a condition that could not become true, which iOS repays with fewer windows.
+The outbound set therefore stays inside `run_iroh`, unreachable from outside, so the mistake cannot be made again.
 
 ## Module layout (delta-sync wire vs. orchestration)
 
 Which file owns what, and why each split happened: [`docs/iroh-internals.md` → Module layout](../../docs/iroh-internals.md#module-layout).
-The one-line version: `engine_sync.rs` is "on the wire", `engine.rs` is "stand it up", `coordination.rs` is "what the concurrent tasks meet on", `protocol.rs` is "what the bytes mean".
 
 The **gossip supervisor** lives in `engine_gossip.rs` (`run_gossip` + `GossipCtx`).
 It is one task that `select!`s over the op-announce drain, the periodic membership broadcast, the inbound gossip stream, AND the `wid_changed` signal — re-subscribing to the new topic on an id change (see "Gossip re-subscribes on id change").
@@ -292,24 +296,17 @@ Both catalogs (named guards + the chaos battery) live in [`docs/iroh-internals.m
 `run_iroh` spawns a periodic **catch-up loop** (`catch_up_loop` → `run_catch_up`)
 in addition to the boot-time connect, the gossip subscribe, and the announce
 drain.
-It exists for one bug: a device paired AFTER `start()` writes its `PeerEntry` to `peers.json`, but the boot connect read the peer list once and never re-reads it.
-So the new peer's op-log history is never pulled (only brand-new ops would trickle in via gossip).
+It exists for one bug: a device paired AFTER `start()` writes its `PeerEntry` to `peers.json`, but the boot connect read that list once and never re-reads it, so the new peer's history is never pulled.
 
-- **Tick**: `CATCH_UP_INTERVAL` (8s). tokio's `interval` fires the first tick
-  immediately, so a freshly paired peer syncs within one tick.
-- **Each tick**: reload `PeersStore` from the SAME `peers.json` path the
-  transport started with (threaded via `PeersStore::path()`), so peers paired
-  after boot are picked up.
-- **Dial**: build a full `iroh::EndpointAddr` from each `PeerEntry`
-  (`PeerEntry::iroh_endpoint_addr`) — the stored full `endpoint_addr` (id +
-  relay + **direct addrs**) first, then id + `relay_url`, then the bare id.
-  The direct addrs make device↔device connect immediately on the same LAN
-  instead of depending on n0 discovery resolving a route (the old bare-id
-  connect is why the status dot showed offline).
-  The boot-time connect loop and `probe_peers` (status dot) use the same builder.
-- **Maintenance re-sync (the convergence safety net)**: each peer's last clean sync is timestamped in a `HashMap<EndpointId, Instant>`.
-  A peer is (re)dialed when new this session, when its last attempt failed (absent from the map), or when its last success is older than `MAINTENANCE_RESYNC` (10s).
-  `delta_sync` is a cheap no-op on matching vector clocks and the in-flight guard collapses a slow re-dial into the previous one, so the short interval doesn't thunder.
+- **Tick**: `CATCH_UP_INTERVAL` (8s), first tick immediate, so a freshly paired peer syncs right away.
+- **Each tick**: reload `PeersStore` from the same `peers.json` path the transport started with, so peers paired after boot are picked up.
+- **Dial**: `PeerEntry::iroh_endpoint_addr` — stored full `endpoint_addr` (id + relay + **direct addrs**) first, then id + `relay_url`, then the bare id.
+  The direct addrs are what make same-LAN connect immediate instead of waiting on n0 discovery; the boot connect and `probe_peers` use the same builder.
+- **Maintenance re-sync (the convergence safety net)**: each peer's last clean sync is timestamped, and a peer is re-dialed when new this session, when its last attempt failed, or when its last success is older than `MAINTENANCE_RESYNC` (10s).
+  `delta_sync` no-ops on matching vector clocks and the in-flight guard collapses a slow re-dial into the previous one, so the short interval doesn't thunder.
+
+**Those two numbers set the floor on how long a device stays busy.**
+An unreachable peer costs 15s per dial against an 8s tick, which is why a background window must never wait on the outbound set (see "Force-sync trigger").
   **Load-bearing**: convergence must not depend on the real-time gossip path, since the announce may never cross (flaky cross-network iroh) or never be sent at all (the ephemeral CLI, see "Who ends up with the endpoint").
   The loop re-pulls every known peer within `MAINTENANCE_RESYNC` regardless.
   The earlier "synced once, never re-dial" design broke exactly there ("paired, first sync worked, then nothing propagates"); regression: `catch_up_resyncs_peer_after_interval`.

@@ -76,7 +76,7 @@ const WARMUP_TICKS: u32 = 12;
 /// Returns when the task is aborted at shutdown.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn catch_up_loop(
-    endpoint: iroh::Endpoint,
+    conns: crate::peer_conn::PeerConnections,
     peers_path: PathBuf,
     workspace_root: PathBuf,
     workspace_id: SharedWorkspaceId,
@@ -107,7 +107,7 @@ pub(crate) async fn catch_up_loop(
         }
     };
     run_catch_up(
-        endpoint,
+        conns,
         CATCH_UP_INTERVAL,
         MAINTENANCE_RESYNC,
         resolver,
@@ -143,7 +143,7 @@ pub(crate) async fn catch_up_loop(
 /// for the status dot. Peers are resolved once from `peers.json` at call time.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn force_sync_all(
-    endpoint: iroh::Endpoint,
+    conns: crate::peer_conn::PeerConnections,
     peers_path: PathBuf,
     workspace_root: PathBuf,
     workspace_id: SharedWorkspaceId,
@@ -186,7 +186,7 @@ pub(crate) async fn force_sync_all(
             .expect("workspace id rwlock poisoned")
             .clone();
         match delta_sync(
-            &endpoint,
+            &conns,
             addr,
             &workspace_root,
             &wid_snapshot,
@@ -227,7 +227,7 @@ pub(crate) async fn force_sync_all(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drain_sync_now(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<()>,
-    endpoint: iroh::Endpoint,
+    conns: crate::peer_conn::PeerConnections,
     peers_path: PathBuf,
     workspace_root: PathBuf,
     workspace_id: SharedWorkspaceId,
@@ -240,9 +240,31 @@ pub(crate) async fn drain_sync_now(
     progress: crate::progress::ProgressSink,
 ) {
     while rx.recv().await.is_some() {
-        info!("sync-now: forced sync pass requested");
+        // Coalesce every request already queued behind this one into a single
+        // pass.
+        //
+        // "Sync everything now" is idempotent, so N of them queued together
+        // want one dial cycle, not N. Without this the channel is an unbounded
+        // backlog against a serial consumer: the mobile client fires
+        // `syncNow()` on a 3s timer while a pass against a peer that needs the
+        // relay takes ~20s, so the queue grows without limit and every request
+        // lands further behind the one before it. Observed on device as a
+        // forced pass logging `requested` 17µs after the previous one reported
+        // `ok`, and as `pass #107` — a backlog nothing was ever going to drain,
+        // where a fresh request would not run for half an hour and the sync a
+        // user just triggered by editing a block was queued behind a hundred
+        // stale copies of itself.
+        let mut coalesced = 1u64;
+        while rx.try_recv().is_ok() {
+            coalesced += 1;
+        }
+        if coalesced > 1 {
+            info!("sync-now: forced sync pass requested (coalescing {coalesced} queued requests)");
+        } else {
+            info!("sync-now: forced sync pass requested");
+        }
         force_sync_all(
-            endpoint.clone(),
+            conns.clone(),
             peers_path.clone(),
             workspace_root.clone(),
             workspace_id.clone(),
@@ -255,8 +277,10 @@ pub(crate) async fn drain_sync_now(
         )
         .await;
         // The dial cycle over every peer finished (each dial succeeded or
-        // failed). Publish it for `completed_sync_passes()` pollers.
-        passes_completed.fetch_add(1, Ordering::Release);
+        // failed). Publish it for `completed_sync_passes()` pollers — once per
+        // REQUEST, not once per pass, so a waiter on sequence N still sees its
+        // own request satisfied by the pass that absorbed it.
+        passes_completed.fetch_add(coalesced, Ordering::Release);
     }
 }
 
@@ -276,7 +300,7 @@ pub(crate) async fn drain_sync_now(
 /// `None` — they exercise convergence over the per-session `synced` dedup).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_catch_up<F>(
-    endpoint: iroh::Endpoint,
+    conns: crate::peer_conn::PeerConnections,
     period: Duration,
     resync_after: Duration,
     mut resolve_peers: F,
@@ -375,7 +399,7 @@ pub(crate) async fn run_catch_up<F>(
                 .expect("workspace id rwlock poisoned")
                 .clone();
             match delta_sync(
-                &endpoint,
+                &conns,
                 addr.clone(),
                 &workspace_root,
                 &wid_snapshot,
@@ -401,7 +425,7 @@ pub(crate) async fn run_catch_up<F>(
                     // debug-logged no-op. Tests pass `pull_assets = false`.
                     if pull_assets {
                         match crate::engine_assets::pull_assets_from_peer(
-                            &endpoint,
+                            conns.endpoint(),
                             addr,
                             &workspace_root,
                             &progress,
@@ -459,7 +483,7 @@ mod tests {
 
         let drain = tokio::spawn(drain_sync_now(
             rx,
-            endpoint,
+            crate::peer_conn::PeerConnections::new(endpoint.clone()),
             // Absent peers.json → load_or_default yields an empty peer set,
             // so each pass is a fast no-dial cycle.
             tmp.path().join("peers.json"),
@@ -521,7 +545,7 @@ mod tests {
 
         let drain = tokio::spawn(drain_sync_now(
             rx,
-            endpoint,
+            crate::peer_conn::PeerConnections::new(endpoint.clone()),
             tmp.path().join("peers.json"),
             tmp.path().to_path_buf(),
             wid,

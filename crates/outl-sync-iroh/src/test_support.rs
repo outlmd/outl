@@ -302,6 +302,34 @@ pub async fn run_asset_pull(
 /// which is exactly why nothing else catches a wrong one: a pass classified as
 /// the wrong colour still errors, still re-pushes, still converges. The only
 /// symptom is on screen.
+/// The one body every `run_delta_sync*` helper shares: a fresh append lock,
+/// then the production initiator.
+///
+/// The three public forms differ only in where the connection pool comes from
+/// and whether progress is captured, so they are one-liners over this.
+async fn drive_delta_sync(
+    conns: &crate::peer_conn::PeerConnections,
+    peer: impl Into<iroh::EndpointAddr>,
+    workspace_root: &Path,
+    workspace_id: &WorkspaceId,
+    actor: ActorId,
+    peer_ready_tx: std::sync::mpsc::Sender<()>,
+    progress: crate::progress::ProgressSink,
+) -> Result<()> {
+    let append_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    delta_sync(
+        conns,
+        peer,
+        workspace_root,
+        workspace_id,
+        actor,
+        peer_ready_tx,
+        &append_lock,
+        &progress,
+    )
+    .await
+}
+
 pub async fn run_delta_sync_with_progress(
     endpoint: &iroh::Endpoint,
     peer: impl Into<iroh::EndpointAddr>,
@@ -311,16 +339,14 @@ pub async fn run_delta_sync_with_progress(
     peer_ready_tx: std::sync::mpsc::Sender<()>,
     progress_tx: std::sync::mpsc::Sender<outl_actions::SyncProgress>,
 ) -> Result<()> {
-    let append_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-    delta_sync(
-        endpoint,
+    drive_delta_sync(
+        &crate::peer_conn::PeerConnections::new(endpoint.clone()),
         peer,
         workspace_root,
         workspace_id,
         actor,
         peer_ready_tx,
-        &append_lock,
-        &crate::progress::ProgressSink::new(progress_tx),
+        crate::progress::ProgressSink::new(progress_tx),
     )
     .await
 }
@@ -335,16 +361,14 @@ pub async fn run_delta_sync(
     actor: ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
 ) -> Result<()> {
-    let append_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-    delta_sync(
-        endpoint,
+    drive_delta_sync(
+        &crate::peer_conn::PeerConnections::new(endpoint.clone()),
         peer,
         workspace_root,
         workspace_id,
         actor,
         peer_ready_tx,
-        &append_lock,
-        &crate::progress::ProgressSink::default(),
+        crate::progress::ProgressSink::default(),
     )
     .await
 }
@@ -380,7 +404,7 @@ pub async fn run_catch_up_loop<F>(
     F: FnMut() -> Vec<iroh::EndpointAddr>,
 {
     run_catch_up(
-        endpoint,
+        crate::peer_conn::PeerConnections::new(endpoint.clone()),
         period,
         resync_after,
         resolve_peers,
@@ -441,4 +465,45 @@ pub fn membership_roundtrip(peers_path: &Path) -> Vec<PeerEntry> {
 pub fn membership_merge(peers_path: &Path, self_node_id: &str, incoming: Vec<PeerEntry>) -> usize {
     crate::engine_membership::merge_membership(peers_path, self_node_id, incoming)
         .expect("merge membership")
+}
+
+/// A connection pool over `endpoint`, so an out-of-crate test can prove the
+/// pooling contract (a confirmed sync leaves the connection open; the next
+/// sync reuses it) instead of inferring it from timings.
+pub fn connection_pool(endpoint: iroh::Endpoint) -> crate::peer_conn::PeerConnections {
+    crate::peer_conn::PeerConnections::new(endpoint)
+}
+
+/// The pooled connection for `peer`, if the pool holds a live one.
+///
+/// Returns `None` both when nothing is cached and when the cached entry is no
+/// longer usable — the same answer `get_or_connect` acts on, which is what a
+/// test asserting "the dead one was dropped" needs to see.
+pub fn pooled_connection(
+    conns: &crate::peer_conn::PeerConnections,
+    peer: iroh::EndpointId,
+) -> Option<iroh::endpoint::Connection> {
+    conns.live_connection(peer)
+}
+
+/// [`run_delta_sync`] over a caller-supplied pool, so consecutive calls can be
+/// observed sharing one connection.
+pub async fn run_delta_sync_pooled(
+    conns: &crate::peer_conn::PeerConnections,
+    peer: impl Into<iroh::EndpointAddr>,
+    workspace_root: &Path,
+    workspace_id: &WorkspaceId,
+    actor: ActorId,
+    peer_ready_tx: std::sync::mpsc::Sender<()>,
+) -> Result<()> {
+    drive_delta_sync(
+        conns,
+        peer,
+        workspace_root,
+        workspace_id,
+        actor,
+        peer_ready_tx,
+        crate::progress::ProgressSink::default(),
+    )
+    .await
 }
