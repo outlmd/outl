@@ -34,4 +34,7 @@
 # this one once and it stays paired. See `outl_sync_iroh::default_device_dir`,
 # whose own docs asked for a persistent path while this file pointed at the one
 # directory guaranteed to be erased.
+# Keep the iroh node identity across cleans, but let cargo-launched tests
+# discard their workspace actor bindings with target/.
 OUTL_DEVICE_DIR = { value = ".dev-device-store", relative = true }
+OUTL_ACTOR_DEVICE_DIR = { value = "target/device-store", relative = true }

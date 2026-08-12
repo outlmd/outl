@@ -162,9 +162,13 @@ impl fmt::Display for MachineId {
 /// `Option`): every supported OS has a home directory, and forcing
 /// every call site to handle a case that cannot happen buys nothing.
 pub fn device_dir() -> PathBuf {
-    if let Ok(custom) = std::env::var("OUTL_DEVICE_DIR") {
-        if !custom.is_empty() {
-            return PathBuf::from(custom);
+    // Cargo-launched tests use a disposable actor store, while the sync
+    // transport keeps its persistent device identity in OUTL_DEVICE_DIR.
+    for variable in ["OUTL_ACTOR_DEVICE_DIR", "OUTL_DEVICE_DIR"] {
+        if let Ok(custom) = std::env::var(variable) {
+            if !custom.is_empty() {
+                return PathBuf::from(custom);
+            }
         }
     }
     if let Ok(custom) = std::env::var("XDG_CONFIG_HOME") {
