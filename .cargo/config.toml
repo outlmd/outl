@@ -29,9 +29,18 @@
 # three broken pairings, and a log that reads like a transport bug.
 #
 # `.dev-device-store/` is gitignored and survives a clean, so a source build
-# stays the same device across rebuilds. It is still NOT the machine's real
-# identity: run with `OUTL_DEVICE_DIR=` for that, or pair the phone against
-# this one once and it stays paired. See `outl_sync_iroh::default_device_dir`,
-# whose own docs asked for a persistent path while this file pointed at the one
-# directory guaranteed to be erased.
+# stays the same device across rebuilds.
+#
+# The trade: nothing prunes it any more. The suite opens a temp workspace per
+# test and each leaves an actor binding, so `actors/` grows without bound (one
+# session: 935 records, all pointing at TempDir paths that no longer exist).
+# `scripts/gc-dev-device-store.sh` drops the orphaned ones. It only ever
+# touches `actors/` — a binding is regenerated on the next open, while
+# `iroh/identity.key` IS the node id and deleting it is the failure this whole
+# move exists to prevent.
+#
+# This is still NOT the machine's real identity: run with `OUTL_DEVICE_DIR=`
+# for that, or pair the phone against this one once and it stays paired. See
+# `outl_sync_iroh::default_device_dir`, whose own docs asked for a persistent
+# path while this file pointed at the one directory guaranteed to be erased.
 OUTL_DEVICE_DIR = { value = ".dev-device-store", relative = true }

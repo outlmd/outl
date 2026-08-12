@@ -245,6 +245,18 @@ Only do that for a run you want on the wire — it takes the endpoint lease from
 A source build is now stably paired by default.
 Pair the phone against `.dev-device-store`'s identity once and it stays paired across rebuilds and cleans; deleting that directory is the one thing that breaks it again.
 
+**It does grow, and pruning it is not the same as deleting it.**
+Every test opens a temp workspace and leaves an actor binding behind, and `cargo clean` no longer sweeps them: one session left 935 records, all pointing at `TempDir` paths that were already gone.
+
+```bash
+./scripts/gc-dev-device-store.sh --dry-run   # count first
+./scripts/gc-dev-device-store.sh             # drop bindings whose workspace is gone
+```
+
+It only touches `actors/`, and only records whose `root=` no longer exists.
+A binding is regenerated on the next open, so losing one costs nothing; `iroh/identity.key` **is** the node id, so losing that voids every pairing.
+That asymmetry is the whole reason this is a script and not `rm -rf`.
+
 Symptoms and network-side causes are in [sync.md → Troubleshooting sync](sync.md#troubleshooting-sync).
 
 ### Playground workspace
