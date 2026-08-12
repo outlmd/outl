@@ -140,29 +140,6 @@ async fn read_ops_blob(recv: &mut iroh::endpoint::RecvStream) -> Result<Vec<LogO
     decode_ops_blob(&read_frame(recv).await?)
 }
 
-/// Why [`read_ack`] failed, split by who is at fault.
-///
-/// The split is load-bearing for the verdict: a broken stream is the peer
-/// going away, so the connection's close reason decides amber vs red. A
-/// well-formed frame that is not [`ACK_DURABLE`] is a live peer speaking a
-/// protocol this version does not understand — the connection is still open,
-/// `close_reason()` is `None`, and defaulting that to "interrupted" would
-/// dress a protocol failure up as a transient suspend and retry it forever.
-enum AckError {
-    /// The stream ended before a full ack frame arrived.
-    Stream(anyhow::Error),
-    /// A frame arrived, but it is not the durable-ingest confirmation.
-    Protocol(anyhow::Error),
-}
-
-impl AckError {
-    fn into_inner(self) -> anyhow::Error {
-        match self {
-            AckError::Stream(e) | AckError::Protocol(e) => e,
-        }
-    }
-}
-
 /// Read the responder's durable-ingest confirmation.
 ///
 /// One byte, framed like everything else on this stream. `Ok(())` means the
@@ -173,19 +150,12 @@ impl AckError {
 /// means the peer answered something this version does not understand, and
 /// treating an unknown answer as a yes is how a confirmation protocol stops
 /// being one.
-async fn read_ack(recv: &mut iroh::endpoint::RecvStream) -> Result<(), AckError> {
-    let frame = read_frame(recv)
-        .await
-        .context("read durable-ingest ack")
-        .map_err(AckError::Stream)?;
+async fn read_ack(recv: &mut iroh::endpoint::RecvStream) -> Result<()> {
+    let frame = read_frame(recv).await.context("read durable-ingest ack")?;
     match frame.get(4) {
         Some(&ACK_DURABLE) => Ok(()),
-        Some(other) => Err(AckError::Protocol(anyhow::anyhow!(
-            "peer sent an unknown ack byte: {other}"
-        ))),
-        None => Err(AckError::Protocol(anyhow::anyhow!(
-            "peer sent an empty ack frame"
-        ))),
+        Some(other) => anyhow::bail!("peer sent an unknown ack byte: {other}"),
+        None => anyhow::bail!("peer sent an empty ack frame"),
     }
 }
 
@@ -416,26 +386,16 @@ async fn delta_sync_inner(
             progress.emit(SyncProgress::Synced { peer: peer_short });
             Ok(())
         }
-        Err(ack_err) => {
-            let verdict = match &ack_err {
-                // A live peer answered with a frame this version has no
-                // meaning for. No close reason will ever explain it (the
-                // connection is still up), and calling it an interruption
-                // keeps the amber retry loop spinning against a protocol
-                // mismatch that retrying cannot fix.
-                AckError::Protocol(_) => CloseVerdict::Failed,
-                // The stream broke, so the connection tells us WHY it ended,
-                // which decides whether the user sees amber (peer suspended,
-                // retried) or red (peer refused, act on it). `close_reason()`
-                // is `None` while the connection is still up, which happens
-                // when the stream broke on its own; that is an interruption
-                // too.
-                AckError::Stream(_) => conn
-                    .close_reason()
-                    .map(|err| classify_close(&err))
-                    .unwrap_or(CloseVerdict::Interrupted),
-            };
-            let e = ack_err.into_inner();
+        Err(e) => {
+            // The connection tells us WHY it ended, which decides whether the
+            // user sees amber (peer suspended, retried) or red (peer refused,
+            // act on it). `close_reason()` is `None` while the connection is
+            // still up, which happens when the stream broke on its own; that
+            // is an interruption too.
+            let verdict = conn
+                .close_reason()
+                .map(|err| classify_close(&err))
+                .unwrap_or(CloseVerdict::Interrupted);
             match verdict {
                 CloseVerdict::Failed => {
                     progress.emit(SyncProgress::Failed {
@@ -476,7 +436,7 @@ pub(crate) struct SyncProtocolHandler {
     /// `IrohSyncTransport::inbound_serves` is what reports this to a caller.
     /// The mobile background flush waits on that count before releasing its
     /// OS runtime assertion, and an inbound push still short of its
-    /// [`ACK_DURABLE`] confirmation is precisely the exchange it holds the
+    /// close-code-0 confirmation is precisely the exchange it holds the
     /// window open to finish.
     pub(crate) inbound_serves: crate::coordination::InboundServes,
 }
@@ -504,6 +464,9 @@ impl ProtocolHandler for SyncProtocolHandler {
     /// Looping until `accept_bi` errors is what makes the connection worth
     /// keeping: one connect, then a stream per sync.
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        const MAX_CONSECUTIVE_SERVE_FAILURES: usize = 3;
+        let mut consecutive_failures = 0;
+
         loop {
             let (send, recv) = match conn.accept_bi().await {
                 Ok(streams) => streams,
@@ -515,12 +478,19 @@ impl ProtocolHandler for SyncProtocolHandler {
                 }
             };
             if let Err(e) = self.serve_exchange(&conn, send, recv).await {
-                warn!("sync serve failed: {e:#}");
+                consecutive_failures += 1;
+                warn!("sync serve failed ({consecutive_failures}/{MAX_CONSECUTIVE_SERVE_FAILURES}): {e:#}");
                 // One bad exchange does not condemn the connection: the next
                 // stream may be fine, and tearing down here would put us back
-                // to a connect per sync.
+                // to a connect per sync. Repeated failures, however, indicate
+                // that this connection is not making useful progress.
+                if consecutive_failures >= MAX_CONSECUTIVE_SERVE_FAILURES {
+                    warn!("closing sync connection after repeated serve failures");
+                    return Ok(());
+                }
                 continue;
             }
+            consecutive_failures = 0;
         }
     }
 }
