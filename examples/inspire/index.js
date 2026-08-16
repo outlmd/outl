@@ -36,4 +36,3 @@
     }
   });
 })();
-//# sourceMappingURL=index.js.map

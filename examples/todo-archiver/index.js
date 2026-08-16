@@ -56,4 +56,3 @@
     return page && page.length > 0 ? page : DEFAULT_ARCHIVE_PAGE;
   }
 })();
-//# sourceMappingURL=index.js.map

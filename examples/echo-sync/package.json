@@ -6,7 +6,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=iife --platform=neutral --target=es2022 --sourcemap --outfile=index.js",
+    "build": "esbuild src/index.ts --bundle --format=iife --platform=neutral --target=es2022 --outfile=index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

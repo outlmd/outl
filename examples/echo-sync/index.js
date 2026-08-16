@@ -43,4 +43,3 @@
     return jsonl.split("\n").filter((line) => line.trim().length > 0).length;
   }
 })();
-//# sourceMappingURL=index.js.map
