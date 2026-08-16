@@ -7,6 +7,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Changed
 
+- **HTTPS now trusts the operating system's certificate store instead of a bundled root list.**
+  `reqwest` 0.13 renamed its TLS features and made `rustls` mean "rustls + `rustls-platform-verifier`", so the two crates that fetch over the network — remote asset download during a Roam import (`outl-import`) and plugin registry install (`outl-plugins`) — stopped carrying their own copy of the webpki root set.
+  The practical difference is that a certificate your machine already trusts (a corporate MITM proxy, an internal CA) now works without further configuration, and a root revoked at the OS level stops working without waiting for an outl release.
+  This is the same verifier iroh already used for QUIC, so the Android JNI bootstrap in `android_jni.rs` that primes `rustls-platform-verifier` now covers every TLS path in the app rather than just sync.
+  No OpenSSL anywhere, unchanged.
+
 - **The repository moved from `avelino/outl` to the `outlmd` org: <https://github.com/outlmd/outl>.**
   GitHub redirects the old URL, old clone remotes and old issue links, so nothing breaks by itself.
   Two things are re-resolved by name rather than followed, and both need a one-time action:

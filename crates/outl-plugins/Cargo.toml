@@ -39,9 +39,9 @@ boa_engine = { version = "0.21", optional = true }
 # Blocking HTTP for `ctx.net.fetch`. rustls (never OpenSSL) per the workspace
 # TLS policy. The fetch runs on the plugin's own thread (GUI) or inline
 # (TUI/CLI), so blocking is fine; a hard timeout caps the worst case.
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
-    "rustls-tls",
+    "rustls",
 ], optional = true }
 
 # Used by `registry::install_official` to stage a downloaded bundle before

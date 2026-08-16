@@ -57,7 +57,7 @@ arboard = { version = "3", default-features = false }
 # OSC 52 terminal-clipboard escape encoding, for `yy` / `Y` / visual `y`
 # copy-as-markdown. Reaches the outer clipboard over SSH / Crostini /
 # tmux where `arboard` (which needs a local display server) can't.
-base64 = "0.22"
+base64 = "0.23"
 # Open a markdown link `[text](url)` under the cursor (`gx`) in the
 # system's default browser / handler (issue #183). Desktop/mobile use
 # `tauri-plugin-opener`; the TUI isn't Tauri, so it uses the `open` crate.
@@ -68,7 +68,7 @@ open = "5"
 # `/upload` prompts for a typed path instead. macOS uses Cocoa and Windows
 # the Win32 dialog, neither of which needs extra system libraries.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-rfd = { version = "0.15", default-features = false }
+rfd = { version = "0.17", default-features = false }
 
 [dev-dependencies]
 tempfile = { workspace = true }

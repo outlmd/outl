@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // ../../packages/outl-plugin-sdk/src/index.ts
+  // ../../plugin-sdk/src/index.ts
   function definePlugin(def) {
     if (def === null || typeof def !== "object") {
       throw new TypeError("definePlugin: expected a plugin definition object");

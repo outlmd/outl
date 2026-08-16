@@ -17,7 +17,7 @@
   "dependencies": {
     "@tauri-apps/api": "catalog:",
     "@tauri-apps/plugin-barcode-scanner": "^2",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-log": "^2",
     "@tauri-apps/plugin-opener": "catalog:",
     "@tauri-apps/plugin-os": "catalog:",

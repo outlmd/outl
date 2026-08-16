@@ -41,7 +41,7 @@ percent-encoding = "2"
 # Encode asset bytes into a `data:` URL the webview loads inline (image /
 # pdf render). Already in the dep tree via outl-sync-iroh; pinned to the
 # same 0.22 line it uses.
-base64 = "0.22"
+base64 = "0.23"
 
 [dev-dependencies]
 tempfile = { workspace = true }

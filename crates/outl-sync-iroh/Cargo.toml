@@ -40,7 +40,7 @@ chrono = { version = "0.4", features = ["serde"] }
 qrcode = "0.14"
 # `base64` encodes the pairing ticket (an `EndpointAddr` serialized to JSON);
 # `bytes` is the payload type `GossipSender::broadcast` takes.
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 # `if-addrs` enumerates the local machine's interfaces (ip + netmask) so a dial
 # can drop a peer's stored direct addrs that are NOT on any local subnet — stale

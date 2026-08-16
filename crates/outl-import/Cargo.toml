@@ -23,9 +23,9 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 # Remote asset download (Roam firebase-hosted images). rustls only —
 # never OpenSSL. Blocking client: the import pipeline is synchronous.
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
-    "rustls-tls",
+    "rustls",
 ] }
 
 [dev-dependencies]
