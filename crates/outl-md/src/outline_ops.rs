@@ -348,6 +348,30 @@ mod tests {
     }
 
     #[test]
+    fn count_todos_sees_a_marker_behind_a_quote_marker() {
+        // `"> TODO foo"` is the legacy authoring order, and the TUI
+        // already draws it as a checkbox (`split_block_prefixes` takes
+        // the two prefixes in either order). The chip has to agree
+        // with what is on screen, or the page shows four checkboxes
+        // and counts two.
+        let blocks = vec![
+            block("> TODO write the RFC"),
+            block("> [ ] file the issue"),
+            block("> DONE read the paper"),
+            block("TODO > canonical order"),
+            block("> just a quote"),
+        ];
+        assert_eq!(count_todos(&blocks), (1, 4));
+    }
+
+    #[test]
+    fn count_todos_unwraps_only_one_quote_marker() {
+        // "No nested quotes" — the inner `> ` stays part of the body,
+        // so this is a quote of a quote, not a task.
+        assert_eq!(count_todos(&[block("> > TODO foo")]), (0, 0));
+    }
+
+    #[test]
     fn count_todos_counts_the_checkbox_spelling_too() {
         // A block written `- [ ] ship it` draws a checkbox, so the
         // progress chip has to see it as well — counting one spelling

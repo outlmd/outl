@@ -48,6 +48,14 @@ The `query` runtime (`runtimes/query.rs`) is a special case:
 - **`engine::Status` mirrors `outl_actions::TodoState`** (`Todo` / `Doing` / `Done`) instead of importing it: `outl-actions` depends on **this** crate for `run_code_block`, so the arrow only points one way.
   A state added there has to be added here in the same change — nothing in the compiler enforces the pair.
   `status: open` means "is a task", DONE included; it kept that meaning when `doing` landed so existing queries don't change under the user.
+- **The local `split_todo` deliberately reads *more* than its owner does.**
+  It unwraps one optional `"> "` quote prefix before looking for the marker, so the legacy authoring order (`"> TODO foo"`) matches `status: todo`.
+  `outl_actions::split_todo` does **not** do that, and the difference is forced by its return type, not by disagreement.
+  It hands back a `&str` slice of the body, so stripping the quote there would drop the marker from `OutlineNode.text` and the GUI clients would stop drawing the `│` bar.
+  Know the consequence before "fixing" either side.
+  A block written `"> TODO foo"` is a task to the TUI render, the TUI progress chip and this query engine.
+  It is **not** a task to the DTO the desktop / mobile clients receive, to `outl` CLI human output, or to plugins.
+  The canonical order (`"TODO > foo"`) has no such split, and `cycle_todo` rewrites the legacy shape into it on the first toggle.
 
 User-facing DSL docs live in `docs/query.md` — don't duplicate here.
 

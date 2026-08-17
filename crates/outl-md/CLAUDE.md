@@ -28,6 +28,7 @@ Treat matching with the same paranoia as the CRDT.
   Each line in `OutlineNode.text` after the first is emitted at `indent + 1`; the renderer **does not invent** prefixes on continuation lines — whatever the user (or the parser) put in `text` round-trips as-is.
   Block-kind markers (`TODO `, `DOING `, `DONE `, `> `) are owned by `outl-actions` (`todo.rs`, `quote.rs`); this crate only preserves them verbatim, which is why `DOING ` needed no parser change.
   The lone exception is `outline_ops::count_todos` (the progress chip's `(done, total)`): `DOING` counts toward the total, never toward `done`.
+  It reads both spellings and unwraps one `"> "` first, so it counts what the TUI draws; `split_todo` does not (see `outl-actions/CLAUDE.md`).
 - Read/write `.outl` sidecar (JSON, sibling file) — current version `2`, reads v1 transparently (handles backfilled on load; missing `text` stays empty and level 2 skips that block).
   **Additive fields ride at the same version — see [Sidecar versioning](#sidecar-versioning-both-directions) before touching `SIDECAR_VERSION`.**
   The sidecar is **structural metadata only** (id, line, indent, content hash, ref handle, last-synced text).

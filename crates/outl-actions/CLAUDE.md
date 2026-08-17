@@ -125,6 +125,11 @@ The trailing space is load-bearing: `[x](url)` is a markdown link and stays one.
 Three consumers keep their own copy of this alphabet: `outl-exec`'s query engine and `@outl/shared`'s `cycleTodo` (the dependency arrow forbids importing it) plus `outl_md::outline_ops::count_todos`.
 All three learn a new spelling in the same change, or a block reads as a task on one surface and as prose on another.
 
+**One deliberate asymmetry:** those copies also unwrap a leading `"> "`, so the legacy order `"> TODO foo"` reads as a task there.
+`split_todo` cannot: it returns a `&str` slice of the body, so dropping the quote would strip the marker from `OutlineNode.text` and the GUI would stop drawing the `│` bar.
+That shape is therefore a task to the TUI render, the TUI chip and `status:` queries, and prose to the DTO, the CLI and plugins.
+`cycle_todo` rewrites it to canonical order on the first toggle.
+
 **`TodoState::prefix` is the single owner of the marker spelling**, and the prefixes are **not** the same width — `"DOING "` is six characters, the other two are five.
 Any caller doing cursor math (the TUI's inline cycle, a GUI draft splice) must measure the prefix it is adding or removing instead of assuming five.
 A local `match` re-spelling the markers is the second owner that goes stale the next time a state lands: `quote.rs` had one, and it stopped compiling the moment `DOING` existed — which is the good outcome, but only because the enum is exhaustive.

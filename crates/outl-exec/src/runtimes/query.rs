@@ -28,7 +28,8 @@ use crate::runtime::{ExecContext, ExecError, ExecOutput, ExitStatus, OutputForma
 /// This is the shape that `outl.query({ … })` deserialises from JS.
 #[derive(Debug, Default, Clone)]
 pub struct QueryParams {
-    /// `"todo"`, `"done"`, or `"open"` (either).
+    /// `"todo"`, `"doing"`, `"done"`, or `"open"` (any task, DONE
+    /// included).
     pub status: Option<String>,
     /// Partial tag match (without `#`).
     pub tag: Option<String>,
@@ -51,9 +52,11 @@ pub struct QueryHit {
     pub handle: String,
     /// Slug of the hosting page.
     pub page: String,
-    /// `"todo"`, `"done"`, or `None` when the block is not a task.
+    /// `"todo"`, `"doing"`, `"done"`, or `None` when the block is not
+    /// a task.
     pub status: Option<String>,
-    /// Block text with TODO/DONE prefix stripped.
+    /// Block text with the task prefix stripped, in either spelling
+    /// (`TODO ` / `[ ] `) and behind an optional `"> "` quote marker.
     pub text: String,
 }
 
@@ -599,6 +602,29 @@ pub(crate) mod engine {
         #[test]
         fn split_todo_none() {
             assert_eq!(split_todo("just text"), (None, "just text"));
+        }
+
+        #[test]
+        fn split_todo_sees_a_marker_behind_a_quote_marker() {
+            // Legacy authoring order. The TUI draws it as a checkbox,
+            // so `status: todo` has to find it too.
+            assert_eq!(
+                split_todo("> TODO buy milk"),
+                (Some(Status::Todo), "buy milk")
+            );
+            assert_eq!(
+                split_todo("> [ ] buy milk"),
+                (Some(Status::Todo), "buy milk")
+            );
+            // Canonical order still works, quote and all.
+            assert_eq!(
+                split_todo("TODO > buy milk"),
+                (Some(Status::Todo), "> buy milk")
+            );
+            // One quote marker only, matching `outl_actions::quote`.
+            assert_eq!(split_todo("> > TODO x"), (None, "> > TODO x"));
+            // A plain quote is not a task.
+            assert_eq!(split_todo("> just a quote"), (None, "> just a quote"));
         }
 
         #[test]
