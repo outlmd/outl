@@ -38,6 +38,7 @@ pub mod sidecar;
 mod similarity;
 pub mod slug;
 pub mod tag;
+pub mod todo;
 mod token;
 pub mod unlogged;
 pub mod view;

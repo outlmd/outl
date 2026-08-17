@@ -86,7 +86,7 @@ fn run_query_internal(query: &dsl::Query, workspace_root: &Path) -> Result<Vec<Q
         .map(|h| QueryHit {
             handle: h.handle,
             page: h.page_slug,
-            status: h.status.map(|s| s.as_str().to_string()),
+            status: h.status.map(|s| s.wire_str().to_string()),
             text: h.text,
         })
         .collect())
@@ -414,30 +414,8 @@ pub(crate) mod engine {
     use outl_md::block_index::BlockEntry;
     use outl_md::index::WorkspaceIndex;
 
-    /// Task state of a block, as read off its text prefix.
-    ///
-    /// **This mirrors `outl_actions::TodoState`, which is the owner of
-    /// the marker vocabulary.** It cannot be imported: `outl-actions`
-    /// depends on this crate (for `run_code_block`), so the arrow only
-    /// points one way. Adding a state there means adding it here in the
-    /// same change — the pair is convention, not a compiler check.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum Status {
-        Todo,
-        Doing,
-        Done,
-    }
-
-    impl Status {
-        /// Lowercase wire form used in `QueryHit.status`.
-        pub fn as_str(self) -> &'static str {
-            match self {
-                Status::Todo => "todo",
-                Status::Doing => "doing",
-                Status::Done => "done",
-            }
-        }
-    }
+    /// Task state shared with the markdown and actions layers.
+    pub type Status = outl_md::todo::TodoState;
 
     /// One query hit — the data we need to render an embed.
     pub struct Hit {
@@ -540,28 +518,7 @@ pub(crate) mod engine {
     /// fails to match `status: todo`, which is the same "it's a task
     /// except where it isn't" split issue #230 was filed about.
     fn split_todo(raw: &str) -> (Option<Status>, &str) {
-        const PREFIXES: [(&str, Status); 7] = [
-            ("TODO ", Status::Todo),
-            ("DOING ", Status::Doing),
-            ("DONE ", Status::Done),
-            ("[ ] ", Status::Todo),
-            ("[/] ", Status::Doing),
-            ("[x] ", Status::Done),
-            ("[X] ", Status::Done),
-        ];
-        // The marker may also sit after a single `"> "` quote prefix —
-        // the legacy authoring shape (`"> TODO foo"`) that the TUI's
-        // `split_block_prefixes` renders as a checkbox. The canonical
-        // order (`"TODO > foo"`) already matches marker-first, and only
-        // one quote marker is unwrapped, mirroring the "no nested
-        // quotes" policy of `outl_actions::quote`.
-        let after_quote = raw.strip_prefix("> ").unwrap_or(raw);
-        for (prefix, status) in PREFIXES {
-            if let Some(rest) = after_quote.strip_prefix(prefix) {
-                return (Some(status), rest);
-            }
-        }
-        (None, raw)
+        outl_md::todo::split_todo(raw)
     }
 
     fn parse_journal_date(slug: &str) -> Option<NaiveDate> {
@@ -617,30 +574,6 @@ pub(crate) mod engine {
                 split_todo("[x](https://example.com)"),
                 (None, "[x](https://example.com)")
             );
-        }
-
-        #[test]
-        fn split_todo_reads_the_quote_first_shape() {
-            // `"> TODO foo"` is the legacy authoring order the TUI
-            // renders as a quoted checkbox, so a `status:` filter has
-            // to see it too — a task on one surface is a task on all
-            // of them.
-            assert_eq!(
-                split_todo("> TODO buy milk"),
-                (Some(Status::Todo), "buy milk")
-            );
-            assert_eq!(
-                split_todo("> [ ] buy milk"),
-                (Some(Status::Todo), "buy milk")
-            );
-            assert_eq!(
-                split_todo("> [x] buy milk"),
-                (Some(Status::Done), "buy milk")
-            );
-            // A plain quote is not a task, and only one quote marker
-            // is unwrapped (no nested quotes).
-            assert_eq!(split_todo("> just a quote"), (None, "> just a quote"));
-            assert_eq!(split_todo("> > TODO foo"), (None, "> > TODO foo"));
         }
 
         #[test]
