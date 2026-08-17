@@ -113,10 +113,25 @@ pub(super) fn write_record<K: AsRef<str>, V: AsRef<str>>(
         path: tmp.clone(),
         source,
     })?;
-    std::fs::rename(&tmp, path).map_err(|source| DeviceError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            // GC may have removed a paused scratch file. Recreate it and
+            // retry publication rather than failing the device-store update.
+            std::fs::write(&tmp, render(pairs)).map_err(|source| DeviceError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+            std::fs::rename(&tmp, path).map_err(|source| DeviceError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        Err(source) => Err(DeviceError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Create `path` only if it does not exist yet, so a caller can tell "I
