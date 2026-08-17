@@ -400,7 +400,10 @@ impl DeviceStore {
 fn actor_record(actor: ActorId, root: &Path, machine: &MachineId) -> [(&'static str, String); 3] {
     [
         ("actor", actor.to_string()),
-        ("root", root.display().to_string()),
+        // A non-Unicode OS path cannot be represented in the legacy text
+        // format. Mark it explicitly; GC will refuse to act on it rather
+        // than trusting Path::display()'s replacement characters.
+        ("root", root.to_str().map_or_else(|| "__outl_lossy_root__".to_string(), str::to_string)),
         ("machine", machine.as_str().to_string()),
     ]
 }

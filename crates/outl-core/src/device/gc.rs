@@ -26,7 +26,7 @@
 //!   machine,
 //! - a workspace the user archived and will restore next week.
 //!
-//! ## The three conditions, and why all of them
+//! ## The two conditions, and why both
 //!
 //! A binding is [`BindingVerdict::Stale`] only when **all** of these hold:
 //!
@@ -314,7 +314,9 @@ fn judge(path: &Path, now: SystemTime, ttl: Duration) -> ActorBinding {
         .ok()
         .flatten()
         .filter(|r| !r.is_lossy())
-        .and_then(|r| r.get("root").map(PathBuf::from));
+        .and_then(|r| r.get("root"))
+        .filter(|root| *root != "__outl_lossy_root__")
+        .map(PathBuf::from);
     let age = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -349,6 +351,14 @@ fn verdict_for(root: Option<&Path>, age: Option<Duration>, ttl: Duration) -> Bin
         .filter(|p| !p.as_os_str().is_empty())
         .is_some_and(|p| p.try_exists().unwrap_or(false));
     if !parent_present {
+        return BindingVerdict::Inconclusive;
+    }
+    // A workspace that is itself a mount point is indistinguishable from an
+    // unmounted volume by looking only at the missing root and its parent.
+    // Keep conventional mount roots conservative rather than deleting them.
+    if root.parent().is_some_and(|p| {
+        p == Path::new("/Volumes") || p == Path::new("/mnt")
+    }) {
         return BindingVerdict::Inconclusive;
     }
     match age {
