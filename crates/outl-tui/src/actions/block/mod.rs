@@ -51,24 +51,36 @@ pub(crate) fn cycle_todo_inline(buffer: &mut EditBuffer) {
     let current: String = buffer.chars.iter().collect();
     let next = outl_actions::cycle_todo(&current);
 
-    // The shift is the change in total length, not the change in the
-    // task prefix: `cycle_todo` also normalises a legacy `"> TODO x"`
-    // into `"TODO > x"`, which moves text the prefix measurement
-    // cannot see. Measuring the prefix alone read `"> DOING foo"` as
+    // Everything `cycle_todo` rewrites lives in front of the body —
+    // including the quote normalisation that turns a legacy `"> TODO x"`
+    // into `"TODO > x"` — so the body is a common suffix of both
+    // strings. Measuring the task prefix alone read `"> DOING foo"` as
     // unmarked (the quote comes first), so the caret jumped to the end
     // of the line instead of following its character.
     //
-    // Total length works for every case because the body is a suffix
-    // of both strings — everything `cycle_todo` rewrites lives in
-    // front of it.
-    let before = current.chars().count();
-    let after = next.chars().count();
+    // The split matters for where the caret sits:
+    // - a caret in the body follows its character, shifting by the
+    //   front-width delta;
+    // - a caret at or inside the rewritten front stays at its column
+    //   (clamped into the new front). Shifting it by the delta pushed a
+    //   column-0 caret one step into the marker, so the next keystroke
+    //   landed inside `DOING`.
+    let next_chars: Vec<char> = next.chars().collect();
+    let common_suffix = buffer
+        .chars
+        .iter()
+        .rev()
+        .zip(next_chars.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let old_front = buffer.chars.len() - common_suffix;
+    let new_front = next_chars.len() - common_suffix;
 
-    buffer.chars = next.chars().collect();
-    if after >= before {
-        buffer.cursor += after - before;
+    buffer.chars = next_chars;
+    buffer.cursor = if buffer.cursor >= old_front {
+        buffer.cursor - old_front + new_front
     } else {
-        buffer.cursor = buffer.cursor.saturating_sub(before - after);
-    }
+        buffer.cursor.min(new_front)
+    };
     buffer.cursor = buffer.cursor.min(buffer.chars.len());
 }

@@ -6,6 +6,7 @@
 //! returns, so adding a new printer never forces a change in the
 //! business path.
 
+use outl_actions::TodoState;
 use serde_json::Value;
 
 /// Prefix used in front of a block body to surface its task state.
@@ -15,20 +16,52 @@ use serde_json::Value;
 /// in one place so every CLI surface (page, block, daily, backlinks,
 /// embed) renders the same.
 ///
-/// The `_` arm means an unrecognised state renders as a plain bullet,
-/// which is indistinguishable from a block that is not a task at all.
-/// So a state added to `outl_actions::TodoState` and not added here
-/// goes silently missing from every non-`--json` command — that is
-/// exactly what happened to `DOING`. The value arrives as a `&str`
-/// (it crosses the wire as one), so the compiler cannot flag it.
+/// The value arrives as a `&str` (it crosses the wire as one), so it
+/// is resolved back to a [`TodoState`] and rendered through
+/// [`state_marker`]'s exhaustive match. A string that matches no
+/// state renders as a plain bullet — that can only be an unknown
+/// producer, never a variant this binary knows and forgot to draw.
 pub fn todo_prefix(todo: Option<&str>) -> &'static str {
-    match todo {
-        Some("TODO") => "[ ] ",
-        Some("DOING") => "[/] ",
-        Some("DONE") => "[x] ",
-        _ => "",
+    let Some(value) = todo else { return "" };
+    ALL_STATES
+        .iter()
+        .find(|state| state.as_str() == value)
+        .map(|state| state_marker(*state))
+        .unwrap_or("")
+}
+
+/// Marker drawn for one task state.
+///
+/// No `_` arm on purpose: rendering an unrecognised state as a plain
+/// bullet is indistinguishable from a block that is not a task at
+/// all, and that is exactly how `DOING` went silently missing from
+/// every non-`--json` command. A variant added upstream stops this
+/// crate from **compiling** — in every build, not just under
+/// `cargo test` — until it gets a marker here.
+fn state_marker(state: TodoState) -> &'static str {
+    match state {
+        TodoState::Todo => "[ ] ",
+        TodoState::Doing => "[/] ",
+        TodoState::Done => "[x] ",
     }
 }
+
+/// Every `TodoState` this crate knows about, as one list.
+///
+/// The `match` is what makes it exhaustive: it has no `_` arm, so
+/// adding a variant upstream stops this file from compiling until
+/// someone extends the array below — otherwise the wire-string lookup
+/// in [`todo_prefix`] would skip the new variant silently, even with
+/// [`state_marker`] already covering it.
+const ALL_STATES: [TodoState; 3] = {
+    const fn assert_exhaustive(state: TodoState) {
+        match state {
+            TodoState::Todo | TodoState::Doing | TodoState::Done => (),
+        }
+    }
+    assert_exhaustive(TodoState::Todo);
+    [TodoState::Todo, TodoState::Doing, TodoState::Done]
+};
 
 /// Print an outline tree starting at depth `depth`. Each node is the
 /// shape produced by `outl_actions::project_outline` (after JSON
@@ -57,25 +90,6 @@ pub fn print_outline_node(node: &Value, depth: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use outl_actions::TodoState;
-
-    /// Every `TodoState` this crate knows about, as one list.
-    ///
-    /// The `match` is what makes it exhaustive: it has no `_` arm, so
-    /// adding a variant upstream stops this file from **compiling**
-    /// until someone extends the array below and, with it, the test
-    /// that checks each state renders. An array on its own would just
-    /// skip the new variant silently — which is precisely how `DOING`
-    /// went missing from every non-`--json` command in the first place.
-    const ALL_STATES: [TodoState; 3] = {
-        const fn assert_exhaustive(state: TodoState) {
-            match state {
-                TodoState::Todo | TodoState::Doing | TodoState::Done => (),
-            }
-        }
-        assert_exhaustive(TodoState::Todo);
-        [TodoState::Todo, TodoState::Doing, TodoState::Done]
-    };
 
     /// Every task state must render as something, and no two may share
     /// a marker.

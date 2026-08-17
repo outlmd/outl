@@ -192,6 +192,31 @@ mod tests {
     }
 
     #[test]
+    fn cycle_todo_inline_keeps_a_caret_at_column_zero() {
+        // The width change happens *after* a caret sitting at the very
+        // start of the line, so the caret must not move: shifting it by
+        // the total delta parked it one column inside the marker, and
+        // the next keystroke landed inside `DOING`.
+        let mut buf = EditBuffer::from_text("TODO buy milk");
+        buf.cursor = 0;
+        cycle_todo_inline(&mut buf);
+        assert_eq!(buf.as_string(), "DOING buy milk");
+        assert_eq!(buf.cursor, 0);
+    }
+
+    #[test]
+    fn cycle_todo_inline_keeps_a_caret_inside_the_marker_at_its_column() {
+        // A caret inside the rewritten marker has no character to
+        // follow; it keeps its column instead of drifting with the
+        // width delta.
+        let mut buf = EditBuffer::from_text("TODO buy milk");
+        buf.cursor = 3; // inside "TODO"
+        cycle_todo_inline(&mut buf);
+        assert_eq!(buf.as_string(), "DOING buy milk");
+        assert_eq!(buf.cursor, 3);
+    }
+
+    #[test]
     fn cycle_todo_inline_handles_short_strings() {
         // `TODOlist` (no space) — doesn't match the `TODO ` prefix, so
         // it gets a `TODO ` prepended.
