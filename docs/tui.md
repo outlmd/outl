@@ -125,7 +125,7 @@ No characters insert themselves — every key is a command.
 | `dd` | Delete the current block (chord) |
 | `c` | Fold / unfold the current block. The bullet row shows `▼ ` (expanded) or `▶ ` (collapsed) when the block has children, two spaces otherwise. Children are hidden from the outline while collapsed and `j` / `k` skip past them, but the underlying tree is untouched. State is persisted as an `Op::SetCollapsed` in the op log — every device replays the same sequence, so the fold layout converges across iCloud / Syncthing peers without relying on file-level last-write-wins (which would lose concurrent flips). No-op on a block whose sidecar entry hasn't been written yet (save first). |
 | `y r` | Yank the current block's ref handle (`((blk-XXXXXX))`) to the OS clipboard + `last_yanked_ref` (chord). On headless / no-clipboard environments it falls back to the status line only. |
-| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's TODO / DONE / none prefix (`Ctrl+T` is the portable fallback for tmux / Terminal.app, which collapse `Ctrl+Enter` into plain `Enter`) |
+| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (`Ctrl+T` is the portable fallback for tmux / Terminal.app, which collapse `Ctrl+Enter` into plain `Enter`) |
 | `u` / `Ctrl+R` | Undo / redo |
 | `V` | Enter Visual mode (multi-block select) |
 | `t` / `Home` | Today's journal |
@@ -151,7 +151,7 @@ Esc commits (writes back to the `.md`), Enter commits + creates a new block.
 | `Enter` | Commit + new block below (soft newline inside open code fence — see below) |
 | `Alt+Enter` / `Ctrl+J` | Soft newline (stays in same block) — portable across terminals |
 | `Shift+Enter` | Soft newline — only on terminals that speak the kitty keyboard protocol |
-| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's TODO / DONE / none (stays in Insert; `Ctrl+T` works on terminals that collapse `Ctrl+Enter`) |
+| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (stays in Insert, caret follows the text; `Ctrl+T` works on terminals that collapse `Ctrl+Enter`) |
 | `Tab` / `Shift-Tab` | Indent / outdent (stays in Insert) |
 | `Backspace` on empty | Delete block, move to previous |
 | `Left` at column 0 | Spill into the previous block (cursor at end) |
@@ -362,7 +362,7 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
   Embeds (`!((blk-XXXXXX))`) — when the block contains a single embed token (whitespace OK) — render the source block **and its children** expanded read-only below the carrying block.
   Every embed row carries a `↳ ` prefix (root + descendants), so the expansion reads as one cohesive block.
   Descendants are indented by `2 * (depth + 1)` spaces before their `↳ ` so children align under the source's *text*, not under the parent's `↳ `.
-  TODO/DONE checkboxes, page refs, and tags render with their normal styling inside the expansion.
+  Task checkboxes (`☐` TODO, `◐` DOING, `☑` DONE), page refs, and tags render with their normal styling inside the expansion.
   Recursion is capped at depth 4 to break embed cycles.
   The cursor-bearing block always keeps the raw `((…))` / `!((…))` literal on its first row so column counting stays exact.
 - **Backlinks (inline)** — rendered below the outline, separated by a full-width `─` rule.

@@ -214,19 +214,28 @@ pub enum TaskState {
 
 impl TaskState {
     /// The outl text prefix this state maps to.
+    ///
+    /// `DOING` and `NOW` both land on outl's `DOING`: outl has one
+    /// started-state, and Logseq's two differ only in whether the
+    /// user's workflow calls it now or in progress. `NOW` keeps a
+    /// `state::` property so the distinction is still readable.
     pub fn outl_prefix(self) -> &'static str {
         match self {
-            Self::Todo | Self::Doing | Self::Now | Self::Later | Self::Waiting => "TODO",
+            Self::Todo | Self::Later | Self::Waiting => "TODO",
+            Self::Doing | Self::Now => "DOING",
             Self::Done | Self::Canceled => "DONE",
         }
     }
 
     /// Extra `state::` property preserving the source nuance, when the
     /// outl prefix alone is lossy.
+    ///
+    /// `Doing` dropped off this list when outl grew a `DOING` prefix —
+    /// the prefix now carries the whole meaning, so a property would
+    /// be a second, queryable-but-divergent copy of it.
     pub fn state_prop(self) -> Option<&'static str> {
         match self {
-            Self::Todo | Self::Done => None,
-            Self::Doing => Some("doing"),
+            Self::Todo | Self::Doing | Self::Done => None,
             Self::Now => Some("now"),
             Self::Later => Some("later"),
             Self::Waiting => Some("waiting"),

@@ -93,6 +93,14 @@ fn block_append_then_toggle_todo() {
         .args(["block", "toggle-todo", &id, "--json"])
         .output()
         .unwrap());
+    assert_eq!(toggle["data"]["todo"], "DOING");
+
+    let toggle = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["block", "toggle-todo", &id, "--json"])
+        .output()
+        .unwrap());
     assert_eq!(toggle["data"]["todo"], "DONE");
 }
 

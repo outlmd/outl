@@ -14,10 +14,12 @@ import {
  *  map — see {@link ResolvedBlock}. */
 export type EmbedMap = Record<string, ResolvedBlock>;
 
-/** TODO/DONE glyph prefix for a resolved block's `status`
- *  (`"todo"`/`"done"`), shared by the `blockref` and `embed` renders. */
+/** Task glyph prefix for a resolved block's `status`
+ *  (`"todo"`/`"doing"`/`"done"`), shared by the `blockref` and `embed`
+ *  renders. Same glyphs the TUI draws. */
 function statusMark(status: ResolvedBlock["status"]): string {
   if (status === "done") return "✓ ";
+  if (status === "doing") return "◐ ";
   if (status === "todo") return "☐ ";
   return "";
 }

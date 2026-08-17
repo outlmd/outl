@@ -33,7 +33,7 @@ If a row below disagrees with what you observe in the app, **the code is right a
 |---|---|---|---|
 | Quick switcher (fuzzy pages + journals) | `Ctrl+P` | `Cmd/Ctrl+P` | tap toolbar |
 | Open today's **j**ournal | `t` / `Home` | `Cmd/Ctrl+J` | toolbar |
-| Toggle TODO / DONE on focused or selected block (T for **t**ask) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox |
+| Cycle task state on focused or selected block — `(none) → TODO → DOING → DONE → (none)`, one stop per press (T for **t**ask) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox |
 | Run code block under cursor / selected block (X for e**x**ecute). TUI: when the block isn't code, `g x` instead opens the markdown link `[text](url)` under the cursor — an asset link in the OS default app, anything else in the browser (issue #183) | `g x` chord / `:run` | `Cmd/Ctrl+Shift+X` (inside a textarea the Insert-mode strikethrough wins — commit first or use the Run button; plain `Cmd+X` is the OS cut / block cut) | tap "Run" button |
 | Previous journal day | `[` | `Cmd/Ctrl+[` | swipe right |
 | Next journal day | `]` | `Cmd/Ctrl+]` | swipe left |
@@ -172,7 +172,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Tag autocomplete | `#` triggers picker | `#` triggers picker | — |
 | Block ref autocomplete | `((` triggers picker | `((` triggers picker | — |
 | Slash command autocomplete | `/` | `/` | — |
-| Toggle TODO/DONE on current | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox / long-press menu |
+| Cycle task state on current (`TODO` → `DOING` → `DONE` → none) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox / long-press menu |
 | Cut / copy / paste **text** (native) | — | `Cmd/Ctrl+X` / `Cmd/Ctrl+C` / `Cmd/Ctrl+V` | native |
 | Run code block | `g x` chord | _(commit with `Esc`, then `Cmd/Ctrl+Shift+X`)_ | tap "Run" |
 

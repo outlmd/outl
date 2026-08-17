@@ -870,6 +870,21 @@ export function Journal() {
     const pid = pageId();
     if (!id || !pid) return;
     const text = draft();
+
+    // Nothing typed — leave without writing. The draft was seeded
+    // from `rawTextWithTodo`, which rebuilds the text from the DTO's
+    // split `todo` + `text`, so it comes back in the canonical word
+    // form even when the block on disk is written as a checkbox
+    // (`[ ] buy milk`). Committing unconditionally therefore rewrote
+    // that block to `TODO buy milk` on a tap-in / tap-out with no
+    // keystroke, which is a real `Op::Edit` and a silent loss of the
+    // user's spelling. The desktop has had this guard all along
+    // (`BlockRow.tsx` → `commit`).
+    const current = findBlock(view()?.outline ?? [], id);
+    if (current && text === rawTextWithTodo(current)) {
+      setEditingId(null);
+      return;
+    }
     // Serialize: if an earlier edit is still in flight, wait for it
     // to land before we send this one. Without this, a quick
     // sequence like (type → toggle TODO → blur) can hit the

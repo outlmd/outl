@@ -35,8 +35,14 @@ export type BlockId = string;
  */
 export type PageSlug = string;
 
-/** TODO state of a block, when it has one. */
-export type TodoState = "TODO" | "DONE";
+/**
+ * Task state of a block, when it has one.
+ *
+ * Mirrors `outl_actions::TodoState`. A plugin that only branches on
+ * `"TODO"` and `"DONE"` silently drops every started block, so treat
+ * a state you don't handle as "not finished" rather than "not a task".
+ */
+export type TodoState = "TODO" | "DOING" | "DONE";
 
 /**
  * A single materialized block, as the host hands it to a plugin.
@@ -193,7 +199,7 @@ export interface BlocksApi {
   createAfter(after: BlockId, text: string): Promise<void>;
   /** Move a block to a new page (`{ toPage }`) or under another block (`{ toParent }`). */
   move(id: BlockId, target: MoveTarget): Promise<void>;
-  /** Cycle a block's TODO state (None → TODO → DONE → None). */
+  /** Cycle a block's task state (None → TODO → DOING → DONE → None). */
   toggleTodo(id: BlockId): Promise<void>;
   /** Delete a block (moved to trash; the op stays in the log). */
   delete(id: BlockId): Promise<void>;

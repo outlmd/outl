@@ -504,7 +504,13 @@ function BulletOrCheckbox(props: {
     >
       <button
         type="button"
-        aria-label={props.todo === "DONE" ? "Mark as TODO" : "Mark as done"}
+        aria-label={
+          props.todo === "DONE"
+            ? "Clear task state"
+            : props.todo === "DOING"
+              ? "Mark as done"
+              : "Mark as doing"
+        }
         onClick={(e) => {
           e.stopPropagation();
           props.onToggle();
@@ -516,10 +522,21 @@ function BulletOrCheckbox(props: {
           classList={{
             "border-(--color-ios-accent) bg-(--color-ios-accent) dark:border-(--color-iosd-accent) dark:bg-(--color-iosd-accent)":
               props.todo === "DONE",
+            // DOING keeps the accent ring and gets a small accent dot
+            // instead of the full fill, so a started task reads as
+            // "open, underway" at a glance rather than as finished.
+            "border-(--color-ios-accent) bg-transparent dark:border-(--color-iosd-accent)":
+              props.todo === "DOING",
             "border-(--color-ios-text-secondary) bg-transparent dark:border-(--color-iosd-text-secondary)":
-              props.todo !== "DONE",
+              props.todo === "TODO",
           }}
         >
+          <Show when={props.todo === "DOING"}>
+            <span
+              aria-hidden="true"
+              class="h-[9px] w-[9px] rounded-full bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)"
+            />
+          </Show>
           <Show when={props.todo === "DONE"}>
             <svg
               width="12"

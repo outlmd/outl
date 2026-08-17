@@ -34,10 +34,6 @@ pub(crate) const HELP_HINT_VISUAL: &str =
 /// becoming a memory issue.
 pub(crate) const MAX_HISTORY: usize = 200;
 
-// Re-exported from `outl-actions` so every client (TUI, mobile,
-// future Tauri desktop) agrees on the literal wire form.
-pub(crate) use outl_actions::{DONE_PREFIX, TODO_PREFIX};
-
 /// Where Insert-mode edits get committed.
 ///
 /// `CurrentPage` is the historical path: mutate `App.page` and save

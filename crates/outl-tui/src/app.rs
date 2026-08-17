@@ -23,7 +23,7 @@ mod tests {
     use crate::edit_buffer::EditBuffer;
     use crate::state::AutocompleteKind;
     use crate::theme::{self, default_theme};
-    use crate::view::{highlight_inline, render_markdown_inline, split_todo_prefix};
+    use crate::view::{highlight_inline, render_markdown_inline};
     use outl_md::index::WorkspaceIndex;
 
     // Tokenization and ref-at-cursor logic itself is tested in
@@ -79,18 +79,6 @@ mod tests {
     }
 
     #[test]
-    fn todo_prefix_splits_into_state_and_body() {
-        assert_eq!(
-            split_todo_prefix("TODO buy milk"),
-            (Some(false), "buy milk")
-        );
-        assert_eq!(split_todo_prefix("DONE buy milk"), (Some(true), "buy milk"));
-        assert_eq!(split_todo_prefix("regular block"), (None, "regular block"));
-        // No prefix when there's no space delimiter.
-        assert_eq!(split_todo_prefix("TODOlist"), (None, "TODOlist"));
-    }
-
-    #[test]
     fn every_theme_preset_provides_complete_palette() {
         // Sanity: all preset themes share the same set of named styles
         // (compiler-enforced by the struct shape, but a quick smoke
@@ -138,9 +126,10 @@ mod tests {
     }
 
     #[test]
-    fn cycle_todo_state_cycles_none_todo_done_none() {
+    fn cycle_todo_state_cycles_none_todo_doing_done_none() {
         assert_eq!(cycle_todo_state("buy milk"), "TODO buy milk");
-        assert_eq!(cycle_todo_state("TODO buy milk"), "DONE buy milk");
+        assert_eq!(cycle_todo_state("TODO buy milk"), "DOING buy milk");
+        assert_eq!(cycle_todo_state("DOING buy milk"), "DONE buy milk");
         assert_eq!(cycle_todo_state("DONE buy milk"), "buy milk");
         // Empty block: still cycles cleanly.
         assert_eq!(cycle_todo_state(""), "TODO ");
@@ -159,12 +148,27 @@ mod tests {
     }
 
     #[test]
-    fn cycle_todo_inline_todo_to_done_preserves_cursor() {
+    fn cycle_todo_inline_todo_to_doing_shifts_cursor_by_one() {
+        // `DOING ` is one character wider than `TODO `, so the caret
+        // has to follow the body right by one to stay on the same
+        // letter. A fixed five-character assumption parks it inside
+        // the marker instead.
         let mut buf = EditBuffer::from_text("TODO buy milk");
-        buf.cursor = 7; // mid-word
+        buf.cursor = 7; // on the "y" of "buy"
+        cycle_todo_inline(&mut buf);
+        assert_eq!(buf.as_string(), "DOING buy milk");
+        assert_eq!(buf.cursor, 8);
+        assert_eq!(buf.chars[buf.cursor], 'y');
+    }
+
+    #[test]
+    fn cycle_todo_inline_doing_to_done_shifts_cursor_back() {
+        let mut buf = EditBuffer::from_text("DOING buy milk");
+        buf.cursor = 8; // on the "y" of "buy"
         cycle_todo_inline(&mut buf);
         assert_eq!(buf.as_string(), "DONE buy milk");
         assert_eq!(buf.cursor, 7);
+        assert_eq!(buf.chars[buf.cursor], 'y');
     }
 
     #[test]
@@ -199,12 +203,32 @@ mod tests {
     }
 
     #[test]
-    fn cycle_todo_inline_three_calls_returns_to_original() {
+    fn cycle_todo_inline_follows_the_caret_through_a_legacy_quote_shape() {
+        // `"> DOING foo"` is the shape external markdown authors — the
+        // quote before the marker. `cycle_todo` normalises it to
+        // `"DONE > foo"`, which moves the body left by one. Measuring
+        // only the task prefix read the input as unmarked (the quote
+        // is first), added five instead of subtracting one, and parked
+        // the caret at the end of the line.
+        let mut buf = EditBuffer::from_text("> DOING foo");
+        buf.cursor = 8; // on the "f" of "foo"
+        cycle_todo_inline(&mut buf);
+        assert_eq!(buf.as_string(), "DONE > foo");
+        assert_eq!(buf.chars[buf.cursor], 'f');
+    }
+
+    #[test]
+    fn cycle_todo_inline_four_calls_returns_to_original() {
         let mut buf = EditBuffer::from_text("milk");
         let original = buf.as_string();
+        let original_cursor = buf.cursor;
         cycle_todo_inline(&mut buf); // TODO milk
+        cycle_todo_inline(&mut buf); // DOING milk
         cycle_todo_inline(&mut buf); // DONE milk
         cycle_todo_inline(&mut buf); // milk
         assert_eq!(buf.as_string(), original);
+        // The caret comes home too — the widths have to cancel out
+        // across the full cycle, not just per step.
+        assert_eq!(buf.cursor, original_cursor);
     }
 }

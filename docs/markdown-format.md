@@ -120,21 +120,53 @@ Nothing is silently skipped, at any depth.
 In the TUI: `Alt+Enter` (or `Ctrl+J`, or `Shift+Enter` in kitty-protocol-aware terminals) inserts a soft newline inside the current block.
 Plain `Enter` commits and creates a sibling — unless the cursor is inside an open fenced code block, in which case `Enter` auto-detects and inserts a soft newline instead (see below).
 
-### Block-level prefixes (TODO / DONE / quote)
+### Block-level prefixes (TODO / DOING / DONE / quote)
 
-A block's *kind* (open task, completed task, blockquote) is encoded as a **text prefix** on the bullet's body, not as a separate AST field.
+A block's *kind* (open task, task in progress, completed task, blockquote) is encoded as a **text prefix** on the bullet's body, not as a separate AST field.
 This keeps the wire format stable, round-trips through any CommonMark renderer, and lets a user drop the marker by erasing the prefix in their editor.
 
 | Prefix | Meaning | Helpers |
 |---|---|---|
 | `TODO ` | Open task | `outl_actions::todo::TODO_PREFIX` / `split_todo` / `cycle_todo` |
+| `DOING ` | Task somebody has started | `outl_actions::todo::DOING_PREFIX` / `split_todo` / `cycle_todo` |
 | `DONE ` | Completed task | `outl_actions::todo::DONE_PREFIX` / `split_todo` / `cycle_todo` |
 | `> ` | Blockquote (CommonMark-compatible) | `outl_actions::quote::QUOTE_PREFIX` / `split_quote` / `toggle_quote` |
+
+```markdown
+- TODO write the RFC
+- DOING ship the parser
+- DONE read the paper
+```
+
+The toggle chord (`Ctrl+T` in the TUI, `⌘T` on desktop) walks one stop per press: `(none) → TODO → DOING → DONE → (none)`.
+
+**The CommonMark checkbox is a second spelling of the same three states**, accepted on read ([issue #230](https://github.com/outlmd/outl/issues/230)):
+
+| You type | outl reads it as |
+|---|---|
+| `- [ ] buy milk` | `TODO` |
+| `- [/] buy milk` | `DOING` |
+| `- [x] buy milk` / `- [X] buy milk` | `DONE` |
+
+A block written that way is a task everywhere a `TODO ` block is one: it draws a checkbox, answers `status:` queries, counts in the progress chip, and toggles.
+
+Two things to know about it:
+
+- **Only the word form is ever written back.**
+  The first toggle rewrites `[ ] buy milk` into `DOING buy milk`, and it does not return to bracket form.
+  Until you act on the block, the bytes on disk stay exactly as typed — recognition alone never edits the file.
+- **The trailing space is what separates a checkbox from a link.**
+  `[x](https://example.com)` is a markdown link whose anchor text is `x`, and it stays a link.
+  `[]`, `[ ]` alone, and `[y] foo` are prose.
 
 Rules:
 
 - One space follows the marker.
   `>foo` (no space) is **not** a quote — same CommonMark rule that decides `>foo` is a literal paragraph and `> foo` is a blockquote.
+  The same rule makes `DOINGs are piling up` prose, not a started task.
+- **`DOING ` is one character wider than the other two.**
+  Anything doing cursor math around the marker must measure the prefix it is adding or removing (`TodoState::prefix`), never assume five.
+- Progress counters (the TUI's `●● 3/7` chip) count `DOING` toward the **total**, never toward the done half — a started task is unfinished work.
 - Markers compose in a **canonical order**: `"TODO > body"` / `"DONE > body"` (TODO/DONE before the quote marker).
   `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so a user who authors them in the other order (`"> TODO foo"`) gets normalised on the next toggle.
   Why canonical order matters: the backend's `split_todo` reads from the **start** of the text.
@@ -757,8 +789,10 @@ This section is only the **syntax-translation table**; for how paste works as a 
 | Input (external) | Output (outl) | Origin |
 |------------------|---------------|--------|
 | `{{[[TODO]]}} foo` | `TODO foo` | Roam |
+| `{{[[DOING]]}} foo` | `DOING foo` | Roam |
 | `{{[[DONE]]}} foo` | `DONE foo` | Roam |
 | `- [ ] foo` | `- TODO foo` | GitHub / CommonMark task list |
+| `- [/] foo` | `- DOING foo` | Logseq / Obsidian tasks |
 | `- [x] foo` / `- [X] foo` | `- DONE foo` | GitHub / CommonMark |
 | `{{embed: ((blk-XXXXXX))}}` | `!((blk-XXXXXX))` | Roam |
 | `{{[[query]]: foo}}` | `{{query: foo}}` | Roam |

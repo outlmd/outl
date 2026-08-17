@@ -193,7 +193,7 @@ pub fn list() -> Vec<Value> {
         ),
         tool_def(
             "outl_block_toggle_todo",
-            "Cycle the block's TODO state: None → TODO → DONE → None.",
+            "Cycle the block's task state one step: None → TODO → DOING → DONE → None.",
             json!({
                 "type": "object",
                 "properties": { "id": { "type": "string" } },

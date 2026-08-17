@@ -45,6 +45,9 @@ The `query` runtime (`runtimes/query.rs`) is a special case:
 - **DSL parser** (`runtimes/query::dsl`): line-by-line `key: value` directives, implicitly ANDed.
   Filters: `status`, `tag`, `kind`, `since`, `text`.
   Controls: `sort`, `limit`.
+- **`engine::Status` mirrors `outl_actions::TodoState`** (`Todo` / `Doing` / `Done`) instead of importing it: `outl-actions` depends on **this** crate for `run_code_block`, so the arrow only points one way.
+  A state added there has to be added here in the same change — nothing in the compiler enforces the pair.
+  `status: open` means "is a task", DONE included; it kept that meaning when `doing` landed so existing queries don't change under the user.
 
 User-facing DSL docs live in `docs/query.md` — don't duplicate here.
 

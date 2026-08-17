@@ -144,7 +144,7 @@ pub use template::{
     instantiate_template, list_templates, parse_call_invocation, resolve_call, run_callable_block,
     TemplateEntry, FROM_TEMPLATE_KEY, JOURNAL_TEMPLATE_NAME, PARAMS_KEY, TEMPLATE_KEY,
 };
-pub use todo::{cycle_todo, split_todo, TodoState, DONE_PREFIX, TODO_PREFIX};
+pub use todo::{cycle_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX};
 pub use tree::{
     children_of, enclosing_page_id, position_after, position_for_new_last_child, walk_subtree,
 };

@@ -125,8 +125,9 @@ impl App {
         }
     }
 
-    /// Cycle the focused block's TODO state: none → `TODO ` → `DONE ` →
-    /// none. Dispatches by `Focus`: outline blocks edit `app.page`
+    /// Cycle the focused block's task state: none → `TODO ` →
+    /// `DOING ` → `DONE ` → none.
+    /// Dispatches by `Focus`: outline blocks edit `app.page`
     /// directly; backlink blocks route through
     /// [`Self::toggle_todo_backlink`] which loads the source page off
     /// disk.

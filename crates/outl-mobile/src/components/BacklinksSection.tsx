@@ -203,10 +203,16 @@ function BacklinkCheckbox(props: { todo: TodoState | null }): JSX.Element {
       classList={{
         "border-(--color-ios-accent) bg-(--color-ios-accent) dark:border-(--color-iosd-accent) dark:bg-(--color-iosd-accent)":
           props.todo === "DONE",
+        // Same three-state vocabulary as `BulletOrCheckbox`.
+        "border-(--color-ios-accent) bg-transparent dark:border-(--color-iosd-accent)":
+          props.todo === "DOING",
         "border-(--color-ios-text-secondary) bg-transparent dark:border-(--color-iosd-text-secondary)":
-          props.todo !== "DONE",
+          props.todo !== "DONE" && props.todo !== "DOING",
       }}
     >
+      <Show when={props.todo === "DOING"}>
+        <span class="h-[8px] w-[8px] rounded-full bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)" />
+      </Show>
       <Show when={props.todo === "DONE"}>
         <svg
           width="10"

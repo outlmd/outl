@@ -235,19 +235,20 @@ Desktop and mobile share the drop-handling code (`installFileDrop` + `importAsse
 See [`outl-frontend-shared/CLAUDE.md`](../crates/outl-frontend-shared/CLAUDE.md#todays-surface) for the pure helpers underneath.
 The TUI has no OS drag events over SSH/tmux, so it treats a lone pasted file path as a drop instead (`outl-tui/CLAUDE.md` → "Drag-and-drop file upload").
 
-## TODO/DONE convention
+## Task state convention
 
-A block's TODO state is **a prefix on its text**, not a property:
+A block's task state is **a prefix on its text**, not a property:
 
 ```
 "foo"             plain block
 "TODO foo"        open task
+"DOING foo"       started task
 "DONE foo"        completed task
 ```
 
 This is the wire format the TUI already uses and what `.md` files contain when synced to other tools.
-`outl-actions::cycle_todo` walks `None → TODO → DONE → None`.
-UI surfaces parse the prefix out via `split_todo` so they can render a checkbox.
+`outl-actions::cycle_todo` walks `None → TODO → DOING → DONE → None`; UI surfaces parse the prefix out via `split_todo` to render a checkbox.
+Never re-derive the cycle order — [markdown-format.md](markdown-format.md#block-level-prefixes-todo--doing--done--quote) owns it.
 
 ## Blockquote convention
 

@@ -53,16 +53,16 @@ pub fn split_quote(raw: &str) -> (bool, &str) {
 /// in `text`. Checkbox disappears mid-flight. Same hazard the
 /// **other** direction in [`crate::todo::cycle_todo`].
 pub fn toggle_quote(raw: &str) -> String {
-    use crate::todo::{split_todo, TodoState};
+    use crate::todo::split_todo;
     let (todo_state, after_todo) = split_todo(raw);
     let (quoted, body) = split_quote(after_todo);
     let next_quoted = !quoted;
     let mut out = String::new();
     if let Some(state) = todo_state {
-        out.push_str(match state {
-            TodoState::Todo => "TODO ",
-            TodoState::Done => "DONE ",
-        });
+        // `TodoState::prefix` is the single owner of the marker
+        // spelling — a local match here is a second one, and it is
+        // how this function missed `DOING` when that state landed.
+        out.push_str(state.prefix());
     }
     if next_quoted {
         out.push_str(QUOTE_PREFIX);

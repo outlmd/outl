@@ -56,7 +56,11 @@ It is also non-negotiable in the reverse direction because rendering is frequent
 **2. No new field on the AST, no new field on the wire.**
 `OutlineNode` keeps `text`, `properties`, `children`.
 An inline form is an `InlineTok` variant plus the matching `InlineToken` variant plus its `InlineToken::from_borrowed` arm, all three in the same change.
-A block-level form is a **text prefix** consumed by a helper — `outl_actions::todo` (`TODO ` / `DONE `) and `outl_actions::quote` (`> `) are the two that exist.
+A block-level form is a **text prefix** consumed by a helper — `outl_actions::todo` (`TODO ` / `DOING ` / `DONE `) and `outl_actions::quote` (`> `) are the two that exist.
+`DOING ` ([#235](https://github.com/outlmd/outl/issues/235)) is the cheapest possible instance of this clause, and the reference case for it.
+It took a third arm on `TodoState`, one more stop in `cycle_todo`, and **zero** changes to the parser, the renderer, the sidecar or any DTO.
+What it did cost was every place that had quietly assumed the state was binary — an `Option<bool>` in the query engine and in the TUI's view layer, a `match` on two arms in `quote.rs`, and cursor math assuming all markers are five characters wide.
+The lesson generalises: a block-level prefix is free to *parse* and is priced by how many consumers encoded its cardinality in a type.
 No `Op` variant, no sidecar version bump, no DTO migration on mobile and desktop.
 Issue [#8](https://github.com/outlmd/outl/issues/8) put this in its own body: references are *content* of a block, not *structure* of the tree.
 

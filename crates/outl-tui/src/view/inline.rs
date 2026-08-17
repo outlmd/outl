@@ -6,23 +6,9 @@
 //! so column-to-byte alignment stays 1:1).
 
 use crate::theme::Theme;
+use outl_actions::TodoState;
 use outl_md::inline::{inline_to_source, tokenize, InlineTok};
 use ratatui::text::Span;
-
-/// Strip an optional `TODO`/`DONE` prefix off a block's text, returning
-/// both the stripped body and a marker describing what was present.
-///
-/// `true` means `DONE`, `false` means `TODO`, `None` means no prefix.
-/// Delegates to [`outl_actions::split_todo`] so every surface (TUI,
-/// mobile, future desktop) agrees on the wire format.
-pub(crate) fn split_todo_prefix(text: &str) -> (Option<bool>, &str) {
-    let (state, body) = outl_actions::split_todo(text);
-    match state {
-        Some(outl_actions::TodoState::Todo) => (Some(false), body),
-        Some(outl_actions::TodoState::Done) => (Some(true), body),
-        None => (None, body),
-    }
-}
 
 /// Strip an optional `"> "` blockquote prefix off a block's text.
 /// Returns `(quoted, body)` — same shape as [`outl_actions::split_quote`].
@@ -46,8 +32,8 @@ pub(crate) fn split_quote_prefix(text: &str) -> (bool, &str) {
 /// At most one TODO/DONE and one quote marker are recognised — a
 /// nested `">> "` keeps the inner `> ` inside the body, matching the
 /// "no nested quotes in v1" policy from the canonical helper.
-pub(crate) fn split_block_prefixes(text: &str) -> (Option<bool>, bool, &str) {
-    let mut todo: Option<bool> = None;
+pub(crate) fn split_block_prefixes(text: &str) -> (Option<TodoState>, bool, &str) {
+    let mut todo: Option<TodoState> = None;
     let mut quoted = false;
     let mut current = text;
     // Two passes are enough — at most one of each marker is recognised.
@@ -61,7 +47,7 @@ pub(crate) fn split_block_prefixes(text: &str) -> (Option<bool>, bool, &str) {
             }
         }
         if todo.is_none() {
-            let (t, rest) = split_todo_prefix(current);
+            let (t, rest) = outl_actions::split_todo(current);
             if t.is_some() {
                 todo = t;
                 current = rest;
@@ -115,8 +101,18 @@ fn render_pretty_block_text_impl(
         out.push(Span::styled("│ ", theme.dim));
     }
     match todo_state {
-        Some(false) => {
-            out.push(Span::styled("☐ ", theme.todo_open));
+        // Both open states share `todo_open`'s colour on purpose: a
+        // started task is unfinished work, and the glyph already
+        // carries the distinction. A third palette entry would mean a
+        // new key in every theme preset for something one character
+        // says.
+        Some(state @ (TodoState::Todo | TodoState::Doing)) => {
+            let glyph = if state == TodoState::Doing {
+                "◐ "
+            } else {
+                "☐ "
+            };
+            out.push(Span::styled(glyph, theme.todo_open));
             out.extend(render_markdown_inline_impl(
                 body,
                 theme,
@@ -124,7 +120,7 @@ fn render_pretty_block_text_impl(
                 expand_embed,
             ));
         }
-        Some(true) => {
+        Some(TodoState::Done) => {
             out.push(Span::styled("☑ ", theme.todo_done));
             for sp in render_markdown_inline_impl(body, theme, index, expand_embed) {
                 out.push(Span::styled(
@@ -491,27 +487,21 @@ mod tests {
 
     #[test]
     fn split_block_prefixes_recognises_both_orders() {
-        assert_eq!(
-            split_block_prefixes("> TODO foo"),
-            (Some(false), true, "foo")
-        );
-        assert_eq!(
-            split_block_prefixes("TODO > foo"),
-            (Some(false), true, "foo")
-        );
-        assert_eq!(
-            split_block_prefixes("DONE > foo"),
-            (Some(true), true, "foo")
-        );
-        assert_eq!(
-            split_block_prefixes("> DONE foo"),
-            (Some(true), true, "foo")
-        );
+        let todo = Some(TodoState::Todo);
+        let doing = Some(TodoState::Doing);
+        let done = Some(TodoState::Done);
+        assert_eq!(split_block_prefixes("> TODO foo"), (todo, true, "foo"));
+        assert_eq!(split_block_prefixes("TODO > foo"), (todo, true, "foo"));
+        assert_eq!(split_block_prefixes("DOING > foo"), (doing, true, "foo"));
+        assert_eq!(split_block_prefixes("> DOING foo"), (doing, true, "foo"));
+        assert_eq!(split_block_prefixes("DONE > foo"), (done, true, "foo"));
+        assert_eq!(split_block_prefixes("> DONE foo"), (done, true, "foo"));
         assert_eq!(split_block_prefixes("> foo"), (None, true, "foo"));
-        assert_eq!(
-            split_block_prefixes("TODO foo"),
-            (Some(false), false, "foo")
-        );
+        assert_eq!(split_block_prefixes("TODO foo"), (todo, false, "foo"));
+        assert_eq!(split_block_prefixes("DOING foo"), (doing, false, "foo"));
+        // The checkbox spelling reads the same (issue #230).
+        assert_eq!(split_block_prefixes("> [ ] foo"), (todo, true, "foo"));
+        assert_eq!(split_block_prefixes("[x] foo"), (done, false, "foo"));
         assert_eq!(split_block_prefixes("foo"), (None, false, "foo"));
         // Nested `>>` keeps inner `>` in body — no double-strip.
         assert_eq!(split_block_prefixes("> > foo"), (None, true, "> foo"));

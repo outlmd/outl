@@ -53,6 +53,23 @@ describe("rawTextWithTodo", () => {
     );
   });
 
+  it("rebuilds in the canonical word form, losing the checkbox spelling", () => {
+    // The DTO carries `todo` separately from `text`, so a block the
+    // user wrote as `[ ] ship it` arrives here indistinguishable from
+    // one written `TODO ship it`. This function cannot tell them
+    // apart and always rebuilds the word form.
+    //
+    // That is why a client seeding an editor draft from this MUST
+    // compare against it before committing: writing the draft back
+    // unconditionally rewrites the user's spelling on a focus/blur
+    // with no keystroke. The mobile client shipped exactly that bug.
+    expect(rawTextWithTodo(block("x", { text: "ship it", todo: "TODO" }))).toBe(
+      "TODO ship it",
+    );
+    // Same input the backend produces for `[ ] ship it` — same output.
+    // The guard is the caller's job, not this function's.
+  });
+
   it("reattaches DONE prefix", () => {
     expect(rawTextWithTodo(block("x", { text: "ship it", todo: "DONE" }))).toBe(
       "DONE ship it",
@@ -482,28 +499,58 @@ describe("collectBlockRefHandles", () => {
 });
 
 describe("cycleTodo", () => {
-  it("walks none to TODO to DONE and back", () => {
+  it("walks none to TODO to DOING to DONE and back", () => {
+    // Must match `outl_actions::todo::cycle_todo` stop for stop —
+    // this function exists so a GUI draft doesn't wait on the
+    // backend, and a different cycle here shows the user a state the
+    // op log never gets.
     const s0 = "deploy frontend";
     const s1 = cycleTodo(s0);
     const s2 = cycleTodo(s1);
     const s3 = cycleTodo(s2);
+    const s4 = cycleTodo(s3);
     expect(s1).toBe("TODO deploy frontend");
-    expect(s2).toBe("DONE deploy frontend");
-    expect(s3).toBe("deploy frontend");
+    expect(s2).toBe("DOING deploy frontend");
+    expect(s3).toBe("DONE deploy frontend");
+    expect(s4).toBe("deploy frontend");
   });
 
   it("keeps a quote marker in canonical order", () => {
     // Same order `outl_actions::cycle_todo` emits: state, then quote.
     expect(cycleTodo("> deploy")).toBe("TODO > deploy");
-    expect(cycleTodo("TODO > deploy")).toBe("DONE > deploy");
+    expect(cycleTodo("TODO > deploy")).toBe("DOING > deploy");
+    expect(cycleTodo("DOING > deploy")).toBe("DONE > deploy");
     expect(cycleTodo("DONE > deploy")).toBe("> deploy");
   });
 
   it("normalises a legacy TODO written after the quote", () => {
     // Naive concatenation would yield "TODO > TODO foo", which
     // `split_todo` then misreads.
-    expect(cycleTodo("> TODO foo")).toBe("DONE > foo");
+    expect(cycleTodo("> TODO foo")).toBe("DOING > foo");
+    expect(cycleTodo("> DOING foo")).toBe("DONE > foo");
     expect(cycleTodo("> DONE foo")).toBe("> foo");
+  });
+
+  it("does not treat a word starting with DOING as a marker", () => {
+    expect(cycleTodo("DOINGs pile up")).toBe("TODO DOINGs pile up");
+  });
+
+  it("cycles a checkbox block onto the canonical word form", () => {
+    // Issue #230: `- [ ] foo` is a task. Treating it as unmarked
+    // would emit "TODO [ ] foo" — two markers, and the backend's
+    // split_todo reads the wrong one.
+    expect(cycleTodo("[ ] buy milk")).toBe("DOING buy milk");
+    expect(cycleTodo("[/] buy milk")).toBe("DONE buy milk");
+    expect(cycleTodo("[x] buy milk")).toBe("buy milk");
+    expect(cycleTodo("[X] buy milk")).toBe("buy milk");
+  });
+
+  it("leaves a markdown link alone", () => {
+    // `[x](url)` is a link whose anchor is "x". The trailing space in
+    // the checkbox prefix is the only thing separating them.
+    expect(cycleTodo("[x](https://example.com)")).toBe(
+      "TODO [x](https://example.com)",
+    );
   });
 
   it("handles an empty block", () => {

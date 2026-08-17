@@ -161,7 +161,7 @@ TUI-specific contracts worth remembering:
   - Every embed row carries a `↳ ` prefix (root + descendants) so the expansion reads as one cohesive block.
   - Descendants get `2 * (depth + 1)` spaces of padding before `↳ ` so children align under the source root's *text*, not under its `↳ `.
   - Outer indent (`│ ` guides) matches the carrying block's outline depth.
-  - TODO/DONE checkboxes, page refs and tags render with their normal styling inside the expansion (via `render_pretty_block_text`).
+  - Task checkboxes (`☐` TODO / `◐` DOING / `☑` DONE), page refs and tags render with their normal styling inside the expansion (via `render_pretty_block_text`).
   - Recursion is capped at depth 4 to break embed cycles.
   - Expansion runs in every render mode — but the carrying block's first row keeps the raw `!((…))` literal under the cursor so column-byte alignment holds.
 - The selected/editing block renders **raw** (delimiters visible, dimmed) so cursor columns map 1:1 to source bytes — including the literal `((blk-XXXXXX))` and `!((blk-XXXXXX))` forms.
@@ -169,7 +169,11 @@ TUI-specific contracts worth remembering:
   Same affordance as `TODO`/`DONE`.
   The chrome lives in **`view::inline::render_pretty_block_text_impl`** and is the **only owner** of the bar + checkbox + token rendering pipeline;
   the outline view's `BlockRowKind::Bullet if single_line_pretty` branch delegates to it directly (one owner, every caller wraps).
-  The bar composes with the TODO checkbox (`│ ☐ foo`) and `view::inline::split_block_prefixes` accepts the prefixes in **either order**, so `"> TODO foo"` and `"TODO > foo"` render the same.
+  The bar composes with the task checkbox (`│ ☐ foo`) and `view::inline::split_block_prefixes` accepts the prefixes in **either order**, so `"> TODO foo"` and `"TODO > foo"` render the same.
+- **Task states draw as `☐` (TODO), `◐` (DOING), `☑` (DONE).**
+  DOING shares `theme.todo_open`'s colour rather than claiming a third palette entry — it is unfinished work and the glyph already says which kind.
+  Only DONE dims and strikes the body.
+  `Ctrl+T` walks `none → TODO → DOING → DONE → none`; in Insert mode `cycle_todo_inline` shifts the caret by the **difference between the two prefixes** (`DOING ` is one wider than its neighbours), never by a constant.
 - IDs are **never** shown.
 - Mode tag (`NORMAL`/`INSERT`) appears in the header.
 - **Block text word-wraps to the pane width** (issue #99).

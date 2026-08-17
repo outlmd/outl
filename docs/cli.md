@@ -136,7 +136,8 @@ The flag exists so external clients (the Raycast extension's "New Page") can ask
 
 `block move` is the one user-visible name for `Op::Move`.
 Cycle detection still applies: a move that would create a cycle returns `{ "code": "CYCLE_REJECTED" }` and the op still goes into the log (see [docs/crdt.md](crdt.md)).
-`block toggle-todo` walks `None → TODO → DONE → None`, same as `outl_actions::cycle_todo`.
+`block toggle-todo` walks `None → TODO → DOING → DONE → None`, same as `outl_actions::cycle_todo`.
+One call is one step, so reaching `DONE` from an unmarked block takes three.
 
 `block append-tree` writes a root block plus its recursive children in one op-log session.
 `--tree` accepts the JSON shape `{"text": "...", "children": [{"text": "...", "children": [...]}]}`, or `--tree -` to read the JSON from stdin.
@@ -280,7 +281,9 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 Folded blocks (Roam `open: false`, Logseq `collapsed:: true`) land as `Op::SetCollapsed`.
 Each dialect is translated on the way in.
 Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences.
-Logseq: `DOING`/`NOW`/`LATER`/`WAITING` states → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
+Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
+`LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
+A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
 Obsidian: frontmatter → `key:: value` properties, wiki-link variants collapse to `[[Note]]`.
 Referenced files are pulled into the workspace's `assets/` dir, content-addressed.
 A local attachment (`![](../assets/pic.png)`) is copied and a remote image (Roam's firebase URLs) is downloaded; either way the link is rewritten to `[name](assets/<hash>.<ext>)`.

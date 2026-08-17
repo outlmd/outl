@@ -38,7 +38,7 @@ Blank lines and `#`-prefixed comments are ignored.
 
 | Key | Example | Description |
 |-----|---------|-------------|
-| `status` | `status: todo` | Filter by TODO state: `todo` (open tasks), `done` (completed tasks), or `open` (either) |
+| `status` | `status: todo` | Filter by task state: `todo` (not started), `doing` (started), `done` (completed), or `open` (**any** task, DONE included) |
 | `tag` | `tag: ops` | Block text contains `#ops` (partial match — `#ops/deploy` matches `tag: ops`) |
 | `kind` | `kind: journal` | Hosting page kind: `journal` or `page` |
 | `since` | `since: 7d` | Journal within N days. Units: `d` (days), `w` (weeks), `m` (months) |
@@ -56,6 +56,17 @@ Blank lines and `#`-prefixed comments are ignored.
   sort: page
   ```
 ````
+
+### What I'm in the middle of
+
+````markdown
+- ```query
+  status: doing
+  sort: page
+  ```
+````
+
+`status: todo` does **not** include these — once a task is started it answers to `doing`, and `open` is the filter that covers every task regardless of state.
 
 ### Today's open tasks in journals
 
@@ -177,7 +188,7 @@ for (const t of tasks) {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | `"todo"` \| `"done"` \| `"open"` | Filter by TODO state |
+| `status` | `"todo"` \| `"doing"` \| `"done"` \| `"open"` | Filter by task state (`"open"` is any task, DONE included) |
 | `tag` | `string` | Block contains `#tag` (partial match) |
 | `kind` | `"journal"` \| `"page"` | Hosting page kind |
 | `since` | `string` | Duration: `"7d"`, `"2w"`, `"3m"` |
@@ -194,8 +205,8 @@ Each hit is an object:
 ```ts
 interface QueryHit {
   handle: string;   // "blk-XXXXXX"
-  text: string;     // block text, TODO/DONE prefix stripped
-  status: string | null;  // "todo", "done", or null (not a task)
+  text: string;     // block text, task prefix stripped
+  status: string | null;  // "todo", "doing", "done", or null (not a task)
   page: string;     // hosting page slug
 }
 ```

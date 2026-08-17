@@ -7,7 +7,7 @@
  * a generator.
  */
 
-export type TodoState = "TODO" | "DONE";
+export type TodoState = "TODO" | "DOING" | "DONE";
 export type PageKind = "page" | "journal";
 /** Direction of the backlinks ("Linked from") list (issue #142).
  * Mirrors `outl_config::BacklinksOrder`. */

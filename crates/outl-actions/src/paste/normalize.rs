@@ -87,9 +87,13 @@ fn convert_line(line: &str) -> String {
     let indent: String = " ".repeat(indent_len);
     let rest = &line[indent_len..];
 
-    // GitHub task list `[ ]` / `[x]` only at the start of a bullet line.
+    // GitHub task list `[ ]` / `[x]` only at the start of a bullet
+    // line. `[/]` is the in-progress box Logseq and Obsidian's tasks
+    // plugin both write.
     let rest = if let Some(after) = rest.strip_prefix("- [ ] ") {
         format!("- TODO {after}")
+    } else if let Some(after) = rest.strip_prefix("- [/] ") {
+        format!("- DOING {after}")
     } else if let Some(after) = rest
         .strip_prefix("- [x] ")
         .or_else(|| rest.strip_prefix("- [X] "))
@@ -102,6 +106,8 @@ fn convert_line(line: &str) -> String {
     // Roam tokens, applied anywhere in the line.
     let rest = rest.replace("{{[[TODO]]}} ", "TODO ");
     let rest = rest.replace("{{[[TODO]]}}", "TODO");
+    let rest = rest.replace("{{[[DOING]]}} ", "DOING ");
+    let rest = rest.replace("{{[[DOING]]}}", "DOING");
     let rest = rest.replace("{{[[DONE]]}} ", "DONE ");
     let rest = rest.replace("{{[[DONE]]}}", "DONE");
 
@@ -363,11 +369,14 @@ mod tests {
     fn roam_done_becomes_prefix() {
         let out = normalize_external_syntax("- {{[[DONE]]}} bar");
         assert_eq!(out, "- DONE bar");
+        let out = normalize_external_syntax("- {{[[DOING]]}} baz");
+        assert_eq!(out, "- DOING baz");
     }
 
     #[test]
     fn github_checkbox_becomes_todo() {
         assert_eq!(normalize_external_syntax("- [ ] foo"), "- TODO foo");
+        assert_eq!(normalize_external_syntax("- [/] foo"), "- DOING foo");
         assert_eq!(normalize_external_syntax("- [x] foo"), "- DONE foo");
         assert_eq!(normalize_external_syntax("- [X] foo"), "- DONE foo");
     }

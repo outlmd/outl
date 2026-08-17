@@ -30,7 +30,7 @@ outl-cli / outl-tui / outl-mobile / future clients
 | `collapsed` | `set_block_collapsed`, `toggle_block_collapsed`. Both generate `Op::SetCollapsed` and route it through `Workspace::apply`, so the fold flag converges between devices on top of the existing per-actor jsonl + HLC infrastructure. **Never** write fold state to the sidecar — that's last-write-wins per file under iCloud and loses concurrent flips. See the root `CLAUDE.md` invariants. |
 | `tree`      | Read-only helper: `children_of`. Sibling / fractional-position helpers (`previous_sibling`, `next_sibling`, `position_before`, `position_after`, `position_for_new_last_child`) — `position_before` and `position_after` are `pub`; the rest remain `pub(crate)` until a real caller asks. |
 | `exec`      | `run_code_block`, `ExecOutputDto`, `RunCodeBlockOutcome`. Shared "run a fence" orchestration: walks DFS for the block's flat index (`outline::flat_index_for_block`), resolves the page's `.md` path via `journal::page_md_path`, calls `outl_exec::run_block_at_index`, returns a Serde-friendly outcome. Every client (TUI, desktop, mobile) wraps **this** function instead of re-implementing the flow. The runtime catalog is selected by the consuming binary's `outl-exec` features — `outl-actions` declares the dep with `default-features = false` so the mobile IPA never picks up `wasmtime` by accident. |
-| `todo`      | `TodoState`, `split_todo`, `cycle_todo`, `set_todo` — TODO/DONE encoded as text prefix. `cycle_todo` advances one state, `set_todo` sets one outright; a caller that means "mark done" must use the latter, since one cycle from an unmarked block lands on `TODO` |
+| `todo`      | `TodoState` (`Todo` / `Doing` / `Done`), `split_todo`, `cycle_todo`, `set_todo` — task state encoded as a text prefix (`TODO ` / `DOING ` / `DONE `). `cycle_todo` advances one state (`None → TODO → DOING → DONE → None`), `set_todo` sets one outright; a caller that means "mark done" must use the latter, since one cycle from an unmarked block lands on `TODO`. **The prefixes differ in width** — measure `TodoState::prefix`, never assume five characters |
 | `quote`     | `QUOTE_PREFIX`, `is_quote`, `split_quote`, `toggle_quote` — CommonMark `"> "` prefix encoding a per-block blockquote marker. Same wire-format policy as `todo` (text prefix, no AST field, every client renders its own visual). |
 | `outline`   | `OutlineNode` DTO + `project_outline` — UI-friendly tree projection. Also owns `flatten_subtree_paths` and `flat_index_for_block` (the DFS index used by `exec::run_code_block`). **`project_parsed_subtree(children: &[outl_md::OutlineNode]) -> Vec<OutlineNode>`** projects a **parsed** subtree (the `.md` AST, no sidecar) into wire `OutlineNode`s with `tokens` attached — ids are **transient** (fresh per call), so it's for read-only surfaces that re-resolve on navigation, specifically the `!((blk))` embed subtree expansion (`resolve_embeds` populates `EmbedContent.children` with it). Re-exported at the crate root. **`PageOutline { nodes, warnings }`** + `read_page_outline` / `read_page_outline_with_workspace` bundle the outline with parser recovery records (`outl_md::ParseWarning`) so every client surface (banner, status line, doctor) can warn the user that their `.md` has lines outside the dialect — without re-parsing the file. The legacy `read_page_view*` shims silently drop warnings for back-compat. |
 | `page`      | `PageMeta` (`id`, `slug`, `title`, `kind`, `icon`, **`pinned`** — surfaced from the `pinned::` page property so every client that consumes `list_all` sees the flag without re-querying the workspace index), `PageKind` (Page / Journal), `open_or_create`, `open_journal`, `open_today`, `today` (delegates to `clock`), `find_by_slug`, `list_all`, `migrate_legacy_into_today`, `page_id_from_slug` (deterministic ID derivation so two peers agree on a fresh page's NodeId), **`delete(ws, hlc, slug) -> Result<PageMeta, ActionError>`** (moves the page root to `NodeId::trash()` via a single `Op::Move`; the whole subtree travels with it; returns the meta so callers can drop projections + navigate away). **`merge_duplicate_slug_roots(ws, hlc) -> Result<usize, ActionError>`** (split-brain repair: when >1 root shares a slug, re-parents every child under the canonical root — `page_id_from_slug` id if present, else most-descendants / smallest-id — and trashes the emptied duplicates via `Op`s, so it converges on every device; idempotent, returns the count merged. Impl lives in the sibling `page_merge` module, re-exported through `page` + the crate root. Clients call it on boot alongside `migrate_legacy_into_today`). `open_or_create` creates the root with **no text** and, when `title != slug`, stores the title in the **`title::` property** (`TITLE_KEY`, `Op::SetProp`, last-write-wins by HLC) instead of the root's Yrs text — two devices minting the same deterministic root offline used to run concurrent Yrs text inserts that concatenated (`"2026-06-252026-06-25"`); a property converges to one value instead. Journals (`journal_title == slug`) never get a `title::` property — `page_meta` falls back to the slug, so a journal's `.md` stays title-line-free. Regular pages created in-app now render a `title:: <title>` line at the top of their `.md`. Journal date **labels** live in `dates`; user-typed name/ref **resolution** lives in `resolve` |
@@ -104,18 +104,30 @@ Disk layout when projected to `.md`:
 `migrate_legacy_into_today` reshuffles any pre-page-model blocks (direct children of root that lack `page-slug`) under today's journal.
 Clients call it once on startup; it's idempotent.
 
-## TODO/DONE convention
+## Task state convention
 
-TODO state lives **in the block's text** as a prefix:
+Task state lives **in the block's text** as a prefix:
 
 ```
 "foo"             ← plain block
 "TODO foo"        ← open task
+"DOING foo"       ← task somebody has started
 "DONE foo"        ← completed task
 ```
 
 This matches the TUI's existing wire format.
-`cycle_todo` walks `None → TODO → DONE → None`.
+`cycle_todo` walks `None → TODO → DOING → DONE → None`.
+
+**`split_todo` reads a second spelling it never writes**: the CommonMark checkbox (`"[ ] foo"`, `"[/] foo"`, `"[x] foo"`, `"[X] foo"`), issue #230.
+A block typed that way is a task everywhere a `TODO ` block is one, and the first `cycle_todo` / `set_todo` rewrites it to the word form.
+The bytes on disk are untouched until then — recognising a spelling must never turn opening a page into a write.
+The trailing space is load-bearing: `[x](url)` is a markdown link and stays one.
+Three consumers keep their own copy of this alphabet: `outl-exec`'s query engine and `@outl/shared`'s `cycleTodo` (the dependency arrow forbids importing it) plus `outl_md::outline_ops::count_todos`.
+All three learn a new spelling in the same change, or a block reads as a task on one surface and as prose on another.
+
+**`TodoState::prefix` is the single owner of the marker spelling**, and the prefixes are **not** the same width — `"DOING "` is six characters, the other two are five.
+Any caller doing cursor math (the TUI's inline cycle, a GUI draft splice) must measure the prefix it is adding or removing instead of assuming five.
+A local `match` re-spelling the markers is the second owner that goes stale the next time a state lands: `quote.rs` had one, and it stopped compiling the moment `DOING` existed — which is the good outcome, but only because the enum is exhaustive.
 `edit_text` writes the caller's text **verbatim** — including the prefix — so the user can drop a TODO just by erasing `TODO `/`DONE ` in the editor.
 UIs that surface state separately (mobile checkbox) must reattach the prefix before calling `edit_text`; helper `rawTextWithTodo` on the mobile side does this.
 The historical "auto-preserve prefix" behaviour was removed because it made `TODO`/`DONE` impossible to delete from the editor.

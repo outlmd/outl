@@ -33,7 +33,7 @@ Every entry here routes through `Workspace::apply` — never build a `LogOp` fro
 | Re-parent a block under an arbitrary page/block (cross-page move) | `outl_actions::block::move_under` | `crates/outl-actions/src/block/moves.rs` |
 | Delete a block (`Move(node, TRASH_ROOT)`, **never** physical) | `outl_actions::block::delete` | `crates/outl-actions/src/block/moves.rs` |
 | Toggle a block's collapsed flag (converges via `Op::SetCollapsed`) | `outl_actions::collapsed::toggle_block_collapsed` / `set_block_collapsed` | `crates/outl-actions/src/collapsed.rs` |
-| Cycle / split / read TODO/DONE state (encoded as text prefix) | `outl_actions::todo::cycle_todo` / `split_todo` / `TodoState` / `TODO_PREFIX` / `DONE_PREFIX` | `crates/outl-actions/src/todo.rs` |
+| Cycle / split / read task state — TODO → DOING → DONE, encoded as a text prefix. `TodoState::prefix` is the one owner of the marker spelling, and the widths differ (`DOING ` is 6 chars), so measure it instead of assuming | `outl_actions::todo::cycle_todo` / `split_todo` / `TodoState` / `TODO_PREFIX` / `DOING_PREFIX` / `DONE_PREFIX` | `crates/outl-actions/src/todo.rs` |
 | Set TODO/DONE state outright (not "advance one step") | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
 | Toggle TODO/DONE on a block in one call | `outl_actions::block::toggle_todo` | `crates/outl-actions/src/block/edit.rs` |
 | Read / toggle blockquote state (encoded as `"> "` text prefix, CommonMark-compatible) | `outl_actions::quote::is_quote` / `split_quote` / `toggle_quote` / `QUOTE_PREFIX` | `crates/outl-actions/src/quote.rs` |

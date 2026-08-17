@@ -377,12 +377,36 @@ export function isInVisualRange(
   return set !== null && set.has(id);
 }
 
-/** Keep in sync with `outl_actions::TODO_PREFIX` / `DONE_PREFIX`. */
-const TODO_PREFIX = "TODO ";
-const DONE_PREFIX = "DONE ";
+/**
+ * Keep in sync with `outl_actions::TODO_PREFIX` / `DOING_PREFIX` /
+ * `DONE_PREFIX`. The order is the cycle order.
+ */
+const TASK_PREFIXES = ["TODO ", "DOING ", "DONE "] as const;
 
 /**
- * Cycle a block's TODO prefix: none → `TODO ` → `DONE ` → none.
+ * Every prefix a block's text may carry, mapped to the index it
+ * occupies in {@link TASK_PREFIXES}. Mirrors
+ * `outl_actions::READ_PREFIXES`.
+ *
+ * Reading includes the CommonMark checkbox spellings; writing goes
+ * through {@link TASK_PREFIXES} alone, so `"[ ] foo"` becomes
+ * `"DOING foo"` on its first toggle. Miss a spelling here and the
+ * toggle reads the block as unmarked and emits `"TODO [ ] foo"` — two
+ * markers, and the backend's `split_todo` reads the wrong one.
+ */
+const READ_PREFIXES: ReadonlyArray<readonly [string, number]> = [
+  ["TODO ", 0],
+  ["DOING ", 1],
+  ["DONE ", 2],
+  ["[ ] ", 0],
+  ["[/] ", 1],
+  ["[x] ", 2],
+  ["[X] ", 2],
+];
+
+/**
+ * Cycle a block's task prefix: none → `TODO ` → `DOING ` → `DONE `
+ * → none.
  *
  * Mirrors `outl_actions::todo::cycle_todo`, quote handling included:
  * both prefixes are peeled and re-emitted in canonical order
@@ -399,16 +423,12 @@ export function cycleTodo(raw: string): string {
   const quoted = raw.startsWith(QUOTE_PREFIX);
   const afterQuote = quoted ? raw.slice(QUOTE_PREFIX.length) : raw;
 
-  let body = afterQuote;
-  let next = "";
-  if (afterQuote.startsWith(TODO_PREFIX)) {
-    body = afterQuote.slice(TODO_PREFIX.length);
-    next = DONE_PREFIX;
-  } else if (afterQuote.startsWith(DONE_PREFIX)) {
-    body = afterQuote.slice(DONE_PREFIX.length);
-    next = "";
-  } else {
-    next = TODO_PREFIX;
-  }
+  const hit = READ_PREFIXES.find(([p]) => afterQuote.startsWith(p));
+  const current = hit ? hit[1] : -1;
+  const body = hit ? afterQuote.slice(hit[0].length) : afterQuote;
+
+  // -1 (no marker) steps to index 0; the last one steps off the end
+  // back to no marker.
+  const next = TASK_PREFIXES[current + 1] ?? "";
   return `${next}${quoted ? QUOTE_PREFIX : ""}${body}`;
 }

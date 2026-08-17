@@ -248,7 +248,8 @@ Load-bearing decisions:
 - Zoom is **local view state, never an op** — `appState.focusBlockId` (default `null`), sliced at render time via `focusSubtree` (`@outl/shared/outline`).
   No Tauri round-trip, no `PageView` change; a display preference like `backlinksOrder`, not cross-device state.
 - **No zoom stack:** `ZoomOut` reads the current focus's breadcrumb — last crumb is the parent, empty breadcrumb means top-level so it exits to the full page.
-- **Bullet gesture split** (no TODO collision): a `•` (non-TODO) bullet zooms via `onFocusBlock`; a `▢`/`▣` checkbox keeps its TODO toggle; the fold **chevron** stays collapse.
+- **Bullet gesture split** (no task-state collision): a `•` (unmarked) bullet zooms via `onFocusBlock`; a `▢` / `▨` / `▣` checkbox (TODO / DOING / DONE) keeps its toggle, which walks one stop per click; the fold **chevron** stays collapse.
+  DOING shares TODO's colour and is distinguished by the half-filled glyph; only DONE strikes the body.
 - **Stale zoom self-heals:** `focusSubtree` → `null` when the id left the outline (peer delete / off-page move) clears `focusBlockId`; page navigation resets it too.
 - **`j`/`k` stay inside the zoom:** `SelectionUp`/`SelectionDown` walk `navBlocks()` (`[fv.root]` when zoomed) so the cursor can't escape the subtree.
 

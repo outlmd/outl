@@ -33,7 +33,7 @@ use ratatui::widgets::{
 // reachable via `crate::view::…` for backwards compat with the
 // pre-split layout.
 #[cfg(test)]
-pub(crate) use inline::{highlight_inline, render_markdown_inline, split_todo_prefix};
+pub(crate) use inline::{highlight_inline, render_markdown_inline};
 
 // Re-export the help-tabs constant so `input` can compute the tab
 // count without needing the whole `overlays` module visible.

@@ -292,11 +292,15 @@ fn real_confetti_bundle_emits_view_on_done() {
     host.mark_synced(&ws);
 
     // One sweep per commit, like a real client (the desktop calls
-    // sync_hooks after each commit). The TODO transition draws nothing; the
-    // DONE transition fires the author's confetti.
+    // sync_hooks after each commit). Only the DONE transition fires the
+    // author's confetti — the two states before it draw nothing.
     block::toggle_todo(&mut ws, &hlc, b).unwrap(); // → TODO
     let todo_run = host.sync_hooks(&mut ws, &hlc).unwrap();
     assert!(todo_run.views.is_empty(), "no confetti on TODO");
+
+    block::toggle_todo(&mut ws, &hlc, b).unwrap(); // → DOING
+    let doing_run = host.sync_hooks(&mut ws, &hlc).unwrap();
+    assert!(doing_run.views.is_empty(), "no confetti on DOING");
 
     block::toggle_todo(&mut ws, &hlc, b).unwrap(); // → DONE
     let done_run = host.sync_hooks(&mut ws, &hlc).unwrap();

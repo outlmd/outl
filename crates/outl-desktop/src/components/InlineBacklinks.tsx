@@ -12,6 +12,16 @@ import type { Backlink } from "@outl/shared/api/types";
 
 import { appState, setAppState, setOutline } from "../lib/store";
 
+/** What one click on a backlink's bullet does next. The toggle walks
+ *  the cycle a step at a time, so the label names the *next* stop,
+ *  not "done" from wherever it is. */
+function backlinkTodoLabel(todo: Backlink["todo"]): string {
+  if (todo === "DONE") return "Mark not done";
+  if (todo === "DOING") return "Mark done";
+  if (todo === "TODO") return "Mark doing";
+  return "Mark as TODO";
+}
+
 /**
  * Inline backlinks section — rendered **below** the outline, not
  * as a side panel.
@@ -230,30 +240,21 @@ export function InlineBacklinks() {
                               class={`mt-[2px] mr-2 w-3 shrink-0 cursor-pointer text-center text-[13px] leading-none hover:opacity-70 ${
                                 link.todo === "DONE"
                                   ? "text-(--color-outl-todo-done-fg)"
-                                  : link.todo === "TODO"
+                                  : link.todo === "TODO" ||
+                                      link.todo === "DOING"
                                     ? "text-(--color-outl-todo-open-fg)"
                                     : "text-(--color-outl-fg-dimmer)"
                               }`}
-                              title={
-                                link.todo === "DONE"
-                                  ? "Mark not done"
-                                  : link.todo === "TODO"
-                                    ? "Mark done"
-                                    : "Mark as TODO"
-                              }
-                              aria-label={
-                                link.todo === "DONE"
-                                  ? "Mark not done"
-                                  : link.todo === "TODO"
-                                    ? "Mark done"
-                                    : "Mark as TODO"
-                              }
+                              title={backlinkTodoLabel(link.todo)}
+                              aria-label={backlinkTodoLabel(link.todo)}
                             >
                               {link.todo === "DONE"
                                 ? "▣"
-                                : link.todo === "TODO"
-                                  ? "▢"
-                                  : "•"}
+                                : link.todo === "DOING"
+                                  ? "▨"
+                                  : link.todo === "TODO"
+                                    ? "▢"
+                                    : "•"}
                             </button>
                             <button
                               type="button"

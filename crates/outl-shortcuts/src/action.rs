@@ -129,7 +129,7 @@ pub enum Action {
     DeleteBlock,
     /// Fold / unfold the current block.
     ToggleCollapsed,
-    /// Cycle TODO state (none → TODO → DONE → none).
+    /// Cycle task state (none → TODO → DOING → DONE → none).
     ToggleTodo,
     /// Copy the current block's `((blk-…))` ref handle to clipboard.
     CopyBlockRef,

@@ -17,9 +17,10 @@ import { MarkdownInline, type EmbedMap } from "./MarkdownInline";
  */
 const MAX_DEPTH = 4;
 
-/** TODO/DONE glyph prefix, matching the embed case in `MarkdownInline`. */
+/** Task glyph prefix, matching the embed case in `MarkdownInline`. */
 function todoMark(todo: BlockNode["todo"]): string {
   if (todo === "DONE") return "✓ ";
+  if (todo === "DOING") return "◐ ";
   if (todo === "TODO") return "☐ ";
   return "";
 }

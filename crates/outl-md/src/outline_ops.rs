@@ -20,9 +20,19 @@ pub fn flat_count(blocks: &[OutlineNode]) -> usize {
     blocks.iter().map(|b| 1 + flat_count(&b.children)).sum()
 }
 
-/// TODO/DONE counters: `(done, total)`. A block is counted when its
-/// trimmed text starts with `TODO ` or `DONE `; `DONE` counts toward
-/// `done` and toward `total`.
+/// Task counters: `(done, total)`. A block counts when its trimmed
+/// text starts with a task marker in either spelling — the canonical
+/// word (`TODO `, `DOING `, `DONE `) or the CommonMark checkbox
+/// (`[ ] `, `[/] `, `[x] `). Only the done states count toward `done`;
+/// all of them count toward `total`.
+///
+/// `DOING` is deliberately not partial credit — the indicator answers
+/// "how much is finished", and a started task is not a finished one.
+///
+/// Both spellings are counted for the same reason `outl_actions`
+/// reads both: a user who typed `- [ ] ship it` sees a checkbox, and a
+/// progress chip that skipped those blocks would disagree with what is
+/// on screen (issue #230).
 ///
 /// The header chip in the TUI uses this for the `●● 3/7` indicator,
 /// so the count walks the whole tree (nested children included).
@@ -33,16 +43,27 @@ pub fn count_todos(blocks: &[OutlineNode]) -> (usize, usize) {
     (done, total)
 }
 
+/// Prefixes that mark a task, and whether that task is finished.
+/// Mirrors `outl_actions::READ_PREFIXES`, which is the owner — the
+/// dependency arrow points the other way, so this crate keeps a copy.
+const TASK_PREFIXES: [(&str, bool); 7] = [
+    ("TODO ", false),
+    ("DOING ", false),
+    ("DONE ", true),
+    ("[ ] ", false),
+    ("[/] ", false),
+    ("[x] ", true),
+    ("[X] ", true),
+];
+
 fn walk_todos(blocks: &[OutlineNode], done: &mut usize, total: &mut usize) {
     for b in blocks {
         let t = b.text.trim_start();
-        if let Some(rest) = t.strip_prefix("TODO ") {
-            let _ = rest;
+        if let Some((_, finished)) = TASK_PREFIXES.iter().find(|(p, _)| t.starts_with(p)) {
             *total += 1;
-        } else if let Some(rest) = t.strip_prefix("DONE ") {
-            let _ = rest;
-            *total += 1;
-            *done += 1;
+            if *finished {
+                *done += 1;
+            }
         }
         walk_todos(&b.children, done, total);
     }
@@ -295,6 +316,45 @@ mod tests {
             text: text.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn count_todos_counts_doing_as_open_work() {
+        // A started task is unfinished work: it belongs in the
+        // denominator, never in the numerator. Reading `DOING` as
+        // done would let the progress chip show 3/3 on a page where
+        // nothing shipped.
+        let blocks = vec![
+            OutlineNode {
+                text: "TODO write the RFC".into(),
+                children: vec![block("DOING ship the parser")],
+                ..Default::default()
+            },
+            block("DONE read the paper"),
+            block("just a note"),
+        ];
+        assert_eq!(count_todos(&blocks), (1, 3));
+    }
+
+    #[test]
+    fn count_todos_ignores_a_marker_word_without_its_space() {
+        assert_eq!(count_todos(&[block("DOINGs are piling up")]), (0, 0));
+    }
+
+    #[test]
+    fn count_todos_counts_the_checkbox_spelling_too() {
+        // A block written `- [ ] ship it` draws a checkbox, so the
+        // progress chip has to see it as well — counting one spelling
+        // and rendering the other is how 3/7 disagrees with the
+        // screen (issue #230).
+        let blocks = vec![
+            block("[ ] write the RFC"),
+            block("[/] ship the parser"),
+            block("[x] read the paper"),
+            block("[X] merge it"),
+            block("[x](https://example.com) is a link, not a task"),
+        ];
+        assert_eq!(count_todos(&blocks), (2, 4));
     }
 
     #[test]

@@ -116,7 +116,7 @@ pub enum BlockCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Cycle the block's TODO state: `None → TODO → DONE → None`.
+    /// Cycle the block's task state one step: `None → TODO → DOING → DONE → None`.
     ToggleTodo {
         /// Block id.
         id: String,

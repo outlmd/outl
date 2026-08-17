@@ -99,7 +99,7 @@ pub struct EmbedContent {
     pub handle: String,
     pub text: String,
     pub page_slug: String,
-    /// `"todo"`, `"done"`, or `None` when the block is not a task.
+    /// `"todo"`, `"doing"`, `"done"`, or `None` when the block is not a task.
     pub status: Option<String>,
     /// The source block's subtree, projected with inline tokens so an
     /// embed surface can expand it exactly as the source page would.
@@ -215,9 +215,10 @@ fn truncate_children_depth(nodes: &mut [outl_actions::OutlineNode], depth_left: 
     }
 }
 
-/// Split `"TODO body"` / `"DONE body"` into `(Some("todo"|"done"), "body")`,
-/// reusing the canonical `outl_actions::split_todo` so TODO encoding
-/// stays consistent.
+/// Split `"TODO body"` / `"DOING body"` / `"DONE body"` into
+/// `(Some("todo"|"doing"|"done"), "body")`, reusing the canonical
+/// `outl_actions::split_todo` so the marker vocabulary stays
+/// consistent — a new state reaches the GUI without a change here.
 fn split_todo_prefix(raw: &str) -> (Option<String>, String) {
     let (state, body) = outl_actions::split_todo(raw);
     let status = state.map(|s| s.as_str().to_lowercase());

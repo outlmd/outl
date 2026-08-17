@@ -86,7 +86,8 @@ Recently added — check these before writing a parallel reminder helper (catalo
 | Silence a reminder across every device | `outl_actions::snooze` / `snooze_until` (`Op::SnoozeRemind`) | `crates/outl-actions/src/reminders/mod.rs` |
 | Deliver what came due + the device-local fired log. In `outl-actions` because every client delivers, the TUI included | `outl_actions::take_due` | `crates/outl-actions/src/reminders/fired.rs` |
 | Format "in 3h" / bucket a reminder list for a GUI | `@outl/shared` `formatNextFire` / `groupReminders` | `crates/outl-frontend-shared/src/api/commands.ts` |
-| **Mark a block DONE outright** (cancels its rule). Not `cycle_todo` — on a block with no marker, one cycle lands on `TODO` and arms the nag | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
+| **Mark a block DONE outright** (cancels its rule). Not `cycle_todo` — the cycle is `TODO → DOING → DONE`, so from an unmarked block one press lands on `TODO` and arms the nag | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
+| Cycle / split / read task state (`TODO ` / `DOING ` / `DONE ` text prefixes; `TodoState::prefix` owns the spelling and the widths differ) | `outl_actions::todo::cycle_todo` / `split_todo` / `TodoState` / `DOING_PREFIX` | `crates/outl-actions/src/todo.rs` |
 
 Recently added — check these before writing a parallel template helper (catalog: `docs/primitives-actions.md` → "Templates"):
 

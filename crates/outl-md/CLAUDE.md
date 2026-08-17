@@ -17,7 +17,7 @@ Treat matching with the same paranoia as the CRDT.
   A sibling when found at depth 0, a child of the block above it when found indented with no open continuation to absorb it.
   Every recovery is recorded in `ParsedPage.warnings: Vec<ParseWarning>` (kind `UnrecognizedBlockMarker`).
   Nothing is silently dropped, at any depth; surfaces show the warning list so the user can clean the file at their pace.
-  Multi-line bodies (including `> ` blockquote continuation lines, `TODO ` / `DONE ` continuations, and free-text continuations) land verbatim in `OutlineNode.text` separated by `\n`;
+  Multi-line bodies (including `> ` blockquote continuation lines, `TODO ` / `DOING ` / `DONE ` continuations, and free-text continuations) land verbatim in `OutlineNode.text` separated by `\n`;
   the prefix on each continuation line is preserved by the same "trim leading indent, append to text" path so blockquote bodies round-trip cleanly as CommonMark.
   **Blank lines and indentation inside a block's text now round-trip.**
   A whitespace-only line indented deeper than the block (what `render::write_block_text` emits for a blank line mid-continuation) folds into `text`; only a genuinely empty line closes continuation.
@@ -26,7 +26,8 @@ Treat matching with the same paranoia as the CRDT.
   Getting any of these three wrong is the issue #210 producer — measured at 41 pages / 387 lines on a real workspace, and 0 after the fix.
 - Render outline AST → `.md` (clean, no IDs).
   Each line in `OutlineNode.text` after the first is emitted at `indent + 1`; the renderer **does not invent** prefixes on continuation lines — whatever the user (or the parser) put in `text` round-trips as-is.
-  Block-kind markers (`TODO `, `DONE `, `> `) are owned by `outl-actions` (`todo.rs`, `quote.rs`); this crate only preserves them verbatim.
+  Block-kind markers (`TODO `, `DOING `, `DONE `, `> `) are owned by `outl-actions` (`todo.rs`, `quote.rs`); this crate only preserves them verbatim, which is why `DOING ` needed no parser change.
+  The lone exception is `outline_ops::count_todos` (the progress chip's `(done, total)`): `DOING` counts toward the total, never toward `done`.
 - Read/write `.outl` sidecar (JSON, sibling file) — current version `2`, reads v1 transparently (handles backfilled on load; missing `text` stays empty and level 2 skips that block).
   **Additive fields ride at the same version — see [Sidecar versioning](#sidecar-versioning-both-directions) before touching `SIDECAR_VERSION`.**
   The sidecar is **structural metadata only** (id, line, indent, content hash, ref handle, last-synced text).

@@ -99,10 +99,17 @@ fn task_states_props_and_org_dates_translate() {
     assert!(tasks.contains("type:: project"), "page prop:\n{tasks}");
     assert!(tasks.contains("- TODO buy milk"));
     assert!(
-        tasks.contains("- TODO write spec [[2026-11-10]]"),
-        "DOING → TODO + date link:\n{tasks}"
+        tasks.contains("- DOING write spec [[2026-11-10]]"),
+        "DOING → DOING + date link:\n{tasks}"
     );
-    assert!(tasks.contains("state:: doing"), "nuance kept:\n{tasks}");
+    // The `state:: doing` property existed only because the prefix
+    // could not say it. Now that it can, a property saying the same
+    // thing is a second copy that queries and the toggle would drift
+    // away from.
+    assert!(
+        !tasks.contains("state:: doing"),
+        "DOING is the prefix now, not a property:\n{tasks}"
+    );
     assert!(tasks.contains("priority:: A"), "priority prop:\n{tasks}");
     assert!(tasks.contains("- DONE ship"));
     assert!(!tasks.contains(":LOGBOOK:"), "logbook dropped:\n{tasks}");

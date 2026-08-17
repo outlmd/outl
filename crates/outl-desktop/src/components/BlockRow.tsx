@@ -777,20 +777,21 @@ export function BlockRow(props: {
     );
   }
 
-  /** TODO/DONE state to render the bullet by. Edit mode is the
-   *  **raw markdown view** — the `TODO `/`DONE ` prefix is literally
-   *  visible in the textarea, so the bullet collapses to the neutral
-   *  `•` to avoid showing the same state twice. Read mode is where
-   *  the prefix is replaced by `▢` / `▣`. */
+  /** Task state to render the bullet by. Edit mode is the
+   *  **raw markdown view** — the `TODO `/`DOING `/`DONE ` prefix is
+   *  literally visible in the textarea, so the bullet collapses to the
+   *  neutral `•` to avoid showing the same state twice. Read mode is
+   *  where the prefix is replaced by `▢` / `▨` / `▣`. */
   function effectiveTodo(): TodoState | null {
     return isEditing() ? null : props.block.todo;
   }
 
-  /** Bullet glyph + click action — folds TODO/DONE/none into a
-   *  single visual primitive (TUI parity, `▢` / `▣` / `•`). */
+  /** Bullet glyph + click action — folds the task states and none into
+   *  a single visual primitive (TUI parity, `▢` / `▨` / `▣` / `•`). */
   function bulletGlyph(): string {
     const t = effectiveTodo();
     if (t === "DONE") return "▣";
+    if (t === "DOING") return "▨";
     if (t === "TODO") return "▢";
     return "•";
   }
@@ -799,7 +800,9 @@ export function BlockRow(props: {
     if (t === "DONE") {
       return "text-(--color-outl-todo-done-fg)";
     }
-    if (t === "TODO") {
+    // DOING shares the open colour: it is unfinished work, and the
+    // half-filled glyph already carries the distinction.
+    if (t === "TODO" || t === "DOING") {
       return "text-(--color-outl-todo-open-fg)";
     }
     return "text-(--color-outl-fg-dimmer)";
@@ -943,20 +946,24 @@ export function BlockRow(props: {
               title={
                 props.block.todo === "DONE"
                   ? "Click to uncheck"
-                  : props.block.todo === "TODO"
+                  : props.block.todo === "DOING"
                     ? "Click to mark done"
-                    : zoomableBullet
-                      ? "Click to zoom in"
-                      : "Click to mark as TODO"
+                    : props.block.todo === "TODO"
+                      ? "Click to mark doing"
+                      : zoomableBullet
+                        ? "Click to zoom in"
+                        : "Click to mark as TODO"
               }
               aria-label={
                 props.block.todo === "DONE"
                   ? "Mark not done"
-                  : props.block.todo === "TODO"
+                  : props.block.todo === "DOING"
                     ? "Mark done"
-                    : zoomableBullet
-                      ? "Zoom in on block"
-                      : "Mark as TODO"
+                    : props.block.todo === "TODO"
+                      ? "Mark doing"
+                      : zoomableBullet
+                        ? "Zoom in on block"
+                        : "Mark as TODO"
               }
             >
               {bulletGlyph()}

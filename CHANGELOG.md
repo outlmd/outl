@@ -7,6 +7,46 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **A third task state: `DOING`.**
+  A block used to be either `TODO` or `DONE`, with no way to say a task is underway.
+  The workaround was a tag or a property, which kept that state out of `status:` queries and out of the progress counter, and let every user invent a different convention for it.
+
+  ```markdown
+  - TODO write the RFC
+  - DOING ship the parser
+  - DONE read the paper
+  ```
+
+  The toggle (`Ctrl+T` in the TUI, `⌘T` on desktop, tapping the checkbox on mobile) walks one more stop: `(none) → TODO → DOING → DONE → (none)`.
+  `status: doing` is a query filter like any other, and `- [/]` (Logseq / Obsidian) plus Roam's `{{[[DOING]]}}` normalize to it on paste.
+
+  **Importing Logseq no longer flattens it.**
+  `DOING` used to arrive as `TODO ` plus a `state:: doing` property (and `NOW` as `TODO ` plus `state:: now`), which no query, count or view could tell apart from a real `TODO` — every Logseq graph imported before this landed is flattened that way, and re-importing is what fixes it.
+  `NOW` still keeps a `state:: now` property, since outl has one started-state and Logseq has two.
+
+  Two things deliberately did **not** change: `status: open` still means "is a task" (DONE included), so existing queries keep their meaning, and the progress chip counts `DOING` toward the total but never toward the done half — a started task is unfinished work.
+
+  Nothing in the parser, the renderer, the sidecar or any DTO changed: the state is a text prefix like `TODO `/`DONE `/`> ` before it, so a `.md` written by a newer binary still reads on an older one (the marker simply shows as literal text).
+  The one shape to know when writing code against it: **`DOING ` is one character wider than the other two markers**, so cursor math measures `TodoState::prefix` instead of assuming five.
+  ([#235](https://github.com/outlmd/outl/issues/235), [RFC 0008](docs/rfcs/0008-markdown-dialect-and-sidecar-tokens.md))
+
+- **Markdown checkboxes are tasks now.**
+  Typing `- [ ] buy milk` used to leave inert prose: the literal `[ ]` rendered as text, the block matched no `status:` query, counted in no progress chip, and `Ctrl+T` treated it as unmarked.
+  It is now read as a task in all three states, alongside the word form:
+
+  | You type | outl reads it as |
+  |---|---|
+  | `- [ ] buy milk` | `TODO` |
+  | `- [/] buy milk` | `DOING` |
+  | `- [x] buy milk` / `- [X] buy milk` | `DONE` |
+
+  **Two spellings in, one out.**
+  outl still writes only the word form, so the first toggle rewrites `[ ] buy milk` into `DOING buy milk` and it does not go back to brackets.
+  Until you act on a block, its bytes are untouched — recognising a spelling never turns opening a page into a write, which is why the alternative (normalising at parse time) was rejected: it would edit the file on read and change text under the cursor.
+
+  The trailing space is what separates a checkbox from a link, so `[x](https://example.com)` stays a link, and `[]` / `[ ]` alone / `[y] foo` stay prose.
+  ([#230](https://github.com/outlmd/outl/issues/230))
+
 - **`outl doctor` now reports — and `--repair` drops — actor bindings for workspaces that no longer exist.**
   `~/.config/outl/actors/` (or `$OUTL_DEVICE_DIR/actors/`) records which actor id this device writes under for every workspace it has ever opened, and nothing ever removed one.
   A workspace you deleted last year still had its binding; on one development machine that reached 1,208 records, 1,166 of them pointing at directories that are gone.

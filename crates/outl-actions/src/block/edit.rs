@@ -47,7 +47,7 @@ pub fn edit_text(
     Ok(())
 }
 
-/// Cycle the block's TODO state: `None → TODO → DONE → None`.
+/// Cycle the block's task state one step: `None → TODO → DOING → DONE → None`.
 pub fn toggle_todo(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -129,6 +129,8 @@ mod tests {
         toggle_todo(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("TODO ship it"));
         toggle_todo(&mut ws, &hlc, n).unwrap();
+        assert_eq!(ws.block_text(n).as_deref(), Some("DOING ship it"));
+        toggle_todo(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("DONE ship it"));
         toggle_todo(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("ship it"));
@@ -160,9 +162,9 @@ mod tests {
         // And the reverse: starting from a quoted block, toggle TODO
         // also lands the canonical order.
         toggle_quote(&mut ws, &hlc, n).unwrap(); // back to "TODO ship it"
-        toggle_todo(&mut ws, &hlc, n).unwrap(); // → "DONE ship it"
+        toggle_todo(&mut ws, &hlc, n).unwrap(); // → "DOING ship it"
         toggle_quote(&mut ws, &hlc, n).unwrap();
-        assert_eq!(ws.block_text(n).as_deref(), Some("DONE > ship it"));
+        assert_eq!(ws.block_text(n).as_deref(), Some("DOING > ship it"));
     }
 
     #[test]
@@ -175,6 +177,8 @@ mod tests {
         assert_eq!(ws.block_text(n).as_deref(), Some("> ship it"));
         toggle_todo(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("TODO > ship it"));
+        toggle_todo(&mut ws, &hlc, n).unwrap();
+        assert_eq!(ws.block_text(n).as_deref(), Some("DOING > ship it"));
         toggle_todo(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("DONE > ship it"));
         toggle_todo(&mut ws, &hlc, n).unwrap();

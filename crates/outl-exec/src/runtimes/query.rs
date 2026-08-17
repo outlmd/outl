@@ -86,10 +86,7 @@ fn run_query_internal(query: &dsl::Query, workspace_root: &Path) -> Result<Vec<Q
         .map(|h| QueryHit {
             handle: h.handle,
             page: h.page_slug,
-            status: h
-                .status
-                .map(|done| if done { "done" } else { "todo" })
-                .map(String::from),
+            status: h.status.map(|s| s.as_str().to_string()),
             text: h.text,
         })
         .collect())
@@ -100,9 +97,14 @@ fn build_query_from_params(p: &QueryParams) -> Result<dsl::Query, String> {
     if let Some(s) = &p.status {
         filters.push(dsl::Filter::Status(match s.as_str() {
             "todo" => dsl::StatusFilter::Todo,
+            "doing" => dsl::StatusFilter::Doing,
             "done" => dsl::StatusFilter::Done,
             "open" => dsl::StatusFilter::Open,
-            other => return Err(format!("invalid status '{other}' (use todo|done|open)")),
+            other => {
+                return Err(format!(
+                    "invalid status '{other}' (use todo|doing|done|open)"
+                ))
+            }
         }));
     }
     if let Some(t) = &p.tag {
@@ -210,6 +212,7 @@ pub(crate) mod dsl {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum StatusFilter {
         Todo,
+        Doing,
         Done,
         Open,
     }
@@ -297,11 +300,12 @@ pub(crate) mod dsl {
     fn parse_status(v: &str, line_idx: usize) -> Result<StatusFilter, ParseError> {
         match v {
             "todo" => Ok(StatusFilter::Todo),
+            "doing" => Ok(StatusFilter::Doing),
             "done" => Ok(StatusFilter::Done),
             "open" => Ok(StatusFilter::Open),
             _ => Err(ParseError {
                 line: line_idx + 1,
-                msg: format!("status must be 'todo', 'done', or 'open', got '{v}'"),
+                msg: format!("status must be 'todo', 'doing', 'done', or 'open', got '{v}'"),
             }),
         }
     }
@@ -410,15 +414,40 @@ pub(crate) mod engine {
     use outl_md::block_index::BlockEntry;
     use outl_md::index::WorkspaceIndex;
 
+    /// Task state of a block, as read off its text prefix.
+    ///
+    /// **This mirrors `outl_actions::TodoState`, which is the owner of
+    /// the marker vocabulary.** It cannot be imported: `outl-actions`
+    /// depends on this crate (for `run_code_block`), so the arrow only
+    /// points one way. Adding a state there means adding it here in the
+    /// same change — the pair is convention, not a compiler check.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum Status {
+        Todo,
+        Doing,
+        Done,
+    }
+
+    impl Status {
+        /// Lowercase wire form used in `QueryHit.status`.
+        pub fn as_str(self) -> &'static str {
+            match self {
+                Status::Todo => "todo",
+                Status::Doing => "doing",
+                Status::Done => "done",
+            }
+        }
+    }
+
     /// One query hit — the data we need to render an embed.
     pub struct Hit {
         /// Block ref handle (`blk-XXXXXX`) for embed rendering.
         pub handle: String,
         /// Slug of the page hosting the block.
         pub page_slug: String,
-        /// `Some(false)` = TODO, `Some(true)` = DONE, `None` = not a task.
-        pub status: Option<bool>,
-        /// Block text with the TODO prefix stripped.
+        /// Task state, or `None` when the block is not a task.
+        pub status: Option<Status>,
+        /// Block text with the task prefix stripped.
         pub text: String,
     }
 
@@ -454,10 +483,12 @@ pub(crate) mod engine {
         for key in keys.iter().rev() {
             match key {
                 SortKey::Page => hits.sort_by(|a, b| a.page_slug.cmp(&b.page_slug)),
+                // Unfinished work first, in the order it moves through:
+                // TODO, DOING, DONE. A non-task sorts with TODO, which
+                // is where it sat before DOING existed.
                 SortKey::Status => hits.sort_by(|a, b| {
-                    let a_done = a.status.unwrap_or(false);
-                    let b_done = b.status.unwrap_or(false);
-                    a_done.cmp(&b_done)
+                    let rank = |s: Option<Status>| s.unwrap_or(Status::Todo);
+                    rank(a.status).cmp(&rank(b.status))
                 }),
                 SortKey::Text => hits.sort_by(|a, b| a.text.cmp(&b.text)),
             }
@@ -467,14 +498,18 @@ pub(crate) mod engine {
     fn matches(
         f: &Filter,
         entry: &BlockEntry,
-        status: Option<bool>,
+        status: Option<Status>,
         is_journal: Option<bool>,
         today: &NaiveDate,
     ) -> bool {
         match f {
             Filter::Status(sf) => match sf {
-                StatusFilter::Todo => status == Some(false),
-                StatusFilter::Done => status == Some(true),
+                StatusFilter::Todo => status == Some(Status::Todo),
+                StatusFilter::Doing => status == Some(Status::Doing),
+                StatusFilter::Done => status == Some(Status::Done),
+                // `open` has always meant "is a task", DONE included —
+                // kept as-is so existing queries don't change meaning
+                // under the user on an upgrade.
                 StatusFilter::Open => status.is_some(),
             },
             Filter::Tag(tag) => {
@@ -495,16 +530,31 @@ pub(crate) mod engine {
         }
     }
 
-    /// Split `"TODO body"` / `"DONE body"` / `"body"` into `(status, body)`.
-    /// Returns `Some(false)` for TODO, `Some(true)` for DONE, `None` otherwise.
-    fn split_todo(raw: &str) -> (Option<bool>, &str) {
-        if let Some(rest) = raw.strip_prefix("TODO ") {
-            (Some(false), rest)
-        } else if let Some(rest) = raw.strip_prefix("DONE ") {
-            (Some(true), rest)
-        } else {
-            (None, raw)
+    /// Split a block's text into `(status, body)`, accepting both the
+    /// canonical word form (`"TODO body"`) and the CommonMark checkbox
+    /// form (`"[ ] body"`). Mirrors `outl_actions::split_todo` — see
+    /// [`Status`] for why it is a mirror and not a call.
+    ///
+    /// The checkbox spellings have to be here too, or a block the user
+    /// wrote as `- [ ] ship it` renders a checkbox everywhere and then
+    /// fails to match `status: todo`, which is the same "it's a task
+    /// except where it isn't" split issue #230 was filed about.
+    fn split_todo(raw: &str) -> (Option<Status>, &str) {
+        const PREFIXES: [(&str, Status); 7] = [
+            ("TODO ", Status::Todo),
+            ("DOING ", Status::Doing),
+            ("DONE ", Status::Done),
+            ("[ ] ", Status::Todo),
+            ("[/] ", Status::Doing),
+            ("[x] ", Status::Done),
+            ("[X] ", Status::Done),
+        ];
+        for (prefix, status) in PREFIXES {
+            if let Some(rest) = raw.strip_prefix(prefix) {
+                return (Some(status), rest);
+            }
         }
+        (None, raw)
     }
 
     fn parse_journal_date(slug: &str) -> Option<NaiveDate> {
@@ -517,17 +567,81 @@ pub(crate) mod engine {
 
         #[test]
         fn split_todo_open() {
-            assert_eq!(split_todo("TODO buy milk"), (Some(false), "buy milk"));
+            assert_eq!(
+                split_todo("TODO buy milk"),
+                (Some(Status::Todo), "buy milk")
+            );
+        }
+
+        #[test]
+        fn split_todo_doing() {
+            assert_eq!(
+                split_todo("DOING buy milk"),
+                (Some(Status::Doing), "buy milk")
+            );
         }
 
         #[test]
         fn split_todo_done() {
-            assert_eq!(split_todo("DONE buy milk"), (Some(true), "buy milk"));
+            assert_eq!(
+                split_todo("DONE buy milk"),
+                (Some(Status::Done), "buy milk")
+            );
         }
 
         #[test]
         fn split_todo_none() {
             assert_eq!(split_todo("just text"), (None, "just text"));
+        }
+
+        #[test]
+        fn split_todo_reads_the_checkbox_spelling() {
+            // A block the user typed as `- [ ] ship it` has to match
+            // `status: todo`, or it renders a checkbox everywhere and
+            // then goes missing from the query (issue #230).
+            assert_eq!(split_todo("[ ] buy milk"), (Some(Status::Todo), "buy milk"));
+            assert_eq!(
+                split_todo("[/] buy milk"),
+                (Some(Status::Doing), "buy milk")
+            );
+            assert_eq!(split_todo("[x] buy milk"), (Some(Status::Done), "buy milk"));
+            // A link is not a checkbox.
+            assert_eq!(
+                split_todo("[x](https://example.com)"),
+                (None, "[x](https://example.com)")
+            );
+        }
+
+        #[test]
+        fn doing_is_neither_todo_nor_done_to_a_filter() {
+            // The whole point of the state: a query for open work must
+            // not sweep up started work, and `status: done` must not
+            // count something nobody finished.
+            let today = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+            let text = "DOING ship the parser";
+            let entry = BlockEntry {
+                id: outl_core::NodeId::new(),
+                ref_handle: "blk-aaaaaa".into(),
+                source_slug: "notes".into(),
+                source_path: std::path::PathBuf::from("pages/notes.md"),
+                source_block_path: vec![0],
+                text: text.into(),
+                text_fold: text.to_lowercase(),
+                children: Vec::new(),
+            };
+            let (status, _) = split_todo(&entry.text);
+            for (filter, expected) in [
+                (StatusFilter::Todo, false),
+                (StatusFilter::Doing, true),
+                (StatusFilter::Done, false),
+                (StatusFilter::Open, true),
+            ] {
+                assert_eq!(
+                    matches(&Filter::Status(filter), &entry, status, None, &today),
+                    expected,
+                    "{filter:?} against a DOING block"
+                );
+            }
         }
     }
 }

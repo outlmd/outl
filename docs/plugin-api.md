@@ -209,7 +209,8 @@ The typed signatures live in `@outl/plugin-sdk`; the runtime ships the subset be
 | `ctx.ui` | `notify(m)` | — |
 | `ctx.ui` | `render(html)` — run author-written HTML/JS in a sandboxed iframe overlay (GUI only) | capability `ui-render` |
 
-`Block` is `{ id, text, parent, todo?, page }` — `text` has the `TODO`/`DONE` prefix stripped, `todo` is `"TODO" \| "DONE"` or absent, and `parent` is the parent block id or `null` for a top-level child of the page (use it to reconstruct hierarchy from a `query`).
+`Block` is `{ id, text, parent, todo?, page }` — `text` has the task prefix stripped, `todo` is `"TODO" \| "DOING" \| "DONE"` or absent, and `parent` is the parent block id or `null` for a top-level child of the page (use it to reconstruct hierarchy from a `query`).
+Branch on the state you care about and treat the rest as unfinished, rather than assuming `todo !== "DONE"` means `"TODO"`: a plugin written against two states counts every started block as neither.
 
 `TreeNode` (what `appendTree` takes) is `{ text, children? }`, recursive.
 `LogOp` (what `onOp` receives) is `{ kind, node, text?, todo? }`, where `kind` is one of `"Create" | "Move" | "Edit" | "SetProp" | "SetCollapsed"`; `text` and `todo` are present only on `"Edit"`.

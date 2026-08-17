@@ -8,15 +8,23 @@
 
 use serde_json::Value;
 
-/// Prefix used in front of a block body to surface its TODO state.
+/// Prefix used in front of a block body to surface its task state.
 ///
 /// Mirrors what the user sees in the TUI today: `[ ]` for open,
-/// `[x]` for done, empty for a plain bullet. Lives in one place so
-/// every CLI surface (page, block, daily, backlinks, embed) renders
-/// the same.
+/// `[/]` for started, `[x]` for done, empty for a plain bullet. Lives
+/// in one place so every CLI surface (page, block, daily, backlinks,
+/// embed) renders the same.
+///
+/// The `_` arm means an unrecognised state renders as a plain bullet,
+/// which is indistinguishable from a block that is not a task at all.
+/// So a state added to `outl_actions::TodoState` and not added here
+/// goes silently missing from every non-`--json` command — that is
+/// exactly what happened to `DOING`. The value arrives as a `&str`
+/// (it crosses the wire as one), so the compiler cannot flag it.
 pub fn todo_prefix(todo: Option<&str>) -> &'static str {
     match todo {
         Some("TODO") => "[ ] ",
+        Some("DOING") => "[/] ",
         Some("DONE") => "[x] ",
         _ => "",
     }
@@ -43,5 +51,55 @@ pub fn print_outline_node(node: &Value, depth: usize) {
     println!("{:indent$}- {}{}", "", prefix, text, indent = depth * 2);
     if let Some(children) = node.get("children").and_then(Value::as_array) {
         print_outline_tree(children, depth + 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use outl_actions::TodoState;
+
+    /// Every `TodoState` this crate knows about, as one list.
+    ///
+    /// The `match` is what makes it exhaustive: it has no `_` arm, so
+    /// adding a variant upstream stops this file from **compiling**
+    /// until someone extends the array below and, with it, the test
+    /// that checks each state renders. An array on its own would just
+    /// skip the new variant silently — which is precisely how `DOING`
+    /// went missing from every non-`--json` command in the first place.
+    const ALL_STATES: [TodoState; 3] = {
+        const fn assert_exhaustive(state: TodoState) {
+            match state {
+                TodoState::Todo | TodoState::Doing | TodoState::Done => (),
+            }
+        }
+        assert_exhaustive(TodoState::Todo);
+        [TodoState::Todo, TodoState::Doing, TodoState::Done]
+    };
+
+    /// Every task state must render as something, and no two may share
+    /// a marker.
+    #[test]
+    fn every_task_state_has_a_visible_marker() {
+        let mut seen: Vec<&str> = Vec::new();
+        for state in ALL_STATES {
+            let marker = todo_prefix(Some(state.as_str()));
+            assert!(
+                !marker.is_empty(),
+                "{} renders as a plain bullet, indistinguishable from a non-task block",
+                state.as_str()
+            );
+            assert!(
+                !seen.contains(&marker),
+                "{} reuses the marker {marker:?} of another state",
+                state.as_str()
+            );
+            seen.push(marker);
+        }
+    }
+
+    #[test]
+    fn a_block_with_no_task_state_gets_no_marker() {
+        assert_eq!(todo_prefix(None), "");
     }
 }
