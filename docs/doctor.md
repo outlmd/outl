@@ -1,12 +1,11 @@
 # outl doctor
 
-The integrity check, and the only writing mode the CLI has that is not an explicit mutation.
+The integrity check you run before trusting a migration, and after any sync weirdness.
+It is also the only writing mode the CLI has that is not an explicit mutation.
 Split out of [cli.md](cli.md) because it is the one subcommand whose *refusals* need as much space as its behaviour: what `--repair` declines to touch is the part that keeps it from deleting your work.
 
 > Why `--repair` refuses a page whose `.md` holds content the op log lacks: [RFC 0210](rfcs/0210-md-content-outside-op-log.md).
 > Where the device store lives and why it is outside the workspace: [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).
-
-The integrity check you run before trusting a migration, and after any sync weirdness.
 
 **Read-only by default** — it reports, it never fixes, unless you pass `--repair`.
 Exit code is `1` when the report carries any error, so it drops straight into a script or CI step.
@@ -46,7 +45,7 @@ The only thing a default run writes is its own stdout.
   Detection is shared with this check, so the two can never disagree about which pages qualify.
   This only helps while the content is still **on disk**.
   A page whose `.md` was already overwritten (before this guard existed) is unreachable this way.
-  [`outl recover`](#outl-recover) reads the **op log** instead, where the same producer bug left the pre-truncation text as a recoverable earlier revision.
+  [`outl recover`](cli.md#outl-recover) reads the **op log** instead, where the same producer bug left the pre-truncation text as a recoverable earlier revision.
 
   **`outl reconcile --allow-bulk-delete`** is a different flag for a different state, and the two are worth keeping apart.
   A reconcile stops, writing nothing, when one page's `.md` would send more than **500 blocks** to the trash or more than **75%** of the blocks its sidecar knew (the share arm stands down under 20 blocks — clearing a scratch note is routine).
@@ -110,13 +109,16 @@ Three conditions, all required:
 
 1. The root is **gone** — not merely unreadable.
    A permission or I/O error keeps the binding.
-2. The root's **parent directory is still there**.
+2. The root's **parent directory is still there**, on the **filesystem the root was bound on**.
    Deleting a folder leaves its parent behind; an unmounted volume takes the whole path with it.
+   A workspace that is *itself* a mount point would defeat the parent test alone (unmounting `/Volumes/Notes` leaves `/Volumes` behind), so each binding records which filesystem its root lived on, and a surviving parent on a different filesystem keeps the binding.
+   A binding written before that stamp existed has nothing to compare and keeps the plain parent reading.
 3. The record is **older than 30 days** — the age of the *record*, not time since the deletion.
    A binding is rewritten only when its workspace moves, so a graph you have had for years and deleted today is eligible right away.
    Condition 2 is what protects a live workspace.
 
 A record whose `root=` does not survive a parse/write round trip (a path ending in a space, or holding a newline) is also kept: it names a path that was never written, and acting on it would drop a live binding.
+The same goes for a root the store's text format could not spell faithfully in the first place, such as a path holding non-Unicode characters.
 
 The verdict is re-checked immediately before the delete, so a drive plugged back in between the listing and the repair keeps its binding.
 Each dropped record is copied to `.outl/repair-backup/<timestamp>/device-store/actors/` first; restoring is a `cp` back into `<device_dir>/actors/`.

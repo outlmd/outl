@@ -22,16 +22,20 @@ fn store() -> (TempDir, DeviceStore) {
 }
 
 /// Write a binding naming `root`, aged `age` by backdating its mtime.
+///
+/// Mirrors `actor_record`: the writer stamps the root's filesystem
+/// device (`dev=`) while the root is still there to ask, so a root that
+/// does not exist at binding time gets the pre-stamp legacy shape.
 fn binding(store: &DeviceStore, name: &str, root: &Path, age: Duration) -> PathBuf {
     let path = store.dir().join("actors").join(name);
-    std::fs::write(
-        &path,
-        format!(
-            "actor=01J0000000000000000000000A\nroot={}\nmachine=01J0000000000000000000000B\n",
-            root.display()
-        ),
-    )
-    .unwrap();
+    let mut contents = format!(
+        "actor=01J0000000000000000000000A\nroot={}\nmachine=01J0000000000000000000000B\n",
+        root.display()
+    );
+    if let Some(dev) = device_of(root) {
+        contents.push_str(&format!("dev={dev}\n"));
+    }
+    std::fs::write(&path, contents).unwrap();
     backdate(&path, age);
     path
 }
@@ -286,6 +290,101 @@ fn a_root_containing_a_newline_is_never_prunable() {
     assert_eq!(verdict(&store, &path), BindingVerdict::Inconclusive);
     assert!(!store.prune_binding(&path, TTL).unwrap());
     assert!(path.exists());
+}
+
+/// The parent-present rule assumes the root lived on the parent's own
+/// filesystem. A workspace that is *itself* a mount point breaks that:
+/// unmounting `/Volumes/Notes` leaves `/Volumes` behind exactly like a
+/// deletion would, and pruning there forks the actor of a live external
+/// volume on its next mount. The binding records the root's device id
+/// while the root is there to ask, and a surviving parent on a
+/// different filesystem than the recorded one is the unmount signature.
+#[test]
+fn a_workspace_that_was_its_own_mount_point_is_kept_after_unmount() {
+    let (_d, store) = store();
+    let volumes = TempDir::new().unwrap();
+    // The mount point itself is absent while its parent survives.
+    let root = volumes.path().join("Notes");
+    // A mounted volume's device can never be its parent directory's own.
+    let foreign = device_of(volumes.path()).map_or(1, |d| d.wrapping_add(1));
+    let path = store.dir().join("actors").join("mount-root");
+    std::fs::write(
+        &path,
+        format!(
+            "actor=01J0000000000000000000000A\nroot={}\n\
+             machine=01J0000000000000000000000B\ndev={foreign}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    backdate(&path, TTL * 4);
+
+    assert_eq!(verdict(&store, &path), BindingVerdict::Inconclusive);
+    assert!(store.stale_actor_bindings(TTL).unwrap().is_empty());
+    assert!(!store.prune_binding(&path, TTL).unwrap());
+    assert!(path.exists(), "an unmounted volume must keep its binding");
+}
+
+/// A `dev=` stamp we cannot read is a stamp we cannot verify, not a
+/// licence to fall back to the weaker parent-only rule.
+#[test]
+fn an_unreadable_dev_stamp_keeps_the_binding() {
+    let (_d, store) = store();
+    let parent = TempDir::new().unwrap();
+    let root = parent.path().join("gone");
+    let path = store.dir().join("actors").join("bad-dev");
+    std::fs::write(
+        &path,
+        format!(
+            "actor=01J0000000000000000000000A\nroot={}\n\
+             machine=01J0000000000000000000000B\ndev=not-a-device\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    backdate(&path, TTL * 4);
+
+    assert_eq!(verdict(&store, &path), BindingVerdict::Inconclusive);
+    assert!(!store.prune_binding(&path, TTL).unwrap());
+    assert!(path.exists());
+}
+
+/// The writer serializes the root with `Path::display()`, which replaces
+/// non-Unicode path data with U+FFFD *before* the parser (and its
+/// `is_lossy`) ever see the text. The stored path was never the real
+/// one, so its absence proves nothing about the workspace: judged
+/// `Inconclusive`, never `Stale`.
+#[test]
+fn a_root_the_display_serialization_already_mangled_is_never_prunable() {
+    let (_d, store) = store();
+    let parent = TempDir::new().unwrap();
+    // What a non-Unicode root looks like after `display()`: this
+    // replacement-character rendering does not exist, its parent does.
+    let root = parent.path().join("caf\u{FFFD}");
+    let path = binding(&store, "mangled", &root, TTL * 4);
+
+    assert_eq!(verdict(&store, &path), BindingVerdict::Inconclusive);
+    assert!(!store.prune_binding(&path, TTL).unwrap());
+    assert!(path.exists());
+}
+
+/// End-to-end shape of the same defect, on a filesystem that allows
+/// non-Unicode names: the workspace is alive, the recorded text is not
+/// its name.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_live_non_unicode_workspace_keeps_its_binding() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let (_d, store) = store();
+    let parent = TempDir::new().unwrap();
+    let root = parent.path().join(OsStr::from_bytes(b"caf\xE9"));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = binding(&store, "non-unicode", &root, TTL * 4);
+
+    assert_eq!(verdict(&store, &path), BindingVerdict::Inconclusive);
+    assert!(!store.prune_binding(&path, TTL).unwrap());
+    assert!(path.exists(), "the workspace is alive");
 }
 
 /// The guard on `prune_binding` is advertised as what keeps

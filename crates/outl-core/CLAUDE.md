@@ -145,6 +145,7 @@ Keeping a stale record costs ~190 bytes.
 So "the root is missing" is **not** the rule, because an unplugged drive, an unmounted network volume, an undownloaded iCloud folder and an archived workspace all look exactly like a deleted one.
 A binding is `BindingVerdict::Stale` only when the root is gone, its *parent* directory is still present, and the record is older than `STALE_BINDING_TTL` (30 days).
 The parent check is what does the real work: a deleted folder leaves its parent behind, while a missing mount takes the whole path with it.
+A workspace that is *itself* a mount point would defeat the parent check alone (unmounting `/Volumes/Notes` leaves `/Volumes` behind), so each binding also stamps the root's filesystem device id (`dev=`) while the root is there to ask, and a surviving parent on a different filesystem keeps the entry.
 Everything else — including a record with no `root=`, and any path we failed to *read* rather than observed to be absent — is `Inconclusive`, which always keeps it.
 
 Two things about that rule are easy to misread, and both are pinned by tests:
@@ -156,6 +157,7 @@ Two things about that rule are easy to misread, and both are pinned by tests:
 - **A record that does not survive the parse is not evidence.**
   `write_record` does not escape and `parse` trims, so a root ending in a space (or holding a newline) reads back as a *different*, non-existent path whose parent exists — the exact shape that authorises a delete, for a workspace that is alive.
   `Record::is_lossy` reports the failed round trip and `judge` drops the root rather than trusting it.
+  The same defect exists one layer earlier: the writer serializes the root via `Path::display()`, which replaces non-Unicode path data with U+FFFD before the parser ever sees the text, so `judge` also drops a root carrying the replacement character.
   Before the GC that leniency cost one redundant rewrite per open; the GC is what changed its price.
 
 `gc.rs` is the **single owner** of that verdict.
@@ -166,7 +168,7 @@ The same module also collects **abandoned scratch files** (`STALE_SCRATCH_TTL`, 
 `record.rs` composes every write in a `.<name>.<pid>.<seq>` sibling and removes it after publishing, so a killed process leaves one behind forever.
 They stay out of the binding listing on purpose: a scratch file names no workspace, so reporting one as "a binding whose workspace is gone" invents a graph that never existed.
 They are also never backed up, because a half-published write is by definition content that never became a record.
-Deleting one a live writer still holds is survivable — its `hard_link` then fails with something other than `AlreadyExists`, and `exclusive_create` writes the same record anyway.
+Deleting one a live writer still holds is survivable on both publish paths — `create_new_record`'s `hard_link` fails with something other than `AlreadyExists` and falls through to `exclusive_create`, and `write_record` recomposes a scratch its `rename` found missing and publishes again.
 
 The surface is `outl doctor` (reports the count) and `outl doctor --repair` (drops them, after a backup) — see `outl-cli/CLAUDE.md`.
 `scripts/gc-dev-device-store.sh` is the *developer's* faster sweep of `.dev-device-store`, and it now differs in **exactly one** way: no TTL, because test debris does not deserve a 30-day wait.

@@ -396,13 +396,23 @@ impl DeviceStore {
     }
 }
 
-/// The three fields of an `actors/*` binding.
-fn actor_record(actor: ActorId, root: &Path, machine: &MachineId) -> [(&'static str, String); 3] {
-    [
+/// The fields of an `actors/*` binding.
+///
+/// `dev=` is the filesystem device the root lives on, stamped while the
+/// root is still there to ask. It is what later lets the GC tell a
+/// deleted folder from an unmounted workspace that was itself a mount
+/// point (see `gc::verdict_for`). Omitted where the platform cannot
+/// answer; the GC then keeps the plain parent reading.
+fn actor_record(actor: ActorId, root: &Path, machine: &MachineId) -> Vec<(&'static str, String)> {
+    let mut record = vec![
         ("actor", actor.to_string()),
         ("root", root.display().to_string()),
         ("machine", machine.as_str().to_string()),
-    ]
+    ];
+    if let Some(dev) = gc::device_of(root) {
+        record.push(("dev", dev.to_string()));
+    }
+    record
 }
 
 /// The two fields of the device-wide `actor` file.
@@ -435,7 +445,7 @@ fn read_binding(
 /// Create `path` with `record` if it does not exist, else adopt whatever
 /// is already there. The compare-and-swap that keeps two processes racing
 /// a first open from minting two actors for one workspace.
-fn bind(path: &Path, record: [(&'static str, String); 3]) -> Result<ActorId, DeviceError> {
+fn bind(path: &Path, record: Vec<(&'static str, String)>) -> Result<ActorId, DeviceError> {
     let wanted = record[0].1.clone();
     let machine = record[2].1.clone();
     match create_new_record(path, &record) {

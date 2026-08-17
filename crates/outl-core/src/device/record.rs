@@ -109,14 +109,36 @@ pub(super) fn write_record<K: AsRef<str>, V: AsRef<str>>(
 ) -> Result<(), DeviceError> {
     let parent = ensure_parent(path)?;
     let tmp = scratch_path(&parent, path, "tmp");
-    std::fs::write(&tmp, render(pairs)).map_err(|source| DeviceError::Io {
+    let contents = render(pairs);
+    std::fs::write(&tmp, &contents).map_err(|source| DeviceError::Io {
         path: tmp.clone(),
         source,
     })?;
-    std::fs::rename(&tmp, path).map_err(|source| DeviceError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        // The scratch can vanish under us: `super::gc` collects scratch
+        // files older than `STALE_SCRATCH_TTL`, so a process paused for
+        // that long between composing and publishing resumes to find its
+        // temp file pruned. The write is self-contained (nothing read the
+        // scratch back), so recompose and publish rather than failing an
+        // otherwise healthy update. This is what keeps the scratch sweep
+        // non-load-bearing for this path, the way the `exclusive_create`
+        // fallback does for `create_new_record`.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::write(&tmp, &contents).map_err(|source| DeviceError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+            std::fs::rename(&tmp, path).map_err(|source| DeviceError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        Err(source) => Err(DeviceError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Create `path` only if it does not exist yet, so a caller can tell "I

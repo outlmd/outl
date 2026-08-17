@@ -40,6 +40,18 @@
 //!    and every binding on it survives. A deleted `~/notes` leaves `~`
 //!    right where it was, so the absence is something we actually
 //!    observed rather than something we failed to observe.
+//!
+//!    A workspace that is *itself* a mount point defeats that reading on
+//!    its own: unmounting `/Volumes/Notes` leaves `/Volumes` behind
+//!    exactly like a deletion would. So a binding also records the
+//!    filesystem device id of its root (`dev=`), stamped while the root
+//!    was still there to ask, and the absence only counts as observed
+//!    when the surviving parent sits on that same filesystem. A parent
+//!    on a different device is the unmount signature, and the binding is
+//!    kept. A record that predates the stamp has nothing to compare and
+//!    keeps the plain parent reading, as does a platform whose `std`
+//!    cannot name a device; a stamp that is present but unverifiable
+//!    keeps the binding.
 //! 3. **The record is older than the TTL.**
 //!
 //! Condition 2 is the one that does the real work. Condition 3 is
@@ -99,10 +111,12 @@ use super::{read_record, DeviceError, DeviceStore};
 /// cleans it up?" the bindings had.
 ///
 /// A real in-flight write lives for microseconds, so a day is four orders
-/// of magnitude of headroom. It is also **not** load-bearing: deleting a
-/// scratch a live writer still holds makes its `hard_link` fail with
-/// something other than `AlreadyExists`, which falls through to
-/// `exclusive_create` and writes the same record anyway.
+/// of magnitude of headroom. It is also **not** load-bearing on either
+/// publish path: deleting a scratch a live `create_new_record` still
+/// holds makes its `hard_link` fail with something other than
+/// `AlreadyExists`, which falls through to `exclusive_create` and writes
+/// the same record anyway; a `write_record` whose `rename` finds the
+/// scratch missing recomposes it and publishes again.
 pub const STALE_SCRATCH_TTL: Duration = Duration::from_secs(60 * 60 * 24);
 
 /// How long a binding whose root is gone is kept anyway.
@@ -300,6 +314,25 @@ fn older_than(path: &Path, now: SystemTime, ttl: Duration) -> bool {
         .is_some_and(|age| age >= ttl)
 }
 
+/// The filesystem device holding `path`, where the platform can name it.
+///
+/// Used on both sides of one comparison: `actor_record` stamps the
+/// root's device into the binding while the root is still there to ask,
+/// and [`verdict_for`] checks that stamp against the surviving parent's
+/// device before trusting "the parent is present" as evidence of a
+/// deletion. On platforms where `std` exposes no device id (Windows),
+/// nothing is stamped and both sides keep the plain parent reading.
+#[cfg(unix)]
+pub(super) fn device_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.dev())
+}
+
+#[cfg(not(unix))]
+pub(super) fn device_of(_path: &Path) -> Option<u64> {
+    None
+}
+
 /// The whole policy, in one place so the listing and the prune cannot
 /// develop separate opinions about what is safe.
 fn judge(path: &Path, now: SystemTime, ttl: Duration) -> ActorBinding {
@@ -310,11 +343,27 @@ fn judge(path: &Path, now: SystemTime, ttl: Duration) -> ActorBinding {
     // root instead of trusting it; `verdict_for` then says
     // `Inconclusive`, which is the answer we want for a record we cannot
     // read faithfully.
-    let root = read_record(path)
-        .ok()
-        .flatten()
-        .filter(|r| !r.is_lossy())
-        .and_then(|r| r.get("root").map(PathBuf::from));
+    let record = read_record(path).ok().flatten().filter(|r| !r.is_lossy());
+    // The same defect one layer earlier: the writer serializes the root
+    // with `Path::display()`, which replaces non-Unicode path data with
+    // U+FFFD *before* the parser (and its `is_lossy`) ever sees the
+    // text. A stored root carrying the replacement character may name a
+    // path that was never real, absent while its parent exists: the one
+    // shape that authorises a delete, for a workspace that can be alive.
+    // Not evidence either.
+    let root = record.as_ref().and_then(|r| {
+        r.get("root")
+            .filter(|raw| !raw.contains('\u{FFFD}'))
+            .map(PathBuf::from)
+    });
+    // `dev=` is the filesystem the root lived on when it was bound.
+    // `None` when the record predates the stamp; `Some(None)` when the
+    // stamp is there but unreadable, which must keep the binding rather
+    // than fall back to the weaker rule.
+    let dev = record
+        .as_ref()
+        .and_then(|r| r.get("dev"))
+        .map(|raw| raw.parse::<u64>().ok());
     let age = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -322,12 +371,17 @@ fn judge(path: &Path, now: SystemTime, ttl: Duration) -> ActorBinding {
 
     ActorBinding {
         path: path.to_path_buf(),
-        verdict: verdict_for(root.as_deref(), age, ttl),
+        verdict: verdict_for(root.as_deref(), dev, age, ttl),
         root,
     }
 }
 
-fn verdict_for(root: Option<&Path>, age: Option<Duration>, ttl: Duration) -> BindingVerdict {
+fn verdict_for(
+    root: Option<&Path>,
+    dev: Option<Option<u64>>,
+    age: Option<Duration>,
+    ttl: Duration,
+) -> BindingVerdict {
     // No `root=` line: a legacy binding written before roots were
     // recorded, or a torn one. Either way there is nothing to check the
     // workspace's existence against, so there is nothing to conclude.
@@ -344,12 +398,25 @@ fn verdict_for(root: Option<&Path>, age: Option<Duration>, ttl: Duration) -> Bin
     // The absence has to be one we could actually see. If the parent is
     // gone too, the volume or the mount is what is missing, and every
     // binding under it must survive.
-    let parent_present = root
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .is_some_and(|p| p.try_exists().unwrap_or(false));
-    if !parent_present {
+    let Some(parent) = root.parent().filter(|p| !p.as_os_str().is_empty()) else {
         return BindingVerdict::Inconclusive;
+    };
+    if !parent.try_exists().unwrap_or(false) {
+        return BindingVerdict::Inconclusive;
+    }
+    // "The parent survived, so the absence is a deletion" assumes the
+    // root lived on the parent's own filesystem. A workspace that was
+    // *itself* a mount point breaks that reading: unmounting
+    // `/Volumes/Notes` leaves `/Volumes` behind exactly like a deletion
+    // would. The binding stamped the root's device id while the root was
+    // there to ask; a surviving parent on any *other* device is the
+    // unmount signature, and so is a stamp we cannot verify. A record
+    // from before the stamp existed has nothing to compare and keeps the
+    // plain parent reading.
+    match dev {
+        None => {}
+        Some(Some(dev)) if device_of(parent) == Some(dev) => {}
+        Some(_) => return BindingVerdict::Inconclusive,
     }
     match age {
         Some(age) if age >= ttl => BindingVerdict::Stale,

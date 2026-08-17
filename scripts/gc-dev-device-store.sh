@@ -60,6 +60,15 @@ for record in "$actors"/*; do
     kept=$((kept + 1))
     continue
   fi
+  # A root the writer could not spell faithfully (non-Unicode bytes come
+  # back as U+FFFD replacement characters) names a path that may never
+  # have existed. Same rule as `gc.rs`: not evidence, keep it.
+  case "$root" in
+    *"$(printf '\357\277\275')"*)
+      kept=$((kept + 1))
+      continue
+      ;;
+  esac
   if [ -d "$root" ]; then
     kept=$((kept + 1))
   # The absence has to be one we could observe. A missing parent means the
@@ -69,6 +78,20 @@ for record in "$actors"/*; do
   elif [ ! -d "$(dirname "$root")" ]; then
     kept=$((kept + 1))
   else
+    # A workspace that was itself a mount point leaves its parent behind
+    # when unmounted, exactly like a deletion. The binding stamps the
+    # root's filesystem device (`dev=`) while the root is there to ask;
+    # a surviving parent on any other device is the unmount signature.
+    # Same rule as `gc.rs`, same reason.
+    dev=$(sed -n 's/^dev=//p' "$record" | head -1)
+    if [ -n "$dev" ]; then
+      parent="$(dirname "$root")"
+      parent_dev=$(stat -c %d "$parent" 2>/dev/null || stat -f %d "$parent" 2>/dev/null || echo "")
+      if [ "$parent_dev" != "$dev" ]; then
+        kept=$((kept + 1))
+        continue
+      fi
+    fi
     $dry_run || rm -f "$record"
     removed=$((removed + 1))
   fi
