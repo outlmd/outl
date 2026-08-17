@@ -265,9 +265,13 @@ impl Plan {
             // named by an opaque workspace id; `root=` is the only field
             // that lets a user recognise the entry as debris from a test
             // run rather than a graph they forgot about.
+            // The TTL is the *record's* age (its file mtime), not the time
+            // since the workspace disappeared — a years-old binding whose
+            // directory vanished today is eligible immediately, so the text
+            // must not promise a grace period after the deletion.
             out.push(format!(
-                "drop the device-store actor binding for {} — that workspace has been gone \
-                 for over {} days ({})",
+                "drop the device-store actor binding for {}: its directory is gone and the \
+                 binding record itself is older than {} days ({})",
                 // A binding with no recorded root is never `Stale` (it is
                 // `Inconclusive` — nothing to check existence against), so
                 // this list always has one; falling back to the record's

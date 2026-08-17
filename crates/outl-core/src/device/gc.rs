@@ -26,7 +26,7 @@
 //!   machine,
 //! - a workspace the user archived and will restore next week.
 //!
-//! ## The two conditions, and why both
+//! ## The three conditions, and why all of them
 //!
 //! A binding is [`BindingVerdict::Stale`] only when **all** of these hold:
 //!

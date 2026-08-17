@@ -8,7 +8,6 @@ Split out of [cli.md](cli.md) because it is the one subcommand whose *refusals* 
 
 The integrity check you run before trusting a migration, and after any sync weirdness.
 
-> **Why `--repair` refuses a page whose `.md` holds content the op log lacks:** [RFC 0210](rfcs/0210-md-content-outside-op-log.md).
 **Read-only by default** — it reports, it never fixes, unless you pass `--repair`.
 Exit code is `1` when the report carries any error, so it drops straight into a script or CI step.
 
