@@ -51,24 +51,27 @@ pub(crate) fn cycle_todo_inline(buffer: &mut EditBuffer) {
     let current: String = buffer.chars.iter().collect();
     let next = outl_actions::cycle_todo(&current);
 
-    // The shift is the change in total length, not the change in the
-    // task prefix: `cycle_todo` also normalises a legacy `"> TODO x"`
-    // into `"TODO > x"`, which moves text the prefix measurement
-    // cannot see. Measuring the prefix alone read `"> DOING foo"` as
-    // unmarked (the quote comes first), so the caret jumped to the end
-    // of the line instead of following its character.
-    //
-    // Total length works for every case because the body is a suffix
-    // of both strings — everything `cycle_todo` rewrites lives in
-    // front of it.
     let before = current.chars().count();
     let after = next.chars().count();
+    // The rewritten marker is a prefix of the unchanged body.  Only a
+    // caret at the body boundary (or in the body) follows the boundary
+    // delta; carets before or inside the old marker must not move.
+    let body_len = current
+        .chars()
+        .rev()
+        .zip(next.chars().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let old_boundary = before - body_len;
+    let new_boundary = after - body_len;
 
     buffer.chars = next.chars().collect();
-    if after >= before {
-        buffer.cursor += after - before;
+    if buffer.cursor < old_boundary {
+        buffer.cursor = buffer.cursor.min(new_boundary);
+    } else if new_boundary >= old_boundary {
+        buffer.cursor += new_boundary - old_boundary;
     } else {
-        buffer.cursor = buffer.cursor.saturating_sub(before - after);
+        buffer.cursor = buffer.cursor.saturating_sub(old_boundary - new_boundary);
     }
     buffer.cursor = buffer.cursor.min(buffer.chars.len());
 }
