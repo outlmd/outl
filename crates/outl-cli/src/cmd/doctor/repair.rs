@@ -297,7 +297,7 @@ impl Plan {
 #[derive(Debug, Clone, Serialize)]
 pub struct RepairAction {
     /// `reproject` | `rebuild_sidecar` | `delete_snapshot` |
-    /// `prune_backup` | `prune_binding`.
+    /// `prune_backup` | `prune_binding` | `prune_scratch`.
     pub kind: String,
     /// Path the action targeted.
     pub path: String,

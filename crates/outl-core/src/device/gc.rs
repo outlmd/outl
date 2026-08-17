@@ -1,7 +1,7 @@
 //! Which actor bindings the device store may drop, and — far more
 //! importantly — which it may not.
 //!
-//! The store has never had a GC. `actors/` gains one record per workspace
+//! The store had none until this module. `actors/` gains one record per workspace
 //! this device has ever opened and loses none, so a workspace the user
 //! deleted keeps its binding forever. On a dev machine that reached 1,208
 //! records, 1,166 of them orphaned and 1,144 pointing at `TempDir` paths
