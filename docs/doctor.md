@@ -8,6 +8,7 @@ Split out of [cli.md](cli.md) because it is the one subcommand whose *refusals* 
 
 The integrity check you run before trusting a migration, and after any sync weirdness.
 
+> **Why `--repair` refuses a page whose `.md` holds content the op log lacks:** [RFC 0210](rfcs/0210-md-content-outside-op-log.md).
 **Read-only by default** — it reports, it never fixes, unless you pass `--repair`.
 Exit code is `1` when the report carries any error, so it drops straight into a script or CI step.
 
@@ -46,7 +47,7 @@ The only thing a default run writes is its own stdout.
   Detection is shared with this check, so the two can never disagree about which pages qualify.
   This only helps while the content is still **on disk**.
   A page whose `.md` was already overwritten (before this guard existed) is unreachable this way.
-  [`outl recover`](#outl-recover) reads the **op log** instead, where the same producer bug left the pre-truncation text as a recoverable earlier revision.
+  [`outl recover`](cli.md#outl-recover) reads the **op log** instead, where the same producer bug left the pre-truncation text as a recoverable earlier revision.
 
   **`outl reconcile --allow-bulk-delete`** is a different flag for a different state, and the two are worth keeping apart.
   A reconcile stops, writing nothing, when one page's `.md` would send more than **500 blocks** to the trash or more than **75%** of the blocks its sidecar knew (the share arm stands down under 20 blocks — clearing a scratch note is routine).
