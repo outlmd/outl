@@ -59,6 +59,12 @@ const TASK_PREFIXES: [(&str, bool); 7] = [
 fn walk_todos(blocks: &[OutlineNode], done: &mut usize, total: &mut usize) {
     for b in blocks {
         let t = b.text.trim_start();
+        // The marker may also sit after a single `"> "` quote prefix —
+        // the legacy authoring shape (`"> TODO foo"`) that the TUI's
+        // `split_block_prefixes` renders as a checkbox. The canonical
+        // order (`"TODO > foo"`) already matches marker-first, and only
+        // one quote marker is unwrapped ("no nested quotes" policy).
+        let t = t.strip_prefix("> ").unwrap_or(t);
         if let Some((_, finished)) = TASK_PREFIXES.iter().find(|(p, _)| t.starts_with(p)) {
             *total += 1;
             if *finished {
@@ -355,6 +361,24 @@ mod tests {
             block("[x](https://example.com) is a link, not a task"),
         ];
         assert_eq!(count_todos(&blocks), (2, 4));
+    }
+
+    #[test]
+    fn count_todos_counts_quote_first_tasks() {
+        // `"> TODO foo"` is the legacy authoring order the TUI's
+        // `split_block_prefixes` renders as a quoted checkbox, so the
+        // progress chip has to count it — a checkbox on screen that
+        // the chip skips disagrees with what the user sees. The
+        // canonical order (`"TODO > foo"`) already matched.
+        let blocks = vec![
+            block("> TODO write the RFC"),
+            block("> [ ] ship the parser"),
+            block("> DONE read the paper"),
+            block("TODO > canonical order"),
+            block("> just a quote"),
+            block("> > TODO nested quotes stay prose"),
+        ];
+        assert_eq!(count_todos(&blocks), (1, 4));
     }
 
     #[test]

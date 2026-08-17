@@ -549,8 +549,15 @@ pub(crate) mod engine {
             ("[x] ", Status::Done),
             ("[X] ", Status::Done),
         ];
+        // The marker may also sit after a single `"> "` quote prefix —
+        // the legacy authoring shape (`"> TODO foo"`) that the TUI's
+        // `split_block_prefixes` renders as a checkbox. The canonical
+        // order (`"TODO > foo"`) already matches marker-first, and only
+        // one quote marker is unwrapped, mirroring the "no nested
+        // quotes" policy of `outl_actions::quote`.
+        let after_quote = raw.strip_prefix("> ").unwrap_or(raw);
         for (prefix, status) in PREFIXES {
-            if let Some(rest) = raw.strip_prefix(prefix) {
+            if let Some(rest) = after_quote.strip_prefix(prefix) {
                 return (Some(status), rest);
             }
         }
@@ -610,6 +617,30 @@ pub(crate) mod engine {
                 split_todo("[x](https://example.com)"),
                 (None, "[x](https://example.com)")
             );
+        }
+
+        #[test]
+        fn split_todo_reads_the_quote_first_shape() {
+            // `"> TODO foo"` is the legacy authoring order the TUI
+            // renders as a quoted checkbox, so a `status:` filter has
+            // to see it too — a task on one surface is a task on all
+            // of them.
+            assert_eq!(
+                split_todo("> TODO buy milk"),
+                (Some(Status::Todo), "buy milk")
+            );
+            assert_eq!(
+                split_todo("> [ ] buy milk"),
+                (Some(Status::Todo), "buy milk")
+            );
+            assert_eq!(
+                split_todo("> [x] buy milk"),
+                (Some(Status::Done), "buy milk")
+            );
+            // A plain quote is not a task, and only one quote marker
+            // is unwrapped (no nested quotes).
+            assert_eq!(split_todo("> just a quote"), (None, "> just a quote"));
+            assert_eq!(split_todo("> > TODO foo"), (None, "> > TODO foo"));
         }
 
         #[test]
