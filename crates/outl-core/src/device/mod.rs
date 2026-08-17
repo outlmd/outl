@@ -93,10 +93,13 @@ use sha2::{Digest, Sha256};
 use crate::id::ActorId;
 use crate::workspace_id::WorkspaceId;
 
+mod gc;
 mod host;
 mod record;
 #[cfg(test)]
 mod tests;
+
+pub use gc::{ActorBinding, BindingVerdict, STALE_BINDING_TTL, STALE_SCRATCH_TTL};
 
 use host::host_fingerprint;
 use record::{create_new_record, read_record, write_record};

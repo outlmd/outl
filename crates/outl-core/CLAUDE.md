@@ -128,8 +128,51 @@ A lost actor costs one extra ops file; a lost machine id invalidates every bindi
 A bare legacy line (the Tauri clients' plain-ULID `actor` file) still parses.
 
 `device_dir()` honours `$OUTL_DEVICE_DIR` before the XDG layout.
-That override is what keeps the test suite (and any container) off the developer's real store — the repo's `.cargo/config.toml` points every cargo-spawned process at `target/device-store`.
+That override is what keeps the test suite (and any container) off the developer's real store — the repo's `.cargo/config.toml` points every cargo-spawned process at `.dev-device-store`.
+That path is deliberately **not** under `target/`, which `cargo clean` erases along with the iroh identity key that is this device's node id.
 `the_test_suite_runs_against_an_isolated_device_store` fails outright when that file is missing, because a suite that silently writes into `~/.config/outl/` is how 64 entries got there, 15 of them pointing at `TempDir` paths that no longer exist.
+
+#### The store has a GC now, and its whole design is what it refuses
+
+`device/gc.rs` answers invariant 9's fourth question for this store: *what cleans it up?*
+Until it existed, nothing did — `actors/` gained one record per workspace this device ever opened and lost none, so a workspace the user deleted kept its binding forever (1,208 records on a dev machine, 1,166 orphaned).
+
+**Dropping a binding is not free**, and that asymmetry is the entire design.
+The next open of that workspace mints a *fresh* actor — a second `ops-<actor>.jsonl` for a device that already had one, with every op it previously wrote no longer attributed to it.
+That is the fork this store exists to prevent, so a GC that guesses wrong causes the bug it is tidying up after.
+Keeping a stale record costs ~190 bytes.
+
+So "the root is missing" is **not** the rule, because an unplugged drive, an unmounted network volume, an undownloaded iCloud folder and an archived workspace all look exactly like a deleted one.
+A binding is `BindingVerdict::Stale` only when the root is gone, its *parent* directory is still present, and the record is older than `STALE_BINDING_TTL` (30 days).
+The parent check is what does the real work: a deleted folder leaves its parent behind, while a missing mount takes the whole path with it.
+Everything else — including a record with no `root=`, and any path we failed to *read* rather than observed to be absent — is `Inconclusive`, which always keeps it.
+
+Two things about that rule are easy to misread, and both are pinned by tests:
+
+- **The TTL is the record's age, not time since the deletion.**
+  A binding is written on first open and rewritten only when its workspace *moves*, so nothing records when a directory went away.
+  A workspace bound years ago and deleted a minute ago is `Stale` immediately (`an_old_binding_whose_workspace_just_vanished_is_stale`).
+  Buying the stronger reading means stamping `seen=` on every open, which turns the common read path into a write on a store that may be read-only — a trade not made here.
+- **A record that does not survive the parse is not evidence.**
+  `write_record` does not escape and `parse` trims, so a root ending in a space (or holding a newline) reads back as a *different*, non-existent path whose parent exists — the exact shape that authorises a delete, for a workspace that is alive.
+  `Record::is_lossy` reports the failed round trip and `judge` drops the root rather than trusting it.
+  Before the GC that leniency cost one redundant rewrite per open; the GC is what changed its price.
+
+`gc.rs` is the **single owner** of that verdict.
+`DeviceStore::prune_binding` re-asks it immediately before deleting, because listing and pruning are two passes with a user in between, and a workspace can come back in that gap.
+It also refuses any path outside `actors/`: `iroh/identity.key` **is** this device's node id.
+
+The same module also collects **abandoned scratch files** (`STALE_SCRATCH_TTL`, 24h).
+`record.rs` composes every write in a `.<name>.<pid>.<seq>` sibling and removes it after publishing, so a killed process leaves one behind forever.
+They stay out of the binding listing on purpose: a scratch file names no workspace, so reporting one as "a binding whose workspace is gone" invents a graph that never existed.
+They are also never backed up, because a half-published write is by definition content that never became a record.
+Deleting one a live writer still holds is survivable — its `hard_link` then fails with something other than `AlreadyExists`, and `exclusive_create` writes the same record anyway.
+
+The surface is `outl doctor` (reports the count) and `outl doctor --repair` (drops them, after a backup) — see `outl-cli/CLAUDE.md`.
+`scripts/gc-dev-device-store.sh` is the *developer's* faster sweep of `.dev-device-store`, and it now differs in **exactly one** way: no TTL, because test debris does not deserve a 30-day wait.
+It carries the parent check, which is the condition that actually protects a live workspace.
+It used to skip that too, deleting on `[ -d "$root" ]` alone — the rule this module rejects — and since it reads `$OUTL_DEVICE_DIR`, pointing that at a real store applied the rejected rule to real bindings.
+If the two ever diverge again, align the **script** to `gc.rs`, never the reverse.
 
 **Migration lives in `outl_ws::actor`, not here**, because it needs `config.toml`.
 `config.toml`'s `actor_id` is a legacy value adopted only by the device named in `[workspace] actor_claimed_by`, and that marker is stamped when the config is **created**, never on first open — the default transport (iroh) never ships `config.toml`, so a claim written at open time propagates to nobody.

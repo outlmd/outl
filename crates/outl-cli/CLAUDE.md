@@ -58,7 +58,7 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
 - `outl serve [<path>] [--once]` — run file watcher; `--once` reconciles every `.md` and exits (smoke tests, scripting).
 - `outl doctor [<path>] [--json] [--repair]` — integrity check.
   **Read-only by default**; `--repair` is the only writing mode.
-  Full user-facing check list lives in [`docs/cli.md`](../../docs/cli.md#outl-doctor).
+  Full user-facing check list lives in [`docs/doctor.md`](../../docs/doctor.md).
   Parser warnings are appended to `.outl/orphans.log` tagged `parse-warning <iso> <path>:<line> <kind> <raw>` so the trail persists across runs.
 
   `cmd/doctor/` is a module dir, one file per class of check.
@@ -76,10 +76,18 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
      `JsonlStorage::open` skips malformed records on purpose — one torn tail line must never lock a user out of their workspace — and reports them only via `tracing::warn!`.
      Doctor is the only surface that names *which line of which file* was lost, so it frames records itself rather than asking the storage layer.
   2. **`--repair` writes projections and caches, never the op log.**
-     Allow-list: re-project a `.md` + sidecar from the log, rebuild a missing sidecar over byte-identical content, delete a corrupt snapshot, prune old repair backups.
+     Allow-list, inside the workspace: re-project a `.md` + sidecar from the log, rebuild a missing sidecar over byte-identical content, delete a corrupt snapshot, prune old repair backups.
+     Allow-list, in the device store: drop an actor binding whose workspace is provably gone, delete a scratch file a killed writer abandoned.
      It never deletes a `.md`, never touches `ops/`, never moves a block to the trash, and never picks a winner between sync-conflict copies.
      Every file it writes is copied to `.outl/repair-backup/<timestamp>/` first; that directory is pruned by `BACKUP_KEEP` / `BACKUP_MIN_AGE_DAYS` (an entry must fail **both** to be removed).
-     **All four are `Plan` entries**, so `describe()` announces the prune like the rest and a run whose only work is a prune still happens — an otherwise-healthy workspace is exactly the one that would keep every generation forever.
+     **All six are `Plan` entries**, so `describe()` announces each prune like the rest and a run whose only work is a prune still happens — an otherwise-healthy workspace is exactly the one that would keep every generation forever.
+
+     The last two are the entries whose subject lives **outside** the workspace (`<device_dir>/actors/`), and they carry two consequences worth stating.
+     `outl-core`'s `device/gc.rs` owns the "is this safe to drop" verdict entirely, and nothing here re-derives it.
+     `DeviceStore::prune_binding` re-asks it immediately before deleting, because the workspace can come back between the listing and the write.
+     And because the store is machine-global, `collect_internal` takes the `DeviceStore` as a **parameter**.
+     Resolving it inside the pass would make every test in the battery judge and delete from one shared `.dev-device-store` — issue #211 reintroduced by its own fix (root `CLAUDE.md` invariant 9, third question).
+     `collect_with_scope` in `cmd/doctor/tests/mod.rs` is what hands each run its own.
      The page write itself delegates to `outl_actions::apply_page_md_with_sidecar{,_if_stale}` so the doctor never develops its own opinion about when a projection is safe to overwrite.
   3. **A damaged op log has no authority to overwrite its own projection.**
      `JsonlStorage` skips malformed records by design, so a torn `ops/` file replays into a **truncated tree** — while the `.md` on disk still matches its sidecar hash and therefore still looks "faithful".

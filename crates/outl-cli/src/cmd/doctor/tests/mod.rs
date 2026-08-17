@@ -10,6 +10,7 @@
 //! [`safety`] covers the other half — what the doctor is allowed to
 //! write while it looks.
 
+mod device_store;
 mod safety;
 
 use super::*;
@@ -86,7 +87,38 @@ fn messages(report: &DoctorReport) -> Vec<String> {
 /// that a test which *wants* the forced scope has to say so, and reads
 /// as the exception it is.
 fn collect(path: &Path, do_repair: bool) -> Result<DoctorReport, ApiError> {
-    collect_scoped(path, do_repair, RepairScope::Guarded)
+    collect_with_scope(path, do_repair, RepairScope::Guarded)
+}
+
+/// A doctor run against a device store **this call owns**.
+///
+/// Not a detail. `doctor` now reads (and under `--repair`, prunes) the
+/// device store's actor bindings, and that store is machine-global: the
+/// repo's `.cargo/config.toml` points every cargo-spawned process at one
+/// shared `.dev-device-store`. Going through `collect_scoped` here would
+/// make every test in this battery judge — and delete from — a directory
+/// that other tests, other test binaries and the developer's own
+/// `cargo run` are all writing to. The binding count would drift, the
+/// `repairable[]` assertions with it, and the result is issue #211's
+/// flaky doctor tests reintroduced by the fix for issue #211.
+///
+/// A `TempDir` per call is safe *here* precisely because it is not an
+/// env-var mutation: `collect_internal` takes the store as an argument,
+/// so nothing about this is process-wide (root `CLAUDE.md` invariant 9,
+/// third question).
+fn collect_with_scope(
+    path: &Path,
+    do_repair: bool,
+    scope: RepairScope,
+) -> Result<DoctorReport, ApiError> {
+    let store_dir = tempfile::TempDir::new().expect("temp device store");
+    super::collect_internal(
+        path,
+        true,
+        do_repair,
+        scope,
+        &outl_core::device::DeviceStore::at(store_dir.path()),
+    )
 }
 
 /// Every file under `dir`, by relative path and content.

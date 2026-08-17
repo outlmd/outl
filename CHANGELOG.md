@@ -5,7 +5,37 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **`outl doctor` now reports — and `--repair` drops — actor bindings for workspaces that no longer exist.**
+  `~/.config/outl/actors/` (or `$OUTL_DEVICE_DIR/actors/`) records which actor id this device writes under for every workspace it has ever opened, and nothing ever removed one.
+  A workspace you deleted last year still had its binding; on one development machine that reached 1,208 records, 1,166 of them pointing at directories that are gone.
+
+  The count is reported as **info**, not a warning: a stale binding is ~190 bytes and breaks nothing, because the workspace it names does not exist.
+
+  What matters is what `--repair` refuses.
+  Dropping a binding is not free — the next open of that workspace mints a **fresh** actor, a second `ops-<actor>.jsonl` for a device that already had one, which is exactly the fork the device store exists to prevent.
+  So "the folder is missing" is not enough on its own: an unplugged external drive, an unmounted network volume, an iCloud folder not yet downloaded on this machine, and a workspace you archived all look identical to a deleted one.
+  A binding goes only when its root is gone, its root's **parent directory is still present** (a deleted folder leaves its parent behind; a missing mount takes the whole path with it), and the record is over **30 days** old.
+  Anything the check could not *read*, rather than observed to be absent, is kept — including a record whose `root=` does not survive a parse/write round trip.
+
+  One thing the 30 days is **not**: a grace period after a deletion.
+  It is the age of the *record*, and a binding is only rewritten when its workspace moves, so a graph you have had for years and deleted this morning is eligible right away.
+  That is bounded rather than dangerous — a dropped binding costs one extra `ops-<actor>.jsonl` and loses no ops, since every reader merges every `ops-*.jsonl` in the directory — and the parent check is what actually protects a live workspace.
+  The verdict is re-checked immediately before the delete, so a drive plugged back in between the listing and the repair keeps its binding, and each dropped record is copied into that run's `.outl/repair-backup/` generation first.
+  `iroh/identity.key`, `machine-id` and `backups/` are never touched.
+
+  `--repair` also deletes **abandoned scratch files** in the same directory: every device-store write composes a `.<name>.<pid>.<seq>` sibling and removes it after publishing, so a process killed in between left one behind forever.
+  Anything untouched for 24 hours qualifies; a real write lives for microseconds.
+  These are never reported as bindings (a scratch file names no workspace) and never backed up (it never became a record).
+
+  This closes the last open item of [#211](https://github.com/outlmd/outl/issues/211) — root `CLAUDE.md` invariant 9's fourth question, *what cleans it up?*
+
 ### Changed
+
+- **`docs/cli.md`'s `outl doctor` section moved to its own page: [`docs/doctor.md`](docs/doctor.md).**
+  `cli.md` is the surface contract for ~30 subcommands, and `doctor` was a sixth of the page on its own, because the part that matters about it is everything `--repair` *refuses* to touch.
+  Old `cli.md#outl-doctor` anchors no longer resolve.
 
 - **HTTPS now trusts the operating system's certificate store instead of a bundled root list.**
   `reqwest` 0.13 renamed its TLS features and made `rustls` mean "rustls + `rustls-platform-verifier`", so the two crates that fetch over the network — remote asset download during a Roam import (`outl-import`) and plugin registry install (`outl-plugins`) — stopped carrying their own copy of the webpki root set.

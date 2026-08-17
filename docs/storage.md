@@ -141,6 +141,18 @@ Every peer's `peers.json` still lists the old one, so the device reads as perman
 This is deliberate: the actor binding and the iroh identity are both device-local state about the same device-local resource, so a variable that says "this process is a different device" has to move both, or it isn't isolating anything.
 Point the variable at a persistent path (not a fresh tmpdir per run) if you want a stable node id under it, and re-pair once after the move.
 
+#### Cleaning up bindings for workspaces that no longer exist
+
+`actors/` gains a record per workspace this device opens and, until recently, never lost one — so a workspace you deleted keeps its binding forever.
+`outl doctor` reports how many name a directory that is gone, and `outl doctor --repair` drops them after copying each into that run's `.outl/repair-backup/` generation.
+
+The rule is deliberately conservative, because dropping a binding is not free: the next open of that workspace mints a **fresh** actor, which is a second `ops-<actor>.jsonl` for a device that already had one.
+A binding goes only when its root is gone, its root's **parent** directory is still present, and the record is past the TTL.
+The parent check is what separates a deleted folder from an unmounted drive, an unmapped network volume, or an iCloud folder this machine has not downloaded — all of which read as "missing" and must keep their bindings.
+Anything the check could not *read* (rather than observed to be absent) is kept too.
+
+Full behaviour and the backup path: [doctor.md → The device store's stale actor bindings](doctor.md#the-device-stores-stale-actor-bindings).
+
 ### Why JSONL specifically
 
 - **Append-only writes** map to the filesystem cleanly.

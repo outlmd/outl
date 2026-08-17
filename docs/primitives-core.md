@@ -83,6 +83,8 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Device-local actor store — per workspace *instance* (`actor_for_instance`, keyed by `WorkspaceId` **and** the workspace directory) and device-wide (`device_actor`, the Tauri clients' `<dir>/actor`) | `outl_core::DeviceStore` (errors: `outl_core::DeviceError`) | `crates/outl-core/src/device/` |
 | Stable fingerprint of one physical device — the claim marker that lets exactly one device adopt a legacy `config.toml` actor | `outl_core::MachineId` (via `DeviceStore::machine_id`) | `crates/outl-core/src/device/` |
 | Directory holding this device's identity files (`$OUTL_DEVICE_DIR`, else `$XDG_CONFIG_HOME/outl`, else `~/.config/outl`) — **never** inside a workspace | `outl_core::device_dir` | `crates/outl-core/src/device/` |
+| Whether an actor binding may be dropped — the **single owner** of that verdict, so a listing and a prune cannot disagree (root gone **and** its parent present **and** past the TTL; anything unreadable keeps the binding) | `outl_core::BindingVerdict`, `outl_core::ActorBinding`, `outl_core::STALE_BINDING_TTL` (via `DeviceStore::actor_bindings` / `stale_actor_bindings` / `prune_binding`) | `crates/outl-core/src/device/gc.rs` |
+| Device-store scratch files a killed writer left half-published (never bindings, never backed up) | `outl_core::STALE_SCRATCH_TTL` (via `DeviceStore::stale_scratch` / `prune_scratch`) | `crates/outl-core/src/device/gc.rs` |
 | The `Storage` trait every persistent backend implements (invariant #5) | `outl_core::Storage` / `StorageError` | `crates/outl-core/src/storage/mod.rs` |
 
 ---

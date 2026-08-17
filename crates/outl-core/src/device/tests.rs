@@ -36,7 +36,7 @@ fn machine_id_is_stable_across_calls() {
 ///
 /// Not hypothetical: this made `outl-cli`'s doctor suite fail on every
 /// `cargo test --workspace` that started from a cold
-/// `target/device-store`. `init` stamped the claim, and the `open` right
+/// shared dev device store. `init` stamped the claim, and the `open` right
 /// after it read a machine id a concurrent test binary had just
 /// overwritten.
 ///

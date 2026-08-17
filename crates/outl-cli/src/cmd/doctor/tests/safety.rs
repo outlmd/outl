@@ -625,8 +625,8 @@ fn the_same_repair_runs_once_it_is_explicitly_forced() {
     let (_dir, root, _paths) = fresh();
     let (md, witness) = page_with_deleted_blocks(&root, 150, 120);
 
-    let report =
-        collect_scoped(&root, true, RepairScope::Forced).expect("doctor --repair --force runs");
+    let report = super::collect_with_scope(&root, true, RepairScope::Forced)
+        .expect("doctor --repair --force runs");
 
     assert!(
         has(&report, "proceeding: `--force` was given"),

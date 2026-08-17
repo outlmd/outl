@@ -113,7 +113,11 @@ Violating any one breaks user trust irreversibly.
    Not theory.
    0.11.0 moved the write actor out of `.outl/config.toml` into a device-local store, correctly — the file rode every sync transport except iCloud, so two devices resolved the same actor and appended to one `ops-<actor>.jsonl`.
    Question three went unanswered, so the test suite wrote into the developer's real `~/.config/outl` (64 entries, 15 of them orphaned `TempDir` paths) and three doctor tests went flaky.
-   Question four is still unanswered: nothing prunes a workspace the user deleted.
+   Question four went unanswered for longer — nothing pruned a workspace the user deleted, and `actors/` reached 1,208 records on one machine, 1,166 of them orphaned.
+   `outl-core`'s `device/gc.rs` answers it now, reported by `outl doctor` and dropped by `--repair`.
+   What that took is the part worth carrying.
+   The obvious rule ("delete the ones whose directory is gone") is wrong: an unplugged drive and a deleted folder are the same observation, and a wrong delete forks the workspace's actor — the failure the store exists to prevent.
+   **A cleanup answer is only as good as what it refuses**, so the rule is three conditions, not one, and every reading it cannot make faithfully keeps the entry.
    [RFC 0211](docs/rfcs/0211-state-that-leaves-a-boundary.md), [issue #211](https://github.com/outlmd/outl/issues/211).
 
    **The general rule, of which invariant 8 is one instance:** a fix relocates a problem far more often than it removes one.

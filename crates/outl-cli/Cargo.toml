@@ -55,3 +55,6 @@ semver = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
+# Backdating a binding's mtime is the only way to exercise the device
+# store's staleness TTL without sleeping through it.
+filetime = { workspace = true }

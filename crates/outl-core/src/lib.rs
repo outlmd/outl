@@ -32,7 +32,10 @@ pub mod workspace;
 pub mod workspace_id;
 
 pub use block::Block;
-pub use device::{device_dir, DeviceError, DeviceStore, MachineId};
+pub use device::{
+    device_dir, ActorBinding, BindingVerdict, DeviceError, DeviceStore, MachineId,
+    STALE_BINDING_TTL, STALE_SCRATCH_TTL,
+};
 pub use fractional::Fractional;
 pub use hlc::Hlc;
 pub use id::{ActorId, NodeId};

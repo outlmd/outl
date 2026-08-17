@@ -21,34 +21,65 @@ use super::DeviceError;
 
 /// Parsed key/value pairs of one device-store file.
 #[derive(Debug, Default)]
-pub(super) struct Record(Vec<(String, String)>);
+pub(super) struct Record {
+    pairs: Vec<(String, String)>,
+    lossy: bool,
+}
 
 impl Record {
     /// First value recorded under `key`, if any.
     pub(super) fn get(&self, key: &str) -> Option<&str> {
-        self.0
+        self.pairs
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
     }
+
+    /// Whether reading this record back changed it — the parse trimmed
+    /// whitespace off a key or value, or hit a line with no `=`.
+    ///
+    /// Reads that only *use* a value can ignore this; it exists for the
+    /// one caller that **deletes** based on what it read.
+    ///
+    /// Writes are unescaped (`write_record` renders `key=value`), so a
+    /// workspace path ending in a space comes back a character shorter,
+    /// and one containing a newline comes back cut at the newline with
+    /// the tail parsed as a second line. Either way `root=` names a
+    /// directory that does not exist while its parent does — which is
+    /// exactly the shape [`super::gc`] reads as "safe to delete". The
+    /// binding of a live workspace would be dropped and its actor forked.
+    ///
+    /// Before the GC existed this leniency cost one redundant rewrite per
+    /// open, which is why the parser was allowed to be forgiving.
+    pub(super) fn is_lossy(&self) -> bool {
+        self.lossy
+    }
 }
 
 fn parse(raw: &str) -> Record {
-    let mut out = Vec::new();
+    let mut pairs = Vec::new();
+    let mut lossy = false;
     for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-        match line.split_once('=') {
-            Some((key, value)) => out.push((key.trim().to_string(), value.trim().to_string())),
+        match trimmed.split_once('=') {
+            Some((key, value)) => {
+                lossy |= trimmed != line || key.trim() != key || value.trim() != value;
+                pairs.push((key.trim().to_string(), value.trim().to_string()));
+            }
             None => {
-                out.push(("actor".to_string(), line.to_string()));
-                out.push(("id".to_string(), line.to_string()));
+                // The legacy single-value form (a bare ULID) — legitimate
+                // for `<dir>/actor`, and also what the tail of a
+                // newline-bearing value degrades into.
+                lossy = true;
+                pairs.push(("actor".to_string(), trimmed.to_string()));
+                pairs.push(("id".to_string(), trimmed.to_string()));
             }
         }
     }
-    Record(out)
+    Record { pairs, lossy }
 }
 
 /// Read and parse `path`, treating a missing or blank file as absent.

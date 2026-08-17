@@ -31,6 +31,7 @@ mod tree;
 use crate::output::{emit, ApiError};
 use crate::workspace_layout::{read_config, Paths};
 use anyhow::{Context, Result};
+use outl_core::device::{ActorBinding, DeviceStore, STALE_BINDING_TTL, STALE_SCRATCH_TTL};
 use outl_core::storage::{JsonlStorage, Storage};
 use outl_core::workspace::Workspace;
 use outl_md::index::WorkspaceIndex;
@@ -186,7 +187,7 @@ pub fn collect_scoped(
     do_repair: bool,
     scope: RepairScope,
 ) -> Result<DoctorReport, ApiError> {
-    collect_internal(path, true, do_repair, scope)
+    collect_internal(path, true, do_repair, scope, &DeviceStore::open_default())
 }
 
 /// Same as [`collect_scoped`] but skips the workspace-lock probe.
@@ -201,14 +202,31 @@ pub fn collect_scoped(
 /// Never repairs: a tool call is not the place to start rewriting
 /// files on the user's disk. `--repair` is CLI-only and explicit.
 pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
-    collect_internal(path, false, false, RepairScope::Guarded)
+    collect_internal(
+        path,
+        false,
+        false,
+        RepairScope::Guarded,
+        &DeviceStore::open_default(),
+    )
 }
 
+/// `store` is the device store the binding check reads and prunes.
+///
+/// It is a parameter, not a `DeviceStore::open_default()` call inside the
+/// pass, for one reason: the device store is **machine-global**, so a
+/// pass that resolved it itself would make every test in this suite share
+/// the developer's store — and a `--repair` test would then delete real
+/// bindings and assert against a count nobody controls. That is issue
+/// #211 exactly, reintroduced by its own fix. Root `CLAUDE.md`
+/// invariant 9's third question (*how does a test get its own copy?*) has
+/// to be answered where the state is reached, and this is that place.
 fn collect_internal(
     path: &Path,
     probe_lock: bool,
     do_repair: bool,
     scope: RepairScope,
+    store: &DeviceStore,
 ) -> Result<DoctorReport, ApiError> {
     let paths = Paths::at(path.to_path_buf());
     let cfg = read_config(&paths).map_err(|e| {
@@ -220,12 +238,13 @@ fn collect_internal(
     // Report the actor this DEVICE writes under, not the one seeded in
     // `config.toml` — on a shared/synced workspace they differ on every
     // device but the one that claimed it (see `outl_ws::actor`).
-    let actor = outl_ws::actor::resolve_device_actor(
-        &paths,
-        &cfg,
-        &outl_core::device::DeviceStore::open_default(),
-    )
-    .map_err(|e| {
+    // `store`, not `open_default()`. This call *writes* — it binds an
+    // actor for the workspace when the device has none — so resolving the
+    // store here would leave one record per test workspace in the shared
+    // dev store, which is the leak this issue is about. It would also let
+    // the report name an actor from one store while the binding check
+    // judges another.
+    let actor = outl_ws::actor::resolve_device_actor(&paths, &cfg, store).map_err(|e| {
         ApiError::new(
             crate::output::codes::INTERNAL,
             format!("could not resolve this device's actor: {e}"),
@@ -248,6 +267,20 @@ fn collect_internal(
     // a workspace with nothing else wrong still gets its old backup
     // generations reclaimed.
     plan.prune_backups = repair::collect_prunable(&paths.root);
+    // The one check whose subject is outside this workspace. The device
+    // store is machine-global and has never had a GC, so a workspace the
+    // user deleted keeps its actor binding forever (issue #211 item 3).
+    // Reported here because `doctor` is the surface a user already runs,
+    // and because the store's health is what decides whether the *next*
+    // open of any workspace forks an actor.
+    // An error here is an empty list, never a finding: the store is
+    // outside this workspace, so a permission problem there says nothing
+    // about this graph and must not fail an otherwise-clean run.
+    plan.prune_bindings = store
+        .stale_actor_bindings(STALE_BINDING_TTL)
+        .unwrap_or_default();
+    plan.prune_scratch = store.stale_scratch(STALE_SCRATCH_TTL).unwrap_or_default();
+    report_stale_bindings(&mut b, &plan.prune_bindings);
 
     // 2. The op log as the storage layer sees it: how many ops survive
     //    the skip-on-malformed read, and which nodes they touch.
@@ -521,14 +554,17 @@ fn collect_internal(
     let repairable = plan.describe();
     let repair_report = match (do_repair, plan.is_empty(), &workspace) {
         (false, _, _) | (true, true, _) => None,
-        (true, false, Some(ws)) => Some(repair::run(ws, &paths.root, &plan)),
+        (true, false, Some(ws)) => Some(repair::run(ws, &paths.root, &plan, store)),
         // No replayed tree, so page re-projection is off the table, but
-        // dropping a corrupt snapshot and pruning stale backups still
-        // are not — neither needs a tree.
+        // dropping a corrupt snapshot, pruning stale backups and dropping
+        // a dead device-store binding still are not — none needs a tree,
+        // and the binding prune does not even read this workspace.
         (true, false, None) => {
             let treeless = Plan {
                 corrupt_snapshots: std::mem::take(&mut plan.corrupt_snapshots),
                 prune_backups: std::mem::take(&mut plan.prune_backups),
+                prune_bindings: std::mem::take(&mut plan.prune_bindings),
+                prune_scratch: std::mem::take(&mut plan.prune_scratch),
                 ..Plan::default()
             };
             if treeless.is_empty() {
@@ -536,7 +572,7 @@ fn collect_internal(
             } else {
                 Workspace::open_in_memory(actor)
                     .ok()
-                    .map(|ws| repair::run(&ws, &paths.root, &treeless))
+                    .map(|ws| repair::run(&ws, &paths.root, &treeless, store))
             }
         }
     };
@@ -547,6 +583,25 @@ fn collect_internal(
     ops_guard.restore(&mut b);
 
     Ok(b.into_report(repairable, repair_report))
+}
+
+/// Say what the device store is carrying, in the read-only pass too.
+///
+/// **Info, never a warning.** A stale binding costs ~190 bytes and breaks
+/// nothing: the workspace it names is gone, so there is no sync to be
+/// wrong about. Ranking tidiness alongside a torn op log is how the loud
+/// lines in this report stop being read. The user learns the number, and
+/// `--repair` is where they act on it.
+fn report_stale_bindings(b: &mut Builder, stale: &[ActorBinding]) {
+    if stale.is_empty() {
+        return;
+    }
+    b.info(format!(
+        "device store: {} actor binding(s) name a workspace that no longer exists — \
+         `outl doctor --repair` drops them (a binding whose volume is merely unmounted \
+         is never counted here)",
+        stale.len()
+    ));
 }
 
 /// MCP entry point — returns the report as JSON `data` without the

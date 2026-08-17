@@ -26,6 +26,7 @@
 ## Integrations
 
 * [CLI](cli.md)
+* [outl doctor](doctor.md)
 * [Embedding outl as a Rust library](embedding.md)
 * [MCP](mcp.md)
 * [MCP recipes (skills & commands)](mcp-recipes.md)

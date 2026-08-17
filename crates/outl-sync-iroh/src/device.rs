@@ -93,7 +93,7 @@ pub fn default_device_dir() -> anyhow::Result<PathBuf> {
 
 /// Say once per process that this run is **not** the machine's usual device.
 ///
-/// The repo's `.cargo/config.toml` exports `$OUTL_DEVICE_DIR = target/device-store`
+/// The repo's `.cargo/config.toml` exports `$OUTL_DEVICE_DIR = .dev-device-store`
 /// so the suite stays off the developer's `~/.outl`, and cargo exports it to
 /// everything it launches — including `cargo run -p outl-desktop`, which is how
 /// a developer tests P2P sync. That build therefore comes up as a **different

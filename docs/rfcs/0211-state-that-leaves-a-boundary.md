@@ -44,7 +44,9 @@ The question after "did I fix it?" is **"where does the problem live now, and wh
 Three things, in increasing generality.
 
 **The isolation, which already existed.**
-`.cargo/config.toml` sets `OUTL_DEVICE_DIR = "target/device-store"` under `[env]`, so every process cargo launches resolves the store inside the repo rather than in `~/.config/outl`.
+`.cargo/config.toml` sets `OUTL_DEVICE_DIR` under `[env]` to a path inside the repo, so every process cargo launches resolves the store there rather than in `~/.config/outl`.
+It pointed at `target/device-store` when this was written and now points at `.dev-device-store`.
+`cargo clean` deletes `target/`, including the iroh identity key that **is** this device's node id, so every clean turned a `cargo run` desktop into a brand-new device and broke its pairings.
 One repo-wide value, not a temp dir per test: `std::env::set_var` is process-global and Rust tests share a process, so mutating it per test would be racy by construction, and the fix cannot be another instance of the bug.
 Two gaps the mechanism does not cover, both worth knowing: a git worktree created before that file existed has no copy of it, and cargo only exports `[env]` to processes it launches, so invoking a built binary directly still reaches the real store.
 
@@ -99,6 +101,12 @@ The guard against that is that it applies to *state crossing a boundary*, not to
 **What this does not make better.**
 The 15 orphans are still there, and the store still has no GC — a workspace the user deletes leaves its entry forever.
 Preventing new pollution does not clean up old, and nothing in this RFC does ([#211](https://github.com/outlmd/outl/issues/211) item 3).
+
+> **Followed up.**
+> The GC landed later as `outl-core`'s `device/gc.rs`, surfaced through `outl doctor` (reports) and `outl doctor --repair` (drops, after a backup).
+> Its design is one long refusal: a binding goes only when its root is gone, its root's *parent* is still present, and the record is over 30 days old, because dropping a binding forks that workspace's actor and an unmounted volume is indistinguishable from a deleted folder without the parent check.
+> Wiring it also produced this RFC's own lesson a second time: `doctor` reads machine-global state, so `collect_internal` had to take the `DeviceStore` as a **parameter** — resolving it inside the pass would have made every doctor test judge and delete from one shared store, which is the flakiness in this issue's title, reintroduced by its fix.
+> See [`doctor.md`](../doctor.md#the-device-stores-stale-actor-bindings).
 
 ## How it cannot regress
 

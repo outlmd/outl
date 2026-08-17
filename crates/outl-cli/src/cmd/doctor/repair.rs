@@ -66,6 +66,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use outl_core::device::{ActorBinding, DeviceStore, STALE_BINDING_TTL, STALE_SCRATCH_TTL};
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use serde::Serialize;
@@ -174,6 +175,24 @@ pub(super) struct Plan {
     /// otherwise a healthy graph keeps every generation forever, which
     /// is the case the pruning exists for.
     pub prune_backups: Vec<PathBuf>,
+    /// Device-store actor bindings whose workspace is provably gone.
+    ///
+    /// The only entry in this plan that lives **outside** the workspace
+    /// (`<device_dir>/actors/`), and the reason it is here rather than in
+    /// its own command is that `doctor` is the surface users already run
+    /// when something is off. The device store is machine-global, so a
+    /// run from workspace A can prune a binding that belonged to
+    /// workspace B — which is why every entry is named individually in
+    /// [`Plan::describe`] instead of being reported as a count.
+    ///
+    /// `outl-core` owns the "is this safe to drop" question entirely
+    /// ([`outl_core::device::BindingVerdict`]); nothing here re-derives
+    /// it, and the prune re-asks before deleting.
+    pub prune_bindings: Vec<ActorBinding>,
+    /// Scratch files a killed process left half-published in the device
+    /// store. Not bindings, not backed up: a scratch file is by
+    /// definition content that never became a record.
+    pub prune_scratch: Vec<PathBuf>,
 }
 
 impl Plan {
@@ -183,6 +202,8 @@ impl Plan {
             && self.rebuild_sidecar.is_empty()
             && self.corrupt_snapshots.is_empty()
             && self.prune_backups.is_empty()
+            && self.prune_bindings.is_empty()
+            && self.prune_scratch.is_empty()
     }
 
     /// How much content the page writes in this plan would remove.
@@ -239,6 +260,31 @@ impl Plan {
                 path.display()
             ));
         }
+        for binding in &self.prune_bindings {
+            // The workspace path, not the record's filename. A record is
+            // named by an opaque workspace id; `root=` is the only field
+            // that lets a user recognise the entry as debris from a test
+            // run rather than a graph they forgot about.
+            out.push(format!(
+                "drop the device-store actor binding for {} — that workspace has been gone \
+                 for over {} days ({})",
+                // A binding with no recorded root is never `Stale` (it is
+                // `Inconclusive` — nothing to check existence against), so
+                // this list always has one; falling back to the record's
+                // own path keeps that assumption out of the type system.
+                binding.root.as_deref().unwrap_or(&binding.path).display(),
+                STALE_BINDING_TTL.as_secs() / 86_400,
+                binding.path.display()
+            ));
+        }
+        for path in &self.prune_scratch {
+            out.push(format!(
+                "delete the abandoned device-store scratch file {} (a write that was \
+                 killed before it published, untouched for over {} hour(s))",
+                path.display(),
+                STALE_SCRATCH_TTL.as_secs() / 3_600
+            ));
+        }
         out
     }
 }
@@ -247,7 +293,7 @@ impl Plan {
 #[derive(Debug, Clone, Serialize)]
 pub struct RepairAction {
     /// `reproject` | `rebuild_sidecar` | `delete_snapshot` |
-    /// `prune_backup`.
+    /// `prune_backup` | `prune_binding`.
     pub kind: String,
     /// Path the action targeted.
     pub path: String,
@@ -275,7 +321,7 @@ pub struct RepairReport {
 /// Never returns `Err`: a failure on one file is recorded in its
 /// [`RepairAction`] and the pass continues, because a permission error
 /// on one page must not block re-projecting the other 200.
-pub(super) fn run(ws: &Workspace, root: &Path, plan: &Plan) -> RepairReport {
+pub(super) fn run(ws: &Workspace, root: &Path, plan: &Plan, store: &DeviceStore) -> RepairReport {
     let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
     let backup_dir = root.join(".outl").join("repair-backup").join(&stamp);
     let mut actions: Vec<RepairAction> = Vec::new();
@@ -289,6 +335,14 @@ pub(super) fn run(ws: &Workspace, root: &Path, plan: &Plan) -> RepairReport {
     for path in &plan.corrupt_snapshots {
         actions.push(delete_snapshot(root, &backup_dir, path));
     }
+    for binding in &plan.prune_bindings {
+        actions.push(prune_binding(store, &backup_dir, binding));
+    }
+    for path in &plan.prune_scratch {
+        actions.push(prune_scratch(store, path));
+    }
+    // Last, so a binding backup written above is never a candidate for
+    // the generation prune in the same run.
     actions.extend(prune_backups(&plan.prune_backups));
 
     let repaired = actions.iter().filter(|a| a.ok).count();
@@ -494,6 +548,87 @@ pub(super) fn collect_prunable(root: &Path) -> Vec<PathBuf> {
         .collect();
 
     prunable_backups(&mut generations, SystemTime::now())
+}
+
+/// Copy one binding into the backup generation, then drop it.
+///
+/// The backup lands under `device-store/actors/` inside this run's
+/// generation. Putting device-global state in one workspace's backup dir
+/// is deliberate: the generation records *what this repair run removed*,
+/// which is the thing a user needs to undo it, and it inherits the
+/// existing generational prune instead of growing a second pile that
+/// would need its own GC (root `CLAUDE.md` invariant 9, fourth question).
+///
+/// Restoring is a plain `cp` back into `<device_dir>/actors/`.
+fn prune_binding(store: &DeviceStore, backup_dir: &Path, binding: &ActorBinding) -> RepairAction {
+    let action = |ok, detail| RepairAction {
+        kind: "prune_binding".to_string(),
+        path: binding.path.display().to_string(),
+        ok,
+        detail,
+    };
+    let dest = backup_dir
+        .join("device-store")
+        .join("actors")
+        .join(binding.path.file_name().unwrap_or_default());
+
+    if let Err(e) = std::fs::create_dir_all(dest.parent().unwrap_or(backup_dir))
+        .and_then(|()| std::fs::copy(&binding.path, &dest).map(|_| ()))
+    {
+        return action(false, format!("backup failed, nothing removed: {e}"));
+    }
+
+    let pruned = store.prune_binding(&binding.path, STALE_BINDING_TTL);
+    if !matches!(pruned, Ok(true)) {
+        // The generation records what this run *removed*; a backup of a
+        // record still sitting in the store is clutter that reads like a
+        // deletion that happened.
+        let _ = std::fs::remove_file(&dest);
+    }
+    match pruned {
+        Ok(true) => action(true, format!("backed up to {}", dest.display())),
+        // `DeviceStore::prune_binding` re-judges before deleting, and
+        // refused: the workspace came back between the collection and
+        // now, so it keeps its actor. Nothing is wrong — the evidence
+        // simply expired — so the run still succeeded.
+        Ok(false) => action(
+            true,
+            "left in place — its workspace is reachable again".to_string(),
+        ),
+        Err(e) => action(false, format!("could not remove: {e}")),
+    }
+}
+
+/// Delete one abandoned scratch file.
+///
+/// Not backed up, and that is the one way it differs from every other
+/// action here. A scratch file is a write that never published — its
+/// content became a record or it did not, and if it did, the record is
+/// already there. Copying it would archive a fragment of nothing.
+fn prune_scratch(store: &DeviceStore, path: &Path) -> RepairAction {
+    let (kind, shown) = ("prune_scratch".to_string(), path.display().to_string());
+    match store.prune_scratch(path, STALE_SCRATCH_TTL) {
+        Ok(true) => RepairAction {
+            kind,
+            path: shown,
+            ok: true,
+            detail: "half-published write, never became a record".to_string(),
+        },
+        // Re-judged and refused: something touched it since the listing,
+        // so it may belong to a live writer after all.
+        Ok(false) => RepairAction {
+            kind,
+            path: shown,
+            ok: true,
+            detail: "left in place — it was touched since the scan".to_string(),
+        },
+        Err(e) => RepairAction {
+            kind,
+            path: shown,
+            ok: false,
+            detail: format!("could not remove: {e}"),
+        },
+    }
 }
 
 /// Delete what [`collect_prunable`] selected.
