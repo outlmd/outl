@@ -14,7 +14,7 @@ The crate is intentionally tiny and modular:
   Two optional overrides: `auto_run()` and `needs_workspace_index()` (both default `false`).
   `needs_workspace_index()` is how a caller knows whether to derive a `WorkspaceIndex` at all — a `python` fence must not pay for a facility only `query` uses.
   If your runtime reads `ctx.index`, say so here, and still handle `None`.
-- **`runtime::ExecContext`** — workspace root, stdin, timeout, mem limit, **`index: Option<Arc<WorkspaceIndex>>`**.
+- **`runtime::ExecContext`** — workspace root, stdin, timeout, mem limit, **`index: Option<&WorkspaceIndex>`**.
   The `query` runtime cannot answer without an index; left `None` it builds one from `workspace_root` on **every** fence execution (walkdir + comrak + every sidecar).
   A caller holding a `Workspace` should derive it once (`outl_actions::index::derive`) and inject it.
   This crate cannot derive one itself — `outl-actions` depends on it, so injection is what keeps the dependency acyclic while the work still happens once.
@@ -76,7 +76,7 @@ The query engine exposes a **structured API** alongside the DSL, so plugins and 
 
 - **`run_query_dsl(dsl, root)`** — user-facing DSL string → `Vec<QueryHit>`. Builds an index off disk; used by `QueryRuntime::execute` only when the caller injected none.
 - **`run_query_structured(params, root)`** — plugin-facing struct → `Vec<QueryHit>`. Exposed to JS as `outl.query({ ... })`.
-- **`run_query_dsl_with_index(dsl, &index)` / `run_query_structured_with_index(params, &index)`** — the same two against an index the caller already holds. Prefer these; a page with several ` ```query ` fences otherwise pays a full workspace read per fence.
+- **`run_query_dsl_with_index(dsl, &index)`** — the DSL query against an index the caller already holds. Prefer it; a page with several ` ```query ` fences otherwise pays a full workspace read per fence.
 
 Both converge on the same engine pipeline.
 
