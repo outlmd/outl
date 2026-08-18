@@ -44,7 +44,7 @@ impl Runtime for JsRuntime {
         "js"
     }
 
-    fn execute(&self, source: &str, ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
         let mut context = Context::default();
         // Prevent unused-variable warning when lang-query is off.
@@ -74,6 +74,15 @@ impl Runtime for JsRuntime {
         #[cfg(feature = "lang-query")]
         {
             let ws_root = Rc::new(ctx.workspace_root.clone());
+            // Deliberately does NOT reuse `ctx.index`, unlike the
+            // `query` runtime. Boa's only way to register a capturing
+            // native fn stores the closure in the `Context`, which
+            // outlives this call, so a borrowed index cannot travel
+            // into it — and the alternative (owning it behind an `Arc`)
+            // would make every resident client clone a 64k-block index
+            // per fence to serve a path that is not the hot one. The
+            // hot path is the ` ```query ` fence, which auto-runs on
+            // every page load; `outl.query()` is a plugin call.
             let query_fn = unsafe {
                 NativeFunction::from_closure(move |_, args, js_ctx| {
                     let root = ws_root.clone();

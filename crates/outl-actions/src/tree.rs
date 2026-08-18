@@ -7,6 +7,40 @@ use outl_core::workspace::Workspace;
 
 use crate::page::{KIND_KEY, SLUG_KEY};
 
+/// Whether `key` is page-model book-keeping rather than a user
+/// property.
+///
+/// `page-slug` / `page-kind` are written by [`crate::page`] through its
+/// own ops; surfacing them in a rendered `.md` would rewrite the slug on
+/// every reconcile, and surfacing them in the index would show the user
+/// a property they never typed.
+pub(crate) fn is_page_model_key(key: &str) -> bool {
+    key == SLUG_KEY || key == KIND_KEY
+}
+
+/// A property value as the `.md` dialect renders it, or `None` when it
+/// has no render syntax.
+///
+/// `Text`, `PageRef` and `Tag` all render as their string form, and the
+/// parser reads `key:: [[x]]` / `key:: #x` back into the same shapes, so
+/// the round trip closes. `List` has none yet and is dropped.
+///
+/// The single owner of that mapping. It exists because three callers
+/// need it — the page renderer, the block renderer, and the tree-derived
+/// index — and a block's properties must read the same whether they
+/// arrive through the renderer or through the index.
+///
+/// Note this is **not** the rule [`text_properties_of`] applies: that
+/// one keeps `Text` only. The two have disagreed since before either was
+/// documented as an owner; whether the clipboard should be dropping
+/// `PageRef` / `Tag` is a separate question from this one.
+pub(crate) fn renderable_prop_value(value: &PropValue) -> Option<String> {
+    match value {
+        PropValue::Text(s) | PropValue::PageRef(s) | PropValue::Tag(s) => Some(s.clone()),
+        PropValue::List(_) => None,
+    }
+}
+
 /// Textual properties of `node`, minus the internal `page-slug` /
 /// `page-kind` book-keeping keys, alphabetically sorted by key so the
 /// output is stable across runs.
@@ -20,7 +54,7 @@ pub(crate) fn text_properties_of(workspace: &Workspace, node: NodeId) -> Vec<(St
     let mut properties: Vec<(String, String)> = workspace
         .tree()
         .properties_of(node)
-        .filter(|(k, _)| *k != SLUG_KEY && *k != KIND_KEY)
+        .filter(|(k, _)| !is_page_model_key(k))
         .filter_map(|(k, v)| match v {
             PropValue::Text(s) => Some((k.to_string(), s.clone())),
             _ => None,

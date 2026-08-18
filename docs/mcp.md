@@ -113,6 +113,9 @@ Same surface works through tools (`outl_daily_today`
 There is no `outl-mcp` crate, no parallel logic, no JSON-RPC framework dependency (we speak the protocol directly).
 Every new feature lands once, as a function in `outl-actions`, and is exposed in both surfaces — see [`crates/outl-cli/CLAUDE.md`](../crates/outl-cli/CLAUDE.md) for the exact "add a new tool" walkthrough.
 
+Read tools (`outl_search`, `outl_backlinks`, …) answer from a workspace index derived from the **op log**, cached for the session and dropped whenever a mutating tool runs or a peer pushes ops.
+So a tool call reflects what the log holds, which is not always what a `.md` on disk holds — see the note under [Search / Query in `cli.md`](cli.md#search--query).
+
 ## Sync: edits made through MCP reach your other devices
 
 `outl mcp serve` is **long-lived**, so it can be this device's peer — no GUI needs to be open.

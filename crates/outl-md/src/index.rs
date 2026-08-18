@@ -19,7 +19,7 @@
 //! for thousands. The TUI calls `rebuild()` at startup and on a debounce
 //! after writes.
 
-use crate::block_index::{BlockEntry, BlockIndex, BlockReference};
+use crate::block_index::{BlockEntry, BlockIndex, BlockReference, IdentifiedNode};
 use crate::parse::parse;
 use crate::sidecar::{self, Sidecar};
 use outl_core::id::NodeId;
@@ -172,6 +172,46 @@ impl WorkspaceIndex {
         }
 
         idx
+    }
+
+    /// Insert (or replace) a page entry and its `title → slug` alias.
+    ///
+    /// The building block of the **tree-derived** build path: a caller
+    /// holding a `Workspace` reads page metadata straight off the page
+    /// root's properties and hands the result here, instead of this
+    /// module walking `pages/` and parsing every `.md` to recover the
+    /// same four values. See `outl_actions::index::derive`.
+    ///
+    /// Replaces any previous alias for this slug so a renamed title
+    /// can't leave a stale entry shadowing the new one — the same rule
+    /// [`patch_page`](Self::patch_page) follows.
+    pub fn insert_page(&mut self, entry: PageEntry) {
+        let slug = entry.slug.clone();
+        let title = entry.title.clone();
+        self.title_to_slug.retain(|_, s| s != &slug);
+        self.pages.insert(slug.clone(), entry);
+        self.title_to_slug.insert(title, slug);
+    }
+
+    /// Pass 1 of the tree-derived block build: register every block of
+    /// a page. Forwards to
+    /// [`BlockIndex::collect_page_blocks_from_tree`].
+    pub fn collect_page_blocks_from_tree(
+        &mut self,
+        slug: &str,
+        path: &Path,
+        blocks: &[IdentifiedNode],
+    ) {
+        self.blocks
+            .collect_page_blocks_from_tree(slug, path, blocks);
+    }
+
+    /// Pass 2 of the tree-derived block build: record reverse refs for
+    /// every block already indexed. Forwards to
+    /// [`BlockIndex::collect_refs_from_indexed`] — call once, after
+    /// every page's blocks are in.
+    pub fn collect_refs_from_indexed(&mut self) {
+        self.blocks.collect_refs_from_indexed();
     }
 
     /// Look up a page by its slug.

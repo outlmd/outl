@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
+use outl_md::index::WorkspaceIndex;
 use outl_md::parse::{parse, OutlineNode};
 use outl_md::reconcile::reconcile_md;
 use outl_md::render::render;
@@ -112,6 +113,15 @@ pub struct RunReport {
 /// `flat_index` is the DFS-preorder position of the block in the page.
 /// That's what TUI selection already tracks (`App.selected`) and what
 /// `path_for_index` returns — same coordinate system.
+///
+/// `index` is a workspace index the caller already holds. The `query`
+/// runtime needs one to answer at all; given `None` it builds a fresh
+/// one off disk **per fence**, so a page carrying several ` ```query `
+/// blocks re-reads and re-parses the whole workspace once for each of
+/// them, on every page load, because `query` auto-runs. Pass what a
+/// resident client already keeps (the TUI's `App::index`); pass `None`
+/// only when there genuinely is none.
+#[allow(clippy::too_many_arguments)]
 pub fn run_block_at_index(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -119,6 +129,7 @@ pub fn run_block_at_index(
     flat_index: usize,
     registry: &RuntimeRegistry,
     orphans_log: Option<&Path>,
+    index: Option<&WorkspaceIndex>,
 ) -> Result<RunReport, RunError> {
     // 1. Load and parse.
     let text = std::fs::read_to_string(md_path).map_err(|source| RunError::Read {
@@ -153,6 +164,7 @@ pub fn run_block_at_index(
         stdin: None,
         timeout: DEFAULT_TIMEOUT,
         mem_limit: None,
+        index,
     };
     let result = runtime.execute(&body, &ctx);
 
@@ -192,6 +204,7 @@ pub fn run_block_at_index(
 /// - `Ok(Some(report))` — the block ran. Caller can update status.
 /// - `Ok(None)` — cache hit, nothing happened.
 /// - `Err(_)` — orchestration failure (same surface as `run_block_at_index`).
+#[allow(clippy::too_many_arguments)]
 pub fn run_block_at_index_if_source_changed(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -199,6 +212,7 @@ pub fn run_block_at_index_if_source_changed(
     flat_index: usize,
     registry: &RuntimeRegistry,
     orphans_log: Option<&Path>,
+    index: Option<&WorkspaceIndex>,
 ) -> Result<Option<RunReport>, RunError> {
     let text = std::fs::read_to_string(md_path).map_err(|source| RunError::Read {
         path: md_path.display().to_string(),
@@ -236,6 +250,7 @@ pub fn run_block_at_index_if_source_changed(
         stdin: None,
         timeout: DEFAULT_TIMEOUT,
         mem_limit: None,
+        index,
     };
     let result = runtime.execute(&body, &ctx);
 

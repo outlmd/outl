@@ -77,22 +77,39 @@ pub fn run_query_dsl(dsl: &str, workspace_root: &Path) -> Result<Vec<QueryHit>, 
     run_query_internal(&query, workspace_root)
 }
 
+/// Run `query` against an index the caller already holds.
+///
+/// This is the path every caller should be on: building a
+/// `WorkspaceIndex` costs a walk of every `.md` plus every sidecar, and
+/// a page with several ` ```query ` fences would otherwise pay it once
+/// per fence.
+pub fn run_query_dsl_with_index(
+    dsl: &str,
+    index: &WorkspaceIndex,
+) -> Result<Vec<QueryHit>, String> {
+    let query = dsl::parse(dsl).map_err(|e| e.to_string())?;
+    Ok(run_against(&query, index))
+}
+
 fn run_query_internal(query: &dsl::Query, workspace_root: &Path) -> Result<Vec<QueryHit>, String> {
     let index = WorkspaceIndex::build(workspace_root);
-    let mut hits = engine::run(&index, query);
+    Ok(run_against(query, &index))
+}
+
+fn run_against(query: &dsl::Query, index: &WorkspaceIndex) -> Vec<QueryHit> {
+    let mut hits = engine::run(index, query);
     engine::sort_hits(&mut hits, &query.sort);
     if let Some(limit) = query.limit {
         hits.truncate(limit);
     }
-    Ok(hits
-        .into_iter()
+    hits.into_iter()
         .map(|h| QueryHit {
             handle: h.handle,
             page: h.page_slug,
             status: h.status.map(|s| s.as_str().to_string()),
             text: h.text,
         })
-        .collect())
+        .collect()
 }
 
 fn build_query_from_params(p: &QueryParams) -> Result<dsl::Query, String> {
@@ -170,10 +187,21 @@ impl Runtime for QueryRuntime {
         true
     }
 
-    fn execute(&self, source: &str, ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn needs_workspace_index(&self) -> bool {
+        true
+    }
+
+    fn execute(&self, source: &str, ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
 
-        let hits = run_query_dsl(source, &ctx.workspace_root).map_err(ExecError::Language)?;
+        // Prefer the caller's index. Falling back to a disk build keeps
+        // every existing caller working, but it re-reads the whole
+        // workspace per fence — see `ExecContext::index`.
+        let hits = match &ctx.index {
+            Some(index) => run_query_dsl_with_index(source, index),
+            None => run_query_dsl(source, &ctx.workspace_root),
+        }
+        .map_err(ExecError::Language)?;
 
         let stdout = hits
             .iter()

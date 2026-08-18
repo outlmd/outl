@@ -59,7 +59,7 @@ impl Runtime for RustRuntime {
         "rust"
     }
 
-    fn execute(&self, source: &str, ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
         let wrapped = wrap_in_main(source);
 
@@ -112,7 +112,7 @@ fn wrap_in_main(source: &str) -> String {
 /// Uses a temp directory under the runtime cache so the .rs file is
 /// reachable for diagnostics ("`error[E0425]: ... at /var/.../snippet.rs`")
 /// and gets cleaned up by the OS in due course.
-fn compile_rust_to_wasm(source: &str, ctx: &ExecContext) -> Result<Vec<u8>, ExecError> {
+fn compile_rust_to_wasm(source: &str, ctx: &ExecContext<'_>) -> Result<Vec<u8>, ExecError> {
     let tmp_root = std::env::temp_dir().join("outl-rustc");
     std::fs::create_dir_all(&tmp_root).map_err(ExecError::Io)?;
     let src_path = tmp_root.join(format!("snippet-{}.rs", std::process::id()));

@@ -497,7 +497,7 @@ fn walk_page(
 /// [`crate::tree::children_of`]'s per-call `O(total-nodes)` rescan
 /// (which made the whole pass `O(n²)`). Pages are the children of
 /// [`NodeId::root`].
-pub(crate) fn build_children_index(workspace: &Workspace) -> ChildrenIndex {
+pub fn build_children_index(workspace: &Workspace) -> ChildrenIndex {
     let mut grouped: HashMap<NodeId, Vec<(NodeId, Fractional)>> = HashMap::new();
     for (id, parent, pos) in workspace.tree().iter_nodes() {
         grouped.entry(parent).or_default().push((id, pos.clone()));

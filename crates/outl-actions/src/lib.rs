@@ -64,6 +64,7 @@ pub mod desync;
 pub mod error;
 pub mod exec;
 pub mod history;
+pub mod index;
 pub mod journal;
 pub mod outline;
 pub mod page;

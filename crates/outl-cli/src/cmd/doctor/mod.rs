@@ -436,6 +436,14 @@ fn collect_internal(
 
     // 6. Block ref integrity — every `((blk-XXXXXX))` mentioned must
     //    resolve to an indexed block. Build the index once.
+    //
+    //    Deliberately the **disk** build, not `outl_actions::index::derive`,
+    //    while every other reader moved to the derived one. Doctor's job is
+    //    to compare the projection against the tree; deriving both sides
+    //    from the tree would make this check agree with itself by
+    //    construction and stop reporting the divergence it exists to find.
+    //    An orphan `((blk-…))` in a `.md` whose target the log never had is
+    //    precisely a finding, not noise.
     let workspace_index = WorkspaceIndex::build(&paths.root);
     files::check_orphan_block_refs(&mut b, &workspace_index);
 

@@ -20,7 +20,7 @@ impl Runtime for EchoRuntime {
         "echo"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
         Ok(ExecOutput {
             stdout: source.to_string(),

@@ -123,6 +123,13 @@ pub fn run_auto_run_blocks<S: AppHost>(state: &S, page_id: String) -> Result<Aut
         .map(String::from)
         .collect();
 
+    // Does any auto-run runtime actually read `ExecContext::index`?
+    // Only `query` does today; the answer gates the derivation below.
+    let needs_index = auto_run_langs
+        .iter()
+        .filter_map(|lang| registry.get(lang))
+        .any(|r| r.needs_workspace_index());
+
     if auto_run_langs.is_empty() {
         let view = with_ws(state, |ws| {
             build_page_view(ws, &root, page).map_err(|e| e.to_string())
@@ -142,6 +149,13 @@ pub fn run_auto_run_blocks<S: AppHost>(state: &S, page_id: String) -> Result<Aut
 
         let md_path = outl_actions::journal::page_md_path(&root, &meta);
         let hlc = state.hlc();
+        // Derive once for the whole sweep, not per block — this loop
+        // runs every auto-run block on the page, and a runtime handed
+        // no index builds its own off disk. Skipped entirely when no
+        // target's runtime reads one, so a page of `auto-run::` python
+        // blocks does not pay for a facility only `query` uses.
+        let index =
+            (needs_index && !targets.is_empty()).then(|| outl_actions::index::derive(ws, &root));
         let mut count = 0usize;
         for idx in targets {
             if let Err(e) = run_block_at_index(
@@ -151,6 +165,7 @@ pub fn run_auto_run_blocks<S: AppHost>(state: &S, page_id: String) -> Result<Aut
                 idx,
                 &registry,
                 Some(&root.join(".outl").join("orphans.log")),
+                index.as_ref(),
             ) {
                 warn!("auto-run block {idx} failed: {e}");
             } else {

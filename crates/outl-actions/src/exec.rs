@@ -143,8 +143,26 @@ pub fn run_code_block(
 
     let md_path = page_md_path(storage_root, &meta);
 
-    let report = run_block_at_index(workspace, hlc, &md_path, flat_idx, registry, None)
-        .map_err(|e| ActionError::Exec(e.to_string()))?;
+    // Derive an index only for a runtime that reads one. `query` does;
+    // `python` / `lisp` / `js` do not, and deriving over a large
+    // workspace costs enough that making every fence pay for it would
+    // be a regression. Without this the runtime would build its own off
+    // disk anyway, which is strictly worse — hence deriving rather than
+    // passing `None`.
+    let index = outl_exec::extract_fence(&block_text)
+        .and_then(|parts| registry.get(&parts.language))
+        .is_some_and(|rt| rt.needs_workspace_index())
+        .then(|| crate::index::derive(workspace, storage_root));
+    let report = run_block_at_index(
+        workspace,
+        hlc,
+        &md_path,
+        flat_idx,
+        registry,
+        None,
+        index.as_ref(),
+    )
+    .map_err(|e| ActionError::Exec(e.to_string()))?;
 
     let (result_ok, error) = match &report.result {
         Ok(out) => (Some(ExecOutputDto::from(out)), None),

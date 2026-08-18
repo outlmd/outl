@@ -149,6 +149,7 @@ impl App {
             idx,
             &self.exec_registry,
             Some(&orphans),
+            Some(&self.index),
         ) {
             Ok(report) => {
                 match &report.result {
@@ -246,6 +247,12 @@ impl App {
             // auto-run:: property (no auto_run runtime), keep the
             // cache so navigation is cheap.
             let force = self.block_flat_is_auto_run_lang(idx, &auto_run_langs);
+            // Hand the runtime the index this app already maintains
+            // (rebuilt on a background thread after each save). The
+            // `query` runtime otherwise builds a fresh one off disk per
+            // fence — a full walkdir + parse + sidecar read of the
+            // workspace, repeated for every query block on the page,
+            // on every page load, since `query` auto-runs.
             let result = if force {
                 outl_exec::run_block_at_index(
                     &mut self.workspace,
@@ -254,6 +261,7 @@ impl App {
                     idx,
                     &self.exec_registry,
                     Some(&orphans),
+                    Some(&self.index),
                 )
                 .map(Some)
             } else {
@@ -264,6 +272,7 @@ impl App {
                     idx,
                     &self.exec_registry,
                     Some(&orphans),
+                    Some(&self.index),
                 )
             };
             match result {

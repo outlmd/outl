@@ -19,6 +19,35 @@
 //! are pure HashMap reads so they stay O(1) regardless of workspace
 //! size — the contract that bench #12 validates.
 //!
+//! ## Two population paths, one shape
+//!
+//! Blocks reach this index from either side of the `.md` ↔ op-log
+//! boundary, and the pair is deliberate:
+//!
+//! - **From disk** ([`BlockIndex::collect_page`] and its two-pass
+//!   siblings) — an AST parsed out of a `.md` plus the sidecar that
+//!   supplies the ids. Used when the caller has no `Workspace` in
+//!   scope, and when the question being asked is genuinely about the
+//!   file (`outl doctor` comparing disk against tree).
+//! - **From the tree** ([`BlockIndex::collect_page_blocks_from_tree`]
+//!   plus [`BlockIndex::collect_refs_from_indexed`]) — an [`IdentifiedNode`] forest projected from the op
+//!   log, which already carries its own ids. Used by every caller that
+//!   holds a `Workspace`, which is nearly all of them.
+//!
+//! The tree path is not merely faster (no walkdir, no comrak, no
+//! sidecar JSON): it also cannot hit the disk path's **positional
+//! skip**. `walk_blocks` pairs the AST with `sidecar_blocks[cursor]`
+//! and drops any block whose `content_hash` disagrees, so one block
+//! typed before reconcile ran desynchronises the cursor and silently
+//! removes the rest of the page from the index. A node projected from
+//! the tree carries its id by construction, so there is nothing to
+//! disagree with and nothing to drop.
+//!
+//! Keep the two paths behaviourally identical in everything else —
+//! handle assignment, collision expansion, DFS path numbering and
+//! reverse-ref collection all run through the same helpers, so a fix
+//! to one is a fix to both.
+//!
 //! ## Handle collision handling
 //!
 //! The 6-char tail of a ULID has ~1B values, so collisions are
@@ -68,6 +97,50 @@ pub struct BlockEntry {
     pub text_fold: String,
     /// Cloned subtree under this block — used by embed surfaces.
     pub children: Vec<OutlineNode>,
+}
+
+/// A block projected straight from the op-log tree: the outline shape
+/// a renderer needs, plus the stable id that the disk path has to go
+/// to the sidecar for.
+///
+/// This is the input type of the tree-side population path
+/// ([`BlockIndex::collect_page_blocks_from_tree`]). It exists because
+/// [`OutlineNode`] deliberately carries no id — it is the shape of a
+/// *parsed `.md`*, where ids live in the sidecar and nowhere else
+/// (root `CLAUDE.md` invariant 2). A projection of the tree has the
+/// opposite problem: the id is the one thing it is certain of.
+///
+/// Producers live in `outl-actions`, which owns the tree walk
+/// (`outl_actions::index::project_identified`). This crate only
+/// consumes the shape, so nothing here needs a `Workspace` — the
+/// dependency arrow keeps pointing the one way it always has.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IdentifiedNode {
+    /// Stable id of the block, straight from the tree.
+    pub id: NodeId,
+    /// Block content, same convention as [`OutlineNode::text`]
+    /// (markdown inline, no `- ` prefix, no property lines).
+    pub text: String,
+    /// Properties attached to this block.
+    pub properties: Vec<(String, String)>,
+    /// Children, depth-first — same order the `.md` renders them in.
+    pub children: Vec<IdentifiedNode>,
+}
+
+impl IdentifiedNode {
+    /// Drop the ids, yielding the plain AST shape that
+    /// [`BlockEntry::children`] and the renderer both take.
+    ///
+    /// Recursive, and it clones: one clone per indexed block, which is
+    /// the same bound the disk path already pays (`b.children.clone()`
+    /// in `walk_blocks`).
+    pub fn to_outline(&self) -> OutlineNode {
+        OutlineNode {
+            text: self.text.clone(),
+            properties: self.properties.clone(),
+            children: self.children.iter().map(Self::to_outline).collect(),
+        }
+    }
 }
 
 /// One reverse edge: somebody cites the block.
@@ -337,6 +410,112 @@ impl BlockIndex {
                 source_slug,
                 source_path,
             );
+            path_stack.pop();
+        }
+    }
+
+    /// Pass 1 from the tree: register every block (id, handle, text,
+    /// subtree) without touching reverse refs.
+    ///
+    /// Unlike [`collect_page_blocks`](Self::collect_page_blocks) this
+    /// **cannot skip a block**. There is no sidecar to agree or
+    /// disagree with — the id arrives on the node itself — so a page
+    /// edited outside outl before reconcile ran is indexed in full
+    /// rather than truncated at the first hash mismatch.
+    pub fn collect_page_blocks_from_tree(
+        &mut self,
+        source_slug: &str,
+        source_path: &Path,
+        blocks: &[IdentifiedNode],
+    ) {
+        let mut path_stack: Vec<usize> = Vec::new();
+        self.walk_blocks_tree(blocks, &mut path_stack, source_slug, source_path);
+    }
+
+    /// Pass 2 from the tree: record every `((blk-XXXXXX))` /
+    /// `!((blk-XXXXXX))` reverse edge, workspace-wide.
+    ///
+    /// Reads the blocks **already in the index** rather than a caller's
+    /// forest, so the caller does not have to keep one alive across
+    /// both passes. That mattered: `derive` used to buffer the whole
+    /// projected forest for this, holding a second copy of every
+    /// block's subtree beside the copies the index itself stores.
+    ///
+    /// Call once, after
+    /// [`collect_page_blocks_from_tree`](Self::collect_page_blocks_from_tree)
+    /// has run for **every** page — a citation can point at a page
+    /// walked later, and only then is every handle known.
+    ///
+    /// Idempotent: it rebuilds the reverse map from scratch, so calling
+    /// it twice cannot double an edge.
+    pub fn collect_refs_from_indexed(&mut self) {
+        self.block_refs.clear();
+        // Resolve against `handle_to_block` while iterating `blocks`,
+        // then write — two disjoint borrows of `self` cannot overlap.
+        let mut edges: Vec<(NodeId, BlockReference)> = Vec::new();
+        for entry in self.blocks.values() {
+            for tok in tokenize(&entry.text) {
+                let cited = match tok {
+                    InlineTok::BlockRef { handle } | InlineTok::Embed { handle } => handle,
+                    _ => continue,
+                };
+                if let Some(&target) = self.handle_to_block.get(cited) {
+                    edges.push((
+                        target,
+                        BlockReference {
+                            source_slug: entry.source_slug.clone(),
+                            source_block_path: entry.source_block_path.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+        for (target, edge) in edges {
+            self.block_refs.entry(target).or_default().push(edge);
+        }
+    }
+
+    fn walk_blocks_tree(
+        &mut self,
+        blocks: &[IdentifiedNode],
+        path_stack: &mut Vec<usize>,
+        source_slug: &str,
+        source_path: &Path,
+    ) {
+        for (i, b) in blocks.iter().enumerate() {
+            path_stack.push(i);
+            let base_handle = sidecar::derive_ref_handle(b.id);
+            let text = b.text.clone();
+            let text_fold = text.to_lowercase();
+            // Insert before assigning the handle for the same reason
+            // the disk path does: `assign_handle` may rewrite a
+            // displaced owner's `ref_handle`, and that owner can be
+            // this very entry on a re-index.
+            self.blocks.insert(
+                b.id,
+                BlockEntry {
+                    id: b.id,
+                    ref_handle: base_handle.clone(),
+                    source_slug: source_slug.to_string(),
+                    source_path: source_path.to_path_buf(),
+                    source_block_path: path_stack.clone(),
+                    text,
+                    text_fold,
+                    children: b.children.iter().map(IdentifiedNode::to_outline).collect(),
+                },
+            );
+            let final_handle = self.assign_handle(b.id, base_handle);
+            if let Some(entry) = self.blocks.get_mut(&b.id) {
+                entry.ref_handle = final_handle;
+            }
+            self.pages
+                .entry(source_slug.to_string())
+                .or_default()
+                .push(b.id);
+            self.location_to_block
+                .insert((source_slug.to_string(), path_stack.clone()), b.id);
+
+            self.walk_blocks_tree(&b.children, path_stack, source_slug, source_path);
             path_stack.pop();
         }
     }

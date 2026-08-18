@@ -288,22 +288,45 @@ impl ServerCtx {
         }
     }
 
-    /// Run `f` against the cached `WorkspaceIndex`, building it on
+    /// Run `f` against the cached `WorkspaceIndex`, deriving it on
     /// first use. Mutating tools should call [`Self::invalidate_index`]
     /// after their `apply_page_md_with_sidecar` so the next read sees
     /// fresh blocks.
+    ///
+    /// Derived from the session's already-open workspace rather than
+    /// walked off disk — the tree is the source of truth, and it is
+    /// right here. Falls back to the disk build only if the workspace
+    /// cannot be opened at all, so a read-only tool still answers
+    /// something instead of failing on a state it could recover from.
     pub(crate) fn with_index<F, R>(self: &Arc<Self>, f: F) -> R
     where
         F: FnOnce(&WorkspaceIndex) -> R,
     {
         let mut state = self.state.lock();
+        // A peer pushed ops since the last access — the cached index
+        // describes the pre-push tree. Same invalidation
+        // `with_workspace` performs, needed here because a read-only
+        // tool may never reach that path.
+        if self.peer_dirty.swap(false, Ordering::Acquire) {
+            state.workspace = None;
+            state.index = None;
+        }
         if state.index.is_none() {
-            state.index = Some(WorkspaceIndex::build(&self.workspace_path));
+            if state.workspace.is_none() {
+                if let Ok(wc) = ws::open(&self.workspace_path) {
+                    self.ensure_transport(&mut state, &wc);
+                    state.workspace = Some(wc);
+                }
+            }
+            state.index = Some(match state.workspace.as_ref() {
+                Some(wc) => outl_actions::index::derive(&wc.workspace, &wc.root),
+                None => WorkspaceIndex::build(&self.workspace_path),
+            });
         }
         f(state.index.as_ref().expect("index just populated"))
     }
 
-    /// Drop the cached index. The next `with_index` rebuild from disk.
+    /// Drop the cached index. The next `with_index` re-derives it.
     pub(crate) fn invalidate_index(self: &Arc<Self>) {
         self.state.lock().index = None;
     }

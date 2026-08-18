@@ -189,7 +189,12 @@ where
 /// projection / walking doesn't pay [`children_of`]'s per-call
 /// `O(total-nodes)` scan. See [`crate::backlinks`] for the builder and
 /// why the naive walk was quadratic without it.
-pub(crate) type ChildrenIndex = HashMap<NodeId, Vec<NodeId>>;
+///
+/// Public because a full-workspace walk is not a private concern:
+/// [`crate::index::derive`] and
+/// [`crate::backlinks_index::build_backlink_index`] both need one, and
+/// a caller doing both should build it once rather than twice.
+pub type ChildrenIndex = HashMap<NodeId, Vec<NodeId>>;
 
 /// Walk the workspace tree starting from `parent` and return the
 /// outline below it. `NodeId::root()` is the usual starting point.

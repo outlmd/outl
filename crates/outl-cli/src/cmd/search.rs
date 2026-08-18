@@ -61,10 +61,22 @@ pub fn run(args: &SearchArgs, path: &Path) -> i32 {
     emit(args.json, result, print_results)
 }
 
-/// Pure handler — used by the CLI path (rebuilds the workspace
-/// index per call).
+/// Pure handler — used by the CLI path (derives the workspace index
+/// per call).
+///
+/// Derived from the op log, not from `pages/`: `ctx.workspace` is
+/// already replayed by the time we get here, so walking every `.md`
+/// and parsing it would be a second, slower derivation of state we
+/// hold in memory. Measured on a 2,835-page workspace: the walk was
+/// ~250 ms of the command's ~650 ms, ~160 ms of which was raw file
+/// I/O.
+///
+/// Consequence worth knowing: a line that lives in a `.md` but in no
+/// op is not searchable here. That is root `CLAUDE.md` invariant 8's
+/// state, and `outl reconcile --ahead-of-log` is what turns such
+/// content into ops.
 pub fn handler(ctx: &WsCtx, args: &SearchArgs) -> Result<Value, ApiError> {
-    let index = WorkspaceIndex::build(&ctx.root);
+    let index = outl_actions::index::derive(&ctx.workspace, &ctx.root);
     handler_with_index(&index, args)
 }
 

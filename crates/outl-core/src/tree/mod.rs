@@ -148,6 +148,25 @@ impl Tree {
             .map(|((n, _), v)| (*n, v))
     }
 
+    /// Every `(node, key, value)` triple in the tree, in unspecified
+    /// order.
+    ///
+    /// The bulk counterpart to [`Self::properties_of`], which filters
+    /// this same map per call and is therefore `O(total properties)`
+    /// **each time**. Asking it once per node — the natural shape of a
+    /// full-workspace projection — is `O(nodes × properties)`, which on
+    /// a 67k-node / 216k-op workspace made a whole-tree walk slower
+    /// than re-reading every `.md` off disk.
+    ///
+    /// So: reading one node's properties is `properties_of`; walking
+    /// the workspace is this, grouped by node once. `O(total
+    /// properties)` for the whole traversal instead of per node.
+    pub fn iter_properties(&self) -> impl Iterator<Item = (NodeId, &str, &PropValue)> {
+        self.properties
+            .iter()
+            .map(|((n, k), v)| (*n, k.as_str(), v))
+    }
+
     /// Whether `node` is currently rendered collapsed (children
     /// hidden in the outline view). Defaults to `false` for any node
     /// the op log has never explicitly set.

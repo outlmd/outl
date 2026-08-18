@@ -108,6 +108,13 @@ Treat matching with the same paranoia as the CRDT.
 - **Block index** (`block_index.rs`) — `NodeId → BlockEntry`, `ref_handle → NodeId`, `NodeId → [BlockReference]` (reverse refs), `(slug, dfs_path) → NodeId` for location lookup.
   Population is two-pass (`collect_page_blocks` then `collect_page_refs`) so reverse edges survive arbitrary page-load order during the initial build.
   Lookups are O(1).
+  **Two population paths, one shape.**
+  From **disk** (`collect_page*`) — a parsed AST plus the sidecar that supplies the ids.
+  From the **tree** (`collect_page_blocks_from_tree` per page, then `collect_refs_from_indexed` once) — an `IdentifiedNode` forest projected from the op log, which already carries its ids; built by `outl_actions::index::derive`.
+  The tree-side pass 2 reads the blocks **already in the index** rather than a caller's forest, so the caller need not hold one alive across both passes; it is idempotent (rebuilds the reverse map) and must run only after every page's blocks are in.
+  The tree path cannot hit the disk path's **positional skip**: `walk_blocks` pairs the AST with `sidecar_blocks[cursor]` and drops any block whose `content_hash` disagrees, so one block typed before reconcile ran desynchronises the cursor and silently removes the rest of the page from the index (search stops finding it, its `((blk-…))` stops resolving).
+  Everything else — handle assignment, collision expansion, DFS numbering, reverse-ref collection — runs through the same helpers, so a fix to one is a fix to both.
+  `IdentifiedNode` is the tree-side input type: `OutlineNode` deliberately carries no id (invariant 2 — ids live in the sidecar), and a tree projection has the opposite problem, so the two shapes cannot be one type.
 - **Workspace index** (`index.rs`) — page-level (`slug → PageEntry`) plus block-level (re-exports the `BlockIndex` API).
   **Does not carry backlinks.**
   Backlinks live in `outl_actions::backlinks` / `outl_actions::backlinks_index` so every client computes them straight from the `Workspace` — an earlier parallel cache on this index hid self-references on one surface while the other showed them.

@@ -28,7 +28,7 @@
 //! struct RubyRuntime;
 //! impl outl_exec::Runtime for RubyRuntime {
 //!     fn language(&self) -> &'static str { "ruby" }
-//!     fn execute(&self, source: &str, ctx: &outl_exec::ExecContext)
+//!     fn execute(&self, source: &str, ctx: &outl_exec::ExecContext<'_>)
 //!         -> Result<outl_exec::ExecOutput, outl_exec::ExecError>
 //!     {
 //!         // run the source however you like (wasm, subprocess, ...);
@@ -67,4 +67,6 @@ pub use result_block::{
 pub use runtime::{ExecContext, ExecError, ExecOutput, ExitStatus, OutputFormat, Runtime};
 
 #[cfg(feature = "lang-query")]
-pub use runtimes::query::{run_query_dsl, run_query_structured, QueryHit, QueryParams};
+pub use runtimes::query::{
+    run_query_dsl, run_query_dsl_with_index, run_query_structured, QueryHit, QueryParams,
+};

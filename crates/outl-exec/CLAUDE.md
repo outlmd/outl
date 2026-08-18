@@ -11,8 +11,13 @@ The crate is intentionally tiny and modular:
 
 - **`runtime::Runtime`** — the trait you implement to add a new language.
   Two required methods: `language()` (the fence info-string) and `execute()`.
-  One optional override: `auto_run()` (default `false`).
-- **`runtime::ExecContext`** — workspace root, stdin, timeout, mem limit.
+  Two optional overrides: `auto_run()` and `needs_workspace_index()` (both default `false`).
+  `needs_workspace_index()` is how a caller knows whether to derive a `WorkspaceIndex` at all — a `python` fence must not pay for a facility only `query` uses.
+  If your runtime reads `ctx.index`, say so here, and still handle `None`.
+- **`runtime::ExecContext`** — workspace root, stdin, timeout, mem limit, **`index: Option<Arc<WorkspaceIndex>>`**.
+  The `query` runtime cannot answer without an index; left `None` it builds one from `workspace_root` on **every** fence execution (walkdir + comrak + every sidecar).
+  A caller holding a `Workspace` should derive it once (`outl_actions::index::derive`) and inject it.
+  This crate cannot derive one itself — `outl-actions` depends on it, so injection is what keeps the dependency acyclic while the work still happens once.
 - **`runtime::ExecOutput`** — stdout, stderr, duration, exit status, and `format: OutputFormat`.
 - **`runtime::OutputFormat`** — `Text` (default: result subblock as `> **result:** …`) or `Embeds` (result subblock with one child bullet per stdout line, rendered as embeds).
 - **`registry::RuntimeRegistry`** — resolves a fence info-string to the concrete `Runtime`.
@@ -21,7 +26,9 @@ The crate is intentionally tiny and modular:
   Includes `upsert_result_child` (text), `upsert_result_embeds` (embed children), and hash-stamped variants for auto-run cache.
 - **`orchestrate::run_block_at_index`** — single entry point for every UI.
   Takes a workspace + page path + block flat-index, runs, persists, reconciles.
+  Takes a `Option<&WorkspaceIndex>` — pass one whenever you have one, and a client running many blocks (an auto-run sweep) must pass **one** index for the whole loop, never derive per block.
 - **`orchestrate::run_block_at_index_if_source_changed`** — cache-aware variant used by auto-run loop.
+
 
 ## Adding a new language runtime
 
@@ -29,7 +36,7 @@ The crate is intentionally tiny and modular:
 2. Create `runtimes/<name>.rs` with one struct + one `impl Runtime`.
 3. Register it in `RuntimeRegistry::with_builtins` behind the feature.
 4. Add aliases to `KNOWN_ALIASES` in `crates/outl-md/src/lang.rs` **and** the TS mirror at `crates/outl-frontend-shared/src/highlight/aliases.ts`.
-5. If the runtime needs workspace access, use `ctx.workspace_root` to build a `WorkspaceIndex`.
+5. If the runtime needs workspace access, override `needs_workspace_index()` to `true`, read `ctx.index` first, and only build one from `ctx.workspace_root` when it is `None`.
 6. If the runtime should auto-run on page load, override `auto_run()` to return `true`.
 
 See `runtimes/query.rs` for the most advanced example (workspace access, embed output, auto-run).
@@ -41,7 +48,9 @@ The `query` runtime (`runtimes/query.rs`) is a special case:
 - **Returns `OutputFormat::Embeds`**: each stdout line becomes an embed child (`!((blk-XXXXXX))`) under the result header.
   This makes query results **live references** to the original blocks, not copies.
 - **Overrides `auto_run()` to `true`**: query blocks always re-run on page load, without needing `gx` or `auto-run::`.
-- **Builds a `WorkspaceIndex`** from `ctx.workspace_root` on every execution.
+- **Overrides `needs_workspace_index()` to `true`** — the only runtime that does, pinned by `tests/query_uses_injected_index.rs`.
+- **Uses `ctx.index` when the caller supplied one**, and builds a `WorkspaceIndex` from `ctx.workspace_root` otherwise — the fallback keeps every existing caller working but re-reads the whole workspace per fence.
+  `run_query_dsl_with_index` / `run_query_structured_with_index` are the injected-index entry points; the `outl.query()` JS binding takes the same path.
 - **DSL parser** (`runtimes/query::dsl`): line-by-line `key: value` directives, implicitly ANDed.
   Filters: `status`, `tag`, `kind`, `since`, `text`.
   Controls: `sort`, `limit`.
@@ -65,8 +74,9 @@ The query engine exposes a **structured API** alongside the DSL, so plugins and 
 
 ### Two entry points
 
-- **`run_query_dsl(dsl, root)`** — user-facing DSL string → `Vec<QueryHit>`. Used internally by `QueryRuntime::execute`.
+- **`run_query_dsl(dsl, root)`** — user-facing DSL string → `Vec<QueryHit>`. Builds an index off disk; used by `QueryRuntime::execute` only when the caller injected none.
 - **`run_query_structured(params, root)`** — plugin-facing struct → `Vec<QueryHit>`. Exposed to JS as `outl.query({ ... })`.
+- **`run_query_dsl_with_index(dsl, &index)` / `run_query_structured_with_index(params, &index)`** — the same two against an index the caller already holds. Prefer these; a page with several ` ```query ` fences otherwise pays a full workspace read per fence.
 
 Both converge on the same engine pipeline.
 

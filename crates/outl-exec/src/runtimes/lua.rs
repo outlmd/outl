@@ -21,7 +21,7 @@ impl Runtime for LuaRuntime {
         "lua"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
         let lua = Lua::new();
         let buffer: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));

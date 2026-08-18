@@ -81,9 +81,12 @@ pub fn page(ctx: &WsCtx, slug: &str) -> Result<Value, ApiError> {
     }))
 }
 
-/// Block-level references — CLI path (rebuilds the index per call).
+/// Block-level references — CLI path (derives the index per call).
+///
+/// Derived from the op log rather than walked off disk; see
+/// [`crate::cmd::search::handler`] for the reasoning and the cost.
 pub fn block(ctx: &WsCtx, id_str: &str) -> Result<Value, ApiError> {
-    let index = WorkspaceIndex::build(&ctx.root);
+    let index = outl_actions::index::derive(&ctx.workspace, &ctx.root);
     block_with_index(&index, id_str)
 }
 
@@ -105,7 +108,7 @@ pub fn block_with_index(index: &WorkspaceIndex, id_str: &str) -> Result<Value, A
 
 /// Resolve an embed (`!((…))`) — CLI path.
 pub fn embed(ctx: &WsCtx, id_or_handle: &str) -> Result<Value, ApiError> {
-    let index = WorkspaceIndex::build(&ctx.root);
+    let index = outl_actions::index::derive(&ctx.workspace, &ctx.root);
     embed_with_index(&index, id_or_handle)
 }
 

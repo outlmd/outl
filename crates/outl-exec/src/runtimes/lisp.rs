@@ -24,7 +24,7 @@ impl Runtime for LispRuntime {
         "lisp"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
 
         let sink: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));

@@ -34,7 +34,7 @@ impl Runtime for PythonRuntime {
         "python"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext) -> Result<ExecOutput, ExecError> {
+    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
         let start = Instant::now();
         let interpreter = Interpreter::without_stdlib(Settings::default());
 

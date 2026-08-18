@@ -5,7 +5,7 @@ use outl_core::workspace::Workspace;
 use outl_md::parse::{OutlineNode, ParsedPage};
 use outl_md::render::render;
 
-use crate::tree::children_of;
+use crate::tree::{children_of, is_page_model_key, renderable_prop_value};
 
 pub(super) fn build_outline(workspace: &Workspace, parent: NodeId) -> Vec<OutlineNode> {
     children_of(workspace, parent)
@@ -31,13 +31,8 @@ fn block_properties(workspace: &Workspace, id: NodeId) -> Vec<(String, String)> 
     let mut props: Vec<(String, String)> = workspace
         .tree()
         .properties_of(id)
-        .filter_map(|(k, v)| match v {
-            outl_core::property::PropValue::Text(s) => Some((k.to_string(), s.clone())),
-            outl_core::property::PropValue::PageRef(s) | outl_core::property::PropValue::Tag(s) => {
-                Some((k.to_string(), s.clone()))
-            }
-            outl_core::property::PropValue::List(_) => None,
-        })
+        .filter(|(k, _)| !is_page_model_key(k))
+        .filter_map(|(k, v)| renderable_prop_value(v).map(|s| (k.to_string(), s)))
         .collect();
     props.sort_by(|a, b| a.0.cmp(&b.0));
     props
@@ -62,22 +57,8 @@ pub fn render_page_md(workspace: &Workspace, page_root: NodeId) -> String {
     let mut properties: Vec<(String, String)> = workspace
         .tree()
         .properties_of(page_root)
-        .filter(|(k, _)| {
-            // Skip internal book-keeping owned by `outl_actions::page`.
-            *k != crate::page::SLUG_KEY && *k != crate::page::KIND_KEY
-        })
-        .filter_map(|(k, v)| match v {
-            // Text, PageRef, and Tag all render as their string form —
-            // the `.md` dialect reads `key:: [[x]]` / `key:: #x` back
-            // into the same shapes, so the round trip closes. Only
-            // `List` is skipped: it has no render syntax yet; revisit
-            // if a real consumer asks for it.
-            outl_core::property::PropValue::Text(s) => Some((k.to_string(), s.clone())),
-            outl_core::property::PropValue::PageRef(s) | outl_core::property::PropValue::Tag(s) => {
-                Some((k.to_string(), s.clone()))
-            }
-            outl_core::property::PropValue::List(_) => None,
-        })
+        .filter(|(k, _)| !is_page_model_key(k))
+        .filter_map(|(k, v)| renderable_prop_value(v).map(|s| (k.to_string(), s)))
         .collect();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
 

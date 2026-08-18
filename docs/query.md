@@ -139,7 +139,10 @@ Because these are embeds — not copies — toggling a TODO on the original bloc
 | Feature flag | `crates/outl-exec/Cargo.toml` (`lang-query`) | On by default in the workspace |
 | Language aliases | `crates/outl-md/src/lang.rs` (`KNOWN_ALIASES`) | `query` and `tasks` both resolve to `query` |
 
-The runtime builds a `WorkspaceIndex` from `ctx.workspace_root` on every execution — no incremental index today.
+The runtime uses the index its caller injected (`ExecContext::index`) and falls back to building one from `ctx.workspace_root` when there is none — no incremental index today.
+On the fallback path every fence execution re-reads and re-parses the whole workspace, so a caller that already holds a `Workspace` should derive the index once (`outl_actions::index::derive`) and pass it in.
+Every shipping caller now does: the TUI's auto-run loop passes the index it already maintains, and the desktop / mobile paths derive one per sweep.
+The fallback remains for an embedder that has neither.
 For workspaces under ~1000 pages this is sub-second; the per-page op log shards plan ([`docs/sync.md`](sync.md)) will be needed before 10k pages.
 
 ## Relationship to `{{query: ...}}`

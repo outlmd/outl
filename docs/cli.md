@@ -178,6 +178,11 @@ Only the link enters the op log; the asset's bytes are a plain blob replicated a
 
 `search` is full-text and lives today as the TUI's workspace search.
 `query` is the structured filter (tag, property, date range, kind).
+
+`search` and `backlinks` answer from the **op log**, not by reading `pages/` and `journals/`.
+Practical consequence: a line that exists in a `.md` but in no op is not found.
+That happens when a file was edited outside outl and no reconcile has run yet, or when the page is in the state `outl doctor` reports as ahead of the log — `outl reconcile --ahead-of-log` is what turns that content into ops.
+In exchange, a block the log holds stays findable even while its sidecar is stale, which the previous disk-walking implementation could not promise: it dropped every block after the first one whose hash disagreed.
 The `--raw='…'` flag is reserved for the not-yet-implemented query DSL and currently rejects with `INVALID_ARG` — when the DSL lands it folds into the same `outl_query` tool, not a new one.
 
 ### Backlinks / Refs
