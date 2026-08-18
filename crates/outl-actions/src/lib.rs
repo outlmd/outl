@@ -64,6 +64,7 @@ pub mod desync;
 pub mod error;
 pub mod exec;
 pub mod history;
+/// Workspace indexing derived from the materialised op-log tree.
 pub mod index;
 pub mod journal;
 pub mod outline;
