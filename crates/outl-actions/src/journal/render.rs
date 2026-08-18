@@ -31,7 +31,6 @@ fn block_properties(workspace: &Workspace, id: NodeId) -> Vec<(String, String)> 
     let mut props: Vec<(String, String)> = workspace
         .tree()
         .properties_of(id)
-        .filter(|(k, _)| !is_page_model_key(k))
         .filter_map(|(k, v)| renderable_prop_value(v).map(|s| (k.to_string(), s)))
         .collect();
     props.sort_by(|a, b| a.0.cmp(&b.0));
