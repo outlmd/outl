@@ -203,7 +203,7 @@ fn page_entry(meta: &PageMeta, path: &Path) -> PageEntry {
 /// Mirrors `crate::journal::render::build_outline` (which produces the
 /// same forest for the renderer, minus the ids) but resolves children
 /// through `index` so a full-workspace walk stays linear.
-pub fn project_identified(
+pub(crate) fn project_identified(
     workspace: &Workspace,
     parent: NodeId,
     index: &ChildrenIndex,
