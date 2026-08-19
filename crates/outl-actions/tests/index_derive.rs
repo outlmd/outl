@@ -23,10 +23,11 @@
 use std::fs;
 use std::path::Path;
 
-use outl_actions::page::{open_or_create, PageKind};
+use outl_actions::page::{open_or_create, set_property, PageKind};
 use outl_actions::{append_block, apply_page_md_with_sidecar};
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::{ActorId, NodeId};
+use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
 use outl_md::index::WorkspaceIndex;
 use tempfile::TempDir;
@@ -251,4 +252,83 @@ fn derive_on_an_empty_workspace_is_empty_not_a_panic() {
     let idx = f.derived();
     assert_eq!(idx.page_count(), 0);
     assert_eq!(idx.block_count(), 0);
+}
+
+#[test]
+fn a_block_property_named_like_page_book_keeping_survives_the_round_trip() {
+    // `page-slug` / `page-kind` are book-keeping on a *page root*. On an
+    // ordinary block they are whatever the user typed, and the dialect
+    // has no allow-list of keys, so the parser accepts them and the diff
+    // emits a `SetProp` like any other property.
+    //
+    // Filtering them out of a block's projection puts the value in the
+    // tree and nowhere on disk, and the next external-edit reconcile
+    // emits the removal. That is convergent data loss, and it is the
+    // exact failure `block_properties` was written to stop.
+    let mut f = Fixture::new();
+    let notes = f.page("notes", "Notes");
+    let block = f.block(notes, "a block that mentions a page");
+    set_property(
+        &mut f.workspace,
+        &f.hlc,
+        block,
+        "page-kind",
+        Some(PropValue::Text("not-book-keeping".to_string())),
+    )
+    .unwrap();
+    f.project(notes);
+
+    let md = fs::read_to_string(f.root().join("pages/notes.md")).unwrap();
+    assert!(
+        md.contains("page-kind:: not-book-keeping"),
+        "the block property must reach the `.md`, got:\n{md}"
+    );
+
+    // And the index must agree with the renderer about what the block
+    // carries, or a query filtering on the property misses it.
+    let idx = f.derived();
+    let entry = idx.block_by_id(block).expect("the block is indexed");
+    assert_eq!(entry.source_slug, "notes");
+}
+
+#[test]
+fn duplicate_slug_roots_index_as_one_page() {
+    // Split-brain: two live roots carrying one slug, until
+    // `merge_duplicate_slug_roots` repairs it. The index is keyed by
+    // slug in three places (page entry, per-page block list, and
+    // `(slug, dfs_path) -> NodeId`), so indexing both roots lets the
+    // last one win the entry while their blocks merge under one slug
+    // and their DFS paths collide.
+    let mut f = Fixture::new();
+    let first = f.page("notes", "Notes");
+    f.block(first, "block from the first root");
+
+    // A second root with the same slug, as a peer's concurrent create
+    // would leave it.
+    let second = append_block(&mut f.workspace, &f.hlc, Some(NodeId::root()), None).unwrap();
+    set_property(
+        &mut f.workspace,
+        &f.hlc,
+        second,
+        "page-slug",
+        Some(PropValue::Text("notes".to_string())),
+    )
+    .unwrap();
+    f.block(second, "block from the duplicate root");
+
+    let idx = f.derived();
+
+    assert_eq!(idx.page_count(), 1, "one slug must yield one page entry");
+    // Whichever root wins, `(slug, path)` must resolve to a block that
+    // actually belongs to the page the entry describes.
+    let located = idx
+        .block_at_location("notes", &[0])
+        .expect("the first block of the winning root resolves");
+    assert_eq!(located.source_slug, "notes");
+    assert_eq!(
+        idx.block_count(),
+        1,
+        "only the winning root's blocks are indexed; the loser's stay in \
+         the op log until the merge repair re-parents them"
+    );
 }

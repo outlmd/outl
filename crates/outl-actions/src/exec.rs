@@ -143,16 +143,20 @@ pub fn run_code_block(
 
     let md_path = page_md_path(storage_root, &meta);
 
-    // Derive an index only for a runtime that reads one. `query` does;
-    // `python` / `lisp` / `js` do not, and deriving over a large
-    // workspace costs enough that making every fence pay for it would
-    // be a regression. Without this the runtime would build its own off
-    // disk anyway, which is strictly worse — hence deriving rather than
-    // passing `None`.
+    // Build an index only for a runtime that reads one. `query` does;
+    // `python` / `lisp` / `js` do not, and making every fence pay for a
+    // workspace-wide build would be a regression. Handing `None` is not
+    // the alternative: the runtime would then build one per fence.
+    //
+    // The **disk** build rather than `crate::index::derive`, for the
+    // reason spelled out in that module: every GUI client calls this
+    // holding its workspace mutex, and deriving reads `block_text` for
+    // every node, which is the lazy-boot materialization that froze the
+    // app in #179. `derive` is for short-lived readers with no UI.
     let index = outl_exec::extract_fence(&block_text)
         .and_then(|parts| registry.get(&parts.language))
         .is_some_and(|rt| rt.needs_workspace_index())
-        .then(|| crate::index::derive(workspace, storage_root));
+        .then(|| outl_md::index::WorkspaceIndex::build(storage_root));
     let report = run_block_at_index(
         workspace,
         hlc,

@@ -27,11 +27,18 @@ pub(super) fn build_outline(workspace: &Workspace, parent: NodeId) -> Vec<Outlin
 /// op → `.md` re-render silently deleted the property lines from disk
 /// and the next external-edit reconcile emitted prop-removal ops:
 /// convergent data loss surfaced by the importer's resolve pass.
+/// **No page-model filtering here, deliberately.** `page-slug` /
+/// `page-kind` are book-keeping *on a page root*; on an ordinary block
+/// they are whatever the user typed. The dialect has no allow-list of
+/// property keys, so `parse_property_line` accepts them and `diff_to_ops`
+/// emits a `SetProp` like any other. Dropping them on render would put
+/// the value in the tree and nowhere on disk, and the next external-edit
+/// reconcile would emit the removal, which is the same convergent loss
+/// the doc above describes.
 fn block_properties(workspace: &Workspace, id: NodeId) -> Vec<(String, String)> {
     let mut props: Vec<(String, String)> = workspace
         .tree()
         .properties_of(id)
-        .filter(|(k, _)| !is_page_model_key(k))
         .filter_map(|(k, v)| renderable_prop_value(v).map(|s| (k.to_string(), s)))
         .collect();
     props.sort_by(|a, b| a.0.cmp(&b.0));

@@ -58,11 +58,17 @@
 //! alongside the from-workspace builder.
 //!
 //! So this is for **short-lived, one-shot readers** that already
-//! replayed the log and exit right after — `outl search`, `outl
-//! backlinks`, an MCP tool call. A resident client (TUI, desktop,
-//! mobile) that rebuilds its index on a debounce after every save must
-//! keep using the disk build, or move to an incremental update, until
-//! the materialization cost is bounded.
+//! replayed the log, hold no UI, and exit right after. Today that is
+//! exactly three callers: `outl search`, `outl backlinks`, and the MCP
+//! session's index cache.
+//!
+//! **Every GUI path uses the disk build instead**, and that is a
+//! decision, not an oversight. The TUI's auto-run loop passes the index
+//! it already rebuilds on a background thread; the desktop / mobile
+//! auto-run sweep and `crate::exec::run_code_block` call
+//! `WorkspaceIndex::build`. All three run while their client holds the
+//! workspace mutex, so the correctness below is not worth a stall on
+//! the boot path.
 //!
 //! ## What this does NOT buy you
 //!
@@ -92,8 +98,8 @@ use outl_md::index::{PageEntry, WorkspaceIndex};
 use crate::backlinks_index::build_children_index;
 use crate::journal::page_md_path;
 use crate::outline::ChildrenIndex;
-use crate::page::{page_meta, PageKind, PageMeta};
-use crate::tree::{is_page_model_key, renderable_prop_value};
+use crate::page::{canonical_root_for_slug, page_meta, PageKind, PageMeta};
+use crate::tree::renderable_prop_value;
 
 /// `node → its renderable properties`, built in one scan.
 ///
@@ -112,11 +118,11 @@ type PropertiesIndex = HashMap<NodeId, Vec<(String, String)>>;
 fn build_properties_index(workspace: &Workspace) -> PropertiesIndex {
     let mut grouped: PropertiesIndex = HashMap::new();
     for (node, key, value) in workspace.tree().iter_properties() {
-        // `crate::tree` owns both rules, so a block's properties read
-        // the same here as they do through the renderer.
-        if is_page_model_key(key) {
-            continue;
-        }
+        // No page-model filtering: this map is only ever read for
+        // blocks, and on a block `page-slug` / `page-kind` are ordinary
+        // user properties the dialect accepts. Matches
+        // `journal::render::block_properties` so a block's properties
+        // read the same through the index as through the renderer.
         let Some(text) = renderable_prop_value(value) else {
             continue;
         };
@@ -153,15 +159,7 @@ pub fn derive(workspace: &Workspace, root: &Path) -> WorkspaceIndex {
     let properties = build_properties_index(workspace);
     let mut idx = WorkspaceIndex::default();
 
-    // Children of the root in the tree's own order. `page_meta` is the
-    // one owner of "is this node a page" — a root child without a
-    // `page-slug` (the trash root, a pre-page-model stray) reads back
-    // as `None` and is skipped before anything is projected.
-    let page_roots = children.get(&NodeId::root()).cloned().unwrap_or_default();
-    for page_root in page_roots {
-        let Some(meta) = page_meta(workspace, page_root) else {
-            continue;
-        };
+    for (page_root, meta) in canonical_pages(workspace, &children) {
         let path = page_md_path(root, &meta);
         let blocks = project_identified(workspace, page_root, &children, &properties);
 
@@ -176,6 +174,54 @@ pub fn derive(workspace: &Workspace, root: &Path) -> WorkspaceIndex {
     idx.collect_refs_from_indexed();
 
     idx
+}
+
+/// One page root per slug, with its metadata.
+///
+/// `page_meta` is the owner of "is this node a page" — a root child
+/// without a `page-slug` (the trash root, a pre-page-model stray) reads
+/// back as `None` and never reaches the projection.
+///
+/// The **grouping** matters and is not defensive coding. Split-brain
+/// leaves more than one live root carrying one slug until
+/// `merge_duplicate_slug_roots` repairs it, and this index is keyed by
+/// slug in three places at once: `PageEntry`, the per-page block list,
+/// and `(slug, dfs_path) -> NodeId`. Indexing both roots would let the
+/// last one win the page entry while their blocks merged under one slug
+/// and their DFS paths overwrote each other, so `block_at_location`
+/// could hand back a block from the root the page metadata does not
+/// describe. `page::canonical_root_for_slug` owns which root wins, and
+/// this asks it rather than keeping a second copy of that rule.
+///
+/// The losing root's blocks are left out of the index entirely. They
+/// are still in the op log and the merge repair re-parents them under
+/// the winner, which is when they come back.
+fn canonical_pages(workspace: &Workspace, children: &ChildrenIndex) -> Vec<(NodeId, PageMeta)> {
+    let mut by_slug: HashMap<String, Vec<(NodeId, PageMeta)>> = HashMap::new();
+    for &id in children.get(&NodeId::root()).into_iter().flatten() {
+        if let Some(meta) = page_meta(workspace, id) {
+            by_slug
+                .entry(meta.slug.clone())
+                .or_default()
+                .push((id, meta));
+        }
+    }
+
+    let mut pages: Vec<(NodeId, PageMeta)> = by_slug
+        .into_iter()
+        .filter_map(|(slug, mut roots)| {
+            if roots.len() == 1 {
+                return roots.pop();
+            }
+            let winner = canonical_root_for_slug(&slug, roots.iter().map(|(id, _)| *id))?;
+            roots.into_iter().find(|(id, _)| *id == winner)
+        })
+        .collect();
+    // `HashMap` iteration is unordered and this index is rebuilt often;
+    // sort so two runs over one tree produce the same handle assignment
+    // when a `blk-` collision has to pick a loser to expand.
+    pages.sort_by(|a, b| a.1.slug.cmp(&b.1.slug));
+    pages
 }
 
 /// Translate a [`PageMeta`] into the index's [`PageEntry`].
@@ -203,7 +249,11 @@ fn page_entry(meta: &PageMeta, path: &Path) -> PageEntry {
 /// Mirrors `crate::journal::render::build_outline` (which produces the
 /// same forest for the renderer, minus the ids) but resolves children
 /// through `index` so a full-workspace walk stays linear.
-pub fn project_identified(
+///
+/// Private: its signature names `PropertiesIndex`, which no caller
+/// outside this module can build, so a `pub` here would advertise an
+/// API nobody can reach.
+fn project_identified(
     workspace: &Workspace,
     parent: NodeId,
     index: &ChildrenIndex,

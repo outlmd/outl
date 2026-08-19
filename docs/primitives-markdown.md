@@ -109,7 +109,7 @@ UI-agnostic; both TUI and mobile consume them.
 | Intent | Use this | File |
 |---|---|---|
 | Build / query the workspace-wide index (slug → page, backlinks, block lookups) | `outl_md::WorkspaceIndex::build` / `by_slug` / `by_title` / `pages` / `pages_by_title_prefix` / `pages_by_type` | `crates/outl-md/src/index.rs` |
-| Populate that index from the **op-log tree** instead of from disk (id-carrying nodes, no sidecar, cannot drop a block on a stale hash) | `outl_md::IdentifiedNode` + `WorkspaceIndex::insert_page` / `collect_page_blocks_from_tree` / `collect_page_refs_from_tree` / `patch_page_from_tree` | `crates/outl-md/src/index.rs`, `block_index.rs` |
+| Populate that index from the **op-log tree** instead of from disk (id-carrying nodes, no sidecar, cannot drop a block on a stale hash) | `outl_md::IdentifiedNode` + `WorkspaceIndex::insert_page` / `collect_page_blocks_from_tree` (per page) / `collect_refs_from_indexed` (once, after every page is in) | `crates/outl-md/src/index.rs`, `block_index.rs` |
 | Patch / remove a page in an existing index | `WorkspaceIndex::patch_page` / `remove_page` | `crates/outl-md/src/index.rs` |
 | Resolve `((blk-XXXXXX))` to a block / look a block up by id or location | `WorkspaceIndex::resolve_block_ref` / `block_by_id` / `block_at_location` | `crates/outl-md/src/index.rs` |
 | Reverse refs to a block / iterate / search | `WorkspaceIndex::block_refs_to` / `iter_blocks` / `search_block_text` / `block_count` / `block_index` (borrow the inner `BlockIndex`) | `crates/outl-md/src/index.rs` |

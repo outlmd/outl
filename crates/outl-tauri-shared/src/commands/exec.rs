@@ -149,13 +149,23 @@ pub fn run_auto_run_blocks<S: AppHost>(state: &S, page_id: String) -> Result<Aut
 
         let md_path = outl_actions::journal::page_md_path(&root, &meta);
         let hlc = state.hlc();
-        // Derive once for the whole sweep, not per block — this loop
-        // runs every auto-run block on the page, and a runtime handed
-        // no index builds its own off disk. Skipped entirely when no
-        // target's runtime reads one, so a page of `auto-run::` python
-        // blocks does not pay for a facility only `query` uses.
-        let index =
-            (needs_index && !targets.is_empty()).then(|| outl_actions::index::derive(ws, &root));
+        // Build once for the whole sweep, not per block: a runtime
+        // handed no index builds its own, and this loop runs every
+        // auto-run block on the page. Skipped entirely when no target's
+        // runtime reads one, so a page of `auto-run::` python blocks
+        // does not pay for a facility only `query` uses.
+        //
+        // The **disk** build, not `outl_actions::index::derive`, and
+        // deliberately so. This runs on every page load and holds the
+        // workspace mutex for the whole command, while deriving reads
+        // `block_text` for every node: the lazy-boot materialization
+        // that froze the app in #179, and the reason
+        // `build_backlink_index_from_disk` exists beside its
+        // from-workspace twin. What the derivation buys is real, but not
+        // worth a stall on the boot path. The short-lived readers that
+        // hold no UI (CLI, MCP) get it instead.
+        let index = (needs_index && !targets.is_empty())
+            .then(|| outl_md::index::WorkspaceIndex::build(&root));
         let mut count = 0usize;
         for idx in targets {
             if let Err(e) = run_block_at_index(

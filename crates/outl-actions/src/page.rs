@@ -130,13 +130,36 @@ fn is_false(b: &bool) -> bool {
 /// present, otherwise the numerically smallest [`NodeId`]. The
 /// single-match fast path is unchanged.
 pub fn find_by_slug(workspace: &Workspace, slug: &str) -> Option<NodeId> {
+    let candidates = children_of(workspace, NodeId::root())
+        .into_iter()
+        .filter(|(id, _)| {
+            matches!(workspace.tree().property(*id, SLUG_KEY), Some(PropValue::Text(s)) if s == slug)
+        })
+        .map(|(id, _)| id);
+    canonical_root_for_slug(slug, candidates)
+}
+
+/// Pick the one root that represents `slug` out of every candidate
+/// carrying it.
+///
+/// The single owner of the split-brain tie-break: the root whose id
+/// equals [`page_id_from_slug`] when present, otherwise the numerically
+/// smallest [`NodeId`]. Deterministic, so every device and every reader
+/// resolves to the same root while [`merge_duplicate_slug_roots`] has
+/// not run yet.
+///
+/// Takes the candidates rather than finding them, so a caller already
+/// walking the root's children (the workspace-index derivation) applies
+/// the same rule without paying a scan per slug — and, more to the
+/// point, without writing a second copy of the rule that could drift
+/// from this one.
+pub fn canonical_root_for_slug(
+    slug: &str,
+    candidates: impl IntoIterator<Item = NodeId>,
+) -> Option<NodeId> {
     let canonical = page_id_from_slug(slug);
     let mut best: Option<NodeId> = None;
-    for (id, _) in children_of(workspace, NodeId::root()) {
-        match workspace.tree().property(id, SLUG_KEY) {
-            Some(PropValue::Text(s)) if s == slug => {}
-            _ => continue,
-        }
+    for id in candidates {
         if id == canonical {
             return Some(id);
         }

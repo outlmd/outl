@@ -14,7 +14,9 @@ The crate is intentionally tiny and modular:
   Two optional overrides: `auto_run()` and `needs_workspace_index()` (both default `false`).
   `needs_workspace_index()` is how a caller knows whether to derive a `WorkspaceIndex` at all — a `python` fence must not pay for a facility only `query` uses.
   If your runtime reads `ctx.index`, say so here, and still handle `None`.
-- **`runtime::ExecContext`** — workspace root, stdin, timeout, mem limit, **`index: Option<Arc<WorkspaceIndex>>`**.
+- **`runtime::ExecContext<'a>`** — workspace root, stdin, timeout, mem limit, **`index: Option<&'a WorkspaceIndex>`**.
+  Borrowed, not owned: a caller that keeps an index (the TUI rebuilds one on a background thread) would otherwise clone a 64k-block structure per fence to serve a field that exists to avoid exactly that work.
+  The lifetime is why every `Runtime::execute` signature reads `&ExecContext<'_>`.
   The `query` runtime cannot answer without an index; left `None` it builds one from `workspace_root` on **every** fence execution (walkdir + comrak + every sidecar).
   A caller holding a `Workspace` should derive it once (`outl_actions::index::derive`) and inject it.
   This crate cannot derive one itself — `outl-actions` depends on it, so injection is what keeps the dependency acyclic while the work still happens once.
@@ -50,7 +52,7 @@ The `query` runtime (`runtimes/query.rs`) is a special case:
 - **Overrides `auto_run()` to `true`**: query blocks always re-run on page load, without needing `gx` or `auto-run::`.
 - **Overrides `needs_workspace_index()` to `true`** — the only runtime that does, pinned by `tests/query_uses_injected_index.rs`.
 - **Uses `ctx.index` when the caller supplied one**, and builds a `WorkspaceIndex` from `ctx.workspace_root` otherwise — the fallback keeps every existing caller working but re-reads the whole workspace per fence.
-  `run_query_dsl_with_index` / `run_query_structured_with_index` are the injected-index entry points; the `outl.query()` JS binding takes the same path.
+  `run_query_dsl_with_index` is the injected-index entry point.
 - **DSL parser** (`runtimes/query::dsl`): line-by-line `key: value` directives, implicitly ANDed.
   Filters: `status`, `tag`, `kind`, `since`, `text`.
   Controls: `sort`, `limit`.
@@ -76,7 +78,8 @@ The query engine exposes a **structured API** alongside the DSL, so plugins and 
 
 - **`run_query_dsl(dsl, root)`** — user-facing DSL string → `Vec<QueryHit>`. Builds an index off disk; used by `QueryRuntime::execute` only when the caller injected none.
 - **`run_query_structured(params, root)`** — plugin-facing struct → `Vec<QueryHit>`. Exposed to JS as `outl.query({ ... })`.
-- **`run_query_dsl_with_index(dsl, &index)` / `run_query_structured_with_index(params, &index)`** — the same two against an index the caller already holds. Prefer these; a page with several ` ```query ` fences otherwise pays a full workspace read per fence.
+- **`run_query_dsl_with_index(dsl, &index)`** — the DSL path against an index the caller already holds. Prefer it; a page with several ` ```query ` fences otherwise pays a full workspace read per fence.
+  There is deliberately **no** structured counterpart. The only caller that would want one is the `outl.query()` JS binding, and Boa stores a capturing native fn in the `Context`, which outlives the call, so a borrowed index cannot travel into it. Owning it behind an `Arc` would reinstate the per-fence clone this field removes, to serve the path that is not the hot one.
 
 Both converge on the same engine pipeline.
 
