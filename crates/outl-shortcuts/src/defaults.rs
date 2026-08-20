@@ -307,6 +307,51 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::InsertRemind,
             "Add a reminder (Cmd+R)",
         ),
+        // ── Properties (`key:: value`) ─────────────────────────
+        //
+        // `Normal`, not `Global`: the editor writes onto the
+        // *selected* block, and inside a textarea the selection is the
+        // caret, not a block. A Global row would also `preventDefault`
+        // a chord some webview / OS input method may want. The desktop
+        // reaches Normal through its "nothing focused" detection, so
+        // this fires in view mode with or without `vim_mode` — the
+        // same rule `CutBlock` / `CopyBlock` follow.
+        //
+        // Dual-spelled per OS: the desktop adapter never rewrites
+        // Cmd↔Ctrl, so a single META row dead-keys on Linux/Windows.
+        Binding::new(
+            shift_meta_ch('p'),
+            Normal,
+            Action::AddProperty,
+            "Add a property to this block (Cmd+Shift+P)",
+        ),
+        Binding::new(
+            shift_ctrl_ch('p'),
+            Normal,
+            Action::AddProperty,
+            "Add a property to this block (Ctrl+Shift+P)",
+        ),
+        // `g p` = "go properties", the `g<action>` family again. The
+        // TUI's overlay is the discoverable half of `:prop`: `:prop`
+        // needs you to know the key, this lists what is already there.
+        //
+        // It **took** `g p` from the pin toggle, which moved to `g P`.
+        // Pinning is a once-per-page act and already has `/pin`;
+        // editing properties is a daily one, and `pinned::` is itself
+        // a page property this overlay now edits. The shift also
+        // matches `g r` / `g R`.
+        Binding::new(
+            pair('g', 'p'),
+            Normal,
+            Action::OpenProperties,
+            "Open the property editor (chord)",
+        ),
+        Binding::new(
+            pair_shift_second('g', 'p'),
+            Normal,
+            Action::TogglePin,
+            "Toggle pinned:: on this page (chord)",
+        ),
         Binding::new(
             ctrl('p'),
             Normal,

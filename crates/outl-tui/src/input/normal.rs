@@ -204,11 +204,21 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             }
             ('g', KeyCode::Char('p')) => {
-                // `gp` = toggle the `pinned::` page property.
-                // Mnemonic: "go pin". Chose a chord (not bare `P`)
-                // because `P` is already paste-before in Normal
-                // mode — overloading it would surprise yanker
-                // muscle memory.
+                // `g p` = open the property editor. "go properties".
+                // The discoverable half of `:prop`: the command needs
+                // you to remember the key, the overlay lists what the
+                // block already has and completes new keys from the
+                // workspace catalogue.
+                app.open_properties();
+                return Ok(false);
+            }
+            ('g', KeyCode::Char('P')) => {
+                // `g P` = toggle the `pinned::` page property. It used
+                // to be `g p`; properties took that spelling because
+                // pinning is a once-per-page act with `/pin` as its
+                // other door, while `pinned::` is itself one of the
+                // page properties `g p` now edits. Shifted for the
+                // rarer of the two, same as `g r` / `g R`.
                 app.toggle_pinned();
                 return Ok(false);
             }
@@ -601,6 +611,39 @@ mod reminder_chord_tests {
             lookup(Mode::Normal, &pair('g', 's')),
             Some(Action::SnoozeReminder),
             "the `('g', Char('s'))` arm in handle_normal_key must match this"
+        );
+    }
+
+    #[test]
+    fn g_p_opens_the_property_editor() {
+        assert_eq!(
+            lookup(Mode::Normal, &pair('g', 'p')),
+            Some(Action::OpenProperties),
+            "the `('g', Char('p'))` arm in handle_normal_key must match this"
+        );
+    }
+
+    #[test]
+    fn g_shift_p_is_the_pin_toggle_that_g_p_displaced() {
+        // `g p` meant pin until the property editor took the
+        // spelling. If someone reverts one half of that move, the
+        // other half silently becomes unreachable — this is the test
+        // that notices.
+        let seq = ChordSequence::pair(Chord::ch('g'), Chord::new(Modifiers::SHIFT, Key::char('p')));
+        assert_eq!(
+            lookup(Mode::Normal, &seq),
+            Some(Action::TogglePin),
+            "the `('g', Char('P'))` arm in handle_normal_key must match this"
+        );
+    }
+
+    #[test]
+    fn ctrl_p_is_still_the_quick_switcher_not_properties() {
+        // `g p` is a two-key chord; a bare `Ctrl+P` must keep opening
+        // the picker, which is the muscle memory most users have.
+        assert_eq!(
+            lookup(Mode::Normal, &ChordSequence::chord(Chord::ctrl('p'))),
+            Some(Action::OpenPicker)
         );
     }
 

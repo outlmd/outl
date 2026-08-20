@@ -51,10 +51,12 @@ import {
   installFileDrop,
   joinAssetMarkdowns,
 } from "@outl/shared/drag-drop";
+import { setPageProperty } from "../lib/api";
 import { spliceTextAtCaret } from "../lib/markdown-wrap";
 import { appState, setAppState, setOutline } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
 import { InlineBacklinks } from "./InlineBacklinks";
+import { PropertyEditor } from "./PropertyEditor";
 
 /**
  * Boot placeholder for the outline body.
@@ -226,6 +228,7 @@ export function OutlineView() {
       page: view.page,
       parseWarnings: view.warnings ?? [],
       mdAheadOfLog: stickyAheadOfLog(view),
+      pageProperties: view.page_properties ?? [],
     });
     // Reconcile the outline (see `setOutline`): only the block that
     // actually changed re-renders, not all N rows.
@@ -240,6 +243,7 @@ export function OutlineView() {
             page: updated.page,
             parseWarnings: updated.warnings ?? [],
             mdAheadOfLog: stickyAheadOfLog(updated),
+            pageProperties: updated.page_properties ?? [],
           });
           setOutline(updated.outline);
           void resolvePageEmbeds(updated.outline);
@@ -547,11 +551,10 @@ export function OutlineView() {
     onSetProperty: (blockId: string, key: string, value: string) => {
       const page = appState.page?.id;
       if (!page) return;
-      void setBlockProperty(page, blockId, key, value)
-        .then(applyView)
-        .catch((e) =>
-          setAppState("lastError", e instanceof Error ? e.message : String(e)),
-        );
+      // Returned, not fire-and-forget: the editor reports a rejection
+      // (an empty key, a backend refusal) instead of repainting the
+      // chip as if the write landed.
+      return setBlockProperty(page, blockId, key, value).then(applyView);
     },
     onRefClick: handleRefClick,
     onTagClick: handleTagClick,
@@ -567,6 +570,16 @@ export function OutlineView() {
       setAppState("focusBlockId", id);
     },
   };
+
+  /** Write a page-level property, refreshing the view on success.
+   *  Rejections propagate to the editor, which surfaces them — a page
+   *  property that silently failed to save is the same defect the
+   *  block chips already fixed. */
+  function setPagePropertyOnCurrent(key: string, value: string) {
+    const pageId = appState.page?.id;
+    if (!pageId) return;
+    return setPageProperty(pageId, key, value).then(applyView);
+  }
 
   async function addFirstBlock() {
     const pageId = appState.page?.id;
@@ -846,6 +859,26 @@ export function OutlineView() {
                 </h1>
               </>
             )}
+          </Show>
+
+          {/*
+           * The page's own `key:: value` properties (`icon::`,
+           * `type::`, …). Same editor as the block chips, because they
+           * are the same data — the desktop showed them nowhere until
+           * now, so `icon::` was TUI-or-`.md` only (issue #13). Hidden
+           * while zoomed: the header is a *block* then, and page
+           * metadata under a block title reads as the block's.
+           */}
+          <Show when={!focus() && appState.page}>
+            <PropertyEditor
+              properties={appState.pageProperties}
+              noun="page property"
+              addAffordance="always"
+              onCommit={setPagePropertyOnCurrent}
+              onError={(msg) => setAppState("lastError", msg)}
+              chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
+              inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
+            />
           </Show>
         </div>
       </header>

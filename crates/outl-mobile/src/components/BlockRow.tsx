@@ -24,6 +24,7 @@ import {
 } from "@outl/shared/paste";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { transformerFor } from "@outl/shared/plugins/transformer-registry";
+import { createLongPress } from "../lib/long-press";
 import { haptic } from "../lib/haptics";
 import { parkCaret } from "../lib/textarea";
 import { PluginFence } from "./PluginFence";
@@ -220,11 +221,6 @@ function BlockBody(props: {
    *  injected `blockId`; this variant gets the caret + text. */
   onPasteMarkdown?: (caret: number, text: string) => void;
 }) {
-  let longPressTimer: number | undefined;
-  let downX = 0;
-  let downY = 0;
-  let didLongPress = false;
-
   /**
    * True when the gesture started inside an interactive child — a
    * page ref (`[[…]]`), tag (`#…`), inline code, link, or any
@@ -235,41 +231,31 @@ function BlockBody(props: {
    */
   function pressedInteractive(e: PointerEvent): boolean {
     const target = e.target as HTMLElement | null;
-    return !!target?.closest(
-      "a,button,[role='button'],code,textarea,input",
-    );
+    return !!target?.closest("a,button,[role='button'],code,textarea,input");
   }
 
+  // Hold timing / drift tolerance are shared with the page title's
+  // gesture — one recogniser, so the two never feel different.
+  const longPress = createLongPress({
+    onLongPress: () => props.onLongPress(),
+  });
+  let skipGesture = false;
+
   function onPointerDown(e: PointerEvent) {
-    if (props.editing) return;
-    if (pressedInteractive(e)) return;
-    downX = e.clientX;
-    downY = e.clientY;
-    didLongPress = false;
-    longPressTimer = window.setTimeout(() => {
-      didLongPress = true;
-      props.onLongPress();
-    }, 450);
+    skipGesture = props.editing || pressedInteractive(e);
+    if (skipGesture) return;
+    longPress.onPointerDown(e);
   }
   function onPointerMove(e: PointerEvent) {
-    if (longPressTimer === undefined) return;
-    if (
-      Math.abs(e.clientX - downX) > 8 ||
-      Math.abs(e.clientY - downY) > 8
-    ) {
-      window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
-    }
+    if (skipGesture) return;
+    longPress.onPointerMove(e);
   }
   function onPointerUp() {
-    if (longPressTimer !== undefined) {
-      window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
-    }
+    longPress.onPointerUp();
   }
+
   function onClick(e: MouseEvent) {
-    if (didLongPress) {
-      didLongPress = false;
+    if (longPress.consumedClick()) {
       return;
     }
     // A tap that landed inside an interactive child has already been
@@ -284,9 +270,9 @@ function BlockBody(props: {
     if (!props.editing) props.onStartEdit();
   }
 
-  onCleanup(() => {
-    if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-  });
+  // A row can unmount mid-hold (a sync reload repaints the outline);
+  // the timer would fire onto a component that no longer exists.
+  onCleanup(() => longPress.cancel());
 
   const padLeft = () => 16 + props.depth * INDENT_PX;
 

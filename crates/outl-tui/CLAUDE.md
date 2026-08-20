@@ -103,6 +103,29 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   `move_{up,down}_visual_range` drag the whole selection among its siblings — mirror of the single-block `Alt`+arrows in Normal (the plain arrows extend the range, so `Alt` is what separates reorder from grow).
   They loop `move_{up,down}_at_path` (`lo→hi` for up, `hi→lo` for down) and follow the selection one row; if the leading block can't move (already first/last sibling) the op aborts before the rest of the range scrambles against itself.
 
+### Properties (`g p`)
+
+`g p` opens the property editor for the selected block (`actions/properties.rs` + `view/properties.rs`, keys routed by `input/overlay.rs::handle_properties_key`).
+`j` / `k` move, `Enter` edits the highlighted **value**, `o` adds a pair (key first, `Enter` advances to the value, `Enter` again saves), `d d` deletes, `p` flips between block and page scope, `Esc` / `q` closes.
+
+Three contracts worth knowing before touching it:
+
+- **Rows come from the parsed AST, not the workspace tree.**
+  `set_property_on_current_block` / `set_property_on_page` write the AST, and the two only meet at a save boundary — reading the tree would list a value the user cannot see in the outline and would drop the one they just typed.
+  This is the same trap `actions/reminders.rs` documents for `g r`.
+  `outl_actions::property::page_properties` is therefore **not** the reader here; the structural-key predicate it uses (`outl_actions::tree::is_page_model_key`) is, so `page-slug` / `page-kind` are filtered out of the list and refused on create.
+- **Key completion is `outl_actions::known_keys`, snapshotted on open.**
+  Frequency-ranked, one owner shared with the GUI clients.
+  Snapshotted because the overlay owns the keyboard while it is up, so no key can appear mid-session; `open_properties` calls `flush_pending_save()` first so the catalogue isn't one coalesced edit behind.
+  `key_completions` (pure, tested) is the prefix-then-substring ranking `Tab` walks.
+- **The value field reuses Insert mode's autocomplete wholesale.**
+  Same `detect_trigger`, same `candidates_for_pageref` / `candidates_for_tag`, same `App::autocomplete` slot, same popup renderer — only the accept differs (`apply_value_completion` writes a `String`, `accept_autocomplete` writes an `EditBuffer`).
+  Only `[[` and `#` are honoured: `((`, `/`, `@` and `:` are ordinary characters in a property value.
+  Because the popup renders off `App::autocomplete` independently of `App::overlay`, **anything that closes the overlay must clear it** (`close_properties`), or a dangling box paints over the outline with no keystream to dismiss it.
+
+**`g p` used to be the `pinned::` toggle; that moved to `g P`.**
+Both spellings now live in the shared catalog (`Action::OpenProperties` / `Action::TogglePin`) with drift-guard tests at the bottom of `input/normal.rs`, because a chord outside the catalog is a chord the duplicate-detection test cannot see — which is how the collision happened in the first place.
+
 ### Reminders (`remind::`)
 
 `g r` attaches a starter rule (`remind:: 9am`) to the selected block; it **reports** an existing rule instead of overwriting, so the chord can't discard a carefully typed schedule.
@@ -265,6 +288,7 @@ src/
 │   ├── paste.rs         # external-clipboard paste (bracketed paste → outl_actions::paste_markdown)
 │   ├── exec.rs          # run code block via outl_exec
 │   ├── plugins.rs       # outl_plugins::PluginHost wiring (load, slash dispatch, op-hook sweep)
+│   ├── properties.rs    # the `g p` property editor (key catalogue completion, `[[` in the value)
 │   └── overlay.rs       # quick switcher, search, palette, autocomplete
 ├── input/               # key → action routing (normal/insert/visual/overlay)
 │   ├── chord_adapter.rs # crossterm KeyEvent → outl_shortcuts::Chord
@@ -275,6 +299,7 @@ src/
 │   ├── outline.rs       # outline rendering (render_outline, render_block, …)
 │   ├── wrap.rs          # width-aware word wrap of styled spans (push_wrapped)
 │   ├── overlays.rs      # every modal popup
+│   ├── properties.rs    # the `g p` property editor popup
 │   ├── warnings_banner.rs # yellow banner above the outline when the current page has ParseWarnings
 │   └── backlinks.rs     # inline backlinks section (below outline, ─ rule)
 ├── outline_ops.rs       # one-line re-export shim — helpers moved to outl_md::outline_ops so the mobile client can share them

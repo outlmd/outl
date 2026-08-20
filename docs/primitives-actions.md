@@ -33,6 +33,9 @@ Every entry here routes through `Workspace::apply` — never build a `LogOp` fro
 | Re-parent a block under an arbitrary page/block (cross-page move) | `outl_actions::block::move_under` | `crates/outl-actions/src/block/moves.rs` |
 | Delete a block (`Move(node, TRASH_ROOT)`, **never** physical) | `outl_actions::block::delete` | `crates/outl-actions/src/block/moves.rs` |
 | Toggle a block's collapsed flag (converges via `Op::SetCollapsed`) | `outl_actions::collapsed::toggle_block_collapsed` / `set_block_collapsed` | `crates/outl-actions/src/collapsed.rs` |
+| Rank the workspace's property keys by use (what to suggest when the user adds a property) | `outl_actions::property::known_keys` | `crates/outl-actions/src/property.rs` |
+| Read a page's own `key:: value` pairs, structural keys filtered out | `outl_actions::property::page_properties` | `crates/outl-actions/src/property.rs` |
+| Decide whether a property key is the page model's book-keeping (`page-slug` / `page-kind`) rather than user metadata | `outl_actions::tree::is_page_model_key` | `crates/outl-actions/src/tree.rs` |
 | Cycle / split / read task state — TODO → DOING → DONE, encoded as a text prefix. `TodoState::prefix` is the one owner of the marker spelling, and the widths differ (`DOING ` is 6 chars), so measure it instead of assuming | `outl_actions::todo::cycle_todo` / `split_todo` / `TodoState` / `TODO_PREFIX` / `DOING_PREFIX` / `DONE_PREFIX` | `crates/outl-actions/src/todo.rs` |
 | Set TODO/DONE state outright (not "advance one step") | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
 | Toggle TODO/DONE on a block in one call | `outl_actions::block::toggle_todo` | `crates/outl-actions/src/block/edit.rs` |

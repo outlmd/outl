@@ -154,7 +154,11 @@ impl App {
     }
 
     /// Sorted page-title candidates matching the query (fuzzy, top 8).
-    fn candidates_for_pageref(&self, q: &str) -> Vec<String> {
+    ///
+    /// `pub(crate)` because the properties overlay's value field runs
+    /// the same `[[` picker over a plain `String` buffer — a second
+    /// ranking there would drift from this one.
+    pub(crate) fn candidates_for_pageref(&self, q: &str) -> Vec<String> {
         let mut scored: Vec<(i32, String)> = self
             .index
             .pages()
@@ -198,7 +202,7 @@ impl App {
 
     /// Tag candidates — for now, every page title (tags resolve to pages).
     /// Filtered by fuzzy match on the query.
-    fn candidates_for_tag(&self, q: &str) -> Vec<String> {
+    pub(crate) fn candidates_for_tag(&self, q: &str) -> Vec<String> {
         let mut scored: Vec<(i32, String)> = self
             .index
             .pages()

@@ -120,11 +120,16 @@ import { SyncDot } from "./SyncDot";
 import { BlockRow } from "./BlockRow";
 import { SkeletonOutline } from "./Skeleton";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
+import { createLongPress } from "../lib/long-press";
 import { haptic } from "../lib/haptics";
 import { BacklinksSection } from "./BacklinksSection";
 import { BlockContextMenu, type BlockContextAction } from "./BlockContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TemplateSheet } from "./TemplateSheet";
+import {
+  PropertiesSheet,
+  type PropertyScope,
+} from "./PropertiesSheet";
 import { Toast } from "./Toast";
 
 /** Whether this build runs on Android. The web keyboard accessory bar
@@ -198,6 +203,26 @@ export function Journal() {
   const [templateBlockId, setTemplateBlockId] = createSignal<string | null>(
     null,
   );
+  // Properties sheet target. `blockId` is the long-pressed block (null
+  // when the sheet was opened from the page's own chips); `scope` picks
+  // which side it lands on. `null` keeps the sheet closed.
+  const [propertiesTarget, setPropertiesTarget] = createSignal<{
+    blockId: string | null;
+    scope: PropertyScope;
+  } | null>(null);
+  /** Press-and-hold on the page title opens the sheet on the page's
+   *  own properties. It is the only door that does not need a block:
+   *  a page with no blocks has nothing to long-press, and `icon::` /
+   *  `type::` are page metadata anyway, so routing them through a
+   *  block was always the indirect path. */
+  const titleLongPress = createLongPress({
+    onLongPress: () => {
+      if (!pageId()) return;
+      haptic("medium");
+      setPropertiesTarget({ blockId: null, scope: "page" });
+    },
+  });
+
   const [syncing, setSyncing] = createSignal(false);
   // PRIMARY sync signal: is at least one iroh peer reachable right now?
   // Polled from the transport's own dial outcomes (`peerStatus()` →
@@ -1553,8 +1578,25 @@ export function Journal() {
           </Show>
 
           {/* Center — title region. `min-w-0` is what lets the inner
-              truncate work in PageHeader. */}
-          <div class="min-w-0">
+              truncate work in PageHeader. Press-and-hold anywhere in
+              here opens the page's properties (see `titleLongPress`);
+              the journal arrows below are buttons, so they keep their
+              own taps. */}
+          <div
+            class="min-w-0"
+            onPointerDown={titleLongPress.onPointerDown}
+            onPointerMove={titleLongPress.onPointerMove}
+            onPointerUp={titleLongPress.onPointerUp}
+            onPointerCancel={titleLongPress.onPointerUp}
+            onClick={(e) => {
+              // Swallow the click the completed hold produces, or the
+              // journal header would also step a day.
+              if (titleLongPress.consumedClick()) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+          >
             <Show
               when={view()?.page.kind === "journal"}
               fallback={
@@ -1754,6 +1796,28 @@ export function Journal() {
       <main class="ios-scroll flex-1 pb-32">
         <PullToRefresh onRefresh={handleRefresh}>
         <div class="min-h-[60vh]">
+        {/* The page's own `key:: value` metadata (`icon::`, `type::`).
+            Mobile showed none of it before — it existed only in the
+            `.md` and the TUI. Tapping a chip opens the same properties
+            sheet the block long-press does, on the Page side. */}
+        <Show when={(view()?.page_properties ?? []).length > 0}>
+          <div class="ios-scroll flex gap-1.5 overflow-x-auto px-4 pt-2">
+            <For each={view()!.page_properties!}>
+              {([key, value]) => (
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic("light");
+                    setPropertiesTarget({ blockId: null, scope: "page" });
+                  }}
+                  class="shrink-0 rounded-full bg-(--color-ios-divider)/40 px-2.5 py-1 text-[11px] text-(--color-ios-text-secondary) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text-secondary)"
+                >
+                  <span class="font-mono">{key}</span>: {value}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
         <section class="mt-1 pb-1">
           <Show
             when={loaded() && view() && view()!.outline.length > 0}
@@ -1849,6 +1913,42 @@ export function Journal() {
                   </For>
                 </div>
               )}
+            </Show>
+            {/* An empty page used to render as nothing at all: no
+                text, no affordance, no hint that a tap anywhere would
+                help. It is also the one state with no block to
+                long-press, so it was the only place page properties
+                were unreachable. Both doors live here, and the whole
+                block costs nothing on a page that has content. */}
+            <Show when={outlineRoots().length === 0 && view()}>
+              <div class="flex flex-col items-center gap-4 py-16 text-center">
+                <p class="text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                  This page is empty
+                </p>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleAppendBlock()}
+                    class="rounded-full bg-(--color-ios-accent) px-4 py-2 text-[15px] font-medium text-white active:opacity-70 dark:bg-(--color-iosd-accent)"
+                  >
+                    Add a block
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!pageId()) return;
+                      haptic("light");
+                      setPropertiesTarget({ blockId: null, scope: "page" });
+                    }}
+                    class="rounded-full bg-(--color-ios-card) px-4 py-2 text-[15px] text-(--color-ios-text) active:opacity-70 dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)"
+                  >
+                    Properties
+                  </button>
+                </div>
+                <p class="max-w-[16rem] text-[13px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+                  Hold the title to edit page properties from anywhere.
+                </p>
+              </div>
             </Show>
             <For each={outlineRoots()}>
               {(block) => (
@@ -2058,6 +2158,8 @@ export function Journal() {
             delete: handleDelete,
             runCode: handleRunCodeBlock,
             insertTemplate: (id) => setTemplateBlockId(id),
+            properties: (id) =>
+              setPropertiesTarget({ blockId: id, scope: "block" }),
             remindMe: (id) => void handleRemindMe(id),
             attachFile: handleAttachFile,
             copy: async (id) => {
@@ -2080,6 +2182,16 @@ export function Journal() {
       <TemplateSheet
         blockId={templateBlockId()}
         onClose={() => setTemplateBlockId(null)}
+        onMessage={(text) => setError(text)}
+        onView={(v) => applyView(v)}
+      />
+
+      <PropertiesSheet
+        blockId={propertiesTarget()?.blockId ?? null}
+        scope={propertiesTarget()?.scope ?? null}
+        pageId={pageId()}
+        view={view() ?? null}
+        onClose={() => setPropertiesTarget(null)}
         onMessage={(text) => setError(text)}
         onView={(v) => applyView(v)}
       />
@@ -2216,6 +2328,7 @@ function buildContextActions(
     delete: (id: string) => void;
     runCode: (id: string) => void;
     insertTemplate: (id: string) => void;
+    properties: (id: string) => void;
     remindMe: (id: string) => void;
     copy: (id: string) => void;
     attachFile: (id: string) => void;
@@ -2287,6 +2400,15 @@ function buildContextActions(
       iconPath:
         "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0",
       onSelect: () => handlers.remindMe(blockId),
+    },
+    {
+      id: "properties",
+      label: "Properties…",
+      // "tag" glyph — a `key:: value` is the block's metadata, and the
+      // sheet behind it is the only GUI place to create one.
+      iconPath:
+        "M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0l-7.2-7.2a2 2 0 0 1-.6-1.4V4a1 1 0 0 1 1-1h8a2 2 0 0 1 1.4.6l7.4 7.4a2 2 0 0 1 0 2.8z M7.5 7.5h.01",
+      onSelect: () => handlers.properties(blockId),
     },
     {
       id: "insertTemplate",

@@ -203,7 +203,7 @@ Only the toolbar's **Delete** confirms before erasing a range that contains nest
 ## Page operations
 
 `g d` (Normal mode, "go delete") is the canonical chord for page deletion.
-It lives in the shared `outl-shortcuts` catalog, same `g<action>` family as `g j` (today) / `g x` (execute) / `g p` (pin).
+It lives in the shared `outl-shortcuts` catalog, same `g<action>` family as `g j` (today) / `g x` (execute) / `g p` (properties).
 The chord deletes the focused page (sidebar-highlighted row when the sidebar has focus on the TUI, otherwise the current page).
 Each client confirms before invoking `outl_actions::page::delete`.
 Journals are refused everywhere.
@@ -241,6 +241,32 @@ What the TUI can't do is deliver while it's closed, since a terminal session has
 > `Ctrl+R` on the desktop likewise stays Redo on Linux / Windows, which is why authoring is `Cmd+R` only.
 
 Snoozing writes `Op::SnoozeRemind`, so it converges: silencing a nag on the phone silences the same block on the laptop.
+
+---
+
+## Properties (`key:: value`)
+
+`remind::` above is one property with its own chords; this is the generic door.
+Creating the **first** property on a block used to be impossible in either GUI client — you could edit a chip that already existed and nothing more (issue #13).
+
+| Action | TUI | Desktop | Mobile |
+|---|---|---|---|
+| Open the property editor for the selected block | `g p` | `g p` in Normal — the chip row is always visible, so this opens the blank pair (same as `Cmd+Shift+P`) | long-press the block → **Properties…** |
+| Add a property to the selected block | `o` inside `g p`, or `/prop <key> <value>` | `Cmd+Shift+P` / `Ctrl+Shift+P` in Normal, or the `+ prop` button at the end of the chip row (visible on block hover) | `+ Add property` at the top of the sheet |
+| Edit a property's value | `Enter` inside `g p`, or `/prop <key> <value>` | click the chip | tap the chip |
+| Delete a property | `d d` inside `g p`, or `/prop <key>` (empty value) | the `×` on the chip | swipe the row left, or Delete inside the editor |
+| Add / edit a **page** property | `p` inside `g p` flips to page scope, or `/prop-page <key> <value>` | the chip row under the page title (always visible) | **long-press the title**, the Block ⇄ Page switch in the sheet, or the Properties button on an empty page |
+| Complete the key from the workspace catalogue | `Tab` in the key field | typeahead on the key field | the most-used keys as tappable chips, plus **Other…** for the keyboard |
+| Pick a `[[page]]` as the value | `[[` / `#` in the value field | `[[` in the value field opens the page list (↑/↓, Enter or click) | the `[[` picker |
+| Close the editor | `Esc` / `q` | `Esc` | swipe the sheet down, or ✕ |
+
+The key field completes from the workspace's own key catalogue (`outl_actions::known_keys`), most-used first, skipping keys the block already carries.
+Deleting and "empty the value" are the same backend call — the `×` exists because a gesture nobody can see is not an affordance.
+
+**The TUI gets an overlay rather than a form.** It is modal and vim, so tabbing between a key field and a value field fights the mode: `Tab` there means *complete*, and `Enter` is what advances key → value → save. `/prop` and `/prop-page` stay for muscle memory; the overlay is for when you don't remember the key.
+
+> **`g p` used to mean "pin".** The `pinned::` toggle moved to **`g P`** (`/pin` is unchanged).
+> Pinning is a once-per-page act with a second door already; editing properties is a daily one — and `pinned::` is itself one of the page properties `g p` now edits.
 
 ---
 

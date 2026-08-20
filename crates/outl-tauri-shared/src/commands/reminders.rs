@@ -226,6 +226,40 @@ pub fn set_block_property<S: AppHost>(
     finish_in_page(state, page, |ws| set_property(ws, &hlc, node, key, value))
 }
 
+/// Set (or, with an empty value, clear) a property on the **page**
+/// itself: `icon::`, `type::`, `title::`, anything the user keeps as
+/// page metadata.
+///
+/// Structural keys are refused rather than silently written. The page
+/// root holds `page-slug` and `page-kind` in the same property map,
+/// and those are the page's identity: `page-slug` is what the filename
+/// and every `[[ref]]` resolve through. Letting an "edit property"
+/// surface reach them turns a typo into a page that no link finds.
+/// Renaming is `page_rename`, which moves the projection too.
+pub fn set_page_property<S: AppHost>(
+    state: &S,
+    page_id: &str,
+    key: &str,
+    value: &str,
+) -> Result<PageView, String> {
+    let page = parse_node_id(page_id)?;
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("property key cannot be empty".to_string());
+    }
+    if outl_actions::tree::is_page_model_key(key) {
+        return Err(format!(
+            "`{key}` defines the page and cannot be edited as a property; rename the page instead"
+        ));
+    }
+    let value = {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| PropValue::Text(trimmed.to_string()))
+    };
+    let hlc = state.hlc().clone();
+    finish_in_page(state, page, |ws| set_property(ws, &hlc, page, key, value))
+}
+
 /// Mark a block DONE, which cancels every pending fire of its rule.
 ///
 /// Deliberately **not** `toggle_todo`. The reminders list offers this

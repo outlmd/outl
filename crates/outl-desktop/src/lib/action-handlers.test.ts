@@ -530,3 +530,41 @@ describe("zoom / focus (ZoomIn / ZoomOut)", () => {
     expect(appState.focusBlockId).toBeNull();
   });
 });
+
+/**
+ * `Cmd/Ctrl+Shift+P` (issue #13). The chord has no chip to click, so
+ * it names the block and `<BlockRow />` opens a blank editor on it —
+ * the handler's whole job is that hand-off, plus refusing to be a
+ * no-op when nothing is selected. Silence there is how "the shortcut
+ * is broken" bug reports get filed.
+ */
+describe("AddProperty", () => {
+  const applyView = vi.fn();
+  const setError = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setAppState({
+      page: { id: "pg-1", slug: "today", title: "Today", kind: "journal" },
+      outline: [block("blk-1", "hello")],
+      selectedBlockId: null,
+      addPropertyBlockId: null,
+    });
+  });
+
+  it("asks the selected block's row to open a blank editor", () => {
+    setAppState("selectedBlockId", "blk-1");
+
+    buildHandlers({ applyView, setError }).AddProperty?.();
+
+    expect(appState.addPropertyBlockId).toBe("blk-1");
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it("says why nothing happened when no block is selected", () => {
+    buildHandlers({ applyView, setError }).AddProperty?.();
+
+    expect(appState.addPropertyBlockId).toBeNull();
+    expect(setError).toHaveBeenCalled();
+  });
+});

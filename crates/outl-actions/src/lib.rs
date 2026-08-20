@@ -72,6 +72,7 @@ pub mod page_merge;
 pub mod page_repair_titles;
 pub mod paste;
 pub mod person;
+pub mod property;
 pub mod quote;
 pub mod recover;
 pub mod reminders;
@@ -132,6 +133,7 @@ pub use paste::{
     PasteOutcome,
 };
 pub use person::{search_persons, PERSON_TYPE, TYPE_KEY};
+pub use property::known_keys;
 pub use recover::{restore_truncated_block, scan_truncated_blocks, TruncatedBlock};
 pub use reminders::{
     epoch_ms_to_local_naive, local_naive_to_epoch_ms, next_fire_at, scan_reminders, snooze,

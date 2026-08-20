@@ -210,6 +210,88 @@ pub(crate) enum Overlay {
     /// has no background presence), but it must still let the user see
     /// and author what the GUI clients will deliver.
     Reminders(RemindersState),
+    /// Property editor for the selected block (or for the page).
+    ///
+    /// The discoverable counterpart to `:prop` / `:prop-page`: those
+    /// need you to remember the key, this one lists what is already
+    /// there and completes new keys from the workspace catalogue.
+    Properties(PropertiesState),
+}
+
+/// Which set of properties [`Overlay::Properties`] is editing.
+///
+/// One overlay, two scopes, because the two are the same editor over
+/// two `Vec<(String, String)>` — `p` toggles between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PropertyScope {
+    /// `key:: value` lines under the selected block.
+    Block,
+    /// The `.md`'s top-of-file properties (`icon::`, `type::`, ...).
+    Page,
+}
+
+impl PropertyScope {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            PropertyScope::Block => "block",
+            PropertyScope::Page => "page",
+        }
+    }
+}
+
+/// Which half of an in-flight property the keystrokes go to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PropertyField {
+    Key,
+    Value,
+}
+
+/// One property being typed inside the properties overlay.
+///
+/// Two buffers rather than a form: the TUI is modal, so `Enter`
+/// advances Key → Value → commit and `Esc` aborts the whole thing.
+/// Tabbing between fields is what a form would do, and it fights vim.
+#[derive(Debug)]
+pub(crate) struct PropertyEdit {
+    /// Where the caret is.
+    pub(crate) field: PropertyField,
+    pub(crate) key: String,
+    pub(crate) value: String,
+    /// `Some(key)` when editing an existing row — the key is fixed
+    /// there and only the value is editable. `None` while creating.
+    pub(crate) original_key: Option<String>,
+    /// Catalogue entries matching the typed key prefix, most-used
+    /// first. Recomputed on every keystroke in the Key field.
+    pub(crate) key_matches: Vec<String>,
+    /// Index the next `Tab` will apply, so repeated `Tab` cycles.
+    pub(crate) key_match_idx: usize,
+}
+
+/// State of the properties overlay.
+///
+/// `rows` is a snapshot of the parsed AST taken whenever the overlay
+/// opens or a write lands — the same place `:prop` reads and writes.
+/// Asking the op log instead would show properties the user cannot
+/// see on screen yet (a write only reaches the tree at the next save
+/// boundary), which is the mismatch `actions/reminders.rs` documents.
+#[derive(Debug)]
+pub(crate) struct PropertiesState {
+    pub(crate) scope: PropertyScope,
+    /// `(key, value)` pairs currently on the target, in file order.
+    pub(crate) rows: Vec<(String, String)>,
+    /// Cursor into `rows`.
+    pub(crate) selected: usize,
+    /// The in-flight edit; `None` while navigating.
+    pub(crate) editing: Option<PropertyEdit>,
+    /// First `d` of the `dd` chord landed, waiting for the second.
+    pub(crate) pending_delete: bool,
+    /// Transient status / refusal line at the bottom of the overlay.
+    pub(crate) message: Option<String>,
+    /// Property keys already used anywhere in the workspace, most-used
+    /// first. Snapshotted on open: the catalogue is a scan of the
+    /// property map, and re-running it per keystroke buys nothing —
+    /// no key can appear while the overlay owns the keyboard.
+    pub(crate) known_keys: Vec<String>,
 }
 
 /// State of the reminders overlay: the scanned list plus a cursor.

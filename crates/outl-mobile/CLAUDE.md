@@ -27,6 +27,7 @@ outl-mobile (this crate)
    │       ├── block.rs            (create / edit / toggle_todo / toggle_quote / delete / indent / outdent / move_* / set_collapsed / paste_markdown_at / copy_markdown)
    │       ├── peers.rs            (outl_peer_list / outl_peer_remove — read/edit <workspace>/.outl/peers.json, no workspace lock)
    │       ├── plugin.rs           (plugin_list / plugin_run / plugin_sync_hooks — thin shims over PluginService)
+   │       ├── property.rs         (known_property_keys — the key catalogue the Properties sheet's chips come from)
    │       └── exec.rs             (run_code_block — thin shim over outl_actions::exec::run_code_block)
    ├── gen/apple/.../main.mm       (NSMetadataQuery + NSFileCoordinator iCloud watcher)
    ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
@@ -265,6 +266,65 @@ Flow + runtime-catalog rationale: [`docs/clients.md` → Running code blocks](..
 
 The block long-press menu's "Insert template" action opens `TemplateSheet` (bottom sheet listing `listTemplates()`); picking one calls `instantiateTemplateAt(name, blockId)` and applies the returned `PageView`.
 Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/clients.md` → Structural templates](../../docs/clients.md#structural-templates).
+
+## Properties (`key:: value`) — the sheet (issue #13)
+
+Creating a property was impossible in either GUI client: the chips
+rendered what a block already carried and edited a value in place, so
+the *first* one had to come from the TUI or a hand-edited `.md`. Page
+properties (`icon::`, `type::`) were not even visible.
+
+**`components/PropertiesSheet.tsx`** is mobile's answer. The block
+long-press menu's "Properties…" action opens it on that block; the
+page's own chips (rendered under the header in `Journal.tsx`) open it
+on the page, and a Block/Page switch inside crosses between the two.
+
+Two design facts, both measured on a real 66k-block graph, decide the
+shape — and both are the reason this is a sheet and not a `+` on the
+chip row:
+
+1. **Keys repeat.** A graph reuses about a dozen (`icon`, `related`,
+   `status`, `oura-date`). So the Add step paints the workspace's own
+   keys as **tappable chips**, ranked by `known_property_keys`, with
+   "Other…" as the keyboard escape. Two taps, nothing typed — that is
+   ~87% of the value of this feature on a phone.
+2. **87% of values are a `[[page]]` or a `#tag`.** Typing `[[` in the
+   value field opens the page picker (`searchPages` + the shared
+   `detectRefContext` / `applySuggestion` / `refReplacement` — the
+   accept rule is **not** re-implemented), and a "Link a page…" button
+   types the `[[` for you.
+
+Deleting is explicit in two shapes: swipe a row (`<SwipeRow>`) and a
+Delete button inside the value editor. Both write an **empty value**,
+which is how `set_property` spells "remove" — the user never has to
+discover that.
+
+Wire commands, both thin wrappers over shared bodies:
+
+- `known_property_keys` (`commands/property.rs` → the catalogue; the
+  ranking itself is `outl_actions::known_keys`, one owner, three
+  clients).
+- `set_page_property` (`commands/reminders.rs`, next to the existing
+  `set_block_property` — same shared module owns both bodies). It
+  refuses `page-slug` / `page-kind`: those *are* the page's identity,
+  and renaming is `page_rename`, which moves the projection too.
+
+`PageView.page_properties` is what makes the page side possible at all.
+
+Mobile-only pieces, and why they are not in `@outl/shared` yet:
+`lib/properties.ts` (`normalizeKey` — strips the `::` a user copies —
+plus `suggestedKeys` / `editableProperties`) and the sheet itself are
+phone-keyboard answers; the desktop's affordance for the same
+catalogue is inline completion with no cap and no "Other…" escape.
+`knownPropertyKeys` / `setPageProperty` sit in `lib/api.ts` for the
+same transitional reason and are marked `PROMOTE-TO-SHARED` there —
+both clients register those commands, so by this repo's own rule the
+wrappers belong beside `setBlockProperty` in
+`@outl/shared/api/commands`.
+
+Covered by `PropertiesSheet.test.tsx` (chips exclude keys already set,
+two-tap add, `::` normalisation, edit, both delete affordances, page
+scope, the `[[` picker) and `lib/properties.test.ts`.
 
 ## Reminders (`remind::`)
 

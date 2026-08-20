@@ -72,6 +72,18 @@ export interface DesktopHandlerDeps {
  * the rendered page or surface a problem in the status bar.
  */
 export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
+  /** Ask the selected block's row for a blank property editor.
+   *  Refusing loudly matters: a chord that silently does nothing when
+   *  no block is selected gets reported as "the shortcut is broken". */
+  const openPropertyEditor = () => {
+    const block = appState.selectedBlockId;
+    if (!block) {
+      deps.setError("select a block first");
+      return;
+    }
+    setAppState("addPropertyBlockId", block);
+  };
+
   const safeCall = async <T>(p: Promise<T>): Promise<T | undefined> => {
     try {
       return await p;
@@ -333,6 +345,19 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       // `g s` lands on the same instant as the panel's first button.
       await safeCall(snoozeReminder(block, "1h"));
     },
+    // ── properties (`key:: value`) ────────────────────────────────
+    //
+    // The chord has no chip to click, so it names the block and
+    // `<BlockRow />` opens a blank editor on it. The editor clears the
+    // signal when it closes, which is what lets a second press
+    // re-open it on the same block.
+    //
+    // `OpenProperties` (the TUI's `g p`) resolves here too: that
+    // overlay's job is to *list* a block's properties, and the desktop
+    // already renders that list permanently as the chip row. The only
+    // half it lacks is the blank pair, so both chords open it.
+    AddProperty: openPropertyEditor,
+    OpenProperties: openPropertyEditor,
     Quit: async () => {
       // `qq` chord in Normal + `Ctrl+C` Global. Close the active
       // window; Tauri tears the app down once the last window

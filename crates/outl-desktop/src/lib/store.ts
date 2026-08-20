@@ -53,6 +53,22 @@ export interface AppStateShape {
    * something upstream produced unlogged content.
    */
   mdAheadOfLog: MdAheadOfLog | undefined;
+  /**
+   * The current page's own `key:: value` properties (`icon::`,
+   * `type::`, …), from `PageView.page_properties`. Rendered under the
+   * page title by the same editor the block chips use — before issue
+   * #13 the desktop showed them nowhere at all, so `icon::` could only
+   * be read in the TUI or the `.md`.
+   */
+  pageProperties: Array<[string, string]>;
+  /**
+   * Block whose property editor should open blank, or `null`.
+   *
+   * The `Cmd/Ctrl+Shift+P` chord has no chip to click, so it asks for
+   * an editor by id and `<BlockRow />` opens it. Cleared by the editor
+   * when it closes, which is what lets a second press re-open it.
+   */
+  addPropertyBlockId: string | null;
   /** Resolved source blocks keyed by ref handle, for `((blk-…))` inline
    *  refs and `!((blk-…))` embeds on the current page. Inline refs render
    *  `text`; embeds also expand `children` as a subtree. */
@@ -240,6 +256,8 @@ const [state, setState] = createStore<AppStateShape>({
   backlinks: [],
   parseWarnings: [],
   mdAheadOfLog: undefined,
+  pageProperties: [],
+  addPropertyBlockId: null,
   embeds: {},
   selectedPath: null,
   selectedBlockId: null,

@@ -97,6 +97,7 @@ pub fn build_page_view(
         outline: page_outline.nodes,
         backlinks: Vec::new(),
         backlinks_order,
+        page_properties: outl_actions::property::page_properties(workspace, page_id),
         warnings: page_outline.warnings,
         // Set by the open commands, which are the ones that attempt the
         // re-projection this flag reports on. Reading the `.md` never
@@ -133,6 +134,7 @@ pub fn build_page_view_from_tree(
         outline,
         backlinks: Vec::new(),
         backlinks_order,
+        page_properties: outl_actions::property::page_properties(workspace, page_id),
         warnings: Vec::new(),
         md_ahead_of_log: None,
         md_ahead_of_log_checked: false,

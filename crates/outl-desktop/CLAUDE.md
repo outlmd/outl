@@ -96,6 +96,26 @@ The mutation lands on the source page, and `OutlineView`'s backlink effect is ke
 So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
 Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always empty now, so that blanks the section.
 
+## Properties (`key:: value`) — `PropertyEditor.tsx`
+
+`components/PropertyEditor.tsx` renders a chip row and owns the three verbs.
+It replaced `@outl/shared`'s `<BlockProperties />` on this client: that component edits an existing chip's value and offers nothing else, so creating the first property meant the TUI or the `.md`, and deleting was an invisible gesture (issue #13).
+
+- **Create** — `+ prop` at the end of the row (revealed by the block row's `.group` hover), or `Cmd/Ctrl+Shift+P` in Normal mode.
+- **Delete** — `×` on each chip. Same backend call as emptying the value; the button exists because the gesture was undiscoverable.
+- **Key autocomplete** — `known_property_keys` (→ `outl_actions::known_keys`), most-used first, minus keys the block already carries. Fetched on each open, never cached: the backend answer is a map scan, and a cached list is wrong the first time the user adds a key. Navigation goes through `handlePopupNav`, the same contract the `[[` / `/` popups use.
+
+The chord has no chip to click, so `AddProperty` (in `action-handlers.ts`) writes `appState.addPropertyBlockId` and `<BlockRow />` opens a blank editor on that id.
+`OpenProperties` (the TUI's `g p`) resolves to the same handler: that overlay exists to *list* a block's properties, and the desktop renders that list permanently as the chip row — the only half it lacks is the blank pair.
+The editor calls `onAddOpenChange(false)` when it closes, which is what lets a second press re-open it on the same block.
+
+**Page properties** use the same component under the page title (`OutlineView.tsx`), fed by `appState.pageProperties` ← `PageView.page_properties`, written through `set_page_property`.
+`addAffordance="always"` there: the header has one row, and hiding its `+` behind hover would reintroduce the undiscoverable gesture.
+The row is hidden while zoomed — the header is a *block* then, and page metadata under a block title reads as the block's.
+
+`propertyChips` (which keys are chrome, which get a glyph) stays in `@outl/shared/markdown` — one owner, wrapped, not reimplemented.
+Promoting `PropertyEditor` itself to `@outl/shared` waits on mobile: its answer to the same issue is a sheet with tappable key chips, not an inline row, so promoting a desktop-shaped API first would freeze the wrong contract.
+
 ## Blockquote chrome
 
 A `"> "`-prefixed block renders with a left border + ~6% tint, right-rounded, body full-colour; the outline bullet stays outside the quote chrome.

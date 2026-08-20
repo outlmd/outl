@@ -87,6 +87,9 @@ Recently added — check these before writing a parallel reminder helper (catalo
 | Deliver what came due + the device-local fired log. In `outl-actions` because every client delivers, the TUI included | `outl_actions::take_due` | `crates/outl-actions/src/reminders/fired.rs` |
 | Format "in 3h" / bucket a reminder list for a GUI | `@outl/shared` `formatNextFire` / `groupReminders` | `crates/outl-frontend-shared/src/api/commands.ts` |
 | **Mark a block DONE outright** (cancels its rule). Not `cycle_todo` — the cycle is `TODO → DOING → DONE`, so from an unmarked block one press lands on `TODO` and arms the nag | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
+| Rank the workspace's property keys by use (what to suggest when the user adds a property) | `outl_actions::property::known_keys` | `crates/outl-actions/src/property.rs` |
+| Read a page's own `key:: value` pairs, structural keys filtered out | `outl_actions::property::page_properties` | `crates/outl-actions/src/property.rs` |
+| Decide whether a property key is the page model's book-keeping (`page-slug` / `page-kind`) rather than user metadata | `outl_actions::tree::is_page_model_key` | `crates/outl-actions/src/tree.rs` |
 | Cycle / split / read task state (`TODO ` / `DOING ` / `DONE ` text prefixes; `TodoState::prefix` owns the spelling and the widths differ) | `outl_actions::todo::cycle_todo` / `split_todo` / `TodoState` / `DOING_PREFIX` | `crates/outl-actions/src/todo.rs` |
 
 Recently added — check these before writing a parallel template helper (catalog: `docs/primitives-actions.md` → "Templates"):

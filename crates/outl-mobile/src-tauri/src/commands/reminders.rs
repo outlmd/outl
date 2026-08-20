@@ -74,6 +74,19 @@ pub(crate) fn set_block_property(
     shared::set_block_property(state.inner(), &page_id, &block_id, &key, &value)
 }
 
+/// Set (or clear, with an empty value) a property on the **page**
+/// itself (`icon::`, `type::`, …). Refuses the structural keys
+/// upstream — renaming a page is `page_rename`, not a property edit.
+#[tauri::command]
+pub(crate) fn set_page_property(
+    page_id: String,
+    key: String,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<PageView, String> {
+    shared::set_page_property(state.inner(), &page_id, &key, &value)
+}
+
 #[tauri::command]
 pub(crate) fn set_block_remind(
     page_id: String,

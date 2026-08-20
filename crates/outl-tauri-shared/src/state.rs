@@ -43,6 +43,16 @@ pub struct PageView {
     /// shows the right arrow at boot without a separate settings read.
     /// Serialises as `"newest"` / `"oldest"`.
     pub backlinks_order: outl_config::BacklinksOrder,
+    /// The page's own `key:: value` properties, alpha-sorted, with the
+    /// structural keys (`page-slug`, `page-kind`) filtered out by
+    /// `outl_actions::property::page_properties`.
+    ///
+    /// Same shape as `OutlineNode.properties`, so both feed the one
+    /// editor component. Without this the GUI clients could not even
+    /// *see* `icon::` / `type::`, let alone change them, which left the
+    /// TUI as the only way to touch page metadata.
+    #[serde(default)]
+    pub page_properties: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<outl_md::ParseWarning>,
     /// Set when this page's `.md` could not be refreshed from the op log

@@ -986,7 +986,7 @@ fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
             Line::from("  c           fold / unfold the selected block"),
             Line::from("              (▼ expanded · ▶ collapsed · synced via op log)"),
             Line::from("  u / Ctrl+R  undo / redo"),
-            Line::from("  g p         toggle pinned:: on this page (chord)"),
+            Line::from("  g P         toggle pinned:: on this page (chord)"),
             Line::from(""),
             Line::from(Span::styled("Navigation", theme.help_title)),
             Line::from("  j/k ↑↓      move between blocks"),
@@ -1008,6 +1008,15 @@ fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
             Line::from("  B           toggle inline backlinks"),
             Line::from("  \\           toggle left sidebar (opens with focus on Pinned)"),
             Line::from("  q q         quit (chord)"),
+            Line::from(""),
+            Line::from(Span::styled("Properties (key:: value)", theme.help_title)),
+            Line::from("  g p         open the property editor for this block"),
+            Line::from("              j/k move · Enter edit · o add · dd delete"),
+            Line::from("              p switches between block and page properties"),
+            Line::from("              Tab completes the key from the workspace"),
+            Line::from("              [[ picks a page in the value, # a tag"),
+            Line::from("  :prop <key> <value>        set / clear on the block"),
+            Line::from("  :prop-page <key> <value>   set / clear on the page"),
             Line::from(""),
             Line::from(Span::styled("Reminders", theme.help_title)),
             Line::from("  g r         add remind:: to this block"),
@@ -1061,7 +1070,7 @@ fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
             Line::from(Span::styled("Sections", theme.help_title)),
             Line::from("  📅 Calendar  current month — journals marked with ●"),
             Line::from("  ⭐ Pinned    pages with `pinned:: true` property"),
-            Line::from("              (toggle with `gp` chord in Normal, or `/pin`)"),
+            Line::from("              (toggle with `g P` chord in Normal, or `/pin`)"),
             Line::from("  🕘 Recent    pages opened this session (LRU, cap 20)"),
         ],
         "Overlays" => vec![
@@ -1129,6 +1138,22 @@ mod help_coverage_tests {
     fn every_reminder_chord_is_listed() {
         let help = normal_help();
         for chord in ["g r", "g R", "g n", "g s"] {
+            assert!(
+                help.contains(chord),
+                "`{chord}` works but isn't in the help; the popup is \
+                 hand-written, so adding a chord means editing it too"
+            );
+        }
+    }
+
+    #[test]
+    fn the_property_editor_and_its_keys_are_listed() {
+        // `g p` used to mean "pin"; the re-spelling only pays off if
+        // both the new chord and the moved one are findable here.
+        // And an overlay whose inner keys aren't documented is a
+        // list the user can open and not operate.
+        let help = normal_help();
+        for chord in ["g p", "g P", "dd delete", "Tab completes"] {
             assert!(
                 help.contains(chord),
                 "`{chord}` works but isn't in the help; the popup is \

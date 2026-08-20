@@ -20,7 +20,6 @@ import type {
 import type { BlockHit } from "@outl/shared/api/commands";
 import {
   EmbeddedSubtree,
-  BlockProperties,
   MarkdownInline,
   QuoteWrap,
   isBlockQuoted,
@@ -64,6 +63,7 @@ import { detectFence } from "@outl/shared/highlight";
 import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import { appState, setAppState } from "../lib/store";
 import { handlePopupNav } from "../lib/popup-nav";
+import { PropertyEditor } from "./PropertyEditor";
 import {
   assetSlashCommands,
   rankSlashCommands,
@@ -117,8 +117,15 @@ export interface BlockCallbacks {
    *  parent owns the `pluginRun` round-trip + view/overlay application,
    *  same as `PluginPalette` does for the `⧉` palette. */
   onRunPluginCommand: (pluginId: string, commandId: string) => Promise<void>;
-  /** Commit a `key:: value` property edit; empty value clears it. */
-  onSetProperty?: (blockId: string, key: string, value: string) => void;
+  /** Commit a `key:: value` property edit; an empty value clears it.
+   *  Returning the promise lets the editor surface a rejected write —
+   *  the chip repaints either way, so a swallowed failure reads as a
+   *  successful edit. */
+  onSetProperty?: (
+    blockId: string,
+    key: string,
+    value: string,
+  ) => void | Promise<void>;
   /** Ref / tag click handlers (forwarded to MarkdownInline). */
   onRefClick: (target: string) => void;
   onTagClick: (tag: string) => void;
@@ -1054,11 +1061,27 @@ export function BlockRow(props: {
                                   here: the chord wrote the rule and the
                                   block looked untouched. Clicking a chip
                                   opens the rule for editing. */}
-                              <BlockProperties
+                              <PropertyEditor
                                 properties={props.block.properties}
                                 onCommit={(key, value) =>
-                                  props.cb.onSetProperty?.(props.block.id, key, value)
+                                  props.cb.onSetProperty?.(
+                                    props.block.id,
+                                    key,
+                                    value,
+                                  )
                                 }
+                                onError={(msg) =>
+                                  setAppState("lastError", msg)
+                                }
+                                addOpen={
+                                  appState.addPropertyBlockId ===
+                                  props.block.id
+                                }
+                                onAddOpenChange={(open) => {
+                                  if (!open) {
+                                    setAppState("addPropertyBlockId", null);
+                                  }
+                                }}
                                 chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
                                 inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
                               />

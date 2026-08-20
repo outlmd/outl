@@ -7,6 +7,21 @@
  * a generator.
  */
 
+/**
+ * One entry of the workspace's property-key catalogue: the key as most
+ * of its uses spell it, and how many properties use it.
+ *
+ * Mirrors `outl_tauri_shared::commands::property::PropertyKey`. Lives
+ * here rather than per client because both GUI clients register the
+ * same `known_property_keys` command and ask it the same question when
+ * the user adds a property; two copies of a wire type is how they end
+ * up disagreeing about a field.
+ */
+export interface PropertyKey {
+  key: string;
+  uses: number;
+}
+
 export type TodoState = "TODO" | "DOING" | "DONE";
 export type PageKind = "page" | "journal";
 /** Direction of the backlinks ("Linked from") list (issue #142).
@@ -192,6 +207,17 @@ export interface PageView {
    * `"oldest"`. Lets a client's direction toggle show the right arrow
    * without a separate settings read. Mirrors `PageView.backlinks_order`. */
   backlinks_order: BacklinksOrder;
+  /**
+   * The page's own `key:: value` properties (`icon::`, `type::`, …),
+   * alpha-sorted, with the structural keys (`page-slug`, `page-kind`)
+   * already filtered out by the backend. Same shape as
+   * {@link BlockNode.properties}, so one editor serves both.
+   *
+   * Optional on the wire only for back-compat with an older binary;
+   * a current backend always sends it (empty array when the page has
+   * no properties). Mirrors `PageView.page_properties`.
+   */
+  page_properties?: Array<[string, string]>;
   /**
    * Parser recovery records for the page's `.md`. Empty (or
    * absent) when the file is fully in the outl dialect. Drives

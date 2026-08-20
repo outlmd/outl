@@ -5,6 +5,7 @@
 //!
 //! - `overlays` — every modal popup (quick switcher, search, slash,
 //!   command bar, error, help, inline autocomplete).
+//! - `properties` — the `g p` property editor popup.
 //! - `outline` — the current page's block tree.
 //! - `backlinks` — the inline backlinks section below the outline.
 //! - `inline` — span-level markdown (used by `outline` and
@@ -18,6 +19,7 @@ mod chrome;
 mod inline;
 mod outline;
 pub(crate) mod overlays;
+mod properties;
 mod sidebar;
 mod toasts;
 mod warnings_banner;
@@ -84,6 +86,7 @@ pub(crate) fn render_app(f: &mut ratatui::Frame<'_>, app: &mut App) {
         Some(Overlay::TemplatePicker(tp)) => overlays::render_template_picker(f, area, app, tp),
         Some(Overlay::Reminders(r)) => overlays::render_reminders(f, area, app, r),
         Some(Overlay::PluginSettings(ps)) => overlays::render_plugin_settings(f, area, app, ps),
+        Some(Overlay::Properties(p)) => properties::render_properties(f, area, app, p),
         None => {}
     }
 

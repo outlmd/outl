@@ -206,8 +206,31 @@ A range of blocks is highlighted.
 
 ## Overlays
 
-Three modal popups can appear over the main panes.
+Several modal popups can appear over the main panes.
 They steal the keystream while open; `Esc` always closes them.
+
+### Property editor (`g p`)
+
+Lists the `key:: value` pairs on the selected block, and edits them without your having to remember a single key.
+
+`:prop` is still there and still faster when you already know the key — this overlay is for when you don't.
+
+| Key | What it does |
+|-----|--------------|
+| `j` / `k` (or `↑` / `↓`) | Move between properties |
+| `Enter` | Edit the highlighted property's **value** (the key stays put — renaming is a delete plus an add) |
+| `o` | Add a new property: key first, `Enter` moves to the value, `Enter` again saves |
+| `Tab` (in the key field) | Complete the key from the ones this workspace already uses, most-used first. Press again to cycle |
+| `[[` / `#` (in the value field) | The same page / tag picker Insert mode has — `Tab` or `Enter` accepts, `Esc` dismisses the popup |
+| `d d` | Delete the highlighted property (one `d` only arms the chord) |
+| `p` | Switch between the **block's** properties and the **page's** (`icon::`, `type::`, …) |
+| `Esc` / `q` | Close |
+
+Two keys are refused rather than written: `page-slug` and `page-kind` are the page's identity, not metadata, and editing them would rename the page out from under every ref pointing at it.
+
+Writes go through the same path `:prop` uses, so a property lands in the outline immediately.
+
+> The `pinned::` toggle used to be `g p`. It is **`g P`** now (`/pin` still works), because `pinned::` is itself one of the page properties this overlay edits — and you reach for properties far more often than you pin.
 
 ### Quick Switcher (`Ctrl+P`)
 
@@ -245,6 +268,9 @@ Unknown commands surface in the status line as `unknown command: <name>`.
 |---------|---------|--------|
 | `prop-block <key> <value>` | `prop` | Set property on current block (empty value deletes) |
 | `prop-page <key> <value>` | — | Set page-level property (`title::`, `icon::`, …) |
+
+The `g p` overlay above is the same two writers behind a list you can browse.
+Use the commands when you know the key, the overlay when you don't.
 
 #### Block references
 

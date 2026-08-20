@@ -14,7 +14,7 @@ use crate::page::{KIND_KEY, SLUG_KEY};
 /// own ops; surfacing them in a rendered `.md` would rewrite the slug on
 /// every reconcile, and surfacing them in the index would show the user
 /// a property they never typed.
-pub(crate) fn is_page_model_key(key: &str) -> bool {
+pub fn is_page_model_key(key: &str) -> bool {
     key == SLUG_KEY || key == KIND_KEY
 }
 

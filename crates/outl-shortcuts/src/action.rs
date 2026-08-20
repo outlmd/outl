@@ -171,6 +171,35 @@ pub enum Action {
     /// (`Op::SnoozeRemind`, so it silences every device).
     SnoozeReminder,
 
+    // ── properties (`key:: value`) ───────────────────────────────
+    //
+    // `remind::` above is one property with its own chords; this is
+    // the generic door. Creating the *first* property on a block was
+    // impossible in both GUI clients (issue #13) — you could edit a
+    // chip that already existed and nothing more.
+    /// Open a blank property editor on the selected block: an empty
+    /// key field (completing from the workspace's key catalogue) and
+    /// an empty value.
+    AddProperty,
+    /// Open the property editor for the selected block: every
+    /// `key:: value` already on it, plus the affordances to add,
+    /// change and remove one.
+    ///
+    /// Distinct from [`Action::AddProperty`], which skips straight to
+    /// a blank pair. The TUI needs both doors because its overlay is
+    /// list-first (`g p` lists, `o` inside adds); a client whose
+    /// property surface is always visible (the desktop's chip row) may
+    /// reasonably bind only `AddProperty`.
+    OpenProperties,
+    /// Toggle `pinned:: true` on the current page.
+    ///
+    /// TUI-only today. It lives in the catalog because it holds a
+    /// chord (`g P`) in the `g<action>` family, and a chord outside
+    /// the catalog is a chord the duplicate-detection test cannot see
+    /// — which is how it ended up colliding with `g p` in the first
+    /// place.
+    TogglePin,
+
     // ── block clipboard (view-mode cut / copy / paste of a block) ─
     //
     // These act on a whole block + its subtree while the user is in

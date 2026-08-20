@@ -15,6 +15,7 @@
 //! - `exec` — run code block under cursor via `outl_exec`
 //! - `overlay` — quick switcher, workspace search, command palette
 //! - `autocomplete` — Insert-mode inline `[[`/`#`/`((`/`/`/`@` popup
+//! - `properties` — the `g p` property editor overlay
 //!
 //! Anything cross-cutting (constructors, `pub(crate)` free helpers
 //! consumed by `input` / `view`) is re-exported from this file.
@@ -30,6 +31,7 @@ pub(crate) mod nav;
 pub(crate) mod overlay;
 pub(crate) mod paste;
 pub(crate) mod plugins;
+pub(crate) mod properties;
 pub(crate) mod reminders;
 pub(crate) mod sidebar;
 pub(crate) mod text_ops;

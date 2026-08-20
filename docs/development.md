@@ -79,6 +79,7 @@ crates/outl-desktop/
 │   ├── components/            # AppShell, Sidebar, OutlineView (owns BlockCallbacks),
 │   │                         #   BlockRow (+CodeFenceView), BacklinksPanel, Picker,
 │   │                         #   SettingsModal, ChromeToggleBar, SyncIndicator,
+│   │                         #   PropertyEditor (key:: value chips + create/delete),
 │   │                         #   Onboarding, WorkspacePicker
 │   └── lib/                   # api.ts (desktop-only cmds), code-block.ts, events.ts,
 │                             #   shortcuts.ts, action-handlers.ts, store.ts
