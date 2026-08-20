@@ -120,12 +120,15 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
    *  thing the dialect resolves, and `@` is sugar for a page ref the
    *  `[[` path already covers. */
   async function refreshValueSuggest(field: "edit" | "add", text: string, caret: number) {
+    // Bump first: leaving without it lets a search fired for an
+    // earlier `[[fo` resolve after the user deleted the brackets and
+    // reopen the popup over a field that no longer has a ref context.
+    const token = ++valueSearchToken;
     const ctx = detectRefContext(text, caret);
     if (!ctx || ctx.kind !== "page") {
       setValueSuggest(null);
       return;
     }
-    const token = ++valueSearchToken;
     try {
       const hits = await searchPages(ctx.query);
       // A newer keystroke already fired: its result is the current one.
@@ -251,13 +254,17 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
 
   return (
     <div
-      // Always rendered, even with no chips: the row is what carries
-      // the `+` affordance, and hiding it when empty would remove the
-      // one way to add a *first* property — the exact gap issue #13
-      // exists to close. The empty row's height cost is the `+`
-      // button's own (hover-revealed on block rows, pinned on the
-      // page header).
-      class="mt-0.5 flex flex-wrap items-center gap-1"
+      class={`mt-0.5 flex-wrap items-center gap-1 ${
+        chips().length > 0 || adding() || props.addAffordance === "always"
+          ? "flex"
+          : // Nothing to show at rest. `hidden` (not a faded row) because
+            // an always-rendered empty row costs ~18px on EVERY block:
+            // a 200-block page would scroll an extra screenful for a
+            // control nobody is reaching for. The `+` still appears on
+            // block hover, and the keyboard path (`Cmd+Shift+P`) never
+            // depended on seeing it.
+            "hidden group-hover:flex"
+      }`}
       onClick={(e) => {
         // The row underneath selects / edits the block. Anything in
         // here means "act on a property", never both.
@@ -499,52 +506,6 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
           >
             ✓
           </button>
-          {/* `[[page]]` completion over the value field. Same shape as
-              the key popup above so the two read as one mechanism. */}
-          <Show when={valueSuggest()}>
-            {(sug) => (
-              <ul
-                role="listbox"
-                aria-label={`${noun()} value page suggestions`}
-                class="absolute top-full right-0 z-30 mt-1 max-h-56 min-w-48 overflow-y-auto rounded border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 shadow-lg"
-              >
-                <For each={sug().hits}>
-                  {(hit, i) => (
-                    <li>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={i() === sug().index}
-                        class={`flex w-full items-baseline gap-2 px-2 py-0.5 text-left text-xs ${
-                          i() === sug().index
-                            ? "bg-(--color-outl-accent)/20"
-                            : "hover:bg-(--color-outl-fg)/8"
-                        }`}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          const field = sug().field;
-                          const input = field === "add" ? valueRef : editValueRef;
-                          const text = field === "add" ? newValue() : draft();
-                          setValueSuggest({ ...sug(), index: i() });
-                          acceptValueSuggest(
-                            field,
-                            text,
-                            input?.selectionStart ?? text.length,
-                            input,
-                          );
-                        }}
-                      >
-                        <Show when={hit.icon}>
-                          <span>{hit.icon}</span>
-                        </Show>
-                        <span>{hit.title}</span>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            )}
-          </Show>
           <Show when={suggestOpen() && suggestions().length > 0}>
             <ul
               role="listbox"
@@ -583,6 +544,55 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
           </Show>
         </span>
       </Show>
+        {/* `[[page]]` completion over whichever value field is focused.
+            Anchored at the editor root, not inside the add row: the
+            inline chip editor lives in the `<For>` above, so a popup
+            nested in the add row never rendered for it while its
+            keydown handler still swallowed Arrow/Enter/Escape. */}
+            <Show when={valueSuggest()}>
+              {(sug) => (
+                <ul
+                  role="listbox"
+                  aria-label={`${noun()} value page suggestions`}
+                  class="absolute top-full left-0 z-30 mt-1 max-h-56 min-w-48 overflow-y-auto rounded border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 shadow-lg"
+                >
+                  <For each={sug().hits}>
+                    {(hit, i) => (
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i() === sug().index}
+                          class={`flex w-full items-baseline gap-2 px-2 py-0.5 text-left text-xs ${
+                            i() === sug().index
+                              ? "bg-(--color-outl-accent)/20"
+                              : "hover:bg-(--color-outl-fg)/8"
+                          }`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            const field = sug().field;
+                            const input = field === "add" ? valueRef : editValueRef;
+                            const text = field === "add" ? newValue() : draft();
+                            setValueSuggest({ ...sug(), index: i() });
+                            acceptValueSuggest(
+                              field,
+                              text,
+                              input?.selectionStart ?? text.length,
+                              input,
+                            );
+                          }}
+                        >
+                          <Show when={hit.icon}>
+                            <span>{hit.icon}</span>
+                          </Show>
+                          <span>{hit.title}</span>
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              )}
+            </Show>
     </div>
   );
 }

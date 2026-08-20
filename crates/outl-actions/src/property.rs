@@ -36,6 +36,13 @@ pub fn known_keys(workspace: &Workspace) -> Vec<(String, usize)> {
     // a Unicode fold here would merge keys the tree treats as distinct.
     let mut folded: HashMap<String, HashMap<&str, usize>> = HashMap::new();
     for (_, key, _) in workspace.tree().iter_properties() {
+        // Bookkeeping is not metadata the user authors. Offering it in
+        // an "add a property" menu invites editing a field the app owns
+        // — `from-template` is how a template instance is traced, and
+        // `id` / `collapsed` ride in from imported graphs.
+        if !is_suggestable_key(key) {
+            continue;
+        }
         *folded
             .entry(key.to_ascii_lowercase())
             .or_default()
@@ -62,6 +69,69 @@ pub fn known_keys(workspace: &Workspace) -> Vec<(String, usize)> {
 
     out.sort_by(|(a_key, a_n), (b_key, b_n)| b_n.cmp(a_n).then_with(|| a_key.cmp(b_key)));
     out
+}
+
+/// Whether a key belongs in an "add a property" menu.
+///
+/// Excludes the page model's own fields (via
+/// [`crate::tree::is_page_model_key`]) plus the bookkeeping a user
+/// never authors by hand: `from-template` (how a template instance is
+/// traced back), and `id` / `collapsed`, which arrive with imported
+/// Logseq graphs and mean nothing to outl's own model.
+///
+/// This is about *suggesting*, not about permission: a user who types
+/// `collapsed` still gets it written. The menu just does not propose it.
+fn is_suggestable_key(key: &str) -> bool {
+    if crate::tree::is_page_model_key(key) {
+        return false;
+    }
+    !matches!(
+        key.to_lowercase().as_str(),
+        crate::template::FROM_TEMPLATE_KEY | "id" | "collapsed"
+    )
+}
+
+/// Clean up what a user typed into a property key.
+///
+/// Strips the trailing `::` (the dialect's separator, which the user
+/// sees as part of the key everywhere it is written) and trims. That
+/// is all: a key is otherwise taken literally, because an existing
+/// key is edited and deleted through the same string.
+///
+/// **Call this at the edge that reads the user's keystrokes**, never
+/// inside the writer. `set_property` is also how a chip is edited and
+/// deleted, and normalising there makes a legitimate `foo:` key (which
+/// the parser accepts, and imported graphs contain) impossible to
+/// touch: the delete would target `foo` and leave `foo:` on screen.
+pub fn normalize_key(raw: &str) -> String {
+    raw.trim().trim_end_matches(':').trim().to_string()
+}
+
+/// Why a key cannot be used, or `None` when it can.
+///
+/// Separate from [`normalize_key`] because these are refusals the user
+/// has to see, not silent repairs. Whitespace is the sharp one: the
+/// `.md` grammar rejects a key containing any (`outl_md`'s
+/// `is_valid_key`), so a key like `date captured` would take the op,
+/// render, and then fail to parse back — the property would simply
+/// vanish on the next read, and in a page header it takes every
+/// property below it along.
+pub fn key_rejection(key: &str) -> Option<String> {
+    if key.is_empty() {
+        return Some("property key cannot be empty".to_string());
+    }
+    if key.chars().any(char::is_whitespace) {
+        return Some(format!(
+            "`{key}` cannot be a property key: keys cannot contain spaces (try `{}`)",
+            key.split_whitespace().collect::<Vec<_>>().join("-")
+        ));
+    }
+    if crate::tree::is_page_model_key(key) {
+        return Some(format!(
+            "`{key}` defines the page and cannot be edited as a property; rename the page instead"
+        ));
+    }
+    None
 }
 
 /// A page's user-facing properties (`icon::`, `type::`, `title::`, …),
@@ -192,6 +262,113 @@ mod tests {
         assert!(
             !keys.contains(&"page-kind"),
             "structural key leaked: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_key_covers_what_a_user_actually_types() {
+        assert_eq!(normalize_key("oura-date::"), "oura-date");
+        assert_eq!(normalize_key("  related::  "), "related");
+        assert_eq!(normalize_key("related"), "related");
+        // A single colon is the same slip.
+        assert_eq!(normalize_key("related:"), "related");
+        // Whitespace is NOT repaired here: `is_valid_key` in outl-md
+        // rejects any key containing it, so a collapsed `date captured`
+        // would take the op, render, and then fail to parse back — the
+        // property vanishing on the next read. `key_rejection` refuses
+        // it out loud instead.
+        assert_eq!(normalize_key("date  captured"), "date  captured");
+        // Nothing left is nothing — the caller rejects an empty key.
+        assert_eq!(normalize_key("::"), "");
+        assert_eq!(normalize_key("   "), "");
+    }
+
+    #[test]
+    fn a_property_key_keeps_its_inner_colons() {
+        // Only the trailing separator goes. A key that legitimately
+        // holds a colon inside (a namespaced key someone imported)
+        // must survive, or normalising silently renames it.
+        assert_eq!(normalize_key("ns:key"), "ns:key");
+    }
+
+    #[test]
+    fn bookkeeping_keys_are_not_suggested() {
+        // The catalogue feeds an "add a property" menu. `from-template`
+        // is written by the template engine and `id` / `collapsed` come
+        // in with imported graphs; proposing them invites the user to
+        // hand-edit fields the app owns.
+        let (mut ws, hlc) = workspace();
+        block_with(
+            &mut ws,
+            &hlc,
+            &[
+                ("related", "x"),
+                ("from-template", "journal"),
+                ("id", "abc"),
+                ("collapsed", "true"),
+            ],
+        );
+
+        let keys: Vec<String> = known_keys(&ws).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, vec!["related".to_string()], "got {keys:?}");
+    }
+
+    #[test]
+    fn a_key_with_spaces_is_refused_rather_than_repaired() {
+        let why = key_rejection("date captured").expect("must be refused");
+        assert!(why.contains("cannot contain spaces"), "{why}");
+        // The message names the shape that works.
+        assert!(why.contains("date-captured"), "{why}");
+    }
+
+    #[test]
+    fn the_structural_guard_survives_the_colons_a_user_copies() {
+        // `page-slug::` is not equal to `page-slug`, so a guard that
+        // reads the raw text lets it through and the writer then
+        // stores the real key, repointing every `[[ref]]` into the
+        // page. Normalising first is what closes it.
+        for typed in ["page-slug::", "  page-kind:: ", "page-slug:"] {
+            let key = normalize_key(typed);
+            assert!(
+                key_rejection(&key).is_some(),
+                "{typed:?} normalised to {key:?} and slipped past the guard"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_key_is_refused_after_normalising_too() {
+        assert!(key_rejection(&normalize_key("::")).is_some());
+        assert!(key_rejection(&normalize_key("   ")).is_some());
+    }
+
+    #[test]
+    fn a_key_that_legitimately_ends_in_a_colon_stays_editable() {
+        // `foo::: bar` parses as key `foo:` and round-trips. Since the
+        // writer no longer normalises, deleting that chip targets the
+        // key that is actually stored.
+        let (mut ws, hlc) = workspace();
+        let n = append_block(&mut ws, &hlc, None, Some("a block")).unwrap();
+        set_property(
+            &mut ws,
+            &hlc,
+            n,
+            "foo:",
+            Some(PropValue::Text("bar".into())),
+        )
+        .unwrap();
+        assert_eq!(
+            ws.tree()
+                .properties_of(n)
+                .map(|(k, _)| k)
+                .collect::<Vec<_>>(),
+            vec!["foo:"]
+        );
+        set_property(&mut ws, &hlc, n, "foo:", None).unwrap();
+        assert_eq!(
+            ws.tree().properties_of(n).count(),
+            0,
+            "delete must hit the stored key"
         );
     }
 }

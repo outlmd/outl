@@ -554,7 +554,10 @@ mod properties_overlay_tests {
             "the refusal must keep the caret in the key field"
         );
         assert!(
-            s.message.as_deref().unwrap_or("").contains("identity"),
+            s.message
+                .as_deref()
+                .unwrap_or("")
+                .contains("defines the page"),
             "a silent refusal reads as a broken Enter"
         );
         assert!(app.page.properties.iter().all(|(k, _)| k != "page-slug"));
@@ -578,7 +581,7 @@ mod properties_overlay_tests {
             .message
             .as_deref()
             .unwrap_or("")
-            .contains("needs a key"));
+            .contains("cannot be empty"));
     }
 
     #[test]

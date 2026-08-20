@@ -135,9 +135,18 @@ impl App {
     /// (clamped — a delete shortens the list).
     fn open_properties_scope(&mut self, scope: PropertyScope, want: usize) {
         let rows = self.property_rows(scope);
+        // Drop what the target already carries. Completing to a key
+        // that is sitting three lines below turns "add" into a silent
+        // overwrite of a value the user can see — the desktop and the
+        // mobile sheet both filter it, and this was the odd one out.
         let known_keys = outl_actions::known_keys(&self.workspace)
             .into_iter()
             .map(|(key, _count)| key)
+            .filter(|key| {
+                !rows
+                    .iter()
+                    .any(|(existing, _)| existing.eq_ignore_ascii_case(key))
+            })
             .collect();
         let selected = want.min(rows.len().saturating_sub(1));
         self.autocomplete = None;
@@ -302,13 +311,15 @@ impl App {
         let Some(edit) = p.editing.as_mut() else {
             return;
         };
-        let key = edit.key.trim().to_string();
-        if key.is_empty() {
-            p.message = Some("a property needs a key".into());
-            return;
-        }
-        if outl_actions::tree::is_page_model_key(&key) {
-            p.message = Some(format!("`{key}` is the page's identity, not a property"));
+        // Same edge treatment the GUI commands do: strip the `::` the
+        // user copies along with the key, then judge the result. The
+        // TUI writes straight into the AST (never through
+        // `outl_actions::set_property`), so skipping this is how the
+        // same keystrokes produced `oura-date::` here and `oura-date`
+        // on desktop, in one op log.
+        let key = outl_actions::property::normalize_key(&edit.key);
+        if let Some(why) = outl_actions::property::key_rejection(&key) {
+            p.message = Some(why);
             return;
         }
         edit.key = key;
@@ -327,11 +338,14 @@ impl App {
             let Some(edit) = p.editing.as_ref() else {
                 return;
             };
-            (edit.key.trim().to_string(), edit.value.trim().to_string())
+            (
+                outl_actions::property::normalize_key(&edit.key),
+                edit.value.trim().to_string(),
+            )
         };
-        if key.is_empty() {
+        if let Some(why) = outl_actions::property::key_rejection(&key) {
             if let Some(Overlay::Properties(ref mut p)) = self.overlay {
-                p.message = Some("a property needs a key".into());
+                p.message = Some(why);
             }
             return;
         }

@@ -7,6 +7,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Properties are creatable and deletable from every client.**
+  Editing a property that already existed worked. Making the first one did not: both GUI clients could only edit a chip that was already there, so creating meant opening the `.md` by hand or reaching for the TUI, and deleting was an undiscoverable gesture (empty the value).
+  Page properties were worse — `PageView` carried none, so `icon::` and `type::` could not even be read outside the TUI.
+
+  Each client got the shape that fits it.
+  The TUI opens a `g p` overlay (`j`/`k` moves, `Enter` edits, `dd` deletes, `o` adds, `p` flips to page scope), with `Tab` completing the key from the workspace catalogue and `[[` opening the page picker in the value.
+  The desktop grew a `+` and an `×` on the chip row, plus the same `[[` picker.
+  Mobile got a bottom sheet, reachable from the block long-press **and from a press-and-hold on the page title**, where the key shows as tappable chips of the most-used keys instead of an empty field.
+  An empty page on mobile used to render nothing at all and now offers both doors.
+
+  Typing `key:: value` on a child line still works and always did.
+  The UI is the door for people who don't know the syntax, not a replacement for it.
+  ([#13](https://github.com/outlmd/outl/issues/13))
+
+### Changed
+
+- **`g p` in the TUI now opens the property editor.**
+  The `pinned::` toggle moved to **`g P`**; `/pin` is unchanged.
+  Pinning is a once-per-page act with a second door already, editing properties is a daily one, and `pinned::` is itself one of the page properties `g p` now edits.
+
 - **A third task state: `DOING`.**
   A block used to be either `TODO` or `DONE`, with no way to say a task is underway.
   The workaround was a tag or a property, which kept that state out of `status:` queries and out of the progress counter, and let every user invent a different convention for it.

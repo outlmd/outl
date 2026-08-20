@@ -121,6 +121,7 @@ import { BlockRow } from "./BlockRow";
 import { SkeletonOutline } from "./Skeleton";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
+import { editableProperties } from "../lib/properties";
 import { haptic } from "../lib/haptics";
 import { BacklinksSection } from "./BacklinksSection";
 import { BlockContextMenu, type BlockContextAction } from "./BlockContextMenu";
@@ -1802,7 +1803,7 @@ export function Journal() {
             sheet the block long-press does, on the Page side. */}
         <Show when={(view()?.page_properties ?? []).length > 0}>
           <div class="ios-scroll flex gap-1.5 overflow-x-auto px-4 pt-2">
-            <For each={view()!.page_properties!}>
+            <For each={editableProperties(view()!.page_properties)}>
               {([key, value]) => (
                 <button
                   type="button"

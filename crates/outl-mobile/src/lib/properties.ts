@@ -91,7 +91,7 @@ export function suggestedKeys(
 
 /**
  * Properties of a block / page as the sheet lists them: whatever the
- * backend sent, minus the bookkeeping keys the user cannot act on.
+ * backend sent, minus the bookkeeping keys the user cannot act on (see {@link NEVER_SHOW}).
  *
  * The backend already alpha-sorts, so the order is left alone — two
  * clients showing the same block show the same sequence.

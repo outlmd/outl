@@ -214,10 +214,12 @@ pub fn set_block_property<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(page_id)?;
     let node = parse_node_id(block_id)?;
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("property key cannot be empty".to_string());
+    // Same order as `set_page_property`: clean first, judge after.
+    let key = outl_actions::property::normalize_key(key);
+    if let Some(why) = outl_actions::property::key_rejection(&key) {
+        return Err(why);
     }
+    let key = key.as_str();
     let value = {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| PropValue::Text(trimmed.to_string()))
@@ -243,15 +245,16 @@ pub fn set_page_property<S: AppHost>(
     value: &str,
 ) -> Result<PageView, String> {
     let page = parse_node_id(page_id)?;
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("property key cannot be empty".to_string());
+    // Normalise BEFORE the guards. Checking the raw text let
+    // `page-slug::` through: it is not equal to `page-slug`, so the
+    // structural guard passed, and the key was then written as the
+    // real thing — silently repointing the page every `[[ref]]`
+    // resolves through.
+    let key = outl_actions::property::normalize_key(key);
+    if let Some(why) = outl_actions::property::key_rejection(&key) {
+        return Err(why);
     }
-    if outl_actions::tree::is_page_model_key(key) {
-        return Err(format!(
-            "`{key}` defines the page and cannot be edited as a property; rename the page instead"
-        ));
-    }
+    let key = key.as_str();
     let value = {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| PropValue::Text(trimmed.to_string()))

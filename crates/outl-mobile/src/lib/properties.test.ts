@@ -59,16 +59,17 @@ describe("suggestedKeys", () => {
     expect(suggestedKeys([{ key: "remind", uses: 3 }], ["Remind"])).toEqual([]);
   });
 
-  it("never offers a structural or bookkeeping key", () => {
-    const noisy = [
-      { key: "page-slug", uses: 900 },
-      { key: "page-kind", uses: 900 },
-      { key: "collapsed", uses: 300 },
-      { key: "id", uses: 300 },
-      { key: "from-template", uses: 5 },
+  it("takes the catalogue as given — bookkeeping is dropped upstream", () => {
+    // `outl_actions::known_keys` filters `page-slug`, `page-kind`,
+    // `from-template`, `id` and `collapsed` before they ever reach a
+    // client, so all three clients get the same menu. Re-filtering here
+    // would be a second owner of that rule, and the desktop (which did
+    // not have one) proved the two drift.
+    const catalogue = [
+      { key: "related", uses: 40 },
       { key: "icon", uses: 1 },
     ];
-    expect(suggestedKeys(noisy)).toEqual(["icon"]);
+    expect(suggestedKeys(catalogue)).toEqual(["related", "icon"]);
   });
 
   it("caps the list — the overflow is reachable through Other…", () => {

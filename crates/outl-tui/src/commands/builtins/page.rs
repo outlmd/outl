@@ -30,13 +30,15 @@ impl SlashCommand for PropBlockCommand {
     }
     fn execute(&self, app: &mut App, args: &str) -> Result<bool> {
         let (key, value) = args.split_once(' ').unwrap_or((args, ""));
-        let key = key.trim();
         let value = value.trim();
-        if key.is_empty() {
-            app.status = "usage: prop-block <key> <value>".into();
+        // `/prop oura-date:: x` is how the key is spelled everywhere
+        // else, so accept it and store the clean form.
+        let key = outl_actions::property::normalize_key(key);
+        if let Some(why) = outl_actions::property::key_rejection(&key) {
+            app.status = why;
             return Ok(false);
         }
-        app.set_property_on_current_block(key, value);
+        app.set_property_on_current_block(&key, value);
         Ok(false)
     }
 }
@@ -58,13 +60,13 @@ impl SlashCommand for PropPageCommand {
     }
     fn execute(&self, app: &mut App, args: &str) -> Result<bool> {
         let (key, value) = args.split_once(' ').unwrap_or((args, ""));
-        let key = key.trim();
         let value = value.trim();
-        if key.is_empty() {
-            app.status = "usage: prop-page <key> <value>".into();
+        let key = outl_actions::property::normalize_key(key);
+        if let Some(why) = outl_actions::property::key_rejection(&key) {
+            app.status = why;
             return Ok(false);
         }
-        app.set_property_on_page(key, value);
+        app.set_property_on_page(&key, value);
         Ok(false)
     }
 }
