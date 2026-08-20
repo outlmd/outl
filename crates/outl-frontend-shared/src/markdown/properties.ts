@@ -45,6 +45,25 @@ const KNOWN_PROPERTIES: Record<string, string> = {
 const INTERNAL_KEYS = new Set(["id", "from-template", "collapsed"]);
 
 /**
+ * Is `key` outl's own bookkeeping rather than the user's metadata?
+ *
+ * The single owner of the internal-key policy: {@link propertyChips}
+ * hides these from the chip row, and the property editors (the mobile
+ * sheet's key chips, the desktop's catalogue popup) must not offer
+ * them either. A per-client copy of the list drifts the first time a
+ * bookkeeping key is added — one client keeps hiding it, the other
+ * starts suggesting it.
+ *
+ * Case-insensitive, matching the dialect's own key folding. Note the
+ * page-identity keys (`page-slug`, `page-kind`) are *not* internal in
+ * this sense — they are structural and owned by
+ * `outl_actions::tree::is_page_model_key` on the Rust side.
+ */
+export function isInternalKey(key: string): boolean {
+  return INTERNAL_KEYS.has(key.toLowerCase());
+}
+
+/**
  * Project a block's properties into renderable chips.
  *
  * Order is preserved (the backend already sorts alphabetically), so
@@ -55,7 +74,7 @@ export function propertyChips(
 ): PropertyChip[] {
   if (!properties) return [];
   return properties
-    .filter(([key]) => !INTERNAL_KEYS.has(key.toLowerCase()))
+    .filter(([key]) => !isInternalKey(key))
     .map(([key, value]) => {
       const icon = KNOWN_PROPERTIES[key.toLowerCase()];
       return { key, value, icon, known: icon !== undefined };

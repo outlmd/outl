@@ -316,11 +316,14 @@ Mobile-only pieces, and why they are not in `@outl/shared` yet:
 plus `suggestedKeys` / `editableProperties`) and the sheet itself are
 phone-keyboard answers; the desktop's affordance for the same
 catalogue is inline completion with no cap and no "Other…" escape.
-`knownPropertyKeys` / `setPageProperty` sit in `lib/api.ts` for the
-same transitional reason and are marked `PROMOTE-TO-SHARED` there —
-both clients register those commands, so by this repo's own rule the
-wrappers belong beside `setBlockProperty` in
-`@outl/shared/api/commands`.
+`knownPropertyKeys` / `setPageProperty` live in
+`@outl/shared/api/commands` beside `setBlockProperty` — both clients
+register those commands, so the wrappers have one owner; `lib/api.ts`
+only re-exports them so existing imports keep resolving.
+The sheet's deny-list delegates its bookkeeping half to
+`@outl/shared/markdown::isInternalKey` (the same predicate
+`propertyChips` hides those keys with) and keeps only the
+page-identity pair (`page-slug` / `page-kind`) local.
 
 Covered by `PropertiesSheet.test.tsx` (chips exclude keys already set,
 two-tap add, `::` normalisation, edit, both delete affordances, page

@@ -31,11 +31,13 @@ use outl_core::workspace::Workspace;
 /// walk.
 pub fn known_keys(workspace: &Workspace) -> Vec<(String, usize)> {
     // Fold by lowercase key, keeping a count per exact spelling so the
-    // winner can be the one the user actually types.
+    // winner can be the one the user actually types. ASCII folding, not
+    // Unicode: the dialect's own matching is `eq_ignore_ascii_case`, so
+    // a Unicode fold here would merge keys the tree treats as distinct.
     let mut folded: HashMap<String, HashMap<&str, usize>> = HashMap::new();
     for (_, key, _) in workspace.tree().iter_properties() {
         *folded
-            .entry(key.to_lowercase())
+            .entry(key.to_ascii_lowercase())
             .or_default()
             .entry(key)
             .or_insert(0) += 1;

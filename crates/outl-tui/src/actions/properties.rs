@@ -43,11 +43,14 @@ pub(crate) fn key_completions(known: &[String], query: &str) -> Vec<String> {
     if query.is_empty() {
         return known.to_vec();
     }
-    let q = query.to_lowercase();
+    // ASCII folding, not Unicode: the dialect's case-insensitive
+    // matching is `eq_ignore_ascii_case`, so the completion must not
+    // merge keys the backend treats as distinct.
+    let q = query.to_ascii_lowercase();
     let mut prefix = Vec::new();
     let mut contains = Vec::new();
     for key in known {
-        let lower = key.to_lowercase();
+        let lower = key.to_ascii_lowercase();
         if lower.starts_with(&q) {
             prefix.push(key.clone());
         } else if lower.contains(&q) {

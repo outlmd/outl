@@ -251,15 +251,13 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
 
   return (
     <div
-      class={`mt-0.5 flex-wrap items-center gap-1 ${
-        chips().length > 0 || adding()
-          ? "flex"
-          : // Nothing to show at rest, and an always-rendered empty row
-            // would add a line of height to every block in the outline.
-            props.addAffordance === "always"
-            ? "flex"
-            : "flex"
-      }`}
+      // Always rendered, even with no chips: the row is what carries
+      // the `+` affordance, and hiding it when empty would remove the
+      // one way to add a *first* property — the exact gap issue #13
+      // exists to close. The empty row's height cost is the `+`
+      // button's own (hover-revealed on block rows, pinned on the
+      // page header).
+      class="mt-0.5 flex flex-wrap items-center gap-1"
       onClick={(e) => {
         // The row underneath selects / edits the block. Anything in
         // here means "act on a property", never both.

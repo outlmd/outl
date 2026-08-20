@@ -15,25 +15,27 @@
  * `outl_actions::known_keys`.
  */
 
+import { isInternalKey } from "@outl/shared/markdown";
+
 import type { PropertyKey } from "./api";
 
 /**
- * Keys outl writes for its own bookkeeping, plus the two that *are*
- * the page's identity. Never offered as a chip: `page-slug` /
- * `page-kind` are refused by the backend (renaming is `page_rename`),
- * and the rest are machinery the user did not type.
- *
- * Mirrors `outl_actions::tree::is_page_model_key` plus the
- * `INTERNAL_KEYS` set in `@outl/shared/markdown::propertyChips`, which
- * is why the sheet does not show them either.
+ * The two keys that *are* the page's identity. Never offered as a
+ * chip: the backend refuses them (renaming is `page_rename`). Mirrors
+ * `outl_actions::tree::is_page_model_key`.
  */
-const NEVER_SUGGEST = new Set([
-  "page-slug",
-  "page-kind",
-  "id",
-  "from-template",
-  "collapsed",
-]);
+const PAGE_IDENTITY_KEYS = new Set(["page-slug", "page-kind"]);
+
+/**
+ * Keys the sheet never suggests or lists: the page-identity pair
+ * above, plus outl's own bookkeeping keys — the latter asked of
+ * `@outl/shared/markdown::isInternalKey`, the same predicate
+ * `propertyChips` hides them with, so the sheet cannot drift from
+ * what the other clients hide.
+ */
+function neverSuggest(key: string): boolean {
+  return PAGE_IDENTITY_KEYS.has(key.toLowerCase()) || isInternalKey(key);
+}
 
 /**
  * Normalise what the user typed into a property key.
@@ -62,7 +64,7 @@ export function normalizeKey(raw: string): string {
  * - keys the target already carries drop out — tapping one would mean
  *   "edit", and editing is what tapping the existing row does; showing
  *   both makes the same key look like two different actions;
- * - bookkeeping / structural keys drop out (see {@link NEVER_SUGGEST});
+ * - bookkeeping / structural keys drop out (see {@link neverSuggest});
  * - the list is capped, because 40 chips is a keyboard with extra
  *   steps. What falls off the end is reachable through "Other…".
  *
@@ -79,7 +81,7 @@ export function suggestedKeys(
   const out: string[] = [];
   for (const { key } of known) {
     const lower = key.toLowerCase();
-    if (taken.has(lower) || NEVER_SUGGEST.has(lower)) continue;
+    if (taken.has(lower) || neverSuggest(key)) continue;
     taken.add(lower); // the catalogue is already folded; belt + braces
     out.push(key);
     if (out.length >= limit) break;
@@ -99,6 +101,6 @@ export function editableProperties(
 ): Array<[string, string]> {
   if (!properties) return [];
   return properties
-    .filter(([key]) => !NEVER_SUGGEST.has(key.toLowerCase()))
+    .filter(([key]) => !neverSuggest(key))
     .map(([key, value]) => [key, value] as [string, string]);
 }

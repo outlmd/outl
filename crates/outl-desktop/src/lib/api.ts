@@ -85,41 +85,16 @@ export function redoPage(pageId: string): Promise<PageView> {
 // Properties (`key:: value`)
 // ---------------------------------------------------------------------------
 //
-// `setBlockProperty` is shared (`@outl/shared/api/commands`) — both
-// GUI clients have registered it since the `remind::` work. These two
-// are registered on the desktop today and belong beside it the moment
-// mobile picks them up; see `PropertyEditor.tsx`'s note.
-
-// `PropertyKey` is a wire type both GUI clients share — it lives in
-// `@outl/shared/api/types`, re-exported here so existing imports from
-// this module keep resolving.
+// `knownPropertyKeys` / `setPageProperty` live in
+// `@outl/shared/api/commands` next to `setBlockProperty` — both GUI
+// clients register the same commands, so the wrappers have one owner.
+// Re-exported here (with the `PropertyKey` wire type) so existing
+// imports from this module keep resolving.
 export type { PropertyKey } from "@outl/shared/api/types";
-
-/**
- * Property keys used anywhere in the workspace, most-used first.
- *
- * Deliberately **not** cached: the backend answer is a scan of the
- * property map (no tree walk, no block text), so it is cheaper to ask
- * every time an editor opens than to hold a list that goes stale the
- * first time the user adds a key.
- */
-export function knownPropertyKeys(): Promise<PropertyKey[]> {
-  return invoke<PropertyKey[]>("known_property_keys");
-}
-
-/**
- * Set — or, with an empty `value`, clear — a property on the **page**
- * itself (`icon::`, `type::`, …). Rejects the structural keys
- * (`page-slug`, `page-kind`): those are the page's identity and
- * renaming is `page_rename`, not a property edit.
- */
-export function setPageProperty(
-  pageId: string,
-  key: string,
-  value: string,
-): Promise<PageView> {
-  return invoke<PageView>("set_page_property", { pageId, key, value });
-}
+export {
+  knownPropertyKeys,
+  setPageProperty,
+} from "@outl/shared/api/commands";
 
 // ---------------------------------------------------------------------------
 // Settings (desktop-only)
