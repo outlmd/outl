@@ -29,6 +29,8 @@ use tracing::{debug, warn};
 mod batch;
 mod text_history;
 
+pub use text_history::TextRevision;
+
 use batch::BatchRoute;
 pub use batch::WorkspaceBatch;
 
@@ -466,7 +468,8 @@ impl Workspace {
             self.ensure_doc_for_edit(*node);
             self.content.merge_update(*node, &self.log, text_op);
         }
-        self.tree.apply_op(&mut self.log, op.clone());
+        let ts = op.ts;
+        self.tree.apply_op(&mut self.log, op);
 
         // Only persist ops the tree didn't already have. `apply_op`
         // deduplicates via `contains_ts`, but the storage append below
@@ -475,6 +478,34 @@ impl Workspace {
         if !is_new {
             return Ok(());
         }
+
+        // Persist the op **the tree recorded**, not the one the caller
+        // handed in. `do_op` fills `old_parent` / `old_position` /
+        // `old_value` on its way through, and those are the caller's
+        // guesses until it does: `block::moves::move_to` reads them off
+        // the tree and is right, while the reconcile and import paths
+        // pass `root` / `None` and are not. Writing the caller's copy
+        // left the file disagreeing with the resident log for 65,141 of
+        // 65,703 `Move` ops and every one of 14,191 `SetProp` ops in the
+        // reference workspace.
+        //
+        // Convergence never depended on this, which is why it went
+        // unnoticed: every path into the **resident log** runs `do_op`,
+        // which overwrites the fields before `undo_op` (its only reader,
+        // and only from `apply_op`) can see them. Note the narrower
+        // claim: peer-sync ingest writes a line straight into
+        // `ops-<actor>.jsonl` without passing through here, so a peer's
+        // stored op carries *their* derivation until this device's next
+        // boot replay runs `do_op` over it. What did depend on it is anything
+        // reading the log **as data** — `outl_actions::timeline` has to
+        // fold the parent trail from `Create.parent` / `Move.new_parent`
+        // precisely because this field lied, and historical ops still
+        // carry the old values, so that defence stays.
+        let op = self
+            .log
+            .get_by_ts(&ts)
+            .cloned()
+            .expect("apply_op appended the op it was handed");
 
         // Deferred-persistence mode: a `WorkspaceBatch` guard is live, so
         // buffer the op instead of fsyncing it now. The route is resolved

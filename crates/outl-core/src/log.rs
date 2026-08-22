@@ -116,7 +116,21 @@ impl OpLog {
     /// is O(log n). `Tree::apply_op` calls this on every `apply` to enforce
     /// idempotency without quadratic cost.
     pub fn contains_ts(&self, ts: &Hlc) -> bool {
-        self.ops.binary_search_by(|o| o.ts.cmp(ts)).is_ok()
+        self.get_by_ts(ts).is_some()
+    }
+
+    /// The op with this HLC, if the log holds it. O(log n), same binary
+    /// search as [`Self::contains_ts`].
+    ///
+    /// Exists so a caller can read back the op **as the tree recorded
+    /// it**. `Tree::do_op` fills the `old_*` fields on the copy that
+    /// lands here, and those are what a reader of the log has to see —
+    /// see `Workspace::apply`.
+    pub fn get_by_ts(&self, ts: &Hlc) -> Option<&LogOp> {
+        self.ops
+            .binary_search_by(|o| o.ts.cmp(ts))
+            .ok()
+            .and_then(|i| self.ops.get(i))
     }
 }
 

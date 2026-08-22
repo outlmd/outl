@@ -34,6 +34,26 @@ pub enum Op {
         /// Position of the node among siblings of `new_parent`.
         position: Fractional,
         /// Filled by `do_op`. Required for `undo_op`.
+        ///
+        /// **Only `undo_op` may read this.** In the paper it is not part
+        /// of the transmitted operation at all — `Move` carries four
+        /// fields and `oldp` lives on the local `LogMove` record (Fig. 4,
+        /// §3.2). Here the two types are one, so the field rides the
+        /// JSONL, but it stays what the paper says it is: the originating
+        /// replica's derivation against *its* tree at *first*
+        /// application. A reorder recomputes it in the resident log and
+        /// cannot rewrite the persisted line (`redo_op`, §3.4), and every
+        /// device that ingests the line overwrites it in `do_op` before
+        /// reading it.
+        ///
+        /// So a reader of the log **as data** — a page history, `doctor`,
+        /// a human — must never trust it, and this is more tempting now
+        /// than it used to be: before `Workspace::apply` was fixed to
+        /// persist what `do_op` derived, the field was uniformly wrong
+        /// (`root` in 65,141 of 65,703 stored Moves) and obviously junk.
+        /// It is plausible now, and still not authoritative. Fold the
+        /// parent trail from `Create.parent` / `Move.new_parent`, which
+        /// describe the op's own effect.
         old_parent: NodeId,
         /// Filled by `do_op`. Required for `undo_op`.
         old_position: Fractional,
@@ -57,7 +77,9 @@ pub enum Op {
         key: String,
         /// `None` removes the property.
         value: Option<PropValue>,
-        /// Filled by `do_op` for `undo_op`.
+        /// Filled by `do_op` for `undo_op`. Same rule as
+        /// [`Op::Move::old_parent`]: local derivation, undo-only, never
+        /// authoritative to a reader of the log as data.
         old_value: Option<PropValue>,
     },
 

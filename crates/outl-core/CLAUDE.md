@@ -232,13 +232,35 @@ This is a materialization change only: the op log stays the source of truth, the
 `Workspace` is only ever reached through `Arc<Mutex<..>>`, so it needs `Send` (which `RefCell<T: Send>` keeps) but never `Sync`.
 The resident `OpLog` still holds every `Op::Edit`'s `text_op` bytes (the cheaper second copy of history); shrinking that is the separate per-page op-log shards work, not this change.
 
+### `Workspace::apply` persists the op the tree recorded, not the caller's
+
+`Tree::do_op` fills `old_parent` / `old_position` / `old_value` on the `LogOp` it is handed, so those fields are the caller's guess until it runs.
+`apply` used to hand `apply_op` a **clone** and then persist the original, which left `ops-<actor>.jsonl` disagreeing with the resident log about every `Move` and every `SetProp`.
+It now reads the op back out of the log by `Hlc` (`OpLog::get_by_ts`) and stores that.
+
+**Convergence never depended on this**, which is why it survived so long: `undo_op` is the only reader of those fields, its only caller is `apply_op`, and it only ever sees ops that already went through `do_op`.
+Every path into the **resident log** overwrites the stored value before it can matter.
+The claim is deliberately that narrow: peer-sync ingest writes a line straight into `ops-<actor>.jsonl` without going through `apply`, so a peer's stored op carries *their* derivation until this device's next boot replay runs `do_op` over it.
+What *did* depend on it is every reader of the log **as data** — a page history, `outl doctor`, a human reading the jsonl.
+
+**The old values are still on disk and always will be.**
+The log is append-only, so the fix reaches ops written after it and nothing before: the reference workspace holds 65,141 `Move` ops (of 65,703) naming `root` as the old parent, and all 14,191 of its `SetProp` ops carry a null `old_value`.
+Anything reading the log as data must derive from the fields that describe the op's *own effect* — `Create.parent`, `Move.new_parent`, the value being set — never from `old_*`.
+`outl_actions::timeline` is the worked example.
+
+Pinned by `tests/stored_op_matches_the_log.rs`, which asserts the general property (storage equals the resident log for every op) rather than one field at a time, because a per-field test keeps missing the next field — `SetCollapsed` carries an `old_value` nobody has read yet.
+
+**That property holds for in-order application only, and the fourth test pins the exception rather than hiding it.** A reorder re-derives `old_*` in the resident log via `redo_op` (paper Fig. 4 l.37-40, §3.4: the record "might have changed due to the effect of the new operation"), and an append-only log cannot follow it there — the persisted line keeps the derivation from first application. So storage and the resident log legitimately diverge on any workspace that has ever received a late op, which is every synced workspace. A `doctor` check built on the stronger reading of the test's name would fire on all of them.
+
 ### `Workspace::block_text_history` — the past, not just the present
 
 `block_text` answers "what does this block say now"; `block_text_history` (`src/workspace/text_history.rs`) answers "what did it say before", replaying a block's `Op::Edit`s in order into every intermediate string.
 `Op::Edit` carries a Yrs delta, not a snapshot, and the log is append-only — so an edit that *shrank* a block did not erase what it replaced, only the materialized tree stopped showing it.
 Reads from **storage**, never the resident log or text cache — both are boot-mode dependent (a snapshot boot's resident log holds only the post-cutoff delta).
 A caller asking "was anything lost here" getting a silently shortened history back is the one wrong answer to give it.
-`outl_actions::recover` is the consumer: it scans for a block whose current text is a proper prefix of an earlier entry — the signature a truncating `Op::Edit` leaves — and restores it as a **new** edit.
+`outl_actions::recover` is one consumer: it scans for a block whose current text is a proper prefix of an earlier entry — the signature a truncating `Op::Edit` leaves — and restores it as a **new** edit.
+
+**`block_revisions` is the owner; `block_text_history` is its text-only projection.** The revisions carry the `Hlc` and `ActorId` of the edit that produced each state, which `recover` does not need and a timeline does. Both go through the same read, so the two can never disagree about what a block's past was. `ops_for_node` is the general form underneath — every op naming a node, read from storage for the same reason. The second consumer is `outl_actions::timeline`, which turns them into a page's history.
 
 ## What this crate does NOT own
 
