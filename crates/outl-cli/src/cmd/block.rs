@@ -132,6 +132,20 @@ pub enum BlockCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show every revision of a block, newest first, from the op log.
+    ///
+    /// Read-only, and follows the block across pages — unlike
+    /// `outl page history`, which is scoped to one page.
+    History {
+        /// Block id.
+        id: String,
+        /// How many events to show. The total is always reported.
+        #[arg(long, default_value_t = super::history::DEFAULT_LIMIT)]
+        limit: usize,
+        /// Force JSON output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Run a `outl block …` invocation.
@@ -200,6 +214,9 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
         BlockCommand::Tree { id, json } => {
             let result = ws::open(path).and_then(|ctx| tree(&ctx, id));
             emit(*json, result, print_block)
+        }
+        BlockCommand::History { id, limit, json } => {
+            super::history::run_block(path, id, *limit, *json)
         }
     }
 }

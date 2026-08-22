@@ -81,6 +81,7 @@ pub mod storage_scope;
 pub mod sync;
 pub mod template;
 mod text;
+pub mod timeline;
 pub mod todo;
 pub mod tree;
 
@@ -147,7 +148,9 @@ pub use template::{
     instantiate_template, list_templates, parse_call_invocation, resolve_call, run_callable_block,
     TemplateEntry, FROM_TEMPLATE_KEY, JOURNAL_TEMPLATE_NAME, PARAMS_KEY, TEMPLATE_KEY,
 };
+pub use timeline::{block_timeline, page_timeline, Change, PageTimeline, TimelineEvent};
 pub use todo::{cycle_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX};
 pub use tree::{
-    children_of, enclosing_page_id, position_after, position_for_new_last_child, walk_subtree,
+    children_of, enclosing_page_id, is_trashed, page_slug_of, position_after,
+    position_for_new_last_child, walk_subtree,
 };

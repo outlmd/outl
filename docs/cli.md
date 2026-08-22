@@ -106,6 +106,7 @@ The MCP tool column is the name Claude Desktop (or any MCP host) sees.
 | `outl page list [--filter=tag:foo] [--json]`                   | `outl_page_list`     |
 | `outl page rename <old-slug> <new-slug>`                       | `outl_page_rename`   |
 | `outl page render <slug>`                                      | `outl_page_render`   |
+| `outl page history <slug> [--limit=N] [--json]`                 | —                    |
 
 `page get` returns page meta plus the outline tree.
 `page render` returns the projected `.md` string (clean, no sidecar fields).
@@ -133,6 +134,7 @@ The flag exists so external clients (the Raycast extension's "New Page") can ask
 | `outl block delete <blk> [--confirm]`                          | `outl_block_delete`     |
 | `outl block toggle-todo <blk>`                                 | `outl_block_toggle_todo`|
 | `outl block tree <blk> [--json]`                               | `outl_block_tree`       |
+| `outl block history <blk> [--limit=N] [--json]`                | —                       |
 
 `block move` is the one user-visible name for `Op::Move`.
 Cycle detection still applies: a move that would create a cycle returns `{ "code": "CYCLE_REJECTED" }` and the op still goes into the log (see [docs/crdt.md](crdt.md)).
@@ -424,6 +426,35 @@ Recover-first restored the same content as 4 blocks / 77 lines but parked two pa
 Cost is one op-log read per node in the workspace, since there is no cheaper prefilter that wouldn't itself be a second opinion about which blocks deserve a look.
 Measured at ~4.7s over 67,213 nodes / 214k ops on the workspace that surfaced issue #210.
 
+### `outl page history` / `outl block history`
+
+What the op log says happened, newest first.
+Read-only — neither writes an op.
+
+```
+$ outl page history buser-cto --limit 3
+history of `buser-cto`
+  2026-08-07 11:44  edited
+      - **Volta do Slack**
+      + **Volta do Slack** :slack:
+  2026-07-16 12:24  deleted
+      - 32 dias, até o abril/23
+  2026-07-16 12:24  created
+
+showing the 3 most recent of 174 events — `--limit` for more
+```
+
+`--limit` (default 50) caps the **listing**, never the count: the last line always names the total, so a truncated history can't read as a complete one.
+
+Two rules worth knowing before you read the output, both owned by `outl_actions::timeline`:
+
+- **A page's history includes the blocks deleted out of it**, with the text each one held when it went. That is usually why someone opens a history at all. A block moved to a *different* page goes with it and shows up there; `outl block history` follows one block wherever it has lived.
+- **Not everything in the log is a change.** Folding a block, snoozing a reminder, a `page-slug` write, an `Op::Edit` that re-emitted a block's existing text, and a re-emitted `Create` / `Move` that moved nothing are all skipped. A reconcile produces those in volume — on the reference workspace one block's history was six rows of them around a single real edit.
+
+For scripting, `--json` gives one flat object per event: `change` is `created` / `edited` / `deleted` / `restored` / `moved` / `property`, with `from` / `to` / `text` / `key` beside it, plus `physical_ms` and `logical` if you need the real HLC ordering rather than the rendered local time.
+
+The desktop has the same read behind the `⏱` button in the page header.
+
 ## MCP
 
 Every machine-shaped command above is also exposed as an MCP tool through `outl mcp serve` — same binary, same handler, same JSON shape.
@@ -441,6 +472,7 @@ This document stays focused on the surface; how to attach it to a host lives ove
 - **Destructive commands** (`page delete`, `block delete`) accept `--confirm` on the CLI and require `confirm: true` in the MCP input.
   Without it, the tool returns `{ "code": "CONFIRM_REQUIRED" }` and the operation is a no-op.
 - **Importers** (`outl import …`) stay CLI-only — they're one-time migrations, not workspace ops.
+- `page history` / `block history` — read-only, and their handlers print rather than returning a `Value`, so they need the ordinary `fn(ctx, …) -> Result<Value, ApiError>` extraction before they can be registered. Tracked with [#241](https://github.com/outlmd/outl/issues/241).
 
 ## Layout
 

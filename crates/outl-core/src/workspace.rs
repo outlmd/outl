@@ -552,6 +552,28 @@ impl Workspace {
         Ok(())
     }
 
+    /// Every op that names `node`, oldest first, read from **storage**.
+    ///
+    /// Reads **storage**, never the resident log: the resident log is
+    /// boot-mode dependent (a snapshot boot leaves it holding only the
+    /// post-cutoff delta), so anything asking about a node's *past* has
+    /// to go to the log on disk or risk a silently short answer.
+    ///
+    /// This is what makes the op log verifiable as data, which is the
+    /// point of `apply` persisting what `do_op` recorded. The test that
+    /// pins that reads through here.
+    ///
+    /// # Cost
+    ///
+    /// One index-driven read set per node — O(ops-of-node), not O(log),
+    /// but it goes to **storage** on every call: with `JsonlStorage` that
+    /// is a seek plus a line parse per op, and nothing caches in front of
+    /// it. Fine once per user action (a history panel, a recovery scan);
+    /// not something to call per block in a render loop.
+    pub fn ops_for_node(&self, node: NodeId) -> Result<Vec<LogOp>, WorkspaceError> {
+        Ok(self.ops_for_node_combined(node)?)
+    }
+
     /// Assemble a [`SnapshotBody`] from the current materialized state,
     /// or `None` when nothing is persisted yet. Single builder for both
     /// the background [`Self::spawn_background_snapshot`] and the

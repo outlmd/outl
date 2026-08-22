@@ -22,6 +22,42 @@ export interface PropertyKey {
   uses: number;
 }
 
+/**
+ * One change to one block, out of the op log.
+ *
+ * Mirrors `outl_tauri_shared::commands::timeline::TimelineEventDto`.
+ * `change` says which of the optional fields are meaningful: `edited`
+ * uses `from`/`to`, `deleted` uses `text`, `property` uses `key` plus
+ * `from`/`to`, and the rest use none. This is a flat interface, not a
+ * discriminated union, so TypeScript will not narrow them for you —
+ * reading `event.text` on a `created` event compiles and gives `null`.
+ */
+export interface TimelineEvent {
+  at_ms: number;
+  actor: string;
+  block: string;
+  block_deleted: boolean;
+  change: "created" | "edited" | "deleted" | "restored" | "moved" | "property";
+  from: string | null;
+  to: string | null;
+  text: string | null;
+  key: string | null;
+}
+
+/**
+ * A page's history, newest first.
+ *
+ * `total` is the count **before** the limit, never `events.length` — a
+ * capped list that reports its own length as the total reads as the
+ * whole history, which is the one thing a history must not do.
+ */
+export interface PageTimeline {
+  slug: string;
+  total: number;
+  truncated: boolean;
+  events: TimelineEvent[];
+}
+
 export type TodoState = "TODO" | "DOING" | "DONE";
 export type PageKind = "page" | "journal";
 /** Direction of the backlinks ("Linked from") list (issue #142).

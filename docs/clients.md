@@ -113,6 +113,26 @@ Only the open commands run the check, so a mutation reply can never carry the no
 `PageView.md_ahead_of_log_checked` marks the replies that *did* run it, and those are authoritative in both directions: the first checked reply with no notice (the next open or refresh of the page, after `outl reconcile --ahead-of-log` fixed it) clears the banner on both clients.
 A banner that outlives the condition is the mirror of the silence this section exists to end.
 
+## Page history
+
+The op log holds every revision of every block. `outl_actions::timeline` is the single owner of turning that into "what happened to this page" — which blocks count as the page's, which ops are not events, and the order. No client re-derives any of it.
+
+**Read-only on every surface.** Restoring a revision is `outl recover`, which covers one narrow case with a provably-additive rule (the recovered text *contains* the current text as a prefix). A general "put this back" button needs its own safety argument and does not exist.
+
+Two rules that decide what a reader sees:
+
+- **A deleted block stays in its page's history**, with the text it held when it went. A history that omits deletions answers "what changed" with everything except the change people open a history to find. A block moved to a *different* page goes with it; `block_timeline` follows one block wherever it has lived.
+- **Not every op is an event.** Folds, snoozes, `page-slug` / `page-kind` writes, an `Op::Edit` that re-emitted the block's existing text, and a re-emitted `Create` / `Move` that changed nothing are all skipped. A reconcile produces them in volume — on a real 64k-block workspace one block's history was six such rows around a single real edit.
+
+| Client | Surface |
+|--------|---------|
+| CLI | `outl page history <slug>` and `outl block history <id>`, both with `--limit` and `--json`. See [`docs/cli.md`](cli.md#outl-page-history--outl-block-history). |
+| Desktop | The `⏱` button in the page-header eyebrow opens `<TimelinePanel />`; `Esc` closes. No chord yet. |
+| Mobile | Not yet. The command body is in `outl-tauri-shared`, so it is a handler registration plus a surface. |
+| TUI | Not yet. |
+
+Related but different: **undo / redo** (`outl_actions::history`) is this session's mutations, and `outl backup` is workspace-granular git snapshots. Neither answers "what did this page say last Tuesday" — that is this.
+
 ## Running code blocks
 
 Every client that lets the user execute a `` ```lang ``` `` block (TUI `g x`, desktop `Cmd+Shift+X` / Run button, mobile long-press → "Run code") goes through **one** shared entry point:

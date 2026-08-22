@@ -121,6 +121,20 @@ pub enum PageCommand {
         #[command(subcommand)]
         sub: super::prop::PropCommand,
     },
+    /// Show what changed on a page, newest first, from the op log.
+    ///
+    /// Read-only. Includes blocks that were deleted out of the page —
+    /// that is usually what someone opens a history to find.
+    History {
+        /// Page slug.
+        slug: String,
+        /// How many events to show. The total is always reported.
+        #[arg(long, default_value_t = super::history::DEFAULT_LIMIT)]
+        limit: usize,
+        /// Force JSON output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Run a `outl page …` invocation.
@@ -211,6 +225,9 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
             })
         }
         PageCommand::Prop { sub } => super::prop::run(sub, path),
+        PageCommand::History { slug, limit, json } => {
+            super::history::run_page(path, slug, *limit, *json)
+        }
     }
 }
 

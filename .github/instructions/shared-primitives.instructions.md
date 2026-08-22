@@ -74,6 +74,19 @@ Recently added — recovering text an `Op::Edit` truncated (catalog: `docs/primi
 | Scan the tree for a block whose current text is a proper prefix of an earlier `Op::Edit` revision (truncated, and the dropped tail is still in the log) | `outl_actions::scan_truncated_blocks` → `TruncatedBlock` | `crates/outl-actions/src/recover.rs` |
 | Write a recovered revision back as a **new** `Op::Edit`; refuses when the block changed since the scan | `outl_actions::restore_truncated_block` | `crates/outl-actions/src/recover.rs` |
 | Every intermediate text a block held, replayed from **storage** (never the resident log / text cache, so a snapshot boot can't silently shorten it) | `outl_core::Workspace::block_text_history` | `crates/outl-core/src/workspace/text_history.rs` |
+| The same revisions carrying the `Hlc` + `ActorId` that produced each — the owner, of which `block_text_history` is the text-only projection | `outl_core::Workspace::block_revisions` → `TextRevision` | `crates/outl-core/src/workspace/text_history.rs` |
+| Every op naming a node, oldest first, read from **storage** for the same reason | `outl_core::Workspace::ops_for_node` | `crates/outl-core/src/workspace/text_history.rs` |
+
+Recently added — reading a **page's** history (catalog: `docs/primitives-actions.md` §5b).
+**Block a second opinion about what a page's history is** — every client calls these; none re-walks the op log itself.
+Two rules the module owns: a deleted block stays in its page's history (a history that omits deletions omits the change people came for), and a fold / snooze / `page-slug` write / no-op re-emit is not an event.
+**Never read `Move.old_parent` from storage** — `do_op` fills it on the copy that reaches the in-memory log while `Workspace::apply` persists the caller's original, so 99% of the stored `Move` ops in the reference workspace say `root`. Fold the parent trail from `Create.parent` / `Move.new_parent`.
+
+| Intent | Use this | File |
+|---|---|---|
+| Every change to a page, newest first (`total` is the count before `limit`, so a capped list never reads as complete) | `outl_actions::page_timeline` → `PageTimeline` | `crates/outl-actions/src/timeline.rs` |
+| Every change to one block, following it across pages | `outl_actions::block_timeline` | `crates/outl-actions/src/timeline.rs` |
+| Slug of the page hosting a node | `outl_actions::page_slug_of` | `crates/outl-actions/src/tree.rs` |
 
 Recently added — check these before writing a parallel reminder helper (catalog: `docs/primitives-actions.md` → "Reminders"):
 

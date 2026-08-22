@@ -61,7 +61,7 @@ use crate::commands::{
     move_block_up, next_day, open_asset, open_journal_for, open_page_by_slug, open_ref,
     open_today_journal, outdent_block, outl_emoji_search, outl_peer_list, outl_peer_pair_host,
     outl_peer_pair_join, outl_peer_remove, outl_peer_status, outl_sync_now, page_backlinks,
-    paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
+    page_timeline, paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
     plugin_install_official, plugin_keybindings, plugin_list, plugin_registry_list, plugin_run,
     plugin_secret_remove, plugin_secret_set, plugin_set_enabled, plugin_settings_describe,
     plugin_sync_hooks, plugin_toolbar, plugin_transform, plugin_transformers, plugin_uninstall,
@@ -347,6 +347,8 @@ pub fn run() {
             mark_block_done,
             set_block_property,
             deliver_due_reminders,
+            // Page history, read out of the op log (read-only)
+            page_timeline,
             // Properties (`key:: value`) — catalogue + page-level writer
             known_property_keys,
             set_page_property,

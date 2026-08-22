@@ -96,7 +96,7 @@ pub fn scan_truncated_blocks(
         // A trashed block is a block the user deleted. Its history is
         // just as recoverable, and offering it back is noise at best and
         // a resurrection of something deliberately removed at worst.
-        if is_trashed(workspace, node) {
+        if crate::tree::is_trashed(workspace, node) {
             continue;
         }
         let history = workspace.block_text_history(node)?;
@@ -108,7 +108,7 @@ pub fn scan_truncated_blocks(
         }
         found.push(TruncatedBlock {
             node,
-            page_slug: page_slug_of(workspace, node),
+            page_slug: crate::tree::page_slug_of(workspace, node),
             current: hit.current,
             recovered: hit.recovered,
             lost_lines: hit.lost_lines,
@@ -202,27 +202,6 @@ fn truncation_in(history: &[String]) -> Option<Truncation> {
         recovered: recovered.to_string(),
         lost_lines,
     })
-}
-
-/// Whether `node`'s ancestor chain reaches the trash root.
-fn is_trashed(workspace: &Workspace, node: NodeId) -> bool {
-    let mut current = node;
-    loop {
-        if current == NodeId::trash() {
-            return true;
-        }
-        match workspace.tree().parent(current) {
-            Some(parent) => current = parent,
-            None => return false,
-        }
-    }
-}
-
-/// Slug of the page hosting `node`, read off the page root's `page-slug`
-/// property via the shared [`crate::tree::enclosing_page_id`] walk.
-fn page_slug_of(workspace: &Workspace, node: NodeId) -> Option<String> {
-    let page = crate::tree::enclosing_page_id(workspace, node)?;
-    crate::page::page_meta(workspace, page).map(|meta| meta.slug)
 }
 
 #[cfg(test)]

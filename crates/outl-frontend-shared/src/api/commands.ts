@@ -32,6 +32,7 @@ import type {
   PluginToolbarButton,
   PluginTransformer,
   PluginTransformResult,
+  PageTimeline,
   PropertyKey,
   RegistryItem,
   Reminder,
@@ -1126,6 +1127,28 @@ export function setBlockProperty(
  */
 export function knownPropertyKeys(): Promise<PropertyKey[]> {
   return invoke<PropertyKey[]>("known_property_keys");
+}
+
+/**
+ * Every change to a page, newest first, read out of the op log.
+ *
+ * Read-only: there is no counterpart that restores a revision. The
+ * events include blocks that were **deleted** out of the page, which is
+ * usually what sends somebody to a history in the first place.
+ *
+ * Not cached. The backend reads the node's ops from storage per block
+ * in the page, so the answer is current by construction, and a cached
+ * timeline is stale the moment the user types.
+ *
+ * **Desktop only so far.** The command body is in `outl-tauri-shared`,
+ * so mobile gets it by registering `page_timeline` in its handler list
+ * and building a surface for it; until then this rejects there.
+ */
+export function pageTimeline(
+  pageId: string,
+  limit?: number,
+): Promise<PageTimeline> {
+  return invoke<PageTimeline>("page_timeline", { pageId, limit });
 }
 
 /**

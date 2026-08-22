@@ -19,6 +19,8 @@
 //! - [`reminders`] — list / snooze / author `remind::` rules. The
 //!   *delivery* of the notification stays per-client (each OS has its
 //!   own scheduler); only the "what and when" is shared.
+//! - [`timeline`] — a page's history, read out of the op log.
+//!   Read-only; there is no restore command.
 
 pub mod asset;
 pub mod block;
@@ -29,3 +31,4 @@ pub mod plugin;
 pub mod property;
 pub mod reminders;
 pub mod template;
+pub mod timeline;

@@ -182,8 +182,12 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
 These are the surface called by scripts, agents, and the MCP shim.
 Each handler returns a `serde_json::Value` so the same code path serves both the CLI and `outl mcp serve`.
 
-- `outl page get|create|update|delete|list|rename|render` (`create` takes `--content=<JSON|->` to seed the outline in one call)
-- `outl block get|append|append-tree|insert|update|move|delete|toggle-todo|tree` (`append-tree` takes `--tree=<JSON|->`)
+- `outl page get|create|update|delete|list|rename|render|history` (`create` takes `--content=<JSON|->` to seed the outline in one call)
+  `page history` / `block history` are the **read-only** window on the op log's past (issue #241): what changed on a page, when, by whom, and the text on either side.
+  `cmd/history.rs` renders both — glue only, `outl_actions::timeline` owns what an event is.
+  Two things the renderer must not lose: `--limit` caps the listing and never the count (a capped list that reports its own length as the total reads as the whole history), and a `deleted` row always prints the text the deletion took, since that is what someone opens a history to find.
+  **No MCP tool, and not one call away from having one.** Both are `run_page(path, …) -> i32` / `run_block(path, …) -> i32`: they open the workspace themselves and print, where MCP dispatch wants `fn(ctx: &WsCtx, …) -> Result<Value, ApiError>` like every other handler in this crate. Wiring them up means extracting the `Value` half first, then registering in `mcp/tools::list` + `run_tool`.
+- `outl block get|append|append-tree|insert|update|move|delete|toggle-todo|tree|history` (`append-tree` takes `--tree=<JSON|->`)
 - `outl daily today|get|append|range`
 - `outl asset add <file> [--page=<slug>] [--daily]` — import a file into `<workspace>/assets/` (content-addressed) and append its markdown link as a new block (daily by default, or a page).
   Glue only: copy + hash + link live in `outl_actions::import_asset`; the block append routes through `outl-actions` like every other mutation.

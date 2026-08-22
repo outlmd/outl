@@ -9,6 +9,7 @@ pub mod daily;
 pub mod doctor;
 pub mod export;
 pub mod export_v2;
+pub mod history;
 pub mod import;
 pub mod init;
 pub mod migrate_to_per_page_ops;

@@ -9,6 +9,8 @@
 //! - [`block`] — every block mutation (create, edit, todo, indent,
 //!   move, paste, collapsed).
 //! - [`history`] — undo / redo of committed block mutations.
+//! - [`timeline`] — a page's history out of the op log (read-only).
+//!   Distinct from [`history`]: that is this session's undo stack.
 //!
 //! Every command is re-exported at this level so
 //! `tauri::generate_handler!` in `lib.rs` doesn't have to know about
@@ -26,6 +28,7 @@ pub(crate) mod reminders;
 pub(crate) mod shortcuts;
 pub(crate) mod template;
 pub(crate) mod theme;
+pub(crate) mod timeline;
 pub(crate) mod workspace;
 
 pub(crate) use asset::*;
@@ -40,4 +43,5 @@ pub(crate) use reminders::*;
 pub(crate) use shortcuts::*;
 pub(crate) use template::*;
 pub(crate) use theme::*;
+pub(crate) use timeline::*;
 pub(crate) use workspace::*;

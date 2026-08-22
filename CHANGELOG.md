@@ -7,6 +7,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Page history — the op log holds every revision and now something can read it.**
+  `Op::Edit` carries a Yrs delta, not a snapshot, and the log is append-only, so every past state of every block has always been reconstructible. Nothing surfaced any of it. The only history a user had was `outl backup`, which is workspace-granular git snapshots and is not wired on desktop or mobile at all — on the workspace this was built against, that meant one commit, twelve days old, on a graph edited daily.
+
+  `outl page history <slug>` and `outl block history <id>` (both `--limit`, both `--json`), plus a `⏱` button in the desktop page header. Read-only everywhere: restoring a revision stays `outl recover`'s job, which covers one narrow case with a provably-additive rule, and a general restore needs its own safety argument.
+
+  Two decisions worth knowing. **A deleted block stays in its page's history**, with the text it held when it went — a history that omits deletions omits the change people open a history to find. And **not every op is an event**: folds, snoozes, `page-slug` writes, an edit that re-emitted the block's existing text, and a re-emitted `Create` / `Move` that changed nothing are skipped, because a reconcile produces all of those in volume and they bury the real changes.
+  ([#241](https://github.com/outlmd/outl/issues/241))
+
 - **Properties are creatable and deletable from every client.**
   Editing a property that already existed worked. Making the first one did not: both GUI clients could only edit a chip that was already there, so creating meant opening the `.md` by hand or reaching for the TUI, and deleting was an undiscoverable gesture (empty the value).
   Page properties were worse — `PageView` carried none, so `icon::` and `type::` could not even be read outside the TUI.
@@ -20,6 +28,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Typing `key:: value` on a child line still works and always did.
   The UI is the door for people who don't know the syntax, not a replacement for it.
   ([#13](https://github.com/outlmd/outl/issues/13))
+
+### Fixed
+
+- **The op log on disk disagreed with the op log in memory about every `Move` and every `SetProp`.**
+  `Tree::do_op` fills the `old_parent` / `old_position` / `old_value` fields that let an op be undone, but `Workspace::apply` handed it a *clone* and then persisted the caller's original. Those fields are only as good as the code that built the op: `block::moves::move_to` reads them off the tree and is right, while the reconcile and import paths pass `root` / `None`. On one real 64k-block workspace that meant 65,141 of 65,703 stored `Move` ops named the wrong old parent, and all 14,191 `SetProp` ops carried a null old value.
+
+  Sync and convergence were never affected, which is why it went unnoticed for so long — every ingest path runs `do_op`, which overwrites the fields before the one function that reads them can. What was affected is anything reading the log as data.
+
+  `apply` now stores what the tree recorded. The values already on disk stay wrong, because the log is append-only, so readers must keep deriving from the fields describing an op's own effect.
 
 ### Changed
 

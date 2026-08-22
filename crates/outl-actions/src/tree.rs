@@ -208,3 +208,37 @@ pub fn enclosing_page_id(workspace: &Workspace, node: NodeId) -> Option<NodeId> 
         current = parent;
     }
 }
+
+/// Whether `node`'s ancestor chain reaches the trash root.
+///
+/// **Not `tree().parent(node) == Some(NodeId::trash())`.** Deleting a
+/// block is one `Op::Move` on the subtree *root*, and `do_op` rewrites
+/// only that node's parent — every block under it keeps pointing at the
+/// trashed root. So the direct-parent test answers `false` for the whole
+/// inside of a deleted subtree, which is the majority of what a user
+/// deleted.
+pub fn is_trashed(workspace: &Workspace, node: NodeId) -> bool {
+    let mut current = node;
+    loop {
+        if current == NodeId::trash() {
+            return true;
+        }
+        match workspace.tree().parent(current) {
+            Some(parent) => current = parent,
+            None => return false,
+        }
+    }
+}
+
+/// The slug of the page hosting `node`, or `None` when the node is
+/// detached (or is itself the root).
+///
+/// [`enclosing_page_id`] plus the page's `page-slug` — the pair every
+/// caller that wants to *name* a block's page was writing out by hand.
+/// `None` also covers a trashed block, whose ancestor chain no longer
+/// reaches a page; a caller that must tell "deleted" from "detached"
+/// checks the trash itself.
+pub fn page_slug_of(workspace: &Workspace, node: NodeId) -> Option<String> {
+    let page = enclosing_page_id(workspace, node)?;
+    crate::page::page_meta(workspace, page).map(|meta| meta.slug)
+}

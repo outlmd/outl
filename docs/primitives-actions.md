@@ -149,6 +149,28 @@ This is *not* per-keystroke undo inside an uncommitted draft — that belongs to
 
 ---
 
+## 5b. Page history (outl-actions::timeline)
+
+What the op log says happened to a page: what changed, when, by whom, and the text on either side.
+**Read-only** — restoring a revision is `outl_actions::recover`'s job for the one case with a proven-safe (strictly additive) rule; a general restore needs its own safety argument and does not exist yet.
+
+Not the same past as section 5. `history` is this session's undo stack; this is every device's, from the beginning of the workspace.
+
+Two rules the module owns, so no client re-decides them:
+
+- **Which blocks are the page's** — the live subtree *plus* everything deleted out of it. A history that omits deletions answers "what changed" with everything except the change people open a history to find. A block moved to another page goes with it; `block_timeline` follows a block regardless of where it has lived.
+- **What is not an event** — `Op::SetCollapsed` and `Op::SnoozeRemind` (view state and reminder bookkeeping), `page-slug` / `page-kind` writes, an `Op::Edit` that re-emitted a block's existing text, and a re-emitted `Create` / `Move` that changed nothing. A reconcile produces all four in volume; reporting them buries the real changes.
+
+**Never read `Move.old_parent` from storage.** `do_op` fills it on the copy that reaches the in-memory log, but `Workspace::apply` persists the caller's original — 99% of the `Move` ops in the reference workspace say `root` no matter where the block was. The parent trail is folded from `Create.parent` / `Move.new_parent`, which are the op's own effect.
+
+| Intent | Use this | File |
+|---|---|---|
+| Every change to a page, newest first, capped at `limit` (the **count** is never capped — `total` + `truncated()` let a listing say what it left out) | `outl_actions::page_timeline` → `PageTimeline` | `crates/outl-actions/src/timeline.rs` |
+| Every change to one block, following it across pages | `outl_actions::block_timeline` → `Vec<TimelineEvent>` | `crates/outl-actions/src/timeline.rs` |
+| The change itself (`Created` / `Edited` / `Deleted` / `Restored` / `Moved` / `PropertySet`) | `outl_actions::Change` | `crates/outl-actions/src/timeline.rs` |
+
+---
+
 ## 6. Templates
 
 | Intent | Use this | File |

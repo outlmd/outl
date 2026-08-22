@@ -736,6 +736,10 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     // handler (which commits + flips `editingBlockId` to null), so
     // the user is back in Normal mode without a second key.
     ExitInsert: () => {
+      if (appState.timelineOpen) {
+        setAppState("timelineOpen", false);
+        return;
+      }
       if (appState.remindersOpen) {
         setAppState("remindersOpen", false);
         return;

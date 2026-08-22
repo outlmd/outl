@@ -228,6 +228,15 @@ export interface AppStateShape {
    */
   remindersOpen: boolean;
   /**
+   * Page-history panel open state. Opened from the `⏱` button in the
+   * page header. Read-only: it lists what the op log says happened to
+   * this page, including blocks that were deleted out of it.
+   *
+   * Distinct from the undo stack — that is this session's mutations,
+   * this is every device's, forever.
+   */
+  timelineOpen: boolean;
+  /**
    * Zoom / focus root (Roam/Workflowy style). When non-null, the
    * outline renders only this block's subtree with a clickable
    * ancestor breadcrumb above it. Pure **view state, local per
@@ -278,6 +287,7 @@ const [state, setState] = createStore<AppStateShape>({
   marketplaceOpen: false,
   helpOpen: false,
   remindersOpen: false,
+  timelineOpen: false,
   focusBlockId: null,
   dropTargetBlockId: null,
   lastError: null,

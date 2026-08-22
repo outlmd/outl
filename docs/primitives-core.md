@@ -20,10 +20,12 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Intent | Use this | File |
 |---|---|---|
 | Open a workspace (in-memory for tests, on-disk JSONL for prod) | `outl_core::Workspace::open_in_memory` / `open_with_storage` | `crates/outl-core/src/workspace.rs` |
-| Route an op through the log → tree (the **only** mutation path) | `outl_core::Workspace::apply(LogOp)` | `crates/outl-core/src/workspace.rs` |
+| Route an op through the log → tree (the **only** mutation path). Persists the op **as `do_op` left it**, not as the caller built it — the `old_*` fields are the caller's guess until `do_op` derives them. Ops written before this fix keep the wrong values forever (append-only), so a reader of the log as *data* derives from `Create.parent` / `Move.new_parent`, never `old_*` | `outl_core::Workspace::apply(LogOp)` | `crates/outl-core/src/workspace.rs` |
 | Batch a composite action so its ops persist in one `append_ops` per destination instead of one fsync per `apply` (RAII guard, derefs to `Workspace`; commit or drop flushes) | `outl_core::Workspace::begin_batch` → `outl_core::WorkspaceBatch` | `crates/outl-core/src/workspace/batch.rs` |
 | Read the materialized tree / op log from a workspace | `outl_core::Workspace::tree` / `log` / `block_text` | `crates/outl-core/src/workspace.rs` |
 | Every intermediate text a block held, oldest first, one entry per `Op::Edit`, replayed from **storage** (never the resident log or the text cache, so a snapshot boot can't silently shorten it) — what makes a truncating edit's earlier text reconstructible (`outl_actions::recover`) | `outl_core::Workspace::block_text_history` | `crates/outl-core/src/workspace/text_history.rs` |
+| The same revisions with the `Hlc` + `ActorId` of the edit that produced each — the owner; `block_text_history` is its text-only projection, so the two cannot disagree about a block's past | `outl_core::Workspace::block_revisions` → `outl_core::workspace::TextRevision` | `crates/outl-core/src/workspace/text_history.rs` |
+| Every op naming a node, oldest first, read from **storage** (the general form of the sourcing rule above: the resident log is boot-mode dependent, so anything asking about a node's *past* must read the log on disk) | `outl_core::Workspace::ops_for_node` | `crates/outl-core/src/workspace/text_history.rs` |
 | Build a Yrs text-replace update payload for an op | `outl_core::Workspace::build_text_replace_update` | `crates/outl-core/src/workspace.rs` |
 | Save / boot from a materialized-state snapshot (local boot cache, workspace-owned) | `outl_core::Workspace::save_snapshot` / `set_snapshot_policy` / `wait_for_snapshots` | `crates/outl-core/src/workspace.rs` |
 | Read / write the raw snapshot body on disk (`<root>/.outl/snapshots/snap-<actor>.bin` — NOT a `Storage` method) | `outl_core::snapshot::read_from_disk` / `read_best_from_disk` (adopt a peer's snapshot when this device has none — Phase 2; local ops preserved via the per-actor delta) / `write_to_disk` (`SnapshotBody`) | `crates/outl-core/src/snapshot.rs` |
@@ -31,6 +33,7 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Generate HLC timestamps with actor tiebreak (required for every op) | `outl_core::HlcGenerator::new` / `next` / `observe` | `crates/outl-core/src/hlc.rs` |
 | Wrap an `Op` into a `LogOp` (timestamp + actor) for `apply` | `outl_core::Op` + `outl_core::LogOp` | `crates/outl-core/src/op.rs` |
 | Extract the `NodeId` an op targets | `outl_core::op::op_node(&Op) -> Option<NodeId>` | `crates/outl-core/src/op.rs` |
+| The op with a given `Hlc`, out of the resident log (O(log n)) — how `apply` reads back what `do_op` recorded | `outl_core::OpLog::get_by_ts` | `crates/outl-core/src/log.rs` |
 | Sentinel node ids (`root`, `trash`) | `outl_core::NodeId::root()` / `trash()` | `crates/outl-core/src/id.rs` |
 | Per-device identity for ops | `outl_core::ActorId` | `crates/outl-core/src/id.rs` |
 | Stable, shared workspace identity (read/generate, persist, pairing-adoption) — the gossip-topic key, NOT the path | `outl_core::WorkspaceId::read_or_create` / `write` / `from_raw` (errors: `outl_core::WorkspaceIdError`) | `crates/outl-core/src/workspace_id.rs` |
@@ -54,6 +57,7 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Walk a subtree applying a closure | `outl_actions::tree::walk_subtree` | `crates/outl-actions/src/tree.rs` |
 | Sibling after a node + position helpers (for inserts) | `outl_actions::tree::next_sibling` / `position_after` / `position_for_new_last_child` | `crates/outl-actions/src/tree.rs` |
 | Which page (slug-bearing root child) does this node sit under? | `outl_actions::tree::enclosing_page_id` | `crates/outl-actions/src/tree.rs` |
+| Slug of the page hosting a node (`enclosing_page_id` + its `page-slug`) | `outl_actions::page_slug_of` | `crates/outl-actions/src/tree.rs` |
 
 ---
 

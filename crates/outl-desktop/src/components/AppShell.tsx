@@ -30,6 +30,7 @@ import { PluginEffectLayer } from "./PluginEffectLayer";
 import { SettingsModal } from "./SettingsModal";
 import { HelpOverlay } from "./HelpOverlay";
 import { RemindersPanel } from "./RemindersPanel";
+import { TimelinePanel } from "./TimelinePanel";
 import { deliverDueReminders } from "@outl/shared/api/commands";
 
 /**
@@ -299,6 +300,7 @@ export function AppShell() {
       <SettingsModal />
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
+      <TimelinePanel setError={setError} />
       <PluginEffectLayer />
       {/* Mounted last so the notification toast sits above every chrome
        *  element (ChromeToggleBar, overlays) in the stacking order. */}

@@ -783,6 +783,24 @@ export function OutlineView() {
                     <span>{pageIcon()}</span>
                     <span class="font-mono">{appState.page?.slug}</span>
                   </Show>
+                  {/*
+                   * The op log holds every revision of every block on
+                   * this page and nothing surfaced any of it until now
+                   * (issue #241). Read-only, so it sits in the eyebrow
+                   * next to the page's identity rather than in the
+                   * editing chrome.
+                   */}
+                  <Show when={appState.page}>
+                    <button
+                      type="button"
+                      class="ml-auto opacity-50 hover:opacity-100"
+                      title="Page history"
+                      aria-label="Page history"
+                      onClick={() => setAppState("timelineOpen", true)}
+                    >
+                      ⏱
+                    </button>
+                  </Show>
                 </div>
 
                 <h1 class="font-mono text-[28px] font-semibold leading-[1.15] tracking-tight">

@@ -116,6 +116,21 @@ The row is hidden while zoomed — the header is a *block* then, and page metada
 `propertyChips` (which keys are chrome, which get a glyph) stays in `@outl/shared/markdown` — one owner, wrapped, not reimplemented.
 Promoting `PropertyEditor` itself to `@outl/shared` waits on mobile: its answer to the same issue is a sheet with tappable key chips, not an inline row, so promoting a desktop-shaped API first would freeze the wrong contract.
 
+## Page history — `TimelinePanel.tsx`
+
+The `⏱` button in the page-header eyebrow opens `components/TimelinePanel.tsx`: what the op log says happened to this page, newest first (issue #241).
+Read-only, `Esc` or a click outside closes it, `appState.timelineOpen` is the flag.
+
+Three things a contributor should not undo:
+
+- **It is not the undo stack.** `Cmd+Z` walks this session's mutations (`commands/history.rs`, `outl_actions::history`); this walks every device's, from the start of the workspace. The panel and the command are named `timeline` precisely so the two don't get merged.
+- **No restore button.** `outl recover` is the only restore path that exists, and it is narrow on purpose: it only writes back a revision that *contains* the current text as a prefix, so the write cannot drop anything. A general "put this revision back" needs its own safety argument; the panel deliberately does not assume one.
+- **Nothing here decides what an event is.** Which blocks count as the page's (including the deleted ones), which ops are not events at all, and the order all come from `outl_actions::timeline`. `formatAt` renders `at_ms` and must never *re-sort* on it — the ordering is HLC with actor tiebreak and is already applied, so a device with a skewed clock can legitimately show a time that reads out of order.
+
+The fetch is gated on `timelineOpen && appState.page`: the read walks every block in the page under the workspace lock, which is not something to do on every navigation on the chance the user might open the panel.
+
+No chord yet — a global binding means an entry in `outl-shortcuts`, which every client consumes, and the TUI has no timeline surface to bind it to.
+
 ## Blockquote chrome
 
 A `"> "`-prefixed block renders with a left border + ~6% tint, right-rounded, body full-colour; the outline bullet stays outside the quote chrome.
