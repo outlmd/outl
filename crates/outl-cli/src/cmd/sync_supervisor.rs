@@ -16,10 +16,18 @@
 //! the sync indicator never turns green and Refresh cannot force a pass.
 //!
 //! So the supervisor **retries** rather than competes: it asks for the lease
-//! every [`LEASE_RETRY`], and a refusal is a normal state, not a failure. An
-//! open GUI keeps the endpoint it already has; the supervisor takes over the
-//! moment that GUI exits, and hands it back the next time one wins the race.
-//! Nobody who was relying on "the GUI holds the endpoint" loses it.
+//! every [`LEASE_RETRY`], and a refusal is a normal state, not a failure. A GUI
+//! that is already running keeps the endpoint it has, and the supervisor takes
+//! over the moment that GUI exits.
+//!
+//! **It does not hand the endpoint back.** [`SyncTransport::start`] moves the
+//! lease onto the endpoint's own thread, which releases it only on shutdown or
+//! a `peers.json` change, and nothing here watches for a GUI that wants it. So
+//! a GUI opened *after* the daemon won the election loses, and stays in the
+//! degraded mode (sync indicator never green, Refresh cannot force a pass)
+//! until the daemon stops. Deferring on the way in is not the same as yielding
+//! once held, and only the first is implemented: `flock` gives no signal that
+//! another process is waiting, so yielding needs a design of its own.
 //!
 //! It also stands down when no devices are paired: holding the endpoint to
 //! sync with nobody only denies it to a GUI that could be using it to pair.
@@ -450,8 +458,18 @@ mod tests {
     #[test]
     fn the_lease_retry_gives_up_early_on_a_signal() {
         let (tx, rx) = channel();
-        let shutdown = Arc::new(AtomicBool::new(true));
-        tx.send(()).unwrap();
+        // FALSE at the start, on purpose. Setting it up front would return at
+        // the entry check and never reach `recv_timeout` — the test would pass
+        // with the whole body of that function deleted, and the path it claims
+        // to cover (a signal landing mid-sleep) would have zero coverage.
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&shutdown);
+        // Same order as `install_signal_handler`: set the flag, then wake.
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            flag.store(true, Ordering::SeqCst);
+            let _ = tx.send(());
+        });
 
         let started = Instant::now();
         assert!(sleep_until_shutdown(

@@ -111,10 +111,12 @@ enum Command {
     /// edits into the op log; the sync half holds the iroh endpoint, deferring
     /// to a GUI or TUI that already has it and taking over when that exits.
     ///
-    /// `--no-watch` is the mode to leave running permanently beside a GUI you
-    /// also use: without the watcher there is nothing to write, so it takes no
-    /// per-actor write lock and cannot push that GUI onto a fresh ephemeral
-    /// actor (and a fresh `ops-<ulid>.jsonl`) on every launch.
+    /// `--no-watch` is the cheaper mode to leave running: without the watcher
+    /// there is nothing to write, so it takes no per-actor write lock and
+    /// cannot push a GUI onto a fresh ephemeral actor (and a fresh
+    /// `ops-<ulid>.jsonl`) on every launch. It still takes the P2P endpoint,
+    /// though, and does not give it back, so a GUI opened after this daemon
+    /// syncs through the shared ops/ dir until the daemon stops.
     Serve {
         /// Workspace path. Overrides the global `--workspace`.
         path: Option<PathBuf>,

@@ -390,7 +390,9 @@ Turning both halves off is a usage error rather than a process that runs and doe
 
 **The sync half defers.**
 One endpoint per device identity, elected not assigned — so the supervisor asks for the lease every 30s and treats a refusal as a normal state.
-A desktop or TUI that already holds the endpoint keeps it; the daemon takes over when that process exits, and hands it back the next time one wins.
+A desktop or TUI that already holds the endpoint keeps it, and the daemon takes over when that process exits.
+It does **not** hand the endpoint back: once the daemon holds it, a GUI started later loses and stays degraded (sync indicator never green, Refresh cannot force a pass) until the daemon stops.
+Deferring on the way in is not the same as yielding once held, and only the first is implemented.
 It also stands down entirely when no devices are paired, since holding the endpoint to sync with nobody only denies it to a GUI that could be using it to pair.
 It re-reads `.outl/peers.json` and rebuilds the transport when that file changes, so a device paired *after* the daemon started is actually synced with.
 

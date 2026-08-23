@@ -159,6 +159,10 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     info!("watching pages/ and journals/ (Ctrl-C or SIGTERM to stop)");
 
     let engine = SyncEngine::new(paths.root.clone(), actor);
+    // The one loop exit that is a failure. Without it the teardown below
+    // cannot tell a dead watcher from a clean SIGTERM, so the process exits 0
+    // and `Restart=on-failure` never brings the daemon back.
+    let mut watcher_died = false;
     while !shutdown.load(Ordering::SeqCst) {
         // Keeps the snapshot current on an idle daemon; correctness is the
         // second call, just before the reconcile.
@@ -207,6 +211,7 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
             // The debouncer's sender is gone, so the watcher half is dead.
             Err(RecvTimeoutError::Disconnected) => {
                 error!("file watcher stopped delivering events; shutting down");
+                watcher_died = true;
                 break;
             }
         }
@@ -225,6 +230,9 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
         if handle.join().is_err() {
             warn!("sync supervisor thread panicked on the way out");
         }
+    }
+    if watcher_died {
+        bail!("the file watcher stopped delivering events");
     }
     info!("outl serve stopped");
     Ok(())
