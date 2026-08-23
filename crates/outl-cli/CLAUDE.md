@@ -55,7 +55,8 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   Seeds `templates/journal` as a **page** (`template:: journal`), not a `templates/journal.md` file (issue #146).
   A legacy file, if present, migrates into the page body best-effort.
   Opening today's journal then auto-instantiates it.
-- `outl serve [<path>] [--once]` — run file watcher; `--once` reconciles every `.md` and exits (smoke tests, scripting).
+- `outl serve [<path>] [--once] [--no-watch] [--no-sync]` — the background daemon: file watcher + P2P endpoint holder, both on by default.
+  `--once` reconciles every `.md` and exits (smoke tests, scripting) and implies neither half; `--no-watch` is endpoint-only, `--no-sync` is watcher-only, and both together is a usage error.
 - `outl doctor [<path>] [--json] [--repair]` — integrity check.
   **Read-only by default**; `--repair` is the only writing mode.
   Full user-facing check list lives in [`docs/doctor.md`](../../docs/doctor.md).
@@ -245,6 +246,13 @@ What that means for the surfaces in this crate:
 - **`outl sync` contends and stands down when it loses.**
   It is the explicit flush for scripts: bring a transport up, force a push/pull pass against every peer, wait, exit.
   When another local process already holds the endpoint it says so and exits, because that process is already pushing these ops out and a 25s route steal would break the sync `outl sync` was asked to help.
+- **`outl serve` contends but never competes — it is the only process built to run forever.**
+  Winning the lease once and holding it for a week is not the same trade as a GUI winning it for a session: it would push every GUI and TUI on the machine permanently into the degraded mode where the sync dot never turns green and Refresh cannot force a pass.
+  So `cmd/sync_supervisor.rs` re-asks every 30s and treats a refusal as a normal state, with each stand-down reason logged once rather than twice a minute.
+  It declines with **no paired peers**, same reasoning as the MCP server: nothing to sync, and dropping the lease leaves it free for the pairing flow that fixes exactly that.
+  It also rebuilds the transport when `.outl/peers.json` changes — `PeersStore` is read once at build, so a device paired after the daemon started would otherwise never be synced with while the daemon reported itself healthy.
+  SIGTERM/SIGINT release the lease; a lease left held by a killed process locks every outl process on the device out of an endpoint.
+  **Only the watcher half takes the per-actor write lock.** The transport buckets writes by `op.actor` and goes through `OpsDirAppendLock`, never the `JsonlStorage::append` path that `ActorWriteLock` guards, so `--no-watch` takes no write lock at all — which is what makes it safe to run permanently beside a GUI, instead of minting that GUI a fresh ephemeral actor and `ops-<ulid>.jsonl` on every launch.
 - **`outl peer pair`/`status`** use a transient endpoint they close before returning (CLI-only, no long-lived client should be mid-pair at the same time).
 
 ## JSON envelope (CLI + MCP)
@@ -277,7 +285,8 @@ src/
 ├── cmd/
 │   ├── mod.rs
 │   ├── init.rs            # outl init
-│   ├── serve.rs           # outl serve
+│   ├── serve.rs           # outl serve — watcher half + wiring
+│   ├── sync_supervisor.rs # outl serve — deferential endpoint lease loop
 │   ├── doctor/            # outl doctor — one file per class of check
 │   │   ├── mod.rs         #   report types + orchestration
 │   │   ├── oplog.rs       #   raw .jsonl sweep, snapshots, offset indexes

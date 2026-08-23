@@ -104,13 +104,29 @@ enum Command {
         /// Workspace path. Overrides `--workspace`.
         path: Option<PathBuf>,
     },
-    /// Run the file watcher; keep the workspace in sync.
+    /// Run the background daemon: watch `.md` files and hold this device's
+    /// P2P endpoint so paired peers sync continuously.
+    ///
+    /// Both halves are on by default. The watcher reconciles external `.md`
+    /// edits into the op log; the sync half holds the iroh endpoint, deferring
+    /// to a GUI or TUI that already has it and taking over when that exits.
+    ///
+    /// `--no-watch` is the mode to leave running permanently beside a GUI you
+    /// also use: without the watcher there is nothing to write, so it takes no
+    /// per-actor write lock and cannot push that GUI onto a fresh ephemeral
+    /// actor (and a fresh `ops-<ulid>.jsonl`) on every launch.
     Serve {
         /// Workspace path. Overrides the global `--workspace`.
         path: Option<PathBuf>,
-        /// Reconcile every `.md` once and exit (no file watcher).
-        #[arg(long)]
+        /// Reconcile every `.md` once and exit (no file watcher, no sync).
+        #[arg(long, conflicts_with_all = ["no_watch", "no_sync"])]
         once: bool,
+        /// Skip the file watcher; only hold the P2P endpoint.
+        #[arg(long)]
+        no_watch: bool,
+        /// Skip P2P sync; only run the file watcher.
+        #[arg(long)]
+        no_sync: bool,
     },
     /// Check workspace integrity.
     Doctor {
@@ -319,8 +335,8 @@ enum Command {
     /// For scripts that mutate via the CLI and must flush to peers before the
     /// process dies — a normal `outl page/block/...` command is too short-lived
     /// to bind an iroh endpoint, so it relies on whichever long-lived process
-    /// on this device holds the endpoint (a GUI, or `outl mcp serve`) plus the
-    /// catch-up re-sync instead. `outl sync` is the explicit flush; if one of
+    /// on this device holds the endpoint (a GUI, a TUI, `outl mcp serve`, or
+    /// `outl serve`) plus the catch-up re-sync instead. `outl sync` is the explicit flush; if one of
     /// those already holds the endpoint it says so and exits, since that
     /// process is already pushing these ops out.
     ///
@@ -393,9 +409,14 @@ fn main() -> Result<()> {
             let p = resolve_path(cli.workspace.as_ref(), path.as_ref())?;
             cmd::migrate_to_per_page_ops::run(&p)
         }
-        Some(Command::Serve { path, once }) => {
+        Some(Command::Serve {
+            path,
+            once,
+            no_watch,
+            no_sync,
+        }) => {
             let p = resolve_path(cli.workspace.as_ref(), path.as_ref())?;
-            cmd::serve::run(&p, once)
+            cmd::serve::run(&p, once, !no_watch, !no_sync)
         }
         Some(Command::Doctor {
             path,

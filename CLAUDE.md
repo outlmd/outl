@@ -164,6 +164,36 @@ Violating any one breaks user trust irreversibly.
     **The general rule:** invariant 9 asks where the problem moved to.
     This one asks **who was standing on the thing you moved.**
 
+11. **A cost only argues against a design if that design causes it.**
+    Rejecting an approach because it is expensive is sound only after you have attributed the expense.
+    A cost the alternative pays too is not a tiebreaker — it is a separate problem, and folding it into an unrelated decision buys a worse design *and* leaves the real problem unfixed.
+
+    Not theory.
+    Issue #244 asked for a background sync daemon.
+    `outl serve` was already the long-lived background process and already had no P2P at all, so the obvious move was to give it the transport.
+    That got rejected on the grounds that a permanently-running `serve` holds the device write actor, which pushes every later GUI and TUI launch onto a fresh ephemeral actor and a fresh `ops-<ulid>.jsonl` — 16 such files, 1 to 221 ops each, had already accumulated in a real 20-actor workspace.
+    The conclusion drawn was "so sync needs its own command".
+
+    The attribution was wrong.
+    The actor cost comes from running *any* process permanently, not from what that process does while it runs.
+    `outl serve` under `launchd` holds the write actor whether or not it also syncs.
+    The proposed second command only dodged the cost because it dropped the **file watcher** — and a flag drops the watcher just as well, at the price of one boolean instead of a second daemon, a second `launchd` job, and a second thing that can die quietly.
+
+    Before a cost rules a design out:
+
+    1. **Would the alternative pay it too?**
+       If yes, it cannot choose between them, and quoting it as though it could hides that you have no argument yet.
+    2. **Does the cost track the feature, or the lifetime?**
+       "Runs forever" and "does X" are different properties, and only one of them is the thing you are deciding.
+    3. **What is the smallest thing that avoids it?**
+       A flag, a parameter and a whole new entry point are not equivalent.
+       The reflex to reach for the largest is strongest exactly when the argument feels settled.
+    4. **Did it already exist?**
+       A pre-existing cost you happened to discover while investigating is a finding that deserves its own issue, not evidence about the change in front of you.
+
+    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved.
+    This one asks **whether the problem you are avoiding is even caused by the thing you are changing.**
+
 ## Repo layout
 
 ```
@@ -324,6 +354,7 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
 - ❌ Overwriting a `.md` because its sidecar hash matches (invariant 8 — that proves outl wrote it last, not that the op log holds it)
 - ❌ Rewriting a sidecar to agree with content you did not emit ops for (this is what *produces* the state invariant 8 defends against)
 - ❌ Fixing one direction of a `.md` ↔ tree divergence without stating what happens in the other
+- ❌ Rejecting a design over a cost the alternative pays too, or over a cost that was already there before your change (invariant 11 — attribute the cost before you let it decide)
 - ❌ Comparing HLCs without actor tiebreak
 - ❌ Treating `Delete` as physical removal
 - ❌ Skipping tests because "the algorithm is the same as the paper"

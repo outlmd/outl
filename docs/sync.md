@@ -467,7 +467,7 @@ Syncing with paired devices…
 Your host's pages and journals now appear in the joiner's folder.
 From here on, edits on either device propagate automatically whenever both are online.
 A running GUI/TUI syncs continuously.
-A bare CLI edit converges on the next `outl sync`, or the next time a long-lived client (GUI, TUI, or `outl mcp serve`) opens the workspace — the ephemeral CLI never binds an endpoint, documented in `crates/outl-cli/CLAUDE.md`.
+A bare CLI edit converges on the next `outl sync`, or the next time a long-lived client (GUI, TUI, `outl mcp serve`, or `outl serve`) opens the workspace — the ephemeral CLI never binds an endpoint, documented in `crates/outl-cli/CLAUDE.md`.
 
 > The ticket is **not** an iroh `NodeTicket` — that type doesn't exist in iroh 1.0.0.
 > It is a base64 of `serde_json(EndpointAddr)` (node id + relay + direct addrs), which feeds straight back into `endpoint.connect`.
@@ -494,9 +494,14 @@ The list below is therefore a description of what usually happens, not a rule an
 Losing the election is a working state: the loser writes its ops to the shared `ops/` dir and the holder pushes them out on its next catch-up pass.
 
 - **Long-lived processes contend.**
-  A GUI (desktop / mobile), the TUI and `outl mcp serve` all ask, and take whatever they are granted.
+  A GUI (desktop / mobile), the TUI, `outl mcp serve` and `outl serve` all ask, and take whatever they are granted.
   The winner binds the endpoint, announces after each local mutation, and answers inbound dials.
   A GUI opened at login therefore keeps the endpoint and an MCP server started later stays passive; with no GUI at all, the MCP server *is* the peer, which is the whole point.
+- **`outl serve` contends but never competes.**
+  It is the one process designed to run forever, so it asks for the lease every 30s and treats a refusal as normal: a GUI or TUI that already holds the endpoint keeps it, and the daemon takes over when that exits.
+  Anything else would push every GUI on the machine permanently into the degraded mode where the sync indicator never turns green.
+  It also stands down with no paired devices, so it never holds the endpoint away from the pairing flow that would fix that.
+  See [`docs/cli.md` → `outl serve`](cli.md#outl-serve--the-background-daemon) for which flags to run permanently.
 - **Every long-lived client polls `ops/` too, endpoint or not.**
   iroh signals only on its own wire receipts; the poller signals on any growth of a peer's `ops-<actor>.jsonl`, including ops a co-resident process wrote.
   Neither subsumes the other, so both always run.
@@ -557,9 +562,11 @@ If you want the joiner's folder to stay a *separate* workspace, pair from a **di
 **Paired, but nothing shows up.**
 `outl peer pair` sets up the link; it doesn't transfer history.
 Run `outl sync` on the device that's missing notes, or open a GUI/TUI client (it syncs on launch and keeps syncing while open).
+For a machine that should keep pulling peers' ops with no GUI open, run `outl serve --no-watch` under `launchd` / `systemd`.
+That converges the **op log**; the `.md` files on that machine are re-projected when a client next opens the workspace, not by the daemon.
 
 **`outl peer status` says a peer is offline.**
-The other device has to be running a long-lived client (GUI, TUI, or `outl mcp serve`) to answer.
+The other device has to be running a long-lived client (GUI, TUI, `outl mcp serve`, or `outl serve`) to answer.
 A device that only ever runs one-shot CLI commands has no endpoint to reach — the ephemeral CLI never binds one, documented in `crates/outl-cli/CLAUDE.md`.
 A device runs **one** sync endpoint at a time, taken by whichever long-lived process started first; the others sync through the shared `ops/` dir behind it.
 So a machine running only `outl mcp serve` does answer, and a machine where a GUI is already open answers through the GUI.

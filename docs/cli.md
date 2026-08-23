@@ -270,7 +270,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | CLI                                          | MCP tool                |
 |----------------------------------------------|-------------------------|
 | `outl init <path>`                           | —                       |
-| `outl serve [--workspace=…]`                 | —                       |
+| `outl serve [<path>] [--once] [--no-watch] [--no-sync]` | —           |
 | `outl doctor [--json] [--repair] [--force]`  | `outl_workspace_doctor` |
 | `outl reconcile [--ahead-of-log] [--allow-bulk-delete]` | —             |
 | `outl recover [--apply] [--min-lines=N]`     | —                       |
@@ -282,6 +282,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl import roam\|logseq\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
 
 `init`, `serve`, `reconcile`, `recover`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
+
 
 `outl import` runs the adapter-based pipeline in the `outl-import` crate for every source (`roam` = JSON backup file, `logseq` = graph directory, `obsidian` = vault directory; `auto` detects from the source's shape).
 `((uid))` block refs and `{{embed}}`s resolve to real `((blk-XXXXXX))` handles, not page-link fallbacks.
@@ -374,8 +375,44 @@ It defaults to the machine hostname; the GUI clients default it to "desktop" / "
 
 `outl sync` forces a one-shot P2P sync pass (bring the iroh transport up, exchange ops with every paired device, exit).
 It's for scripts that mutate via the CLI and must flush to peers before the process dies — a normal short-lived CLI mutation can't keep a connection alive long enough.
-The long-lived surfaces (`outl mcp serve`, the desktop/TUI apps) sync continuously and don't need it.
+The long-lived surfaces (`outl serve`, `outl mcp serve`, the desktop/TUI apps) sync continuously and don't need it.
 If one of them is running on this machine, `outl sync` says so and exits without doing anything: a device binds one sync endpoint at a time, and that process is already pushing your ops out.
+
+#### `outl serve` — the background daemon
+
+Two halves, both on by default:
+
+- the **file watcher** reconciles external `.md` edits into the op log (`--no-watch` turns it off);
+- the **sync supervisor** holds this device's iroh endpoint so paired peers converge continuously (`--no-sync` turns it off).
+
+`--once` reconciles every `.md` and exits; it implies neither half and conflicts with both flags.
+Turning both halves off is a usage error rather than a process that runs and does nothing.
+
+**The sync half defers.**
+One endpoint per device identity, elected not assigned — so the supervisor asks for the lease every 30s and treats a refusal as a normal state.
+A desktop or TUI that already holds the endpoint keeps it; the daemon takes over when that process exits, and hands it back the next time one wins.
+It also stands down entirely when no devices are paired, since holding the endpoint to sync with nobody only denies it to a GUI that could be using it to pair.
+It re-reads `.outl/peers.json` and rebuilds the transport when that file changes, so a device paired *after* the daemon started is actually synced with.
+
+**Which flag to run permanently.**
+The watcher emits ops, so it takes the exclusive per-actor write lock, and any process that loses the race for the device actor gets a fresh ephemeral actor and its own `ops-<ulid>.jsonl`.
+That is cheap for an occasional overlap and expensive for a daemon: `outl serve` running forever holds the device actor, so every later GUI or TUI launch mints one more op-log file.
+
+The sync half has no such cost — the transport writes peer ops to `ops-<peer>.jsonl` and uses your actor id only for the vector clock it offers.
+So:
+
+- **`outl serve --no-watch`** — the mode to leave running beside a GUI you also use. No write lock, no ephemeral actors.
+- **`outl serve`** — both halves, for a headless box where nothing else opens the workspace.
+
+**What it converges is the op log, not the `.md` files.**
+The daemon never re-projects: peer ops land in `ops/`, the materialised tree is reloaded in memory, and the `.md` on that machine keeps whatever text it had.
+They catch up the next time a client opens the workspace, or on the next `outl reconcile`.
+So a headless box stays a correct *replica*; it is not a place to read current notes off disk.
+Re-projecting from a daemon has to clear [invariant 8](../CLAUDE.md) first — overwriting a `.md` that holds content the log never saw is the one failure this project treats as unrecoverable — so it is deliberately not done here.
+
+SIGTERM and SIGINT both shut down cleanly, releasing the endpoint lease.
+That release matters: a lease left held by a killed process locks every outl process on the device out of an endpoint.
+
 
 ### `outl doctor`
 

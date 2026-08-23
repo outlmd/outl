@@ -142,7 +142,8 @@ Practical consequences:
 - Your process may get an ephemeral actor when the app holds this device's actor.
   That is normal, not an error.
   (The device actor itself comes from the device store outside the workspace, not from `.outl/config.toml` — see [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).)
-- Ops you write while a long-lived outl process runs (a GUI, the TUI, `outl mcp serve`) are picked up by its watcher and shipped to peers by its transport.
+- Ops you write while a long-lived outl process runs (a GUI, the TUI, `outl mcp serve`, `outl serve`) are picked up by its poller and shipped to peers by its transport.
+  `outl serve --no-watch` is the headless case: it has a transport and no file watcher, and the transport is the half that ships your ops.
 - Ops written while nothing else runs sit on disk until any long-lived surface opens, then converge.
 - Reads see whatever the log held when you called `open`.
   A long-running embedder that needs fresh peer state reopens, or wires `outl_actions::sync::SyncEngine` the way the MCP server does.

@@ -52,7 +52,7 @@ tempfile = { workspace = true }
 semver = { workspace = true }
 # Only `outl peer pair` needs a runtime — to drive the async iroh pairing
 # handshake from this otherwise-sync binary. Minimal multi-thread feature set.
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "signal", "macros"] }
 
 [dev-dependencies]
 # Backdating a binding's mtime is the only way to exercise the device

@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **`outl serve` is a real background daemon — it holds the P2P endpoint now, not just the file watcher.**
+  Continuous sync was never the missing piece: once any process holds this device's iroh endpoint, the catch-up loop and gossip converge with every paired peer on their own. What was missing is a *headless* process willing to hold it. `outl serve` was already the long-lived background process and never called `build_default_transport`, so a machine running it under `launchd` synced with nobody and said nothing about it — the same shape as [#220](https://github.com/outlmd/outl/issues/220), in a different command.
+
+  Both halves are on by default and each has an off switch: `--no-watch` (endpoint only) and `--no-sync` (watcher only). `--once` is unchanged.
+
+  **The sync half defers rather than competes.** One endpoint per device identity, elected not assigned — so it asks for the lease every 30s and treats a refusal as a normal state. A GUI or TUI that already holds the endpoint keeps it; the daemon takes over when that exits. Anything else would push every GUI on the machine permanently into the degraded mode where the sync dot never turns green. It stands down entirely with no paired devices, so it never holds the endpoint away from the pairing flow that fixes that, and it rebuilds the transport when `.outl/peers.json` changes — a device paired *after* the daemon started would otherwise never be synced with, while the daemon reported itself healthy.
+
+  **Which flag to leave running matters.** The watcher emits ops, so it takes the per-actor write lock, and whoever loses that race gets a fresh ephemeral actor and its own `ops-<ulid>.jsonl`. A daemon holding the device actor forever therefore mints one more op-log file on every later GUI launch. The sync half carries no such cost, so `--no-watch` is the mode to run permanently beside a GUI you also use.
+
+  SIGTERM and SIGINT both release the endpoint lease on the way out. A lease left held by a killed process locks every outl process on the device out of an endpoint.
+  ([#244](https://github.com/outlmd/outl/issues/244))
+
 - **Page history — the op log holds every revision and now something can read it.**
   `Op::Edit` carries a Yrs delta, not a snapshot, and the log is append-only, so every past state of every block has always been reconstructible. Nothing surfaced any of it. The only history a user had was `outl backup`, which is workspace-granular git snapshots and is not wired on desktop or mobile at all — on the workspace this was built against, that meant one commit, twelve days old, on a graph edited daily.
 

@@ -55,11 +55,20 @@
 //! cannot add a device at all. It is not licence to bind an endpoint on any
 //! other path.
 //!
-//! These standalone [`host_pairing`] / [`join_pairing`] functions survive only
-//! for the **CLI** (`outl peer pair`), which has *no* running transport — so
-//! binding a one-shot endpoint here is the only option and there is no route to
-//! steal. To keep the overlap with any concurrent endpoint bounded, both still
-//! **close their endpoint** (`endpoint.close().await`) before returning.
+//! These standalone [`host_pairing`] / [`join_pairing`] functions survive for
+//! the **CLI** (`outl peer pair`), which has no running transport of its own,
+//! so binding a one-shot endpoint here is the only option.
+//!
+//! It used to be the case that there was also no route to steal. That premise
+//! is gone: `outl serve` is built to hold the endpoint for as long as the
+//! machine is up, so on a box running it there IS a live route, and a pairing
+//! endpoint takes it for the length of the handshake. The daemon's stand-down
+//! with no paired peers covers only the FIRST device; pairing a second one
+//! overlaps a running transport. That overlap is accepted for the same reason
+//! the GUI accepts it — a device you cannot add is worse — and bounded the
+//! same way: both paths still **close their endpoint**
+//! (`endpoint.close().await`) before returning, and the daemon rebuilds its
+//! transport when `peers.json` changes.
 
 use std::path::Path;
 use std::sync::Arc;
