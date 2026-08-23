@@ -404,6 +404,10 @@ So:
 - **`outl serve --no-watch`** — the mode to leave running beside a GUI you also use. No write lock, no ephemeral actors.
 - **`outl serve`** — both halves, for a headless box where nothing else opens the workspace.
 
+`--no-watch` **exits non-zero when `[sync] transport` is `"file"`**, because holding the P2P endpoint is then the only job it had and there is none.
+Exiting 0 there would read as success to a process manager, which would restart it into the same config forever.
+Plain `outl serve` only warns: the watcher still has work.
+
 **What it converges is the op log, not the `.md` files.**
 The daemon never re-projects: peer ops land in `ops/`, the materialised tree is reloaded in memory, and the `.md` on that machine keeps whatever text it had.
 They catch up the next time a client opens the workspace, or on the next `outl reconcile`.

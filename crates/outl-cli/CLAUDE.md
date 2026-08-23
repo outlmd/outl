@@ -57,6 +57,7 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   Opening today's journal then auto-instantiates it.
 - `outl serve [<path>] [--once] [--no-watch] [--no-sync]` — the background daemon: file watcher + P2P endpoint holder, both on by default.
   `--once` reconciles every `.md` and exits (smoke tests, scripting) and implies neither half; `--no-watch` is endpoint-only, `--no-sync` is watcher-only, and both together is a usage error.
+  `--no-watch` also **fails** (non-zero) when `[sync] transport` is `"file"`: with no watcher and no P2P it has no job, and exiting 0 would have a process manager restart it into that config forever. Plain `outl serve` only warns there.
 - `outl doctor [<path>] [--json] [--repair]` — integrity check.
   **Read-only by default**; `--repair` is the only writing mode.
   Full user-facing check list lives in [`docs/doctor.md`](../../docs/doctor.md).
@@ -249,6 +250,7 @@ What that means for the surfaces in this crate:
 - **`outl serve` contends but never competes — it is the only process built to run forever.**
   Winning the lease once and holding it for a week is not the same trade as a GUI winning it for a session: it would push every GUI and TUI on the machine permanently into the degraded mode where the sync dot never turns green and Refresh cannot force a pass.
   So `cmd/sync_supervisor.rs` re-asks every 30s and treats a refusal as a normal state, with each stand-down reason logged once rather than twice a minute.
+  One exception to the 30s: after it tears the transport down **itself** (a `peers.json` change), it retries at 500ms for 10s. `SyncTransport::shutdown` only signals, and the endpoint lease is released later on the transport's own detached thread, so the re-acquire races that teardown. Without the exception the daemon loses to itself and then reports "another outl process holds the endpoint" about a process that does not exist.
   It declines with **no paired peers**, same reasoning as the MCP server: nothing to sync, and dropping the lease leaves it free for the pairing flow that fixes exactly that.
   It also rebuilds the transport when `.outl/peers.json` changes — `PeersStore` is read once at build, so a device paired after the daemon started would otherwise never be synced with while the daemon reported itself healthy.
   SIGTERM/SIGINT release the lease; a lease left held by a killed process locks every outl process on the device out of an endpoint.

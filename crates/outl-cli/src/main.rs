@@ -122,6 +122,10 @@ enum Command {
         #[arg(long, conflicts_with_all = ["no_watch", "no_sync"])]
         once: bool,
         /// Skip the file watcher; only hold the P2P endpoint.
+        ///
+        /// Fails when `[sync] transport` is "file": with no watcher and no
+        /// endpoint to hold there is nothing left to do, and exiting 0 would
+        /// have a process manager restart it into that config forever.
         #[arg(long)]
         no_watch: bool,
         /// Skip P2P sync; only run the file watcher.

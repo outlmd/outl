@@ -16,7 +16,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   **Which flag to leave running matters.** The watcher emits ops, so it takes the per-actor write lock, and whoever loses that race gets a fresh ephemeral actor and its own `ops-<ulid>.jsonl`. A daemon holding the device actor forever therefore mints one more op-log file on every later GUI launch. The sync half carries no such cost, so `--no-watch` is the mode to run permanently beside a GUI you also use.
 
-  SIGTERM and SIGINT both release the endpoint lease on the way out. A lease left held by a killed process locks every outl process on the device out of an endpoint.
+  SIGTERM and SIGINT both release the endpoint lease on the way out. A lease left held by a killed process locks every outl process on the device out of an endpoint. `--no-watch` exits non-zero when `[sync] transport` is `"file"`, since holding the endpoint was its only job; plain `outl serve` warns and keeps watching.
   ([#244](https://github.com/outlmd/outl/issues/244))
 
 - **Page history — the op log holds every revision and now something can read it.**
