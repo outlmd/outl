@@ -101,13 +101,12 @@ Two borderline cases were **rejected on purpose**.
 ### Gaps these RFCs surfaced
 
 Writing them turned up behaviour nothing pins.
-Each is recorded in its RFC's **Guarded by** row as `none found — gap` rather than papered over with an invented test name:
+Each is recorded in its RFC's **Guarded by** row as `none found — gap` rather than papered over with an invented test name.
+Most of the original list has since been closed: the ghost-block policy (#122), the op-log payload rule, #169's random-workspace agreement check and the desktop char-cursor nudge all have named tests now, listed in their RFCs' **Guarded by** rows.
+What remains open:
 
-- **#122** — "don't write an op for what the user didn't do" (the ghost-block policy) has no automated test.
-- **Asset bytes never entering the op log** holds by construction only: `Op` has no asset variant, and nothing asserts it.
-- **`CaTlsConfig::system()`** and the relay 502 path are untested.
-- **#169's proposed random-workspace property test** does not exist — `outl-actions` has no `proptest` dependency, and `bench_backlinks` is `#[ignore]`d, so the 3.8 s regression it was written against would pass CI today.
-- **The desktop char-cursor nudge** (`shortcuts.support.test.ts`) has no test, nor does #41's arrow navigation.
+- **`CaTlsConfig::system()`** is still untested (the compiler guards the feature flag, but removing the `.ca_tls_config(...)` call while keeping the feature would pass), and the relay WebSocket 502 path has no test because there is no fix to guard.
+- **#41's arrow-key block navigation** has no test: the edge-aware first-line/last-line crossing is unpinned.
 
 Two RFCs also correct the record on what shipped.
 [RFC 0128](0128-boot-and-memory-at-scale.md) says outright that #179's Front B never landed — `actor_census` still does a full `all_ops()` — instead of claiming the issue is closed.

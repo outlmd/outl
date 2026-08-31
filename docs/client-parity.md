@@ -29,7 +29,7 @@ A new variant **does not compile** until all three clients have declared what th
 
 That is the whole mechanism.
 The gap gets recorded when it is created, by the person creating it — instead of being discovered months later by a user pressing a key that does nothing.
-It is [invariant 10](../CLAUDE.md) applied to features rather than authority: *when you add a capability, enumerate who does not have it.*
+It is [invariant 12](../CLAUDE.md): *when you add a capability, enumerate who does not have it.*
 
 ## How to read it
 
