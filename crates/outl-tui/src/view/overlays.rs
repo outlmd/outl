@@ -971,6 +971,8 @@ pub(crate) fn render_help_popup(f: &mut ratatui::Frame<'_>, full: Rect, app: &Ap
 /// `outl-shortcuts`, so a chord added to the catalog does NOT appear
 /// here on its own. The guard test at the bottom of this file is what
 /// keeps the reminder chords from silently dropping out again.
+/// Note however, that at least one keybinding *change* was missed -
+/// `\` -> Ctrl+E for the sidebar toggle.
 fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
     match HELP_TABS.get(tab).copied().unwrap_or("Normal") {
         "Normal" => vec![
@@ -1006,7 +1008,7 @@ fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
             Line::from("  Ctrl+S      force save"),
             Line::from("  Ctrl+L      reload workspace from disk"),
             Line::from("  B           toggle inline backlinks"),
-            Line::from("  \\           toggle left sidebar (opens with focus on Pinned)"),
+            Line::from("  Ctrl+E           toggle left sidebar (opens with focus on Pinned)"),
             Line::from("  q q         quit (chord)"),
             Line::from(""),
             Line::from(Span::styled("Properties (key:: value)", theme.help_title)),
@@ -1058,7 +1060,7 @@ fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
         ],
         "Sidebar" => vec![
             Line::from(Span::styled("Open / close", theme.help_title)),
-            Line::from("  \\           toggle sidebar (opens with focus on Pinned)"),
+            Line::from("  Ctrl+E           toggle sidebar (opens with focus on Pinned)"),
             Line::from("  Esc         return focus to the outline (sidebar stays open)"),
             Line::from(""),
             Line::from(Span::styled("Inside the sidebar", theme.help_title)),
