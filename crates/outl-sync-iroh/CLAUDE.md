@@ -32,6 +32,9 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
     They never call `host_pairing` / `join_pairing`.
   The endpoint-agnostic handshake halves (`accept_host_handshake` / `run_join_handshake` in `pairing`) are shared by both paths.
   The GUI side is wired through `engine_pairing` (the `PairingHub` + `PairingProtocolHandler` mounted on the sync router).
+  **The ticket carries a secret** (`mint_ticket` → `PairingSecret`); the joiner proves possession with `blake3::keyed_hash(secret, its own node id)`, checked before the host discloses its workspace id.
+  Keyed to the node id on purpose — a bare hash would be a replayable bearer token — and interlocked with `verify_declared_identity`, which pins that node id to the authenticated TLS identity. Neither check stands alone.
+  **A refused attempt must re-arm.** The CLI loops until the window closes; the GUI takes `arm_snapshot` and only `complete_arm`s on success. Consuming the arm on any inbound dial turns the proof into a one-packet denial of the pairing flow (issue #159).
 
 ## Workspace identity is a stable shared id, NOT the path (load-bearing)
 
@@ -46,7 +49,12 @@ Devices live at different paths (desktop `~/outl-p2p`, mobile `…/app.outl.mobi
   `workspace_topic_id` = `blake3(workspace_id)`, so two devices on the same workspace land on the same topic regardless of path.
 - **Sync request.**
   `SyncRequest.workspace_id` carries the id; `SyncProtocolHandler::serve` **validates it against the local id** (`workspace-mismatch` close) **and checks `remote_id()` is in `peers.json`** (read fresh per connection; `unknown-peer` close).
-  Issue #158: the id only proves the peer thinks it belongs; a removed device still knows it, so revocation needs the peer check.
+  Issue #158: the id only proves the peer *thinks* it belongs; a removed device still knows it.
+  **The check alone was not a revocation** — the add-only membership merge re-added the peer within one 5s tick and the check then passed honestly.
+  `PeersStore::remove` leaves a tombstone (`peers.json` → `revoked`) and `merge_membership` honours it, so removal holds **on this device**; it is never gossiped, so other devices keep syncing with the peer until they remove it too.
+  Never give the tombstone a TTL (a revocation that undoes itself on a timer) and never drop the `PeersStore::add` clear (re-pairing must work).
+  **For a device the user no longer holds, the answer is `rotate_workspace_identity` (`revoke.rs`), not a propagated tombstone.**
+  Gossiping a removal would let any paired device evict any other, and the stolen-laptop attacker *holds* a paired device — so they move first. Rotation has no race: the new id never leaves the devices being re-paired, and every mechanism enforcing it (topic = `blake3(id)`, the `workspace-mismatch` close, pairing adoption) already existed. [RFC 0155](../../docs/rfcs/0155-peer-trust.md).
 - **Pairing makes the joiner adopt the host's id.**
   The handshake `PairingPayload` carries each side's id; the **host keeps** its id and the **joiner adopts** it *before* the immediate post-pair `delta_sync` fires.
   Adoption is **persist-first**: `adopt_workspace_id` writes the host's id to `.outl/workspace-id`, then flips the in-memory handle; a failed write does NOT adopt (retry-safe).
@@ -374,24 +382,10 @@ Regression: `refresh_peer_direct_addr_replaces_stale_keeps_relay_and_is_idempote
 
 ## STOPGAP: IPv4-only bind (iroh 1.0.0 multipath workaround)
 
-**All four endpoints bind IPv4-only** through `bind::n0_builder_ipv4_only` — `run_iroh`, `bind_pairing_endpoint`, `probe_peers`, `bind_sync_endpoint`.
-The `bind` module owns the bug, the fix and the revert condition; dial and accept must both go through it, because dropping IPv6 on one side only lets the other advertise a dead path.
+Why `bind_pairing_endpoint` and the sync endpoint bind IPv4 only, and what has to be true before it is removed:
+[`docs/iroh-internals.md`](../../docs/iroh-internals.md) → STOPGAP.
+It is a workaround for an upstream bug, not a design decision — do not "clean it up" without reading that section.
 
-**It narrows the bug, it does not close it.**
-Multipath opens paths to **all** of a peer's candidate addrs at once and one unreachable addr stalls the whole connect/accept (`MultipathNotNegotiated`, ~30s) rather than converging on a working path.
-Binding IPv4-only removes the usual offender (a global IPv6 addr that is "No route to host") but an unreachable **IPv4** addr stalls it identically — a VM bridge or VPN `utun` addr in our own ticket, or a peer's stale DHCP lease in theirs.
-Signature: `sendmsg error: … HostUnreachable` / `Host is down` toward one addr, then a connect timeout with the relay up the whole time.
-
-### Configurable relay (default: outl's own)
-
-`n0_builder_ipv4_only(relay_url: Option<&str>)` picks the relay on top of the IPv4-only STOPGAP.
-Default is outl's own dedicated relay, `DEFAULT_RELAY_URL` (`use1-1.relay.avelino.outl.iroh.link`, via `RelayMode::custom`) — the n0 public relay proved slow/unreachable on some networks.
-A non-empty `[sync] relay_url` overrides it; a parse error falls back to `presets::N0` with a warning.
-Pairing / status / test pass `None`, which is **not** "the n0 preset" — `None` resolves to `DEFAULT_RELAY_URL` too, so every endpoint rides outl's relay by default.
-Only the long-lived **sync** endpoint threads the *configured* one (`run_iroh` ← `IrohSyncTransport::new` ← `outl_config::load().sync.relay_url()`), so only a deployment that overrides `[sync] relay_url` sees a split.
-See `docs/relay.md` / `docs/config.md`.
-
-**Revert condition:** delete the `bind` module once iroh > 1.0.0 ships the multipath fallback fix, and let every call site go back to the plain dual-stack `Endpoint::builder(presets::N0)` builder (details in the module docs).
 
 ## iroh 1.0.0 API notes (load-bearing)
 

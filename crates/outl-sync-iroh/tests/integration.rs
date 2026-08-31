@@ -23,7 +23,8 @@ use std::time::Duration;
 use outl_core::id::ActorId;
 use outl_core::WorkspaceId;
 use outl_sync_iroh::{
-    host_pairing, join_pairing, test_support, IrohIdentity, PeersStore, WorkspaceAdoption,
+    decode_ticket, host_pairing, join_pairing, mint_ticket, test_support, IrohIdentity, PeersStore,
+    WorkspaceAdoption,
 };
 
 mod common;
@@ -803,4 +804,153 @@ async fn wait_for_pairing_ready(transport: &outl_sync_iroh::IrohSyncTransport) {
             }
         }
     }
+}
+
+/// Issue #159, end to end: an uninvited device that dials the armed host must
+/// be refused **and must not consume the pairing window**.
+///
+/// This is the half that is easy to get wrong in the safe-looking direction.
+/// Before the proof existed, `host_pairing` accepted exactly one connection —
+/// so once a check that can *fail* was added, the first stranger to dial would
+/// have ended the user's pairing session, and the device they were actually
+/// trying to pair would find nothing listening. A security fix that turns into
+/// a one-packet denial of the feature it protects is not a fix.
+///
+/// The attacker here knows the host's address but not the invite, which is the
+/// exact position of any existing mesh member (membership gossip hands every
+/// peer every other peer's address) or anyone who photographed the screen
+/// rather than the code.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_joiner_does_not_consume_the_pairing_window() {
+    let host_dir = tempfile::tempdir().expect("host tempdir");
+    let evil_dir = tempfile::tempdir().expect("attacker tempdir");
+    let join_dir = tempfile::tempdir().expect("joiner tempdir");
+
+    let host_identity = fresh_identity(host_dir.path(), "host");
+    let evil_identity = fresh_identity(evil_dir.path(), "evil");
+    let join_identity = fresh_identity(join_dir.path(), "join");
+
+    let evil_node_id = evil_identity.node_id().to_string();
+    let join_node_id = join_identity.node_id().to_string();
+
+    let host_peers = host_dir.path().join("peers.json");
+    let host_root = host_dir.path().to_path_buf();
+    let host_peers_for_task = host_peers.clone();
+
+    let (ticket_tx, ticket_rx) = tokio::sync::oneshot::channel::<String>();
+
+    let host_task = tokio::spawn(async move {
+        let mut ticket_tx = Some(ticket_tx);
+        tokio::time::timeout(
+            STEP_TIMEOUT,
+            host_pairing(
+                host_identity,
+                &host_peers_for_task,
+                &host_root,
+                Some("host-device".into()),
+                |ticket, _qr| {
+                    if let Some(tx) = ticket_tx.take() {
+                        let _ = tx.send(ticket.to_string());
+                    }
+                },
+            ),
+        )
+        .await
+        .expect("host pairing timed out — it did not stay armed after refusing")
+        .expect("host pairing failed")
+    });
+
+    let advertised = ticket_rx.await.expect("never received host ticket");
+
+    // Pin both dials to the host's loopback address. The host advertises one
+    // direct address per local interface, and with no relay reachable iroh
+    // 1.0.0's path selection settles on a dead one about half the time when the
+    // same host is dialled twice. Leaving that in would make this test a
+    // measurement of path selection rather than of the accept loop.
+    let (advertised_addr, _) = decode_ticket(&advertised).expect("decode advertised ticket");
+    let Some(loopback) = test_support::loopback_only(&advertised_addr) else {
+        eprintln!("host bound no loopback address; skipping");
+        return;
+    };
+    let real_ticket =
+        test_support::retarget_ticket(&advertised, loopback).expect("retarget the ticket");
+
+    // Forge a ticket for the SAME address with a secret the host never issued.
+    // Everything the attacker needs is public; the only thing it lacks is the
+    // invite, which is precisely what the proof tests.
+    let (host_addr, _issued) = decode_ticket(&real_ticket).expect("decode the real ticket");
+    let (forged_ticket, _forged_secret) = mint_ticket(&host_addr).expect("forge a ticket");
+    // Same address, different secret: the attacker knows where the host is and
+    // nothing else.
+    assert_ne!(
+        forged_ticket, real_ticket,
+        "the forged ticket must differ from the issued one",
+    );
+
+    // 1. The attacker dials first and must be refused.
+    let evil_peers = evil_dir.path().join("peers.json");
+    let evil_result = tokio::time::timeout(
+        STEP_TIMEOUT,
+        join_pairing(
+            evil_identity,
+            &forged_ticket,
+            &evil_peers,
+            evil_dir.path(),
+            Some("evil-device".into()),
+        ),
+    )
+    .await
+    .expect("attacker pairing attempt hung");
+    assert!(
+        evil_result.is_err(),
+        "a device without the issued ticket must not pair",
+    );
+
+    // 2. The real device dials afterwards and must still get through — this is
+    //    the re-arm. If the host had consumed its window on the refusal, this
+    //    hangs until STEP_TIMEOUT and the assertion above the spawn fires.
+    let join_peers = join_dir.path().join("peers.json");
+    let join_outcome = tokio::time::timeout(
+        STEP_TIMEOUT,
+        join_pairing(
+            join_identity,
+            &real_ticket,
+            &join_peers,
+            join_dir.path(),
+            Some("join-device".into()),
+        ),
+    )
+    .await
+    .expect("legitimate pairing timed out — the host stopped accepting after the refusal");
+    let (join_entry, _adoption) = join_outcome.expect("legitimate pairing failed");
+
+    let host_entry = host_task.await.expect("host task panicked");
+
+    // 3. The host paired with the invited device, and only that one.
+    assert_eq!(
+        host_entry.node_id, join_node_id,
+        "host must pair with the invited device",
+    );
+    let host_store = PeersStore::load_or_default(&host_peers).expect("load host peers");
+    assert!(
+        host_store.list().iter().any(|p| p.node_id == join_node_id),
+        "the invited device is missing from the host's peers.json",
+    );
+    assert!(
+        host_store.list().iter().all(|p| p.node_id != evil_node_id),
+        "the refused device was persisted anyway — the check ran too late",
+    );
+
+    // 4. And the attacker learned nothing: no host entry on its side. The host
+    //    verifies the proof BEFORE sending its payload, so a refused dialer
+    //    never receives the workspace identity it was after.
+    let evil_store = PeersStore::load_or_default(&evil_peers).expect("load attacker peers");
+    assert!(
+        evil_store.list().is_empty(),
+        "a refused joiner must not come away with the host's peer entry",
+    );
+    assert!(
+        !join_entry.node_id.is_empty(),
+        "the joiner came away with the host's entry",
+    );
 }

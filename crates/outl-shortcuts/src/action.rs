@@ -278,3 +278,212 @@ pub enum Action {
     /// Redo (`Ctrl+R` in TUI Normal; `Cmd+Shift+Z` desktop).
     Redo,
 }
+
+impl Action {
+    /// Every variant in the catalog, in declaration order.
+    ///
+    /// Kept in step with the enum by `all_matches_the_enum` in this
+    /// module's tests: a variant missing here is a variant the parity
+    /// table and every coverage test would silently skip, which is
+    /// the same "nothing fails, the gap just goes unrecorded" shape
+    /// this list exists to close.
+    pub const ALL: &'static [Action] = &[
+        Action::OpenPicker,
+        Action::OpenCommandPalette,
+        Action::ToggleHelp,
+        Action::ToggleSidebar,
+        Action::ToggleBacklinks,
+        Action::OpenSettings,
+        Action::Quit,
+        Action::OpenToday,
+        Action::PrevDay,
+        Action::NextDay,
+        Action::SelectionDown,
+        Action::SelectionUp,
+        Action::OpenRefUnderCursor,
+        Action::EnterInsert,
+        Action::EnterInsertAtStart,
+        Action::EnterInsertAfter,
+        Action::EnterInsertAtEnd,
+        Action::DeleteCharUnderCursor,
+        Action::DeleteCharBeforeCursor,
+        Action::DeleteToEndOfBlock,
+        Action::ChangeToEndOfBlock,
+        Action::SubstituteBlock,
+        Action::SubstituteChar,
+        Action::ReplaceChar,
+        Action::FindCharForward,
+        Action::FindCharBackward,
+        Action::ToggleCharCase,
+        Action::CursorWordEnd,
+        Action::UnfoldAll,
+        Action::FoldAll,
+        Action::CenterViewport,
+        Action::ZoomIn,
+        Action::ZoomOut,
+        Action::SearchWordForward,
+        Action::SearchWordBackward,
+        Action::ReselectLastVisual,
+        Action::IndentVisualRange,
+        Action::OutdentVisualRange,
+        Action::NewBlockBelow,
+        Action::NewBlockAbove,
+        Action::IndentBlock,
+        Action::OutdentBlock,
+        Action::MoveBlockUp,
+        Action::MoveBlockDown,
+        Action::DeleteBlock,
+        Action::ToggleCollapsed,
+        Action::ToggleTodo,
+        Action::CopyBlockRef,
+        Action::DeletePage,
+        Action::InsertRemind,
+        Action::InsertRemindNag,
+        Action::OpenReminders,
+        Action::SnoozeReminder,
+        Action::AddProperty,
+        Action::OpenProperties,
+        Action::TogglePin,
+        Action::CutBlock,
+        Action::CopyBlock,
+        Action::PasteBlock,
+        Action::ExitInsert,
+        Action::CommitAndContinue,
+        Action::DeleteEmptyBlock,
+        Action::EnterVisual,
+        Action::YankCurrentBlock,
+        Action::YankRange,
+        Action::DeleteRange,
+        Action::SelectRangeDown,
+        Action::SelectRangeUp,
+        Action::MoveVisualRangeUp,
+        Action::MoveVisualRangeDown,
+        Action::RunCodeBlock,
+        Action::WrapBold,
+        Action::WrapItalic,
+        Action::WrapCode,
+        Action::WrapStrike,
+        Action::InsertLink,
+        Action::Undo,
+        Action::Redo,
+    ];
+}
+
+#[cfg(test)]
+mod all_tests {
+    use super::Action;
+
+    /// Exhaustive by construction: a new [`Action`] variant fails to
+    /// compile here until it is named, and naming it is what the
+    /// assertion below then checks against [`Action::ALL`].
+    ///
+    /// Two lists is one more than ideal, but the alternative is a
+    /// derive macro dependency in a crate the mobile IPA links, and
+    /// this is the cheaper half of that trade.
+    fn name(a: Action) -> &'static str {
+        match a {
+            Action::OpenPicker => "OpenPicker",
+            Action::OpenCommandPalette => "OpenCommandPalette",
+            Action::ToggleHelp => "ToggleHelp",
+            Action::ToggleSidebar => "ToggleSidebar",
+            Action::ToggleBacklinks => "ToggleBacklinks",
+            Action::OpenSettings => "OpenSettings",
+            Action::Quit => "Quit",
+            Action::OpenToday => "OpenToday",
+            Action::PrevDay => "PrevDay",
+            Action::NextDay => "NextDay",
+            Action::SelectionDown => "SelectionDown",
+            Action::SelectionUp => "SelectionUp",
+            Action::OpenRefUnderCursor => "OpenRefUnderCursor",
+            Action::EnterInsert => "EnterInsert",
+            Action::EnterInsertAtStart => "EnterInsertAtStart",
+            Action::EnterInsertAfter => "EnterInsertAfter",
+            Action::EnterInsertAtEnd => "EnterInsertAtEnd",
+            Action::DeleteCharUnderCursor => "DeleteCharUnderCursor",
+            Action::DeleteCharBeforeCursor => "DeleteCharBeforeCursor",
+            Action::DeleteToEndOfBlock => "DeleteToEndOfBlock",
+            Action::ChangeToEndOfBlock => "ChangeToEndOfBlock",
+            Action::SubstituteBlock => "SubstituteBlock",
+            Action::SubstituteChar => "SubstituteChar",
+            Action::ReplaceChar => "ReplaceChar",
+            Action::FindCharForward => "FindCharForward",
+            Action::FindCharBackward => "FindCharBackward",
+            Action::ToggleCharCase => "ToggleCharCase",
+            Action::CursorWordEnd => "CursorWordEnd",
+            Action::UnfoldAll => "UnfoldAll",
+            Action::FoldAll => "FoldAll",
+            Action::CenterViewport => "CenterViewport",
+            Action::ZoomIn => "ZoomIn",
+            Action::ZoomOut => "ZoomOut",
+            Action::SearchWordForward => "SearchWordForward",
+            Action::SearchWordBackward => "SearchWordBackward",
+            Action::ReselectLastVisual => "ReselectLastVisual",
+            Action::IndentVisualRange => "IndentVisualRange",
+            Action::OutdentVisualRange => "OutdentVisualRange",
+            Action::NewBlockBelow => "NewBlockBelow",
+            Action::NewBlockAbove => "NewBlockAbove",
+            Action::IndentBlock => "IndentBlock",
+            Action::OutdentBlock => "OutdentBlock",
+            Action::MoveBlockUp => "MoveBlockUp",
+            Action::MoveBlockDown => "MoveBlockDown",
+            Action::DeleteBlock => "DeleteBlock",
+            Action::ToggleCollapsed => "ToggleCollapsed",
+            Action::ToggleTodo => "ToggleTodo",
+            Action::CopyBlockRef => "CopyBlockRef",
+            Action::DeletePage => "DeletePage",
+            Action::InsertRemind => "InsertRemind",
+            Action::InsertRemindNag => "InsertRemindNag",
+            Action::OpenReminders => "OpenReminders",
+            Action::SnoozeReminder => "SnoozeReminder",
+            Action::AddProperty => "AddProperty",
+            Action::OpenProperties => "OpenProperties",
+            Action::TogglePin => "TogglePin",
+            Action::CutBlock => "CutBlock",
+            Action::CopyBlock => "CopyBlock",
+            Action::PasteBlock => "PasteBlock",
+            Action::ExitInsert => "ExitInsert",
+            Action::CommitAndContinue => "CommitAndContinue",
+            Action::DeleteEmptyBlock => "DeleteEmptyBlock",
+            Action::EnterVisual => "EnterVisual",
+            Action::YankCurrentBlock => "YankCurrentBlock",
+            Action::YankRange => "YankRange",
+            Action::DeleteRange => "DeleteRange",
+            Action::SelectRangeDown => "SelectRangeDown",
+            Action::SelectRangeUp => "SelectRangeUp",
+            Action::MoveVisualRangeUp => "MoveVisualRangeUp",
+            Action::MoveVisualRangeDown => "MoveVisualRangeDown",
+            Action::RunCodeBlock => "RunCodeBlock",
+            Action::WrapBold => "WrapBold",
+            Action::WrapItalic => "WrapItalic",
+            Action::WrapCode => "WrapCode",
+            Action::WrapStrike => "WrapStrike",
+            Action::InsertLink => "InsertLink",
+            Action::Undo => "Undo",
+            Action::Redo => "Redo",
+        }
+    }
+
+    #[test]
+    fn all_matches_the_enum() {
+        let names: Vec<_> = Action::ALL.iter().map(|a| name(*a)).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            names.len(),
+            "Action::ALL lists the same variant twice",
+        );
+        assert_eq!(
+            names.len(),
+            EXPECTED_78,
+            "Action::ALL has {} entries but the enum has {EXPECTED_78} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_78)",
+            names.len(),
+        );
+    }
+
+    /// Bumped together with a new variant. The `name` match above is
+    /// what makes forgetting impossible: it will not compile.
+    const EXPECTED_78: usize = 78;
+}

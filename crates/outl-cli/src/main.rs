@@ -77,6 +77,19 @@ enum PeerCommand {
     },
     /// Show connection status of all paired devices.
     Status,
+    /// Lock out every paired device by rotating this workspace's identity.
+    ///
+    /// For a lost or stolen device. `peer remove` only takes effect on the
+    /// machine you run it on; this changes the workspace identity itself, so
+    /// no device that is not re-paired can sync again — including one you no
+    /// longer control.
+    ///
+    /// You will have to re-pair every device you still have.
+    RevokeAll {
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -638,9 +651,66 @@ fn main() -> Result<()> {
                     }
                 }
                 PeerCommand::Remove { id } => match peers.remove(&id)? {
-                    true => println!("Removed peer {id}"),
+                    // Say what this actually does. The command reads as
+                    // "revoke", and for a long time it did less than that: the
+                    // entry came back from membership gossip within ~5s and the
+                    // device kept syncing (issue #158). It now sticks *here*,
+                    // and that "here" is the part a user has to be told —
+                    // silently implying a mesh-wide revocation is how a lost
+                    // laptop stays in someone's graph.
+                    true => {
+                        println!("Removed peer {id} from this device.");
+                        println!(
+                            "  This device will no longer sync with it, and won't re-add it \
+                             from membership gossip."
+                        );
+                        println!(
+                            "  Your OTHER paired devices still have it. Run the same command \
+                             on each of them to cut it off completely."
+                        );
+                    }
                     false => println!("No peer matching '{id}' found."),
                 },
+                PeerCommand::RevokeAll { yes } => {
+                    // Destructive and not undoable: every pairing goes, and
+                    // every device has to be re-paired by hand. Confirm unless
+                    // the user opted out explicitly.
+                    let store = outl_sync_iroh::PeersStore::load_or_default(&peers_path)?;
+                    let count = store.list().len();
+                    if !yes {
+                        println!(
+                            "This will unpair {count} device(s) and change this workspace's identity."
+                        );
+                        println!("Every device you still have will need `outl peer pair` again.");
+                        println!(
+                            "A device you do NOT re-pair can never sync with this workspace again."
+                        );
+                        println!();
+                        print!("Type 'revoke' to continue: ");
+                        use std::io::Write as _;
+                        std::io::stdout().flush().ok();
+                        let mut answer = String::new();
+                        std::io::stdin().read_line(&mut answer)?;
+                        if answer.trim() != "revoke" {
+                            println!("Cancelled. Nothing changed.");
+                            return Ok(());
+                        }
+                    }
+
+                    let unpaired = outl_sync_iroh::rotate_workspace_identity(&ws_root)?;
+                    println!("Workspace identity rotated. {unpaired} device(s) unpaired.");
+                    println!();
+                    println!("Next steps:");
+                    println!("  1. Run `outl peer pair` on this device and each device you keep.");
+                    println!("  2. If a GUI or `outl serve` is running, restart it — it is still");
+                    println!("     holding the old identity in memory.");
+                    println!();
+                    // Never let this read as "the data came back". It did not.
+                    println!("The revoked device keeps the copy of your notes it already synced.");
+                    println!(
+                        "Rotation stops it receiving anything new; it cannot take back history."
+                    );
+                }
                 PeerCommand::Status => {
                     use outl_sync_iroh::{LeaseDenied, PeerProbe};
                     match outl_sync_iroh::probe_peers_blocking(&id_path, &peers)? {

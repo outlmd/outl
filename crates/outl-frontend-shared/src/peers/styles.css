@@ -256,3 +256,12 @@
   border-radius: 0.25rem;
   background: rgb(148 163 184 / 0.2);
 }
+
+/* Scope note under the peer list. Deliberately quiet but not hidden: it
+   corrects what a "Remove" button implies, so it has to be readable. */
+.outl-peer-list__scope-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  opacity: 0.75;
+}

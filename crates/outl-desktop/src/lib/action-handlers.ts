@@ -279,19 +279,6 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     setAppState("pickerOpen", true);
   }
 
-  /** Shared status-line nudge fired by every char-cursor vim op
-   *  (`x` `X` `D` `C` `s` `r` `~` `e` `f` `F`). Desktop Normal mode
-   *  has only a selected block id, not a character cursor inside the
-   *  block, so these ops can't act locally — the user has to enter
-   *  Insert (`i`) and edit inside the textarea. One handler shared
-   *  by all 10 entries so the message stays in lockstep across the
-   *  catalog. */
-  function charCursorNudge() {
-    deps.setError(
-      "char-cursor ops (x/X/D/C/s/r/~/e/f/F) — use `i` and edit inside the textarea on the desktop",
-    );
-  }
-
   return {
     // ── chrome ────────────────────────────────────────────────────
     OpenPicker: () => {
@@ -954,24 +941,6 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       seedPickerWithCurrentBlock();
     },
 
-    // ── Char-cursor ops (Normal) — TUI-only ──────────────────────
-    //
-    // These need a character cursor inside the selected block,
-    // something the desktop's Normal mode does not have (only a
-    // selected block id). The catalog entries stay so vim users
-    // see them in the help overlay; firing any of them surfaces
-    // the same nudge via `charCursorNudge` (one source of truth).
-    DeleteCharUnderCursor: charCursorNudge,
-    DeleteCharBeforeCursor: charCursorNudge,
-    DeleteToEndOfBlock: charCursorNudge,
-    ChangeToEndOfBlock: charCursorNudge,
-    SubstituteChar: charCursorNudge,
-    ReplaceChar: charCursorNudge,
-    FindCharForward: charCursorNudge,
-    FindCharBackward: charCursorNudge,
-    ToggleCharCase: charCursorNudge,
-    CursorWordEnd: charCursorNudge,
-
     // ── inline markdown wrappers (Insert mode) ───────────────────
     //
     // These act on the active `<textarea>` via DOM — no Solid
@@ -1061,15 +1030,18 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       setAppState("selectedBlockId", reply.new_id);
     },
 
-    // ── catalog-only (no JS handler today) ───────────────────────
+    // ── deliberately absent ──────────────────────────────────────
     //
-    // Intentionally absent so the dispatcher falls through (no
-    // preventDefault) and the textarea / OS handles the chord:
+    // Every action with no entry here falls through without
+    // `preventDefault`, so the textarea or the OS still gets the
+    // key, and the dispatcher shows the user the catalog's sentence
+    // for why nothing happened.
     //
-    //   EditBlock chord buffer (CopyBlockRef), EnterVisual,
-    //   YankRange, DeleteRange, OpenCommandPalette.
-    //
-    // Each shows up as `[shortcuts] … no JS handler` in DevTools so
-    // a debugging session can see what's still on the to-do list.
+    // Which ones those are is NOT a comment — comments here went
+    // stale twice (this one named `EnterVisual`, `YankRange` and
+    // `DeleteRange`, all three of which have handlers a few dozen
+    // lines up). It is `outl_shortcuts::support`, rendered in
+    // `docs/client-parity.md` and enforced by
+    // `shortcuts.support.test.ts`.
   };
 }

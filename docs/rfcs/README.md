@@ -107,7 +107,7 @@ Each is recorded in its RFC's **Guarded by** row as `none found — gap` rather 
 - **Asset bytes never entering the op log** holds by construction only: `Op` has no asset variant, and nothing asserts it.
 - **`CaTlsConfig::system()`** and the relay 502 path are untested.
 - **#169's proposed random-workspace property test** does not exist — `outl-actions` has no `proptest` dependency, and `bench_backlinks` is `#[ignore]`d, so the 3.8 s regression it was written against would pass CI today.
-- **The desktop char-cursor nudge** (`charCursorNudge`) has no test, nor does #41's arrow navigation.
+- **The desktop char-cursor nudge** (`shortcuts.support.test.ts`) has no test, nor does #41's arrow navigation.
 
 Two RFCs also correct the record on what shipped.
 [RFC 0128](0128-boot-and-memory-at-scale.md) says outright that #179's Front B never landed — `actor_census` still does a full `all_ops()` — instead of claiming the issue is closed.

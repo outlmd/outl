@@ -46,11 +46,13 @@ mod action;
 mod binding;
 mod chord;
 mod defaults;
+mod support;
 
 pub use action::Action;
 pub use binding::{Binding, Mode};
 pub use chord::{Chord, ChordSequence, Key, Modifiers};
 pub use defaults::default_bindings;
+pub use support::{support, Client, ClientSupport, Support};
 
 /// Return every default binding active in `mode`, in the order
 /// they appear in [`default_bindings`]. Bindings tagged

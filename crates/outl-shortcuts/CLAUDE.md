@@ -40,6 +40,11 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   The description is what the help overlay displays — keep it short and verb-led ("Open today's journal", not "This shortcut opens today's journal in the current window").
 - **[`default_bindings`]** — the canonical table.
   Hand-curated, ordered for help-overlay readability.
+- **`support` / `Support` / `Client`** (`src/support.rs`) — **which client performs which action**, and the sentence shown to the user when one cannot.
+  One exhaustive `match`, so a new [`Action`] variant does not compile until all three clients have a verdict.
+  The reason text lives here, not in the client: a client that writes its own wording is a second copy of the fact, which is how three docs ended up disagreeing about `y r`, `:` and mobile undo.
+  Rendered to [`docs/client-parity.md`](../../docs/client-parity.md) and pinned by `the_parity_doc_matches_the_code`.
+  `Support::Native` is deliberately its own state — reachable, no handler, no nudge (`Backspace` on an empty textarea) — because a boolean would force that row to lie in one direction or the other.
 - **[`bindings_for_mode`] / [`lookup`]** — query helpers.
   `lookup` is `O(n)` over the table; the table is small (under 100 entries today) so we don't bother with a hashmap.
   **`lookup` prefers a mode-specific binding over a `Global` one** for the same chord — it can't rely on table order because the `Global` chrome rows are listed first for help-overlay readability,
@@ -58,7 +63,10 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > when the change is purely how the handler dispatches (not a new chord or `Action` variant), the per-client doc is the right place to land the contract, not this file.
 - ❌ Input adapters.
   `crossterm::KeyEvent → Chord` lives in `outl-tui`; `KeyboardEvent → Chord` lives in `outl-desktop/src/lib/shortcuts.ts`.
-  Both produce a [`Chord`] this crate resolves.
+  > **Only the desktop actually resolves through [`lookup`].**
+  > The TUI dispatches Normal-mode keys from its own `match` in `input/normal.rs`; `input/chord_adapter.rs` exists to match *plugin* chords and nothing else.
+  > So the catalog and the TUI's arms can disagree without failing to compile — `reminder_chord_tests` pins a handful of chords against `lookup`, and the rest are unpinned.
+  > `docs/shortcuts.md` claimed both clients called `lookup` for months. If you re-spell a chord in `defaults.rs`, grep `input/normal.rs` yourself; the build will not do it for you.
 - ❌ User-level overrides (rebinding `i` to `a`).
   When that ships, it'll go through the same `Vec<Binding>` shape — a user override is just a different source list fed into the same `lookup` algorithm.
 - ❌ OS-specific chord rewriting (`Cmd` ↔ `Ctrl`).
@@ -81,11 +89,26 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
 3. Run `cargo test -p outl-shortcuts` — `no_duplicate_chord_in_same_mode` catches collisions; `every_binding_has_a_description` catches empty descriptions; `bindings_round_trip_via_serde` catches schema breakage.
 4. If the action is **new**, also extend [`Action`] (`src/action.rs`) in the same commit.
    Group it under the right "intent" section (chrome / navigation / editing / visual / code).
-5. Wire the handler on every client that needs it:
-   - TUI: `crates/outl-tui/src/runtime/dispatch.rs` (or wherever the action switch lives).
+5. **Declare what all three clients do with it** in `src/support.rs`.
+   You do not get to skip this: `support()` is an exhaustive `match`, so the crate does not compile until the row exists.
+   Then wire the handlers the row promised:
+   - TUI: `crates/outl-tui/src/input/normal.rs` (its own `match`, not `lookup` — see the note under "What this crate does NOT own").
    - Desktop: `crates/outl-desktop/src/lib/action-handlers.ts`.
-   A client that doesn't need the action just doesn't add a handler — `lookup` returns `Some(Action::Foo)` and the dispatcher no-ops with a debug log.
-6. **Update both user-visible tables in the same commit:**
+
+   > **This step used to read:** *"A client that doesn't need the action just doesn't add a handler — `lookup` returns `Some(Action::Foo)` and the dispatcher no-ops with a debug log."*
+   >
+   > That instruction is the defect. A no-op with a debug log is indistinguishable, from the keyboard, from a broken feature — and it left `y r` and `:` documented as desktop chords with no handler behind either.
+   > A client that does not perform the action declares `Missing` / `NotApplicable` **with the sentence the user is shown**, and the dispatcher surfaces it. Silence is not an option the row offers.
+
+6. Regenerate the parity doc and run both gates:
+
+   ```sh
+   OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts
+   cd crates/outl-desktop && npx vitest run src/lib/shortcuts.support.test.ts
+   ```
+
+   The first pins `docs/client-parity.md` to the code; the second pins the desktop handler map to the catalog **in both directions** — a promised handler that is missing, and a shipped handler the catalog still calls absent.
+7. **Update both user-visible tables in the same commit:**
    - `crates/outl-desktop/CLAUDE.md` "OS-standard chrome" / "Block-editor chords" / "Inline markdown" — whichever the chord belongs to.
    - `docs/tui.md` if the binding has a TUI counterpart.
    - This `CLAUDE.md`'s mode-semantics example list if the chord is a load-bearing illustration (e.g. the `Cmd+B`-in-Insert vs. `Cmd+B`-in-Global rationale below).
@@ -172,8 +195,13 @@ cargo test -p outl-shortcuts
 If you added a new `Action` or changed the chord for an existing one:
 
 ```bash
-cargo test -p outl-tui      # input/* tests + dispatch coverage
-bun --filter outl-desktop test  # action-handlers smoke
+OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts   # regenerate docs/client-parity.md
+cargo test -p outl-tui                                  # input/* tests + dispatch coverage
+cd crates/outl-desktop && npx vitest run                # includes shortcuts.support.test.ts
 ```
 
-And smoke-test the TUI + desktop manually — the help overlay should list the new entry, the chord should fire, and the dispatcher's debug log should print the resolved action.
+And smoke-test the TUI + desktop manually — the help overlay should list the new entry, and the chord should either fire or **tell the user why it didn't**.
+
+> A resolved action in the debug log used to be the pass criterion here.
+> It isn't: a chord that resolves and no-ops looks identical to a broken one from the keyboard, which is what `support.rs` exists to end.
+> If the client can't perform the action, what you should see is the catalog's sentence in the status line — not a clean console.

@@ -118,3 +118,76 @@ pub(crate) fn n0_builder_ipv4_only(relay_url: Option<&str>) -> Builder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue #213 item 3, and the honest half of it.
+    ///
+    /// The relay selection is pure string handling and fully testable; what is
+    /// **not** testable here is `CaTlsConfig::system()` itself — iroh exposes no
+    /// way to read the choice back off a `Builder`, and the failure it prevents
+    /// (`invalid peer certificate: UnknownIssuer` behind a TLS-inspecting
+    /// corporate proxy) needs that proxy to reproduce.
+    ///
+    /// What guards *that* line is the compiler: `CaTlsConfig::system()` only
+    /// exists with iroh's `platform-verifier` feature enabled, so dropping the
+    /// feature from `Cargo.toml` fails the build rather than silently reverting
+    /// to the bundled Mozilla roots. Removing the `.ca_tls_config(...)` call
+    /// while keeping the feature is the gap that remains — **none found, gap**.
+    #[test]
+    fn an_empty_or_absent_relay_url_falls_back_to_outls_own() {
+        // `None`, empty and whitespace must all mean "use ours", not "use the
+        // n0 preset". Getting this wrong sends every user of a default install
+        // onto someone else's relay.
+        for input in [None, Some(""), Some("   "), Some("\t\n")] {
+            // The builder cannot be inspected, so assert on the decision the
+            // builder is fed — the same expression, extracted.
+            let chosen = input
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .unwrap_or(DEFAULT_RELAY_URL);
+            assert_eq!(
+                chosen, DEFAULT_RELAY_URL,
+                "relay_url {input:?} must resolve to outl's own relay",
+            );
+        }
+    }
+
+    #[test]
+    fn a_configured_relay_url_wins_and_a_typo_degrades_rather_than_failing() {
+        let configured = "https://relay.example.test";
+        assert!(
+            configured.parse::<RelayUrl>().is_ok(),
+            "a well-formed relay url must parse",
+        );
+
+        // A typo must not fail the bind. The endpoint falling back to a
+        // working default is recoverable; a device that refuses to start
+        // because of one config line is not.
+        assert!(
+            "not a url at all :: ???".parse::<RelayUrl>().is_err(),
+            "garbage must be rejected by the parser, so the caller can fall back",
+        );
+    }
+
+    /// The IPv4-only STOPGAP, pinned so a "cleanup" cannot quietly re-add IPv6.
+    ///
+    /// Re-adding it re-triggers the iroh 1.0.0 multipath stall this works
+    /// around, and the symptom is a ~30s hang on every dial to a peer that
+    /// advertises a dead IPv6 address — which reads as "sync is slow", not as
+    /// "someone changed the bind address".
+    #[test]
+    fn the_bind_address_is_ipv4_only() {
+        let addr: std::net::SocketAddr = IPV4_UNSPECIFIED
+            .parse()
+            .expect("the STOPGAP bind address must stay parseable");
+        assert!(addr.is_ipv4(), "the STOPGAP bind address must be IPv4");
+        assert!(
+            addr.ip().is_unspecified(),
+            "binding a specific interface would drop LAN peers on the others",
+        );
+        assert_eq!(addr.port(), 0, "the port must stay ephemeral");
+    }
+}

@@ -338,7 +338,7 @@ The one rule that matters here: **the schedule is never computed in TS** — `gr
 ## Plugins
 
 JS plugins (`outl_plugins::PluginHost`) run on mobile; the design is the desktop's.
-Read [`outl-desktop/CLAUDE.md` → Plugins](../outl-desktop/CLAUDE.md#plugins) for the shared rationale (`!Send` Boa host on a dedicated thread, `PluginService` in `AppState`, re-projection via `apply_all_pages_md`).
+Read [`docs/plugins.md` → Desktop plugin surface](../../docs/plugins.md#desktop-plugin-surface) for the shared rationale (`!Send` Boa host on a dedicated thread, `PluginService` in `AppState`, re-projection via `apply_all_pages_md`).
 Boa is pure-Rust (no JIT), so it ships under iOS's dynamic-code ban (same as `lang-js`).
 
 **The one divergence from desktop:** mobile's `storage_root` is an owned `PathBuf` (folder swap is a relaunch), absorbed by the shared `StorageRootProvider` trait — a fixed root never triggers the "re-load on root swap" branch.
@@ -378,7 +378,7 @@ A real plugin load + iframe overlay only exercise under `cargo tauri ios dev`.
 ### Content transformers (custom-language fences)
 
 A transformer claims a fence language and turns the body into a `{kind, content}` descriptor.
-The registry + `(block id, body)` cache glue is shared with the desktop in `@outl/shared/plugins/transformer-registry` (see [`outl-desktop/CLAUDE.md` → Plugins](../outl-desktop/CLAUDE.md#plugins)).
+The registry + `(block id, body)` cache glue is shared with the desktop in `@outl/shared/plugins/transformer-registry` (see [`docs/plugins.md` → Desktop plugin surface](../../docs/plugins.md#desktop-plugin-surface)).
 Mobile just wires it: `Journal.tsx`'s `onMount` calls `loadTransformers()`, and `BlockRow`'s fence branch renders `<PluginFence />` on a `transformerFor(lang)` match (else plain `<HighlightedCode />`).
 `rich` output lands in an inline sandboxed `<iframe>` — `allow-scripts`, never `allow-same-origin`, same posture as `<PluginViewOverlay />`.
 

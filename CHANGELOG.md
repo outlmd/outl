@@ -7,6 +7,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Every client now tells you when a key does nothing, instead of leaving you guessing.**
+  Press a shortcut the client you are using does not implement, and it used to do nothing at all — the desktop logged a line to a browser console you never open. A missing feature and a broken one looked identical from the keyboard.
+
+  `outl_shortcuts::support` is now the single owner of which client performs which action, and it carries the sentence you see when one cannot. It is an exhaustive `match`, so a new action does not compile until all three clients have declared what they do with it — the gap gets recorded by whoever creates it, rather than found later by you pressing a key.
+
+  The full table is generated from that code and lives in [`docs/client-parity.md`](docs/client-parity.md). Writing it down turned up three things `docs/shortcuts.md` had been claiming that were not true: the desktop bound `y r` and `:` (neither had a handler — dead keys), and mobile undo / redo were listed as "toolbar" when mobile has neither. All three rows are corrected.
+
+- **`outl peer revoke-all` — lock out a lost or stolen device.**
+  `outl peer remove` only takes effect on the machine you run it on, which is fine for retiring a laptop you still have and useless for one that is gone. This rotates the workspace's identity: every pairing is dropped, and you re-pair the devices you still have. The device you do not re-pair keeps the old id, so it no longer shares a gossip topic with your devices and any direct connection is refused.
+
+  It asks you to type `revoke` first (`--yes` to script it), and tells you two things people would otherwise learn the hard way: a running GUI or `outl serve` is still holding the old identity until you restart it, and **the revoked device keeps the notes it already synced** — rotation stops new edits reaching it, it cannot take back history.
+
+  Rotation rather than a propagated "revoke everywhere": broadcasting a removal would let any paired device evict any other, and in the stolen-laptop case the attacker holds a paired device and would get to move first. ([#158](https://github.com/outlmd/outl/issues/158))
+
 - **`outl serve` is a real background daemon — it holds the P2P endpoint now, not just the file watcher.**
   Continuous sync was never the missing piece: once any process holds this device's iroh endpoint, the catch-up loop and gossip converge with every paired peer on their own. What was missing is a *headless* process willing to hold it. `outl serve` was already the long-lived background process and never called `build_default_transport`, so a machine running it under `launchd` synced with nobody and said nothing about it — the same shape as [#220](https://github.com/outlmd/outl/issues/220), in a different command.
 
@@ -42,6 +56,29 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   ([#13](https://github.com/outlmd/outl/issues/13))
 
 ### Fixed
+
+- **`outl peer remove` did not remove the device. Membership gossip put it back within about five seconds.**
+  The receiver-side check landed earlier and was correct — an inbound sync connection from a device absent from `peers.json` is refused. What it could not survive was this project's own membership gossip, which broadcasts each device's peer list every 5s and merges anything it does not already know. Every *other* paired device still listed the removed one, so the entry came back and the check then passed honestly. A guard and its undo, shipped in the same binary.
+
+  This is worse than never having built the guard, because a user could watch a denial and reasonably conclude they were protected.
+
+  `PeersStore::remove` now records a tombstone that membership gossip honours. Re-pairing the device clears it, so removal is not a one-way door; the tombstone never expires, because a revocation that reverses itself on a timer is the same bug wearing a clock.
+
+  **Read the scope, it is not what the command name implies.** This revokes the device on the machine you ran the command on. Your other paired devices keep their own lists and keep syncing with it, so cutting off a lost laptop means running it everywhere — which `outl peer remove` and the GUI device list now say, instead of printing `Removed peer <id>` and letting you infer otherwise. And a revoked device keeps the copy of the graph it already had; revocation stops new edits, it does not take back history. Cutting a device off everywhere without touching each machine is `outl peer revoke-all` (above). Propagating a *removal* between devices stays out of scope, and [RFC 0155](docs/rfcs/0155-peer-trust.md) says why it loses to rotation for the case that matters ([#158](https://github.com/outlmd/outl/issues/158)).
+
+- **Anyone who knew your device's address could take the pairing slot.**
+  While the host was armed (~2 minutes), the first device to connect on the pairing channel was accepted and handed the workspace identity. No PIN, no challenge, no check that it was the device the code was meant for — and "knew the address" is a low bar, since membership gossip hands every mesh member every peer's address.
+
+  Pairing codes now carry a one-time secret, and the joining device proves it holds the code before the host discloses anything. The proof is keyed to the joiner's own device id rather than being a bare hash, so a proof captured off the wire cannot be replayed by a second device.
+
+  **A refused attempt no longer burns the pairing window.** The CLI accepted exactly one connection and the GUI disarmed on any inbound dial — so adding a check to fail would have turned a single packet into a way to stop you pairing at all. Both now stay armed until a joiner actually passes.
+
+  Codes made by an older version are refused with a message telling you to update the other device and generate a new one, rather than silently pairing without the check. Treat a pairing code like a password for its two-minute life: anyone who photographs it can still use it ([#159](https://github.com/outlmd/outl/issues/159)).
+
+- **`outl peer pair` could hang forever with no output on the joining side.**
+  Connecting to the pairing host was the one step of the handshake with no timeout — the accept window and every payload read had one, the dial did not. When the connection failed to establish, the command just sat there, leaving the user nothing to act on and nothing to report.
+
+  It is now three bounded attempts and then an error naming what to check. Found while writing the test for the change above: the old code accepted exactly one connection, so nothing ever dialled a host that had already handled one, and the stall had nowhere to show up.
 
 - **The op log on disk disagreed with the op log in memory about every `Move` and every `SetProp`.**
   `Tree::do_op` fills the `old_parent` / `old_position` / `old_value` fields that let an op be undone, but `Workspace::apply` handed it a *clone* and then persisted the caller's original. Those fields are only as good as the code that built the op: `block::moves::move_to` reads them off the tree and is right, while the reconcile and import paths pass `root` / `None`. On one real 64k-block workspace that meant 65,141 of 65,703 stored `Move` ops named the wrong old parent, and all 14,191 `SetProp` ops carried a null old value.

@@ -111,3 +111,26 @@ Sizes are bounded (≤ 64 ops, ≤ 8 tasks).
 `chaos_helpers::assert_every_line_is_one_json_value` reads the `ops-<actor>.jsonl` bytes directly — the only thing that reveals whether the lock held.
 
 **Helpers** live in `tests/chaos_helpers/mod.rs`, not `tests/common/mod.rs` (clippy `duplicate_mod` allows one `common` loader per test binary).
+
+---
+
+## STOPGAP: IPv4-only bind (iroh 1.0.0 multipath workaround)
+
+**All four endpoints bind IPv4-only** through `bind::n0_builder_ipv4_only` — `run_iroh`, `bind_pairing_endpoint`, `probe_peers`, `bind_sync_endpoint`.
+The `bind` module owns the bug, the fix and the revert condition; dial and accept must both go through it, because dropping IPv6 on one side only lets the other advertise a dead path.
+
+**It narrows the bug, it does not close it.**
+Multipath opens paths to **all** of a peer's candidate addrs at once and one unreachable addr stalls the whole connect/accept (`MultipathNotNegotiated`, ~30s) rather than converging on a working path.
+Binding IPv4-only removes the usual offender (a global IPv6 addr that is "No route to host") but an unreachable **IPv4** addr stalls it identically — a VM bridge or VPN `utun` addr in our own ticket, or a peer's stale DHCP lease in theirs.
+Signature: `sendmsg error: … HostUnreachable` / `Host is down` toward one addr, then a connect timeout with the relay up the whole time.
+
+### Configurable relay (default: outl's own)
+
+`n0_builder_ipv4_only(relay_url: Option<&str>)` picks the relay on top of the IPv4-only STOPGAP.
+Default is outl's own dedicated relay, `DEFAULT_RELAY_URL` (`use1-1.relay.avelino.outl.iroh.link`, via `RelayMode::custom`) — the n0 public relay proved slow/unreachable on some networks.
+A non-empty `[sync] relay_url` overrides it; a parse error falls back to `presets::N0` with a warning.
+Pairing / status / test pass `None`, which is **not** "the n0 preset" — `None` resolves to `DEFAULT_RELAY_URL` too, so every endpoint rides outl's relay by default.
+Only the long-lived **sync** endpoint threads the *configured* one (`run_iroh` ← `IrohSyncTransport::new` ← `outl_config::load().sync.relay_url()`), so only a deployment that overrides `[sync] relay_url` sees a split.
+See `docs/relay.md` / `docs/config.md`.
+
+**Revert condition:** delete the `bind` module once iroh > 1.0.0 ships the multipath fallback fix, and let every call site go back to the plain dual-stack `Endpoint::builder(presets::N0)` builder (details in the module docs).

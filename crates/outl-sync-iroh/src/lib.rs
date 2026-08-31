@@ -57,12 +57,13 @@ mod health;
 mod identity;
 mod lease;
 mod oplog;
-mod pairing;
+pub(crate) mod pairing;
 pub mod peer_conn;
 mod peers;
 mod peers_lock;
 mod progress;
 mod protocol;
+mod revoke;
 mod status;
 
 #[doc(hidden)]
@@ -72,7 +73,19 @@ pub use device::{build_default_transport, build_transport, default_device_dir, T
 pub use engine::IrohSyncTransport;
 pub use identity::IrohIdentity;
 pub use lease::{EndpointLease, LeaseDenied};
-pub use pairing::{host_pairing, join_pairing, WorkspaceAdoption};
+pub use pairing::{
+    // `decode_ticket` / `mint_ticket` are public so a test can forge a ticket
+    // for a known address without the issued secret — which is exactly the
+    // attacker in issue #159, and the only way to exercise the host's re-arm
+    // path end to end.
+    decode_ticket,
+    host_pairing,
+    join_pairing,
+    mint_ticket,
+    PairingSecret,
+    WorkspaceAdoption,
+};
 pub use peers::{migrate_global_peers_if_absent, workspace_peers_path, PeerEntry, PeersStore};
 pub use protocol::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};
+pub use revoke::rotate_workspace_identity;
 pub use status::{probe_peers, probe_peers_blocking, PeerProbe, PeerStatus};

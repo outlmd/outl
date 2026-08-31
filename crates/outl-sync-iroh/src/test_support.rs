@@ -507,3 +507,31 @@ pub async fn run_delta_sync_pooled(
     )
     .await
 }
+
+/// Rewrite a pairing ticket to dial `addr` instead of the address the host
+/// advertised, **keeping the host's secret**.
+///
+/// Why a test needs this: a host's advertised `EndpointAddr` lists a direct
+/// address per local interface (LAN, VPN tunnels, whatever the machine has up),
+/// and with no relay reachable, iroh 1.0.0's path selection can settle on one
+/// that never completes. `pairing_roundtrip` gets away with it because it dials
+/// once; a test that dials the same host twice hits it roughly half the time,
+/// and then it is measuring iroh's path selection rather than whatever it meant
+/// to measure.
+///
+/// Pointing the ticket at a single loopback address removes that variable. It
+/// does not weaken what the test proves — the handshake, the proof check and the
+/// host's accept loop are all identical either way.
+pub fn retarget_ticket(ticket: &str, addr: iroh::EndpointAddr) -> Result<String> {
+    let (_original, secret) = crate::pairing::decode_ticket(ticket)?;
+    crate::pairing::ticket_with_secret(&addr, &secret)
+}
+
+/// The endpoint's address reduced to its loopback direct address, if it has one.
+///
+/// Returns `None` when the endpoint bound no loopback address, so a caller can
+/// skip rather than silently test something else.
+pub fn loopback_only(addr: &iroh::EndpointAddr) -> Option<iroh::EndpointAddr> {
+    let loopback = *addr.ip_addrs().find(|sa| sa.ip().is_loopback())?;
+    Some(iroh::EndpointAddr::new(addr.id).with_ip_addr(loopback))
+}

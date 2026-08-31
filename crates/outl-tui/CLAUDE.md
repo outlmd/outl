@@ -324,42 +324,8 @@ src/
 
 ## Plugins
 
-JS plugins are loaded at boot from `<root>/.outl/plugins/` into an `outl_plugins::PluginHost` held directly in `App.plugin_host` (`Option`, single-threaded — no `Arc`/`Mutex`, the Boa context is `!Send`).
-Boot / slash / op-hook / content-transform wiring lives in `actions/plugins.rs`; keybinding dispatch lives in `input/plugin_chord.rs`.
-The five touch points are:
-
-- **Boot** (`App::load_plugins`, called at the end of `App::new`).
-  Declares the client capabilities the TUI honors (`slash-command`, `op-hook`, `keybinding`, `content-transformer:text`, `toolbar-button`), runs `load_installed`, then `mark_synced` so pre-existing ops don't fire hooks on startup.
-  A `toolbar-button` has no chrome bar in a terminal, so its command is surfaced in the **slash menu** instead (deduped against `slash-command` entries) — a runnable command is never dropped just because its only affordance was a GUI button.
-  `ctx.net`, `ctx.storage`, and the gas limits are host-level (the engine), so they work in the TUI with no per-capability wiring — only HTML surfaces (`ui-render`, `content-transformer:rich`) stay undeclared, since a terminal can't draw them.
-  Best-effort: a load failure toasts a warning and the TUI runs normally; a workspace with no plugins is unchanged.
-  **`content-transformer:rich` is deliberately *not* declared** — `rich` output is HTML for a GUI iframe, meaningless in a terminal; the host filters those out of `host.transformers()` automatically.
-- **Slash commands** (`App::slash_candidates` in `actions/overlay.rs`).
-  The slash menu concatenates `host.commands()` onto the built-in registry list; each plugin command carries a `SlashOrigin::Plugin { plugin_id, command_id }` tag (vs `SlashOrigin::Builtin`).
-  `accept_slash` routes a plugin pick to `App::run_plugin_command`, which surfaces `notify`/error output as toasts and re-projects if it mutated.
-- **Keybindings** (`input/plugin_chord.rs::try_plugin_binding`, called first inside `handle_normal_key`).
-  A plugin's `contributes.keybindings[].key` is parsed by `outl-plugins` into an `outl_shortcuts::ChordSequence`; `input/chord_adapter.rs` maps the live `crossterm::KeyEvent` into the same `outl_shortcuts::Chord` so we can compare them.
-  A matching single-chord binding runs `App::run_plugin_command` immediately.
-  A two-chord binding (`Ctrl+G A`) buffers the first chord in `App::pending_plugin_chord` (a **separate** field from the native `pending_chord` vim accumulator so the two never interfere) and fires on the second key.
-  **Plugin chords are scoped to Normal mode** — they're `Mode::Global` in the catalog, but the TUI deliberately won't steal keys mid-edit.
-  They **never shadow a native action**: `native_normal_chord` mirrors what `handle_normal_key` consumes, so a plugin can't rebind `j`, `dd`, `Ctrl+T`, `Ctrl+P`, etc. (use a free chord like `Ctrl+G` or a two-chord sequence).
-  No host / no bindings / a key with no `Chord` form all short-circuit to native handling.
-- **Op hooks** (`App::run_plugin_op_hooks`).
-  Called once per iteration at the **single post-mutation point** in `runtime.rs`'s event loop (after the mode key handler, before the next draw).
-  Deferred while in `Mode::Insert` (same reason as `pending_reload`: a hook-driven `load_current` would clobber the in-flight buffer; the edit isn't in the op log until commit anyway).
-- **Content transformers** (`App::recompute_transforms`).
-  **Pre-compute, not render-time.**
-  When a block's text is a single closed code fence (`` ```<lang> `` … `` ``` ``) whose language a loaded `text` transformer claims, its body runs through `host.transform_block` *at load time*.
-  The result is cached in `App::transform_cache`, keyed by `NodeId`.
-  The render walk (`view/outline.rs`) only has `&App`, and `transform_block` is `&mut self` (it runs Boa) — so the transform **cannot** happen during render.
-  It's done in `recompute_transforms`, called from `load_current_no_autorun` (every reparse), after `load_plugins` at boot, and on the reproject paths (plugin + peer mutations).
-  The render path is then a pure `HashMap` lookup: a read-only block with a cache hit renders the transformed text/markdown (`RenderMode::Transformed`) in place of the raw fence; the bullet stays.
-  **A block under the cursor (Insert / Normal-selected) always renders the raw fence source** so the user edits what they see — the cursor cases win over a cache hit.
-  Lang match: the fence's raw info-string first (custom langs like `mermaid`), then the canonical alias via `outl_md::lang::canonical` (so a transformer registered as `rust` fires on `` ```rs ``).
-  Best-effort: a plugin error or `Ok(None)` (declined) leaves the block to render as a raw fence — never crashes.
-
-A plugin mutation lands in the op log via `outl-actions` but does **not** write `.md`, so `reproject_after_plugin` runs `outl_actions::apply_all_pages_md` (a plugin can touch any page) then `load_current`.
-If a plugin declares a capability the TUI lacks, the host filters it; `host.missing_capabilities(id)` lists the gap.
+How the TUI hosts plugins — chord dispatch, slash commands, op hooks, text transformers:
+[`docs/plugins.md`](../../docs/plugins.md) → "TUI plugin surface".
 
 ## Peer sync coordination
 

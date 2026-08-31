@@ -275,7 +275,9 @@ pub(crate) fn refresh_peer_direct_addr_with_ifaces(
         endpoint_addr: Some(encode_endpoint_addr(&fresh)?),
         ..existing
     };
-    store.add(entry)?; // overwrites the stale entry by node_id
+    // `update_existing`, not `add`: this runs on every inbound connection, and
+    // `add` would clear a tombstone written by a concurrent `peer remove`.
+    store.update_existing(entry)?;
     Ok(true)
 }
 
@@ -387,10 +389,35 @@ impl PeerEntry {
     }
 }
 
-/// Persisted list of trusted peers.
+/// A device this machine has explicitly removed.
+///
+/// Kept **after** removal because deleting the entry was not enough: the 5s
+/// membership gossip re-added it from any peer that still knew it, so a
+/// `peer remove` undid itself within a tick (issue #158). The entry the user
+/// deleted is gone; this is only the memory that they deleted it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokedPeer {
+    /// The removed device's iroh node id.
+    pub node_id: String,
+    /// When this machine revoked it (RFC3339, wall clock).
+    ///
+    /// Informational — nothing compares it. A tombstone that expired would be
+    /// a revocation that silently undoes itself, which is the bug.
+    pub revoked_at: String,
+}
+
+/// Persisted list of trusted peers, plus what this device has revoked.
+///
+/// `revoked` is **device-local and never gossiped**: `build_membership_payload`
+/// broadcasts [`PeersStore::list`], which returns only `peers`. That is a
+/// deliberate limit, not an oversight — see [`PeersStore::revoked`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PeersFile {
     peers: Vec<PeerEntry>,
+    /// `#[serde(default)]` so a `peers.json` written before this field existed
+    /// loads unchanged.
+    #[serde(default)]
+    revoked: Vec<RevokedPeer>,
 }
 
 /// In-memory peer store backed by `<workspace>/.outl/peers.json`.
@@ -430,12 +457,56 @@ impl PeersStore {
     }
 
     /// Add a peer and persist to disk (dedup-replace by node_id).
+    ///
+    /// **Clears any tombstone for that node id.** Adding is the deliberate act
+    /// of a user pairing the device again, and it has to outrank the earlier
+    /// deliberate act of removing it — otherwise re-pairing a device you once
+    /// removed would appear to succeed and then never sync, with nothing on
+    /// screen explaining why.
     pub fn add(&mut self, entry: PeerEntry) -> Result<()> {
-        self.mutate_locked(|peers| {
-            peers.retain(|p| p.node_id != entry.node_id);
-            peers.push(entry);
+        self.mutate_full(|file| {
+            file.peers.retain(|p| p.node_id != entry.node_id);
+            file.revoked.retain(|r| r.node_id != entry.node_id);
+            file.peers.push(entry);
             true
         })
+    }
+
+    /// Refresh an **already-known** peer's entry in place. Returns `false`
+    /// when the peer is not in the list, and never adds one.
+    ///
+    /// Distinct from [`add`](Self::add), and the distinction is the point:
+    /// `add` clears the tombstone, because it models a user deliberately
+    /// pairing a device again. A background refresh is not that. Routing
+    /// `refresh_peer_direct_addr` through `add` meant an inbound connection
+    /// arriving just after `peer remove` would re-insert the peer **and erase
+    /// the revocation** — permanently, since nothing re-creates a tombstone.
+    ///
+    /// The existence check runs inside the lock. Checking a snapshot taken
+    /// before it is what left the window in the first place.
+    pub fn update_existing(&mut self, entry: PeerEntry) -> Result<bool> {
+        let mut updated = false;
+        self.mutate_full(|file| {
+            let Some(slot) = file.peers.iter_mut().find(|p| p.node_id == entry.node_id) else {
+                return false;
+            };
+            *slot = entry;
+            updated = true;
+            true
+        })?;
+        Ok(updated)
+    }
+
+    /// Whether `node_id` has been revoked on this device.
+    ///
+    /// **Scope, stated plainly: `remove` revokes the peer *here*, not across
+    /// the mesh.** Every other paired device keeps its own list, so a removed
+    /// laptop still syncs with any device that has not also removed it. For a
+    /// device the user no longer holds, the answer is
+    /// [`crate::rotate_workspace_identity`], not a propagated tombstone — see
+    /// [RFC 0155](../../../docs/rfcs/0155-peer-trust.md).
+    pub fn is_revoked(&self, node_id: &str) -> bool {
+        self.inner.revoked.iter().any(|r| r.node_id == node_id)
     }
 
     /// Merge a batch of peers, adding **only** node_ids not already present, and
@@ -443,33 +514,80 @@ impl PeersStore {
     /// Unlike [`add`](Self::add), a known node_id keeps its current `PeerEntry`
     /// (its locally-captured `endpoint_addr`, e.g. from direct pairing, may beat a
     /// gossiped one) — the ADD-only primitive membership auto-discovery uses.
+    /// Returns `(added, refused)` — `refused` counts incoming peers dropped
+    /// because this device revoked them.
+    ///
+    /// The second number is the one worth logging. Silently dropping a gossiped
+    /// peer looks identical to never having been told about it, and "the
+    /// removal keeps being undone" is exactly the failure that went unnoticed
+    /// long enough to make it into a security issue.
     pub fn merge_unknown(
         &mut self,
         incoming: impl IntoIterator<Item = PeerEntry>,
-    ) -> Result<usize> {
+    ) -> Result<(usize, usize)> {
         let mut incoming: Vec<PeerEntry> = incoming.into_iter().collect();
         let mut added = 0usize;
-        self.mutate_locked(|peers| {
+        let mut refused = 0usize;
+        self.mutate_full(|file| {
             for entry in incoming.drain(..) {
-                if peers.iter().any(|p| p.node_id == entry.node_id) {
+                // Read the tombstones from the freshly-loaded file, not from
+                // the caller's snapshot: another process may have revoked this
+                // peer since we loaded, and re-adding it here would be the
+                // same self-undoing removal one lock down.
+                if file.revoked.iter().any(|r| r.node_id == entry.node_id) {
+                    refused += 1;
                     continue;
                 }
-                peers.push(entry);
+                if file.peers.iter().any(|p| p.node_id == entry.node_id) {
+                    continue;
+                }
+                file.peers.push(entry);
                 added += 1;
             }
             added > 0
         })?;
-        Ok(added)
+        Ok((added, refused))
     }
 
-    /// Remove a peer by node_id prefix. Returns true if found.
+    /// Remove a peer by node_id prefix, and **remember that we removed it**.
+    /// Returns true if a peer matched.
+    ///
+    /// Dropping the entry alone was not a removal. The membership gossip tick
+    /// re-adds any peer it does not already know, and every other device in the
+    /// mesh still knows this one — so the entry came back within ~5 seconds and
+    /// the sync handler's authorization check (which reads this same file)
+    /// waved it straight through. The user saw "removed" and the device kept
+    /// syncing (issue #158).
+    ///
+    /// The tombstone is what makes the removal survive the next gossip tick.
+    /// It never expires: an expiring tombstone is a revocation that undoes
+    /// itself on a timer, which is the bug wearing a clock.
     pub fn remove(&mut self, node_id_prefix: &str) -> Result<bool> {
         let mut removed = false;
-        self.mutate_locked(|peers| {
-            let before = peers.len();
-            peers.retain(|p| !p.node_id.starts_with(node_id_prefix));
-            removed = peers.len() < before;
-            removed
+        let now = chrono::Utc::now().to_rfc3339();
+        self.mutate_full(|file| {
+            let doomed: Vec<String> = file
+                .peers
+                .iter()
+                .filter(|p| p.node_id.starts_with(node_id_prefix))
+                .map(|p| p.node_id.clone())
+                .collect();
+            removed = !doomed.is_empty();
+            if !removed {
+                return false;
+            }
+            file.peers
+                .retain(|p| !p.node_id.starts_with(node_id_prefix));
+            for node_id in doomed {
+                if file.revoked.iter().any(|r| r.node_id == node_id) {
+                    continue;
+                }
+                file.revoked.push(RevokedPeer {
+                    node_id,
+                    revoked_at: now.clone(),
+                });
+            }
+            true
         })?;
         Ok(removed)
     }
@@ -484,7 +602,12 @@ impl PeersStore {
     /// `load_or_default` a possibly-stale snapshot, so applying to that snapshot
     /// and truncate-writing clobbered a concurrent add. `self.inner` is refreshed
     /// to the reconciled state either way.
-    fn mutate_locked(&mut self, mutate: impl FnOnce(&mut Vec<PeerEntry>) -> bool) -> Result<()> {
+    /// Both halves of a removal have to move under one lock, which is why this
+    /// hands out the whole [`PeersFile`] rather than just `peers`: dropping the
+    /// entry and recording the tombstone in two separate locked writes leaves a
+    /// window in which the peer is absent and unrevoked — precisely when the 5s
+    /// membership tick puts it back.
+    fn mutate_full(&mut self, mutate: impl FnOnce(&mut PeersFile) -> bool) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -498,7 +621,7 @@ impl PeersStore {
             PeersFile::default()
         };
 
-        let changed = mutate(&mut file.peers);
+        let changed = mutate(&mut file);
         self.inner = file;
         if !changed {
             return Ok(());
@@ -745,7 +868,7 @@ mod tests {
             endpoint_addr: None,
             added_at: "2030-01-01T00:00:00Z".to_string(),
         };
-        let added = store.merge_unknown([gossiped]).expect("merge");
+        let (added, _refused) = store.merge_unknown([gossiped]).expect("merge");
 
         assert_eq!(added, 0, "a known node_id must not be re-added");
         let kept = store

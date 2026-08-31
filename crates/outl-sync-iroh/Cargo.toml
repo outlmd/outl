@@ -33,6 +33,9 @@ iroh-gossip = { workspace = true }
 # by iroh-gossip's public API surface.
 n0-future = "0.3"
 blake3 = "1"
+# CSPRNG for the pairing-ticket secret (issue #159). Already in the tree as an
+# iroh dependency; named here because this crate uses it directly.
+rand = "0.9"
 # `chrono` + `qrcode` back the pairing helpers (ISO timestamps in PeerEntry,
 # QR ticket rendering) called out in the crate's CLAUDE.md. Kept so the
 # pairing CLI path can land without a manifest change.

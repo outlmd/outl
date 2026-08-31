@@ -966,6 +966,156 @@ mod tests {
         }
     }
 
+    /// The ghost-block policy, core half (issue #213 item 1, RFC 0129).
+    ///
+    /// **Never write an op for something the user did not do.** The
+    /// `.md` reconcile diff re-emits `Create` + `Move` + a `SetProp`
+    /// per property for every block on every commit; each is
+    /// idempotent on the tree and each still costs an fsynced append.
+    /// A one-block edit on an 11-block page logged 23 ops before this
+    /// filter existed — the slow commit, and an op log that grew by
+    /// the whole page per keystroke.
+    ///
+    /// The filter had no direct test: it was only exercised through
+    /// `outl-md`'s reconcile, where a regression shows up as "commits
+    /// got slower", which nobody notices in CI.
+    #[test]
+    fn a_redundant_op_is_recognised_as_a_noop() {
+        let actor = ActorId::new();
+        let g = HlcGenerator::new(actor);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let storage =
+            Box::new(crate::storage::JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap());
+        let mut ws = Workspace::open_with_storage(actor, storage, None).unwrap();
+
+        let node = NodeId::new();
+        let pos = Fractional::between(None, None);
+        let create = Op::Create {
+            node,
+            parent: NodeId::root(),
+            position: pos.clone(),
+        };
+
+        assert!(
+            !ws.op_is_noop(&create),
+            "a Create for a node that does not exist yet is real work",
+        );
+        ws.apply(make_op(&g, create.clone())).unwrap();
+        assert!(
+            ws.op_is_noop(&create),
+            "re-emitting the same Create must be recognised as a no-op —              this is the filter that keeps a reconcile from logging the              whole page on every keystroke",
+        );
+
+        // A property, then the same property again.
+        let set = Op::SetProp {
+            node,
+            key: "remind".into(),
+            value: Some(crate::property::PropValue::Text("9am".into())),
+            old_value: None,
+        };
+        assert!(!ws.op_is_noop(&set), "setting a new property is real work");
+        ws.apply(make_op(&g, set.clone())).unwrap();
+        assert!(
+            ws.op_is_noop(&set),
+            "re-setting a property to the value it already has is a no-op",
+        );
+
+        // Changing the value is NOT a no-op — guards the guard, since a
+        // filter that swallows everything would pass every assertion above.
+        let changed = Op::SetProp {
+            node,
+            key: "remind".into(),
+            value: Some(crate::property::PropValue::Text("10am".into())),
+            old_value: None,
+        };
+        assert!(
+            !ws.op_is_noop(&changed),
+            "a property whose value differs must still be logged",
+        );
+    }
+
+    /// The dangerous direction: over-filtering silently loses user work.
+    ///
+    /// A `Move` to a *different* parent is never a no-op, including one
+    /// that would form a cycle — invariant 4 says the cycle-forming move
+    /// is a no-op **on the materialized tree** and still goes into the
+    /// log, because removing it breaks the correctness of future
+    /// reordering. If `op_is_noop` ever started answering "true" for
+    /// those, the filter would drop them before they were ever written.
+    #[test]
+    fn a_move_that_changes_the_tree_is_never_filtered_out() {
+        let actor = ActorId::new();
+        let g = HlcGenerator::new(actor);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let storage =
+            Box::new(crate::storage::JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap());
+        let mut ws = Workspace::open_with_storage(actor, storage, None).unwrap();
+
+        let parent = NodeId::new();
+        let child = NodeId::new();
+        let pos = Fractional::between(None, None);
+        for node in [parent, child] {
+            ws.apply(make_op(
+                &g,
+                Op::Create {
+                    node,
+                    parent: NodeId::root(),
+                    position: pos.clone(),
+                },
+            ))
+            .unwrap();
+        }
+
+        // child -> parent: a real move.
+        let nest = Op::Move {
+            node: child,
+            new_parent: parent,
+            position: pos.clone(),
+            old_parent: NodeId::root(),
+            old_position: pos.clone(),
+        };
+        assert!(!ws.op_is_noop(&nest), "a move to a new parent is real work");
+        ws.apply(make_op(&g, nest.clone())).unwrap();
+        assert!(ws.op_is_noop(&nest), "re-emitting the same move is a no-op");
+
+        // parent -> child would form a cycle. It must NOT be filtered:
+        // invariant 4 requires it in the log even though the tree
+        // refuses it.
+        let cycle = Op::Move {
+            node: parent,
+            new_parent: child,
+            position: pos.clone(),
+            old_parent: NodeId::root(),
+            old_position: pos.clone(),
+        };
+        assert!(
+            !ws.op_is_noop(&cycle),
+            "a cycle-forming move must still be logged (invariant 4) —              filtering it out breaks the correctness of future reordering",
+        );
+    }
+
+    /// `Op::Edit` is never filtered here, and the reason is worth pinning:
+    /// a Yrs delta for unchanged text is *already empty*, so the emptiness
+    /// check belongs upstream where the delta is built. If someone adds an
+    /// `Edit` arm to `op_is_noop` that inspects the bytes, they are
+    /// duplicating a decision that already has an owner.
+    #[test]
+    fn edit_is_left_to_the_yrs_delta_to_decide() {
+        let actor = ActorId::new();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let storage =
+            Box::new(crate::storage::JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap());
+        let ws = Workspace::open_with_storage(actor, storage, None).unwrap();
+
+        assert!(
+            !ws.op_is_noop(&Op::Edit {
+                node: NodeId::new(),
+                text_op: Vec::new(),
+            }),
+            "Edit must not be filtered by op_is_noop",
+        );
+    }
+
     #[test]
     fn open_apply_reload_preserves_state() {
         let actor = ActorId::new();

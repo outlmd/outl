@@ -11,7 +11,7 @@
 | **Guarded by** — never drop a durable op | `torn_tail_is_healed_not_glued_on_next_append`, `non_utf8_line_does_not_truncate_the_rest_of_the_file` (`crates/outl-core/tests/op_log_io_robustness.rs`) |
 | **Guarded by** — batch fsync | `append_ops_batch_equals_sequential_appends`, `append_ops_heals_torn_tail_once` (`crates/outl-core/src/storage/jsonl/tests.rs`) |
 | **Guarded by** — replay fidelity | `reedit_after_snapshot_matches_full_replay`, `three_edits_across_sessions` (`crates/outl-core/tests/text_replace_rebuild.rs`) |
-| **Guarded by** — ghost block (#122) | none found — gap |
+| **Guarded by** — ghost block (#122) | `a_redundant_op_is_recognised_as_a_noop`, `a_move_that_changes_the_tree_is_never_filtered_out`, `edit_is_left_to_the_yrs_delta_to_decide` (`crates/outl-core/src/workspace.rs`); client half: `"does not commit when the text is unchanged"`, `"still leaves edit mode when the text is unchanged"`, `"commits when the user actually changed the text"` (`crates/outl-desktop/src/components/BlockRow.test.tsx`) |
 
 The full per-decision list is in [How it cannot regress](#how-it-cannot-regress); the rows above name the two that fail first.
 

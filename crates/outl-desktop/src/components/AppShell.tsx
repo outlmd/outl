@@ -218,7 +218,7 @@ export function AppShell() {
 
     const handlers = buildHandlers({ applyView, setError });
     setHandlers(handlers);
-    const unbindShortcuts = await installShortcuts(handlers);
+    const unbindShortcuts = await installShortcuts(handlers, setError);
     onCleanup(unbindShortcuts);
 
     // Content transformers (code-fence renderers). Plugins load lazily on

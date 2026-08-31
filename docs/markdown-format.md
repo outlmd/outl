@@ -692,6 +692,29 @@ Emit before deletion:
 ```
 
 **Hard rule:** every level-3 deletion must hit `orphans.log` before the op is committed.
+
+**Second hard rule: level 3 says *what* to delete, never *how much*.**
+One orphan and five thousand come back in the same `Vec<NodeId>`.
+So a `.md` that arrived truncated — an iCloud placeholder whose bytes never downloaded, a half-flushed write, a parser that stopped reading the dialect halfway — empties a page as quietly as deleting one bullet.
+Any caller that turns orphans into `Move(node, TRASH_ROOT)` goes through **`matching::guard::match_blocks_guarded`**, not the raw `match_blocks`.
+Three properties it is built to have, which are also the review checklist for changing it:
+
+- **It cannot lose half a page.**
+  `match_blocks` is pure, so refusing after it ran is refusing before anything exists to apply.
+- **It is never silent.**
+  The refusal is `Err(MatchGuardError::BulkDelete { volume, trip })`, not a shortened orphan list.
+  Quietly dropping the deletions leaves the blocks in the tree and out of the `.md`, which is the divergence the reconcile exists to close.
+- **It has a way out.**
+  `OrphanGuard::Disabled` is what a caller wires to the user saying "yes, I meant that" — today `outl reconcile --allow-bulk-delete`.
+  Reachable only from an explicit act; a retry is not consent (root `CLAUDE.md` invariant 9 and RFC 0211 name a guard with no escape hatch as its own defect class).
+
+The defaults, and why each number is what it is:
+
+| Constant | Value | Why |
+|---|---|---|
+| `MAX_ORPHANED_BLOCKS` | 500 | No hand edit removes five hundred blocks from one page in one save. An unattended import legitimately might, and that is exactly the caller that should have to say so out loud. |
+| `MAX_ORPHANED_RATIO` | 0.75 | Deliberately high. Deleting a section is ordinary editing and costs well under half a page, while a truncated read takes essentially all of it. RFC 0210 already recorded what a guard that fires on real edits costs: it gets disabled, and then it guards nothing. |
+| `RATIO_FLOOR_BLOCKS` | 20 | A ratio is meaningless on a four-block scratch note. Under the floor only the absolute arm applies, which cannot fire that low — small pages are unguarded on purpose: small blast radius, high false-positive cost. |
 Silent deletion is a P0 bug.
 
 ### Tiebreakers

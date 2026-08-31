@@ -9,12 +9,18 @@ Every keyboard shortcut outl ships with, across every client, in one table per c
 The desktop and TUI both pull their chord catalog from **`crates/outl-shortcuts`** (`src/defaults.rs::default_bindings()`).
 The mobile app doesn't expose a keyboard surface (touch + on-screen keyboard); the rows below leave its column blank when there's nothing to bind.
 
-> **One catalog, two adapters.**
-> The TUI converts `crossterm::KeyEvent → Chord`, the desktop converts browser `KeyboardEvent → Chord`.
-> Both then call the same `outl_shortcuts::lookup(mode, chord) → Action`.
-> A chord change in `defaults.rs` lights up on both clients on the next build.
+> **One catalog, two consumers — and only one of them resolves through it.**
+> The desktop calls `outl_shortcuts::lookup(mode, chord) → Action` for every keystroke, so a chord change in `defaults.rs` reaches it on the next build.
+> **The TUI does not.**
+> It dispatches Normal-mode keys through its own `match` in `input/normal.rs`, and `input/chord_adapter.rs` exists only to match plugin-contributed chords.
+> The catalog and those match arms can disagree without anything failing to compile; a handful of reminder chords are pinned by `reminder_chord_tests`, and the rest are not.
+> Treat a TUI cell below as documentation of the `match`, not of the catalog.
 
 If a row below disagrees with what you observe in the app, **the code is right and this doc is stale** — file an issue or fix the row.
+
+> **Which client performs which action** is not this doc's to answer, and the three times it tried it was wrong (see the rows fixed in the same commit as this note).
+> That fact lives in `outl_shortcuts::support` and is rendered in [`client-parity.md`](client-parity.md), which is generated and test-pinned.
+> This table says **which key**; that one says **whether anything happens**.
 
 ## How to read the tables
 
@@ -121,11 +127,11 @@ The TUI is vim-style by definition.
 | Reselect last Visual range (chord) | `g v` | `g v` | — |
 | Search workspace for word / block text — forward | `*` | `*` *(seeds picker)* | — |
 | Search workspace for word / block text — backward | `#` | `#` *(seeds picker)* | — |
-| Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | toolbar |
-| Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | toolbar |
-| Yank block ref → clipboard (chord) | `y r` | `y r` | — |
+| Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | — _(issue [#14](https://github.com/outlmd/outl/issues/14))_ |
+| Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | — _(issue [#14](https://github.com/outlmd/outl/issues/14))_ |
+| Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | — |
 | Enter Visual | `v` | `v` | — |
-| Open command palette | `:` | `:` | — |
+| Open command palette | `:` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | — |
 | Open slash menu | `/` | `/` | `/` |
 
 > **About `a` / `*` / `#` on the desktop.** The desktop's Normal mode has only a selected block id — no character cursor inside the block. So `a` collapses to `i` (the textarea's own caret takes over), and `*` / `#` seed the picker with the first few words of the selected block's text instead of doing a word-under-cursor search. The catalog still ships these chords so muscle memory from the TUI carries over.
@@ -289,10 +295,12 @@ The picker (`Cmd+P` / `Ctrl+P`) fuzzy-matches pages and journals together; type 
 |---|---|---|
 | Canonical catalog | `crates/outl-shortcuts/src/defaults.rs` | Every `(mode, chord, action, description)` row. |
 | `Action` enum | `crates/outl-shortcuts/src/action.rs` | The named operation each chord resolves to. |
-| TUI input adapter | `crates/outl-tui/src/input/*.rs` | `crossterm::KeyEvent → Chord`. |
+| TUI key dispatch | `crates/outl-tui/src/input/normal.rs` | Its own `match` on `crossterm::KeyEvent`. Does **not** call `lookup`. |
+| TUI chord adapter | `crates/outl-tui/src/input/chord_adapter.rs` | `crossterm::KeyEvent → Chord`, for plugin keybindings only. |
 | Desktop input adapter | `crates/outl-desktop/src/lib/shortcuts.ts` | `KeyboardEvent → Chord`. |
 | Desktop dispatcher | `crates/outl-desktop/src/lib/action-handlers.ts` | `Action → Tauri command`. |
 | Mobile toolbar / gestures | `crates/outl-mobile/src/components/` | Per-component on-screen handlers. |
+| Per-client support | `crates/outl-shortcuts/src/support.rs` | Whether each client performs each action, and the sentence shown when it can't. Rendered in [`client-parity.md`](client-parity.md). |
 
 A chord change is a single line in `defaults.rs` plus, if the action is new, a row in `action.rs` and a handler in each client.
 See [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) for the full add-a-binding checklist.

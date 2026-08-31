@@ -194,6 +194,33 @@ Violating any one breaks user trust irreversibly.
     **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved.
     This one asks **whether the problem you are avoiding is even caused by the thing you are changing.**
 
+12. **A capability without a per-client verdict is a gap nobody recorded.**
+    Every client does not do everything, and that is fine.
+    What is not fine is that the *difference* has no owner, because then it is discovered by a user pressing a key that does nothing.
+
+    Not theory.
+    "Does the desktop bind `y r`?" had three answers in three places and they disagreed.
+    `docs/shortcuts.md` listed `y r` (`CopyBlockRef`) and `:` (`OpenCommandPalette`) as desktop chords — neither had a handler, so both were dead keys that logged to a console the user never opens.
+    The same doc listed mobile undo / redo as "toolbar"; mobile has neither, [#14](https://github.com/outlmd/outl/issues/14) is open, and `Journal.tsx` says so in a comment.
+    The desktop dispatcher's own comment called its `console.warn` something "the user sees".
+    Three hand-maintained copies of one fact, each stale in a different direction, and **nothing that could fail**.
+
+    `outl_shortcuts::support` owns it now: one exhaustive `match`, so a new `Action` variant does not compile until all three clients have declared their verdict.
+    `docs/client-parity.md` is generated from it and pinned by `the_parity_doc_matches_the_code`; `shortcuts.support.test.ts` pins the desktop's handler map against it in both directions.
+
+    Two things that took a second pass and are worth carrying:
+
+    - **The reason text belongs in the catalog, not the client.**
+      A client that writes its own wording is a fourth copy of the fact.
+      The desktop's `charCursorNudge` was already the right *shape* — one shared message for ten actions — and it still lived on the wrong side of the boundary.
+    - **"Reachable" and "has a handler" are different questions.**
+      `Backspace` on an empty textarea works on the desktop and has no handler, because the platform does it.
+      A boolean would have forced that row to lie in one direction or the other, so `Support::Native` is its own state: reachable, no handler, no nudge.
+
+    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved, invariant 11 asks whether the cost is even yours.
+    This one asks **who does not have what you just built, and does anything fail if you don't say?**
+
+
 ## Repo layout
 
 ```
@@ -210,7 +237,7 @@ outl/
     ├── outl-core/             # tree CRDT, op log, storage trait
     ├── outl-md/               # parser, sidecar, matching
     ├── outl-actions/          # UI-agnostic workspace ops (shared by every client)
-    ├── outl-shortcuts/        # canonical (chord, action) catalog — every client consumes it
+    ├── outl-shortcuts/        # canonical (chord, action) catalog + per-client support matrix
     ├── outl-exec/             # code-block runtime (desktop + mobile)
     ├── outl-import/           # adapter-based graph importers (Roam, Logseq, Obsidian + auto-detect)
     ├── outl-config/           # `outl.toml` parsing + schema
@@ -302,7 +329,8 @@ Don't unilaterally pivot.
 | `file` transport as the explicit opt-out | `transport = "file"` for iCloud Drive / shared FS users; folder is user-chosen — iCloud is one option, not a dependency |
 | Tauri 2 for mobile (replaces earlier uniffi plan) | Single Rust surface across TUI + mobile via `outl-actions`, Solid + Tailwind frontend, ObjC bridge only for iCloud watcher |
 | Tauri for desktop (shipping today) | Rust core reuse, smaller than Electron. macOS / Linux / Windows; Solid frontend shares `@outl/shared` with mobile |
-| `outl-shortcuts` is the single (chord → action) catalog | Two parallel implementations is the bug we paid to remove (TUI used to define bindings in `input/`, desktop wired its own `KeyboardEvent` handlers — `Cmd+P` and `Ctrl+P` drifted within a sprint). Adding a key on any client without going through `defaults.rs` puts that drift back. See `outl-shortcuts/CLAUDE.md` |
+| `outl-shortcuts` is the single (chord → action) catalog | Two parallel implementations is the bug we paid to remove (TUI used to define bindings in `input/`, desktop wired its own `KeyboardEvent` handlers — `Cmd+P` and `Ctrl+P` drifted within a sprint). Adding a key on any client without going through `defaults.rs` puts that drift back. See `outl-shortcuts/CLAUDE.md`. **Only the desktop resolves through `lookup()` today** — the TUI still dispatches Normal-mode keys from its own `match` in `input/normal.rs`, and mobile consumes neither; `docs/shortcuts.md` claimed otherwise for months. Finishing that migration is open work, not a settled decision |
+| `outl_shortcuts::support` is the single owner of **which client performs which action** | An exhaustive `match`, so a new `Action` variant does not compile until all three clients declare what they do with it. The lesser states carry the sentence shown to the user, so a client cannot invent its own wording. See [invariant 12](#critical-invariants-never-violate) |
 | One `ops-<actor>.jsonl` per device, never shared | Any file transport (iCloud, Syncthing, shared FS) is last-write-wins per file; per-actor files turn that into a non-issue; iroh ships ops directly |
 | MIT license | Simple, widely understood, no patent grant baggage |
 | `outl.app` domain owned | Use for docs/landing later |
@@ -360,6 +388,8 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
 - ❌ Skipping tests because "the algorithm is the same as the paper"
 - ❌ Reintroducing SQLite / rusqlite / any binary log format — cross-device sync depends on per-actor append-only files
 - ❌ Using `id::` Logseq-style metadata anywhere
+- ❌ Adding an `Action`, or any cross-client capability, without recording which clients lack it (invariant 12)
+- ❌ Writing the "this isn't available here" wording in a client instead of in the catalog
 - ❌ Marking work "done" without `/check` passing
 - ❌ Re-introducing `"version"` in `crates/outl-mobile/src-tauri/tauri.conf.json` — Tauri must keep falling back to `Cargo.toml` (see "Versioning + TestFlight release" in `crates/outl-mobile/CLAUDE.md`)
 - ❌ Adding a helper that re-implements something already in `outl-core` / `outl-md` / `outl-actions` (see [Reuse-first](docs/contributing.md#reuse-first-no-parallel-implementations)).

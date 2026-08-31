@@ -256,7 +256,7 @@ This section captures only the **architectural decisions** a contributor needs t
   `<OutlineView />` builds `visualSet = createMemo(() => visualRangeSet(...))` once per change; `<BlockRow />` answers `props.visualSet?.has(id) ?? false` in O(1).
   The old per-row `isInVisualRange` (O(N²)/keystroke) is kept in `@outl/shared/outline` for tests only.
 
-- **Char-cursor nudge is one shared handler:** the 10 char-cursor entries (`x` `X` `D` `C` `s` `r` `~` `e` `f` `F`) all point at `charCursorNudge`, so the message can't drift.
+- **Char-cursor nudge is one shared handler:** the 10 char-cursor entries (`x` `X` `D` `C` `s` `r` `~` `e` `f` `F`) have **no handler at all**: `outl_shortcuts::support` marks them `Missing(why::NO_CHAR_CURSOR)` and the dispatcher shows the catalog's sentence, so the message can't drift.
 
 - **`Y` / Visual `y` copy to the OS clipboard** via `copy_markdown` + `navigator.clipboard.writeText` (fills `yankRegister`; paste-in `p`/`P` deferred).
 
@@ -339,72 +339,8 @@ The one rule that matters here: **nothing about when a reminder fires is compute
 
 ## Plugins
 
-JS plugins (`outl_plugins::PluginHost`) run on the desktop, but the host embeds a Boa `Context` that is **`!Send`**, so it can never live in the `Send + Sync` `AppState`.
-The host therefore runs on a **dedicated plugin thread** (`src-tauri/src/plugin_service.rs`); `AppState` holds only a `PluginService` (a `Send + Sync` clone of a `std::sync::mpsc::Sender<PluginRequest>`).
-
-Design:
-
-- `spawn_plugin_service(workspace, storage_root, hlc)` (the desktop shim over `outl_tauri_shared::PluginService::spawn`, called once in `lib.rs::setup` after `open_today`/opener wiring) starts the thread.
-  It is handed **clones of the same `Arc<Mutex<Option<Workspace>>>` and `Arc<Mutex<Option<PathBuf>>>` every Tauri command locks**, plus the per-device `HlcGenerator`.
-  The `Workspace` is `Send`; the Boa `Context` never crosses a thread boundary.
-- The thread owns the `PluginHost`.
-  It loads plugins from `<root>/.outl/plugins/` lazily on the **first request after the workspace opens** (`ensure_loaded`), then `mark_synced` so pre-existing ops don't fire `onOp` hooks at boot.
-  A workspace **swap** (different `storage_root`) rebuilds the host against the new root.
-- Each request (`ListCommands` / `RunCommand` / `SyncHooks`) carries a one-shot `std::sync::mpsc::Sender` reply channel.
-  The Tauri command sends the request, then **blocks on `recv()` with the workspace `Mutex` released** (never held across the reply) — the plugin thread is the one that locks the workspace to run the host.
-  No `.await` ever holds the lock.
-- After a plugin mutation (`run.applied > 0`), the plugin thread re-projects **every** page's `.md` via `outl_actions::apply_all_pages_md` before replying.
-  A plugin can move blocks to any page — same rationale as the TUI's `reproject_after_plugin`.
-
-Capabilities honored: `slash-command` + `op-hook` + `ui-render` + `keybinding` + `toolbar-button`.
-The host filters `keybinding` / `toolbar-button` by declared capability **before** `keybindings("desktop")` / `toolbar_buttons("desktop")` return anything,
-so both must be in `client_capabilities()` or the desktop sees an empty list.
-
-Tauri commands live in `commands/plugin.rs`: `plugin_list`, `plugin_run`, `plugin_sync_hooks`, `plugin_keybindings`, `plugin_toolbar`, `plugin_transformers`, `plugin_transform`.
-Return types and per-command behaviour (which ones re-project, which are read-only, what `view` / `views` carry): [`docs/plugin-architecture.md`](../../docs/plugin-architecture.md#client-tauri-command-surface-desktop--mobile).
-
-### `keybinding` + `toolbar-button` contributions
-
-`lib/shortcuts.ts` loads `plugin_keybindings()` per `installShortcuts` (re-fetched on workspace swap, **not** module-cached) and folds the chords into the `keydown` dispatcher as a **Global overlay**.
-The DTO's `chord` / `mode` serialize identically to the `outl-shortcuts` catalog, so the dispatcher reuses its `Chord` / `seqEq` machinery unchanged.
-**Native always wins:** a plugin chord fires only after the native catalog matched nothing (match *and* prefix) and no native binding owns that chord in *any* mode (`nativeOwnsChord`) — a plugin can't shadow `Cmd+B` / `Cmd+P`.
-`components/ChromeToggleBar.tsx` loads `plugin_toolbar()` on mount and renders one momentary button per entry in the native cluster (glyph = `icon`, tooltip = `title`, click = `plugin_run`).
-Both paths run a command like the palette does: status-line output, re-render from `reply.view`, `playPluginViews(reply.views)`.
-
-Op-hooks fire `pluginSyncHooks` at **two post-mutation points**: `OutlineView`'s `onCommit` (after an edit) and the `ToggleTodo` handler (`Cmd+T`).
-`sync_hooks` dispatches **every** op since the host's last sweep, so one call also catches up structural ops (indent / move / delete) — mirrors the TUI's once-per-tick sweep.
-Best-effort: a host with no op-hook plugins is a cheap no-op.
-Both fire **fire-and-forget** (no `await`) — a slow plugin can't block the commit or next keystroke.
-
-### `ui-render` overlays (sandboxed iframe)
-
-A `ui-render` plugin emits HTML/JS via `ctx.ui.render(html)`.
-The core gates these on the capability and surfaces them on `PluginRun.views`, propagated as `PluginRunReply.views` / `PluginSyncHooksReply.views`.
-The desktop plays each as an **ephemeral, fully sandboxed `<iframe>` overlay**:
-
-- `lib/plugin-views.ts` owns a Solid signal queue (`playPluginViews` enqueues, `dismissPluginView` pops).
-- `components/PluginEffectLayer.tsx` (in `AppShell`) renders one fullscreen, click-through, `z-index: 9999` iframe per entry, auto-removed after 6s; multiple stack.
-- **Security (load-bearing — never weaken):** the iframe is `sandbox="allow-scripts"` **without** `allow-same-origin`.
-  The plugin JS runs in a null origin — no app DOM, cookies, `localStorage`, or credentialed fetch.
-  HTML enters via `srcdoc`, never `innerHTML` on the host document.
-  This is untrusted third-party code; the isolation is the whole point.
-
-Played from three call sites: `PluginPalette` (after `pluginRun`), `OutlineView.onCommit`, and the `ToggleTodo` handler (after `pluginSyncHooks`).
-The confetti example (`op-hook` + `ui-render`) rides this: mark a block DONE → `sync_hooks` → `onOp` emits confetti HTML → overlay.
-
-Frontend pieces: plugin DTOs + wrappers from `@outl/shared/api` (`lib/api.ts` keeps only `pluginKeybindings`); `lib/plugin-views.ts` + `components/PluginEffectLayer.tsx` (overlay queue).
-The `⧉` button in `ChromeToggleBar` toggles `appState.pluginsOpen`; `components/PluginPalette.tsx` lists + runs commands.
-
-### Content transformers (inline code-fence rendering)
-
-A plugin can declare a transformer for a code-fence language (`mermaid`, …); matching fences render through it in `CodeFenceView` (`components/BlockRow.tsx`).
-Registry + cache glue: `@outl/shared/plugins/transformer-registry` (shared with mobile); keeps `BlockRow` a renderer.
-It owns a `lang → PluginTransformer` registry (Solid signal via `loadTransformers`, re-run on `workspace-ready`; a boot fetch can be empty since plugins load lazily).
-A `(blockId, body)` result cache (`runTransform`) re-runs plugin JS only when the body changes.
-`kind: "text"` renders as plain whitespace-preserving text (no client-side markdown parse — a transformer wanting formatting emits `rich`).
-`kind: "rich"` renders the HTML in an **inline** `<iframe>` (`RichFenceFrame`), sized via an optional `parent.postMessage({outlHeight})` handshake.
-**Security (never weaken):** that iframe is `sandbox="allow-scripts"` **without** `allow-same-origin`, HTML via `srcdoc` — same isolation as the `ui-render` overlay, only inline + persistent instead of fullscreen + ephemeral.
-`content-transformer:text` / `:rich` are in `client_capabilities()` (the host gates transformers by capability before listing them).
+How the desktop hosts plugins — the effect layer, the toolbar and view surfaces:
+[`docs/plugins.md`](../../docs/plugins.md) → "Desktop plugin surface".
 
 ## Logging
 

@@ -154,70 +154,10 @@ Treat matching with the same paranoia as the CRDT.
 
 ## The 3-level matching algorithm
 
-When an external save lands on `pages/foo.md`:
+The three levels, the tiebreakers, the edge cases and the guard that refuses an oversized orphan list:
+[`docs/markdown-format.md`](../../docs/markdown-format.md#3-level-matching) → "3-level matching".
 
-1. **Parse** new `.md` → AST without IDs.
-2. **Load** `foo.outl` (sibling of `foo.md`) → AST with old IDs and content hashes.
-3. **Match** new ↔ old blocks at 3 confidence levels:
-
-| Level | Confidence | Criteria | Action |
-|-------|-----------|----------|--------|
-| 1 | High | `content_hash` exact match, same parent (by hash) or identical structure | Preserve ID, emit `Move` if position changed |
-| 1.5 | High | Equal block counts + same DFS index + same indent + **same parent** | Preserve ID, emit `Edit` (+ `Move` if needed) |
-| 2 | Medium | Normalized Levenshtein similarity > 80% against `SidecarBlock::text`, **and** DFS index within ±2 (unconditional) | Preserve ID, emit `Edit` (+ `Move` if needed), log warning |
-| 3 | Low / no match | Falls through | New ULID for new block; old block becomes `Delete` (`Move` to `TRASH_ROOT`); record in `.outl/orphans.log` |
-
-**Hard rule:** a block that drops to level 3 must appear in `orphans.log` before being deleted.
-**Silent deletion is a P0 bug.**
-
-**Second hard rule: level 3 says *what* to delete, never *how much*.**
-One orphan and five thousand come back in the same `Vec<NodeId>`.
-So a `.md` that arrived truncated — an iCloud placeholder whose bytes never downloaded, a half-flushed write, a parser that stopped reading the dialect halfway — empties a page as quietly as deleting one bullet.
-Any caller that turns orphans into `Move(node, TRASH_ROOT)` goes through **`matching::guard::match_blocks_guarded`**, not the raw `match_blocks`.
-Three properties it is built to have, which are also the review checklist for changing it:
-
-- **It cannot lose half a page.**
-  `match_blocks` is pure, so refusing after it ran is refusing before anything exists to apply.
-- **It is never silent.**
-  The refusal is `Err(MatchGuardError::BulkDelete { volume, trip })`, not a shortened orphan list.
-  Quietly dropping the deletions leaves the blocks in the tree and out of the `.md`, which is the divergence the reconcile exists to close.
-- **It has a way out.**
-  `OrphanGuard::Disabled` is what a caller wires to the user saying "yes, I meant that" — today `outl reconcile --allow-bulk-delete`.
-  Reachable only from an explicit act; a retry is not consent (root `CLAUDE.md` invariant 9 and RFC 0211 name a guard with no escape hatch as its own defect class).
-
-The defaults, and why each number is what it is:
-
-| Constant | Value | Why |
-|---|---|---|
-| `MAX_ORPHANED_BLOCKS` | 500 | No hand edit removes five hundred blocks from one page in one save. An unattended import legitimately might, and that is exactly the caller that should have to say so out loud. |
-| `MAX_ORPHANED_RATIO` | 0.75 | Deliberately high. Deleting a section is ordinary editing and costs well under half a page, while a truncated read takes essentially all of it. RFC 0210 already recorded what a guard that fires on real edits costs: it gets disabled, and then it guards nothing. |
-| `RATIO_FLOOR_BLOCKS` | 20 | A ratio is meaningless on a four-block scratch note. Under the floor only the absolute arm applies, which cannot fire that low — small pages are unguarded on purpose: small blast radius, high false-positive cost. |
-
-**Level 1.5 compares parents, not just indents.**
-Indent is depth, not identity: two blocks at the same depth can live in different subtrees, and matching on indent alone handed one subtree's id — plus its `((blk-…))` handle — to a block in another.
-Parents are compared through the ids matching already resolved (DFS preorder guarantees a parent is resolved before its children), so an unresolved parent counts as disagreement — the conservative answer.
-A rejection here isn't fatal: level 2 can still recover the id on similarity, and it warns when it does so across parents.
-
-**Level 2 exists for one specific save**: the user edits the `.md` outside outl and, in a single write, rewords one block *and* adds or removes another.
-The counts disagree, level 1.5 is out of play, and before level 2 every reworded block minted a fresh ULID while the old id went to the trash with every reference to it dangling.
-That is the *common* external edit, not an exotic one.
-Implementation notes:
-
-- Similarity runs against `SidecarBlock::text` via `strsim::normalized_levenshtein`.
-  An entry with no recorded text — written before the field existed, or by a peer binary that doesn't know it — doesn't fire level 2, so behaviour degrades to exactly what shipped before, never worse.
-  **The gate is the empty string, never the version number** (see below).
-- A length-ratio pre-filter (`min_len / max_len <= 0.8` ⇒ reject) skips the O(n·m) DP for pairs that could not have cleared the threshold anyway.
-  It's exact, so it can never discard a real match.
-- Blocks over 4096 chars are skipped: at that size it's a pasted document, not a reworded sentence.
-- The ±2 DFS window is **unconditional** — parent agreement is not an alternative gate.
-  It used to be skipped whenever the parents agreed, but `parents_agree(None, None)` is `true`, so every pair of *root* blocks agreed and the window never fired on a journal page.
-  `same_parent` today only selects which of the two warnings is logged.
-- **Assignment is by global confidence, never by document order** (`src/similarity.rs`).
-  Every in-window pair is scored first, then resolved from the highest score down, and the runner-up margin is **two-sided**: a winner must beat the best other claim on its new block *and* the best other claim on its old entry.
-  Walking `0..flat.len()` and taking each new block's first above-threshold candidate let a freshly typed block steal the id — and the `ref_handle` — of the block it merely resembles, purely by sitting at a lower index.
-  The real owner then fell to level 3 with a fresh ULID, and because the old id *was* consumed, `orphans` came back empty and nothing reached `orphans.log`.
-  Pinned by `tests/similarity_contention.rs`.
-- The match is `MatchLevel::Medium`, which `diff_to_ops` already treats like level 1 for id **and** `ref_handle` preservation (invariant 6).
+**Read it before touching `src/matching/`.** Invariant 8 in the root `CLAUDE.md` exists because a earlier version of this algorithm deleted content the op log had never seen.
 
 ## Sidecar format
 

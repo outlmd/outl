@@ -363,3 +363,11 @@ It was the default for local-only workspaces and the source of an entire class o
 There is one persistent backend.
 Cross-device sync is no longer a config decision; it's the only mode.
 See `CHANGELOG.md` for the migration path from a 0.4.x SQLite workspace.
+
+---
+
+## The 3-level matching algorithm
+
+Owned by [`markdown-format.md`](markdown-format.md#3-level-matching), which carries the levels, the tiebreakers and the edge cases.
+
+It lives there rather than here because the algorithm is defined by the markdown dialect and the sidecar, and splitting it across two docs is the same "one owner per fact" break that this repo keeps paying for. The bulk-delete guard moved there with it.

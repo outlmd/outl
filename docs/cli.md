@@ -275,7 +275,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl reconcile [--ahead-of-log] [--allow-bulk-delete]` | —             |
 | `outl recover [--apply] [--min-lines=N]`     | —                       |
 | `outl mcp serve [--workspace=…]`             | —                       |
-| `outl peer pair\|list\|remove\|status`        | —                       |
+| `outl peer pair\|list\|remove\|status\|revoke-all` | —                       |
 | `outl plugin init\|search\|list\|install\|run\|config\|secret\|enable\|disable\|remove` | — |
 | `outl sync`                                  | —                       |
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
@@ -372,6 +372,8 @@ Pass `--yes` to approve non-interactively (required when stdin is not a TTY).
 
 `outl peer pair` takes an optional `--name <NAME>` — the label this device advertises to the other (shown in the peer's `outl peer list`).
 It defaults to the machine hostname; the GUI clients default it to "desktop" / "mobile" and let the user edit it before pairing.
+
+`outl peer remove <id>` unpairs a device **on this machine only** — your other devices keep their own peer lists. For a lost or stolen device use `outl peer revoke-all`, which rotates the workspace identity so nothing that is not re-paired can sync again. It prompts for confirmation (`--yes` skips it). Scope, caveats and why rotation rather than a broadcast: [`docs/sync.md` → Managing peers](sync.md#managing-peers).
 
 `outl sync` forces a one-shot P2P sync pass (bring the iroh transport up, exchange ops with every paired device, exit).
 It's for scripts that mutate via the CLI and must flush to peers before the process dies — a normal short-lived CLI mutation can't keep a connection alive long enough.

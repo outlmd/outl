@@ -20,6 +20,7 @@
 * [Theming](theming.md)
 * [Configuration](config.md)
 * [Shortcuts](shortcuts.md)
+* [Client parity](client-parity.md)
 * [Reminders](reminders.md)
 * [Deep links (`outl://`)](deep-links.md)
 

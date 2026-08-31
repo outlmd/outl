@@ -341,6 +341,42 @@ export function listShortcutBindings(): Promise<Binding[]> {
   return invoke<Binding[]>("list_shortcut_bindings");
 }
 
+/**
+ * What a client does with an action — the wire form of
+ * `outl_shortcuts::Support`.
+ *
+ * `why` is the text shown to the *user*, not a log line. It is
+ * `null` for `full` and `native`, which are the two states where
+ * there is nothing to explain.
+ */
+export interface SupportDto {
+  kind: "full" | "native" | "partial" | "missing" | "n/a";
+  why: string | null;
+}
+
+/** Per-client support for one action in the catalog. */
+export interface ActionSupport {
+  action: Action;
+  tui: SupportDto;
+  desktop: SupportDto;
+  mobile: SupportDto;
+}
+
+/**
+ * Fetch what every client does with every action.
+ *
+ * The desktop uses its own column to tell the user why a chord did
+ * nothing. Before this existed the answer was a `console.warn`, and
+ * a chord that is missing was indistinguishable from one that is
+ * broken unless you had DevTools open.
+ *
+ * Single owner: `crates/outl-shortcuts/src/support.rs`. See
+ * [`docs/client-parity.md`](../../../../docs/client-parity.md).
+ */
+export function listActionSupport(): Promise<ActionSupport[]> {
+  return invoke<ActionSupport[]>("list_action_support");
+}
+
 export function getSettings(): Promise<Settings> {
   return invoke<Settings>("get_settings");
 }

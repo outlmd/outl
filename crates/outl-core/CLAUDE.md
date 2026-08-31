@@ -419,36 +419,12 @@ tests/
 └── convergence_property.rs  # proptest: full-op-mix convergence suite (below)
 ```
 
-## Convergence property suite (`tests/convergence_property.rs`)
+## Convergence property suite
 
-The definitive guard for the SEC claim.
-It generates bounded random op programs across up to 4 actors with globally-unique, monotonic-per-actor HLCs.
-The op mix is `Create` / `Move` / delete=`Move`→trash / `SetProp` / `SetCollapsed`.
-It delivers them to multiple replicas under random permutations and random duplication.
-Every op carries a unique HLC so the idempotency dedup never silently drops two distinct ops.
-The comparison is a `BTree`-keyed snapshot of the **full** materialized state: node parent+position, every property binding, and the collapsed set.
-That is stronger than `common::assert_trees_equal`, which compares nodes only.
-It is deterministic (no wall clock; permutations driven by seeded xorshift) and shrinks to a minimal counterexample on failure.
+What it generates, what it asserts, and why each generator shape exists:
+[`docs/crdt.md`](../../docs/crdt.md) → "Convergence property suite".
 
-Properties and the invariants (above) they guard:
-
-1. `convergence_under_reordering` — SEC + commutativity under any permutation, not just reverse.
-2. `idempotent_under_duplication` — idempotency: 1–3× redelivery == once.
-3. `concurrent_moves_never_cycle` — tree invariant + no silent loss.
-   Concurrent cycle-forming moves never materialize a cycle, the no-op move still lives in every replica's log, and all replicas converge.
-4. `hlc_actor_tiebreak_is_deterministic` — equal physical+logical, different actor resolves to the same winner on every replica.
-5. `late_op_undo_redo_round_trips` — the `undo_op`→`do_op` reorder path is a faithful round-trip (a late op forces a full undo/redo of the log).
-
-### Regression: `Op::Create` honors the cycle guard
-
-`Op::Create` runs `creates_cycle` before inserting, exactly like `Op::Move`.
-This was a real bug the convergence suite surfaced.
-The `Op::Create` branch used to do a bare `entry().or_insert((parent, pos))` with no cycle check.
-So a `Create(node, parent)` whose `parent` was already a descendant of `node` inserted `node → parent` and closed a loop (a prior `Move` re-parents something under `node` under reordering).
-That violates invariant #4 and then panics `creates_cycle` on the malformed tree.
-A cycle-forming `Create` is now a no-op on the materialized tree (the op still goes into the log).
-Undo is safe because a node only ever comes into existence through its own `Create` (`Move` never inserts a new entry), so a cycle-skipped `Create` leaves `node` absent and `undo_op`'s `remove(node)` is a no-op.
-The deterministic regression is `create_respects_cycle_guard` (asserts no cycle, C stays unmaterialized, all ops logged, across every delivery order); the full-surface `convergence_under_reordering` property exercises it under random programs.
+It lives in `tests/convergence_property.rs` and is **not optional** — it is the evidence for invariant 3.
 
 ## Coverage targets
 

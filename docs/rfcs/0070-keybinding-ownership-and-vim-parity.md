@@ -8,7 +8,7 @@
 | **Date** | 2026-08-06 |
 | **Reference doc** | [shortcuts.md](../shortcuts.md) |
 | **Invariant** | root `CLAUDE.md` → "`outl-shortcuts` is the single (chord → action) catalog" and "What you're NOT building yet" → character cursor in desktop Normal mode |
-| **Guarded by** | `no_duplicate_chord_in_same_mode`, `cmd_shift_x_splits_between_insert_and_global`, `cmd_shift_enter_splits_between_insert_and_normal` (`crates/outl-shortcuts/src/lib.rs`) |
+| **Guarded by** | `no_duplicate_chord_in_same_mode`, `cmd_shift_x_splits_between_insert_and_global`, `cmd_shift_enter_splits_between_insert_and_normal`, `nudges_are_written_for_the_user_not_the_developer`, `the_parity_doc_matches_the_code` (`crates/outl-shortcuts/src/`), `"wires no handler for an action the catalog calls absent"`, `"wires a handler for every action the catalog says it supports"` (`crates/outl-desktop/src/lib/shortcuts.support.test.ts`) |
 
 ## Why
 
@@ -63,7 +63,7 @@ Plain `Cmd+X` carries **no binding at all**, and `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+
 **The desktop's missing character cursor is a stated capability gap, not a bug backlog.**
 Vim ops are categorised by what they need from the cursor model.
 Block-level ops (`a`, `A`, `S`, `Y`, `*`, `#`, `z R`, `z M`, `z z`, `V`, `g v`, Visual `>` `<` `y` `d`) work on `selectedBlockId` and are implemented.
-Char-cursor ops (`x`, `X`, `D`, `C`, `s`, `r`, `f`, `F`, `~`, `e`) route to **one** `charCursorNudge` (`crates/outl-desktop/src/lib/action-handlers.ts:277`) that puts a status-line message pointing at `i` plus textarea edits.
+Char-cursor ops (`x`, `X`, `D`, `C`, `s`, `r`, `f`, `F`, `~`, `e`) route to **one** message, `why::NO_CHAR_CURSOR` in `crates/outl-shortcuts/src/support.rs` that puts a status-line message pointing at `i` plus textarea edits.
 Their catalog entries stay so the help overlay still lists them.
 One nudge function rather than ten messages is the point: there is a single place that says "this needs a cursor we don't have".
 
@@ -178,7 +178,9 @@ Two rows in different modes always pass, so a genuinely ambiguous pair is a desi
      A code block runs even with a link in it, a non-code block opens the link under the cursor, a cursor off the link does nothing, and the scheme guard allows only web and mail.
 
    **Two gaps, named.**
-   `charCursorNudge` has **no test — none found, gap**: nothing asserts that the ten char-cursor actions nudge rather than mutate, so a contributor could wire one of them to a block-level approximation and no test would object.
+   `charCursorNudge` **no longer exists**, and the gap it left is closed by what replaced it.
+   Its message moved into `outl_shortcuts::support`, where the ten char-cursor actions are `Missing(why::NO_CHAR_CURSOR)` on the desktop, and `shortcuts.support.test.ts` fails if any of them acquires a handler — which is the "wired to a block-level approximation" case this line used to say nothing would catch.
+   The wording is pinned too: `nudges_are_written_for_the_user_not_the_developer` rejects developer vocabulary, because the state before all this was a `console.warn` in a comment that called DevTools output something "the user sees".
    Arrow-key block navigation from #41 has **no test — none found, gap** — the edge-aware first-line/last-line crossing is unpinned.
 
 ## Scope

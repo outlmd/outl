@@ -481,8 +481,50 @@ The host persists the joiner to *its* `peers.json` and keeps its own id.
 | Command | What it does |
 |---------|--------------|
 | `outl peer list` | Print every paired device — node-id prefix, alias, added-at. Reads `peers.json` only (no network). |
-| `outl peer remove <id>` | Unpair a device by node-id prefix. Rewrites `peers.json`. |
+| `outl peer remove <id>` | Unpair a device by node-id prefix, **on this device**. See below — the scope matters. |
+| `outl peer revoke-all` | Lock out **every** device by rotating this workspace's identity. For a lost or stolen device — see below. |
 | `outl peer status` | Probe each paired peer for **live** reachability + RTT. Opens a transient iroh endpoint and connects to each peer with a short timeout; prints `online (Nms)` / `offline`. |
+
+##### What `peer remove` actually revokes
+
+**It cuts the device off from the machine you ran it on, and nothing else.**
+
+On this device the removal is real and it sticks: the entry is deleted, a tombstone stops membership gossip from re-adding it, and the next sync connection from that device is refused.
+Before the tombstone it did *not* stick — gossip put the peer back within about five seconds and sync resumed, so a user could watch a denial and reasonably conclude they were protected ([#158](https://github.com/outlmd/outl/issues/158)).
+
+**Your other paired devices still sync with it.** Each keeps its own peer list, so locking out a lost or stolen laptop means running `outl peer remove` on every device you still have.
+
+And even then, the removed device keeps the copy of the graph it already had.
+Revocation stops it receiving *new* edits; it cannot take back history that has already synced.
+Full reasoning and what real revocation would require: [RFC 0155](rfcs/0155-peer-trust.md) → Scope.
+
+##### Locking out a device you no longer have
+
+`outl peer remove` is for retiring a device you still control. For one that is lost or stolen, it is the wrong tool: you would have to run it on every device you still have, and you cannot run it on the one that is gone.
+
+`outl peer revoke-all` rotates this workspace's identity instead.
+
+```sh
+outl peer revoke-all          # asks you to type `revoke`
+outl peer revoke-all --yes    # scripted
+```
+
+Every pairing is dropped and the workspace gets a new id. **Re-pair each device you still have** (`outl peer pair`). The device you did not re-pair keeps the old id — the gossip topic is derived from the id, so it no longer even discovers your devices, and any direct connection is refused as a workspace mismatch.
+
+Two things to know before running it:
+
+- **A running GUI or `outl serve` holds the old identity in memory.** Restart it.
+- **The revoked device keeps the notes it already synced.** Rotation stops it receiving anything new. Nothing can un-send history that has already crossed.
+
+> **Why rotation and not a "revoke everywhere" broadcast.**
+> Propagating a removal between devices would mean any paired device could evict any other — and in the stolen-laptop case the attacker holds a paired device, so they would get to revoke *your* devices first. Rotation has no such race: the new id never leaves the devices you re-pair. Full reasoning: [RFC 0155](rfcs/0155-peer-trust.md).
+
+##### Pairing codes are single-use and time-limited
+
+A pairing code carries a one-time secret, and the joining device has to prove it holds that code before the host tells it anything.
+Someone who learns your device's address during the pairing window — but never sees the code — cannot pair with you.
+
+Treat the code itself as a password for its two-minute life: anyone who photographs or copies it can use it. Generate a new one rather than re-sending an old.
 
 The same three read/probe operations are exposed to the GUI clients as Tauri commands — `outl_peer_list`, `outl_peer_remove`, `outl_peer_status` — so the mobile and desktop apps can show and prune the peer list and surface live status.
 **Pairing stays CLI-only**; there is no `outl_peer_pair` command, because the handshake's interactive ticket exchange has no good GUI surface yet.

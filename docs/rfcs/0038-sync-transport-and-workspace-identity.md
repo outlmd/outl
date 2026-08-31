@@ -162,7 +162,13 @@ It also means a workspace whose `.outl/` is read-only pairs successfully and nev
      History has to reach a device that joined late, and reach it exactly once.
 
    **Two gaps, named rather than papered over.**
-   `CaTlsConfig::system()` has **no test — none found, gap**: reproducing it needs a custom root CA installed in the OS trust store, and nothing in the suite fakes one.
+   The relay selection around it is pinned: `an_empty_or_absent_relay_url_falls_back_to_outls_own` and `a_configured_relay_url_wins_and_a_typo_degrades_rather_than_failing` (`crates/outl-sync-iroh/src/bind.rs`) cover `None` / empty / whitespace resolving to outl's own relay rather than the n0 preset, and a malformed url degrading instead of failing the bind.
+   `the_bind_address_is_ipv4_only` in the same module pins the IPv4-only STOPGAP, whose removal reads as "sync got slow" rather than as a config change.
+
+   `CaTlsConfig::system()` itself still has **no test — none found, gap**: iroh exposes no way to read the choice back off a `Builder`, and reproducing the failure needs a custom root CA in the OS trust store.
+   What guards it instead is the compiler — `CaTlsConfig::system()` only exists with iroh's `platform-verifier` feature, so dropping the feature fails the build rather than silently reverting to the bundled Mozilla roots.
+   Removing the `.ca_tls_config(...)` call while keeping the feature would still pass: **that specific regression is unguarded**.
+
    The relay WebSocket 502 path has **no test — none found, gap**, because there is no fix to guard.
 
 ## Scope

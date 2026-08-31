@@ -36,7 +36,9 @@ use outl_core::WorkspaceId;
 
 use crate::engine::SharedWorkspaceId;
 use crate::identity::IrohIdentity;
-use crate::pairing::{accept_host_handshake, encode_ticket, ready_addr, run_join_handshake};
+use crate::pairing::{
+    accept_host_handshake, mint_ticket, ready_addr, run_join_handshake, PairingSecret,
+};
 use crate::peers::{PeerEntry, PeersStore};
 
 /// How long an armed host waits for a joiner before the arm expires and the
@@ -83,17 +85,106 @@ pub(crate) struct PairingHub {
     /// pre-adoption topic and the catch-up loop never re-dials after the single
     /// immediate post-pair sync. See the crate `CLAUDE.md`.
     wid_changed_tx: tokio::sync::broadcast::Sender<WorkspaceId>,
-    /// `Some` while the user has armed hosting; the router handler takes it to
-    /// complete exactly one inbound handshake, then clears it.
-    arm: Mutex<Option<HostArm>>,
+    /// The armed hosting session, and the rule about when it is consumed.
+    arm: ArmSlot,
     /// Fires a paired peer's addr so `run_iroh` can dial it immediately.
     pair_done_tx: tokio::sync::mpsc::UnboundedSender<iroh::EndpointAddr>,
+}
+
+/// Holds the armed hosting session, and owns the one rule that matters about
+/// it: **an inbound connection may read the arm, but only a completed handshake
+/// may consume it.**
+///
+/// That rule used to be a single `take()` at the top of the router handler, and
+/// it was wrong in a way nothing could catch. Any inbound dial disarmed the
+/// user — a stranger, a stale probe, a joiner whose handshake failed. It was
+/// survivable while the handshake could only fail by accident; adding a proof
+/// that a stranger is *supposed* to fail turned it into a one-packet way to
+/// stop someone pairing at all (issue #159).
+///
+/// Extracted from `PairingHub` so the rule has a name and a test. The hub needs
+/// an endpoint, a runtime handle and a workspace to construct; this needs
+/// nothing, which is the difference between the policy being tested and being
+/// asserted in a comment.
+#[derive(Default)]
+struct ArmSlot {
+    inner: Mutex<Option<HostArm>>,
+    /// Incremented on every [`arm`](Self::arm). Lets a caller say *which*
+    /// session it means when disarming.
+    ///
+    /// Without it, "disarm" is ambiguous the moment two sessions can overlap,
+    /// and they do: `pair_host_on_hub` spawns its host-wait onto the
+    /// transport's runtime, so a timed-out wait from a **previous** pairing
+    /// screen is still alive and still calling `complete`. It would take the
+    /// arm belonging to the ticket the user is looking at right now, which
+    /// then answers `not-armed`.
+    generation: Mutex<u64>,
+}
+
+/// A specific armed session. Only the holder of a matching generation may
+/// disarm it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ArmGeneration(u64);
+
+impl ArmSlot {
+    /// Arm hosting, superseding any previous session (last-armer-wins:
+    /// re-opening the pairing screen replaces a stale arm). Returns the
+    /// generation identifying *this* session.
+    fn arm(&self, arm: HostArm) -> ArmGeneration {
+        let mut gen = self.generation.lock().expect("pairing generation poisoned");
+        *gen += 1;
+        *self.inner.lock().expect("pairing arm mutex poisoned") = Some(arm);
+        ArmGeneration(*gen)
+    }
+
+    /// What an inbound connection needs to run the handshake, plus the
+    /// generation it belongs to. **Does not disarm** — call it as many times as
+    /// connections arrive.
+    fn snapshot(&self) -> Option<(Option<String>, PairingSecret, ArmGeneration)> {
+        let gen = *self.generation.lock().expect("pairing generation poisoned");
+        let guard = self.inner.lock().expect("pairing arm mutex poisoned");
+        guard
+            .as_ref()
+            .map(|a| (a.alias.clone(), a.secret.clone(), ArmGeneration(gen)))
+    }
+
+    /// Consume the arm **if it is still the session `gen` names**. Only a
+    /// handshake that passed every check, or the wait for that exact session
+    /// timing out, may call this.
+    ///
+    /// Returns `None` when the arm was already taken *or* has been superseded,
+    /// and those are the same answer to the caller: the session it was holding
+    /// is over, and whatever is armed now belongs to someone else.
+    fn complete(&self, gen: ArmGeneration) -> Option<HostArm> {
+        let current = *self.generation.lock().expect("pairing generation poisoned");
+        if current != gen.0 {
+            return None;
+        }
+        self.inner
+            .lock()
+            .expect("pairing arm mutex poisoned")
+            .take()
+    }
+
+    /// Whether hosting is currently armed. Test-only: production reads the arm
+    /// through [`snapshot`](Self::snapshot), which answers the same question
+    /// and returns what the caller needs.
+    #[cfg(test)]
+    fn is_armed(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("pairing arm mutex poisoned")
+            .is_some()
+    }
 }
 
 /// One armed hosting session: the alias to advertise + the channel that delivers
 /// the completed [`PeerEntry`] back to the awaiting `pair_host` future.
 struct HostArm {
     alias: Option<String>,
+    /// Secret baked into the ticket this arm handed out; the joiner must prove
+    /// it holds it (issue #159).
+    secret: PairingSecret,
     result_tx: oneshot::Sender<PeerEntry>,
 }
 
@@ -127,7 +218,7 @@ impl PairingHub {
             workspace_root,
             workspace_id,
             wid_changed_tx,
-            arm: Mutex::new(None),
+            arm: ArmSlot::default(),
             pair_done_tx,
         });
         (hub, pair_done_rx, wid_changed_rx)
@@ -202,23 +293,43 @@ impl PairingHub {
     async fn arm_host(
         self: &Arc<Self>,
         alias: Option<String>,
-    ) -> Result<(String, oneshot::Receiver<PeerEntry>)> {
+    ) -> Result<(String, oneshot::Receiver<PeerEntry>, ArmGeneration)> {
         // The live endpoint is already online (the sync transport has been
         // running), but snapshot a ready addr anyway so the ticket carries the
         // current relay + direct addrs.
         let addr = ready_addr(&self.endpoint).await;
-        let ticket = encode_ticket(&addr).context("encode pairing ticket")?;
+        let (ticket, secret) = mint_ticket(&addr).context("mint pairing ticket")?;
 
         let (result_tx, result_rx) = oneshot::channel();
-        *self.arm.lock().expect("pairing arm mutex poisoned") = Some(HostArm { alias, result_tx });
-        Ok((ticket, result_rx))
+        let gen = self.arm.arm(HostArm {
+            alias,
+            secret,
+            result_tx,
+        });
+        Ok((ticket, result_rx, gen))
     }
 
-    /// Take the current arm, if any. Called by the router handler when an
-    /// inbound `PAIRING_ALPN` connection arrives — `None` means the user has
-    /// not armed hosting, so the handler rejects the connection.
-    fn take_arm(&self) -> Option<HostArm> {
-        self.arm.lock().expect("pairing arm mutex poisoned").take()
+    /// What an inbound connection needs to run the handshake, **without**
+    /// disarming.
+    ///
+    /// Taking the arm up front meant any inbound dial consumed it: a stranger,
+    /// a stale probe, or a joiner whose handshake failed would leave the user
+    /// staring at a pairing screen that no longer accepted anyone, with nothing
+    /// saying so. With a proof to check, that stopped being a rare accident and
+    /// became a one-packet denial of the pairing flow (issue #159). The arm is
+    /// now consumed only by a handshake that succeeded.
+    fn arm_snapshot(&self) -> Option<(Option<String>, PairingSecret, ArmGeneration)> {
+        self.arm.snapshot()
+    }
+
+    /// Consume the arm after a successful handshake, yielding the sender that
+    /// resolves the awaiting `pair_host` future.
+    ///
+    /// Returns `None` if the arm vanished mid-handshake (the user closed the
+    /// pairing screen, or re-armed). The peer is persisted either way — losing
+    /// the notification is cosmetic, losing the pairing would not be.
+    fn complete_arm(&self, gen: ArmGeneration) -> Option<HostArm> {
+        self.arm.complete(gen)
     }
 
     /// Persist a freshly paired peer and signal an immediate sync against it.
@@ -253,14 +364,18 @@ impl iroh::protocol::ProtocolHandler for PairingProtocolHandler {
     ) -> Result<(), iroh::protocol::AcceptError> {
         // Only accept while the user has armed hosting. An unarmed inbound
         // pairing dial is rejected (a stranger can't pair us in the background).
-        let Some(arm) = self.hub.take_arm() else {
+        let Some((alias, secret, gen)) = self.hub.arm_snapshot() else {
             warn!("inbound pairing connection while not armed; rejecting");
             conn.close(1u32.into(), b"not-armed");
             return Ok(());
         };
 
-        if let Err(e) = self.serve(&conn, arm).await {
-            warn!("pairing serve failed: {e:#}");
+        if let Err(e) = self.serve(&conn, alias, &secret, gen).await {
+            // Stay armed. The failure may be the attacker, or a first attempt
+            // by the real device; either way the user's pairing screen must
+            // keep working. Reporting the error to the router is still right —
+            // it closes this connection — but it must not disarm.
+            warn!("pairing serve failed (still armed): {e:#}");
             conn.close(2u32.into(), b"pairing-failed");
             return Err(iroh::protocol::AcceptError::from_boxed(e.into()));
         }
@@ -269,7 +384,13 @@ impl iroh::protocol::ProtocolHandler for PairingProtocolHandler {
 }
 
 impl PairingProtocolHandler {
-    async fn serve(&self, conn: &iroh::endpoint::Connection, arm: HostArm) -> Result<()> {
+    async fn serve(
+        &self,
+        conn: &iroh::endpoint::Connection,
+        alias: Option<String>,
+        secret: &PairingSecret,
+        gen: ArmGeneration,
+    ) -> Result<()> {
         // Snapshot our ready addr so the joiner stores a reachable host.
         let our_addr = ready_addr(&self.hub.endpoint).await;
         // We are the HOST: advertise our workspace id (the joiner adopts it) but
@@ -279,16 +400,20 @@ impl PairingProtocolHandler {
             conn,
             &self.hub.identity,
             &our_addr,
-            arm.alias,
+            alias,
             Some(&our_wid),
+            secret,
         )
         .await?;
 
         self.hub.persist_and_kick(entry.clone())?;
 
-        // Deliver the result to the awaiting `pair_host` future. A dropped
-        // receiver (the GUI gave up waiting) is fine — the peer is persisted.
-        let _ = arm.result_tx.send(entry);
+        // Only now disarm: the handshake passed both checks. Deliver the result
+        // to the awaiting `pair_host` future. A dropped receiver (the GUI gave
+        // up waiting) is fine — the peer is persisted.
+        if let Some(arm) = self.hub.complete_arm(gen) {
+            let _ = arm.result_tx.send(entry);
+        }
 
         // The host replied LAST; wait for the joiner to close so its read of our
         // payload isn't truncated. The live endpoint stays up regardless.
@@ -415,7 +540,7 @@ where
 {
     // Arm + mint the ticket on the transport's runtime (touches the endpoint).
     let arm_hub = hub.clone();
-    let (ticket, result_rx) = hub
+    let (ticket, result_rx, gen) = hub
         .runtime
         .spawn(async move { arm_hub.arm_host(alias).await })
         .await
@@ -436,8 +561,15 @@ where
                 )),
                 Err(_) => {
                     // Disarm so a later inbound dial doesn't complete against a
-                    // dropped receiver.
-                    let _ = wait_hub.take_arm();
+                    // dropped receiver — but only **our** session.
+                    //
+                    // This task lives on the transport's runtime and outlives
+                    // the future that spawned it, so by the time it fires the
+                    // user may have closed and re-opened the pairing screen.
+                    // Disarming unconditionally would take the arm behind the
+                    // ticket now on screen, which then answers `not-armed` and
+                    // reads as pairing being broken.
+                    let _ = wait_hub.complete_arm(gen);
                     Err(anyhow!("timed out waiting for the other device to connect"))
                 }
             }
@@ -482,4 +614,151 @@ pub(crate) async fn pair_join_on_hub(
         })
         .await
         .context("join pair-join task")?
+}
+
+#[cfg(test)]
+mod arm_slot_tests {
+    use super::*;
+
+    fn an_arm() -> (HostArm, oneshot::Receiver<PeerEntry>) {
+        let (result_tx, rx) = oneshot::channel();
+        (
+            HostArm {
+                alias: Some("desktop".into()),
+                secret: PairingSecret::generate(),
+                result_tx,
+            },
+            rx,
+        )
+    }
+
+    /// The GUI half of issue #159's re-arm: reading the arm to run a handshake
+    /// must not disarm, no matter how many connections arrive.
+    ///
+    /// If this regresses, the pairing screen stops accepting after the first
+    /// inbound dial — and because a refused stranger is now an *expected*
+    /// outcome rather than a rare accident, anyone who can reach the device can
+    /// end the user's pairing session with one packet.
+    #[test]
+    fn reading_the_arm_never_disarms_it() {
+        let slot = ArmSlot::default();
+        let (arm, _rx) = an_arm();
+        slot.arm(arm);
+
+        for attempt in 1..=5 {
+            assert!(
+                slot.snapshot().is_some(),
+                "arm vanished after {attempt} inbound connection(s)",
+            );
+            assert!(slot.is_armed(), "still armed after {attempt} read(s)");
+        }
+    }
+
+    /// The other side of the same rule: a handshake that passed consumes it,
+    /// so a second joiner cannot pair against a session already spent.
+    #[test]
+    fn completing_the_handshake_disarms() {
+        let slot = ArmSlot::default();
+        let (arm, _rx) = an_arm();
+        let gen = slot.arm(arm);
+
+        assert!(
+            slot.complete(gen).is_some(),
+            "the first completion takes it"
+        );
+        assert!(!slot.is_armed(), "must be disarmed after a completion");
+        assert!(
+            slot.complete(gen).is_none(),
+            "a second completion must find nothing",
+        );
+        assert!(
+            slot.snapshot().is_none(),
+            "an inbound connection after completion must find no arm",
+        );
+    }
+
+    /// A refused joiner is exactly a `snapshot` with no `complete`, and the
+    /// real device must still get through afterwards.
+    #[test]
+    fn a_refused_joiner_leaves_the_next_one_able_to_pair() {
+        let slot = ArmSlot::default();
+        let (arm, _rx) = an_arm();
+        slot.arm(arm);
+
+        // Attacker: reads the arm, fails the proof, never completes.
+        let stolen = slot.snapshot();
+        assert!(
+            stolen.is_some(),
+            "the handler reads the arm to run a handshake"
+        );
+
+        // Real device: still finds an arm, and completes.
+        let (_, _, gen) = slot.snapshot().expect("the arm survived the refusal");
+        assert!(
+            slot.complete(gen).is_some(),
+            "the invited device must still be able to pair",
+        );
+    }
+
+    /// The stale-timeout case, and the reason `complete` takes a generation.
+    ///
+    /// `pair_host_on_hub` spawns its host-wait onto the transport's runtime,
+    /// so a wait from a pairing screen the user already closed is still alive
+    /// and still fires. Before the generation it called `complete()` bare and
+    /// took whatever was armed — including the session behind the ticket now on
+    /// screen, which then answered `not-armed` and read as broken pairing.
+    #[test]
+    fn a_stale_timeout_cannot_disarm_a_newer_session() {
+        let slot = ArmSlot::default();
+
+        let (first, _rx1) = an_arm();
+        let stale_gen = slot.arm(first);
+
+        // User closes and re-opens the pairing screen.
+        let (second, _rx2) = an_arm();
+        let live_gen = slot.arm(second);
+        assert_ne!(stale_gen, live_gen);
+
+        // The old wait times out now and tries to disarm.
+        assert!(
+            slot.complete(stale_gen).is_none(),
+            "a superseded session must not consume the current arm",
+        );
+        assert!(
+            slot.is_armed(),
+            "the ticket on screen must still be able to pair",
+        );
+
+        // And the current session still completes normally.
+        assert!(slot.complete(live_gen).is_some());
+    }
+
+    /// Re-opening the pairing screen supersedes a stale session rather than
+    /// stacking, so the ticket on screen is always the one that will verify.
+    #[test]
+    fn re_arming_replaces_the_previous_session() {
+        let slot = ArmSlot::default();
+        let (first, _rx1) = an_arm();
+        let first_secret = first.secret.clone();
+        slot.arm(first);
+
+        let (second, _rx2) = an_arm();
+        let second_secret = second.secret.clone();
+        slot.arm(second);
+
+        // Compare the secrets through the proof they produce for one fixed
+        // device — the only observable a `PairingSecret` exposes, by design.
+        let probe = iroh::SecretKey::generate().public();
+        let (_, live, _) = slot.snapshot().expect("still armed");
+        assert_eq!(
+            live.proof_for(probe),
+            second_secret.proof_for(probe),
+            "the live secret must be the most recent arm's",
+        );
+        assert_ne!(
+            live.proof_for(probe),
+            first_secret.proof_for(probe),
+            "a joiner holding the superseded ticket must no longer verify",
+        );
+    }
 }

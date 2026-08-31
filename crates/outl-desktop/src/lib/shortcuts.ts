@@ -28,10 +28,12 @@ import {
   type Key,
   type PluginKeybinding,
   type ShortcutMode,
+  type SupportDto,
   MOD_ALT,
   MOD_CTRL,
   MOD_META,
   MOD_SHIFT,
+  listActionSupport,
   listShortcutBindings,
   pluginKeybindings,
 } from "./api";
@@ -171,18 +173,70 @@ function detectMode(): ShortcutMode {
 
 /**
  * Handler map. Each property is a function the caller supplies that
- * fires when its corresponding [`Action`] resolves. Missing entries
- * fall back to a `console.warn` so the user sees which actions
- * still need wiring during development.
+ * fires when its corresponding [`Action`] resolves.
+ *
+ * A missing entry is not a hole to paper over — it is a fact the
+ * catalog already knows, and `outl_shortcuts::support` carries the
+ * sentence to show the user. Which entries may be absent is pinned
+ * by `shortcuts.support.test.ts`: anything the catalog calls `full`
+ * or `partial` on the desktop must be here.
  */
 export type ActionHandlers = Partial<
   Record<Action["kind"], () => void | Promise<void>>
 >;
 
+/** Desktop support column, keyed by action, fetched once per session. */
+let cachedSupport: Map<Action["kind"], SupportDto> | null = null;
+
+async function loadSupport(): Promise<Map<Action["kind"], SupportDto>> {
+  if (cachedSupport) return cachedSupport;
+  const rows = await listActionSupport();
+  cachedSupport = new Map(rows.map((r) => [r.action.kind, r.desktop]));
+  return cachedSupport;
+}
+
+/**
+ * Tell the user why a chord they pressed did nothing.
+ *
+ * The text comes from the catalog, never from here. A client that
+ * writes its own wording is a fourth copy of a fact that already had
+ * three disagreeing ones — which is the drift
+ * `crates/outl-shortcuts/src/support.rs` was added to end.
+ */
+function nudgeFor(
+  kind: Action["kind"],
+  support: Map<Action["kind"], SupportDto>,
+  onNudge: (msg: string) => void,
+) {
+  const s = support.get(kind);
+  if (!s) {
+    // The catalog is exhaustive over `Action`, so a miss here means
+    // the frontend and the backend are built from different
+    // revisions. Say so in the console: it is a build problem, not
+    // something the user can act on.
+    console.error(`[shortcuts] ${kind} is absent from the support catalog`);
+    return;
+  }
+  if (s.why) {
+    onNudge(s.why);
+    return;
+  }
+  // `full` or `native` with no handler is our bug, not a gap: the
+  // catalog promises the desktop does this. `shortcuts.support.test.ts`
+  // fails on it, so reaching this at runtime means the test was
+  // skipped or the two halves are out of sync.
+  console.error(
+    `[shortcuts] catalog says the desktop supports ${kind} (${s.kind}), but no handler is wired`,
+  );
+}
+
 async function dispatch(action: Action, handlers: ActionHandlers) {
   const h = handlers[action.kind];
   if (!h) {
-    console.warn(`[shortcuts] no handler for action ${action.kind}`);
+    // The keydown path checks for a handler before calling us (it has
+    // to, to decide `preventDefault`), so this is unreachable from
+    // there. Kept so a direct caller cannot fail silently.
+    console.error(`[shortcuts] dispatch called for unhandled ${action.kind}`);
     return;
   }
   try {
@@ -237,13 +291,21 @@ async function runPluginChord(kb: PluginKeybinding) {
  *
  * `handlers` is a map from `Action["kind"]` to a function. Only
  * the actions the desktop actively supports today need to be
- * filled in; the rest log a warning so we can see which TUI-only
- * actions remain unimplemented.
+ * filled in — which ones those are is declared in
+ * `outl_shortcuts::support` and pinned by
+ * `shortcuts.support.test.ts`.
+ *
+ * `onNudge` receives the catalog's sentence when the user presses a
+ * chord this client cannot honour. Default is a no-op so a test
+ * harness can install without one; the app passes its status-line
+ * setter.
  */
 export async function installShortcuts(
   handlers: ActionHandlers,
+  onNudge: (msg: string) => void = () => {},
 ): Promise<() => void> {
   const bindings = await loadBindings();
+  const support = await loadSupport();
 
   // Plugin-contributed chords, folded in as a Global overlay. They are
   // always single-chord and `global` (the backend stamps the mode), so we
@@ -321,10 +383,12 @@ export async function installShortcuts(
         console.info(`[shortcuts] ${mode} → ${hit.action.kind}`);
         await dispatch(hit.action, handlers);
       } else {
-        console.warn(
-          `[shortcuts] ${mode} chord matches ${hit.action.kind} but no JS handler`,
-          { chord: sequence },
-        );
+        // No `preventDefault` on purpose — the textarea or the OS is
+        // the right processor for this key (`Enter` in Insert is the
+        // canonical case). But falling through silently is what made
+        // a missing feature look like a broken one, so the user is
+        // told what the catalog knows.
+        nudgeFor(hit.action.kind, support, onNudge);
         resetPending();
       }
       return;

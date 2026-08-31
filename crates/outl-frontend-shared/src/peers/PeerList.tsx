@@ -33,6 +33,13 @@ interface PeerListProps {
    * Invoked when the user clicks remove on a row, with the peer's full
    * `node_id`. The host calls `peerRemove(nodeId)` then refreshes its
    * list. Omit to hide the remove button (read-only list).
+   *
+   * When set, the list renders a note saying what removal actually
+   * does. That note is not decoration: removal is per-device, and a
+   * bare "Remove" button reads as "cut this device off", which is a
+   * promise neither client can keep (issue #158). The CLI says the
+   * same thing in words; saying it in only one of the two would just
+   * move the misunderstanding.
    */
   onRemove?: (nodeId: string) => void;
   /** Rendered when `peers` is empty. Defaults to a neutral hint. */
@@ -91,6 +98,13 @@ export function PeerList(props: PeerListProps): JSX.Element {
           }}
         </For>
       </ul>
+      <Show when={props.onRemove}>
+        <p class="outl-peer-list__scope-note">
+          Removing a device only stops <em>this</em> device syncing with it. Your
+          other devices keep their own list — remove it there too. It also keeps
+          the copy of your notes it already has.
+        </p>
+      </Show>
     </Show>
   );
 }

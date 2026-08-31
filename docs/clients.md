@@ -49,6 +49,26 @@ The TS+Solid frontends share `@outl/shared` (`crates/outl-frontend-shared`) for 
 | Desktop: FS watcher, settings IO, Solid frontend (3-pane, OS-standard shortcuts) | `outl-desktop` |
 | Mobile: iCloud container resolution, iOS-native bridges (`NSMetadataQuery`, `BGTaskScheduler`), Solid frontend | `outl-mobile` |
 | CLI subcommands                      | `outl-cli`                      |
+| Chord catalog, and **which client performs which action** | `outl-shortcuts` |
+
+## When a client can't do the thing
+
+Not every client performs every action, and that is fine.
+What is not fine is the user pressing a key and getting nothing, with no way to tell a gap from a bug.
+
+`outl_shortcuts::support(action)` is the single owner of that fact — one exhaustive `match`, so a new `Action` variant does not compile until all three clients have declared what they do with it.
+The lesser states (`Partial`, `Missing`, `NotApplicable`) each carry the sentence shown to the user, written **in the catalog** so a client cannot invent its own wording.
+
+The desktop wires it in `lib/shortcuts.ts`: a chord with no handler falls through without `preventDefault` (the textarea or the OS still gets the key) *and* surfaces the catalog's sentence in the status line.
+It used to emit `console.warn` instead, in a comment that called DevTools output something "the user sees".
+
+Full table, generated and test-pinned: [`client-parity.md`](client-parity.md).
+
+> **Why this needed an owner at all.**
+> The fact had three homes and they disagreed: `shortcuts.md` listed `y r` and `:` as desktop chords (neither has a handler), and mobile undo / redo as "toolbar" (mobile has neither — [#14](https://github.com/outlmd/outl/issues/14)).
+> Three hand-maintained copies, each stale in a different direction, and nothing that could fail.
+> This is [invariant 12](../CLAUDE.md#critical-invariants-never-violate): **when you add a capability, enumerate who does not have it.**
+
 
 ## When to put logic in `outl-actions`
 

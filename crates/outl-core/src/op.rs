@@ -174,3 +174,153 @@ pub struct LogOp {
     /// The mutation itself.
     pub op: Op,
 }
+
+/// What kind of payload an [`Op`] variant carries.
+///
+/// Exists for one assertion: **asset bytes never enter the op log**
+/// ([RFC 0202](../../../docs/rfcs/0202-file-assets.md)). That was true by
+/// construction — `Op` simply had no variant for it — and "true by
+/// construction" is the kind of truth that stops being true in a commit
+/// nobody flags, because nothing fails when it does
+/// ([issue #213](https://github.com/outlmd/outl/issues/213), item 2).
+///
+/// RFC 0202 frames the whole asset design as a deliberate, *expiring*
+/// exception to invariant 7. An exception that valuable deserves a guard
+/// that fires when the thing it excepted comes back.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+enum PayloadShape {
+    /// Ids, positions, flags, timestamps, a property key and value.
+    /// Bounded, structural, and describes an edit rather than carrying a
+    /// file.
+    Structural,
+    /// An opaque byte blob whose size the user controls.
+    ///
+    /// The string is the justification, and writing one is the point: a
+    /// second variant landing here should require an author to state,
+    /// in the diff, why the op log is the right home for those bytes.
+    OpaqueBytes(&'static str),
+}
+
+#[cfg(test)]
+mod payload_policy {
+    use super::*;
+
+    /// Classify a variant's payload. **Exhaustive on purpose** — a new
+    /// [`Op`] variant does not compile until someone has said which side
+    /// of RFC 0202 it falls on.
+    fn payload_shape(op: &Op) -> PayloadShape {
+        match op {
+            Op::Move { .. }
+            | Op::Create { .. }
+            | Op::SetCollapsed { .. }
+            | Op::SnoozeRemind { .. } => PayloadShape::Structural,
+
+            // A property value is user text, and bounded by being text.
+            // It is not a file: `SetProp` cannot express "here are the
+            // bytes of a PDF" without someone base64-ing one into a
+            // value, which is the abuse this policy exists to make
+            // visible rather than a shape the variant invites.
+            Op::SetProp { .. } => PayloadShape::Structural,
+
+            Op::Edit { .. } => PayloadShape::OpaqueBytes(
+                "a Yrs update IS the block's text state — the thing the CRDT \
+                 merges. It is not a file the log is carrying on behalf of \
+                 something else, which is the distinction RFC 0202 draws.",
+            ),
+        }
+    }
+
+    /// One sample per variant. Kept complete by
+    /// `every_variant_has_a_sample` below.
+    fn one_of_each() -> Vec<Op> {
+        let node = NodeId::new();
+        vec![
+            Op::Move {
+                node,
+                new_parent: NodeId::new(),
+                position: Fractional::between(None, None),
+                old_parent: NodeId::new(),
+                old_position: Fractional::between(None, None),
+            },
+            Op::Edit {
+                node,
+                text_op: vec![1, 2, 3],
+            },
+            Op::SetProp {
+                node,
+                key: "remind".into(),
+                value: None,
+                old_value: None,
+            },
+            Op::Create {
+                node,
+                parent: NodeId::new(),
+                position: Fractional::between(None, None),
+            },
+            Op::SetCollapsed {
+                node,
+                value: true,
+                old_value: false,
+            },
+            Op::SnoozeRemind {
+                node,
+                until_ms: Some(1),
+                old_until_ms: None,
+            },
+        ]
+    }
+
+    /// RFC 0202's load-bearing claim, as an assertion rather than a
+    /// property of the enum's current shape.
+    ///
+    /// If this fails, someone added a variant that carries opaque bytes.
+    /// That may be right — but it is a decision about invariant 7 and
+    /// RFC 0202, not a refactor, and it should not be possible to make
+    /// it without noticing.
+    #[test]
+    fn only_yrs_text_may_put_opaque_bytes_in_the_op_log() {
+        let carriers: Vec<_> = one_of_each()
+            .iter()
+            .filter(|op| matches!(payload_shape(op), PayloadShape::OpaqueBytes(_)))
+            .map(std::mem::discriminant)
+            .collect();
+
+        let edit = Op::Edit {
+            node: NodeId::new(),
+            text_op: Vec::new(),
+        };
+        assert_eq!(
+            carriers,
+            vec![std::mem::discriminant(&edit)],
+            "exactly one Op variant may carry opaque bytes, and it must be \
+             Op::Edit. A new byte-carrying variant means asset (or other file) \
+             bytes can now enter the op log — see docs/rfcs/0202-file-assets.md \
+             and root CLAUDE.md invariant 7 before changing this test.",
+        );
+    }
+
+    /// Guards the guard: a variant missing from `one_of_each` would make
+    /// the assertion above pass without ever looking at it.
+    ///
+    /// `payload_shape`'s `match` already forces a *classification* at
+    /// compile time; this forces the *sample*, which is what the runtime
+    /// assertion actually reads.
+    #[test]
+    fn every_variant_has_a_sample() {
+        let samples = one_of_each();
+        let distinct: std::collections::HashSet<_> =
+            samples.iter().map(std::mem::discriminant).collect();
+        assert_eq!(
+            distinct.len(),
+            samples.len(),
+            "one_of_each lists a variant twice",
+        );
+        assert_eq!(
+            samples.len(),
+            6,
+            "Op has a new variant — add it to one_of_each (and classify it in \
+             payload_shape, which will not compile until you do)",
+        );
+    }
+}

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BlockNode } from "@outl/shared/api/types";
 import { listTemplates } from "@outl/shared/api/commands";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
-import { setAppState } from "../lib/store";
+import { appState, setAppState } from "../lib/store";
 
 /**
  * Regression for #119: in the Mac app, pressing Enter inside a block
@@ -225,5 +225,70 @@ describe("BlockRow call: fence → template link", () => {
     await Promise.resolve();
     expect(host.querySelector("button[title^='Open template']")).toBeNull();
     expect(cb.onOpenPage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The ghost-block policy, client half (issue #213 item 1, [RFC 0129]).
+ *
+ * **Never write an op for something the user did not do.** The op log is
+ * append-only and every op syncs to every device, so a commit that changes
+ * nothing is not free: it is a permanent row, it shows up in page history as a
+ * change the user did not make, and it re-triggers projection on every peer.
+ *
+ * `commit()` enforces it with `if (raw !== wire)`. That was one line with
+ * nothing pinning it, and it is the kind of line a refactor drops without
+ * noticing — the visible behaviour (leaving edit mode) is identical either way.
+ * `Workspace::op_is_noop` is the core-side twin; this is the half that stops the
+ * op being *emitted* in the first place.
+ */
+describe("BlockRow commit — the ghost-block policy (#213)", () => {
+  it("does not commit when the text is unchanged", async () => {
+    const cb = makeCb();
+    const block = makeBlock("blk-noop", "unchanged");
+    const ta = mountEditing(block, cb);
+
+    // The user focused the block, typed nothing, and left.
+    ta.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      cb.onCommit,
+      "an unchanged block must not reach the backend — that is a ghost op",
+    ).not.toHaveBeenCalled();
+  });
+
+  it("still leaves edit mode when the text is unchanged", async () => {
+    // The mirror case, and the reason the early return cannot simply be
+    // "do nothing": an Esc on an unmodified block used to leave the textarea
+    // visible with raw markdown showing. Suppressing the op must not suppress
+    // the mode flip.
+    const cb = makeCb();
+    const block = makeBlock("blk-esc", "unchanged");
+    const ta = mountEditing(block, cb);
+
+    ta.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(appState.editingBlockId).toBeNull();
+  });
+
+  it("commits when the user actually changed the text", async () => {
+    // Guards the guard: a test that only asserts "did not commit" passes just
+    // as well if commit never fires at all.
+    const cb = makeCb();
+    const block = makeBlock("blk-edit", "before");
+    const ta = mountEditing(block, cb);
+
+    ta.value = "after";
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+    ta.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cb.onCommit).toHaveBeenCalledWith("blk-edit", "after");
   });
 });
