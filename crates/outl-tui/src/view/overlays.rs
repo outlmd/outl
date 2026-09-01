@@ -971,8 +971,6 @@ pub(crate) fn render_help_popup(f: &mut ratatui::Frame<'_>, full: Rect, app: &Ap
 /// `outl-shortcuts`, so a chord added to the catalog does NOT appear
 /// here on its own. The guard test at the bottom of this file is what
 /// keeps the reminder chords from silently dropping out again.
-/// Note however, that at least one keybinding *change* was missed -
-/// `\` -> Ctrl+E for the sidebar toggle.
 fn help_tab_body(tab: usize, theme: &Theme) -> Vec<Line<'static>> {
     match HELP_TABS.get(tab).copied().unwrap_or("Normal") {
         "Normal" => vec![
