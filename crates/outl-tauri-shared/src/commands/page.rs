@@ -67,7 +67,9 @@ async fn compute_backlinks_offloaded(
             None => {
                 // Host without a cached slot: one-shot from-disk build.
                 let idx = build_backlink_index_from_disk(&metas, &root);
-                return finish_lookup(&workspace, &idx, &meta, backlinks_order);
+                let guard = workspace.lock();
+                let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
+                return Ok(finish_lookup(ws, &idx, &meta, backlinks_order));
             }
         };
         if index.lock().is_none() {
@@ -80,9 +82,21 @@ async fn compute_backlinks_offloaded(
 
         // Phase 3: O(refs) lookup under a brief lock (`for_page` reads the
         // page's own `template::` property; no block-text scan).
+        //
+        // **Workspace first, then the index — never the other way round.**
+        // A commit holds the workspace lock for the whole of
+        // `finish_in_page_with` and drops the cached index from inside it
+        // (`invalidate_backlink_index`), so this thread taking the index
+        // lock first and then waiting on the workspace is an ABBA deadlock
+        // with no timeout: the app freezes until it is force-quit. A paste
+        // is the reliable way in, because it commits twice (draft flush +
+        // the paste) and each commit refreshes this panel.
+        // See `tests/backlinks_commit_deadlock.rs`.
+        let guard = workspace.lock();
+        let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
         let g = index.lock();
         let idx = g.as_ref().expect("index just built");
-        finish_lookup(&workspace, idx, &meta, backlinks_order)
+        Ok(finish_lookup(ws, idx, &meta, backlinks_order))
     })
     .await
     .map_err(|e| format!("backlinks task join: {e}"))?
@@ -90,26 +104,27 @@ async fn compute_backlinks_offloaded(
 
 /// Look a page up in `index` and shape the reply. GUI rows render only
 /// `source_block.tokens`, so each hit ships through `into_shallow` to
-/// keep the subtree off the IPC wire. Takes a brief workspace lock for
-/// `for_page` (which reads the page's `template::` property).
+/// keep the subtree off the IPC wire.
+///
+/// Takes the already-locked `&Workspace` (`for_page` reads the page's
+/// `template::` property) rather than the `Arc<Mutex<…>>`: the caller owns
+/// the lock order, and the only safe one here is workspace → index.
 fn finish_lookup(
-    workspace: &Arc<Mutex<Option<Workspace>>>,
+    ws: &Workspace,
     index: &BacklinkIndex,
     meta: &PageMeta,
     backlinks_order: outl_config::BacklinksOrder,
-) -> Result<BacklinksReply, String> {
-    let guard = workspace.lock();
-    let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
+) -> BacklinksReply {
     let mut backlinks: Vec<_> = index
         .for_page(ws, meta)
         .into_iter()
         .map(|b| b.into_shallow())
         .collect();
     sort_backlinks(&mut backlinks, backlinks_order.newest_first());
-    Ok(BacklinksReply {
+    BacklinksReply {
         backlinks,
         backlinks_order,
-    })
+    }
 }
 
 pub fn list_all_pages<S: AppHost>(state: &S) -> Result<Vec<PageMeta>, String> {

@@ -84,5 +84,10 @@ Turning the refusal into an `Err` would trade a stale page for no page at all on
 - A client that wires `AppHost::backlink_index()` must call `helpers::invalidate_backlink_index` after **every** path that can change what a page's backlinks are.
   That's local mutation (`finish_in_page*` already does this), a peer/workspace reload (`reload_workspace`, desktop's `set_workspace`), and a plugin run that applied ops (`commands/plugin.rs::run` / `sync_hooks`, guarded on `applied > 0`).
   Missing one of these serves stale backlinks until the next unrelated invalidation happens to fire.
+- **Lock order is `workspace` → everything else.**
+  The workspace `Mutex` is the outermost lock; the backlinks index, the undo `history` map and the desktop's `storage_root` slot are only ever taken *inside* it (or on their own).
+  `finish_in_page_with` holds the workspace lock for a whole commit and drops the cached index from in there, so any thread that takes the index first and then waits on the workspace is an ABBA deadlock — `parking_lot::Mutex` has no timeout, so the app freezes until the user force-quits it.
+  `compute_backlinks_offloaded` did exactly that and pasting was the reliable way in: a paste commits twice (draft flush + the paste) and every commit refreshes the panel, so the two collided within a keystroke.
+  Pinned by `tests/backlinks_commit_deadlock.rs`, which stress-runs both paths against a watchdog — a re-inverted order fails the test instead of hanging the app.
 - Never change a DTO shape without checking the TS side (`@outl/shared/api/types`) — the frontends depend on the wire format.
 - Client identity (the `CLIENT` str + capability set) stays in each client's `plugin_service.rs` shim, never here.
