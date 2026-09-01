@@ -57,11 +57,6 @@ async fn compute_backlinks_offloaded(
         };
         let backlinks_order = outl_config::load().display.backlinks_order;
 
-        // Phase 2: build the index FROM DISK when stale — reads the `.md`
-        // projection, touches no `Workspace`, holds NO lock. This is what
-        // keeps opening the journal / pressing Esc from freezing: the
-        // O(blocks) work never materializes the vault and never blocks an
-        // edit waiting on the workspace lock.
         let index = match index {
             Some(i) => i,
             None => {
@@ -72,14 +67,12 @@ async fn compute_backlinks_offloaded(
                 return Ok(finish_lookup(ws, &idx, &meta, backlinks_order));
             }
         };
-        if index.lock().is_none() {
-            let fresh = build_backlink_index_from_disk(&metas, &root);
-            let mut g = index.lock();
-            if g.is_none() {
-                *g = Some(fresh);
-            }
-        }
-
+        // Phase 2: build the index FROM DISK when stale — reads the `.md`
+        // projection, touches no `Workspace`, holds NO lock. This is what
+        // keeps opening the journal / pressing Esc from freezing: the
+        // O(blocks) work never materializes the vault and never blocks an
+        // edit waiting on the workspace lock.
+        //
         // Phase 3: O(refs) lookup under a brief lock (`for_page` reads the
         // page's own `template::` property; no block-text scan).
         //
@@ -92,11 +85,36 @@ async fn compute_backlinks_offloaded(
         // is the reliable way in, because it commits twice (draft flush +
         // the paste) and each commit refreshes this panel.
         // See `tests/backlinks_commit_deadlock.rs`.
+        //
+        // Nothing ties the build to the lookup: a commit can run
+        // `invalidate_backlink_index` in between and legitimately empty
+        // the slot again. That is a retry, never a panic: a panic in this
+        // blocking task surfaces as a join error the frontend ignores, and
+        // the panel silently stops refreshing.
+        for _ in 0..3 {
+            if index.lock().is_none() {
+                let fresh = build_backlink_index_from_disk(&metas, &root);
+                let mut g = index.lock();
+                if g.is_none() {
+                    *g = Some(fresh);
+                }
+            }
+            let guard = workspace.lock();
+            let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
+            let g = index.lock();
+            if let Some(idx) = g.as_ref() {
+                return Ok(finish_lookup(ws, idx, &meta, backlinks_order));
+            }
+            // Invalidated between the build and the lookup: drop both
+            // locks and rebuild.
+        }
+        // Commits are invalidating faster than the cache refills; serve a
+        // one-shot from-disk build directly, same as the host-without-a-slot
+        // path above (marginally stale is fine, the next refresh re-caches).
+        let idx = build_backlink_index_from_disk(&metas, &root);
         let guard = workspace.lock();
         let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
-        let g = index.lock();
-        let idx = g.as_ref().expect("index just built");
-        Ok(finish_lookup(ws, idx, &meta, backlinks_order))
+        Ok(finish_lookup(ws, &idx, &meta, backlinks_order))
     })
     .await
     .map_err(|e| format!("backlinks task join: {e}"))?

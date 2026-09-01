@@ -26,7 +26,7 @@ use outl_actions::{
     SyncTransport,
 };
 use outl_core::hlc::HlcGenerator;
-use outl_core::id::{ActorId, NodeId};
+use outl_core::id::ActorId;
 use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
@@ -105,24 +105,27 @@ fn a_commit_and_a_backlinks_refresh_never_deadlock() {
         std::thread::spawn(move || {
             for i in 0..200 {
                 let text = format!("see [[target]] {i}");
-                let _ = finish_in_page(host.as_ref(), src, |ws| {
+                finish_in_page(host.as_ref(), src, |ws| {
                     edit_text(ws, host.hlc(), block, &text).map(|_| ())
-                });
+                })
+                .expect("commit must succeed; an erroring commit path skips the invalidate and the stress proves nothing");
             }
             let _ = done.send("commits");
         })
     };
 
-    // Thread B: the backlinks path — the index lock, then the workspace.
+    // Thread B: the backlinks refresh: the workspace lock, then the
+    // index (the historical bug took them in the opposite order).
     let lookups = {
         let host = host.clone();
         let done = done_tx.clone();
         std::thread::spawn(move || {
             for _ in 0..200 {
-                let _ = tauri::async_runtime::block_on(page_backlinks(
+                tauri::async_runtime::block_on(page_backlinks(
                     host.as_ref(),
                     "target".to_string(),
-                ));
+                ))
+                .expect("backlinks refresh must succeed; an erroring lookup path contends on nothing");
             }
             let _ = done.send("backlinks");
         })
@@ -143,5 +146,4 @@ fn a_commit_and_a_backlinks_refresh_never_deadlock() {
 
     commits.join().unwrap();
     lookups.join().unwrap();
-    let _: Option<NodeId> = None;
 }
