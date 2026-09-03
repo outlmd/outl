@@ -281,7 +281,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-ios-card)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:bg-(--color-iosd-card)/95 dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -294,12 +294,12 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
           >
             <span
               aria-hidden="true"
-              class="mx-auto block h-1 w-10 rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
 
           <div class="px-4 pb-1 pt-1">
-            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
               {title()}
             </span>
           </div>
@@ -309,7 +309,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
               had no GUI surface at all before this, and hanging them
               off the same sheet keeps them one tap from anywhere. */}
           <Show when={props.blockId !== null && mode().kind === "list"}>
-            <div class="mx-4 mb-2 mt-1 flex rounded-lg bg-(--color-ios-divider)/30 p-0.5 dark:bg-(--color-iosd-divider)/30">
+            <div class="mx-4 mb-2 mt-1 flex rounded-lg bg-(--color-outl-border)/30 p-0.5">
               <For each={["block", "page"] as PropertyScope[]}>
                 {(s) => (
                   <button
@@ -321,9 +321,9 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                     }}
                     class="flex-1 rounded-[7px] py-1.5 text-[13px] font-medium capitalize"
                     classList={{
-                      "bg-(--color-ios-card) text-(--color-ios-text) shadow-sm dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)":
+                      "bg-(--color-outl-bg-elev) text-(--color-outl-fg) shadow-sm":
                         scope() === s,
-                      "text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)":
+                      "text-(--color-outl-fg-dim)":
                         scope() !== s,
                     }}
                   >
@@ -342,7 +342,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                 disabled={busy()}
                 aria-label="Add property"
                 onClick={startAdd}
-                class="flex w-full items-center gap-2 border-t border-(--color-ios-divider)/30 px-4 py-3.5 text-left text-[16px] font-medium text-(--color-ios-accent) active:bg-(--color-ios-divider)/30 disabled:opacity-50 dark:border-(--color-iosd-divider)/30 dark:text-(--color-iosd-accent) dark:active:bg-(--color-iosd-divider)/30"
+                class="flex w-full items-center gap-2 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left text-[16px] font-medium text-(--color-outl-accent) active:bg-(--color-outl-border)/30 disabled:opacity-50"
               >
                 <span aria-hidden="true" class="text-[18px] leading-none">
                   +
@@ -361,12 +361,12 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                       disabled={busy()}
                       aria-label={`Edit ${key}`}
                       onClick={() => startEdit(key, value)}
-                      class="flex w-full items-baseline gap-3 border-t border-(--color-ios-divider)/30 px-4 py-3.5 text-left active:bg-(--color-ios-divider)/30 disabled:opacity-50 dark:border-(--color-iosd-divider)/30 dark:active:bg-(--color-iosd-divider)/30"
+                      class="flex w-full items-baseline gap-3 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30 disabled:opacity-50"
                     >
-                      <span class="shrink-0 font-mono text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                      <span class="shrink-0 font-mono text-[13px] text-(--color-outl-fg-dim)">
                         {key}
                       </span>
-                      <span class="min-w-0 flex-1 truncate text-right text-[15px] text-(--color-ios-text) dark:text-(--color-iosd-text)">
+                      <span class="min-w-0 flex-1 truncate text-right text-[15px] text-(--color-outl-fg)">
                         {value}
                       </span>
                     </button>
@@ -375,7 +375,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
               </For>
 
               <Show when={properties().length === 0}>
-                <div class="border-t border-(--color-ios-divider)/30 px-4 py-6 text-center text-[14px] text-(--color-ios-text-secondary) dark:border-(--color-iosd-divider)/30 dark:text-(--color-iosd-text-secondary)">
+                <div class="border-t border-(--color-outl-border)/30 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
                   No properties yet.
                 </div>
               </Show>
@@ -386,8 +386,8 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
               <Show
                 when={typingKey()}
                 fallback={
-                  <div class="border-t border-(--color-ios-divider)/30 px-4 py-3 dark:border-(--color-iosd-divider)/30">
-                    <p class="mb-2 text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                  <div class="border-t border-(--color-outl-border)/30 px-4 py-3">
+                    <p class="mb-2 text-[13px] text-(--color-outl-fg-dim)">
                       Keys already used in this workspace
                     </p>
                     <div class="flex flex-wrap gap-2">
@@ -396,7 +396,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                           <button
                             type="button"
                             onClick={() => pickKey(key)}
-                            class="rounded-full bg-(--color-ios-divider)/40 px-3 py-1.5 font-mono text-[13px] text-(--color-ios-text) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                            class="rounded-full bg-(--color-outl-border)/40 px-3 py-1.5 font-mono text-[13px] text-(--color-outl-fg) active:opacity-60"
                           >
                             {key}
                           </button>
@@ -408,7 +408,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                           haptic("light");
                           setTypingKey(true);
                         }}
-                        class="rounded-full border border-(--color-ios-accent)/50 px-3 py-1.5 text-[13px] text-(--color-ios-accent) active:opacity-60 dark:border-(--color-iosd-accent)/50 dark:text-(--color-iosd-accent)"
+                        class="rounded-full border border-(--color-outl-accent)/50 px-3 py-1.5 text-[13px] text-(--color-outl-accent) active:opacity-60"
                       >
                         Other…
                       </button>
@@ -416,7 +416,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                   </div>
                 }
               >
-                <div class="border-t border-(--color-ios-divider)/30 px-4 py-3 dark:border-(--color-iosd-divider)/30">
+                <div class="border-t border-(--color-outl-border)/30 px-4 py-3">
                   <input
                     type="text"
                     // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -434,13 +434,13 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                         pickKey(keyDraft());
                       }
                     }}
-                    class="w-full rounded-lg border border-(--color-ios-divider) bg-(--color-ios-card) px-3 py-2 font-mono text-[15px] text-(--color-ios-text) outline-none dark:border-(--color-iosd-divider) dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)"
+                    class="w-full rounded-lg border border-(--color-outl-border) bg-(--color-outl-bg-elev) px-3 py-2 font-mono text-[15px] text-(--color-outl-fg) outline-none"
                   />
                   <div class="mt-3 flex gap-2">
                     <button
                       type="button"
                       onClick={() => setTypingKey(false)}
-                      class="flex-1 rounded-lg bg-(--color-ios-divider)/40 py-2 text-[15px] font-medium text-(--color-ios-text) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                      class="flex-1 rounded-lg bg-(--color-outl-border)/40 py-2 text-[15px] font-medium text-(--color-outl-fg) active:opacity-60"
                     >
                       Back
                     </button>
@@ -448,7 +448,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                       type="button"
                       disabled={normalizeKey(keyDraft()) === ""}
                       onClick={() => pickKey(keyDraft())}
-                      class="flex-1 rounded-lg bg-(--color-ios-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40 dark:bg-(--color-iosd-accent)"
+                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40"
                     >
                       Next
                     </button>
@@ -460,8 +460,8 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
             {/* ── Value editor ──────────────────────────────────── */}
             <Show when={mode().kind === "value" ? (mode() as Mode & { kind: "value" }) : null}>
               {(m) => (
-                <div class="border-t border-(--color-ios-divider)/30 px-4 py-3 dark:border-(--color-iosd-divider)/30">
-                  <p class="mb-2 font-mono text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <div class="border-t border-(--color-outl-border)/30 px-4 py-3">
+                  <p class="mb-2 font-mono text-[13px] text-(--color-outl-fg-dim)">
                     {m().key}::
                   </p>
                   <input
@@ -483,7 +483,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                         void write(m().key, valueDraft());
                       }
                     }}
-                    class="w-full rounded-lg border border-(--color-ios-divider) bg-(--color-ios-card) px-3 py-2 text-[15px] text-(--color-ios-text) outline-none dark:border-(--color-iosd-divider) dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)"
+                    class="w-full rounded-lg border border-(--color-outl-border) bg-(--color-outl-bg-elev) px-3 py-2 text-[15px] text-(--color-outl-fg) outline-none"
                   />
 
                   {/* Page chips for the open `[[…]]`. Same detector and
@@ -496,7 +496,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                             type="button"
                             onPointerDown={(e) => e.preventDefault()}
                             onClick={() => acceptSuggestion(page)}
-                            class="shrink-0 rounded-full bg-(--color-ios-divider)/40 px-3 py-1 text-[13px] text-(--color-ios-text) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                            class="shrink-0 rounded-full bg-(--color-outl-border)/40 px-3 py-1 text-[13px] text-(--color-outl-fg) active:opacity-60"
                           >
                             {page.kind === "journal" ? page.slug : page.title}
                           </button>
@@ -509,7 +509,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                     type="button"
                     onPointerDown={(e) => e.preventDefault()}
                     onClick={insertRefTrigger}
-                    class="mt-2 text-[13px] text-(--color-ios-accent) active:opacity-60 dark:text-(--color-iosd-accent)"
+                    class="mt-2 text-[13px] text-(--color-outl-accent) active:opacity-60"
                   >
                     Link a page…
                   </button>
@@ -518,7 +518,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setMode({ kind: "list" })}
-                      class="flex-1 rounded-lg bg-(--color-ios-divider)/40 py-2 text-[15px] font-medium text-(--color-ios-text) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                      class="flex-1 rounded-lg bg-(--color-outl-border)/40 py-2 text-[15px] font-medium text-(--color-outl-fg) active:opacity-60"
                     >
                       Cancel
                     </button>
@@ -527,7 +527,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                         type="button"
                         disabled={busy()}
                         onClick={() => void write(m().key, "")}
-                        class="flex-1 rounded-lg bg-(--color-ios-destructive)/15 py-2 text-[15px] font-semibold text-(--color-ios-destructive) active:opacity-60 disabled:opacity-40 dark:text-(--color-iosd-destructive)"
+                        class="flex-1 rounded-lg bg-(--color-outl-destructive)/15 py-2 text-[15px] font-semibold text-(--color-outl-destructive) active:opacity-60 disabled:opacity-40"
                       >
                         Delete
                       </button>
@@ -536,7 +536,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                       type="button"
                       disabled={busy()}
                       onClick={() => void write(m().key, valueDraft())}
-                      class="flex-1 rounded-lg bg-(--color-ios-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40 dark:bg-(--color-iosd-accent)"
+                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40"
                     >
                       Save
                     </button>
@@ -550,7 +550,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
         <button
           type="button"
           onClick={props.onClose}
-          class="mx-3 rounded-2xl bg-(--color-ios-card)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-ios-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-ios-divider)/30 dark:bg-(--color-iosd-card)/95 dark:text-(--color-iosd-accent) dark:shadow-[var(--shadow-capsule-dark)] dark:active:bg-(--color-iosd-divider)/30"
+          class="mx-3 rounded-2xl bg-(--color-outl-bg-elev)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-outl-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-outl-border)/30 dark:shadow-[var(--shadow-capsule-dark)]"
         >
           Done
         </button>

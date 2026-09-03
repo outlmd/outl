@@ -61,7 +61,7 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
 
   return (
     <section class="mx-3 mt-6">
-      <header class="mb-2 flex items-center gap-2 px-2 text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+      <header class="mb-2 flex items-center gap-2 px-2 text-(--color-outl-fg-dim)">
         <svg
           width="14"
           height="14"
@@ -96,13 +96,13 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
       <Show
         when={props.backlinks.length > 0}
         fallback={
-          <div class="overflow-hidden rounded-2xl bg-(--color-ios-card) px-4 py-5 text-center dark:bg-(--color-iosd-card)">
-            <p class="text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+          <div class="overflow-hidden rounded-2xl bg-(--color-outl-bg-elev) px-4 py-5 text-center">
+            <p class="text-[13px] text-(--color-outl-fg-dim)">
               No backlinks yet.
             </p>
-            <p class="mt-1 text-[12px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+            <p class="mt-1 text-[12px] text-(--color-outl-fg-dimmer)">
               Pages that link here with{" "}
-              <code class="font-mono text-(--color-ios-accent) dark:text-(--color-iosd-accent)">
+              <code class="font-mono text-(--color-outl-accent)">
                 [[this page]]
               </code>{" "}
               will appear in this section.
@@ -113,7 +113,7 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
         <div class="space-y-3">
           <For each={groupedBySource()}>
             {(group) => (
-              <div class="overflow-hidden rounded-2xl bg-(--color-ios-card) dark:bg-(--color-iosd-card)">
+              <div class="overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)">
                 {/* Card header: source page. Tapping it jumps to the
                     page (via the group's first referencing block). */}
                 <button
@@ -122,10 +122,10 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                   class="flex w-full items-center gap-2 px-4 pt-3 pb-1 text-left active:opacity-60"
                 >
                   <span aria-hidden="true">{group.icon}</span>
-                  <span class="flex-1 text-[13px] font-medium text-(--color-ios-accent) dark:text-(--color-iosd-accent)">
+                  <span class="flex-1 text-[13px] font-medium text-(--color-outl-accent)">
                     {group.title}
                   </span>
-                  <span class="text-[12px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+                  <span class="text-[12px] text-(--color-outl-fg-dimmer)">
                     {group.entries.length}
                   </span>
                 </button>
@@ -149,13 +149,13 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                         onClick={() => props.onJump(link)}
                         class="block w-full text-left active:opacity-60"
                         classList={{
-                          "border-t border-(--color-ios-divider)/40 dark:border-(--color-iosd-divider)/40":
+                          "border-t border-(--color-outl-border)/40":
                             idx() > 0,
                         }}
                       >
                         <div class="px-4 py-3">
                           <Show when={showCrumbs}>
-                            <p class="mb-1 truncate text-[12px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+                            <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
                               {crumbTrail}
                             </p>
                           </Show>
@@ -166,7 +166,7 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                             <p
                               class="flex-1 text-[15px] leading-snug"
                               classList={{
-                                "text-(--color-ios-text-tertiary) line-through dark:text-(--color-iosd-text-tertiary)":
+                                "text-(--color-outl-fg-dimmer) line-through":
                                   link.todo === "DONE",
                               }}
                             >
@@ -201,17 +201,17 @@ function BacklinkCheckbox(props: { todo: TodoState | null }): JSX.Element {
       aria-hidden="true"
       class="mt-[3px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px]"
       classList={{
-        "border-(--color-ios-accent) bg-(--color-ios-accent) dark:border-(--color-iosd-accent) dark:bg-(--color-iosd-accent)":
+        "border-(--color-outl-accent) bg-(--color-outl-accent)":
           props.todo === "DONE",
         // Same three-state vocabulary as `BulletOrCheckbox`.
-        "border-(--color-ios-accent) bg-transparent dark:border-(--color-iosd-accent)":
+        "border-(--color-outl-accent) bg-transparent":
           props.todo === "DOING",
-        "border-(--color-ios-text-secondary) bg-transparent dark:border-(--color-iosd-text-secondary)":
+        "border-(--color-outl-fg-dim) bg-transparent":
           props.todo !== "DONE" && props.todo !== "DOING",
       }}
     >
       <Show when={props.todo === "DOING"}>
-        <span class="h-[8px] w-[8px] rounded-full bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)" />
+        <span class="h-[8px] w-[8px] rounded-full bg-(--color-outl-accent)" />
       </Show>
       <Show when={props.todo === "DONE"}>
         <svg

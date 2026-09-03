@@ -305,7 +305,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-ios-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150 dark:bg-(--color-iosd-bg)/85"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150"
         style={{
           "padding-bottom": "env(safe-area-inset-bottom)",
           transform: `translateY(${drag.translateY()}px)`,
@@ -328,14 +328,14 @@ export function DevicesSheet(props: DevicesSheetProps) {
           >
             <span
               aria-hidden="true"
-              class="mx-auto block h-1 w-10 rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
         </header>
 
         <div class="ios-scroll flex-1 overflow-y-auto px-5 pb-6">
           <h2 class="mb-1 text-[22px] font-bold">Devices</h2>
-          <p class="mb-4 text-[14px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+          <p class="mb-4 text-[14px] text-(--color-outl-fg-dim)">
             Pair this device with another to sync your workspace
             peer-to-peer.
           </p>
@@ -343,7 +343,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
           {/* This device's advertised name — what the other device shows in
               its paired list. Defaults to "mobile", editable, remembered. */}
           <label class="mb-3 block">
-            <span class="mb-1 block text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <span class="mb-1 block text-[13px] text-(--color-outl-fg-dim)">
               This device's name
             </span>
             <input
@@ -353,7 +353,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
               placeholder="mobile"
               autocapitalize="none"
               autocorrect="off"
-              class="w-full rounded-xl border border-(--color-ios-divider) bg-(--color-ios-card)/60 px-3 py-2.5 text-[16px] text-(--color-ios-text) outline-none focus:border-(--color-ios-accent) dark:border-(--color-iosd-divider) dark:bg-(--color-iosd-card)/60 dark:text-(--color-iosd-text)"
+              class="w-full rounded-xl border border-(--color-outl-border) bg-(--color-outl-bg-elev)/60 px-3 py-2.5 text-[16px] text-(--color-outl-fg) outline-none focus:border-(--color-outl-accent)"
             />
           </label>
 
@@ -362,7 +362,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
             type="button"
             onClick={handleScan}
             disabled={scanning() || busy()}
-            class="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-(--color-ios-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80 disabled:opacity-50 dark:bg-(--color-iosd-accent)"
+            class="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80 disabled:opacity-50"
           >
             <svg
               width="20"
@@ -386,7 +386,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
             type="button"
             onClick={handleShowMyQr}
             disabled={busy() || scanning()}
-            class="mb-5 w-full rounded-xl border border-(--color-ios-divider) px-4 py-2.5 text-[15px] font-medium text-(--color-ios-accent) active:opacity-60 disabled:opacity-50 dark:border-(--color-iosd-divider) dark:text-(--color-iosd-accent)"
+            class="mb-5 w-full rounded-xl border border-(--color-outl-border) px-4 py-2.5 text-[15px] font-medium text-(--color-outl-accent) active:opacity-60 disabled:opacity-50"
           >
             {hostTicket() ? "Hide my QR" : "Show my QR"}
           </button>
@@ -397,14 +397,14 @@ export function DevicesSheet(props: DevicesSheetProps) {
                 <div class="rounded-2xl bg-white p-4 shadow-sm">
                   <PairingQR ticket={ticket()} />
                 </div>
-                <p class="text-center text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <p class="text-center text-[13px] text-(--color-outl-fg-dim)">
                   Scan this code from your other device. Waiting for a
                   connection…
                 </p>
                 <button
                   type="button"
                   onClick={() => setHostTicket(null)}
-                  class="text-[14px] font-medium text-(--color-ios-accent) active:opacity-60 dark:text-(--color-iosd-accent)"
+                  class="text-[14px] font-medium text-(--color-outl-accent) active:opacity-60"
                 >
                   Cancel
                 </button>
@@ -413,7 +413,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
           </Show>
 
           <Show when={sync.current() || sync.feed().length > 0}>
-            <div class="mb-2 text-[13px] font-semibold uppercase tracking-wider text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <div class="mb-2 text-[13px] font-semibold uppercase tracking-wider text-(--color-outl-fg-dim)">
               Syncing
             </div>
             <div class="mb-4">
@@ -421,7 +421,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
             </div>
           </Show>
 
-          <div class="mb-2 text-[13px] font-semibold uppercase tracking-wider text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+          <div class="mb-2 text-[13px] font-semibold uppercase tracking-wider text-(--color-outl-fg-dim)">
             Paired devices
           </div>
           <PeerList
@@ -429,7 +429,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
             statusByNodeId={statusMap()}
             onRemove={handleRemove}
             emptyState={
-              <div class="rounded-xl bg-(--color-ios-card)/60 px-4 py-6 text-center text-[14px] text-(--color-ios-text-secondary) dark:bg-(--color-iosd-card)/60 dark:text-(--color-iosd-text-secondary)">
+              <div class="rounded-xl bg-(--color-outl-bg-elev)/60 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
                 No paired devices yet. Scan a QR to add one.
               </div>
             }

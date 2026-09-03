@@ -82,6 +82,32 @@ interface BlockRowProps {
    * `caret` is a `char` offset into the host block's text.
    */
   onPasteMarkdown?: (blockId: string, caret: number, text: string) => void;
+  /**
+   * RFC 0254 phase 3 — touch-native multi-block selection. `true`
+   * while a range selection is active anywhere on the page (entered
+   * from a block's long-press menu, "Select blocks"). It changes what
+   * a tap on *any* row does, not just this one — every row's tap
+   * becomes "extend the range to here" instead of its normal action —
+   * so `selectionMode` has to reach every recursive `<BlockRow />`,
+   * not just the one the user long-pressed.
+   */
+  selectionMode?: boolean;
+  /** Membership set for the active range (`visualRangeSet` from
+   *  `@outl/shared/outline`, memoised once per render by `Journal`) —
+   *  a row answers "am I selected?" with `selectionSet?.has(id)` in
+   *  O(1) rather than recomputing the range itself. Same convention
+   *  the desktop's `<BlockRow />` uses for its own Visual highlight —
+   *  see the Vim-parity section of `outl-desktop/CLAUDE.md`, which
+   *  memoises the range as a `Set<id>` at the parent for the same
+   *  reason. `null`/`undefined` while `selectionMode` is false. */
+  selectionSet?: Set<string> | null;
+  /** Fired instead of every other tap handler on this row while
+   *  `selectionMode` is true — grows or shrinks the range to include
+   *  this block. Long-press and swipe are suppressed in the same
+   *  state (see `BlockBody`'s `disabled` wiring below), so a batch op
+   *  in progress can't be interrupted by a stray context menu or an
+   *  accidental swipe-delete pulling one block out of the range. */
+  onSelectTap?: (id: string) => void;
 }
 
 /**
@@ -95,10 +121,14 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
   const isEditing = () => props.editingId === props.block.id;
   const hasChildren = () => props.block.children.length > 0;
 
+  const selectionMode = () => props.selectionMode ?? false;
+  const selected = () => props.selectionSet?.has(props.block.id) ?? false;
+
   return (
     <div class="relative">
       <SwipeRow
         leftActionLabel="Delete"
+        disabled={selectionMode()}
         onSwipeLeft={() => {
           haptic("warning");
           props.onDelete(props.block.id);
@@ -110,6 +140,13 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           draftText={props.draftText}
           depth={props.depth}
           hasChildren={hasChildren()}
+          selectionMode={selectionMode()}
+          selected={selected()}
+          onSelectTap={
+            props.onSelectTap
+              ? () => props.onSelectTap!(props.block.id)
+              : undefined
+          }
           onToggleCollapse={() => {
             haptic("light");
             props.onToggleCollapse(props.block.id, !props.block.collapsed);
@@ -119,6 +156,14 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           }
           onDraftChange={props.onDraftChange}
           onCommitEdit={props.onCommitEdit}
+          onDeleteEmpty={() => {
+            // Backspace on an already-empty block (RFC 0254 phase 4b,
+            // `DeleteEmptyBlock`) — same destructive haptic and the
+            // same confirm-if-it-has-children guard as swipe-to-delete
+            // above, since an empty block can still carry children.
+            haptic("warning");
+            props.onDelete(props.block.id);
+          }}
           onToggleTodo={() => {
             haptic("light");
             props.onToggleTodo(props.block.id);
@@ -154,7 +199,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           {/* Guide line connecting parent bullet to children */}
           <span
             aria-hidden="true"
-            class="absolute top-0 bottom-0 w-px bg-(--color-ios-divider)/35 dark:bg-(--color-iosd-divider)/30"
+            class="absolute top-0 bottom-0 w-px bg-(--color-outl-border)/35 dark:bg-(--color-outl-border)/30"
             style={{ left: `${16 + props.depth * INDENT_PX + 5}px` }}
           />
           <For each={props.block.children}>
@@ -179,6 +224,9 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
                 onTagClick={props.onTagClick}
                 onLinkClick={props.onLinkClick}
                 onTextareaMount={props.onTextareaMount}
+                selectionMode={props.selectionMode}
+                selectionSet={props.selectionSet}
+                onSelectTap={props.onSelectTap}
               />
             )}
           </For>
@@ -204,6 +252,10 @@ function BlockBody(props: {
   onStartEdit: () => void;
   onDraftChange: (text: string) => void;
   onCommitEdit: () => void;
+  /** Backspace pressed while the textarea is already empty
+   *  (`DeleteEmptyBlock`, RFC 0254 phase 4b) — the caller decides
+   *  whether that's an immediate delete or a confirm prompt. */
+  onDeleteEmpty?: () => void;
   onToggleTodo: () => void;
   /** Zoom in on this block. When set, a tap on the plain bullet dot
    *  focuses instead of marking TODO. `undefined` keeps the dot's
@@ -220,6 +272,17 @@ function BlockBody(props: {
   /** See `BlockRowProps.onPasteMarkdown`. The parent has already
    *  injected `blockId`; this variant gets the caret + text. */
   onPasteMarkdown?: (caret: number, text: string) => void;
+  /** RFC 0254 phase 3 — see `BlockRowProps.selectionMode`. */
+  selectionMode?: boolean;
+  /** Is *this* block inside the active range? The parent already
+   *  resolved membership via `selectionSet.has(id)`; `BlockBody`
+   *  never sees the set itself. */
+  selected?: boolean;
+  /** Fired for every tap on this row while `selectionMode` is true,
+   *  in place of `onStartEdit` / the bullet / the checkbox / the
+   *  collapse triangle — a tap anywhere on a row means "extend the
+   *  range to here" while selecting, full stop. */
+  onSelectTap?: () => void;
 }) {
   /**
    * True when the gesture started inside an interactive child — a
@@ -236,8 +299,14 @@ function BlockBody(props: {
 
   // Hold timing / drift tolerance are shared with the page title's
   // gesture — one recogniser, so the two never feel different.
+  // `disabled` suppresses the whole gesture while a range selection
+  // is active: opening the context menu mid-batch-op would let the
+  // user fire a single-block action (delete, indent, …) that only
+  // touches the long-pressed row while the toolbar implies it acts
+  // on the whole range — a correctness trap, not just a UX wrinkle.
   const longPress = createLongPress({
     onLongPress: () => props.onLongPress(),
+    disabled: () => props.selectionMode ?? false,
   });
   let skipGesture = false;
 
@@ -256,6 +325,18 @@ function BlockBody(props: {
 
   function onClick(e: MouseEvent) {
     if (longPress.consumedClick()) {
+      return;
+    }
+    // While a selection is active, every tap on the row body (or any
+    // interactive span whose own handler we've turned off below — see
+    // the `selectionMode ? undefined : …` wiring on `<MarkdownInline>`)
+    // means "extend the range to here", not "start editing" or
+    // "follow this ref". The bullet / checkbox / collapse triangle
+    // have their own `onSelectTap` override at their call sites below,
+    // since those buttons `stopPropagation` unconditionally and would
+    // never let this handler see the click at all.
+    if (props.selectionMode) {
+      props.onSelectTap?.();
       return;
     }
     // A tap that landed inside an interactive child has already been
@@ -284,7 +365,14 @@ function BlockBody(props: {
       // row (bullet + body); children render in a sibling container, so a
       // point over a child resolves to the nearest child's id, not this one.
       data-block-id={props.block.id}
-      class="group flex items-start gap-2.5 py-[5px] pr-4"
+      class="group flex items-start gap-2.5 rounded-md py-[5px] pr-4 transition-colors"
+      classList={{
+        // Unmistakable, matches the desktop's 18%-opacity Visual
+        // highlight (same accent, same idea) so a user who moves
+        // between clients recognises the state on sight.
+        "bg-(--color-outl-accent)/[0.16]":
+          (props.selectionMode ?? false) && (props.selected ?? false),
+      }}
       style={{ "padding-left": `${padLeft()}px` }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -296,6 +384,15 @@ function BlockBody(props: {
         visible={props.hasChildren}
         collapsed={props.block.collapsed}
         onToggle={() => {
+          // While selecting, every tap on this row — including the
+          // fold triangle — extends the range instead of folding.
+          // These two buttons `stopPropagation` unconditionally, so
+          // the override has to live here rather than in the shared
+          // `onClick` above, which would never see the event.
+          if (props.selectionMode) {
+            props.onSelectTap?.();
+            return;
+          }
           props.onToggleCollapse();
         }}
       />
@@ -308,9 +405,21 @@ function BlockBody(props: {
           <BulletOrCheckbox
             todo={props.editing ? null : props.block.todo}
             onToggle={() => {
+              if (props.selectionMode) {
+                props.onSelectTap?.();
+                return;
+              }
               props.onToggleTodo();
             }}
-            onFocus={props.onFocusBlock}
+            // In selection mode the bullet always extends the range —
+            // routed through `onFocus` so `<BulletOrCheckbox>` takes
+            // that branch regardless of whether zoom (`onFocusBlock`)
+            // is wired for this row.
+            onFocus={
+              props.selectionMode
+                ? () => props.onSelectTap?.()
+                : props.onFocusBlock
+            }
           />
         );
         const bodyDiv = (
@@ -357,23 +466,30 @@ function BlockBody(props: {
                   <p
                     class="break-words text-[17px] leading-[1.42]"
                     classList={{
-                      "text-(--color-ios-text-tertiary) line-through dark:text-(--color-iosd-text-tertiary)":
+                      "text-(--color-outl-fg-dimmer) line-through":
                         props.block.todo === "DONE",
                     }}
                   >
                     <Show
                       when={bodyLength > 0}
                       fallback={
-                        <span class="italic text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+                        <span class="italic text-(--color-outl-fg-dimmer)">
                           Empty block
                         </span>
                       }
                     >
                       <MarkdownInline
                         tokens={tokens}
-                        onRefClick={props.onRefClick}
-                        onTagClick={props.onTagClick}
-                        onLinkClick={props.onLinkClick}
+                        // Turned off while selecting: `<MarkdownInline>`
+                        // only `stopPropagation`s a ref/tag/link tap
+                        // when its handler is set (see the shared
+                        // component's own guard), so `undefined` here
+                        // lets the tap bubble up to this row's `onClick`
+                        // — which is what turns it into "extend the
+                        // range" instead of "follow this ref".
+                        onRefClick={props.selectionMode ? undefined : props.onRefClick}
+                        onTagClick={props.selectionMode ? undefined : props.onTagClick}
+                        onLinkClick={props.selectionMode ? undefined : props.onLinkClick}
                       />
                     </Show>
                     {/* `remind::` was invisible here: the long-press
@@ -384,8 +500,8 @@ function BlockBody(props: {
                       onCommit={(key, value) =>
                         props.onSetProperty?.(props.block.id, key, value)
                       }
-                      chipClass="rounded-full bg-(--color-ios-divider)/40 px-2 py-0.5 text-[11px] text-(--color-ios-text-secondary) dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text-secondary)"
-                      inputClass="rounded-full border border-(--color-ios-accent)/50 bg-(--color-ios-card) px-2 py-0.5 text-[11px] text-(--color-ios-text) outline-none dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)"
+                      chipClass="rounded-full bg-(--color-outl-border)/40 px-2 py-0.5 text-[11px] text-(--color-outl-fg-dim)"
+                      inputClass="rounded-full border border-(--color-outl-accent)/50 bg-(--color-outl-bg-elev) px-2 py-0.5 text-[11px] text-(--color-outl-fg) outline-none"
                     />
                   </p>
                 );
@@ -397,6 +513,7 @@ function BlockBody(props: {
             onBlur={props.onCommitEdit}
             onMount={props.onTextareaMount}
             onPaste={props.onPasteMarkdown}
+            onDeleteEmpty={props.onDeleteEmpty}
           />
         </Show>
       </div>
@@ -410,7 +527,7 @@ function BlockBody(props: {
             <QuoteWrap
               quoted={isBlockQuoted(props.block.text)}
               baseClass="flex min-w-0 flex-1"
-              chromeClass="rounded-r-md border-l-2 border-(--color-ios-text-secondary)/40 bg-(--color-ios-text-secondary)/[0.05] pl-2 dark:border-(--color-iosd-text-secondary)/40 dark:bg-(--color-iosd-text-secondary)/[0.07]"
+              chromeClass="rounded-r-md border-l-2 border-(--color-outl-fg-dim)/40 bg-(--color-outl-fg-dim)/[0.05] pl-2 dark:bg-(--color-outl-fg-dim)/[0.07]"
             >
               {bodyDiv}
             </QuoteWrap>
@@ -442,7 +559,7 @@ function CollapseTriangle(props: {
           e.stopPropagation();
           props.onToggle();
         }}
-        class="relative z-10 -my-1.5 flex h-[30px] w-[18px] shrink-0 items-center justify-center text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)"
+        class="relative z-10 -my-1.5 flex h-[30px] w-[18px] shrink-0 items-center justify-center text-(--color-outl-fg-dimmer)"
       >
         <span aria-hidden="true" class="text-[10px] leading-none">
           {props.collapsed ? "▶" : "▼"}
@@ -483,7 +600,7 @@ function BulletOrCheckbox(props: {
         >
           <span
             aria-hidden="true"
-            class="h-1.5 w-1.5 rounded-full bg-(--color-ios-text-tertiary) transition-transform group-active/bullet:scale-150 dark:bg-(--color-iosd-text-tertiary)"
+            class="h-1.5 w-1.5 rounded-full bg-(--color-outl-fg-dimmer) transition-transform group-active/bullet:scale-150"
           />
         </button>
       }
@@ -506,21 +623,21 @@ function BulletOrCheckbox(props: {
         <span
           class="flex h-[20px] w-[20px] items-center justify-center rounded-full border-[1.5px] transition-colors"
           classList={{
-            "border-(--color-ios-accent) bg-(--color-ios-accent) dark:border-(--color-iosd-accent) dark:bg-(--color-iosd-accent)":
+            "border-(--color-outl-accent) bg-(--color-outl-accent)":
               props.todo === "DONE",
             // DOING keeps the accent ring and gets a small accent dot
             // instead of the full fill, so a started task reads as
             // "open, underway" at a glance rather than as finished.
-            "border-(--color-ios-accent) bg-transparent dark:border-(--color-iosd-accent)":
+            "border-(--color-outl-accent) bg-transparent":
               props.todo === "DOING",
-            "border-(--color-ios-text-secondary) bg-transparent dark:border-(--color-iosd-text-secondary)":
+            "border-(--color-outl-fg-dim) bg-transparent":
               props.todo === "TODO",
           }}
         >
           <Show when={props.todo === "DOING"}>
             <span
               aria-hidden="true"
-              class="h-[9px] w-[9px] rounded-full bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)"
+              class="h-[9px] w-[9px] rounded-full bg-(--color-outl-accent)"
             />
           </Show>
           <Show when={props.todo === "DONE"}>
@@ -556,6 +673,9 @@ function EditableTextarea(props: {
    * paste event — we already do that here when this is set.
    */
   onPaste?: (caret: number, text: string) => void;
+  /** See `BlockBody`'s doc — fires on Backspace when the textarea is
+   *  already empty, instead of the pair-collapse logic below. */
+  onDeleteEmpty?: () => void;
 }) {
   let ref!: HTMLTextAreaElement;
   let resizeRaf = 0;
@@ -608,12 +728,22 @@ function EditableTextarea(props: {
       // to `Const`.
       autocapitalize="off"
       onKeyDown={(e) => {
+        if (e.key !== "Backspace") return;
+        const ta = e.currentTarget;
+        // Backspace on an already-empty block deletes the block
+        // itself (`DeleteEmptyBlock`, RFC 0254 phase 4b) — mirrors the
+        // desktop's `draft().length === 0` check. Checked first: an
+        // empty textarea has no pair to collapse, so this and the
+        // pair-collapse branch below never both apply.
+        if (ta.value.length === 0 && props.onDeleteEmpty) {
+          e.preventDefault();
+          props.onDeleteEmpty();
+          return;
+        }
         // Backspace inside an empty `[[]]` or `(())` deletes the
         // whole pair so the user doesn't have to mash four times.
         // We do this in keydown (not input) so we can `preventDefault`
         // before the browser eats the lone `[` to the left of caret.
-        if (e.key !== "Backspace") return;
-        const ta = e.currentTarget;
         if (ta.selectionStart !== ta.selectionEnd) return; // user is deleting a selection
         const caret = ta.selectionStart ?? 0;
         const completion = autoDeletePair(ta.value, caret);

@@ -84,7 +84,7 @@ export function TemplateSheet(props: TemplateSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-ios-card)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:bg-(--color-iosd-card)/95 dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -97,12 +97,12 @@ export function TemplateSheet(props: TemplateSheetProps): JSX.Element {
           >
             <span
               aria-hidden="true"
-              class="mx-auto block h-1 w-10 rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
 
           <div class="px-4 pb-1 pt-1">
-            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
               Insert template
             </span>
           </div>
@@ -114,17 +114,17 @@ export function TemplateSheet(props: TemplateSheetProps): JSX.Element {
                   type="button"
                   disabled={busy()}
                   onClick={() => void pick(template)}
-                  class="flex w-full flex-col items-start gap-0.5 border-t border-(--color-ios-divider)/30 px-4 py-3.5 text-left active:bg-(--color-ios-divider)/30 disabled:opacity-50 dark:border-(--color-iosd-divider)/30 dark:active:bg-(--color-iosd-divider)/30"
+                  class="flex w-full flex-col items-start gap-0.5 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30 disabled:opacity-50"
                 >
-                  <span class="text-[16px] font-medium text-(--color-ios-text) dark:text-(--color-iosd-text)">
+                  <span class="text-[16px] font-medium text-(--color-outl-fg)">
                     {template.name}
                     <Show when={template.duplicate}>
-                      <span class="ml-1.5 text-[12px] font-normal text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                      <span class="ml-1.5 text-[12px] font-normal text-(--color-outl-fg-dim)">
                         (duplicate name)
                       </span>
                     </Show>
                   </span>
-                  <span class="font-mono text-[11px] text-(--color-ios-text-secondary)/70 dark:text-(--color-iosd-text-secondary)/70">
+                  <span class="font-mono text-[11px] text-(--color-outl-fg-dim)/70">
                     {template.slug}
                   </span>
                 </button>
@@ -132,7 +132,7 @@ export function TemplateSheet(props: TemplateSheetProps): JSX.Element {
             </For>
 
             <Show when={!loading() && templates().length === 0}>
-              <div class="border-t border-(--color-ios-divider)/30 px-4 py-6 text-center text-[14px] text-(--color-ios-text-secondary) dark:border-(--color-iosd-divider)/30 dark:text-(--color-iosd-text-secondary)">
+              <div class="border-t border-(--color-outl-border)/30 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
                 No templates yet. Create a page with a{" "}
                 <span class="font-mono">template::</span> property.
               </div>
@@ -143,7 +143,7 @@ export function TemplateSheet(props: TemplateSheetProps): JSX.Element {
         <button
           type="button"
           onClick={props.onClose}
-          class="mx-3 rounded-2xl bg-(--color-ios-card)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-ios-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-ios-divider)/30 dark:bg-(--color-iosd-card)/95 dark:text-(--color-iosd-accent) dark:shadow-[var(--shadow-capsule-dark)] dark:active:bg-(--color-iosd-divider)/30"
+          class="mx-3 rounded-2xl bg-(--color-outl-bg-elev)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-outl-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-outl-border)/30 dark:shadow-[var(--shadow-capsule-dark)]"
         >
           Cancel
         </button>

@@ -48,23 +48,23 @@ export function ConfirmDialog(props: ConfirmDialogProps): JSX.Element {
         }}
       >
         <div
-          class="w-full max-w-[280px] overflow-hidden rounded-2xl bg-(--color-ios-card)/95 backdrop-blur-2xl shadow-2xl dark:bg-(--color-iosd-card)/95"
+          class="w-full max-w-[280px] overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 backdrop-blur-2xl shadow-2xl"
           role="alertdialog"
           aria-modal="true"
           onClick={(e) => e.stopPropagation()}
         >
           <div class="px-4 pt-4 pb-3 text-center">
-            <h2 class="text-[17px] font-semibold text-(--color-ios-text) dark:text-(--color-iosd-text)">
+            <h2 class="text-[17px] font-semibold text-(--color-outl-fg)">
               {props.title}
             </h2>
-            <p class="mt-1.5 text-[13px] leading-tight text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <p class="mt-1.5 text-[13px] leading-tight text-(--color-outl-fg-dim)">
               {props.message}
             </p>
           </div>
-          <div class="grid grid-cols-2 border-t border-(--color-ios-divider)/40 dark:border-(--color-iosd-divider)/40">
+          <div class="grid grid-cols-2 border-t border-(--color-outl-border)/40">
             <button
               type="button"
-              class="border-r border-(--color-ios-divider)/40 py-2.5 text-[17px] font-normal text-(--color-ios-accent) active:bg-(--color-ios-divider)/20 dark:border-(--color-iosd-divider)/40 dark:text-(--color-iosd-accent) dark:active:bg-(--color-iosd-divider)/20"
+              class="border-r border-(--color-outl-border)/40 py-2.5 text-[17px] font-normal text-(--color-outl-accent) active:bg-(--color-outl-border)/20"
               onClick={() => {
                 haptic("light");
                 props.onCancel();
@@ -74,7 +74,7 @@ export function ConfirmDialog(props: ConfirmDialogProps): JSX.Element {
             </button>
             <button
               type="button"
-              class="py-2.5 text-[17px] font-semibold text-(--color-ios-destructive) active:bg-(--color-ios-divider)/20 dark:text-(--color-iosd-destructive) dark:active:bg-(--color-iosd-divider)/20"
+              class="py-2.5 text-[17px] font-semibold text-(--color-outl-destructive) active:bg-(--color-outl-border)/20"
               onClick={() => {
                 haptic("medium");
                 props.onConfirm();

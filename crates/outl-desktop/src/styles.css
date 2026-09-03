@@ -9,8 +9,8 @@
  * directory the entry CSS lives in; `@outl/shared` is a *sibling*
  * workspace package (`../outl-frontend-shared/src/`), so without
  * an explicit `@source` Tailwind never sees `MarkdownInline.tsx`
- * and silently skips every `text-(--color-ios-accent)` /
- * `bg-(--color-ios-accent)/12` class it uses. Result on the
+ * and silently skips every `text-(--color-outl-accent)` /
+ * `bg-(--color-outl-accent)/12` class it uses. Result on the
  * canvas: refs / tags / bold render as plain text instead of the
  * accented pills the renderer expects.
  *
@@ -22,19 +22,26 @@
 
 /*
  * Theme tokens. Boot values are `outl` brand defaults; at runtime
- * `lib/palette.ts::applyPaletteToRoot()` rewrites every `--color-*`
- * on `<html>` to match the active preset returned by the
- * `get_theme` Tauri command.
+ * `@outl/shared/theme::applyPaletteToRoot()` rewrites every
+ * `--color-*` on `<html>` to match the active preset returned by
+ * the `get_theme` Tauri command.
  *
- * `@theme` (Tailwind v4) is what makes utilities like
- * `text-(--color-ios-accent)` and `bg-(--color-outl-accent)/12`
- * resolve — without it Tailwind doesn't know these are colors and
- * silently drops the class (which is exactly why refs / tags /
- * bold stopped highlighting when we tried `:root` here). The
- * shared `@outl/shared/markdown::MarkdownInline` references the
- * `--color-ios-*` namespace (mobile parity); the canonical
- * `--color-outl-*` namespace is the new home that desktop-native
- * components reach for.
+ * `text-(--color-outl-accent)` / `bg-(--color-outl-accent)/12` are
+ * Tailwind v4's arbitrary-property shorthand — they resolve the CSS
+ * custom property at paint time whether or not `@theme` declares
+ * it, so `@theme` is NOT what makes the class work. What `@theme`
+ * actually buys: a boot value for the *first painted frame*, before
+ * `applyPaletteToRoot()` runs over the wire. A name declared here
+ * that doesn't match a real `Palette` field just means that one
+ * token repaints correctly on the first frame instead of arriving
+ * unset until the palette lands a moment later (root CLAUDE.md
+ * invariant 13's "Not theory" paragraph has the incident this
+ * used to describe wrong; this comment is the corrected version).
+ *
+ * The shared `@outl/shared/markdown::MarkdownInline` reads the same
+ * `--color-outl-*` namespace as desktop-native components; there
+ * is one namespace now (RFC 0022 deleted the legacy `--color-ios-*`
+ * / `--color-iosd-*` pair once the shared renderers migrated off it).
  */
 @theme {
   /* Canonical --color-outl-* tokens (palette boot-defaults). */
@@ -48,28 +55,15 @@
   --color-outl-accent-soft: #c4b5fd;
   --color-outl-accent-alt: #d6ff47;
   --color-outl-warn: #fbbf24;
-  --color-outl-ref-link: #a78bfa;
-  --color-outl-tag-link: #f0abfc;
-  --color-outl-md-link: #7dd3fc;
-  --color-outl-code: #d6ff47;
-  --color-outl-todo-open: #fbbf24;
-  --color-outl-todo-done: #d6ff47;
-
-  /*
-   * Legacy iOS-themed tokens consumed by @outl/shared/markdown.
-   * Same values as the --color-outl-* tokens above; mobile parity
-   * keeps the shared renderer client-agnostic.
-   */
-  --color-ios-bg: #0c0814;
-  --color-ios-text-primary: #f4f1fa;
-  --color-ios-text-secondary: #b4adc7;
-  --color-ios-accent: #a78bfa;
-  --color-ios-divider: #382c54;
-  --color-iosd-bg: #15101f;
-  --color-iosd-text-primary: #f4f1fa;
-  --color-iosd-text-secondary: #b4adc7;
-  --color-iosd-accent: #a78bfa;
-  --color-iosd-divider: #382c54;
+  --color-outl-destructive: #fb7185;
+  --color-outl-ref-link-fg: #a78bfa;
+  --color-outl-tag-link-fg: #f0abfc;
+  --color-outl-md-link-fg: #7dd3fc;
+  --color-outl-code-fg: #d6ff47;
+  --color-outl-todo-open-fg: #fbbf24;
+  --color-outl-todo-done-fg: #d6ff47;
+  --color-outl-highlight-bg: #fbbf24;
+  --color-outl-highlight-fg: #0c0814;
 
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
@@ -86,7 +80,7 @@
  * beat us at the cascade. Without this the user sees a white
  * window because preflight wins.
  *
- * Belt-and-suspenders: `lib/palette.ts` also writes inline
+ * Belt-and-suspenders: `@outl/shared/theme` also writes inline
  * `style="background-color:…"` on `<body>` after each `applyPalette`
  * call. Inline styles top everything; the cascade rules below are
  * the static fallback so the boot frame is already brand-colored

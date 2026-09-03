@@ -147,11 +147,11 @@ export function PluginSheet(props: {
           }}
         >
           <div
-            class="flex max-h-[80vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-ios-card) dark:bg-(--color-iosd-card)"
+            class="flex max-h-[80vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg-elev)"
             style="padding-bottom: max(env(safe-area-inset-bottom), 16px);"
           >
             <div class="flex justify-center py-2">
-              <div class="h-1 w-9 rounded-full bg-(--color-ios-text-secondary)/30" />
+              <div class="h-1 w-9 rounded-full bg-(--color-outl-fg-dim)/30" />
             </div>
 
             {/* Tab switcher */}
@@ -167,7 +167,7 @@ export function PluginSheet(props: {
                 onTap={() => setTab("commands")}
               />
               <Show when={loading() && tab() === "browse"}>
-                <span class="ml-auto self-center text-[12px] text-(--color-ios-text-secondary)">
+                <span class="ml-auto self-center text-[12px] text-(--color-outl-fg-dim)">
                   loading…
                 </span>
               </Show>
@@ -182,36 +182,36 @@ export function PluginSheet(props: {
                   placeholder="Search plugins…"
                   value={query()}
                   onInput={(e) => setQuery(e.currentTarget.value)}
-                  class="w-full rounded-lg bg-(--color-ios-divider)/30 px-3 py-2 text-[15px] text-(--color-ios-text) outline-none dark:bg-(--color-iosd-divider)/30 dark:text-(--color-iosd-text)"
+                  class="w-full rounded-lg bg-(--color-outl-border)/30 px-3 py-2 text-[15px] text-(--color-outl-fg) outline-none"
                 />
               </div>
               <div class="ios-scroll max-h-[58vh] overflow-y-auto">
                 <For each={filtered()}>
                   {(i) => (
-                    <div class="border-t border-(--color-ios-divider)/40 px-5 py-3 dark:border-(--color-iosd-divider)/40">
+                    <div class="border-t border-(--color-outl-border)/40 px-5 py-3">
                       <div class="flex items-start gap-3">
                         <div class="min-w-0 flex-1">
                           <div class="flex items-center gap-2">
-                            <span class="text-[15px] font-medium text-(--color-ios-text) dark:text-(--color-iosd-text)">
+                            <span class="text-[15px] font-medium text-(--color-outl-fg)">
                               {i.name}
                             </span>
                             <Show when={i.installed}>
                               <span
                                 class={`rounded px-1.5 py-0.5 text-[10px] ${
                                   i.enabled
-                                    ? "bg-(--color-ios-accent)/15 text-(--color-ios-accent)"
-                                    : "bg-(--color-ios-divider)/40 text-(--color-ios-text-secondary)"
+                                    ? "bg-(--color-outl-accent)/15 text-(--color-outl-accent)"
+                                    : "bg-(--color-outl-border)/40 text-(--color-outl-fg-dim)"
                                 }`}
                               >
                                 {i.enabled ? "installed" : "disabled"}
                               </span>
                             </Show>
                           </div>
-                          <p class="mt-0.5 text-[13px] text-(--color-ios-text-secondary)">
+                          <p class="mt-0.5 text-[13px] text-(--color-outl-fg-dim)">
                             {i.description}
                           </p>
                           <Show when={i.permissions.length > 0}>
-                            <div class="mt-1 font-mono text-[10px] text-(--color-ios-text-secondary)/70">
+                            <div class="mt-1 font-mono text-[10px] text-(--color-outl-fg-dim)/70">
                               {i.permissions.join(", ")}
                             </div>
                           </Show>
@@ -224,7 +224,7 @@ export function PluginSheet(props: {
                                 type="button"
                                 disabled={busyId() === i.id}
                                 onClick={() => void install(i)}
-                                class="rounded-full bg-(--color-ios-accent) px-3 py-1.5 text-[13px] font-medium text-white active:opacity-80 disabled:opacity-50"
+                                class="rounded-full bg-(--color-outl-accent) px-3 py-1.5 text-[13px] font-medium text-white active:opacity-80 disabled:opacity-50"
                               >
                                 {busyId() === i.id ? "…" : "Install"}
                               </button>
@@ -234,7 +234,7 @@ export function PluginSheet(props: {
                               <button
                                 type="button"
                                 onClick={() => toggleSettings(i.id)}
-                                class="rounded-full border border-(--color-ios-divider) px-2.5 py-1 text-[12px] text-(--color-ios-text) active:opacity-60 dark:text-(--color-iosd-text)"
+                                class="rounded-full border border-(--color-outl-border) px-2.5 py-1 text-[12px] text-(--color-outl-fg) active:opacity-60"
                               >
                                 {settingsFor() === i.id ? "Close" : "Settings"}
                               </button>
@@ -242,7 +242,7 @@ export function PluginSheet(props: {
                                 type="button"
                                 disabled={busyId() === i.id}
                                 onClick={() => void toggle(i)}
-                                class="rounded-full border border-(--color-ios-divider) px-2.5 py-1 text-[12px] text-(--color-ios-text) active:opacity-60 disabled:opacity-50 dark:text-(--color-iosd-text)"
+                                class="rounded-full border border-(--color-outl-border) px-2.5 py-1 text-[12px] text-(--color-outl-fg) active:opacity-60 disabled:opacity-50"
                               >
                                 {i.enabled ? "Disable" : "Enable"}
                               </button>
@@ -250,7 +250,7 @@ export function PluginSheet(props: {
                                 type="button"
                                 disabled={busyId() === i.id}
                                 onClick={() => void remove(i)}
-                                class="px-2.5 py-1 text-[12px] text-red-500 active:opacity-60 disabled:opacity-50"
+                                class="px-2.5 py-1 text-[12px] text-(--color-outl-destructive) active:opacity-60 disabled:opacity-50"
                               >
                                 Remove
                               </button>
@@ -259,7 +259,7 @@ export function PluginSheet(props: {
                         </div>
                       </div>
                       <Show when={i.installed && settingsFor() === i.id}>
-                        <div class="mt-3 border-t border-(--color-ios-divider)/40 pt-3 dark:border-(--color-iosd-divider)/40">
+                        <div class="mt-3 border-t border-(--color-outl-border)/40 pt-3">
                           <PluginSettings pluginId={i.id} />
                         </div>
                       </Show>
@@ -267,11 +267,11 @@ export function PluginSheet(props: {
                   )}
                 </For>
                 <Show when={!loading() && filtered().length === 0}>
-                  <div class="px-5 py-8 text-center text-[14px] text-(--color-ios-text-secondary)">
+                  <div class="px-5 py-8 text-center text-[14px] text-(--color-outl-fg-dim)">
                     No plugins found.
                   </div>
                 </Show>
-                <div class="px-5 py-3 text-center text-[11px] text-(--color-ios-text-secondary)/70">
+                <div class="px-5 py-3 text-center text-[11px] text-(--color-outl-fg-dim)/70">
                   Official plugins from plugins.outl.app
                 </div>
               </div>
@@ -286,19 +286,19 @@ export function PluginSheet(props: {
                       type="button"
                       disabled={busy()}
                       onClick={() => void run(cmd)}
-                      class="block w-full border-t border-(--color-ios-divider)/40 px-5 py-3 text-left active:bg-(--color-ios-divider)/30 disabled:opacity-50 dark:border-(--color-iosd-divider)/40 dark:active:bg-(--color-iosd-divider)/30"
+                      class="block w-full border-t border-(--color-outl-border)/40 px-5 py-3 text-left active:bg-(--color-outl-border)/30 disabled:opacity-50"
                     >
-                      <div class="text-[15px] font-medium text-(--color-ios-text) dark:text-(--color-iosd-text)">
+                      <div class="text-[15px] font-medium text-(--color-outl-fg)">
                         {cmd.title}
                       </div>
-                      <div class="font-mono text-[11px] text-(--color-ios-text-secondary)/70">
+                      <div class="font-mono text-[11px] text-(--color-outl-fg-dim)/70">
                         {cmd.plugin_id} · {cmd.command_id}
                       </div>
                     </button>
                   )}
                 </For>
                 <Show when={commands().length === 0}>
-                  <div class="px-5 py-8 text-center text-[14px] text-(--color-ios-text-secondary)">
+                  <div class="px-5 py-8 text-center text-[14px] text-(--color-outl-fg-dim)">
                     No commands yet. Install a plugin from Browse.
                   </div>
                 </Show>
@@ -322,8 +322,8 @@ function TabButton(props: {
       onClick={props.onTap}
       class={`rounded-full px-3 py-1 text-[14px] font-medium ${
         props.active
-          ? "bg-(--color-ios-accent) text-white"
-          : "text-(--color-ios-text-secondary) active:opacity-60"
+          ? "bg-(--color-outl-accent) text-white"
+          : "text-(--color-outl-fg-dim) active:opacity-60"
       }`}
     >
       {props.label}

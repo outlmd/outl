@@ -47,7 +47,7 @@ export function SyncDot(props: SyncDotProps): JSX.Element {
       >
         <span
           aria-hidden="true"
-          class="h-2.5 w-2.5 animate-spin rounded-full border-2 border-(--color-ios-accent) border-t-transparent"
+          class="h-2.5 w-2.5 animate-spin rounded-full border-2 border-(--color-outl-accent) border-t-transparent"
         />
       </Show>
     </span>

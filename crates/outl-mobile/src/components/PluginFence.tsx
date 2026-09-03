@@ -65,7 +65,7 @@ export function PluginFence(props: {
       {(r) => (
         <Switch fallback={props.fallback() as never}>
           <Match when={r.kind === "text"}>
-            <div class="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-(--color-ios-fill)/60 px-3 py-2 font-mono text-[15px] leading-[1.4] dark:bg-(--color-iosd-fill)/60">
+            <div class="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-(--color-outl-bg-elev)/60 px-3 py-2 font-mono text-[15px] leading-[1.4]">
               {r.content}
             </div>
           </Match>
