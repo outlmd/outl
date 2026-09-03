@@ -66,6 +66,7 @@ Silently changing pinned behaviour is the regression this process exists to catc
 |---|---|---|---|
 | [0002](0002-tauri-for-every-gui-client.md) | Every GUI client is Tauri 2 over one Rust surface | Shipped | #2, #3, #98 |
 | [0008](0008-markdown-dialect-and-sidecar-tokens.md) | What it costs to add a token to the outl dialect | Shipped | #8, #52, #64, #65, #10 |
+| [0022](0022-unified-design-tokens.md) | One palette owns every colour, and the OS never picks which token | Accepted | #22 |
 | [0025](0025-plugin-system.md) | iOS bans JIT, so the plugin runtime is an interpreter | Shipped | #25, #4 |
 | [0038](0038-sync-transport-and-workspace-identity.md) | iroh is the default transport, and a workspace is an id the joiner adopts | Shipped | #38, #133, #197, #120 |
 | [0044](0044-clipboard-and-paste.md) | Copy-out and paste-in are one pair, and the core speaks exactly one format | Shipped | #114, #44 |
@@ -81,6 +82,9 @@ Silently changing pinned behaviour is the regression this process exists to catc
 | [0202](0202-file-assets.md) | Asset bytes are content-addressed blobs, deliberately outside the op log | Shipped | #202, #203 |
 | [0210](0210-md-content-outside-op-log.md) | A sidecar hash match is not evidence the `.md` came from the op log | Shipped (partial) | #210, #166, #77 |
 | [0211](0211-state-that-leaves-a-boundary.md) | State that leaves a boundary arrives somewhere with different rules | Accepted | #211 |
+| [0253](0253-client-capability-catalog.md) | Chord parity is a compile error; feature parity is a rumour | Accepted | #253 |
+| [0254](0254-mobile-capability-gaps.md) | Most of mobile's missing features are not missing features | Accepted | #254, #14, #18, #19 |
+| [0255](0255-operation-vocabulary.md) | Three surfaces, three names, and one refusal that reaches two of them | Accepted | #255 |
 
 ## How the retroactive set was chosen
 

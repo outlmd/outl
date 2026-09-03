@@ -155,3 +155,22 @@ The bytes are not workspace state and never enter the op log; only the link does
 | Is `name` a safe asset basename (`<hash>.<ext>`, no traversal)? The one owner of the anti-traversal check — the P2P transport validates every peer-sent name through it | `outl_md::is_safe_asset_name` | `crates/outl-md/src/asset.rs` |
 | Copy an uploaded file into `<root>/assets/<hash>.<ext>` and return the ready-to-insert markdown link (content-addressed, atomic tmp+rename, size-capped by `[assets] max_bytes` from `outl-config`); `import_asset_bytes` is the same for already-in-memory bytes (a remote image downloaded during a Roam import) | `outl_actions::import_asset` / `outl_actions::import_asset_bytes` → `ImportedAsset` | `crates/outl-actions/src/asset.rs` |
 | Resolve a `[name](assets/…)` link back to an on-disk path for "open outside outl" handlers (rejects traversal / external schemes via `ActionError::InvalidAssetPath`) | `outl_actions::resolve_asset_path` | `crates/outl-actions/src/asset.rs` |
+
+---
+
+## 9. Cross-runtime TS contracts (`@outl/shared`)
+
+TS-side pieces that mirror a Rust canonical source above, so mobile and desktop consume the same file instead of drifting copies under each client's own `lib/`.
+Moved out of `crates/outl-mobile/CLAUDE.md` (that file was pinned near the per-crate `CLAUDE.md` size ceiling); this catalog is the one owner now.
+
+| Intent | Use this | Mirrors (Rust) |
+|---|---|---|
+| Detect whether pasted plain text looks like an outline (drives paste-as-outline vs. paste-as-block) | `looksLikeOutline` (`@outl/shared/paste`) | `outl_actions::paste::looks_like_outline` |
+| Render inline markdown tokens to JSX | `<MarkdownInline />` (`@outl/shared/markdown`) | `outl_md::tokenize_owned` (backend produces the tokens; the renderer is a discriminant-to-JSX switch) |
+| Detect a `[[` / `((` autocomplete trigger under the caret, plus the accept/insert helpers (`autoClose/DeletePair`, `insertPair/Text`, `applySuggestion`) | `detectRefContext` (`@outl/shared/autocomplete`) | `outl_tui::actions::overlay::detect_trigger` (the `[[` and `((` triggers; TUI also covers `#` and `/`) |
+| Auto-pair `(`/`[`/`{` and step over an auto-inserted closer; wired via `onBeforeInput` since iOS soft keyboards skip per-char `keydown` | `autoPairBracket` (`@outl/shared/autocomplete`) | `outl_tui::input::insert` (`insert_pair`) + `EditBuffer::delete_pair_back` |
+| Convert a textarea's UTF-16 `selectionStart` to a codepoint offset before splicing text the backend expects in codepoints | `utf16OffsetToCharOffset` (`@outl/shared/paste`) | runtime gap, no Rust mirror — a supplementary-plane char otherwise shifts the splice |
+| Write a `Palette` (from `get_theme`) onto `<html>` as `--color-outl-*` CSS custom properties, plus `<body>`'s inline background/foreground and `color-scheme` | `applyPaletteToRoot` (`@outl/shared/theme`) | no direct Rust mirror — it's the sole writer of what `outl_theme::Palette` describes. Its `color-scheme` decision uses a local `isLightHex` copy, hand-synced against `outl_theme::Palette::is_light()` (`crates/outl-theme/src/palette.rs`) since a method can't cross the Tauri wire — two implementations by design, not drift |
+
+**Adding a new cross-runtime contract = add it in `@outl/shared` from day one.**
+Never add it under a client's own `src/lib/` first — the next client to catch up on the feature has to consume from the same file.
