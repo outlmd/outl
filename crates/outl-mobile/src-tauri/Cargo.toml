@@ -32,6 +32,12 @@ outl-plugins = { workspace = true, features = ["registry"] }
 outl-sync-iroh = { workspace = true }
 outl-tauri-shared = { workspace = true }
 outl-config = { workspace = true }
+outl-theme = { workspace = true }
+# Was only a transitive dep (via outl-plugins / outl-tauri-shared) — declared
+# directly so mobile's own build checks its capability-parity column instead
+# of inheriting a declaration made on its behalf. See RFC 0253 and
+# `capability_parity::mobile_capability_column_is_backed_by_real_commands`.
+outl-shortcuts = { workspace = true }
 dirs = { workspace = true }
 # Pin the rustls crypto provider. iroh pulls rustls with default features off,
 # dropping the workspace-wide default provider, which makes reqwest (Tauri's

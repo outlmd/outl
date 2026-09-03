@@ -15,6 +15,12 @@
 //! A user-level override (TOML / settings) plugs into the same
 //! pipeline — same `Binding`, different source list.
 //!
+//! **`outl-mobile`** has no chord surface at all (touch only), but
+//! depends on this crate directly for the *other* catalog below —
+//! [`Capability`] / [`capability_support`] — so its own build checks
+//! its column instead of inheriting a declaration made on its behalf
+//! by `outl-plugins` / `outl-tauri-shared` (RFC 0253).
+//!
 //! ## What this crate owns
 //!
 //! - The [`Action`] enum — every named operation outl performs in
@@ -31,6 +37,10 @@
 //!   while `settings.vim_mode == true`).
 //! - The default binding table ([`default_bindings`]) and helpers
 //!   to query it by mode or action.
+//! - [`Capability`] / [`capability_support`] — the sibling catalog
+//!   for a feature with no chord (page history, the plugin
+//!   marketplace, a calendar grid, …), reusing [`Support`] /
+//!   [`ClientSupport`] / [`Client`] unchanged.
 //!
 //! ## What this crate does NOT own
 //!
@@ -44,12 +54,16 @@
 
 mod action;
 mod binding;
+mod capability;
+mod capability_support;
 mod chord;
 mod defaults;
 mod support;
 
 pub use action::Action;
 pub use binding::{Binding, Mode};
+pub use capability::Capability;
+pub use capability_support::capability_support;
 pub use chord::{Chord, ChordSequence, Key, Modifiers};
 pub use defaults::default_bindings;
 pub use support::{support, Client, ClientSupport, Support};
