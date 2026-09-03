@@ -8,6 +8,11 @@ interface SwipeRowProps {
   leftActionLabel?: string;
   /** Threshold in px to consider the swipe committed. */
   threshold?: number;
+  /** Suppress the gesture entirely (e.g. a block-selection range is
+   *  active — swipe-to-delete on one row mid-batch-op would silently
+   *  drop it out of a range the user is about to indent/move/delete
+   *  as a whole). The row still renders; only the drag is inert. */
+  disabled?: boolean;
 }
 
 /**
@@ -25,6 +30,7 @@ export function SwipeRow(props: SwipeRowProps): JSX.Element {
   let captured = false;
 
   function onPointerDown(e: PointerEvent) {
+    if (props.disabled) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     startX = e.clientX;
     startY = e.clientY;
@@ -85,13 +91,13 @@ export function SwipeRow(props: SwipeRowProps): JSX.Element {
   return (
     <div class="relative overflow-hidden">
       <div
-        class="absolute inset-y-0 right-0 flex items-center justify-end bg-(--color-ios-destructive) px-5 text-[15px] font-semibold text-white"
+        class="absolute inset-y-0 right-0 flex items-center justify-end bg-(--color-outl-destructive) px-5 text-[15px] font-semibold text-white"
         style={{ width: `${threshold()}px` }}
       >
         {props.leftActionLabel ?? "Delete"}
       </div>
       <div
-        class="relative bg-(--color-ios-card) dark:bg-(--color-iosd-card)"
+        class="relative bg-(--color-outl-bg-elev)"
         style={{
           transform: `translateX(${offset()}px)`,
           transition: animating() ? "transform 180ms cubic-bezier(0.4, 0, 0.2, 1)" : "none",

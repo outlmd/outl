@@ -18,8 +18,12 @@ import type {
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   attachAsset,
+  type BlockHit,
+  copyBlockMarkdown,
+  copyBlockRef,
   copyMarkdown,
   createBlock,
+  cutBlock,
   dateTitle,
   deleteBlock,
   editBlock,
@@ -38,12 +42,14 @@ import {
   openTodayJournal,
   outdentBlock,
   pageBacklinks,
+  pasteBlockAfter,
   pasteMarkdown,
   peerStatus,
   pluginRun,
   pluginSyncHooks,
   pluginToolbar,
   previousDay,
+  redoPage,
   reloadWorkspace,
   runCodeBlock,
   searchEmojis,
@@ -57,6 +63,7 @@ import {
   syncNow,
   todaySlug,
   toggleTodo,
+  undoPage,
   workspaceStats,
 } from "@outl/shared/api/commands";
 import { utf16OffsetToCharOffset } from "@outl/shared/paste";
@@ -67,8 +74,13 @@ import { detectFence } from "@outl/shared/highlight";
 import {
   countDescendants,
   findBlock,
+  flattenAll,
+  flattenParents,
+  flattenVisible,
   focusSubtree,
   rawTextWithTodo,
+  visualRangeIds,
+  visualRangeSet,
 } from "@outl/shared/outline";
 import {
   applyEmojiSuggestion,
@@ -80,6 +92,14 @@ import {
 import { PageAheadOfLogBanner, ParseWarningsBanner } from "@outl/shared/warnings";
 import { parkCaret, spliceText } from "../lib/textarea";
 import { withTimeout } from "../lib/async";
+import {
+  type BlockSelection,
+  extendSelectionTo,
+  growSelectionDown,
+  growSelectionUp,
+  selectionIsLive,
+  startSelection,
+} from "../lib/block-selection";
 
 /**
  * Payload shapes emitted by the backend's `deep-link://navigate` event
@@ -126,6 +146,7 @@ import { haptic } from "../lib/haptics";
 import { BacklinksSection } from "./BacklinksSection";
 import { BlockContextMenu, type BlockContextAction } from "./BlockContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { TemplateSheet } from "./TemplateSheet";
 import {
   PropertiesSheet,
@@ -211,6 +232,46 @@ export function Journal() {
     blockId: string | null;
     scope: PropertyScope;
   } | null>(null);
+  // Block clipboard (RFC 0254 phase 2, cut added phase 4b) — "Copy
+  // block" arms this with the copied subtree's markdown; "Cut block"
+  // arms it with the same shape (the backend deletes the source in
+  // the same round-trip, see `handleCutBlock`). "Paste block" (shown
+  // only while armed) duplicates it after the long-pressed block via
+  // `paste_block_after`, minting fresh ids either way — unlike the
+  // desktop's `appState.blockClipboard`, which tags a cut with
+  // `{ kind: "cut", nodeId }` and pastes it as an identity-preserving
+  // move. Mobile's `cut_block` mints fresh ids on paste instead (see
+  // its doc comment), so one plain markdown string covers both here.
+  const [blockClipboard, setBlockClipboard] = createSignal<string | null>(
+    null,
+  );
+  // Touch-native multi-block selection (RFC 0254 phase 3). Entered
+  // from a block's long-press menu ("Select blocks"); `null` means no
+  // selection is active. `lastSelection` is the vim-`gv` equivalent
+  // ("Reselect last selection") — captured on every exit, live or
+  // not (`selectionIsLive` gates whether the menu offers it back).
+  const [selection, setSelection] = createSignal<BlockSelection | null>(null);
+  const [lastSelection, setLastSelection] = createSignal<BlockSelection | null>(
+    null,
+  );
+  // A range delete is destructive across N blocks (any of which may
+  // carry children), so — unlike the single-block swipe-to-delete,
+  // which only prompts when that one block has descendants — a range
+  // delete always confirms. Holds the snapshotted target ids.
+  const [pendingRangeDelete, setPendingRangeDelete] = createSignal<
+    string[] | null
+  >(null);
+  // Membership set for the active range, memoised once per (selection,
+  // outline) change — every `<BlockRow />` answers "am I selected?"
+  // with `.has(id)` in O(1) instead of re-walking the outline per row.
+  // Mirrors the desktop's `visualSet` (`outl-desktop/CLAUDE.md` → vim
+  // parity).
+  const selectionSet = createMemo(() => {
+    const sel = selection();
+    const cur = view();
+    if (!sel || !cur) return null;
+    return visualRangeSet(sel.anchorId, sel.cursorId, cur.outline);
+  });
   /** Press-and-hold on the page title opens the sheet on the page's
    *  own properties. It is the only door that does not need a block:
    *  a page with no blocks has nothing to long-press, and `icon::` /
@@ -294,7 +355,17 @@ export function Journal() {
     // keeps it — `focusSubtree` re-resolves the id against the fresh
     // outline every render, and falls back to the full page if the block
     // vanished.
-    if (v.page.slug !== view()?.page.slug) setFocusBlockId(null);
+    if (v.page.slug !== view()?.page.slug) {
+      setFocusBlockId(null);
+      // A range selection is scoped to the page it was started on —
+      // block ids from another page would resolve to nothing (or,
+      // worse, to an unrelated same-id-shaped block after a future
+      // cross-page id collision that can't happen today but shouldn't
+      // be assumed). Drop it rather than carry stale anchor/cursor
+      // ids across a navigation the user didn't ask the selection to
+      // survive.
+      setSelection(null);
+    }
     // "This page isn't syncing" is sticky per page across the replies
     // that cannot answer: only the open commands attempt the
     // re-projection that discovers it, so a mutation reply never carries
@@ -800,6 +871,12 @@ export function Journal() {
       case "moveDown":
         if (id) handleMoveDown(id);
         return;
+      case "undo":
+        void handleUndo();
+        return;
+      case "redo":
+        void handleRedo();
+        return;
       case "todo":
         if (id) handleToggleTodo(id);
         return;
@@ -1026,9 +1103,11 @@ export function Journal() {
 
   /**
    * Delete a block. When the block has descendants we *always*
-   * prompt — deleting a parent destroys the whole subtree and the
-   * user can't undo that from the mobile UI yet. Leaf blocks
-   * delete immediately (no prompt) to keep the swipe gesture fast.
+   * prompt — deleting a parent destroys the whole subtree, and while
+   * the keyboard toolbar's Undo button (RFC 0254 phase 1) can revert
+   * it, that is a second, less immediate tap than the confirm dialog
+   * already in front of the user. Leaf blocks delete immediately (no
+   * prompt) to keep the swipe gesture fast.
    */
   function handleDelete(id: string) {
     const cur = view();
@@ -1053,6 +1132,289 @@ export function Journal() {
   }
 
   /**
+   * "Copy block" (long-press menu, RFC 0254 phase 2) — arm the
+   * in-app block clipboard with `id`'s subtree as clean outl
+   * markdown, ready for "Paste block" on another row. Distinct from
+   * the existing "Copy text" action: that one writes straight to the
+   * OS clipboard for pasting outside outl (desktop's `Y` /
+   * `YankCurrentBlock`); this one never touches the OS clipboard —
+   * it's the desktop's `Cmd/Ctrl+C` (`CopyBlock`) view-mode gesture,
+   * just reached by long-press instead of a chord. `copyBlockMarkdown`
+   * is read-only, so arming never mutates the workspace.
+   */
+  async function handleCopyBlock(id: string) {
+    const markdown = await withError(() => copyBlockMarkdown(id));
+    if (markdown !== undefined) setBlockClipboard(markdown);
+  }
+
+  /**
+   * "Paste block" (long-press menu) — duplicate the armed clipboard's
+   * subtree as a sibling right after `id`, minting fresh ids
+   * (`paste_block_after`, same backend the desktop's `Cmd/Ctrl+V`
+   * calls for a `kind: "copy"` clipboard). The clipboard persists
+   * after a successful paste so it can be pasted again, mirroring the
+   * desktop's non-cut branch. Only reachable when `blockClipboard()`
+   * is armed — the context menu hides the action otherwise.
+   */
+  async function handlePasteBlock(id: string) {
+    const pid = pageId();
+    const markdown = blockClipboard();
+    if (!pid || markdown === null) return;
+    const next = await withError(() => pasteBlockAfter(pid, id, markdown));
+    if (next) applyView(next);
+  }
+
+  /**
+   * "Cut block" (long-press menu, RFC 0254 phase 4b) — render `id`'s
+   * subtree to markdown and delete it in one backend round-trip
+   * (`cutBlock`), then arm the same `blockClipboard` "Paste block"
+   * reads. Deliberately **not** identity-preserving (the paste mints
+   * fresh ids, per `cutBlock`'s doc comment) — the alternative is the
+   * desktop's move-based cut, which needs a `{kind, nodeId}` tagged
+   * clipboard this client doesn't have and doesn't need for a
+   * long-press gesture.
+   */
+  async function handleCutBlock(id: string) {
+    const pid = pageId();
+    if (!pid) return;
+    const reply = await withError(() => cutBlock(pid, id));
+    if (!reply) return;
+    if (editingId() === id) setEditingId(null);
+    setBlockClipboard(reply.markdown);
+    applyView(reply.view);
+  }
+
+  /**
+   * "Copy block ref" (long-press menu, issue #18) — resolve `id`'s
+   * `((blk-XXXXXX))` handle and put it on the OS clipboard, same
+   * best-effort posture as "Copy text" above (some webviews refuse
+   * `navigator.clipboard` outside a user-gesture chain).
+   */
+  async function handleCopyBlockRef(id: string) {
+    const ref = await withError(() => copyBlockRef(id));
+    if (ref === undefined) return;
+    try {
+      await navigator.clipboard?.writeText(ref);
+    } catch {
+      // Best-effort, same as "Copy text" / "Copy block" above.
+    }
+  }
+
+  // ── Touch-native block range selection (RFC 0254 phase 3) ────────
+  //
+  // Mobile has no keyboard and deliberately no modal vim Visual state
+  // (the RFC rejects one explicitly — a hidden mode on a touch surface
+  // is worse than a gesture the user can see). The anchor + cursor
+  // model is the desktop's Visual mode unchanged (`visualRangeIds` /
+  // `visualRangeSet` from `@outl/shared/outline`); only how it's
+  // *driven* differs — a long-press menu item starts it, a tap on any
+  // other block extends it, a floating toolbar (`<SelectionToolbar />`)
+  // fires the same range ops the desktop's `>` / `<` / `⌘⇧↑↓` / `y` /
+  // `d` chords do.
+
+  /** "Select blocks" (long-press menu) — start a selection anchored at
+   *  `id`. Commits any in-flight edit first: entering selection mid-
+   *  edit would leave a textarea open underneath a row now behaving as
+   *  a tap target for range extension instead of text input. */
+  async function handleSelectBlocks(id: string) {
+    if (editingId()) await commitEdit();
+    haptic("medium");
+    setSelection(startSelection(id));
+  }
+
+  /** A tap on any row while a selection is active — grows or shrinks
+   *  the range to meet it. Reachable only through `<BlockRow />`'s
+   *  `onSelectTap`, which mobile only wires while `selection()` is
+   *  non-null, but this stays defensive (no-op) if that ever changes. */
+  function handleSelectTap(id: string) {
+    const sel = selection();
+    if (!sel) return;
+    setSelection(extendSelectionTo(sel, id));
+  }
+
+  /** Toolbar `▲`/`▼` — grow the range by exactly one visible row, the
+   *  discrete equivalent of the desktop's `Shift+↑`/`Shift+↓`
+   *  (`SelectRangeUp` / `SelectRangeDown`) for a row that isn't
+   *  directly reachable by tap without scrolling. */
+  function handleGrowUp() {
+    const sel = selection();
+    const cur = view();
+    if (!sel || !cur) return;
+    setSelection(growSelectionUp(sel, cur.outline));
+  }
+  function handleGrowDown() {
+    const sel = selection();
+    const cur = view();
+    if (!sel || !cur) return;
+    setSelection(growSelectionDown(sel, cur.outline));
+  }
+
+  /** Leave selection mode. Captures the range as `lastSelection`
+   *  first — every exit does (the toolbar's Done, a yank, a delete —
+   *  vim's `gv` convention: `y`/`d` also drop out of Visual but leave
+   *  the range reselectable). */
+  function exitSelection() {
+    const sel = selection();
+    if (sel) setLastSelection(sel);
+    setSelection(null);
+  }
+
+  /** Context-menu "Reselect last selection" — vim `gv`. Only offered
+   *  (see `buildContextActions`'s `canReselect`) when `lastSelection`
+   *  still resolves against the live outline; a peer edit or a fold
+   *  can strand an endpoint between sessions. */
+  function handleReselectLast() {
+    const sel = lastSelection();
+    const cur = view();
+    if (!sel || !cur || !selectionIsLive(sel, cur.outline)) return;
+    haptic("medium");
+    setSelection(sel);
+  }
+
+  /** Every block id the active selection covers, in DFS visible
+   *  order (top of the range first) — the ordering every range op
+   *  below needs, in one place so indent/move/yank/delete can't
+   *  disagree about it. `null` when there's no selection or an
+   *  endpoint has left the outline. */
+  function currentRangeIds(): string[] | null {
+    const sel = selection();
+    const cur = view();
+    if (!sel || !cur) return null;
+    const range = visualRangeIds(sel.anchorId, sel.cursorId, cur.outline);
+    if (!range) return null;
+    const ids = flattenVisible(cur.outline);
+    const lo = ids.indexOf(range.lo);
+    const hi = ids.indexOf(range.hi);
+    if (lo === -1 || hi === -1) return null;
+    return ids.slice(lo, hi + 1);
+  }
+
+  /** Walk every block in the range and fire `op` for each — the
+   *  shared body behind Indent/Outdent/Move-range. `reverse` walks
+   *  bottom-up: mirrors the desktop's `applyVisualBlockOp` exactly
+   *  (a move-down has to clear the block *below* the range before its
+   *  neighbours slide into place, or an ascending walk drags each
+   *  block over its own not-yet-moved neighbour). The range stays
+   *  selected afterward (vim convention — the user can repeat the
+   *  op), matching the desktop's Indent/Outdent/Move handlers. */
+  async function applyRangeOp(
+    op: (pid: string, id: string) => Promise<PageView>,
+    reverse = false,
+  ) {
+    const pid = pageId();
+    const ids = currentRangeIds();
+    if (!pid || !ids || ids.length === 0) return;
+    const targets = reverse ? [...ids].reverse() : ids;
+    let lastView: PageView | undefined;
+    for (const id of targets) {
+      const v = await withError(() => op(pid, id));
+      if (v) lastView = v;
+    }
+    if (lastView) applyView(lastView);
+  }
+
+  async function handleIndentRange() {
+    haptic("light");
+    await applyRangeOp((pid, id) => indentBlock(pid, id));
+  }
+  async function handleOutdentRange() {
+    haptic("light");
+    await applyRangeOp((pid, id) => outdentBlock(pid, id));
+  }
+  async function handleMoveRangeUp() {
+    haptic("light");
+    await applyRangeOp((pid, id) => moveBlockUp(pid, id));
+  }
+  /** Bottom-up walk (see `applyRangeOp`'s doc) — the last block in the
+   *  range has to clear the block below the range first. */
+  async function handleMoveRangeDown() {
+    haptic("light");
+    await applyRangeOp((pid, id) => moveBlockDown(pid, id), true);
+  }
+
+  /**
+   * Toolbar "Copy" — serialize the whole range as clean outl markdown
+   * to the OS clipboard (the backend drops a block whose ancestor is
+   * also in the range, so a parent+child selection doesn't duplicate
+   * the child — same guarantee the desktop's `YankRange` documents).
+   * Exits selection afterward, matching vim's `y` — the desktop's
+   * `YankRange` does the same via `exitVisual()`.
+   */
+  async function handleYankRange() {
+    const ids = currentRangeIds();
+    if (!ids || ids.length === 0) return;
+    haptic("light");
+    try {
+      const md = await copyMarkdown(ids);
+      await navigator.clipboard?.writeText(md);
+    } catch {
+      // Best-effort — same posture as the single-block "Copy text"
+      // action; some webviews refuse `navigator.clipboard` outside a
+      // user gesture chain.
+    }
+    exitSelection();
+  }
+
+  /** Toolbar "Delete" — always confirms (`<ConfirmDialog>` via
+   *  `pendingRangeDelete`), unlike the single-block swipe delete
+   *  (which only prompts when that one block has descendants): a
+   *  range is N blocks, any of which may carry children the user
+   *  can't see from the toolbar. */
+  function handleDeleteRangeRequest() {
+    const ids = currentRangeIds();
+    if (!ids || ids.length === 0) return;
+    haptic("warning");
+    setPendingRangeDelete(ids);
+  }
+
+  /** Bottom-up delete (children before parents) — mirrors the
+   *  desktop's `DeleteRange`: when the range covers a parent and its
+   *  descendants, deleting the parent first moves the whole subtree to
+   *  trash and the follow-up delete on a descendant then fails
+   *  ("already in trash"). `withError` records that per-id instead of
+   *  aborting, so one bad id can't strand the rest of the range. */
+  async function performDeleteRange(ids: string[]) {
+    const pid = pageId();
+    if (!pid) return;
+    if (editingId() && ids.includes(editingId()!)) setEditingId(null);
+    let lastView: PageView | undefined;
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const v = await withError(() => deleteBlock(pid, ids[i]));
+      if (v) lastView = v;
+    }
+    if (lastView) applyView(lastView);
+    exitSelection();
+  }
+
+  /**
+   * Revert the last committed block mutation on this page
+   * (`outl_tauri_shared::commands::history::undo_page`, RFC 0254 phase
+   * 1 — the same shared body the desktop's `Cmd+Z` calls). Commits any
+   * in-flight draft first: undo walks *committed* mutations, so an
+   * uncommitted keystroke would otherwise sit invisibly ahead of
+   * whatever `undo_page` restores. `withError` surfaces "nothing to
+   * undo" as a toast rather than a silent no-op — the fired keyboard
+   * button and the console line the desktop had before this UI existed
+   * would read identically to a broken tap.
+   */
+  async function handleUndo() {
+    const pid = pageId();
+    if (!pid) return;
+    if (editingId()) await commitEdit();
+    const next = await withError(() => undoPage(pid));
+    if (next) applyView(next);
+  }
+
+  /** Re-apply the mutation the last {@link handleUndo} reverted. */
+  async function handleRedo() {
+    const pid = pageId();
+    if (!pid) return;
+    if (editingId()) await commitEdit();
+    const next = await withError(() => redoPage(pid));
+    if (next) applyView(next);
+  }
+
+  /**
    * Flip the collapsed flag on a block. The backend generates
    * `Op::SetCollapsed`, applies it through the op log (same path as
    * every other mutation), and returns a fresh page view so the
@@ -1066,6 +1428,46 @@ export function Journal() {
     haptic("light");
     const updated = await withError(() => setBlockCollapsed(pid, id, next));
     if (updated) applyView(updated);
+  }
+
+  /**
+   * Walk the whole page and set every block's `collapsed` flag to
+   * `value` — mirrors the desktop's `applyCollapsedToAll` exactly
+   * (RFC 0254 phase 4b: `FoldAll` / `UnfoldAll` have no bulk backend
+   * op, each flip is its own `Op::SetCollapsed` so concurrent flips
+   * converge via HLC). **Never `flattenVisible`** — the point of
+   * "unfold all" is to expand subtrees hidden under an already-
+   * collapsed parent, and a visible-only walk would no-op on every
+   * descendant of a folded node.
+   *
+   * `value=true` (fold) uses `flattenParents` so leaves are skipped:
+   * folding a leaf is invisible today, but `set_block_collapsed`
+   * always writes the op (a CRDT contract — every flip must land so
+   * concurrent flips converge), so a leaf folded now would surprise
+   * the user the next time they add a child under it. `value=false`
+   * (unfold) uses `flattenAll`: unfolding a leaf has no future effect
+   * and keeps the op count symmetric with the TUI's `collect_collapse_candidates`.
+   */
+  async function applyCollapsedToAll(value: boolean) {
+    const pid = pageId();
+    const cur = view();
+    if (!pid || !cur) return;
+    haptic("light");
+    const ids = value ? flattenParents(cur.outline) : flattenAll(cur.outline);
+    let lastView: PageView | undefined;
+    for (const id of ids) {
+      const updated = await withError(() => setBlockCollapsed(pid, id, value));
+      if (updated) lastView = updated;
+    }
+    if (lastView) applyView(lastView);
+  }
+
+  function handleFoldAll() {
+    void applyCollapsedToAll(true);
+  }
+
+  function handleUnfoldAll() {
+    void applyCollapsedToAll(false);
   }
 
   /**
@@ -1307,6 +1709,29 @@ export function Journal() {
     }
   }
 
+  /**
+   * "New block above" (long-press menu, RFC 0254 phase 4b — mirrors
+   * the desktop's `O` / `NewBlockAbove`). Uses `beforeId`, the same
+   * floor-slot create the desktop uses — never a post-creation
+   * `moveBlockUp` walk, which the desktop's own CLAUDE.md flags as the
+   * bug this shape replaced.
+   */
+  async function handleCreateBefore(id: string) {
+    const pid = pageId();
+    if (!pid) return;
+    haptic("medium");
+    if (editingId()) await commitEdit();
+    const reply = await withError(() =>
+      createBlock(pid, { beforeId: id, text: "" }),
+    );
+    if (reply) {
+      batch(() => {
+        applyView(reply.view);
+        startEdit(reply.new_id, "");
+      });
+    }
+  }
+
   async function handleAppendBlock() {
     const pid = pageId();
     if (!pid) return;
@@ -1492,6 +1917,22 @@ export function Journal() {
   }
 
   /**
+   * Jump from a block-search hit (page switcher's "Blocks" mode,
+   * issue #19) to the page hosting it. A `BlockHit` carries only
+   * `source_slug` — no `kind` — so this can't branch like
+   * `handlePickPage` does; `openRef` already runs the journal-vs-page
+   * decision tree (same call `handleRefClick` makes for a tapped
+   * `[[ref]]`), so this delegates to it instead of duplicating that
+   * logic. There is no per-block scroll/highlight anywhere in this
+   * client yet (the backlinks jump doesn't do it either) — "jump"
+   * means "open the hosting page", matching that existing bar.
+   */
+  async function handleJumpToBlock(hit: BlockHit) {
+    setSwitcherOpen(false);
+    await handleRefClick(hit.source_slug);
+  }
+
+  /**
    * Insert a snippet (or open/close pair) into the active textarea
    * synchronously so iOS keeps the keyboard up across the change.
    *
@@ -1541,7 +1982,7 @@ export function Journal() {
           two floating capsules (left = back, right = grouped icons)
           so the title can breathe in the middle. */}
       <header
-        class="z-30 shrink-0 bg-(--color-ios-bg)/80 px-3 pt-2 pb-3 backdrop-blur-xl dark:bg-(--color-iosd-bg)/80"
+        class="z-30 shrink-0 bg-(--color-outl-bg)/80 px-3 pt-2 pb-3 backdrop-blur-xl"
         style="padding-top: max(env(safe-area-inset-top), 12px);"
       >
         <div class="grid grid-cols-[auto_auto_1fr] items-center gap-2">
@@ -1553,12 +1994,12 @@ export function Journal() {
             when={view() && view()!.page.kind !== "journal"}
             fallback={<span aria-hidden="true" class="block h-9 w-9" />}
           >
-            <div class="inline-flex rounded-full bg-(--color-ios-card)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:bg-(--color-iosd-card)/85 dark:shadow-[var(--shadow-capsule-dark)]">
+            <div class="inline-flex rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:shadow-[var(--shadow-capsule-dark)]">
               <button
                 type="button"
                 aria-label="Back to today's journal"
                 onClick={handleJumpToday}
-                class="flex h-9 w-9 items-center justify-center rounded-full text-(--color-ios-accent) active:bg-(--color-ios-divider)/40 dark:text-(--color-iosd-accent) dark:active:bg-(--color-iosd-divider)/40"
+                class="flex h-9 w-9 items-center justify-center rounded-full text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
               >
                 <svg
                   width="20"
@@ -1620,7 +2061,7 @@ export function Journal() {
           {/* Right capsule — grouped page actions. SyncDot lives inline
               between pages-search and refresh so the user reads it as
               "status of the data this capsule controls". */}
-          <div class="ios-scroll inline-flex max-w-full items-center justify-self-end overflow-x-auto rounded-full bg-(--color-ios-card)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:bg-(--color-iosd-card)/85 dark:shadow-[var(--shadow-capsule-dark)]">
+          <div class="ios-scroll inline-flex max-w-full items-center justify-self-end overflow-x-auto rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:shadow-[var(--shadow-capsule-dark)]">
             <button
               type="button"
               aria-label="Calendar"
@@ -1628,14 +2069,14 @@ export function Journal() {
                 haptic("light");
                 setCalendarOpen(true);
               }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               <svg
                 width="20"
                 height="20"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--color-ios-accent)"
+                stroke="var(--color-outl-accent)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1652,20 +2093,63 @@ export function Journal() {
                 haptic("light");
                 setSwitcherOpen(true);
               }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               <svg
                 width="20"
                 height="20"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--color-ios-accent)"
+                stroke="var(--color-outl-accent)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 aria-hidden="true"
               >
                 <path d="M21 21l-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z" />
+              </svg>
+            </button>
+            {/* Fold all / unfold all (RFC 0254 phase 4b, mirrors the
+                desktop's `z M` / `z R`) — walks the whole page, not just
+                the zoomed subtree, same as the desktop's `zM`/`zR`. */}
+            <button
+              type="button"
+              aria-label="Fold all"
+              onClick={handleFoldAll}
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-outl-accent)"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M7 14l5 5 5-5M7 5l5 5 5-5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label="Unfold all"
+              onClick={handleUnfoldAll}
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-outl-accent)"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M7 9l5-5 5 5M7 19l5-5 5 5" />
               </svg>
             </button>
             {/* Plugin-contributed toolbar buttons — one inline glyph per
@@ -1679,7 +2163,7 @@ export function Journal() {
                   aria-label={btn.title ?? `Plugin: ${btn.command_id}`}
                   title={btn.title ?? btn.command_id}
                   onClick={() => void runToolbarButton(btn)}
-                  class="flex h-9 w-9 items-center justify-center rounded-full text-[17px] leading-none text-(--color-ios-accent) active:bg-(--color-ios-divider)/40 dark:text-(--color-iosd-accent) dark:active:bg-(--color-iosd-divider)/40"
+                  class="flex h-9 w-9 items-center justify-center rounded-full text-[17px] leading-none text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
                 >
                   {btn.icon}
                 </button>
@@ -1692,7 +2176,7 @@ export function Journal() {
                 haptic("light");
                 setRemindersOpen(true);
               }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               {/* Bell glyph — the reminders surface. */}
               <svg
@@ -1700,7 +2184,7 @@ export function Journal() {
                 height="20"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--color-ios-accent)"
+                stroke="var(--color-outl-accent)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1717,7 +2201,7 @@ export function Journal() {
                 haptic("light");
                 setPluginsOpen(true);
               }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               {/* Stacked-squares "extensions/plugins" glyph, mirrors the
                   desktop's `⧉` toggle. */}
@@ -1726,7 +2210,7 @@ export function Journal() {
                 height="20"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--color-ios-accent)"
+                stroke="var(--color-outl-accent)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1748,7 +2232,7 @@ export function Journal() {
                 haptic("light");
                 setDevicesOpen(true);
               }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               <SyncDot
                 status={
@@ -1769,14 +2253,14 @@ export function Journal() {
               type="button"
               aria-label="Sync now"
               onClick={handleRefresh}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-ios-divider)/40 dark:active:bg-(--color-iosd-divider)/40"
+              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
             >
               <svg
                 width="18"
                 height="18"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="var(--color-ios-accent)"
+                stroke="var(--color-outl-accent)"
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
@@ -1811,7 +2295,7 @@ export function Journal() {
                     haptic("light");
                     setPropertiesTarget({ blockId: null, scope: "page" });
                   }}
-                  class="shrink-0 rounded-full bg-(--color-ios-divider)/40 px-2.5 py-1 text-[11px] text-(--color-ios-text-secondary) active:opacity-60 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text-secondary)"
+                  class="shrink-0 rounded-full bg-(--color-outl-border)/40 px-2.5 py-1 text-[11px] text-(--color-outl-fg-dim) active:opacity-60"
                 >
                   <span class="font-mono">{key}</span>: {value}
                 </button>
@@ -1841,23 +2325,23 @@ export function Journal() {
                         stroke-width="1.5"
                         stroke-linecap="round"
                         stroke-linejoin="round"
-                        class="mb-3 text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)"
+                        class="mb-3 text-(--color-outl-fg-dimmer)"
                         aria-hidden="true"
                       >
                         <path d="M12 20h9" />
                         <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                       </svg>
-                      <p class="text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                      <p class="text-[15px] text-(--color-outl-fg-dim)">
                         Nothing here yet.
                       </p>
-                      <p class="mt-1 text-[13px] text-(--color-ios-accent) dark:text-(--color-iosd-accent)">
+                      <p class="mt-1 text-[13px] text-(--color-outl-accent)">
                         Tap to start writing
                       </p>
                     </button>
                   }
                 >
                   <div class="flex flex-col items-center px-5 py-12 text-center">
-                    <p class="text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                    <p class="text-[15px] text-(--color-outl-fg-dim)">
                       Couldn't open the workspace.
                     </p>
                     <button
@@ -1866,7 +2350,7 @@ export function Journal() {
                         setLoaded(false);
                         void loadTodayWithRetry();
                       }}
-                      class="mt-3 rounded-full bg-(--color-ios-accent) px-5 py-2 text-[14px] font-medium text-white active:opacity-70 dark:bg-(--color-iosd-accent)"
+                      class="mt-3 rounded-full bg-(--color-outl-accent) px-5 py-2 text-[14px] font-medium text-white active:opacity-70"
                     >
                       Retry
                     </button>
@@ -1888,7 +2372,7 @@ export function Journal() {
                     type="button"
                     aria-label="Zoom out"
                     onClick={handleZoomOut}
-                    class="flex shrink-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1 text-[13px] font-medium text-(--color-ios-accent) active:opacity-50 dark:text-(--color-iosd-accent)"
+                    class="flex shrink-0 items-center gap-1 rounded-full py-0.5 pr-2 pl-1 text-[13px] font-medium text-(--color-outl-accent) active:opacity-50"
                   >
                     <ChevronLeft />
                     Back
@@ -1898,14 +2382,14 @@ export function Journal() {
                       <>
                         <span
                           aria-hidden="true"
-                          class="shrink-0 text-[12px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)"
+                          class="shrink-0 text-[12px] text-(--color-outl-fg-dimmer)"
                         >
                           /
                         </span>
                         <button
                           type="button"
                           onClick={() => setFocusBlockId(crumb.id)}
-                          class="max-w-[12rem] shrink-0 truncate text-[13px] text-(--color-ios-text-secondary) active:opacity-50 dark:text-(--color-iosd-text-secondary)"
+                          class="max-w-[12rem] shrink-0 truncate text-[13px] text-(--color-outl-fg-dim) active:opacity-50"
                         >
                           {crumb.text || "Untitled"}
                         </button>
@@ -1923,14 +2407,14 @@ export function Journal() {
                 block costs nothing on a page that has content. */}
             <Show when={outlineRoots().length === 0 && view()}>
               <div class="flex flex-col items-center gap-4 py-16 text-center">
-                <p class="text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <p class="text-[15px] text-(--color-outl-fg-dim)">
                   This page is empty
                 </p>
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => void handleAppendBlock()}
-                    class="rounded-full bg-(--color-ios-accent) px-4 py-2 text-[15px] font-medium text-white active:opacity-70 dark:bg-(--color-iosd-accent)"
+                    class="rounded-full bg-(--color-outl-accent) px-4 py-2 text-[15px] font-medium text-white active:opacity-70"
                   >
                     Add a block
                   </button>
@@ -1941,12 +2425,12 @@ export function Journal() {
                       haptic("light");
                       setPropertiesTarget({ blockId: null, scope: "page" });
                     }}
-                    class="rounded-full bg-(--color-ios-card) px-4 py-2 text-[15px] text-(--color-ios-text) active:opacity-70 dark:bg-(--color-iosd-card) dark:text-(--color-iosd-text)"
+                    class="rounded-full bg-(--color-outl-bg-elev) px-4 py-2 text-[15px] text-(--color-outl-fg) active:opacity-70"
                   >
                     Properties
                   </button>
                 </div>
-                <p class="max-w-[16rem] text-[13px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+                <p class="max-w-[16rem] text-[13px] text-(--color-outl-fg-dimmer)">
                   Hold the title to edit page properties from anywhere.
                 </p>
               </div>
@@ -1986,6 +2470,9 @@ export function Journal() {
                     activeTextarea = el;
                     setActiveTextareaSignal(el);
                   }}
+                  selectionMode={selection() !== null}
+                  selectionSet={selectionSet()}
+                  onSelectTap={handleSelectTap}
                 />
               )}
             </For>
@@ -2034,19 +2521,24 @@ export function Journal() {
         </PullToRefresh>
 
         <Show when={stats()}>
-          <footer class="px-5 pt-3 pb-32 text-center text-[12px] text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+          <footer class="px-5 pt-3 pb-32 text-center text-[12px] text-(--color-outl-fg-dimmer)">
             {stats()!.blocks} blocks · {stats()!.ops} ops · actor{" "}
             {stats()!.actor.slice(0, 6)}
           </footer>
         </Show>
       </main>
 
-      <Show when={!editingId() && view()}>
+      {/* Hidden while a range selection is active — the FAB and the
+          selection toolbar both dock bottom-right/bottom-full-width
+          and "add a block" mid-batch-op is not a gesture the RFC asks
+          for; hiding it keeps the two floating surfaces from
+          overlapping. */}
+      <Show when={!editingId() && view() && selection() === null}>
         <button
           type="button"
           aria-label="Add block"
           onClick={handleAppendBlock}
-          class="outl-press fixed right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-(--color-ios-accent) shadow-lg dark:bg-(--color-iosd-accent)"
+          class="outl-press fixed right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-(--color-outl-accent) shadow-lg"
           style="bottom: max(env(safe-area-inset-bottom), 20px);"
         >
           <svg
@@ -2087,6 +2579,7 @@ export function Journal() {
         currentSlug={view()?.page.slug ?? null}
         onClose={() => setSwitcherOpen(false)}
         onPick={handlePickPage}
+        onJumpToBlock={handleJumpToBlock}
       />
 
       <Calendar
@@ -2176,8 +2669,64 @@ export function Journal() {
                 // user gesture chain; failing silently is acceptable.
               }
             },
+            copyBlock: (id) => void handleCopyBlock(id),
+            pasteBlock: (id) => void handlePasteBlock(id),
+            cutBlock: (id) => void handleCutBlock(id),
+            copyBlockRef: (id) => void handleCopyBlockRef(id),
+            newBlockAbove: (id) => void handleCreateBefore(id),
+            selectBlocks: (id) => void handleSelectBlocks(id),
+            reselectSelection: () => handleReselectLast(),
           },
+          // Reading the signal here (not inside a handler) is what
+          // makes this reactive: `actions=` is a Solid prop getter, so
+          // a read during its own evaluation registers as a dependency
+          // — the same way `contextMenuBlockId()` / `view()` above do.
+          // Without this, "Paste block" would only reveal itself the
+          // next time some *other* signal it depends on changed.
+          blockClipboard() !== null,
+          // Same reactivity reasoning for "Reselect last selection":
+          // read `lastSelection()` / `view()` here so a fresh
+          // selection (or a peer edit that strands the old one)
+          // updates the row without needing an unrelated signal to
+          // change first.
+          (() => {
+            const sel = lastSelection();
+            const cur = view();
+            return sel !== null && cur !== null && selectionIsLive(sel, cur.outline);
+          })(),
         )}
+      />
+
+      <SelectionToolbar
+        open={selection() !== null}
+        count={currentRangeIds()?.length ?? 0}
+        onGrowUp={handleGrowUp}
+        onGrowDown={handleGrowDown}
+        onIndent={() => void handleIndentRange()}
+        onOutdent={() => void handleOutdentRange()}
+        onMoveUp={() => void handleMoveRangeUp()}
+        onMoveDown={() => void handleMoveRangeDown()}
+        onCopy={() => void handleYankRange()}
+        onDelete={handleDeleteRangeRequest}
+        onDone={exitSelection}
+      />
+
+      <ConfirmDialog
+        open={pendingRangeDelete() !== null}
+        title="Delete blocks?"
+        message={
+          pendingRangeDelete()
+            ? `This will delete ${pendingRangeDelete()!.length} ${
+                pendingRangeDelete()!.length === 1 ? "block" : "blocks"
+              }, including any nested children. This can't be undone.`
+            : ""
+        }
+        onCancel={() => setPendingRangeDelete(null)}
+        onConfirm={() => {
+          const ids = pendingRangeDelete();
+          setPendingRangeDelete(null);
+          if (ids) void performDeleteRange(ids);
+        }}
       />
 
       <TemplateSheet
@@ -2220,7 +2769,7 @@ function JournalHeader(props: {
           type="button"
           aria-label="Previous day"
           onClick={props.onPrev}
-          class="shrink-0 rounded-full p-1 text-(--color-ios-accent) active:opacity-50 dark:text-(--color-iosd-accent)"
+          class="shrink-0 rounded-full p-1 text-(--color-outl-accent) active:opacity-50"
         >
           <ChevronLeft />
         </button>
@@ -2234,7 +2783,7 @@ function JournalHeader(props: {
           type="button"
           aria-label="Next day"
           onClick={props.onNext}
-          class="shrink-0 rounded-full p-1 text-(--color-ios-accent) active:opacity-50 dark:text-(--color-iosd-accent)"
+          class="shrink-0 rounded-full p-1 text-(--color-outl-accent) active:opacity-50"
         >
           <ChevronRight />
         </button>
@@ -2244,7 +2793,7 @@ function JournalHeader(props: {
           whole outline below jumps by ~14px every time the user pages
           past today, which reads as the header "dancing". */}
       <p
-        class="mt-0.5 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-(--color-ios-accent) dark:text-(--color-iosd-accent)"
+        class="mt-0.5 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-(--color-outl-accent)"
         classList={{ invisible: !isToday() }}
         aria-hidden={!isToday()}
       >
@@ -2257,7 +2806,7 @@ function JournalHeader(props: {
 function PageHeader(props: { title: string; kind: "page" | "journal" | null }) {
   return (
     <div class="min-w-0 text-center">
-      <p class="text-[11px] font-medium uppercase tracking-wider text-(--color-ios-text-tertiary) dark:text-(--color-iosd-text-tertiary)">
+      <p class="text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dimmer)">
         {props.kind === "journal" ? "Journal" : "Page"}
       </p>
       <h1 class="truncate text-[17px] font-semibold leading-tight tracking-tight">
@@ -2316,8 +2865,13 @@ void _holdTitle;
  *
  * The handlers are passed in from `Journal()`'s scope so the menu
  * doesn't have to import every Tauri command directly.
+ *
+ * Exported (only) so `Journal.buildContextActions.test.ts` can drive
+ * it directly — mounting the whole `<Journal>` component just to
+ * assert which context-menu rows appear would need a full Tauri
+ * command mock surface for no extra coverage.
  */
-function buildContextActions(
+export function buildContextActions(
   blockId: string | null,
   pageView: import("@outl/shared/api/types").PageView | null,
   handlers: {
@@ -2332,8 +2886,36 @@ function buildContextActions(
     properties: (id: string) => void;
     remindMe: (id: string) => void;
     copy: (id: string) => void;
+    copyBlock: (id: string) => void;
+    pasteBlock: (id: string) => void;
+    /** RFC 0254 phase 4b — cut `id`'s subtree into the block
+     *  clipboard, deleting it from the source. */
+    cutBlock: (id: string) => void;
+    /** RFC 0254 phase 4b (issue #18) — copy `id`'s `((blk-XXXXXX))`
+     *  ref handle to the OS clipboard. */
+    copyBlockRef: (id: string) => void;
+    /** RFC 0254 phase 4b — create a new sibling immediately above
+     *  `id` and start editing it. */
+    newBlockAbove: (id: string) => void;
     attachFile: (id: string) => void;
+    /** RFC 0254 phase 3 — start a range selection anchored at `id`. */
+    selectBlocks: (id: string) => void;
+    /** RFC 0254 phase 3 — reselect the range captured on the last
+     *  exit (vim `gv`). Takes no id: the range it restores carries
+     *  its own anchor/cursor, independent of which block's menu the
+     *  user opened to reach it. */
+    reselectSelection: () => void;
   },
+  /** Is the block clipboard armed (`blockClipboard() !== null`)? Passed
+   *  in rather than read from a `handlers` closure so the caller's own
+   *  signal read stays inside its `actions=` prop-getter evaluation —
+   *  see the call site's comment for why that's what makes this
+   *  reactive. */
+  canPasteBlock = false,
+  /** Does `lastSelection` still resolve against the live outline? Same
+   *  "read it at the call site" reactivity reasoning as
+   *  `canPasteBlock`. */
+  canReselect = false,
 ): BlockContextAction[] {
   if (!blockId || !pageView) return [];
   // Resolve sibling position so we can hide move-up/down at the
@@ -2386,12 +2968,90 @@ function buildContextActions(
       iconPath: "M5 12l4 4 10-10",
       onSelect: () => handlers.toggleTodo(blockId),
     },
+    // Touch-native range selection (RFC 0254 phase 3) — the one
+    // interaction this phase invents. Long-press already opens this
+    // menu for every other single-block action, so "start selecting
+    // here" is a row in the same sheet rather than a second gesture
+    // competing with long-press-for-menu and swipe-for-delete.
+    {
+      id: "selectBlocks",
+      label: "Select blocks",
+      // Checklist glyph — three ticked rows, reads as "act on more
+      // than one block".
+      iconPath:
+        "M9 6h11M9 12h11M9 18h11M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 10M4 18l1.5 1.5L8 16",
+      onSelect: () => handlers.selectBlocks(blockId),
+    },
+    ...(canReselect
+      ? [
+          {
+            id: "reselectSelection",
+            label: "Reselect last selection",
+            // Circular-arrow "restore" glyph.
+            iconPath:
+              "M3 12a9 9 0 1 1 3 6.7 M3 12v5 M3 17h5",
+            onSelect: () => handlers.reselectSelection(),
+          } satisfies BlockContextAction,
+        ]
+      : []),
     {
       id: "copy",
       label: "Copy text",
       iconPath:
         "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2 M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
       onSelect: () => handlers.copy(blockId),
+    },
+    // Block clipboard (RFC 0254 phase 2, cut added phase 4b), distinct
+    // from "Copy text" above: that one writes to the OS clipboard for
+    // pasting outside outl; this trio arms an in-app buffer for
+    // duplicating (or, for cut, relocating) the block + subtree
+    // elsewhere in this workspace, fresh ids on paste — mirrors the
+    // desktop's `Cmd/Ctrl+X` / `Cmd/Ctrl+C` / `Cmd/Ctrl+V` (`CutBlock` /
+    // `CopyBlock` / `PasteBlock`).
+    {
+      id: "cutBlock",
+      label: "Cut block",
+      // Scissors glyph.
+      iconPath:
+        "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M20 4L8.5 15.5 M14.5 14.5L20 20 M8.5 8.5L10 10",
+      onSelect: () => handlers.cutBlock(blockId),
+    },
+    {
+      id: "copyBlock",
+      label: "Copy block",
+      // Two overlapping rectangles — the "duplicate" glyph, distinct
+      // from "Copy text"'s single-document icon above.
+      iconPath:
+        "M9 9h10v10H9z M5 15V5a2 2 0 0 1 2-2h10",
+      onSelect: () => handlers.copyBlock(blockId),
+    },
+    ...(canPasteBlock
+      ? [
+          {
+            id: "pasteBlock",
+            label: "Paste block",
+            // Clipboard glyph.
+            iconPath:
+              "M9 5h6a1 1 0 0 1 1 1v1H8V6a1 1 0 0 1 1-1z M8 4h8a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+            onSelect: () => handlers.pasteBlock(blockId),
+          } satisfies BlockContextAction,
+        ]
+      : []),
+    {
+      id: "copyBlockRef",
+      label: "Copy block ref",
+      // Link/chain glyph — reads as "copy a reference", distinct from
+      // both the document (Copy text) and duplicate (Copy block) icons.
+      iconPath:
+        "M9 12a3 3 0 0 0 4.24 0l3-3a3 3 0 0 0-4.24-4.24l-1 1 M15 12a3 3 0 0 0-4.24 0l-3 3a3 3 0 0 0 4.24 4.24l1-1",
+      onSelect: () => handlers.copyBlockRef(blockId),
+    },
+    {
+      id: "newBlockAbove",
+      label: "New block above",
+      // Plus above a horizontal rule — reads as "insert before".
+      iconPath: "M12 4v8 M8 8h8 M4 20h16",
+      onSelect: () => handlers.newBlockAbove(blockId),
     },
     {
       id: "remindMe",

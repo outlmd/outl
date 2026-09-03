@@ -102,7 +102,7 @@ export function Calendar(props: CalendarProps) {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl bg-(--color-ios-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150 dark:bg-(--color-iosd-bg)/85"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150"
         style={{
           "padding-bottom": "env(safe-area-inset-bottom)",
           transform: `translateY(${drag.translateY()}px)`,
@@ -125,7 +125,7 @@ export function Calendar(props: CalendarProps) {
           >
             <span
               aria-hidden="true"
-              class="block h-1 w-10 mx-auto rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="block h-1 w-10 mx-auto rounded-full bg-(--color-outl-border)"
             />
           </span>
         </header>
@@ -135,7 +135,7 @@ export function Calendar(props: CalendarProps) {
             type="button"
             aria-label="Previous month"
             onClick={() => stepMonth(-1)}
-            class="rounded-full p-2 text-(--color-ios-accent) active:opacity-50 dark:text-(--color-iosd-accent)"
+            class="rounded-full p-2 text-(--color-outl-accent) active:opacity-50"
           >
             <svg
               width="20"
@@ -162,7 +162,7 @@ export function Calendar(props: CalendarProps) {
             type="button"
             aria-label="Next month"
             onClick={() => stepMonth(1)}
-            class="rounded-full p-2 text-(--color-ios-accent) active:opacity-50 dark:text-(--color-iosd-accent)"
+            class="rounded-full p-2 text-(--color-outl-accent) active:opacity-50"
           >
             <svg
               width="20"
@@ -180,7 +180,7 @@ export function Calendar(props: CalendarProps) {
           </button>
         </div>
 
-        <div class="grid grid-cols-7 px-3 pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+        <div class="grid grid-cols-7 px-3 pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dim)">
           <For each={DAY_LABELS}>{(d) => <div>{d}</div>}</For>
         </div>
 
@@ -196,9 +196,9 @@ export function Calendar(props: CalendarProps) {
                   onClick={() => props.onPick(cell.slug)}
                   class="relative flex aspect-square items-center justify-center rounded-full text-[15px] tabular-nums active:opacity-50"
                   classList={{
-                    "bg-(--color-ios-accent) text-white font-semibold dark:bg-(--color-iosd-accent)":
+                    "bg-(--color-outl-accent) text-white font-semibold":
                       isSelected,
-                    "text-(--color-ios-accent) font-semibold dark:text-(--color-iosd-accent)":
+                    "text-(--color-outl-accent) font-semibold":
                       isToday && !isSelected,
                   }}
                 >
@@ -218,8 +218,7 @@ export function Calendar(props: CalendarProps) {
                       class="absolute h-1 w-1 rounded-full"
                       classList={{
                         "bg-white": isSelected,
-                        "bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)":
-                          !isSelected,
+                        "bg-(--color-outl-accent)": !isSelected,
                       }}
                       style="bottom: 4px;"
                     />

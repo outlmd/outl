@@ -65,27 +65,20 @@
 
 /* Shimmer used by `<Skeleton />` placeholders during initial load.
    Gradient sweeps across the row so users read it as "loading", not
-   "broken". */
+   "broken". Built from `--color-outl-border` (its dark value,
+   #382c54, is exactly the old hardcoded dark-mode rgba) so the
+   shimmer re-tints on hydrate and on OS appearance change instead of
+   carrying its own frozen rgba per theme — a raw rgba here would be
+   a second, un-synced copy of a colour `Palette` already owns. */
 .outl-skeleton {
   background: linear-gradient(
     90deg,
-    rgba(216, 208, 232, 0.4) 0%,
-    rgba(216, 208, 232, 0.7) 50%,
-    rgba(216, 208, 232, 0.4) 100%
+    color-mix(in srgb, var(--color-outl-border) 40%, transparent) 0%,
+    color-mix(in srgb, var(--color-outl-border) 70%, transparent) 50%,
+    color-mix(in srgb, var(--color-outl-border) 40%, transparent) 100%
   );
   background-size: 200% 100%;
   animation: outl-skeleton-shimmer 1400ms ease-in-out infinite;
-}
-@media (prefers-color-scheme: dark) {
-  .outl-skeleton {
-    background: linear-gradient(
-      90deg,
-      rgba(56, 44, 84, 0.4) 0%,
-      rgba(56, 44, 84, 0.8) 50%,
-      rgba(56, 44, 84, 0.4) 100%
-    );
-    background-size: 200% 100%;
-  }
 }
 
 /* Subtle "press" feedback for native-feeling tap targets. */
@@ -120,44 +113,44 @@
 
 @theme {
   /*
-   * Brand palette — outl (avelino.run).
-   * The variable names stay `--color-ios-*` / `--color-iosd-*` for
-   * historical reasons (every component already references them); the
-   * *values* now mirror the deep-purple palette used on the marketing
-   * site so all three surfaces (web, TUI, mobile) read as the same
-   * product.
+   * Boot values only — `installTheme()` rewrites every --color-outl-*
+   * on <html> once the palette arrives from `get_theme`. These exist
+   * so the first painted frame is branded rather than white.
+   *
+   * `bg-(--color-outl-bg)` is Tailwind v4's arbitrary-property
+   * shorthand — it resolves the CSS custom property at paint time
+   * whether the variable is declared under `@theme` or `:root`, so
+   * `@theme` is not what makes the utility work. What `@theme` buys
+   * here is the boot *value* for the first painted frame, before
+   * `installTheme()` runs — declare it under `:root` instead and the
+   * utility still resolves, it just has nothing to paint until the
+   * palette arrives over the wire (see root CLAUDE.md invariant 13).
    */
-
-  /* Light — soft purple-tinted neutrals, brand accent on actions. */
-  --color-ios-bg: #f6f4fb;
-  --color-ios-card: #ffffff;
-  --color-ios-divider: #d8d0e8;
-  --color-ios-text: #0c0814;
-  --color-ios-text-secondary: rgba(28, 21, 48, 0.62);
-  --color-ios-text-tertiary: rgba(28, 21, 48, 0.42);
-  --color-ios-accent: #7c3aed;
-  --color-ios-destructive: #e11d48;
-  --color-ios-tabbar: rgba(246, 244, 251, 0.92);
-  --color-ios-tabbar-border: rgba(12, 8, 20, 0.16);
-
-  /* Dark — site-exact tokens. Note: text-tertiary is bumped from 0.30
-     to 0.55 so the TODO checkbox outline (which uses it) stays legible
-     on the deep-purple background — was the original complaint. */
-  --color-iosd-bg: #0c0814;
-  --color-iosd-card: #15101f;
-  --color-iosd-divider: #382c54;
-  --color-iosd-text: #f4f1fa;
-  --color-iosd-text-secondary: #b4adc7;
-  --color-iosd-text-tertiary: rgba(180, 173, 199, 0.55);
-  --color-iosd-accent: #a78bfa;
-  --color-iosd-destructive: #fb7185;
-  --color-iosd-tabbar: rgba(21, 16, 31, 0.92);
-  --color-iosd-tabbar-border: rgba(255, 255, 255, 0.18);
+  --color-outl-bg: #0c0814;
+  --color-outl-bg-elev: #15101f;
+  --color-outl-fg: #f4f1fa;
+  --color-outl-fg-dim: #b4adc7;
+  --color-outl-fg-dimmer: #7b7390;
+  --color-outl-border: #382c54;
+  --color-outl-accent: #a78bfa;
+  --color-outl-accent-soft: #c4b5fd;
+  --color-outl-accent-alt: #d6ff47;
+  --color-outl-warn: #fbbf24;
+  --color-outl-destructive: #fb7185;
+  --color-outl-ref-link-fg: #a78bfa;
+  --color-outl-tag-link-fg: #f0abfc;
+  --color-outl-md-link-fg: #7dd3fc;
+  --color-outl-code-fg: #d6ff47;
+  --color-outl-todo-open-fg: #fbbf24;
+  --color-outl-todo-done-fg: #d6ff47;
+  --color-outl-highlight-bg: #fbbf24;
+  --color-outl-highlight-fg: #0c0814;
 
   /* Chrome tokens — applied to floating capsules (header actions, edit
      toolbar). Bear-style: rounded-full pills with a soft drop shadow
      and subtle glass background. Light vs dark only differ on the
-     shadow alpha (dark needs more opacity to be visible). */
+     shadow alpha (dark needs more opacity to be visible), which no
+     palette expresses — kept as static tokens, not swapped at runtime. */
   --radius-capsule: 9999px;
   --shadow-capsule: 0 4px 16px rgba(12, 8, 20, 0.08);
   --shadow-capsule-dark: 0 4px 16px rgba(0, 0, 0, 0.4);
@@ -239,8 +232,8 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: var(--color-ios-bg);
-  color: var(--color-ios-text);
+  background: var(--color-outl-bg);
+  color: var(--color-outl-fg);
   font-size: 17px;
   line-height: 1.4;
   overscroll-behavior: none;
@@ -248,13 +241,6 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background: var(--color-iosd-bg);
-    color: var(--color-iosd-text);
-  }
 }
 
 button,
@@ -275,21 +261,10 @@ textarea {
    default grey selection. */
 textarea,
 input {
-  caret-color: var(--color-ios-accent);
-}
-@media (prefers-color-scheme: dark) {
-  textarea,
-  input {
-    caret-color: var(--color-iosd-accent);
-  }
+  caret-color: var(--color-outl-accent);
 }
 ::selection {
-  background: color-mix(in srgb, var(--color-ios-accent) 25%, transparent);
-}
-@media (prefers-color-scheme: dark) {
-  ::selection {
-    background: color-mix(in srgb, var(--color-iosd-accent) 30%, transparent);
-  }
+  background: color-mix(in srgb, var(--color-outl-accent) 25%, transparent);
 }
 
 /* iOS momentum scroll polyfill */

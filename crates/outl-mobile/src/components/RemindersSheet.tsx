@@ -183,7 +183,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-ios-card)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:bg-(--color-iosd-card)/95 dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -196,12 +196,12 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
           >
             <span
               aria-hidden="true"
-              class="mx-auto block h-1 w-10 rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
 
           <div class="px-4 pb-1 pt-1">
-            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
               Reminders
             </span>
           </div>
@@ -210,11 +210,11 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
               (there is no settings screen, and config.toml lives inside
               the iOS sandbox). Saying "it's off" without a switch right
               here would be a dead end. */}
-          <div class="flex items-center justify-between gap-3 border-t border-(--color-ios-divider)/30 px-4 py-2.5 dark:border-(--color-iosd-divider)/30">
-            <span class="text-[13px] text-(--color-ios-text) dark:text-(--color-iosd-text)">
+          <div class="flex items-center justify-between gap-3 border-t border-(--color-outl-border)/30 px-4 py-2.5">
+            <span class="text-[13px] text-(--color-outl-fg)">
               Notify me on this device
               <Show when={!enabled()}>
-                <span class="block text-[11px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <span class="block text-[11px] text-(--color-outl-fg-dim)">
                   Rules below are tracked either way.
                 </span>
               </Show>
@@ -228,8 +228,8 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
               onClick={() => void saveSettings(!enabled(), quietHours())}
               class="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors disabled:opacity-50"
               classList={{
-                "bg-(--color-ios-accent) dark:bg-(--color-iosd-accent)": enabled(),
-                "bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)": !enabled(),
+                "bg-(--color-outl-accent)": enabled(),
+                "bg-(--color-outl-border)": !enabled(),
               }}
             >
               <span
@@ -244,10 +244,10 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
               layouts twice, and iOS renders these as a wheel. Clearing
               either end turns quiet hours off. */}
           <Show when={enabled()}>
-            <div class="flex items-center justify-between gap-3 border-t border-(--color-ios-divider)/30 px-4 py-2.5 dark:border-(--color-iosd-divider)/30">
-              <span class="text-[13px] text-(--color-ios-text) dark:text-(--color-iosd-text)">
+            <div class="flex items-center justify-between gap-3 border-t border-(--color-outl-border)/30 px-4 py-2.5">
+              <span class="text-[13px] text-(--color-outl-fg)">
                 Quiet hours
-                <span class="block text-[11px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <span class="block text-[11px] text-(--color-outl-fg-dim)">
                   A fire lands after the window, never dropped.
                 </span>
               </span>
@@ -258,9 +258,9 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                   disabled={savingSettings()}
                   value={splitQuietHours(quietHours())[0]}
                   onChange={(e) => setQuietEnd(0, e.currentTarget.value)}
-                  class="rounded-lg bg-(--color-ios-divider)/40 px-2 py-1 text-[13px] text-(--color-ios-text) disabled:opacity-50 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                  class="rounded-lg bg-(--color-outl-border)/40 px-2 py-1 text-[13px] text-(--color-outl-fg) disabled:opacity-50"
                 />
-                <span class="text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <span class="text-[13px] text-(--color-outl-fg-dim)">
                   to
                 </span>
                 <input
@@ -269,7 +269,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                   disabled={savingSettings()}
                   value={splitQuietHours(quietHours())[1]}
                   onChange={(e) => setQuietEnd(1, e.currentTarget.value)}
-                  class="rounded-lg bg-(--color-ios-divider)/40 px-2 py-1 text-[13px] text-(--color-ios-text) disabled:opacity-50 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                  class="rounded-lg bg-(--color-outl-border)/40 px-2 py-1 text-[13px] text-(--color-outl-fg) disabled:opacity-50"
                 />
               </div>
             </div>
@@ -279,13 +279,13 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
             <For each={groupReminders(reminders())}>
               {(group) => (
                 <>
-                  <div class="border-t border-(--color-ios-divider)/30 bg-(--color-ios-divider)/10 px-4 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-(--color-ios-text-secondary) dark:border-(--color-iosd-divider)/30 dark:bg-(--color-iosd-divider)/10 dark:text-(--color-iosd-text-secondary)">
+                  <div class="border-t border-(--color-outl-border)/30 bg-(--color-outl-border)/10 px-4 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
                     {group.label}
                   </div>
                   <For each={group.items}>
                     {(r) => (
                       <div
-                        class="border-t border-(--color-ios-divider)/30 px-4 py-3 dark:border-(--color-iosd-divider)/30"
+                        class="border-t border-(--color-outl-border)/30 px-4 py-3"
                         classList={{ "opacity-50": r.done }}
                       >
                         <button
@@ -293,7 +293,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                           class="flex w-full items-baseline gap-2 text-left"
                           onClick={() => void jumpTo(r)}
                         >
-                          <span class="min-w-0 flex-1 truncate text-[16px] text-(--color-ios-text) dark:text-(--color-iosd-text)">
+                          <span class="min-w-0 flex-1 truncate text-[16px] text-(--color-outl-fg)">
                             {r.text || "(empty block)"}
                           </span>
                           {/* Overdue reads very differently from
@@ -302,14 +302,14 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                             class="shrink-0 text-[12px]"
                             classList={{
                               "text-red-500 font-medium": r.urgency === "overdue",
-                              "text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)":
+                              "text-(--color-outl-fg-dim)":
                                 r.urgency !== "overdue",
                             }}
                           >
                             {formatNextFire(r.next_fire)}
                           </span>
                         </button>
-                        <div class="mt-0.5 flex gap-2 text-[11px] text-(--color-ios-text-secondary)/80 dark:text-(--color-iosd-text-secondary)/80">
+                        <div class="mt-0.5 flex gap-2 text-[11px] text-(--color-outl-fg-dim)/80">
                           <span class="truncate">{r.page_title}</span>
                           <span class="font-mono">{r.rule}</span>
                         </div>
@@ -320,7 +320,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                                 <button
                                   type="button"
                                   disabled={busy() === r.block_id}
-                                  class="rounded-full bg-(--color-ios-divider)/40 px-2.5 py-1 text-[12px] text-(--color-ios-text) active:opacity-60 disabled:opacity-40 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                                  class="rounded-full bg-(--color-outl-border)/40 px-2.5 py-1 text-[12px] text-(--color-outl-fg) active:opacity-60 disabled:opacity-40"
                                   onClick={() =>
                                     void withRow(r.block_id, () =>
                                       snoozeReminder(r.block_id, p.id),
@@ -335,7 +335,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                               <button
                                 type="button"
                                 disabled={busy() === r.block_id}
-                                class="rounded-full bg-(--color-ios-divider)/40 px-2.5 py-1 text-[12px] text-(--color-ios-text) active:opacity-60 disabled:opacity-40 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                                class="rounded-full bg-(--color-outl-border)/40 px-2.5 py-1 text-[12px] text-(--color-outl-fg) active:opacity-60 disabled:opacity-40"
                                 onClick={() =>
                                   void withRow(r.block_id, () =>
                                     clearReminderSnooze(r.block_id),
@@ -351,7 +351,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                             <button
                               type="button"
                               disabled={busy() === r.block_id}
-                              class="rounded-full bg-(--color-ios-divider)/40 px-2.5 py-1 text-[12px] text-(--color-ios-text) active:opacity-60 disabled:opacity-40 dark:bg-(--color-iosd-divider)/40 dark:text-(--color-iosd-text)"
+                              class="rounded-full bg-(--color-outl-border)/40 px-2.5 py-1 text-[12px] text-(--color-outl-fg) active:opacity-60 disabled:opacity-40"
                               onClick={() =>
                                 void withRow(r.block_id, () => markDone(r))
                               }
@@ -368,7 +368,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
             </For>
 
             <Show when={!loading() && reminders().length === 0}>
-              <div class="border-t border-(--color-ios-divider)/30 px-4 py-6 text-center text-[14px] text-(--color-ios-text-secondary) dark:border-(--color-iosd-divider)/30 dark:text-(--color-iosd-text-secondary)">
+              <div class="border-t border-(--color-outl-border)/30 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
                 No reminders yet. Long-press a TODO and pick{" "}
                 <span class="font-medium">Remind me…</span>
               </div>

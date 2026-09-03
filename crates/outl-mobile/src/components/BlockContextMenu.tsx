@@ -59,7 +59,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Actions card */}
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-ios-card)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:bg-(--color-iosd-card)/95 dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
           {/* Grab handle integrated at the top of the card so the
               gesture target stays close to the user's thumb. */}
           <span
@@ -74,7 +74,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
           >
             <span
               aria-hidden="true"
-              class="mx-auto block h-1 w-10 rounded-full bg-(--color-ios-divider) dark:bg-(--color-iosd-divider)"
+              class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
           <For each={props.actions}>
@@ -83,9 +83,9 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
                 <button
                   type="button"
                   onClick={() => fire(action)}
-                  class="flex w-full items-center justify-between gap-3 border-t border-(--color-ios-divider)/30 px-4 py-3.5 text-left active:bg-(--color-ios-divider)/30 dark:border-(--color-iosd-divider)/30 dark:active:bg-(--color-iosd-divider)/30"
+                  class="flex w-full items-center justify-between gap-3 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30"
                   classList={{
-                    "text-(--color-ios-destructive) dark:text-(--color-iosd-destructive)":
+                    "text-(--color-outl-destructive)":
                       action.destructive,
                   }}
                 >
@@ -114,7 +114,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         <button
           type="button"
           onClick={props.onClose}
-          class="mx-3 rounded-2xl bg-(--color-ios-card)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-ios-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-ios-divider)/30 dark:bg-(--color-iosd-card)/95 dark:text-(--color-iosd-accent) dark:shadow-[var(--shadow-capsule-dark)] dark:active:bg-(--color-iosd-divider)/30"
+          class="mx-3 rounded-2xl bg-(--color-outl-bg-elev)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-outl-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-outl-border)/30 dark:shadow-[var(--shadow-capsule-dark)]"
         >
           Cancel
         </button>

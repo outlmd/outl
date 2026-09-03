@@ -49,7 +49,7 @@ export function Onboarding(props: { onFinish: () => void }) {
 
   return (
     <div
-      class="flex h-full w-full flex-col bg-(--color-ios-bg) dark:bg-(--color-iosd-bg)"
+      class="flex h-full w-full flex-col bg-(--color-outl-bg)"
       style={{ "padding-top": "max(env(safe-area-inset-top), 16px)" }}
     >
       <div
@@ -62,7 +62,7 @@ export function Onboarding(props: { onFinish: () => void }) {
             <h1 class="mb-2 text-[28px] font-bold leading-tight">
               {STORAGE_STEP.title}
             </h1>
-            <p class="mb-8 text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <p class="mb-8 text-[15px] text-(--color-outl-fg-dim)">
               {STORAGE_STEP.body}
             </p>
 
@@ -70,7 +70,7 @@ export function Onboarding(props: { onFinish: () => void }) {
               <button
                 type="button"
                 onClick={continueToSync}
-                class="flex w-full flex-col items-start gap-1 rounded-2xl bg-(--color-ios-accent) px-5 py-4 text-left active:opacity-80 dark:bg-(--color-iosd-accent)"
+                class="flex w-full flex-col items-start gap-1 rounded-2xl bg-(--color-outl-accent) px-5 py-4 text-left active:opacity-80"
               >
                 <span class="text-[17px] font-semibold text-white">
                   Keep on this device
@@ -89,16 +89,16 @@ export function Onboarding(props: { onFinish: () => void }) {
             <h1 class="mb-2 text-[28px] font-bold leading-tight">
               {SYNC_STEP.title}
             </h1>
-            <p class="mb-5 text-[15px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+            <p class="mb-5 text-[15px] text-(--color-outl-fg-dim)">
               {SYNC_STEP.body}
             </p>
 
             <ul class="mb-6 flex flex-col gap-2.5">
               {SYNC_STEP.bullets.map((line) => (
-                <li class="flex gap-2.5 text-[14px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)">
+                <li class="flex gap-2.5 text-[14px] text-(--color-outl-fg-dim)">
                   <span
                     aria-hidden="true"
-                    class="text-(--color-ios-accent) dark:text-(--color-iosd-accent)"
+                    class="text-(--color-outl-accent)"
                   >
                     ✓
                   </span>
@@ -115,7 +115,7 @@ export function Onboarding(props: { onFinish: () => void }) {
                   haptic("light");
                   setDevicesOpen(true);
                 }}
-                class="w-full rounded-xl border border-(--color-ios-divider) px-4 py-3 text-[16px] font-medium text-(--color-ios-accent) active:opacity-60 dark:border-(--color-iosd-divider) dark:text-(--color-iosd-accent)"
+                class="w-full rounded-xl border border-(--color-outl-border) px-4 py-3 text-[16px] font-medium text-(--color-outl-accent) active:opacity-60"
               >
                 {SYNC_STEP.pairCta}
               </button>
@@ -123,7 +123,7 @@ export function Onboarding(props: { onFinish: () => void }) {
               <button
                 type="button"
                 onClick={finish}
-                class="w-full rounded-xl bg-(--color-ios-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80 dark:bg-(--color-iosd-accent)"
+                class="w-full rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80"
               >
                 {FINISH_CTA}
               </button>
@@ -131,7 +131,7 @@ export function Onboarding(props: { onFinish: () => void }) {
               <button
                 type="button"
                 onClick={finish}
-                class="py-1 text-center text-[14px] text-(--color-ios-text-tertiary) active:opacity-60 dark:text-(--color-iosd-text-tertiary)"
+                class="py-1 text-center text-[14px] text-(--color-outl-fg-dimmer) active:opacity-60"
               >
                 {SYNC_STEP.skipCta}
               </button>

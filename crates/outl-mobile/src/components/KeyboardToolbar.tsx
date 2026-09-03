@@ -38,7 +38,7 @@ export function KeyboardToolbar(props: {
   }
 
   return (
-    <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-white px-2 py-1 shadow-[var(--shadow-capsule)] dark:bg-[#2e2e2e] dark:shadow-[var(--shadow-capsule-dark)]">
+    <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)] dark:shadow-[var(--shadow-capsule-dark)]">
       <ToolbarButton action={PINNED_FIRST} onFire={fire} />
       <div class="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <For each={order()}>
@@ -61,9 +61,9 @@ function ToolbarButton(props: {
     <button
       type="button"
       aria-label={meta.label}
-      class="flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-(--color-ios-text) active:bg-black/5 dark:text-(--color-iosd-text) dark:active:bg-white/10"
+      class="flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-(--color-outl-fg) active:bg-black/5 dark:active:bg-white/10"
       classList={{
-        "text-(--color-ios-destructive) dark:text-(--color-iosd-destructive)":
+        "text-(--color-outl-destructive)":
           destructive,
       }}
       // preventDefault on pointerdown keeps focus in the textarea — a
@@ -112,6 +112,10 @@ function ToolbarGlyph(props: { action: ToolbarAction }): JSX.Element {
       return <Svg>{<path d="M12 19V5M5 12l7-7 7 7" />}</Svg>;
     case "arrow.down":
       return <Svg>{<path d="M12 5v14M5 12l7 7 7-7" />}</Svg>;
+    case "arrow.uturn.left":
+      return <Svg>{<path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 0 0-10h-1" />}</Svg>;
+    case "arrow.uturn.right":
+      return <Svg>{<path d="M15 7l5 5-5 5M20 12H9a5 5 0 0 1 0-10h1" />}</Svg>;
     case "bold":
       return <span class="text-[16px] font-bold">B</span>;
     case "italic":

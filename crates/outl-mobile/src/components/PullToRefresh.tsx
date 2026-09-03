@@ -135,7 +135,7 @@ export function PullToRefresh(props: PullToRefreshProps): JSX.Element {
           height="20"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="var(--color-ios-accent)"
+          stroke="var(--color-outl-accent)"
           stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
