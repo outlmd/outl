@@ -21,7 +21,9 @@
 //! last = "/Users/me/iCloud/outl"
 //!
 //! [theme]
-//! preset = "outl"   # name from outl_theme::PRESETS
+//! preset = "outl"        # name from outl_theme::PRESETS; the light side of the pair
+//! preset_dark = "dracula"   # optional; dark side. Omit = falls back to `preset`
+//! mode = "auto"          # "light" | "dark" | "auto" (default)
 //!
 //! [editor]
 //! vim_mode = true
@@ -63,7 +65,8 @@ mod schema;
 pub use paths::{config_dir, config_path};
 pub use schema::{
     AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DisplayCfg, EditorCfg, RemindersCfg,
-    SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, TuiCfg, WorkspaceCfg,
+    SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode, TuiCfg,
+    WorkspaceCfg,
 };
 
 use std::fs;

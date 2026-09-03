@@ -170,19 +170,61 @@ pub struct WorkspaceCfg {
     pub last: Option<PathBuf>,
 }
 
-/// Theme section. The `preset` name matches one of
-/// `outl_theme::PRESETS` (`"outl"`, `"dracula"`, …); unknown names
-/// fall back to `outl_theme::default()` at render time.
+/// Which side of the light/dark preset pair to render.
+///
+/// Names a *side*, not a colour: nothing stops a user putting a dark
+/// preset in `preset`, and then `Light` returns it. That is a
+/// misconfigured pair rather than a resolution bug — `outl doctor`
+/// reports it (RFC 0022).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    /// Always `preset`.
+    Light,
+    /// Always `ThemeCfg::dark()`.
+    Dark,
+    /// Follow the OS appearance. The TUI cannot read it and treats
+    /// this as `Dark` — see `docs/theming.md` → "Light / dark pair
+    /// and `mode`".
+    #[default]
+    Auto,
+}
+
+/// Theme section. Preset names match `outl_theme::PRESETS`
+/// (`"outl"`, `"dracula"`, …); unknown names fall back to
+/// `outl_theme::default()` at render time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ThemeCfg {
+    /// The light side of the pair, and the only preset used when
+    /// `mode` is `Light`.
     pub preset: String,
+    /// The dark side. `None` resolves to [`ThemeCfg::preset`] — that
+    /// fallback is what keeps every pre-RFC-0022 config (which has
+    /// only `preset`) behaving exactly as it did.
+    pub preset_dark: Option<String>,
+    pub mode: ThemeMode,
+}
+
+impl ThemeCfg {
+    /// The dark-side preset name, falling back to [`Self::preset`]
+    /// when the user never configured a pair.
+    ///
+    /// Do not inline this as `preset_dark.unwrap_or_default()` — an
+    /// empty string is not a preset name and would silently resolve
+    /// to `outl_theme::default()`, changing the theme of every
+    /// existing config.
+    pub fn dark(&self) -> &str {
+        self.preset_dark.as_deref().unwrap_or(&self.preset)
+    }
 }
 
 impl Default for ThemeCfg {
     fn default() -> Self {
         Self {
             preset: "outl".to_string(),
+            preset_dark: None,
+            mode: ThemeMode::Auto,
         }
     }
 }
@@ -613,6 +655,45 @@ relay_url = "https://relay.example"
             let c: Config =
                 toml::from_str(&format!("[reminders]\nquiet_hours = \"{bad}\"\n")).unwrap();
             assert_eq!(c.reminders.quiet_window(), None, "{bad} should not parse");
+        }
+    }
+
+    #[test]
+    fn a_config_with_only_preset_behaves_exactly_as_before() {
+        // RFC 0022's whole backwards-compatibility story. `mode`
+        // defaults to auto, but with no `preset_dark` both sides of
+        // the pair are the same preset, so auto alternates between
+        // dracula and dracula — today's behaviour, byte for byte.
+        // If someone "simplifies" the None fallback away, every
+        // pre-RFC config silently starts theme-switching.
+        let c: Config = toml::from_str("[theme]\npreset = \"dracula\"\n").unwrap();
+        assert_eq!(c.theme.preset, "dracula");
+        assert_eq!(c.theme.dark(), "dracula");
+        assert_eq!(c.theme.mode, ThemeMode::Auto);
+    }
+
+    #[test]
+    fn a_pair_keeps_the_two_sides_apart() {
+        let c: Config = toml::from_str(
+            "[theme]\nmode = \"auto\"\npreset = \"logseq-light\"\npreset_dark = \"outl\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.theme.preset, "logseq-light");
+        assert_eq!(c.theme.dark(), "outl");
+        assert_eq!(c.theme.mode, ThemeMode::Auto);
+    }
+
+    #[test]
+    fn mode_round_trips_through_toml() {
+        for (text, want) in [
+            ("light", ThemeMode::Light),
+            ("dark", ThemeMode::Dark),
+            ("auto", ThemeMode::Auto),
+        ] {
+            let c: Config = toml::from_str(&format!("[theme]\nmode = \"{text}\"\n")).unwrap();
+            assert_eq!(c.theme.mode, want);
+            let back = toml::to_string(&c).unwrap();
+            assert!(back.contains(&format!("mode = \"{text}\"")), "{back}");
         }
     }
 }
