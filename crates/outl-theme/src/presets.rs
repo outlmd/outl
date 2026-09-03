@@ -38,6 +38,7 @@ pub fn outl() -> Palette {
         accent_soft: accent_soft.into(),
         accent_alt: accent_alt.into(),
         warn: warn.into(),
+        destructive: "#fb7185".into(), // rose-400, the value mobile already ships
         ref_link_fg: accent.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: blue.into(),
@@ -46,6 +47,91 @@ pub fn outl() -> Palette {
         strike_fg: fg_dimmer.into(),
         highlight_bg: warn.into(),
         highlight_fg: bg.into(),
+        code_fg: accent_alt.into(),
+        todo_open_fg: warn.into(),
+        todo_done_fg: accent_alt.into(),
+        todo_done_body_fg: fg_dimmer.into(),
+        property_key_fg: fg_dimmer.into(),
+        property_value_fg: accent_soft.into(),
+        heading_fg: fg.into(),
+        dim_fg: fg_dimmer.into(),
+        selected_bullet_bg: accent.into(),
+        selected_bullet_fg: bg.into(),
+        cursor_block_bg: fg.into(),
+        cursor_block_fg: bg.into(),
+        cursor_caret_fg: accent_soft.into(),
+        status_normal_bg: accent.into(),
+        status_normal_fg: bg.into(),
+        status_insert_bg: accent_alt.into(),
+        status_insert_fg: bg.into(),
+        status_visual_bg: magenta.into(),
+        status_visual_fg: bg.into(),
+        status_message_fg: warn.into(),
+        list_selected_bg: accent.into(),
+        list_selected_fg: bg.into(),
+        help_title_fg: accent_soft.into(),
+    }
+}
+
+/// outl brand palette, light side — soft purple-tinted canvas with
+/// the same brand violet accent as [`outl`], darkened where needed
+/// for contrast on a light background.
+///
+/// This is the light palette mobile shipped before RFC 0022, as
+/// `--color-ios-*` CSS custom properties in `outl-mobile/src/styles.css`
+/// (`bg: #f6f4fb`, `card: #ffffff`, `divider: #d8d0e8`, `text: #0c0814`,
+/// `accent: #7c3aed`, `destructive: #e11d48`) — recovered from git
+/// history rather than deleted, per RFC 0022's "the migration moves
+/// state in, it does not delete it". `fg_dim` / `fg_dimmer` were
+/// alpha blends (`rgba(28, 21, 48, 0.62)` / `rgba(28, 21, 48, 0.42)`
+/// over that `bg`); `Palette` fields are opaque hex, so they are
+/// composited here into solid hex once (`#6f6a7d`, `#9a96a6`) rather
+/// than carried as CSS `rgba()`.
+///
+/// The remaining fields (`ref_link_fg`, `code_fg`, `status_*`, …)
+/// have no prior mobile-only value to recover — they mirror
+/// [`outl`]'s structure with each hue darkened for a light canvas,
+/// the way [`logseq_light`] darkens its terminal-flavoured fields
+/// relative to its dark siblings.
+pub fn outl_light() -> Palette {
+    let bg = "#f6f4fb";
+    let bg_elev = "#ffffff";
+    let fg = "#0c0814";
+    let fg_dim = "#6f6a7d"; // rgba(28, 21, 48, 0.62) composited over `bg`
+    let fg_dimmer = "#9a96a6"; // rgba(28, 21, 48, 0.42) composited over `bg`
+    let border = "#d8d0e8";
+    let accent = "#7c3aed"; // brand violet, darkened from outl()'s #a78bfa for contrast on `bg`
+    let accent_soft = "#8b5cf6";
+    let accent_alt = "#65a30d"; // lime-600 — outl()'s lemon #d6ff47 is unreadable on light bg
+    let warn = "#b45309"; // amber-700, darkened from outl()'s #fbbf24
+    let blue = "#0284c7";
+    let magenta = "#a21caf";
+
+    Palette {
+        name: "outl-light".into(),
+        bg: bg.into(),
+        bg_elev: bg_elev.into(),
+        fg: fg.into(),
+        fg_dim: fg_dim.into(),
+        fg_dimmer: fg_dimmer.into(),
+        border: border.into(),
+        hint: fg_dim.into(),
+        accent: accent.into(),
+        accent_soft: accent_soft.into(),
+        accent_alt: accent_alt.into(),
+        warn: warn.into(),
+        destructive: "#e11d48".into(), // rose-600, the value mobile already shipped
+        ref_link_fg: accent.into(),
+        tag_link_fg: magenta.into(),
+        md_link_fg: blue.into(),
+        bold_fg: fg.into(),
+        italic_fg: accent_soft.into(),
+        strike_fg: fg_dimmer.into(),
+        // Highlighter markers stay bright-bg/dark-fg regardless of
+        // theme (a real highlighter pen doesn't get darker on light
+        // paper) — mirrors `light()` / `logseq_light()`, not `outl()`.
+        highlight_bg: "#fde68a".into(),
+        highlight_fg: fg.into(),
         code_fg: accent_alt.into(),
         todo_open_fg: warn.into(),
         todo_done_fg: accent_alt.into(),
@@ -101,6 +187,7 @@ pub fn default_dark() -> Palette {
         accent_soft: "#55ffff".into(),
         accent_alt: green.into(),
         warn: yellow.into(),
+        destructive: "#ff5555".into(), // ANSI bright red
         ref_link_fg: cyan.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: blue.into(),
@@ -160,6 +247,7 @@ pub fn light() -> Palette {
         accent_soft: "#3399ff".into(),
         accent_alt: green.into(),
         warn: yellow.into(),
+        destructive: "#dc2626".into(), // red-600, readable on white
         ref_link_fg: blue.into(),
         tag_link_fg: red.into(),
         md_link_fg: blue.into(),
@@ -231,6 +319,7 @@ pub fn logseq_light() -> Palette {
         accent_soft: blue_bright.into(),
         accent_alt: green.into(),
         warn: orange.into(),
+        destructive: "#c5372c".into(), // Blueprint red, matches its link blue
         ref_link_fg: blue.into(),
         tag_link_fg: blue_deep.into(),
         md_link_fg: blue.into(),
@@ -290,6 +379,7 @@ pub fn dracula() -> Palette {
         accent_soft: purple.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
+        destructive: "#ff5555".into(), // Dracula "red"
         ref_link_fg: cyan.into(),
         tag_link_fg: pink.into(),
         md_link_fg: purple.into(),
@@ -353,6 +443,7 @@ pub fn solarized_dark() -> Palette {
         accent_soft: violet.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
+        destructive: red.into(), // Solarized red
         ref_link_fg: blue.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: violet.into(),
@@ -416,6 +507,7 @@ pub fn nord() -> Palette {
         accent_soft: frost2.into(),
         accent_alt: aurora_green.into(),
         warn: aurora_yellow.into(),
+        destructive: aurora_red.into(), // nord11
         ref_link_fg: frost1.into(),
         tag_link_fg: aurora_purple.into(),
         md_link_fg: frost3.into(),
@@ -475,6 +567,7 @@ pub fn monokai() -> Palette {
         accent_soft: purple.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
+        destructive: pink.into(), // Monokai pink
         ref_link_fg: blue.into(),
         tag_link_fg: pink.into(),
         md_link_fg: blue.into(),

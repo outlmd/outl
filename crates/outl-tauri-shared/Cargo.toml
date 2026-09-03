@@ -22,6 +22,7 @@ outl-exec = { workspace = true }
 outl-plugins = { workspace = true, features = ["registry"] }
 outl-shortcuts = { workspace = true }
 outl-sync-iroh = { workspace = true }
+outl-theme = { workspace = true }
 
 tauri = { workspace = true }
 serde = { workspace = true }

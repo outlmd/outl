@@ -34,10 +34,16 @@ This is what lets every other crate cheaply depend on us.
 - [`Palette`] — the struct of named hex strings (one per semantic surface).
   Field naming follows "what the surface IS", not "what it looks like" (`ref_link_fg`, not `purple_underline`).
   Two surfaces that genuinely share a style share the field.
-- The eight built-in presets in `src/presets.rs`: `outl`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`.
+- The nine built-in presets in `src/presets.rs`: `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`.
 - [`PRESETS`] — the canonical user-visible order (alphabetical-ish, brand first).
 - [`by_name`] — case- and separator-insensitive lookup so `"Solarized Dark"`, `"solarized_dark"`, and `"solarized-dark"` all resolve.
 - [`default`] / [`all`] — fallback + iterator helpers for pickers.
+- `Palette::destructive` (RFC 0022) — the delete-confirmation / "cannot be undone" hue, distinct from `warn`.
+  Every preset sets its own family's red; see `src/presets.rs`.
+- [`Palette::is_light`] (RFC 0022) — BT.601 perceived luminance over `bg`, exposed as a Rust method (never a wire field, so it can't cross the Tauri bridge).
+  Its one non-test caller today is `outl doctor`'s light/dark pairing check.
+  `mode = "auto"` does not call it — the TUI's `resolve_preset_name` matches on `ThemeMode` directly and always resolves `Auto` to the dark side, and no GUI client resolves `auto` in Rust yet.
+  The desktop's `color-scheme` CSS comes from `isLightHex` in `outl-frontend-shared/src/theme/palette.ts`, a hand-synced client-side copy of this same check, by design — see `docs/rfcs/0022-unified-design-tokens.md`.
 
 ## What this crate does NOT own
 
@@ -80,7 +86,7 @@ Steps:
 2. Add a value in **every** preset in `src/presets.rs`.
    Don't ship a `String::new()` placeholder — `every_palette_field_is_hex` will fail.
 3. Update the TUI's `Theme::from_palette` (`crates/outl-tui/src/theme.rs`) to render the new field with its modifier of choice.
-4. Update the desktop's CSS variable wiring (`crates/outl-desktop/src/styles.css` or `lib/palette.ts`) — pick a `--color-outl-<field>` name and use it in the relevant Tailwind class.
+4. Update the desktop's CSS variable wiring (`crates/outl-desktop/src/styles.css` or `crates/outl-frontend-shared/src/theme/palette.ts`) — pick a `--color-outl-<field>` name and use it in the relevant Tailwind class.
 5. Document the field's intent in the doc comment.
 
 Skipping any step lights up a regression on one client and not the other — exactly the failure mode this crate exists to prevent.
@@ -106,6 +112,6 @@ cargo test -p outl-desktop  # palette → CSS wire tests
 |---|---|---|
 | Hex values per preset | `outl-theme` | Single source. |
 | `ratatui::Color` mapping + modifiers | `outl-tui::theme::Theme::from_palette` | Terminal-only knowledge. |
-| CSS custom-property names + Tailwind class wiring | `outl-desktop::lib/palette.ts` + `src/styles.css` | DOM-only knowledge. |
+| CSS custom-property names + Tailwind class wiring | `outl-frontend-shared::src/theme/palette.ts` (`applyPaletteToRoot`, exported as `@outl/shared/theme`) + each client's `src/styles.css` | DOM-only knowledge. |
 | Which preset is active (per-workspace / global) | `outl-config::ThemeCfg.preset` | User preference, not a palette concern. |
 | Resolving the active preset for a given run | `outl-tui::runtime::resolve_theme` / `outl-desktop::commands::theme` | Each client picks; this crate just exposes the catalog. |

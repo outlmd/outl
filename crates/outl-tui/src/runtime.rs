@@ -278,10 +278,23 @@ fn resolve_theme(
     // propagates to the next `outl-tui` launch automatically (and
     // vice versa). Passed in pre-loaded so the launch reads the file
     // once for both theme and `[sync]`.
-    if let Some(t) = theme::by_name(&global.theme.preset) {
+    if let Some(t) = theme::by_name(resolve_preset_name(&global.theme)) {
         return t;
     }
     theme::default_theme()
+}
+
+/// Which preset name this config resolves to on the TUI.
+///
+/// `Auto` means the dark side here: a terminal cannot read the OS
+/// appearance setting. Recorded in `docs/theming.md` → "Light / dark
+/// pair and `mode`" so the gap is visible rather than surprising
+/// (RFC 0022).
+pub(crate) fn resolve_preset_name(cfg: &outl_config::ThemeCfg) -> &str {
+    match cfg.mode {
+        outl_config::ThemeMode::Light => &cfg.preset,
+        outl_config::ThemeMode::Dark | outl_config::ThemeMode::Auto => cfg.dark(),
+    }
 }
 
 /// Open the workspace at `root` and return everything the TUI needs
@@ -625,4 +638,51 @@ fn install_silent_log_subscriber(workspace_root: &Path) {
     // Errors here mean a global subscriber was set by an earlier
     // caller — fine, just move on.
     let _ = result;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use outl_config::{ThemeCfg, ThemeMode};
+
+    #[test]
+    fn auto_resolves_to_the_dark_side_on_the_tui() {
+        // A terminal cannot read the OS appearance setting, so `auto`
+        // picks the dark side. Declared in docs/theming.md → "Light
+        // / dark pair and `mode`" — do not "fix" this into a probe
+        // without an RFC: OSC 11 is unreliable under tmux and
+        // several emulators answer for the wrong pane.
+        let cfg = ThemeCfg {
+            preset: "logseq-light".into(),
+            preset_dark: Some("nord".into()),
+            mode: ThemeMode::Auto,
+        };
+        assert_eq!(resolve_preset_name(&cfg), "nord");
+    }
+
+    #[test]
+    fn light_and_dark_pick_their_declared_sides() {
+        let cfg = ThemeCfg {
+            preset: "logseq-light".into(),
+            preset_dark: Some("nord".into()),
+            mode: ThemeMode::Light,
+        };
+        assert_eq!(resolve_preset_name(&cfg), "logseq-light");
+
+        let cfg = ThemeCfg {
+            mode: ThemeMode::Dark,
+            ..cfg
+        };
+        assert_eq!(resolve_preset_name(&cfg), "nord");
+    }
+
+    #[test]
+    fn a_legacy_config_still_resolves_to_its_single_preset() {
+        let cfg = ThemeCfg {
+            preset: "dracula".into(),
+            preset_dark: None,
+            mode: ThemeMode::Auto,
+        };
+        assert_eq!(resolve_preset_name(&cfg), "dracula");
+    }
 }

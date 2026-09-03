@@ -52,7 +52,9 @@ An actor id must **differ** per device, and `config.toml` is a file users copy b
 last = "/Users/me/iCloud/outl"   # absolute path; optional
 
 [theme]
-preset = "outl"                   # name from outl_theme::PRESETS
+preset = "outl"                   # name from outl_theme::PRESETS; the light side of the pair
+preset_dark = "dracula"           # optional; dark side. Omit = falls back to `preset` (pre-RFC-0022 behaviour)
+mode = "auto"                     # "light" | "dark" | "auto" (default); TUI treats "auto" as "dark"
 
 [editor]
 vim_mode = true                   # default true
@@ -84,6 +86,7 @@ interval_minutes = 30             # floor between automatic snapshots, not a sch
 ```
 
 Nine sections, each modelled as its own struct ([`WorkspaceCfg`], [`ThemeCfg`], [`EditorCfg`], [`CalendarCfg`], [`SyncConfig`], [`TuiCfg`], [`DisplayCfg`], [`AssetsCfg`], [`RemindersCfg`]).
+`ThemeCfg` additionally carries a [`ThemeMode`] enum field (`mode`); see below.
 `RemindersCfg::enabled` defaults to **`true`**, the one non-`Default::default()` bool in the schema: `remind::` on a block is itself the opt-in, so defaulting off just made a written rule silently do nothing.
 `RemindersCfg::quiet_window()` parses `"22:00-07:00"` into `(start, end)` minutes past midnight and returns `None` on anything unparseable, so a typo degrades to "no quiet hours" instead of failing the load.
 `CalendarCfg::timezone` is an optional IANA name resolved at boot by `outl_actions::clock::init`; missing/empty/unknown falls back to the OS local timezone (the previous behaviour).
@@ -92,6 +95,11 @@ It exists for environments where the OS clock lies about the zone — containers
 `SyncConfig::relay_url()` treats an empty string as `None`, which the iroh transport resolves to outl's default relay (`use1-1.relay.avelino.outl.iroh.link`; see [`docs/relay.md`](../../docs/relay.md)).
 `TuiCfg::mouse_capture` (default `false`) is read by the TUI at boot in `runtime.rs` to decide whether to call `EnableMouseCapture` and listen for `Event::Mouse`; the desktop ignores this section entirely.
 `DisplayCfg::backlinks_order` is a [`BacklinksOrder`] enum (`Newest` | `Oldest`, serde `lowercase`, default `Newest`) — a pure display preference, same "never converges between devices" policy as `theme.preset` (root `CLAUDE.md` invariant #7).
+`ThemeCfg` (RFC 0022) models a light/dark preset *pair*, not a single preset.
+`preset` is the light side, `preset_dark: Option<String>` is the dark side, and `mode` is a [`ThemeMode`] enum (`Light` | `Dark` | `Auto`, serde `lowercase`, default `Auto`).
+`ThemeCfg::dark()` returns `preset_dark` when set, else falls back to `preset`.
+That fallback is what keeps a pre-RFC-0022 config with only `preset` behaving byte-for-byte the same (`mode = "auto"` alternating between the same preset on both sides).
+`ThemeMode` names a *side* to render, not a colour, so nothing stops a misconfigured pair (a dark preset in `preset`); that is surfaced by `outl doctor`, not resolved here.
 `BacklinksOrder::newest_first()` returns the `bool` `outl_actions::sort_backlinks` expects.
 `BackupCfg::enabled` defaults to **`true`** — the second non-`Default::default()` bool in the schema, for the same reason as `RemindersCfg::enabled`.
 The failures a backup catches (a projection bug, a mis-aimed `outl import` over a populated workspace, a page deleted with the app then closed) are ones the user discovers *after* the window to enable a safety net has closed.

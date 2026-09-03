@@ -23,7 +23,7 @@
 //!
 //! ## Presets
 //!
-//! Eight built-in palettes, named identically to the TUI presets
+//! Nine built-in palettes, named identically to the TUI presets
 //! that shipped before this crate existed. The TUI's render path is
 //! unchanged; it now derives its `Theme` from these. Adding a
 //! preset means: extend `presets`, add a name to
@@ -38,6 +38,7 @@ pub use palette::Palette;
 /// in pickers (CLI, settings modal, command palette).
 pub const PRESETS: &[&str] = &[
     "outl",
+    "outl-light",
     "default-dark",
     "light",
     "logseq-light",
@@ -65,6 +66,7 @@ pub fn by_name(name: &str) -> Option<Palette> {
         .collect();
     match norm.as_str() {
         "outl" | "default" => Some(presets::outl()),
+        "outl-light" => Some(presets::outl_light()),
         "default-dark" | "dark" => Some(presets::default_dark()),
         "light" => Some(presets::light()),
         "logseq-light" | "logseq" => Some(presets::logseq_light()),
@@ -93,6 +95,20 @@ pub fn all() -> Vec<Palette> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outl_light_reads_as_light() {
+        // `outl-light` is the light half of mobile's default pair
+        // (`App.tsx`: `preset: "outl-light", presetDark: "outl"`).
+        // `outl doctor`'s `check_theme_pair` warns when a pair's
+        // light slot resolves to a dark palette — this pins the
+        // preset never regresses into tripping that check.
+        assert!(presets::outl_light().is_light());
+        assert!(
+            !presets::outl().is_light(),
+            "outl must stay the dark side of the pair"
+        );
+    }
 
     #[test]
     fn every_listed_preset_resolves() {

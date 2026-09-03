@@ -56,6 +56,15 @@ pub struct Palette {
     pub accent_alt: String,
     /// Warning hue (todo_open, transient status messages).
     pub warn: String,
+    /// Destructive action — delete confirmations, the "remove peer"
+    /// button, error toasts. Distinct from `warn`: `warn` is "look
+    /// at this", `destructive` is "this cannot be undone".
+    ///
+    /// Added by RFC 0022. Before it, the TUI's delete confirmation
+    /// and the desktop's `ErrorToast` each picked an ad-hoc red,
+    /// and mobile had `--color-ios-destructive` that no other
+    /// client could see.
+    pub destructive: String,
 
     // ── inline markdown ──────────────────────────────────────────
     /// `[[page]]` reference foreground.
@@ -148,6 +157,7 @@ impl Palette {
             ("accent_soft", &self.accent_soft),
             ("accent_alt", &self.accent_alt),
             ("warn", &self.warn),
+            ("destructive", &self.destructive),
             ("ref_link_fg", &self.ref_link_fg),
             ("tag_link_fg", &self.tag_link_fg),
             ("md_link_fg", &self.md_link_fg),
@@ -180,6 +190,36 @@ impl Palette {
             ("list_selected_fg", &self.list_selected_fg),
             ("help_title_fg", &self.help_title_fg),
         ]
+    }
+
+    /// Whether this palette reads as a light theme, by BT.601
+    /// perceived luminance over [`Palette::bg`].
+    ///
+    /// The Rust-side owner of that question, but not the only
+    /// implementation: it is a method, never a wire field, so it
+    /// cannot cross the Tauri bridge. Its one non-test caller today
+    /// is `outl doctor`'s light/dark pairing check
+    /// (`crates/outl-cli/src/cmd/doctor/theme.rs`), which validates
+    /// a configured `[theme]` pair has one light side and one dark
+    /// side. `mode = "auto"` does **not** call this — the TUI's
+    /// `resolve_preset_name` (`crates/outl-tui/src/runtime.rs`)
+    /// matches on `ThemeMode` directly and always resolves `Auto` to
+    /// the dark side (a terminal can't read the OS setting), and no
+    /// GUI client resolves `auto` in Rust at all yet (see root
+    /// `CLAUDE.md`'s theming decisions). The desktop's `color-scheme`
+    /// CSS comes from `isLightHex` in
+    /// `crates/outl-frontend-shared/src/theme/palette.ts`, a
+    /// hand-synced client-side copy of this same luminance check —
+    /// not this method, since nothing here reaches the DOM.
+    ///
+    /// A malformed hex is treated as dark, matching the boot default.
+    pub fn is_light(&self) -> bool {
+        match parse_hex(&self.bg) {
+            Some((r, g, b)) => {
+                0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b) > 128.0
+            }
+            None => false,
+        }
     }
 }
 
@@ -243,5 +283,33 @@ mod tests {
         let back: Palette = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, p.name);
         assert_eq!(back.accent, p.accent);
+    }
+
+    #[test]
+    fn is_light_reads_the_canvas_background() {
+        // BT.601 perceived luminance over `bg`. This is the single
+        // owner of "is this a light theme" — palette.ts used to have
+        // its own copy (`isLightHex`), and two answers to one
+        // question is what RFC 0022 exists to remove.
+        assert!(crate::presets::light().is_light());
+        assert!(crate::presets::logseq_light().is_light());
+        assert!(!crate::presets::outl().is_light());
+        assert!(!crate::presets::dracula().is_light());
+        assert!(!crate::presets::nord().is_light());
+    }
+
+    #[test]
+    fn every_preset_defines_destructive() {
+        // The compiler forces the field to exist. This forces it to
+        // mean something: a preset satisfying the struct with ""
+        // would paint an invisible delete button.
+        for name in crate::PRESETS {
+            let p = crate::by_name(name).expect("preset in PRESETS must resolve");
+            assert!(
+                p.destructive.starts_with('#') && p.destructive.len() == 7,
+                "preset {name} has no usable destructive colour: {:?}",
+                p.destructive
+            );
+        }
     }
 }
