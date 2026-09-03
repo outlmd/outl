@@ -43,7 +43,7 @@ export function EmbeddedSubtree(props: EmbeddedSubtreeProps): JSX.Element {
     <For each={props.nodes}>
       {(node) => (
         <div
-          class="text-[13px] text-(--color-ios-text-secondary) dark:text-(--color-iosd-text-secondary)"
+          class="text-[13px] text-(--color-outl-fg-dim)"
           style={{ "margin-left": `${depth()}rem` }}
         >
           <span>

@@ -1,13 +1,9 @@
-import { For, Show, createResource, createSignal, onMount } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal, onMount } from "solid-js";
 
-import {
-  getSettings,
-  getTheme,
-  listThemes,
-  updateSettings,
-  type Settings,
-} from "../lib/api";
-import { applyPaletteToRoot } from "../lib/palette";
+import { getTheme, listThemes } from "@outl/shared/api/commands";
+import { applyPaletteToRoot, pickSide, type ThemeMode } from "@outl/shared/theme";
+
+import { getSettings, updateSettings, type Settings } from "../lib/api";
 import { appState, setAppState } from "../lib/store";
 import { SyncPanel } from "./SyncPanel";
 
@@ -30,6 +26,26 @@ export function SettingsModal() {
       return [] as string[];
     }
   });
+
+  /**
+   * Which side of the light/dark pair is actually painted right now.
+   * Reuses `pickSide` — the one function that answers "which side am
+   * I on" (`installTheme` in `App.tsx` calls the same function) —
+   * rather than re-deriving the OS-appearance check here, which is
+   * exactly the "two answers to one question" defect class RFC 0022
+   * exists to remove.
+   *
+   * Reads `theme_mode` straight off the draft (not a separate fetch):
+   * the modal now owns that field, so the moment the user flips the
+   * mode selector this must follow it live, the same way it already
+   * follows an OS appearance change.
+   */
+  const renderedSide = createMemo(() =>
+    pickSide(
+      (draft()?.theme_mode ?? "auto") as ThemeMode,
+      !window.matchMedia("(prefers-color-scheme: dark)").matches,
+    ),
+  );
 
   function close() {
     setAppState("settingsOpen", false);
@@ -109,25 +125,79 @@ export function SettingsModal() {
                 />
               </label>
 
-              <label class="block">
+              <div>
                 <div class="mb-1 text-sm font-medium">Theme</div>
-                <select
-                  value={draft()!.theme}
-                  onChange={(e) => {
-                    const next = e.currentTarget.value;
-                    setDraft({ ...draft()!, theme: next });
-                    void previewTheme(next);
-                  }}
-                  class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
-                >
-                  <For each={themes() ?? []}>
-                    {(name) => <option value={name}>{name}</option>}
-                  </For>
-                </select>
+
+                <label class="mb-2 block">
+                  <div class="mb-1 text-xs opacity-60">Mode</div>
+                  <select
+                    value={draft()!.theme_mode}
+                    onChange={(e) => {
+                      const d = draft()!;
+                      const nextMode = e.currentTarget.value as ThemeMode;
+                      setDraft({ ...d, theme_mode: nextMode });
+                      const osIsLight = !window.matchMedia(
+                        "(prefers-color-scheme: dark)",
+                      ).matches;
+                      const side = pickSide(nextMode, osIsLight);
+                      void previewTheme(side === "dark" ? d.theme_dark : d.theme);
+                    }}
+                    class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
+                  >
+                    <option value="auto">Auto — follow the OS appearance</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </label>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="block">
+                    <div class="mb-1 text-xs opacity-60">
+                      Light
+                      <Show when={renderedSide() === "light"}> — active</Show>
+                    </div>
+                    <select
+                      value={draft()!.theme}
+                      onChange={(e) => {
+                        const next = e.currentTarget.value;
+                        setDraft({ ...draft()!, theme: next });
+                        if (renderedSide() === "light") void previewTheme(next);
+                      }}
+                      class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
+                    >
+                      <For each={themes() ?? []}>
+                        {(name) => <option value={name}>{name}</option>}
+                      </For>
+                    </select>
+                  </label>
+
+                  <label class="block">
+                    <div class="mb-1 text-xs opacity-60">
+                      Dark
+                      <Show when={renderedSide() === "dark"}> — active</Show>
+                    </div>
+                    <select
+                      value={draft()!.theme_dark}
+                      onChange={(e) => {
+                        const next = e.currentTarget.value;
+                        setDraft({ ...draft()!, theme_dark: next });
+                        if (renderedSide() === "dark") void previewTheme(next);
+                      }}
+                      class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
+                    >
+                      <For each={themes() ?? []}>
+                        {(name) => <option value={name}>{name}</option>}
+                      </For>
+                    </select>
+                  </label>
+                </div>
+
                 <div class="mt-1 text-xs opacity-50">
                   Live preview — pick to see, Save to persist, Cancel to revert.
+                  "Active" marks the side currently on screen for the chosen
+                  mode.
                 </div>
-              </label>
+              </div>
 
               <label class="block">
                 <div class="mb-1 text-sm font-medium">Font size (px)</div>

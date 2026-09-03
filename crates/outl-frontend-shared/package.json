@@ -51,6 +51,7 @@
     "./highlight/styles": "./src/highlight/styles.css",
     "./peers": "./src/peers/index.ts",
     "./peers/styles": "./src/peers/styles.css",
+    "./theme": "./src/theme/index.ts",
     "./warnings": "./src/warnings/index.ts",
     "./warnings/styles": "./src/warnings/styles.css"
   }

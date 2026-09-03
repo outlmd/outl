@@ -74,7 +74,7 @@ function FileChip(props: {
     <span
       {...a11y}
       title={props.href}
-      class="inline-flex items-center gap-1 rounded-md bg-(--color-ios-divider)/30 px-1.5 py-0.5 text-[14px] text-(--color-ios-text) dark:bg-(--color-iosd-divider)/30 dark:text-(--color-iosd-text)"
+      class="inline-flex items-center gap-1 rounded-md bg-(--color-outl-border)/30 px-1.5 py-0.5 text-[14px] text-(--color-outl-fg)"
       classList={{ "cursor-pointer": !!props.onLinkClick }}
     >
       <span aria-hidden="true">{props.icon ?? "📄"}</span>
@@ -110,8 +110,7 @@ function FileChip(props: {
  *
  * - **`"pill"`** (default) — touch-friendly chips with filled
  *   backgrounds. Right for mobile where fingers need a fat target.
- *   References `--color-ios-accent` so mobile's existing palette
- *   keeps working.
+ *   Uses the canonical `--color-outl-accent` token, same as `"inline"`.
  * - **`"inline"`** — TUI-style inline text with underline + color
  *   only, no chip background. Right for desktop where dense
  *   reading is the norm; pills there feel heavy. Uses the
@@ -196,7 +195,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
             );
           case "highlight":
             return (
-              <mark class="rounded-[0.2em] bg-yellow-200/70 px-[0.15em] text-inherit dark:bg-yellow-400/30">
+              <mark class="rounded-[0.2em] bg-(--color-outl-highlight-bg) px-[0.15em] text-(--color-outl-highlight-fg)">
                 <MarkdownInline
                   tokens={tok.inner}
                   variant={props.variant}
@@ -208,7 +207,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
             );
           case "code":
             return (
-              <code class="rounded bg-(--color-ios-divider)/30 px-1 py-0.5 font-mono text-[14px] dark:bg-(--color-iosd-divider)/30">
+              <code class="rounded bg-(--color-outl-border)/30 px-1 py-0.5 font-mono text-[14px]">
                 {tok.value}
               </code>
             );
@@ -221,7 +220,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                   <span
                     {...a11y}
                     title={tok.href}
-                    class="text-(--color-ios-accent) underline active:opacity-60 dark:text-(--color-iosd-accent)"
+                    class="text-(--color-outl-accent) underline active:opacity-60"
                     classList={{ "cursor-pointer": !!props.onLinkClick }}
                   >
                     {tok.value}
@@ -314,7 +313,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
               >
                 <Match when={dataUrl.loading}>
                   <span
-                    class="inline-flex items-center gap-1 rounded-md bg-(--color-ios-divider)/30 px-1.5 py-0.5 text-[14px] text-(--color-ios-text-secondary) dark:bg-(--color-iosd-divider)/30 dark:text-(--color-iosd-text-secondary)"
+                    class="inline-flex items-center gap-1 rounded-md bg-(--color-outl-border)/30 px-1.5 py-0.5 text-[14px] text-(--color-outl-fg-dim)"
                     aria-label={tok.alt || label}
                   >
                     <span aria-hidden="true">🖼️</span>
@@ -346,7 +345,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                       e.stopPropagation();
                       props.onRefClick(tok.value);
                     }}
-                    class="rounded-md bg-(--color-ios-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-ios-accent) active:opacity-60 dark:bg-(--color-iosd-accent)/20 dark:text-(--color-iosd-accent)"
+                    class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent) active:opacity-60 dark:bg-(--color-outl-accent)/20"
                   >
                     {tok.value}
                   </span>
@@ -377,7 +376,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                       e.stopPropagation();
                       props.onTagClick(tok.value);
                     }}
-                    class="text-(--color-ios-accent) active:opacity-60 dark:text-(--color-iosd-accent)"
+                    class="text-(--color-outl-accent) active:opacity-60"
                   >
                     {tok.value}
                   </span>
@@ -416,7 +415,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <Show
                   when={variant() === "inline"}
                   fallback={
-                    <span class="rounded-md bg-(--color-ios-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-ios-accent) dark:bg-(--color-iosd-accent)/20 dark:text-(--color-iosd-accent)">
+                    <span class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent) dark:bg-(--color-outl-accent)/20">
                       {mark}
                       {resolved.text}
                     </span>
@@ -430,7 +429,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
               );
             }
             return (
-              <span class="rounded bg-(--color-ios-divider)/30 px-1 font-mono text-[13px] text-(--color-ios-text-secondary) dark:bg-(--color-iosd-divider)/30 dark:text-(--color-iosd-text-secondary)">
+              <span class="rounded bg-(--color-outl-border)/30 px-1 font-mono text-[13px] text-(--color-outl-fg-dim)">
                 {tok.value}
               </span>
             );
@@ -440,13 +439,13 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
             if (resolved) {
               const mark = statusMark(resolved.status);
               return (
-                <span class="rounded bg-(--color-ios-accent)/8 px-1 py-0.5 text-[13px] text-(--color-ios-text) dark:bg-(--color-iosd-accent)/10 dark:text-(--color-iosd-text)">
+                <span class="rounded bg-(--color-outl-accent)/8 px-1 py-0.5 text-[13px] text-(--color-outl-fg) dark:bg-(--color-outl-accent)/10">
                   ↳ {mark}{resolved.text}
                 </span>
               );
             }
             return (
-              <span class="rounded bg-(--color-ios-accent)/12 px-1 font-mono text-[13px] text-(--color-ios-accent) dark:bg-(--color-iosd-accent)/20 dark:text-(--color-iosd-accent)">
+              <span class="rounded bg-(--color-outl-accent)/12 px-1 font-mono text-[13px] text-(--color-outl-accent) dark:bg-(--color-outl-accent)/20">
                 !{tok.value}
               </span>
             );

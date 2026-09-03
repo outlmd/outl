@@ -27,6 +27,8 @@ export type ToolbarAction =
   | "italic"
   | "moveUp"
   | "moveDown"
+  | "undo"
+  | "redo"
   | "insertHash"
   | "insertBlock"
   | "code"
@@ -56,6 +58,8 @@ export const TOOLBAR_META: Readonly<Record<ToolbarAction, ToolbarActionMeta>> = 
   outdent: { label: "Outdent", style: { kind: "symbol", symbol: "decrease.indent" } },
   moveUp: { label: "Move up", style: { kind: "symbol", symbol: "arrow.up" } },
   moveDown: { label: "Move down", style: { kind: "symbol", symbol: "arrow.down" } },
+  undo: { label: "Undo", style: { kind: "symbol", symbol: "arrow.uturn.left" } },
+  redo: { label: "Redo", style: { kind: "symbol", symbol: "arrow.uturn.right" } },
   bold: { label: "Bold", style: { kind: "symbol", symbol: "bold" } },
   italic: { label: "Italic", style: { kind: "symbol", symbol: "italic" } },
   code: { label: "Code", style: { kind: "symbol", symbol: "code" } },
@@ -82,6 +86,8 @@ export const DEFAULT_ORDER: readonly ToolbarAction[] = [
   "italic",
   "moveUp",
   "moveDown",
+  "undo",
+  "redo",
   "insertHash",
   "insertBlock",
   "code",
