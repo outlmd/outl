@@ -16,7 +16,7 @@
  */
 
 .outl-codeblock {
-  background: #15101f; /* brand --color-iosd-card */
+  background: #15101f; /* brand --color-outl-bg-elev (outl preset) */
   color: #f4f1fa;
   padding: 12px 14px;
   border-radius: 10px;

@@ -9,7 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { PageView, WorkspaceSummary } from "@outl/shared/api/types";
+import type { WorkspaceSummary } from "@outl/shared/api/types";
 import type { DeepLinkNavigate } from "./events";
 
 /**
@@ -64,22 +64,13 @@ export async function workspaceStats(): Promise<WorkspaceSummary> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Undo / redo (desktop-only)
+// Undo / redo
 // ---------------------------------------------------------------------------
-
-/**
- * Revert the last committed block mutation on the page. Rejects with
- * `"nothing to undo"` when the page's history stack is empty — the
- * handler surfaces that as a status message, not a crash.
- */
-export function undoPage(pageId: string): Promise<PageView> {
-  return invoke<PageView>("undo_page", { pageId });
-}
-
-/** Re-apply the mutation the last {@link undoPage} reverted. */
-export function redoPage(pageId: string): Promise<PageView> {
-  return invoke<PageView>("redo_page", { pageId });
-}
+//
+// Moved to `@outl/shared/api/commands` (RFC 0254 phase 1 — mobile
+// registers the same `undo_page` / `redo_page` commands now). Re-exported
+// here for backward-compatible imports (same pattern as `runCodeBlock`).
+export { redoPage, undoPage } from "@outl/shared/api/commands";
 
 // ---------------------------------------------------------------------------
 // Properties (`key:: value`)
@@ -106,9 +97,25 @@ export interface Settings {
   /**
    * Name of the active palette preset. Matches one of
    * `outl_theme::PRESETS` (`"outl"`, `"dracula"`, `"nord"`, …) so
-   * the desktop renders identical hues to the TUI / mobile.
+   * the desktop renders identical hues to the TUI / mobile. The
+   * light side of the RFC 0022 pair, and the only side used when
+   * `theme_mode === "light"`.
    */
   theme: string;
+  /**
+   * The dark side of the RFC 0022 pair, used when `theme_mode ===
+   * "dark"` or `"auto"` resolves dark. Always a concrete preset name
+   * (never empty) — the backend resolves it through `ThemeCfg::dark()`,
+   * which falls back to `theme` for a config that never set a second
+   * preset.
+   */
+  theme_dark: string;
+  /**
+   * Which side of the pair to render: `"light"`, `"dark"`, or
+   * `"auto"` (default) to follow the OS appearance setting. Mirrors
+   * `[theme] mode`.
+   */
+  theme_mode: string;
   font_size: number;
   /**
    * Sync transport: `"iroh"` (direct P2P over QUIC, the default) or
@@ -136,64 +143,11 @@ export interface Settings {
   reminders_quiet_hours: string;
 }
 
-/**
- * Palette returned by `get_theme`. Mirrors `outl_theme::Palette`
- * field-for-field — every value is a `#rrggbb` (or `#rrggbbaa`)
- * string that
- * {@link applyPaletteToRoot | the frontend installer} writes as
- * a CSS custom property.
- */
-export interface Palette {
-  name: string;
-  bg: string;
-  bg_elev: string;
-  fg: string;
-  fg_dim: string;
-  fg_dimmer: string;
-  border: string;
-  hint: string;
-  accent: string;
-  accent_soft: string;
-  accent_alt: string;
-  warn: string;
-  ref_link_fg: string;
-  tag_link_fg: string;
-  md_link_fg: string;
-  bold_fg: string;
-  italic_fg: string;
-  strike_fg: string;
-  code_fg: string;
-  todo_open_fg: string;
-  todo_done_fg: string;
-  todo_done_body_fg: string;
-  property_key_fg: string;
-  property_value_fg: string;
-  heading_fg: string;
-  dim_fg: string;
-  selected_bullet_bg: string;
-  selected_bullet_fg: string;
-  cursor_block_bg: string;
-  cursor_block_fg: string;
-  cursor_caret_fg: string;
-  status_normal_bg: string;
-  status_normal_fg: string;
-  status_insert_bg: string;
-  status_insert_fg: string;
-  status_visual_bg: string;
-  status_visual_fg: string;
-  status_message_fg: string;
-  list_selected_bg: string;
-  list_selected_fg: string;
-  help_title_fg: string;
-}
-
-export function listThemes(): Promise<string[]> {
-  return invoke<string[]>("list_themes");
-}
-
-export function getTheme(name: string | null): Promise<Palette> {
-  return invoke<Palette>("get_theme", { name });
-}
+// `Palette`, `listThemes` and `getTheme` moved to `@outl/shared` (RFC 0022,
+// Task 7): both GUI clients register the identical `get_theme` /
+// `list_themes` commands, and `applyPaletteToRoot` needs the same `Palette`
+// type they return. Import from `@outl/shared/api/commands` /
+// `@outl/shared/api/types` instead.
 
 // ---------------------------------------------------------------------------
 // Shortcuts (mirrors outl_shortcuts::{Action, Chord, Binding, Mode})

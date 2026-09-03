@@ -20,9 +20,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   BacklinksOrder,
   CreateBlockReply,
+  CutBlockReply,
   PageBacklinks,
   PageMeta,
   PageView,
+  Palette,
   PeerDto,
   PeerStatusDto,
   PluginCommand,
@@ -41,6 +43,7 @@ import type {
   ResolvedBlock,
   RunCodeBlockReply,
   TemplateDto,
+  ThemeConfig,
   WorkspaceSummary,
 } from "./types";
 
@@ -393,8 +396,68 @@ export function pasteBlockAfter(
   return invoke<PageView>("paste_block_after", { pageId, afterId, text });
 }
 
+/**
+ * Cut block `id` and its subtree: render it to clean outl markdown
+ * (like {@link copyBlockMarkdown}) then move it to trash (`Op::Move`,
+ * never a physical removal — root `CLAUDE.md` invariant 6). The
+ * returned `markdown` feeds the same block-clipboard signal
+ * {@link pasteBlockAfter} reads, so cut-then-paste round-trips —
+ * this is **not** identity-preserving (the paste mints fresh ids,
+ * unlike the desktop's move-based `Cmd+X`/`Cmd+V`), which is what a
+ * mobile long-press "Cut" needs (RFC 0254 phase 4b).
+ */
+export function cutBlock(pageId: string, id: string): Promise<CutBlockReply> {
+  return invoke<CutBlockReply>("cut_block", { pageId, id });
+}
+
+/**
+ * Render block `id`'s `((blk-XXXXXX))` ref handle for the OS
+ * clipboard (issue #18). Reads the handle the workspace index
+ * already assigned (same mechanism `search_blocks` uses) rather than
+ * deriving one from the id directly, so a handle expanded past 6
+ * chars by a collision can't disagree. Rejects with "no ref handle
+ * yet — save and retry" when the block has no sidecar entry yet.
+ */
+export function copyBlockRef(id: string): Promise<string> {
+  return invoke<string>("copy_block_ref", { id });
+}
+
+/**
+ * Flip a page's `pinned:: true` property (issue #254's `TogglePin`).
+ * Refuses journal pages (`CannotPinJournal`) — a journal auto-rotates
+ * daily and would dilute a pinned-pages list with date-shaped junk.
+ * Returns the refreshed `PageView` so the caller can read
+ * `view.page.pinned` back.
+ */
+export function togglePin(pageId: string): Promise<PageView> {
+  return invoke<PageView>("toggle_pin", { pageId });
+}
+
 export function reloadWorkspace(): Promise<void> {
   return invoke<void>("reload_workspace");
+}
+
+// ---------------------------------------------------------------------------
+// Undo / redo
+// ---------------------------------------------------------------------------
+//
+// Both GUI clients register the shared `outl_tauri_shared::commands::history`
+// body (RFC 0254 phase 1 — previously desktop-only, which is why these
+// wrappers used to live in `outl-desktop/src/lib/api.ts`). Promoted here so
+// mobile's keyboard-toolbar Undo / Redo buttons call the same wrapper.
+
+/**
+ * Revert the last committed block mutation on the page. Rejects with
+ * `"nothing to undo"` when the page's history stack is empty — the
+ * caller surfaces that as a status message, not a crash.
+ */
+export function undoPage(pageId: string): Promise<PageView> {
+  return invoke<PageView>("undo_page", { pageId });
+}
+
+/** Re-apply the mutation the last {@link undoPage} reverted. */
+export function redoPage(pageId: string): Promise<PageView> {
+  return invoke<PageView>("redo_page", { pageId });
 }
 
 /**
@@ -1163,4 +1226,37 @@ export function setPageProperty(
   value: string,
 ): Promise<PageView> {
   return invoke<PageView>("set_page_property", { pageId, key, value });
+}
+
+// ---------------------------------------------------------------------------
+// Theme (RFC 0022)
+// ---------------------------------------------------------------------------
+
+/** Every built-in palette name, in user-facing order. */
+export function listThemes(): Promise<string[]> {
+  return invoke<string[]>("list_themes");
+}
+
+/**
+ * Resolve a palette by name (`null` for the default). Both GUI
+ * clients register the identical `get_theme` command
+ * (`outl_tauri_shared::commands::theme`), so the wrapper lives once
+ * here rather than per client.
+ */
+export function getTheme(name: string | null): Promise<Palette> {
+  return invoke<Palette>("get_theme", { name });
+}
+
+/**
+ * Resolve the `[theme]` section for this client: which preset for
+ * each side of the pair, and which side to use. Both GUI clients
+ * register the identical `get_theme_config` command
+ * (`outl_tauri_shared::commands::theme`), so — like {@link getTheme}
+ * — the wrapper lives once here rather than per client.
+ *
+ * `preset_dark` on the reply is already resolved (never empty); see
+ * {@link ThemeConfig} for why a caller must not second-guess it.
+ */
+export function getThemeConfig(): Promise<ThemeConfig> {
+  return invoke<ThemeConfig>("get_theme_config");
 }

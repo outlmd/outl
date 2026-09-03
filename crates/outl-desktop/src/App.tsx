@@ -1,13 +1,10 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 
-import {
-  currentWorkspace,
-  getSettings,
-  getTheme,
-  workspaceStats,
-} from "./lib/api";
+import { getThemeConfig } from "@outl/shared/api/commands";
+import { installTheme } from "@outl/shared/theme";
+
+import { currentWorkspace, getSettings, workspaceStats } from "./lib/api";
 import { onWorkspaceReady } from "./lib/events";
-import { applyPaletteToRoot } from "./lib/palette";
 import { setAppState } from "./lib/store";
 import { AppShell } from "./components/AppShell";
 import { Onboarding } from "./components/Onboarding";
@@ -91,13 +88,16 @@ function App() {
   }
 
   /**
-   * Pull the active palette name from `settings.json` and install
-   * it as CSS custom properties on `<html>` + `<body>`. Falls back
-   * silently to `outl` when settings aren't readable yet — the
-   * default `_root_` CSS already paints the brand background, so a
-   * delayed palette load just upgrades the colors.
+   * Pull `[theme]` (RFC 0022's light/dark pair) via `get_theme_config`
+   * and install it as CSS custom properties on `<html>` + `<body>`,
+   * following `prefers-color-scheme` when `mode = "auto"`. Falls back
+   * to the built-in `outl` preset on both sides when settings/config
+   * aren't readable yet — the default `_root_` CSS already paints the
+   * brand background, so a delayed palette load just upgrades the
+   * colors. Returns the `installTheme` unsubscribe so the caller can
+   * tear down the media-query listener.
    */
-  async function hydrateTheme() {
+  async function hydrateTheme(): Promise<() => void> {
     try {
       const s = await getSettings();
       // A configured workspace is known from `settings.last_workspace` on disk
@@ -113,17 +113,25 @@ function App() {
       if (s.backlinks_order === "oldest" || s.backlinks_order === "newest") {
         setAppState("backlinksOrder", s.backlinks_order);
       }
-      const palette = await getTheme(s.theme || null);
-      applyPaletteToRoot(palette);
+      const cfg = await getThemeConfig();
+      return await installTheme({
+        mode: cfg.mode,
+        preset: cfg.preset,
+        presetDark: cfg.preset_dark,
+      });
     } catch {
-      // First boot before the workspace lock is created — try the
-      // default explicitly so we still ship the brand colors.
+      // First boot before the workspace lock is created — install the
+      // built-in default pair explicitly so we still ship the brand
+      // colors. `installTheme` itself never throws (it degrades to a
+      // no-op unsubscribe on total backend failure), so this nested
+      // try/catch is defensive symmetry with that contract, not a path
+      // expected to hit its own catch.
       try {
-        const palette = await getTheme(null);
-        applyPaletteToRoot(palette);
+        return await installTheme({ mode: "auto", preset: "outl", presetDark: "outl" });
       } catch {
         // No backend at all (shouldn't happen) — keep the static
         // boot frame.
+        return () => {};
       }
     }
   }
@@ -133,7 +141,8 @@ function App() {
     // first painted frame already uses the user's chosen palette
     // — running it in parallel left a perceptible flash where
     // `refresh()` rendered with the static defaults from styles.css.
-    await hydrateTheme();
+    const unsubscribeTheme = await hydrateTheme();
+    onCleanup(unsubscribeTheme);
     await refresh();
 
     // Background opener (boot-time) emits `workspace-ready` when it
