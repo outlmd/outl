@@ -1,6 +1,6 @@
 # Theming
 
-outl ships eight built-in palettes (`outl`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`).
+outl ships nine built-in palettes (`outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`).
 The hex values live in the shared **`outl-theme`** crate — every styled surface (`ref_link_fg`, `cursor_block_bg`, `bold_fg`, `status_normal_bg`, …) is a named field on a `Palette` struct, and the TUI / desktop / mobile clients each turn those hex strings into whatever their renderer expects.
 
 This means a color change in `outl-theme/src/presets.rs` propagates to every client without a coordinated edit.
@@ -39,10 +39,44 @@ You can also swap themes at runtime from the command palette:
 
 The status line confirms the switch (`theme: nord`).
 
+## Light / dark pair and `mode`
+
+`[theme]` also takes `preset_dark` and `mode`, so a config can declare a light preset and a dark preset and let the client pick between them:
+
+```toml
+[theme]
+preset = "logseq-light"
+preset_dark = "nord"
+mode = "auto"
+```
+
+`mode` is one of `light`, `dark`, or `auto` (the default).
+`light` and `dark` always resolve to their named side.
+`auto` is meant to follow the OS appearance setting — but **on the TUI, `auto` resolves to the dark side, always.**
+A terminal has no API to ask the OS for its current appearance.
+Probing for it (an OSC 11 background-color query, or reading `COLORFGBG`) is unreliable in practice: it is often wrong under tmux/screen (which answer for the multiplexer, not the active pane) and several terminal emulators don't implement it at all.
+Rather than guess and sometimes get it wrong, the TUI declares the gap and always renders the dark side when `mode = "auto"`.
+This is a deliberate, permanent behaviour of the TUI client, not a bug to file.
+
+**Both GUI clients now resolve the pair.**
+All three clients read `mode` / `preset_dark`, validated by `outl doctor`'s pairing check.
+The desktop and mobile both call the shared `get_theme_config` command (`outl-tauri-shared::commands::theme`), which resolves `[theme]` — `preset_dark` already falls back to `preset` on the Rust side.
+Both feed the result to the shared `installTheme` (`@outl/shared/theme`, moved out of `outl-mobile/src/lib/theme.ts`).
+Both sides of the pair are fetched once at boot and held in memory; a `prefers-color-scheme` listener repaints locally on an OS appearance flip, with no backend round-trip mid-repaint.
+The desktop's `App.tsx::hydrateTheme` and mobile's `App.tsx` `onMount` are the two call sites.
+
+**The desktop Settings modal now writes the whole pair.**
+`SettingsModal.tsx` renders a mode selector (`light` / `dark` / `auto`) plus one picker per side, backed by two new `Settings` DTO fields — `theme_dark` and `theme_mode` — alongside the existing `theme` (the light side).
+Each picker's live preview reuses `pickSide` (the same function `installTheme` uses) to decide whether an edit to that side should repaint the document immediately, so the modal never has a second opinion about which side is on screen.
+`crates/outl-desktop/src-tauri/src/settings.rs::restore_unmodeled_sections` no longer restores `preset_dark` / `mode` from disk.
+Now that the modal owns all three fields, restoring any of them would silently discard the user's pick instead of protecting it.
+
 ## Built-in presets
 
 | Name | Vibe |
 |------|------|
+| `outl` | The brand palette, matched to the marketing site (avelino.run). Deep-purple background, lavender accent, lemon highlight. Default theme. |
+| `outl-light` | The brand light palette. Soft purple-tinted canvas (`#f6f4fb`), brand purple accent (`#7c3aed`) darkened for contrast. Recovered from what `outl-mobile` used to hardcode in `styles.css` before RFC 0022. |
 | `default-dark` | The original outl-tui palette. Cyan refs, magenta tags, green code. |
 | `light` | High-brightness terminals. Blue refs, red tags. |
 | `logseq-light` | Logseq's default light theme. White canvas, warm dark-gray text, Blueprint blue links. Alias: `logseq`. |
@@ -139,20 +173,18 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 |---|---|
 | **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). The six RGB presets (`outl`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`) are one-line delegates; `default-dark` and `light` stay manual on ANSI named colors. |
 | **`outl-desktop`** | The Tauri commands `list_themes()` and `get_theme(name)` return the `Palette` as JSON. The frontend writes each field as a CSS custom property on `<html>` (`--color-outl-accent`, `--color-outl-ref-link-fg`, …) so Tailwind class utilities like `text-(--color-outl-accent)` resolve at runtime, and flips `color-scheme` (light/dark) from the palette's `bg` luminance so native controls and scrollbars follow. Settings modal exposes the dropdown. Chrome surfaces never hardcode a hue — translucent layers derive from `--color-outl-fg` (`bg-(--color-outl-fg)/10`) so they adapt to light and dark presets alike. |
-| **`outl-mobile`** | Today the mobile client uses its iOS-specific tokens (`--color-ios-*`). When desktop ships, it mirrors those names so `<MarkdownInline />` from `@outl/shared` stays portable. The migration to neutral `--color-outl-*` tokens lands when mobile picks up the theme picker. |
+| **`outl-mobile`** | `src/lib/theme.ts::installTheme` fetches both sides of the configured pair from the same `get_theme` Tauri command at boot and holds both `Palette` objects in memory, then calls the shared `applyPaletteToRoot` (RFC 0022, issue #22 — closed by moving the command bodies into `outl-tauri-shared`). A `prefers-color-scheme` media-query listener swaps tokens on an OS appearance flip without a second backend round-trip — see the opposite-direction cost this trades away in [RFC 0022](rfcs/0022-unified-design-tokens.md). |
 
 ### Desktop CSS custom-property namespaces
 
-`src/lib/palette.ts::applyPaletteToRoot` writes two CSS custom-property namespaces on every theme switch:
+`applyPaletteToRoot` (`@outl/shared/theme`, RFC 0022 — moved out of the desktop crate's own `src/lib/palette.ts`) writes one CSS custom-property namespace on every theme switch: the canonical **`--color-outl-*`** set (`bg-(--color-outl-bg-elev)`, `border-(--color-outl-fg)/15`, etc.).
 
-- **`--color-outl-*`** — the canonical set.
-  New desktop code uses only these (`bg-(--color-outl-bg-elev)`, `border-(--color-outl-fg)/15`, etc.).
-- **`--color-ios-*` / `--color-iosd-*`** — legacy names still consumed by `MarkdownInline`, mapped from the active palette until it migrates.
+The legacy `--color-ios-*` / `--color-iosd-*` namespace it used to also write is gone.
+`@outl/shared/markdown` (`MarkdownInline`, `EmbeddedSubtree`) no longer reads it either — see [`outl-frontend-shared/CLAUDE.md`](../crates/outl-frontend-shared/CLAUDE.md#theming-note).
+`src/styles.css` still declares the legacy tokens in its `@theme` block; nothing reads them, and deleting the block is a later, gated task.
 
-`src/styles.css` provides boot-default values for both namespaces so the page isn't flash-unstyled before `applyPaletteToRoot` runs.
+`src/styles.css` provides boot-default values for `--color-outl-*` so the page isn't flash-unstyled before `applyPaletteToRoot` runs.
 `color-scheme` is set from the palette's `bg` luminance so native controls (scrollbars, `<select>`) follow the active preset.
-
-When `MarkdownInline` migrates to `--color-outl-*`, the `--color-ios-*` writes in `applyPaletteToRoot` + the legacy `styles.css` block can both go — see [`outl-frontend-shared/CLAUDE.md`](../crates/outl-frontend-shared/CLAUDE.md#theming-note).
 
 ## Future
 

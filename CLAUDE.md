@@ -201,12 +201,14 @@ Violating any one breaks user trust irreversibly.
     Not theory.
     "Does the desktop bind `y r`?" had three answers in three places and they disagreed.
     `docs/shortcuts.md` listed `y r` (`CopyBlockRef`) and `:` (`OpenCommandPalette`) as desktop chords — neither had a handler, so both were dead keys that logged to a console the user never opens.
-    The same doc listed mobile undo / redo as "toolbar"; mobile has neither, [#14](https://github.com/outlmd/outl/issues/14) is open, and `Journal.tsx` says so in a comment.
+    The same doc listed mobile undo / redo as "toolbar" when mobile had neither, and `Journal.tsx` carried a comment saying so — closed now by [RFC 0254](docs/rfcs/0254-mobile-capability-gaps.md) ([#14](https://github.com/outlmd/outl/issues/14)).
     The desktop dispatcher's own comment called its `console.warn` something "the user sees".
     Three hand-maintained copies of one fact, each stale in a different direction, and **nothing that could fail**.
 
     `outl_shortcuts::support` owns it now: one exhaustive `match`, so a new `Action` variant does not compile until all three clients have declared their verdict.
     `docs/client-parity.md` is generated from it and pinned by `the_parity_doc_matches_the_code`; `shortcuts.support.test.ts` pins the desktop's handler map against it in both directions.
+    A capability with no chord — page history, the plugin marketplace, a calendar grid — is invisible to that `match`.
+    `outl_shortcuts::capability_support` is a second exhaustive `match`, over `Capability` instead of `Action`, reusing the same `Support` states and the same generated, pinned doc table ([RFC 0253](docs/rfcs/0253-client-capability-catalog.md)).
 
     Two things that took a second pass and are worth carrying:
 
@@ -219,6 +221,34 @@ Violating any one breaks user trust irreversibly.
 
     **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved, invariant 11 asks whether the cost is even yours.
     This one asks **who does not have what you just built, and does anything fail if you don't say?**
+
+13. **A colour token has exactly one meaning, on every client.**
+    A token name that resolves to `bg` in one client and `bg_elev` in another is not a naming inconsistency — it is two definitions of one fact, and the wrong one gets selected by whatever signal happens to be wired to it.
+
+    Not theory.
+    `applyPaletteToRoot()` mapped `--color-ios-bg` to `palette.bg` but `--color-iosd-bg` to `palette.bg_elev`, so on the desktop `iosd` meant *elevated*.
+    Mobile's stylesheet used the same prefix for something else entirely: *dark*.
+    `MarkdownInline.tsx` — one shared component — read both namespaces and reached the `iosd` set through Tailwind's `dark:` variant, which resolves off `prefers-color-scheme`.
+    So the **operating system appearance setting** changed the elevation of markdown blocks on the desktop, with no relationship to the theme the user picked.
+
+    The sharpest part: the regression test caught a real bug on its first run — a smaller one than this invariant used to claim.
+    The desktop's `@theme` boot block declared `--color-outl-ref-link` where the `Palette` field is `ref_link_fg`, so that token had no boot value.
+    That is **not** Tailwind dropping the class: Tailwind v4's `bg-(--var)` / `text-(--var)` arbitrary-property shorthand resolves a CSS custom property at paint time whether or not `@theme` declares it.
+    `--color-outl-status-normal-bg`, `--color-outl-help-title-fg` and `--color-outl-status-insert-bg` are three tokens absent from `@theme` today and still render correctly in the built desktop bundle — proof the class was never silently dropped.
+    What the missing boot value actually cost: the **first painted frame**, before `applyPaletteToRoot()` runs over the wire, had no value for `--color-outl-ref-link-fg`.
+    Refs, tags, markdown links, inline code and TODO markers rendered with that one property unset (inherited/transparent) for that single frame, then repainted correctly the instant the palette landed.
+    `@theme`'s job is supplying that boot default so the first frame is already branded, not making the utility resolve at all — the utility resolves either way, with or without `@theme`.
+
+    Colours come from `outl_theme::Palette` and reach a client through `applyPaletteToRoot()`.
+    A hex literal in a client stylesheet is a second definition.
+    The one exception is a client's `@theme` boot block, which exists so the first painted frame is branded before the palette arrives over the wire.
+    `the_theme_tokens_match_the_palette` pins those names to real `Palette` fields, which is exactly what caught the missing boot value above.
+
+    **The regression net:** `no_client_references_the_legacy_ios_namespace`, `the_theme_tokens_match_the_palette` (`crates/outl-theme/tests/tokens.rs`).
+    [RFC 0022](docs/rfcs/0022-unified-design-tokens.md).
+
+    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved, invariant 11 asks whether the cost is even yours, invariant 12 asks who does not have what you just built.
+    This one asks **does this name mean the same fact everywhere it appears?**
 
 
 ## Repo layout
@@ -394,6 +424,8 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
 - ❌ Re-introducing `"version"` in `crates/outl-mobile/src-tauri/tauri.conf.json` — Tauri must keep falling back to `Cargo.toml` (see "Versioning + TestFlight release" in `crates/outl-mobile/CLAUDE.md`)
 - ❌ Adding a helper that re-implements something already in `outl-core` / `outl-md` / `outl-actions` (see [Reuse-first](docs/contributing.md#reuse-first-no-parallel-implementations)).
   The fix is to wrap the upstream API, not to write a parallel one.
+- ❌ Adding a hex colour to a client stylesheet instead of a `Palette` field (invariant 13)
+- ❌ Reintroducing a second token namespace "just for this client"
 
 ## When in doubt
 
