@@ -175,11 +175,6 @@ mod why {
     pub const TOUCH_ONLY: &str =
         "Not on mobile — tap the block you want instead of moving a selection.";
 
-    /// Mobile has no multi-block selection surface at all.
-    pub const NO_RANGE: &str =
-        "Selecting a range of blocks isn't on mobile yet. Act on one block at a time, \
-         or use the desktop or TUI.";
-
     /// Mobile has no keyboard chord surface for vim-modal state.
     pub const NO_VIM_MODE: &str = "Mobile has no vim modes — it edits directly on tap.";
 }
@@ -270,16 +265,16 @@ pub fn support(action: Action) -> ClientSupport {
         Action::SubstituteBlock => row!(Full, Full, NotApplicable(why::NO_VIM_MODE)),
 
         // ── folding / viewport / zoom ────────────────────────────
-        Action::UnfoldAll => row!(
-            Full,
-            Full,
-            Missing("Unfold-all isn't on mobile yet — tap each bullet to expand it.")
-        ),
-        Action::FoldAll => row!(
-            Full,
-            Full,
-            Missing("Fold-all isn't on mobile yet — tap each bullet to collapse it.")
-        ),
+        // RFC 0254 phase 4b: mobile drives `FoldAll`/`UnfoldAll` by
+        // looping the existing `set_block_collapsed` command over
+        // `flattenParents`/`flattenAll` (`Journal.tsx::applyCollapsedToAll`),
+        // exactly mirroring the desktop's own client-side loop — there
+        // is no bulk-fold backend op on any client, by design (each
+        // flip is its own `Op::SetCollapsed` so concurrent flips
+        // converge). Reached from two header buttons rather than a
+        // chord; `Support` doesn't care which.
+        Action::UnfoldAll => row!(Full, Full, Full),
+        Action::FoldAll => row!(Full, Full, Full),
         Action::CenterViewport => row!(
             Full,
             Full,
@@ -292,21 +287,29 @@ pub fn support(action: Action) -> ClientSupport {
         Action::SearchWordForward => row!(
             Full,
             Partial("The desktop seeds the quick switcher instead of jumping between hits."),
-            Missing("Search from the outline isn't on mobile yet (issue #19) — use the page switcher.")
+            Partial(
+                "Mobile has no word-under-cursor to search from and no forward/backward \
+                 stepping between hits — open the page switcher's Blocks tab (issue #19) \
+                 and type the word instead."
+            )
         ),
         Action::SearchWordBackward => row!(
             Full,
             Partial("The desktop seeds the quick switcher instead of jumping between hits."),
-            Missing("Search from the outline isn't on mobile yet (issue #19) — use the page switcher.")
+            Partial(
+                "Mobile has no word-under-cursor to search from and no forward/backward \
+                 stepping between hits — open the page switcher's Blocks tab (issue #19) \
+                 and type the word instead."
+            )
         ),
 
         // ── block structure ──────────────────────────────────────
         Action::NewBlockBelow => row!(Full, Full, Full),
-        Action::NewBlockAbove => row!(
-            Full,
-            Full,
-            Missing("Only \"new block below\" is on mobile — add it below and drag it up.")
-        ),
+        // RFC 0254 phase 4b: the backend already supports `beforeId`
+        // (the same floor-slot `create_block` the desktop's `O` uses)
+        // — mobile only lacked the affordance. Reached from the
+        // block long-press menu ("New block above"), not a chord.
+        Action::NewBlockAbove => row!(Full, Full, Full),
         Action::IndentBlock => row!(Full, Full, Full),
         Action::OutdentBlock => row!(Full, Full, Full),
         Action::MoveBlockUp => row!(Full, Full, Full),
@@ -314,13 +317,19 @@ pub fn support(action: Action) -> ClientSupport {
         Action::DeleteBlock => row!(Full, Full, Full),
         Action::ToggleCollapsed => row!(Full, Full, Full),
         Action::ToggleTodo => row!(Full, Full, Full),
+        // RFC 0254 phase 4b closes issue #18 for mobile only — the
+        // long-press menu's "Copy block ref" reads the same
+        // `((blk-XXXXXX))` handle the TUI's `y r` copies (off the
+        // workspace index, never re-derived) and puts it on the OS
+        // clipboard. Desktop stays `Missing`; it wasn't in this
+        // phase's scope.
         Action::CopyBlockRef => row!(
             Full,
             Missing(
                 "Copying a block ref isn't on the desktop yet — open the block's \
                  properties, or copy the handle from the TUI with `y r`."
             ),
-            Missing("Copying a block ref isn't on mobile yet (issue #18).")
+            Full
         ),
 
         // ── page operations ──────────────────────────────────────
@@ -339,57 +348,98 @@ pub fn support(action: Action) -> ClientSupport {
         // ── properties ───────────────────────────────────────────
         Action::AddProperty => row!(Full, Full, Full),
         Action::OpenProperties => row!(Full, Full, Full),
+        // RFC 0254 phase 4b: `pinned::` was already an `Op::SetProp`-
+        // backed page property (every property editor could already
+        // write it) — the gap was a write affordance on the two GUI
+        // clients. Mobile's page switcher now has one (a pin toggle
+        // per row, pinned pages sorted first); desktop's own gap
+        // stays `Missing` — out of this phase's scope.
         Action::TogglePin => row!(
             Full,
             Missing("Pinning a page isn't on the desktop yet — pin it from the TUI with `g P`."),
-            Missing("Pinning a page isn't on mobile yet — pin it from the TUI or desktop.")
+            Full
         ),
 
         // ── block clipboard (view-mode cut / copy / paste) ───────
+        //
+        // RFC 0254 phase 4b: mobile's long-press "Cut block" renders
+        // the subtree to markdown and deletes the source in one
+        // round-trip (`cutBlock`), arming the same clipboard "Paste
+        // block" reads. Deliberately `Partial`, not `Full` — the
+        // catalog's own doc comment on `CutBlock` promises the paste
+        // keeps the block's identity (`Op::Move`, refs/backlinks stay
+        // valid), which is what the desktop's move-based cut does.
+        // Mobile's paste mints a fresh id instead (same as its
+        // `CopyBlock`/`PasteBlock` below), so a `((blk-…))` ref to the
+        // cut block goes stale across the round-trip — a real,
+        // user-visible gap the nudge names rather than overstating.
         Action::CutBlock => row!(
             Missing("Cutting a whole block isn't in the TUI yet — use `d d`, then paste."),
             Full,
-            Missing("Cutting a whole block isn't on mobile yet — drag it instead.")
+            Partial(
+                "Mobile's cut duplicates the block with a fresh id instead of moving it, so any \
+                 ((blk-…)) refs pointing at it go stale — copy the ref first (long-press → \
+                 \"Copy block ref\") if something else links to it."
+            )
         ),
         Action::CopyBlock => row!(
             Missing("Copying a whole block + subtree isn't in the TUI yet — use `y y` for the block alone."),
             Full,
-            Missing("Copying a whole block isn't on mobile yet.")
+            Full
         ),
         Action::PasteBlock => row!(
             Missing("Block-clipboard paste isn't in the TUI yet — `p` pastes the OS clipboard."),
             Full,
-            Missing("Block-clipboard paste isn't on mobile yet.")
+            Full
         ),
 
         // ── insert-mode commits ──────────────────────────────────
         Action::ExitInsert => row!(Full, Full, Full),
         Action::CommitAndContinue => row!(Full, Full, Full),
+        // RFC 0254 phase 4b: mobile's `EditableTextarea` now checks
+        // for an empty value on `Backspace` before its bracket-pair
+        // logic and routes to the same swipe-to-delete handler
+        // (confirms first when the block has descendants — a stricter
+        // guard than the action's name requires, never a lesser one).
         Action::DeleteEmptyBlock => row!(
             Full,
             Native("Backspace in an empty textarea is handled by the editor itself."),
-            Missing("Backspace doesn't delete an empty block on mobile — swipe the row to delete it.")
+            Full
         ),
 
         // ── visual / range ───────────────────────────────────────
+        //
+        // RFC 0254 phase 3: mobile gained a touch-native multi-select
+        // (long-press a block's context menu → "Select blocks", then
+        // tap another block to grow the contiguous range up or down —
+        // `crates/outl-mobile/src/lib/block-selection.ts`). It
+        // dispatches the same range actions the desktop's Visual mode
+        // does, so every row below except `EnterVisual` itself is
+        // `Full`. `EnterVisual` stays `Partial`: mobile deliberately
+        // never grows a modal Visual *state* (no keyboard, no modes —
+        // same reasoning as `EnterInsertAfter` above), it only grows a
+        // selection, so claiming `Full` would overstate what changed.
         Action::EnterVisual => row!(
             Full,
             Partial(
                 "The desktop enters a range selection rather than a full modal Visual state."
             ),
-            Missing(why::NO_RANGE)
+            Partial(
+                "Mobile enters a touch-native block selection (long-press a block, then \
+                 \"Select blocks\") rather than a modal Visual state."
+            )
         ),
-        Action::YankCurrentBlock => row!(Full, Full, Missing("Yanking a block isn't on mobile yet.")),
-        Action::YankRange => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::DeleteRange => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::SelectRangeDown => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::SelectRangeUp => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::MoveVisualRangeUp => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::MoveVisualRangeDown => row!(Full, Full, Missing(why::NO_RANGE)),
+        Action::YankCurrentBlock => row!(Full, Full, Full),
+        Action::YankRange => row!(Full, Full, Full),
+        Action::DeleteRange => row!(Full, Full, Full),
+        Action::SelectRangeDown => row!(Full, Full, Full),
+        Action::SelectRangeUp => row!(Full, Full, Full),
+        Action::MoveVisualRangeUp => row!(Full, Full, Full),
+        Action::MoveVisualRangeDown => row!(Full, Full, Full),
 
-        Action::ReselectLastVisual => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::IndentVisualRange => row!(Full, Full, Missing(why::NO_RANGE)),
-        Action::OutdentVisualRange => row!(Full, Full, Missing(why::NO_RANGE)),
+        Action::ReselectLastVisual => row!(Full, Full, Full),
+        Action::IndentVisualRange => row!(Full, Full, Full),
+        Action::OutdentVisualRange => row!(Full, Full, Full),
 
         // ── code execution ───────────────────────────────────────
         Action::RunCodeBlock => row!(Full, Full, Full),
@@ -402,16 +452,13 @@ pub fn support(action: Action) -> ClientSupport {
         Action::InsertLink => row!(Full, Full, Full),
 
         // ── undo / redo ──────────────────────────────────────────
-        Action::Undo => row!(
-            Full,
-            Full,
-            Missing("Undo isn't on mobile yet (issue #14) — the change is already saved and syncs to your other devices.")
-        ),
-        Action::Redo => row!(
-            Full,
-            Full,
-            Missing("Redo isn't on mobile yet (issue #14).")
-        ),
+        // RFC 0254 phase 1: the undo/redo logic was already shared
+        // (`outl_actions::history`) — it was trapped behind a
+        // desktop-only Tauri command. Moving the command body into
+        // `outl-tauri-shared` and registering it on mobile (the
+        // keyboard toolbar's Undo / Redo buttons) closed issue #14.
+        Action::Undo => row!(Full, Full, Full),
+        Action::Redo => row!(Full, Full, Full),
     }
 }
 
@@ -439,8 +486,27 @@ pub(crate) fn parity_table_markdown() -> String {
     out
 }
 
+/// Words that leak developer vocabulary into a user-facing nudge —
+/// the state `support` / `capability_support` replaced was
+/// `console.warn("no handler for action X")`, accurate and useless
+/// to the person holding the keyboard. Shared by
+/// [`crate::capability_support`]'s own nudge test rather than
+/// copied, so the banned list can't drift between the two catalogs.
 #[cfg(test)]
-fn cell(s: Support) -> String {
+pub(crate) const DEV_WORDS: [&str; 7] = [
+    "unimplemented",
+    "not implemented",
+    "todo",
+    "fixme",
+    "no handler",
+    "handler",
+    "dispatcher",
+];
+
+/// Shared by [`crate::capability_support`]'s own table renderer, so
+/// both generated tables format a [`Support`] cell identically.
+#[cfg(test)]
+pub(crate) fn cell(s: Support) -> String {
     match s {
         Support::Full => "✅".to_string(),
         Support::Native(why) => format!("✅ _native — {why}_"),
@@ -491,20 +557,11 @@ mod tests {
 
     #[test]
     fn nudges_are_written_for_the_user_not_the_developer() {
-        // The state this replaces was `console.warn("no handler for
-        // action X")` — accurate, and useless to the person holding
-        // the keyboard. A nudge that leaks developer vocabulary is
-        // the same failure with a nicer transport, so pin the
-        // vocabulary rather than trusting review to catch it.
-        const DEV_WORDS: [&str; 7] = [
-            "unimplemented",
-            "not implemented",
-            "todo",
-            "fixme",
-            "no handler",
-            "handler",
-            "dispatcher",
-        ];
+        // A nudge that leaks developer vocabulary is the same
+        // failure with a nicer transport, so pin the vocabulary
+        // rather than trusting review to catch it. `DEV_WORDS` lives
+        // above `cell`, module-level, so `capability_support`'s own
+        // nudge test reuses this exact list instead of copying it.
         for action in Action::ALL {
             let s = support(*action);
             for client in Client::ALL {
@@ -561,52 +618,89 @@ mod tests {
 
     #[test]
     fn the_parity_doc_matches_the_code() {
-        // `docs/client-parity.md` is generated from `support`. When
-        // this fails, the code is right and the doc is stale — rerun
-        // with `OUTL_UPDATE_PARITY_DOC=1` (below) rather than editing
-        // the table by hand.
+        // `docs/client-parity.md` carries two generated tables now —
+        // one per `outl_shortcuts` catalog (`Action` via `support`,
+        // `Capability` via `capability_support`) — each inside its
+        // own `BEGIN GENERATED` / `END GENERATED` marker pair. Both
+        // are checked here, unconditionally: a marker pair this test
+        // doesn't know about is a marker pair nothing regenerates,
+        // which is exactly how a second, hand-maintained table would
+        // survive a regen and drift — so a table lives inside a pair
+        // this list names, or it isn't the canonical one.
+        //
+        // When this fails, the code is right and the doc is stale —
+        // rerun with `OUTL_UPDATE_PARITY_DOC=1` (below) rather than
+        // editing either table by hand.
         //
         // The doc this replaces was hand-written and wrong in three
         // places at once: it claimed the desktop bound `y r` and `:`
         // (no handler for either) and listed mobile undo / redo as
         // "toolbar" (issue #14, still open). A table a human
         // maintains is a table that disagrees with the build.
-        const BEGIN: &str = "<!-- BEGIN GENERATED: client-parity -->";
-        const END: &str = "<!-- END GENERATED: client-parity -->";
+        let regions: [(&str, &str, String); 2] = [
+            (
+                "<!-- BEGIN GENERATED: client-parity -->",
+                "<!-- END GENERATED: client-parity -->",
+                parity_table_markdown(),
+            ),
+            (
+                "<!-- BEGIN GENERATED: capability-parity -->",
+                "<!-- END GENERATED: capability-parity -->",
+                crate::capability_support::capability_parity_table_markdown(),
+            ),
+        ];
 
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/client-parity.md");
         let doc =
             std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
 
-        let start = doc
-            .find(BEGIN)
-            .unwrap_or_else(|| panic!("{path} has no {BEGIN} marker"))
-            + BEGIN.len();
-        let end = doc
-            .find(END)
-            .unwrap_or_else(|| panic!("{path} has no {END} marker"));
-
-        let in_doc = doc[start..end].trim();
-        let expected = parity_table_markdown();
-
         // Regenerate rather than hand-edit:
         //     OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts
         if std::env::var_os("OUTL_UPDATE_PARITY_DOC").is_some() {
-            let updated = format!(
-                "{}{BEGIN}\n\n{}\n{END}{}",
-                &doc[..start - BEGIN.len()],
-                expected.trim(),
-                &doc[end + END.len()..],
-            );
+            let mut updated = String::new();
+            let mut cursor = 0;
+            for (begin, end, expected) in &regions {
+                let begin_at = doc[cursor..]
+                    .find(begin)
+                    .unwrap_or_else(|| panic!("{path} has no {begin} marker"))
+                    + cursor;
+                let content_start = begin_at + begin.len();
+                let end_at = doc[content_start..]
+                    .find(end)
+                    .unwrap_or_else(|| panic!("{path} has no {end} marker"))
+                    + content_start;
+                updated.push_str(&doc[cursor..begin_at]);
+                updated.push_str(begin);
+                updated.push_str("\n\n");
+                updated.push_str(expected.trim());
+                updated.push('\n');
+                updated.push_str(end);
+                cursor = end_at + end.len();
+            }
+            updated.push_str(&doc[cursor..]);
             std::fs::write(path, updated).expect("cannot write the parity doc");
             return;
         }
 
-        assert_eq!(
-            in_doc,
-            expected.trim(),
-            "docs/client-parity.md is out of date with outl_shortcuts::support \n\
-             — regenerate with `OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts`",
-        );
+        let mut cursor = 0;
+        for (begin, end, expected) in &regions {
+            let begin_at = doc[cursor..]
+                .find(begin)
+                .unwrap_or_else(|| panic!("{path} has no {begin} marker"))
+                + cursor;
+            let content_start = begin_at + begin.len();
+            let end_at = doc[content_start..]
+                .find(end)
+                .unwrap_or_else(|| panic!("{path} has no {end} marker"))
+                + content_start;
+            let in_doc = doc[content_start..end_at].trim();
+            assert_eq!(
+                in_doc,
+                expected.trim(),
+                "docs/client-parity.md's {begin} … {end} region is out of date \n\
+                 — regenerate with `OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts`",
+            );
+            cursor = end_at + end.len();
+        }
     }
 }

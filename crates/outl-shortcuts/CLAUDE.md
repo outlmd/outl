@@ -45,6 +45,12 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   The reason text lives here, not in the client: a client that writes its own wording is a second copy of the fact, which is how three docs ended up disagreeing about `y r`, `:` and mobile undo.
   Rendered to [`docs/client-parity.md`](../../docs/client-parity.md) and pinned by `the_parity_doc_matches_the_code`.
   `Support::Native` is deliberately its own state — reachable, no handler, no nudge (`Backspace` on an empty textarea) — because a boolean would force that row to lie in one direction or the other.
+- **`Capability` / `capability_support`** (`src/capability.rs`, `src/capability_support.rs`) — the sibling catalog for a feature with no chord at all.
+  Page history, the plugin marketplace, a calendar grid, templates, attaching a file, pairing a new device.
+  `support()` above only covers what a chord can fire; `capability_support()` is a second exhaustive `match`, over `Capability` instead of `Action`, reusing `Support` / `ClientSupport` / `Client` unchanged rather than inventing a parallel type.
+  A capability that already has an `Action` (backlinks, block properties, reminders) stays tracked there only — a `Capability` entry for the same fact would be two catalogs disagreeing about one thing.
+  Rendered as a second table in [`docs/client-parity.md`](../../docs/client-parity.md), inside its own `<!-- BEGIN/END GENERATED: capability-parity -->` markers, by the same `the_parity_doc_matches_the_code` test.
+  See [RFC 0253](../../docs/rfcs/0253-client-capability-catalog.md).
 - **[`bindings_for_mode`] / [`lookup`]** — query helpers.
   `lookup` is `O(n)` over the table; the table is small (under 100 entries today) so we don't bother with a hashmap.
   **`lookup` prefers a mode-specific binding over a `Global` one** for the same chord — it can't rely on table order because the `Global` chrome rows are listed first for help-overlay readability,

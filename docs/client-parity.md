@@ -44,12 +44,6 @@ It is [invariant 12](../CLAUDE.md): *when you add a capability, enumerate who do
 The ⚠️ and ❌ text is not documentation.
 It is the string the client shows when the user reaches for the action, so it is written for them and pinned by `nudges_are_written_for_the_user_not_the_developer`.
 
-## What this table does not cover
-
-Only actions in the chord catalog.
-Features with no `Action` — page history, assets, the plugin marketplace, the calendar — diverge across clients the same way and are not yet tracked anywhere.
-That is the next gap, not a closed one.
-
 <!-- BEGIN GENERATED: client-parity -->
 
 | Action | TUI | Desktop | Mobile |
@@ -82,18 +76,18 @@ That is the next gap, not a closed one.
 | `FindCharBackward` | ✅ | ❌ This vim op needs a character cursor inside the block, which only the TUI has. Edit the block and use the arrow keys, or run it from the TUI. | — _Mobile has no vim modes — it edits directly on tap._ |
 | `ToggleCharCase` | ✅ | ❌ This vim op needs a character cursor inside the block, which only the TUI has. Edit the block and use the arrow keys, or run it from the TUI. | — _Mobile has no vim modes — it edits directly on tap._ |
 | `CursorWordEnd` | ✅ | ❌ This vim op needs a character cursor inside the block, which only the TUI has. Edit the block and use the arrow keys, or run it from the TUI. | — _Mobile has no vim modes — it edits directly on tap._ |
-| `UnfoldAll` | ✅ | ✅ | ❌ Unfold-all isn't on mobile yet — tap each bullet to expand it. |
-| `FoldAll` | ✅ | ✅ | ❌ Fold-all isn't on mobile yet — tap each bullet to collapse it. |
+| `UnfoldAll` | ✅ | ✅ | ✅ |
+| `FoldAll` | ✅ | ✅ | ✅ |
 | `CenterViewport` | ✅ | ✅ | — _Mobile scrolls by touch — there is no cursor to centre on._ |
 | `ZoomIn` | ✅ | ✅ | ✅ |
 | `ZoomOut` | ✅ | ✅ | ✅ |
-| `SearchWordForward` | ✅ | ⚠️ The desktop seeds the quick switcher instead of jumping between hits. | ❌ Search from the outline isn't on mobile yet (issue #19) — use the page switcher. |
-| `SearchWordBackward` | ✅ | ⚠️ The desktop seeds the quick switcher instead of jumping between hits. | ❌ Search from the outline isn't on mobile yet (issue #19) — use the page switcher. |
-| `ReselectLastVisual` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `IndentVisualRange` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `OutdentVisualRange` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
+| `SearchWordForward` | ✅ | ⚠️ The desktop seeds the quick switcher instead of jumping between hits. | ⚠️ Mobile has no word-under-cursor to search from and no forward/backward stepping between hits — open the page switcher's Blocks tab (issue #19) and type the word instead. |
+| `SearchWordBackward` | ✅ | ⚠️ The desktop seeds the quick switcher instead of jumping between hits. | ⚠️ Mobile has no word-under-cursor to search from and no forward/backward stepping between hits — open the page switcher's Blocks tab (issue #19) and type the word instead. |
+| `ReselectLastVisual` | ✅ | ✅ | ✅ |
+| `IndentVisualRange` | ✅ | ✅ | ✅ |
+| `OutdentVisualRange` | ✅ | ✅ | ✅ |
 | `NewBlockBelow` | ✅ | ✅ | ✅ |
-| `NewBlockAbove` | ✅ | ✅ | ❌ Only "new block below" is on mobile — add it below and drag it up. |
+| `NewBlockAbove` | ✅ | ✅ | ✅ |
 | `IndentBlock` | ✅ | ✅ | ✅ |
 | `OutdentBlock` | ✅ | ✅ | ✅ |
 | `MoveBlockUp` | ✅ | ✅ | ✅ |
@@ -101,7 +95,7 @@ That is the next gap, not a closed one.
 | `DeleteBlock` | ✅ | ✅ | ✅ |
 | `ToggleCollapsed` | ✅ | ✅ | ✅ |
 | `ToggleTodo` | ✅ | ✅ | ✅ |
-| `CopyBlockRef` | ✅ | ❌ Copying a block ref isn't on the desktop yet — open the block's properties, or copy the handle from the TUI with `y r`. | ❌ Copying a block ref isn't on mobile yet (issue #18). |
+| `CopyBlockRef` | ✅ | ❌ Copying a block ref isn't on the desktop yet — open the block's properties, or copy the handle from the TUI with `y r`. | ✅ |
 | `DeletePage` | ✅ | ✅ | ✅ |
 | `InsertRemind` | ✅ | ✅ | ✅ |
 | `InsertRemindNag` | ✅ | ✅ | ❌ The nag preset isn't on mobile — add a reminder, then edit the rule. |
@@ -109,27 +103,75 @@ That is the next gap, not a closed one.
 | `SnoozeReminder` | ✅ | ✅ | ✅ |
 | `AddProperty` | ✅ | ✅ | ✅ |
 | `OpenProperties` | ✅ | ✅ | ✅ |
-| `TogglePin` | ✅ | ❌ Pinning a page isn't on the desktop yet — pin it from the TUI with `g P`. | ❌ Pinning a page isn't on mobile yet — pin it from the TUI or desktop. |
-| `CutBlock` | ❌ Cutting a whole block isn't in the TUI yet — use `d d`, then paste. | ✅ | ❌ Cutting a whole block isn't on mobile yet — drag it instead. |
-| `CopyBlock` | ❌ Copying a whole block + subtree isn't in the TUI yet — use `y y` for the block alone. | ✅ | ❌ Copying a whole block isn't on mobile yet. |
-| `PasteBlock` | ❌ Block-clipboard paste isn't in the TUI yet — `p` pastes the OS clipboard. | ✅ | ❌ Block-clipboard paste isn't on mobile yet. |
+| `TogglePin` | ✅ | ❌ Pinning a page isn't on the desktop yet — pin it from the TUI with `g P`. | ✅ |
+| `CutBlock` | ❌ Cutting a whole block isn't in the TUI yet — use `d d`, then paste. | ✅ | ⚠️ Mobile's cut duplicates the block with a fresh id instead of moving it, so any ((blk-…)) refs pointing at it go stale — copy the ref first (long-press → "Copy block ref") if something else links to it. |
+| `CopyBlock` | ❌ Copying a whole block + subtree isn't in the TUI yet — use `y y` for the block alone. | ✅ | ✅ |
+| `PasteBlock` | ❌ Block-clipboard paste isn't in the TUI yet — `p` pastes the OS clipboard. | ✅ | ✅ |
 | `ExitInsert` | ✅ | ✅ | ✅ |
 | `CommitAndContinue` | ✅ | ✅ | ✅ |
-| `DeleteEmptyBlock` | ✅ | ✅ _native — Backspace in an empty textarea is handled by the editor itself._ | ❌ Backspace doesn't delete an empty block on mobile — swipe the row to delete it. |
-| `EnterVisual` | ✅ | ⚠️ The desktop enters a range selection rather than a full modal Visual state. | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `YankCurrentBlock` | ✅ | ✅ | ❌ Yanking a block isn't on mobile yet. |
-| `YankRange` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `DeleteRange` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `SelectRangeDown` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `SelectRangeUp` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `MoveVisualRangeUp` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
-| `MoveVisualRangeDown` | ✅ | ✅ | ❌ Selecting a range of blocks isn't on mobile yet. Act on one block at a time, or use the desktop or TUI. |
+| `DeleteEmptyBlock` | ✅ | ✅ _native — Backspace in an empty textarea is handled by the editor itself._ | ✅ |
+| `EnterVisual` | ✅ | ⚠️ The desktop enters a range selection rather than a full modal Visual state. | ⚠️ Mobile enters a touch-native block selection (long-press a block, then "Select blocks") rather than a modal Visual state. |
+| `YankCurrentBlock` | ✅ | ✅ | ✅ |
+| `YankRange` | ✅ | ✅ | ✅ |
+| `DeleteRange` | ✅ | ✅ | ✅ |
+| `SelectRangeDown` | ✅ | ✅ | ✅ |
+| `SelectRangeUp` | ✅ | ✅ | ✅ |
+| `MoveVisualRangeUp` | ✅ | ✅ | ✅ |
+| `MoveVisualRangeDown` | ✅ | ✅ | ✅ |
 | `RunCodeBlock` | ✅ | ✅ | ✅ |
 | `WrapBold` | ✅ | ✅ | ✅ |
 | `WrapItalic` | ✅ | ✅ | ✅ |
 | `WrapCode` | ✅ | ✅ | ✅ |
 | `WrapStrike` | ✅ | ✅ | ✅ |
 | `InsertLink` | ✅ | ✅ | ✅ |
-| `Undo` | ✅ | ✅ | ❌ Undo isn't on mobile yet (issue #14) — the change is already saved and syncs to your other devices. |
-| `Redo` | ✅ | ✅ | ❌ Redo isn't on mobile yet (issue #14). |
+| `Undo` | ✅ | ✅ | ✅ |
+| `Redo` | ✅ | ✅ | ✅ |
 <!-- END GENERATED: client-parity -->
+
+## Capability parity
+
+The table above covers only actions in the chord catalog — a chord fires a
+handler, and `support()` is exhaustive over it.
+Page history, the plugin marketplace, a calendar grid, templates, attaching a
+file, and pairing a new device have no chord anywhere: they're a button, a
+sheet, or a slash command, not a key.
+That used to mean "not tracked anywhere" — [RFC 0253](rfcs/0253-client-capability-catalog.md)
+closed it with a second exhaustive `match`, over `Capability` instead of
+`Action`, reusing the same `Support` states and generated-table mechanism.
+
+**Do not edit the table below by hand** — same rule, same regeneration
+command:
+
+```sh
+OUTL_UPDATE_PARITY_DOC=1 cargo test -p outl-shortcuts
+```
+
+A capability already covered by an `Action` — backlinks (`ToggleBacklinks`),
+block properties (`OpenProperties` / `AddProperty`), reminders
+(`OpenReminders` / `InsertRemind`) — stays in the table above and is
+deliberately **not** duplicated here; a second entry for the same fact is
+the drift this RFC exists to prevent.
+
+<!-- BEGIN GENERATED: capability-parity -->
+
+| Capability | TUI | Desktop | Mobile |
+|---|---|---|---|
+| `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ❌ Page history isn't on mobile yet — open the same page in the desktop app and use the ⏱ button. |
+| `PluginMarketplace` | ❌ Browsing and installing plugins from a marketplace isn't in the TUI — install by id from a terminal with `outl plugin install <id>`, or use the desktop or mobile app. | ✅ | ✅ |
+| `Calendar` | ❌ There's no calendar grid here — open the quick switcher (Cmd/Ctrl+P) and type the date (YYYY-MM-DD) to jump straight to that journal page. | ❌ There's no calendar grid here — open the quick switcher (Cmd/Ctrl+P) and type the date (YYYY-MM-DD) to jump straight to that journal page. | ✅ |
+| `Templates` | ✅ | ✅ | ✅ |
+| `Assets` | ✅ | ✅ | ✅ |
+| `PeerPairing` | ❌ Pairing a new device isn't in the TUI — run `outl peer pair` or `outl peer qr` from a terminal, or pair from the desktop or mobile app. | ⚠️ The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — to join an existing workspace from a desktop, run `outl peer pair` in a terminal. | ✅ |
+<!-- END GENERATED: capability-parity -->
+
+## What this table does not cover
+
+Both tables cover the three clients that render an outline — TUI, desktop,
+mobile.
+The CLI and the MCP server are deliberately out of scope: they expose
+operations (`outl search`, `outl_batch`, …), not user-facing capabilities, so
+the gap between them and the GUI clients is a vocabulary mismatch rather than
+a missing feature.
+That is sub-project D of the client convergence effort
+([#255](https://github.com/outlmd/outl/issues/255)), not a closed gap and not
+this document's job.

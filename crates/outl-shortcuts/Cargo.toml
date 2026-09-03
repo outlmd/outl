@@ -1,6 +1,6 @@
 [package]
 name = "outl-shortcuts"
-description = "Shared keyboard binding catalog (Action / Chord / Mode) consumed by outl-tui and outl-desktop."
+description = "Shared keyboard binding catalog (Action / Chord / Mode) consumed by outl-tui and outl-desktop, plus the Action/Capability parity catalog consumed by all three clients including outl-mobile."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
