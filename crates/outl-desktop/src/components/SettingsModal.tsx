@@ -308,7 +308,7 @@ export function SettingsModal() {
           <footer class="flex shrink-0 justify-end gap-2 border-t border-(--color-outl-fg)/10 px-5 py-3">
             <button
               type="button"
-              onClick={close}
+              onClick={() => close()}
               class="rounded px-3 py-1 text-sm opacity-70 hover:opacity-100"
             >
               Cancel
