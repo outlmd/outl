@@ -190,3 +190,14 @@ pub struct CreateBlockReply {
     pub view: PageView,
     pub new_id: String,
 }
+
+/// Reply for `cut_block`. `markdown` is the removed block's (and its
+/// subtree's) clean outl markdown — hand it to `paste_block_after` to
+/// materialize the cut elsewhere. `view` is the page with the block
+/// already moved to the trash root (`Op::Move`, never a physical
+/// removal — root `CLAUDE.md` invariant 6).
+#[derive(Debug, Clone, Serialize)]
+pub struct CutBlockReply {
+    pub markdown: String,
+    pub view: PageView,
+}
