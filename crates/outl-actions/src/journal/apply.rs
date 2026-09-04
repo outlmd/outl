@@ -171,7 +171,7 @@ pub fn apply_page_md_with_sidecar_guarded(
                 path.display().to_string(),
             ));
         };
-        if let Some(e) = unlogged_content_error(&path, &disk, &sidecar.blocks) {
+        if let Some(e) = unlogged_content_error(&path, disk, &sidecar.blocks) {
             return Err(e);
         }
     }
@@ -201,8 +201,11 @@ impl ProjectionLock {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid page filename")
             })?;
         let lock_path = md_path.with_file_name(format!(".{name}.lock"));
+        // The lock file carries no content; it exists only to be `flock`ed,
+        // so there is nothing to truncate or preserve.
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(lock_path)?;
@@ -754,13 +757,19 @@ pub fn apply_all_pages_md(workspace: &Workspace, root: &Path) -> ProjectionSweep
 /// that were already committed.
 #[derive(Debug, Default)]
 pub struct ProjectionSweep {
+    /// `.md` paths the pass re-projected.
     pub written: Vec<PathBuf>,
+    /// Pages the pass could not project, each with the guard's refusal.
     pub failures: Vec<ProjectionFailure>,
 }
 
+/// One page a [`ProjectionSweep`] left untouched, and why.
 #[derive(Debug)]
 pub struct ProjectionFailure {
+    /// The `.md` path that was not rewritten.
     pub path: PathBuf,
+    /// The refusal, typically [`ActionError::PageMarkdownAheadOfLog`] or
+    /// [`ActionError::PageSidecarUnreadable`].
     pub error: ActionError,
 }
 
