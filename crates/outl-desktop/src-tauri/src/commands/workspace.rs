@@ -185,7 +185,20 @@ pub(crate) async fn reload_workspace(
                 .reload_workspace()
                 .map_err(|e| format!("reload workspace: {e}"))?;
             let today_id = open_today(&mut fresh, &replay_hlc).map_err(|e| e.to_string())?;
-            let _ = engine.reproject_page(&fresh, today_id);
+            // Guarded (root `CLAUDE.md` invariant 8) — can refuse when
+            // today's `.md` holds content the merge never saw. Not
+            // propagated with `?`: that would abort the reload before
+            // `fresh` (which already holds every peer's merged ops) gets
+            // swapped in below, turning one page's refusal into every
+            // page failing to converge. The frontend's `refreshActivePage`
+            // always re-opens the current page right after this command
+            // returns, and that open independently re-runs the equivalent
+            // guarded check and sets `PageView.md_ahead_of_log` — so the
+            // refusal still reaches the banner, just one round-trip later
+            // rather than from this call directly.
+            if let Err(e) = engine.reproject_page(&fresh, today_id) {
+                warn!("reload_workspace: today's page stopped syncing: {e}");
+            }
             Ok(fresh)
         },
     )

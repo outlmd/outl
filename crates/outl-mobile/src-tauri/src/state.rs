@@ -4,18 +4,20 @@
 //! `ERR_LOADING`) live in `outl-tauri-shared` and are re-exported here
 //! so the rest of the crate keeps importing them from `crate::state`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use outl_actions::{BacklinkIndex, SyncTransport};
+use outl_actions::{BacklinkIndex, HistoryStacks, SyncTransport};
 use outl_core::hlc::HlcGenerator;
+use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
 use outl_sync_iroh::IrohSyncTransport;
 use outl_tauri_shared::{AppHost, ProjectionWriter};
 use parking_lot::Mutex;
 
-pub(crate) use outl_tauri_shared::{CreateBlockReply, PageView, WorkspaceSummary};
+pub(crate) use outl_tauri_shared::{CreateBlockReply, CutBlockReply, PageView, WorkspaceSummary};
 
 /// Shared mutable state held by Tauri.
 ///
@@ -55,6 +57,18 @@ pub(crate) struct AppState {
     /// force-sync / announce paths, cloned by the pairing commands, and
     /// shut down gracefully in `Drop`.
     pub(crate) iroh: Option<IrohSyncTransport>,
+    /// Per-page undo / redo stacks of rendered `.md` snapshots
+    /// (`outl_actions::history::HistoryStacks`), mirroring the desktop's
+    /// field 1:1 (RFC 0254 phase 1 — the undo/redo commands were shared
+    /// logic trapped behind a desktop-only registration, see
+    /// `commands::history`). `finish_in_page_with` records the
+    /// pre-mutation render; `undo_page` / `redo_page` restore one
+    /// through `outl_actions::restore_page_md` (new ops in the log,
+    /// never a rewrite). Cleared wholesale on the one event mobile has
+    /// that's equivalent to desktop's workspace switch: there isn't one
+    /// today (a folder swap is a relaunch, see the struct doc above), so
+    /// in practice these stacks live for the whole process lifetime.
+    pub(crate) history: Mutex<HashMap<NodeId, HistoryStacks<String>>>,
     /// Pre-computed backlinks index over the whole workspace. `None`
     /// while stale — `finish_in_page` clears it after a mutation and the
     /// peer reload clears it too, so the next `page_backlinks` rebuilds
@@ -84,8 +98,8 @@ impl Drop for AppState {
 /// The mobile projection onto the shared command surface: the root is
 /// fixed for the process lifetime (`storage_root()` never errors), the
 /// concrete transport is wrapped as `Arc<dyn SyncTransport>` on demand,
-/// and there is no undo history (the `history()` default of `None`
-/// skips snapshot recording entirely).
+/// and `history()` wires the same per-page undo/redo stacks the desktop
+/// has (RFC 0254 phase 1).
 impl AppHost for AppState {
     fn workspace(&self) -> &Mutex<Option<Workspace>> {
         &self.workspace
@@ -111,6 +125,10 @@ impl AppHost for AppState {
 
     fn exec_registry(&self) -> Arc<RuntimeRegistry> {
         self.registry.clone()
+    }
+
+    fn history(&self) -> Option<&Mutex<HashMap<NodeId, HistoryStacks<String>>>> {
+        Some(&self.history)
     }
 
     fn backlink_index(&self) -> Option<Arc<Mutex<Option<BacklinkIndex>>>> {
