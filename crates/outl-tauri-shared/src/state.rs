@@ -141,10 +141,6 @@ pub(crate) struct ProjectionFailure {
 }
 
 impl ProjectionFailure {
-    pub fn from_error(error: &ActionError) -> Self {
-        Self::from_error_at(None, error)
-    }
-
     pub fn from_error_at(path: Option<&std::path::Path>, error: &ActionError) -> Self {
         Self {
             path: path.map(|path| path.to_string_lossy().into_owned()),
