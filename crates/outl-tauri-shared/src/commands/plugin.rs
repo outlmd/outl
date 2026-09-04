@@ -266,7 +266,7 @@ mod tests {
             lines: 1,
             sample: "\"offline\"".into(),
         };
-        let failure = crate::state::ProjectionFailure::from_error(&error);
+        let failure = crate::state::ProjectionFailure::from_error_at(None, &error);
 
         assert!(projection_matches_path(
             &failure,
