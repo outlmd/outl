@@ -400,11 +400,22 @@ fn dispatch(
 /// through the response shape `{ content: [...], isError: true }`
 /// rather than as JSON-RPC errors, so the client gets a recoverable
 /// signal instead of a protocol-level fault.
+///
+/// `structuredContent` carries the same `Envelope` shape a success
+/// reply does (`{ ok, data, error }`), so a caller that already reads
+/// structured replies doesn't need a second parser for the failure
+/// case. This is what makes `ApiError::data` reach the wire: a code
+/// like `PAGE_MARKDOWN_AHEAD_OF_LOG` alone tells a caller *that* a
+/// page stopped syncing, but `error.data.path` / `.lines` / `.sample`
+/// / `.recovery_command` is what lets it act instead of just
+/// reporting the failure onward (RFC 0255).
 pub(crate) fn tool_error_payload(err: &ApiError) -> Value {
+    let envelope = Envelope::<Value>::failure(err.clone());
     json!({
         "content": [
             { "type": "text", "text": format!("{}: {}", err.code, err.message) }
         ],
+        "structuredContent": serde_json::to_value(&envelope).unwrap_or(Value::Null),
         "isError": true,
     })
 }

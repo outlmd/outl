@@ -10,7 +10,7 @@ use std::path::Path;
 use clap::Subcommand;
 use serde_json::{json, Value};
 
-use outl_actions::{apply_page_md_with_sidecar, find_by_slug, set_property};
+use outl_actions::{apply_page_md_with_sidecar_guarded, find_by_slug, set_property};
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 
@@ -119,7 +119,7 @@ pub fn set_kv(ctx: &mut WsCtx, page: &str, key: &str, value: &str) -> Result<Val
     )
     .map_err(ApiError::internal)?;
 
-    apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, id).map_err(ApiError::internal)?;
+    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
     Ok(json!({ "page": page, "key": key, "value": value }))
 }
 

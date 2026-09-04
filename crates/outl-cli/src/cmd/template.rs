@@ -150,7 +150,15 @@ pub fn apply(
     let id_strings: Vec<String> = new_ids.iter().map(|id| id.to_string()).collect();
 
     // Re-render the page projection so the new blocks appear on disk.
-    let _ = outl_actions::apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page);
+    // Guarded, and propagated: `page_slug` is an *existing* page here
+    // (resolved above via `find_by_slug`), so its `.md` can already hold
+    // content the op log never recorded. The unconditional writer used to
+    // sit here and would have silently deleted that content instead of
+    // refusing (RFC 0255) — the same bug the CLI/MCP write paths had, one
+    // file over. A refusal must reach the caller: the ops just applied are
+    // safe in the log, but the user asked for a projection and needs to
+    // know it did not land on disk.
+    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page)?;
 
     Ok(json!({
         "template": name,
@@ -199,8 +207,11 @@ pub fn run_template(
     )
     .map_err(|e| ApiError::new(codes::INVALID_ARG, e.to_string()))?;
 
-    // Re-render the page projection so the `> **result:**` subtree lands on disk.
-    let _ = outl_actions::apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page);
+    // Re-render the page projection so the `> **result:**` subtree lands on
+    // disk. Guarded + propagated for the same reason as `apply` above: this
+    // is an existing page's `.md`, and a frozen one must refuse rather than
+    // silently drop unlogged content (RFC 0255).
+    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page)?;
 
     let dto = ExecOutputDto::from(&out);
     Ok(json!({

@@ -10,6 +10,34 @@
 //! avoid accidental damage from a chatty LLM. The cached
 //! `WorkspaceIndex` is invalidated after any mutation so the next
 //! read-only call sees fresh blocks.
+//!
+//! ## A page that stopped syncing has no cross-language wording owner
+//!
+//! `ActionError::PageMarkdownAheadOfLog` (root `CLAUDE.md` invariant
+//! 8) surfaces here as a structured refusal —
+//! `crate::output::codes::PAGE_MARKDOWN_AHEAD_OF_LOG`, `error.data`
+//! carrying `path` / `lines` / `sample` / `recovery_command` — rather
+//! than a generic `INTERNAL` failure (RFC 0255). The GUI clients own
+//! their wording for the same condition in exactly one place,
+//! `@outl/shared/warnings::aheadOfLogNotice`, unit-tested and shared
+//! by desktop and mobile.
+//!
+//! This module does **not** share that wording. There is no mechanism
+//! in this repo that carries a literal string across the Rust/MCP and
+//! TypeScript/GUI boundary — nothing generates one language's copy
+//! from the other's, the way `outl_shortcuts::support`'s text is one
+//! Rust enum both TUI and desktop read. Building one for a single
+//! sentence would be new infrastructure this RFC's scope doesn't ask
+//! for ("populate the mechanism with one row, stop").
+//!
+//! What this module does instead: `output::ApiError`'s `From<ActionError>`
+//! impl forwards `PageMarkdownAheadOfLog`'s own `Display` verbatim as
+//! `error.message`, rather than writing a second English sentence for
+//! the same condition in this crate. That's the one guarantee that
+//! *is* enforced — no second Rust-side phrasing — pinned by
+//! `output::tests::ahead_of_log_wording_is_the_actionerrors_display_not_a_second_sentence`.
+//! A byte-identical sentence with the TypeScript copy stays an
+//! acknowledged gap, not a silently forked one.
 
 use std::sync::Arc;
 

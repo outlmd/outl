@@ -47,6 +47,7 @@ fn collect_against(path: &Path, do_repair: bool, store: &Path) -> Result<DoctorR
         do_repair,
         RepairScope::Guarded,
         &outl_core::device::DeviceStore::at(store),
+        &outl_config::ThemeCfg::default(),
     )
 }
 

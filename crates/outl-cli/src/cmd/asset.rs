@@ -14,8 +14,8 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 
 use outl_actions::{
-    append_block, apply_page_md_with_sidecar, find_by_slug, import_asset, journal_slug, open_today,
-    today, ActionError,
+    append_block, apply_page_md_with_sidecar_guarded, find_by_slug, import_asset, journal_slug,
+    open_today, today, ActionError,
 };
 
 use crate::output::{codes, emit, ApiError};
@@ -129,7 +129,7 @@ pub fn add_asset(
     )
     .map_err(ApiError::internal)?;
 
-    apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page_id).map_err(ApiError::internal)?;
+    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page_id)?;
 
     Ok(json!({
         "block_id": block_id.to_string(),
