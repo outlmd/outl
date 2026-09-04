@@ -118,7 +118,7 @@ export function PluginMarketplace() {
           </header>
 
           <Show when={error()}>
-            <div class="border-b border-(--color-outl-fg)/10 bg-red-500/10 px-5 py-2 text-xs text-red-400">
+            <div class="border-b border-(--color-outl-fg)/10 bg-(--color-outl-destructive)/10 px-5 py-2 text-xs text-(--color-outl-destructive)">
               {error()}
             </div>
           </Show>
@@ -193,7 +193,7 @@ export function PluginMarketplace() {
                         type="button"
                         disabled={busyId() === i.id}
                         onClick={() => void remove(i)}
-                        class="rounded px-2 py-1 text-xs text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                        class="rounded px-2 py-1 text-xs text-(--color-outl-destructive) hover:bg-(--color-outl-destructive)/10 disabled:opacity-50"
                       >
                         Remove
                       </button>

@@ -21,6 +21,10 @@ outl-md = { workspace = true }
 outl-actions = { workspace = true }
 outl-ws = { workspace = true }
 outl-import = { workspace = true }
+# `outl doctor` validates a `[theme]` pair's light/dark sides via
+# `Palette::is_light()`. Already in the tree via `outl-tui`; this is not
+# a new build cost.
+outl-theme = { workspace = true }
 # `outl template run` needs a `RuntimeRegistry` to execute a callable
 # template. Default features (matching the TUI) so `lang-lisp` et al. are
 # present — feature unification with `outl-tui` already pulls these in.

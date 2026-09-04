@@ -177,7 +177,8 @@ export function RemindersPanel(props: RemindersPanelDeps) {
                           <span
                             class="shrink-0 pt-0.5 text-xs"
                             classList={{
-                              "text-red-500 font-medium": r.urgency === "overdue",
+                              "text-(--color-outl-destructive) font-medium":
+                                r.urgency === "overdue",
                               "opacity-70": r.urgency !== "overdue",
                             }}
                           >

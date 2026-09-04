@@ -95,7 +95,7 @@ function BatchButton(props: {
       onClick={props.onClick}
       class="rounded-md px-2 py-1 text-sm text-(--color-outl-fg) hover:bg-(--color-outl-accent)/[0.12]"
       classList={{
-        "text-(--color-outl-danger) hover:bg-(--color-outl-danger)/[0.12]":
+        "text-(--color-outl-destructive) hover:bg-(--color-outl-destructive)/[0.12]":
           props.danger,
       }}
     >

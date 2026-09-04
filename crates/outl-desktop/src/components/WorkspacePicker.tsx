@@ -62,7 +62,7 @@ export function WorkspacePicker(props: { onPicked: () => void }) {
       </div>
 
       {error() && (
-        <div class="rounded bg-red-500/15 px-3 py-2 text-sm text-red-300">
+        <div class="rounded bg-(--color-outl-destructive)/15 px-3 py-2 text-sm text-(--color-outl-destructive)">
           {error()}
         </div>
       )}
