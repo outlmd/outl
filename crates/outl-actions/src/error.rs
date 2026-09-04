@@ -3,6 +3,14 @@
 use outl_core::workspace::WorkspaceError;
 use thiserror::Error;
 
+/// The command that brings a page's unlogged `.md` content into the op
+/// log — the recovery for [`ActionError::PageMarkdownAheadOfLog`].
+///
+/// One constant so every surface that names it (this variant's own
+/// `Display`, the MCP's structured refusal, `outl doctor`'s listing)
+/// points at something that actually runs. RFC 0255.
+pub const AHEAD_OF_LOG_RECOVERY_COMMAND: &str = "outl reconcile --ahead-of-log";
+
 /// Reasons an action may fail. UI layers convert these to their own
 /// error surface (toasts, returned strings, panics in tests).
 #[derive(Debug, Error)]
@@ -55,6 +63,14 @@ pub enum ActionError {
     #[error("page `{0}` not found")]
     PageNotFound(String),
 
+    /// `page::toggle_pin` was asked to pin a journal page. A journal
+    /// auto-rotates daily, so pinning one would silently dilute every
+    /// sidebar's `Pinned` list with date-shaped junk instead of the
+    /// canonical entry points a user actually wants pinned. Mirrors
+    /// the TUI's `g P` refusal (`outl-tui/src/actions/block/metadata.rs`).
+    #[error("cannot pin `{0}`: journal pages auto-rotate and can't be pinned")]
+    CannotPinJournal(String),
+
     /// A page's `.md` is gone while its `.outl` sidecar is still there.
     ///
     /// The sidecar is only ever written next to a `.md` this device
@@ -96,7 +112,7 @@ pub enum ActionError {
     /// brings the content into the log.
     #[error(
         "refusing to rewrite `{path}`: the .md holds {lines} line(s) that exist in no op \
-         (e.g. {sample}) — run `outl reconcile --ahead-of-log` so they enter the op log first"
+         (e.g. {sample}) — run `{AHEAD_OF_LOG_RECOVERY_COMMAND}` so they enter the op log first"
     )]
     PageMarkdownAheadOfLog {
         /// The `.md` that would have been overwritten.

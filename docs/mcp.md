@@ -78,6 +78,15 @@ For file uploads, `outl_asset_add` imports a file into `<workspace>/assets/` and
 Because MCP is stdio, it takes the file as a `path` argument — a filesystem path on the machine running the server, not base64 bytes.
 See [`docs/cli.md` → Asset](cli.md#asset).
 
+### A page that stopped syncing
+
+A write tool (`outl_page_update`, `outl_block_append`, and every other tool that touches a page) can refuse instead of writing.
+Root `CLAUDE.md` invariant 8 forbids overwriting a `.md` that holds content the op log never recorded, because that write would delete it for good.
+This comes back as a distinct `error.code`, `PAGE_MARKDOWN_AHEAD_OF_LOG`, not the generic `INTERNAL`.
+A caller can branch on it instead of just retrying, which is the failure mode invariant 8 exists to end on a surface whose caller is a program, not a person watching the screen.
+`error.data` carries what the caller needs to act: `path`, `lines`, `sample` (one at-risk line, quoted), and `recovery_command` (`outl reconcile --ahead-of-log`, run from a terminal in the workspace folder).
+See [`docs/clients.md` → "Surfacing a page that stopped syncing"](clients.md#surfacing-a-page-that-stopped-syncing) for the full per-surface picture and RFC 0255.
+
 ### Resources
 
 URIs the host can attach as context without an explicit tool call.

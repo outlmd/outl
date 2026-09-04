@@ -72,6 +72,10 @@ Failure:
 }
 ```
 
+`error.data` is present only for a handful of codes that carry more than a message — today, `PAGE_MARKDOWN_AHEAD_OF_LOG` (root `CLAUDE.md` invariant 8, RFC 0255): a page write refused because its `.md` holds content the op log never recorded.
+`error.data` then carries `{ path, lines, sample, recovery_command }` so a script or an MCP-driven agent can act on the refusal — name the page, know how many lines are at risk, and run the fix — instead of parsing `error.message`.
+Every other error code omits `data` entirely rather than sending `null`, so the envelope shape existing consumers already parse doesn't change.
+
 Error codes are stable strings, listed alongside each command below when relevant.
 Exit codes follow:
 
