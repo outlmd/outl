@@ -768,6 +768,7 @@ fn guarded_projection_checks_disk_only_after_acquiring_the_page_lock() {
     ));
     let lock = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(lock_path)
