@@ -38,7 +38,7 @@ describe("installTheme", () => {
             listeners.add(listener),
           removeEventListener: (_type: string, listener: () => void) =>
             listeners.delete(listener),
-        }) as MediaQueryList,
+        }) as unknown as MediaQueryList,
     );
 
     const disposeOld = await installTheme({
