@@ -29,6 +29,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
 tracing = { workspace = true }
+fs2 = { workspace = true }
 walkdir = "2"
 yrs = { workspace = true }
 ulid = { workspace = true }

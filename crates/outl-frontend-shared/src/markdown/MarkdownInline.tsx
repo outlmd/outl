@@ -345,7 +345,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                       e.stopPropagation();
                       props.onRefClick(tok.value);
                     }}
-                    class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent) active:opacity-60 dark:bg-(--color-outl-accent)/20"
+                    class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent) active:opacity-60"
                   >
                     {tok.value}
                   </span>
@@ -415,7 +415,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <Show
                   when={variant() === "inline"}
                   fallback={
-                    <span class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent) dark:bg-(--color-outl-accent)/20">
+                    <span class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent)">
                       {mark}
                       {resolved.text}
                     </span>
@@ -439,13 +439,13 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
             if (resolved) {
               const mark = statusMark(resolved.status);
               return (
-                <span class="rounded bg-(--color-outl-accent)/8 px-1 py-0.5 text-[13px] text-(--color-outl-fg) dark:bg-(--color-outl-accent)/10">
+                <span class="rounded bg-(--color-outl-accent)/8 px-1 py-0.5 text-[13px] text-(--color-outl-fg)">
                   ↳ {mark}{resolved.text}
                 </span>
               );
             }
             return (
-              <span class="rounded bg-(--color-outl-accent)/12 px-1 font-mono text-[13px] text-(--color-outl-accent) dark:bg-(--color-outl-accent)/20">
+              <span class="rounded bg-(--color-outl-accent)/12 px-1 font-mono text-[13px] text-(--color-outl-accent)">
                 !{tok.value}
               </span>
             );

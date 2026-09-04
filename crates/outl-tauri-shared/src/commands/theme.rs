@@ -82,12 +82,9 @@ mod tests {
     }
 
     #[test]
-    fn a_default_config_yields_the_same_preset_on_both_sides() {
-        // The backwards-compatibility case: a config that never set
-        // `preset_dark` (every pre-RFC-0022 config) must resolve both
-        // sides to the same preset, not silently theme-switch.
+    fn a_default_config_yields_the_brand_pair() {
         let dto = theme_config_dto(&outl_config::Config::default());
-        assert_eq!(dto.preset, "outl");
+        assert_eq!(dto.preset, "outl-light");
         assert_eq!(dto.preset_dark, "outl");
         assert_eq!(dto.mode, "auto");
     }

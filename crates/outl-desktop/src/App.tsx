@@ -91,7 +91,7 @@ function App() {
    * Pull `[theme]` (RFC 0022's light/dark pair) via `get_theme_config`
    * and install it as CSS custom properties on `<html>` + `<body>`,
    * following `prefers-color-scheme` when `mode = "auto"`. Falls back
-   * to the built-in `outl` preset on both sides when settings/config
+   * to the built-in `outl-light` / `outl` pair when settings/config
    * aren't readable yet — the default `_root_` CSS already paints the
    * brand background, so a delayed palette load just upgrades the
    * colors. Returns the `installTheme` unsubscribe so the caller can
@@ -122,12 +122,13 @@ function App() {
     } catch {
       // First boot before the workspace lock is created — install the
       // built-in default pair explicitly so we still ship the brand
-      // colors. `installTheme` itself never throws (it degrades to a
-      // no-op unsubscribe on total backend failure), so this nested
-      // try/catch is defensive symmetry with that contract, not a path
-      // expected to hit its own catch.
+      // colors. A total backend failure keeps the static boot frame.
       try {
-        return await installTheme({ mode: "auto", preset: "outl", presetDark: "outl" });
+        return await installTheme({
+          mode: "auto",
+          preset: "outl-light",
+          presetDark: "outl",
+        });
       } catch {
         // No backend at all (shouldn't happen) — keep the static
         // boot frame.

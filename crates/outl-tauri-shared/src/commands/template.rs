@@ -72,16 +72,17 @@ pub fn instantiate_template_at<S: AppHost>(
         Ok((page_id, meta.slug, date))
     })?;
 
-    with_ws_mut(state, |ws| {
+    let projection_failure = with_ws_mut(state, |ws| {
         instantiate_template(ws, state.hlc(), &name, node, &slug, page_date)
             .map_err(|e| e.to_string())?;
         // Guarded — same reason as every other post-mutation projection:
         // the write is required, deleting unlogged bytes to achieve it is
         // not (invariant 8).
-        if let Err(e) = outl_actions::apply_page_md_with_sidecar_guarded(ws, &root, page_id) {
+        let failure = outl_actions::apply_page_md_with_sidecar_guarded(ws, &root, page_id).err();
+        if let Some(e) = &failure {
             tracing::warn!("instantiate_template_at: md+sidecar sync skipped for {slug}: {e}");
         }
-        Ok(())
+        Ok(failure)
     })?;
 
     // Announce the new ops so a peer pulls the instantiated subtree over
@@ -91,6 +92,15 @@ pub fn instantiate_template_at<S: AppHost>(
     }
 
     with_ws(state, |ws| {
-        build_page_view(ws, &root, page_id).map_err(|e| e.to_string())
+        let mut view = build_page_view(ws, &root, page_id).map_err(|e| e.to_string())?;
+        if let Some(e) = projection_failure {
+            if let Some(writer) = state.projection_writer() {
+                writer.report_failure(page_id, &e);
+            }
+            let failure = crate::state::ProjectionWriteFailed::from_error(page_id, &e);
+            view.md_ahead_of_log = failure.md_ahead_of_log.clone();
+            view.projection_error = failure.md_ahead_of_log.is_none().then_some(failure.error);
+        }
+        Ok(view)
     })
 }

@@ -86,7 +86,7 @@ export function Toast(props: ToastProps): JSX.Element {
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           onTouchCancel={onTouchEnd}
-          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 rounded-full bg-(--color-outl-destructive)/95 px-4 py-2.5 text-white shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:shadow-[var(--shadow-capsule-dark)]"
+          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 rounded-full bg-(--color-outl-destructive)/95 px-4 py-2.5 text-white shadow-[var(--shadow-capsule)] backdrop-blur-xl"
         >
           <svg
             width="18"

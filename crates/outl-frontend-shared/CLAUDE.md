@@ -188,10 +188,10 @@ When in doubt, ship in the client; promote later when the second client appears.
 The legacy `--color-ios-*` / `--color-iosd-*` namespace they used to read is gone — grep for `--color-ios` in this crate's `src/` and expect nothing but historical comments.
 `@outl/shared/theme::applyPaletteToRoot` is the single writer of `--color-outl-*`, driven by the `Palette` the backend's `get_theme` command resolves.
 **Both GUI clients are wired.**
-`SettingsModal.tsx`'s live preview calls `applyPaletteToRoot` directly on a picked name.
-Both clients' boot path instead goes through `@outl/shared/theme::installTheme`, which resolves the full `[theme]` pair via `getThemeConfig()` and calls `applyPaletteToRoot` itself, on boot and on every `prefers-color-scheme` flip.
+`SettingsModal.tsx`'s live preview reinstalls the draft pair through `installTheme`, so later OS appearance changes use the previewed values too.
+Both clients' boot path also goes through `@outl/shared/theme::installTheme`, which resolves the full `[theme]` pair via `getThemeConfig()` and calls `applyPaletteToRoot` itself, on boot and on every `prefers-color-scheme` flip.
 `installTheme` (plus `pickSide`) moved here from `outl-mobile/src/lib/theme.ts` as part of that wiring.
-See `docs/theming.md` § "Light / dark pair and `mode`" for the client-by-client resolution state and the one known gap (the desktop Settings modal can't yet *write* the dark slot).
+See `docs/theming.md` § "Light / dark pair and `mode`" for the client-by-client resolution and Settings preview/restore lifecycle.
 
 ## Adding a new piece
 

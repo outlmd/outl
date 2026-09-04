@@ -94,6 +94,44 @@ impl<T> HistoryStacks<T> {
         Some(next)
     }
 
+    /// Attempt an undo, committing the stack transition only when `apply`
+    /// succeeds. On failure the selected snapshot is restored in place.
+    pub fn try_undo<E>(
+        &mut self,
+        current: T,
+        apply: impl FnOnce(&T) -> Result<(), E>,
+    ) -> Option<Result<(), E>> {
+        let snapshot = self.undo.pop()?;
+        if let Err(error) = apply(&snapshot) {
+            self.undo.push(snapshot);
+            return Some(Err(error));
+        }
+        self.redo.push(current);
+        if self.redo.len() > self.cap {
+            self.redo.remove(0);
+        }
+        Some(Ok(()))
+    }
+
+    /// Attempt a redo, committing the stack transition only when `apply`
+    /// succeeds. On failure the selected snapshot is restored in place.
+    pub fn try_redo<E>(
+        &mut self,
+        current: T,
+        apply: impl FnOnce(&T) -> Result<(), E>,
+    ) -> Option<Result<(), E>> {
+        let snapshot = self.redo.pop()?;
+        if let Err(error) = apply(&snapshot) {
+            self.redo.push(snapshot);
+            return Some(Err(error));
+        }
+        self.undo.push(current);
+        if self.undo.len() > self.cap {
+            self.undo.remove(0);
+        }
+        Some(Ok(()))
+    }
+
     /// Whether an `undo` would succeed.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
@@ -132,6 +170,14 @@ pub fn restore_page_md(
 ) -> Result<(), ActionError> {
     let meta = page_meta(ws, page_id).ok_or_else(|| ActionError::NotInTree(page_id.to_string()))?;
     let path = page_md_path(root, &meta);
+    let _lock = crate::journal::apply::ProjectionLock::acquire(&path)?;
+    let current_disk = std::fs::read_to_string(&path)?;
+    let expected_current = crate::journal::render_page_md(ws, page_id);
+    if current_disk != expected_current {
+        return Err(ActionError::PageMarkdownChangedDuringProjection(
+            path.display().to_string(),
+        ));
+    }
     write_md_atomic(&path, md)?;
     // An undo restores an *older* `.md`, so blocks created after the
     // snapshot legitimately fall to matching level 3 and get trashed.
@@ -139,7 +185,19 @@ pub fn restore_page_md(
     // where a user action deletes blocks wholesale, and `orphans.log`
     // is how they get them back if the undo went further than intended.
     let orphans = crate::sync::orphans_log_path(root);
-    outl_md::reconcile::reconcile_md(ws, hlc, &path, Some(&orphans))?;
+    if let Err(error) = outl_md::reconcile::reconcile_md(ws, hlc, &path, Some(&orphans)) {
+        // BulkDelete is the preflight refusal guaranteed to leave the tree
+        // untouched. Put the bytes we replaced back while the page lock is
+        // still held, but only if nobody changed the snapshot meanwhile.
+        // Other errors may happen after ops were applied; rolling back only
+        // their file would make disk disagree with the now-advanced tree.
+        if matches!(&error, outl_md::ReconcileError::BulkDelete(_))
+            && std::fs::read_to_string(&path).is_ok_and(|current| current == md)
+        {
+            write_md_atomic(&path, &current_disk)?;
+        }
+        return Err(error.into());
+    }
     Ok(())
 }
 

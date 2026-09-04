@@ -72,8 +72,12 @@ function App() {
     } catch {
       cfg = { mode: "auto", preset: "outl-light", presetDark: "outl" };
     }
-    const unsubscribe = await installTheme(cfg);
-    onCleanup(unsubscribe);
+    try {
+      const unsubscribe = await installTheme(cfg);
+      onCleanup(unsubscribe);
+    } catch {
+      // No backend at all (shouldn't happen) — keep the static boot frame.
+    }
   });
 
   return (

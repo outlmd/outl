@@ -59,7 +59,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Actions card */}
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           {/* Grab handle integrated at the top of the card so the
               gesture target stays close to the user's thumb. */}
           <span
@@ -114,7 +114,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         <button
           type="button"
           onClick={props.onClose}
-          class="mx-3 rounded-2xl bg-(--color-outl-bg-elev)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-outl-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-outl-border)/30 dark:shadow-[var(--shadow-capsule-dark)]"
+          class="mx-3 rounded-2xl bg-(--color-outl-bg-elev)/95 py-3.5 text-center text-[16px] font-semibold text-(--color-outl-accent) shadow-[var(--shadow-capsule)] backdrop-blur-2xl active:bg-(--color-outl-border)/30"
         >
           Cancel
         </button>

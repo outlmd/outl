@@ -85,8 +85,8 @@ pub struct Settings {
     /// behaviour ships in the TUI.
     pub vim_mode: bool,
     /// Palette preset name from `outl_theme::PRESETS`. Default
-    /// `"outl"` (brand purple). The light side of the RFC 0022 pair,
-    /// and the only side used when `theme_mode == "light"`.
+    /// `"outl-light"`. The light side of the RFC 0022 pair, and the
+    /// only side used when `theme_mode == "light"`.
     pub theme: String,
     /// The dark side of the RFC 0022 pair, used when `theme_mode ==
     /// "dark"` or `"auto"` resolves dark. Always a concrete preset
@@ -298,11 +298,8 @@ mod tests {
             s.vim_mode,
             "vim mode is on by default — outl is keyboard-first"
         );
-        assert_eq!(s.theme, "outl");
-        assert_eq!(
-            s.theme_dark, "outl",
-            "no preset_dark set on a fresh config — dark() falls back to preset"
-        );
+        assert_eq!(s.theme, "outl-light");
+        assert_eq!(s.theme_dark, "outl");
         assert_eq!(s.theme_mode, "auto", "auto is ThemeMode::default()");
         assert_eq!(s.font_size, 15);
         assert_eq!(s.sync_transport, "iroh", "P2P is the default transport");

@@ -14,6 +14,7 @@ import type {
   MdAheadOfLog,
   PageView,
   PluginToolbarButton,
+  ProjectionWriteFailed,
 } from "@outl/shared/api/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -350,6 +351,7 @@ export function Journal() {
   } | null>(null);
 
   function applyView(v: PageView) {
+    if (v.projection_error) setError(v.projection_error);
     // Dropping the zoom on a page switch keeps focus scoped to the page
     // it was set on. A same-page refresh (background poll, edit commit)
     // keeps it — `focusSubtree` re-resolves the id against the fresh
@@ -821,8 +823,30 @@ export function Journal() {
     // Best-effort: refresh the current view once the background
     // opener finishes, so anything the user did during the brief
     // "loading" window converges on the freshly opened workspace.
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen("workspace-ready", async () => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    onCleanup(() => {
+      disposed = true;
+      for (const unlisten of unlisteners) unlisten();
+    });
+    import("@tauri-apps/api/event").then(async ({ listen }) => {
+      const projectionUnlisten = await listen<ProjectionWriteFailed>(
+        "projection-write-failed",
+        (event) => {
+          const failure = event.payload;
+          if (failure.md_ahead_of_log && view()?.page.id === failure.page_id) {
+            setAheadOfLog({ slug: view()!.page.slug, info: failure.md_ahead_of_log });
+          } else {
+            // An off-screen refusal still froze a page. It cannot use the
+            // current page's sticky banner, but it must reach the user.
+            setError(failure.error);
+          }
+        },
+      );
+      if (disposed) projectionUnlisten();
+      else unlisteners.push(projectionUnlisten);
+
+      const readyUnlisten = await listen("workspace-ready", async () => {
         // Mid-edit is handled inside `pullAndReload` (pull now, re-render when
         // the field closes), so returning early here only threw the signal
         // away. "The next idle workspace-ready picks them up" was the flaw:
@@ -840,6 +864,10 @@ export function Journal() {
         // the page back to an older op-log state (the flicker).
         await pullAndReload({ background: true });
       });
+      if (disposed) readyUnlisten();
+      else unlisteners.push(readyUnlisten);
+    }).catch((error) => {
+      console.warn("failed to register workspace listeners", error);
     });
   }
 
@@ -1033,6 +1061,7 @@ export function Journal() {
           // Independent of the mutation guard below: a view can fire even
           // when the workspace didn't change.
           showPluginViews(reply.views);
+          for (const err of reply.errors) setError(err);
           // Re-render only if a hook actually mutated the workspace AND
           // the user hasn't started editing again in the meantime (so
           // we never reset a fresh textarea mid-edit).
@@ -1994,7 +2023,7 @@ export function Journal() {
             when={view() && view()!.page.kind !== "journal"}
             fallback={<span aria-hidden="true" class="block h-9 w-9" />}
           >
-            <div class="inline-flex rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:shadow-[var(--shadow-capsule-dark)]">
+            <div class="inline-flex rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl">
               <button
                 type="button"
                 aria-label="Back to today's journal"
@@ -2061,7 +2090,7 @@ export function Journal() {
           {/* Right capsule — grouped page actions. SyncDot lives inline
               between pages-search and refresh so the user reads it as
               "status of the data this capsule controls". */}
-          <div class="ios-scroll inline-flex max-w-full items-center justify-self-end overflow-x-auto rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl dark:shadow-[var(--shadow-capsule-dark)]">
+          <div class="ios-scroll inline-flex max-w-full items-center justify-self-end overflow-x-auto rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl">
             <button
               type="button"
               aria-label="Calendar"

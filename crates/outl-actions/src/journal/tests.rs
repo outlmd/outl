@@ -530,12 +530,72 @@ fn apply_all_pages_writes_each_to_disk() {
     let page = open_or_create(&mut ws, &hlc, "ideas", "Ideas", PageKind::Page).unwrap();
     append_block(&mut ws, &hlc, Some(page), Some("first idea")).unwrap();
 
-    let written = apply_all_pages_md(&ws, tmp.path()).unwrap();
-    assert_eq!(written.len(), 1);
-    let body = std::fs::read_to_string(&written[0]).unwrap();
+    let report = apply_all_pages_md(&ws, tmp.path());
+    assert!(report.failures.is_empty());
+    assert_eq!(report.written.len(), 1);
+    let body = std::fs::read_to_string(&report.written[0]).unwrap();
     // In-app pages store their title in the `title::` property (not the
     // root's Yrs text — see `open_or_create`), so it renders at the top.
     assert_eq!(body, "title:: Ideas\n\n- first idea\n");
+}
+
+#[test]
+fn apply_all_pages_refuses_to_overwrite_content_ahead_of_the_log() {
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = Workspace::open_in_memory(actor).unwrap();
+    let tmp = TempDir::new().unwrap();
+
+    let page = open_or_create(&mut ws, &hlc, "ideas", "Ideas", PageKind::Page).unwrap();
+    append_block(&mut ws, &hlc, Some(page), Some("logged")).unwrap();
+    apply_page_md_with_sidecar(&ws, tmp.path(), page).unwrap();
+
+    let path = page_md_path(tmp.path(), &page_meta(&ws, page).unwrap());
+    let ahead = format!(
+        "{}- never entered the op log\n",
+        std::fs::read_to_string(&path).unwrap()
+    );
+    std::fs::write(&path, &ahead).unwrap();
+    append_block(&mut ws, &hlc, Some(page), Some("plugin mutation")).unwrap();
+
+    let report = apply_all_pages_md(&ws, tmp.path());
+    assert_eq!(report.failures.len(), 1);
+    assert!(matches!(
+        &report.failures[0].error,
+        crate::ActionError::PageMarkdownAheadOfLog { .. }
+    ));
+    assert_eq!(std::fs::read_to_string(path).unwrap(), ahead);
+}
+
+#[test]
+fn apply_all_pages_continues_after_a_refused_page() {
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = Workspace::open_in_memory(actor).unwrap();
+    let tmp = TempDir::new().unwrap();
+
+    let frozen = open_or_create(&mut ws, &hlc, "a-frozen", "Frozen", PageKind::Page).unwrap();
+    append_block(&mut ws, &hlc, Some(frozen), Some("logged")).unwrap();
+    apply_page_md_with_sidecar(&ws, tmp.path(), frozen).unwrap();
+    let frozen_path = page_md_path(tmp.path(), &page_meta(&ws, frozen).unwrap());
+    let ahead = format!(
+        "{}- never entered the op log\n",
+        std::fs::read_to_string(&frozen_path).unwrap()
+    );
+    std::fs::write(&frozen_path, &ahead).unwrap();
+
+    let healthy = open_or_create(&mut ws, &hlc, "z-healthy", "Healthy", PageKind::Page).unwrap();
+    append_block(&mut ws, &hlc, Some(healthy), Some("project me")).unwrap();
+    let healthy_path = page_md_path(tmp.path(), &page_meta(&ws, healthy).unwrap());
+
+    let report = apply_all_pages_md(&ws, tmp.path());
+
+    assert_eq!(report.failures.len(), 1);
+    assert!(
+        healthy_path.exists(),
+        "a later healthy page must still project"
+    );
+    assert_eq!(std::fs::read_to_string(frozen_path).unwrap(), ahead);
 }
 
 /// Regression for https://github.com/outlmd/outl/issues/120 —
@@ -683,6 +743,62 @@ fn a_local_edit_does_not_project_over_content_the_log_never_saw() {
         2,
         "the user's edit is in the tree regardless of the projection"
     );
+}
+
+#[test]
+fn guarded_projection_checks_disk_only_after_acquiring_the_page_lock() {
+    use fs2::FileExt;
+
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    let actor = ActorId::new();
+    let mut ws = Workspace::open_in_memory(actor).expect("ws");
+    let hlc = HlcGenerator::new(actor);
+    let page = open_or_create(&mut ws, &hlc, "notes", "Notes", PageKind::Page).expect("page");
+    append_block(&mut ws, &hlc, Some(page), Some("logged")).expect("block");
+    apply_page_md_with_sidecar(&ws, root, page).expect("seed");
+    append_block(&mut ws, &hlc, Some(page), Some("mutation")).expect("edit");
+
+    let path = page_md_path(root, &page_meta(&ws, page).expect("meta"));
+    let lock_path = path.with_file_name(format!(
+        ".{}.lock",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .expect("name")
+    ));
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .expect("lock file");
+    lock.lock_exclusive().expect("lock");
+
+    std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        scope.spawn(|| {
+            tx.send(apply_page_md_with_sidecar_guarded(&ws, root, page))
+                .expect("send");
+        });
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_millis(20))
+                .is_err(),
+            "the guarded projection must wait before reading disk"
+        );
+
+        let ahead = format!(
+            "{}- arrived while the writer waited\n",
+            std::fs::read_to_string(&path).expect("read")
+        );
+        std::fs::write(&path, &ahead).expect("external write");
+        FileExt::unlock(&lock).expect("unlock");
+
+        assert!(matches!(
+            rx.recv().expect("result"),
+            Err(crate::ActionError::PageMarkdownAheadOfLog { .. })
+        ));
+        assert_eq!(std::fs::read_to_string(&path).expect("read back"), ahead);
+    });
 }
 
 /// And the guard stays out of the way on a healthy page — otherwise

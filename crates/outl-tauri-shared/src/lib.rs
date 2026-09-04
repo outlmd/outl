@@ -48,5 +48,6 @@ pub use host::{AppHost, StorageRootProvider};
 pub use plugin_service::PluginService;
 pub use projection::ProjectionWriter;
 pub use state::{
-    CreateBlockReply, CutBlockReply, PageView, TemplateDto, WorkspaceSummary, ERR_LOADING,
+    CreateBlockReply, CutBlockReply, PageView, ProjectionWriteFailed, TemplateDto,
+    WorkspaceSummary, ERR_LOADING, PROJECTION_WRITE_FAILED_EVENT,
 };

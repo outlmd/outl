@@ -69,8 +69,11 @@ mod tests {
 
         let workspace = Arc::new(Mutex::new(Some(ws)));
         let storage_root = Arc::new(Mutex::new(Some(tmp.path().to_path_buf())));
-        let projection_writer =
-            outl_tauri_shared::ProjectionWriter::spawn(workspace.clone(), storage_root.clone());
+        let projection_writer = outl_tauri_shared::ProjectionWriter::spawn(
+            workspace.clone(),
+            storage_root.clone(),
+            |_| {},
+        );
 
         let state = AppState {
             workspace,

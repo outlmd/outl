@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Root config — three sections that map cleanly to "which client
 /// cares".
@@ -193,8 +193,7 @@ pub enum ThemeMode {
 /// Theme section. Preset names match `outl_theme::PRESETS`
 /// (`"outl"`, `"dracula"`, …); unknown names fall back to
 /// `outl_theme::default()` at render time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ThemeCfg {
     /// The light side of the pair, and the only preset used when
     /// `mode` is `Light`.
@@ -204,6 +203,36 @@ pub struct ThemeCfg {
     /// only `preset`) behaving exactly as it did.
     pub preset_dark: Option<String>,
     pub mode: ThemeMode,
+}
+
+#[derive(Deserialize)]
+struct ThemeCfgWire {
+    preset: Option<String>,
+    preset_dark: Option<String>,
+    mode: Option<ThemeMode>,
+}
+
+impl<'de> Deserialize<'de> for ThemeCfg {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ThemeCfgWire::deserialize(deserializer)?;
+        let defaults = Self::default();
+        let preset_was_explicit = wire.preset.is_some();
+        Ok(Self {
+            preset: wire.preset.unwrap_or(defaults.preset),
+            // A present section with an explicit legacy `preset` but no
+            // `preset_dark` must keep one-preset behaviour. A present empty
+            // section is equivalent to a fresh config and gets the brand pair.
+            preset_dark: if preset_was_explicit {
+                wire.preset_dark
+            } else {
+                wire.preset_dark.or(defaults.preset_dark)
+            },
+            mode: wire.mode.unwrap_or(defaults.mode),
+        })
+    }
 }
 
 impl ThemeCfg {
@@ -222,8 +251,8 @@ impl ThemeCfg {
 impl Default for ThemeCfg {
     fn default() -> Self {
         Self {
-            preset: "outl".to_string(),
-            preset_dark: None,
+            preset: "outl-light".to_string(),
+            preset_dark: Some("outl".to_string()),
             mode: ThemeMode::Auto,
         }
     }
@@ -463,7 +492,8 @@ mod tests {
     #[test]
     fn defaults_match_documented_values() {
         let c = Config::default();
-        assert_eq!(c.theme.preset, "outl");
+        assert_eq!(c.theme.preset, "outl-light");
+        assert_eq!(c.theme.dark(), "outl");
         assert!(c.editor.vim_mode);
         assert_eq!(c.editor.font_size, 15);
         assert!(c.workspace.last.is_none());
@@ -516,7 +546,8 @@ mod tests {
         // section at its default (the schema-change checklist).
         let c: Config = toml::from_str("[assets]\nmax_bytes = 5000\n").unwrap();
         assert_eq!(c.assets.max_bytes, 5000);
-        assert_eq!(c.theme.preset, "outl");
+        assert_eq!(c.theme.preset, "outl-light");
+        assert_eq!(c.theme.dark(), "outl");
         assert!(c.editor.vim_mode);
         assert_eq!(c.sync.transport, SyncTransportKind::Iroh);
         assert_eq!(c.display.backlinks_order, BacklinksOrder::Newest);

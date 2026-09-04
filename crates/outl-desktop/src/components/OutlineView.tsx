@@ -224,6 +224,7 @@ export function OutlineView() {
   }
 
   function applyView(view: PageView) {
+    if (view.projection_error) setAppState("lastError", view.projection_error);
     setAppState({
       page: view.page,
       parseWarnings: view.warnings ?? [],
@@ -455,6 +456,7 @@ export function OutlineView() {
       // async-writes principle): nothing the user waits on runs a plugin.
       void handleError(pluginSyncHooks(pageId)).then((hooked) => {
         if (hooked?.view) applyView(hooked.view);
+        for (const err of hooked?.errors ?? []) setAppState("lastError", err);
         if (hooked) playPluginViews(hooked.views);
       });
     },

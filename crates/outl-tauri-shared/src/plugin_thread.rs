@@ -247,10 +247,11 @@ fn run_command<R: StorageRootProvider>(
     let run = host
         .run_command(ws, hlc, plugin_id, command_id)
         .map_err(|e| e.to_string())?;
-    if run.applied > 0 {
-        reproject(ws, storage_root);
+    let mut dto: PluginRunDto = run.into();
+    if dto.applied > 0 {
+        dto.projection_errors = reproject(ws, storage_root);
     }
-    Ok(run.into())
+    Ok(dto)
 }
 
 /// Dispatch the `onOp` sweep under the workspace lock, re-projecting if a
@@ -268,12 +269,15 @@ fn run_sync_hooks<R: StorageRootProvider>(
     };
     match host.sync_hooks(ws, hlc) {
         Ok(run) => {
-            if run.applied > 0 {
-                reproject(ws, storage_root);
-            }
+            let projection_errors = if run.applied > 0 {
+                reproject(ws, storage_root)
+            } else {
+                Vec::new()
+            };
             SyncHooksOutcome {
                 applied: run.applied,
                 views: run.views,
+                projection_errors,
             }
         }
         Err(e) => {
@@ -291,13 +295,24 @@ fn run_sync_hooks<R: StorageRootProvider>(
 /// own. A plugin can mutate any page (`archive-done` moves blocks to a
 /// *different* page), so we render every page from the workspace
 /// (`apply_all_pages_md`) — the same "we don't know which pages moved"
-/// path the TUI uses. Best-effort: a failure is logged, the op log is
-/// still the source of truth.
-fn reproject<R: StorageRootProvider>(ws: &Workspace, storage_root: &R) {
+/// path the TUI uses. A failure is returned separately from the successful
+/// mutation so callers can surface it without claiming the op-log write failed.
+fn reproject<R: StorageRootProvider>(
+    ws: &Workspace,
+    storage_root: &R,
+) -> Vec<crate::state::ProjectionFailure> {
     let Some(root) = storage_root.current() else {
-        return;
+        return vec![crate::state::ProjectionFailure {
+            path: None,
+            md_ahead_of_log: None,
+            error: "markdown projection skipped: no workspace storage root is available".into(),
+        }];
     };
-    if let Err(e) = outl_actions::apply_all_pages_md(ws, &root) {
-        warn!("re-projecting .md after plugin mutation failed: {e}");
-    }
+    outl_actions::apply_all_pages_md(ws, &root)
+        .failures
+        .into_iter()
+        .map(|failure| {
+            crate::state::ProjectionFailure::from_error_at(Some(&failure.path), &failure.error)
+        })
+        .collect()
 }

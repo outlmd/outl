@@ -362,6 +362,8 @@ export interface PageView {
    * Mirrors `outl_tauri_shared::state::PageView.md_ahead_of_log_checked`.
    */
   md_ahead_of_log_checked?: boolean;
+  /** Non-refusal projection failure after this mutation already committed. */
+  projection_error?: string;
 }
 
 /**
@@ -382,6 +384,13 @@ export interface MdAheadOfLog {
   lines: number;
   /** One of those lines, already quoted by the backend. */
   sample: string;
+}
+
+/** A projection failure reported after its mutation already committed. */
+export interface ProjectionWriteFailed {
+  page_id: string;
+  md_ahead_of_log?: MdAheadOfLog;
+  error: string;
 }
 
 /**
@@ -637,6 +646,8 @@ export interface PluginRunReply {
 export interface PluginSyncHooksReply {
   view?: PageView;
   views: string[];
+  /** Projection failures after hook mutations were already saved. */
+  errors: string[];
 }
 
 /**
