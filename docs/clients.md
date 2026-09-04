@@ -137,6 +137,8 @@ Regenerate with `OUTL_UPDATE_CLIENTS_DOC=1 cargo test -p outl-actions refusal::`
 The user-facing wording on the GUI clients is owned by `@outl/shared/warnings::aheadOfLogNotice` (unit-tested), never written inline in a client.
 The MCP's wording has no shared owner across the Rust/TypeScript boundary — see the module doc on `crates/outl-cli/src/mcp/tools/dispatch.rs` for why, and what it does instead: it forwards `ActionError::PageMarkdownAheadOfLog`'s own `Display` verbatim rather than writing a second sentence.
 Both banners also warn against editing the page in the meantime: a local edit is safe: `ProjectionWriter` routes through `apply_page_md_with_sidecar_guarded`, which refuses to project over unlogged content exactly as the open path does. The `.md` simply stays behind until the lines are recorded.
+A refusal discovered after the mutation is persisted is not returned as a command failure: synchronous paths attach it to the successful `PageView`, while `ProjectionWriter` emits `projection-write-failed` with the same structured notice.
+Desktop and mobile feed either route into the existing sticky banner; other projection failures retain their original message and use the existing status/toast surface.
 
 The page **still opens** and still shows what is on disk — the guard withheld a write, not the page.
 Before this banner existed the refusal only reached a backend log line, so the page appeared to freeze with nothing said.

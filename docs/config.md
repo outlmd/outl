@@ -31,10 +31,12 @@ A malformed file is logged and replaced with defaults rather than refused to boo
 last = "/Users/me/iCloud/outl"
 
 [theme]
-# Palette preset name from `outl_theme::PRESETS`.
-# Choices: "outl" (default), "default-dark", "light", "dracula",
-#          "solarized-dark", "nord", "monokai".
-preset = "outl"
+# Palette preset names from `outl_theme::PRESETS`. A fresh config uses
+# this light/dark pair; an older config with only `preset` keeps that
+# preset on both sides.
+preset = "outl-light"
+preset_dark = "outl"
+mode = "auto"
 
 [editor]
 # Vim-style modal bindings (Normal / Insert / Visual). Defaults to
@@ -106,13 +108,12 @@ quiet_hours = "22:00-07:00"
 
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
-| `preset` | string | `"outl"` | TUI, desktop, mobile | The light side of the pair, and the only preset used when `mode = "light"`. Unknown names fall through to `outl`. The desktop Settings modal writes this field via `Settings.theme`. |
-| `preset_dark` | string, optional | _none_ (falls back to `preset`) | TUI, desktop, mobile | The dark side of the pair, used when `mode = "dark"` or when `mode = "auto"` resolves dark. `None` resolves to `preset` — see the backwards-compatibility note below. |
+| `preset` | string | `"outl-light"` | TUI, desktop, mobile | The light side of the pair, and the only preset used when `mode = "light"`. Unknown names fall through to `outl`. The desktop Settings modal writes this field via `Settings.theme`. |
+| `preset_dark` | string, optional | `"outl"` for a fresh or wholly missing section; otherwise falls back to an explicit `preset` | TUI, desktop, mobile | The dark side of the pair, used when `mode = "dark"` or when `mode = "auto"` resolves dark. See the backwards-compatibility note below. |
 | `mode` | `"light"` \| `"dark"` \| `"auto"` | `"auto"` | TUI, desktop, mobile | Which side of the pair to render. `"light"` and `"dark"` always resolve to their named side. `"auto"` follows the OS appearance setting — **except on the TUI**, which cannot read it and always resolves to the dark side (see [theming.md → Light / dark pair and `mode`](theming.md#light--dark-pair-and-mode)). |
 
 **Backwards compatibility:** a config with only `preset` set behaves exactly as it did before `preset_dark` and `mode` existed.
-`preset_dark` defaults to `None`, which resolves to `preset`, so `auto` alternates between the same preset on both sides — byte-identical to a config that only ever had one theme.
-Setting a second preset in `preset_dark` is what makes `mode` do anything.
+`ThemeCfg` distinguishes that present legacy section from a wholly missing section: the former leaves `preset_dark` unset so `dark()` resolves to the explicit `preset`; the latter uses the new brand default pair, `outl-light` / `outl`.
 Pinned by `a_config_with_only_preset_behaves_exactly_as_before` (`crates/outl-config/src/schema.rs`).
 
 **Both GUI clients now resolve the pair.**

@@ -343,7 +343,10 @@ impl App {
                 }
             }
             Err(e) => {
-                tracing::warn!("plugin op-hook sweep failed: {e}");
+                self.toast(
+                    ToastKind::Error,
+                    format!("plugin op-hook sweep failed: {e}"),
+                );
             }
         }
     }
@@ -369,8 +372,16 @@ impl App {
     /// pages moved" path) before re-parsing the current view. Then
     /// `load_current` rebuilds the AST, id map, and collapsed mirror.
     fn reproject_after_plugin(&mut self) {
-        if let Err(e) = outl_actions::apply_all_pages_md(&self.workspace, &self.workspace_root) {
-            tracing::warn!("re-projecting .md after plugin mutation failed: {e}");
+        let projection = outl_actions::apply_all_pages_md(&self.workspace, &self.workspace_root);
+        for failure in projection.failures {
+            self.toast(
+                ToastKind::Warning,
+                format!(
+                    "plugin changes were saved, but markdown projection failed for {}: {}",
+                    failure.path.display(),
+                    failure.error
+                ),
+            );
         }
         self.refresh_page_list();
         // A plugin can touch any page, so rebuild the backlink index

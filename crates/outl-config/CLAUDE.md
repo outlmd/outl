@@ -52,8 +52,8 @@ An actor id must **differ** per device, and `config.toml` is a file users copy b
 last = "/Users/me/iCloud/outl"   # absolute path; optional
 
 [theme]
-preset = "outl"                   # name from outl_theme::PRESETS; the light side of the pair
-preset_dark = "dracula"           # optional; dark side. Omit = falls back to `preset` (pre-RFC-0022 behaviour)
+preset = "outl-light"             # name from outl_theme::PRESETS; the light side of the pair
+preset_dark = "outl"              # optional; dark side. Omit = falls back to `preset` (pre-RFC-0022 behaviour)
 mode = "auto"                     # "light" | "dark" | "auto" (default); TUI treats "auto" as "dark"
 
 [editor]
@@ -97,6 +97,8 @@ It exists for environments where the OS clock lies about the zone — containers
 `DisplayCfg::backlinks_order` is a [`BacklinksOrder`] enum (`Newest` | `Oldest`, serde `lowercase`, default `Newest`) — a pure display preference, same "never converges between devices" policy as `theme.preset` (root `CLAUDE.md` invariant #7).
 `ThemeCfg` (RFC 0022) models a light/dark preset *pair*, not a single preset.
 `preset` is the light side, `preset_dark: Option<String>` is the dark side, and `mode` is a [`ThemeMode`] enum (`Light` | `Dark` | `Auto`, serde `lowercase`, default `Auto`).
+A wholly missing section defaults to the brand pair `outl-light` / `outl`.
+`ThemeCfg` uses custom deserialization to distinguish that from a present legacy section: an explicit `preset` with no `preset_dark` leaves the dark side unset.
 `ThemeCfg::dark()` returns `preset_dark` when set, else falls back to `preset`.
 That fallback is what keeps a pre-RFC-0022 config with only `preset` behaving byte-for-byte the same (`mode = "auto"` alternating between the same preset on both sides).
 `ThemeMode` names a *side* to render, not a colour, so nothing stops a misconfigured pair (a dark preset in `preset`); that is surfaced by `outl doctor`, not resolved here.

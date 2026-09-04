@@ -264,8 +264,18 @@ pub fn run() {
             // thread (async-writes default). `storage_root` is a fixed
             // `PathBuf` here (folder swap is a relaunch), which is itself
             // a `StorageRootProvider`.
-            let projection_writer =
-                outl_tauri_shared::ProjectionWriter::spawn(workspace.clone(), storage_root.clone());
+            let projection_app = app.handle().clone();
+            let projection_writer = outl_tauri_shared::ProjectionWriter::spawn(
+                workspace.clone(),
+                storage_root.clone(),
+                move |failure| {
+                    if let Err(error) = projection_app
+                        .emit(outl_tauri_shared::PROJECTION_WRITE_FAILED_EVENT, failure)
+                    {
+                        tracing::warn!("failed to emit projection failure: {error}");
+                    }
+                },
+            );
 
             app.manage(AppState {
                 workspace,

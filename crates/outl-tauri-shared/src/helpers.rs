@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use outl_actions::{
-    apply_page_md_with_sidecar_if_stale, apply_page_md_with_sidecar_rendered, date_from_slug,
+    apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_stale, date_from_slug,
     page_meta as page_meta_action, project_outline, read_page_outline_with_workspace,
     render_page_md, ActionError, HistoryStacks, PageOutline,
 };
@@ -107,6 +107,7 @@ pub fn build_page_view(
         // them where the check actually ran.
         md_ahead_of_log: None,
         md_ahead_of_log_checked: false,
+        projection_error: None,
     })
 }
 
@@ -139,6 +140,7 @@ pub fn build_page_view_from_tree(
         warnings: Vec::new(),
         md_ahead_of_log: None,
         md_ahead_of_log_checked: false,
+        projection_error: None,
     })
 }
 
@@ -213,18 +215,7 @@ pub fn reproject_stale_md(
 /// without a workspace on disk — it is the piece that decides whether
 /// anything reaches the screen at all.
 fn md_ahead_of_log(err: &ActionError) -> Option<MdAheadOfLog> {
-    match err {
-        ActionError::PageMarkdownAheadOfLog {
-            path,
-            lines,
-            sample,
-        } => Some(MdAheadOfLog {
-            path: path.clone(),
-            lines: *lines,
-            sample: sample.clone(),
-        }),
-        _ => None,
-    }
+    MdAheadOfLog::from_error(err)
 }
 
 /// Apply a workspace mutation `f` and project the result back to
@@ -264,8 +255,7 @@ where
     let root = state.storage_root()?;
     with_ws_mut(state, |ws| {
         // Undo snapshot: record the pre-mutation `.md` only when the page
-        // actually changed. The renders here also cover the async path's
-        // diff; the sync fallback reuses `after` for its projection.
+        // actually changed. The render also covers the async path's diff.
         let before = state.history().map(|_| render_page_md(ws, page_id));
         let value = f(ws).map_err(|e| e.to_string())?;
         if let (Some(history), Some(before)) = (state.history(), before) {
@@ -290,11 +280,16 @@ where
         } else {
             // Synchronous fallback (host without a projection worker):
             // project inline and read the view back off the `.md`.
-            let after = render_page_md(ws, page_id);
-            if let Err(e) = apply_page_md_with_sidecar_rendered(ws, &root, page_id, &after) {
+            let projection_failure = apply_page_md_with_sidecar_guarded(ws, &root, page_id).err();
+            if let Some(e) = &projection_failure {
                 warn!("page md+sidecar sync failed: {e}");
             }
-            let view = build_page_view(ws, &root, page_id).map_err(|e| e.to_string())?;
+            let mut view = build_page_view(ws, &root, page_id).map_err(|e| e.to_string())?;
+            if let Some(e) = projection_failure {
+                let failure = crate::state::ProjectionWriteFailed::from_error(page_id, &e);
+                view.md_ahead_of_log = failure.md_ahead_of_log.clone();
+                view.projection_error = failure.md_ahead_of_log.is_none().then_some(failure.error);
+            }
             Ok((value, view))
         }
     })

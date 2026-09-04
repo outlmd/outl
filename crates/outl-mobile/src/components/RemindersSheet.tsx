@@ -183,7 +183,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]">
+        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}

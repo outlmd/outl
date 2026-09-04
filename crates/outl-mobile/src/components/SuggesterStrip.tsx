@@ -31,7 +31,7 @@ export function SuggesterStrip(): JSX.Element {
   return (
     <Show when={items()}>
       {(list) => (
-        <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)] [scrollbar-width:none] dark:shadow-[var(--shadow-capsule-dark)] [&::-webkit-scrollbar]:hidden">
+        <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <For each={list()}>
             {(item) => (
               <button
@@ -40,7 +40,7 @@ export function SuggesterStrip(): JSX.Element {
                 // it the tap blurs the textarea and drops the keyboard.
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => pick(item.slug, item.kind)}
-                class="shrink-0 rounded-full px-3 py-1 text-[15px] text-(--color-outl-fg) active:bg-black/5 dark:active:bg-white/10"
+                class="shrink-0 rounded-full px-3 py-1 text-[15px] text-(--color-outl-fg) active:bg-(--color-outl-border)/30"
               >
                 {item.title}
               </button>

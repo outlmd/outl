@@ -358,19 +358,16 @@ See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) for what the trans
 
 ## Settings
 
-Stored at `<app_config_dir>/settings.json`:
-
-- macOS: `~/Library/Application Support/app.outl.desktop/`
-- Linux: `~/.config/app.outl.desktop/`
-- Windows: `%APPDATA%\app.outl.desktop\`
-
-Schema (`crates/outl-desktop/src-tauri/src/settings.rs::Settings`):
+Stored through `outl-config` at the shared global config path (`~/.config/outl/config.toml` on macOS/Linux, the platform config directory on Windows).
+The frontend still receives this flat JSON DTO from `crates/outl-desktop/src-tauri/src/settings.rs::Settings`:
 
 ```jsonc
 {
   "last_workspace": "/Users/me/iCloud/outl",
   "vim_mode": false,
-  "theme": "auto",       // "light" | "dark" | "auto"
+  "theme": "outl-light",
+  "theme_dark": "outl",
+  "theme_mode": "auto",       // "light" | "dark" | "auto"
   "font_size": 15,
   "sync_transport": "iroh",  // "iroh" (P2P, default) | "file" (iCloud/fs)
   "backlinks_order": "newest"  // "newest" (default) | "oldest" — read-only, see below
@@ -380,10 +377,10 @@ Schema (`crates/outl-desktop/src-tauri/src/settings.rs::Settings`):
 The Sync transport select in `SettingsModal` writes `sync_transport`.
 `settings.rs` maps it to/from `[sync] transport` and preserves `relay_url` on save; takes effect on next launch.
 `backlinks_order` is read-only here — `save` restores it from disk (same pattern as `[calendar]`) so the modal can't clobber the dedicated `set_backlinks_order` command's write.
-`theme` only carries the preset name (the modal owns it).
-`[theme] preset_dark` and `mode` (RFC 0022's light/dark pair) aren't modeled in this flat shape at all, so `save` restores both from disk the same way — otherwise a modal save would silently reset a hand-configured pair back to defaults.
-`settings.rs::restore_unmodeled_sections` is the single place that lists every section/field `save` restores this way.
-A new field added to `[theme]` (or any other unmodeled section) that isn't added there will get silently dropped on the next modal save.
+`theme`, `theme_dark`, and `theme_mode` carry the complete RFC 0022 pair and are owned by the modal.
+Live preview goes through the shared `installTheme`; Save installs the persisted reply, while Cancel or backdrop click reinstalls the configuration captured on open.
+`settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
+A new unmodeled config field omitted there will get silently dropped on the next modal save.
 
 The actor id (one per device) lives next to it as `actor` — a plain ULID.
 Switching workspaces does not rotate it.

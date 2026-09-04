@@ -35,7 +35,7 @@ export function SelectionToolbar(props: SelectionToolbarProps): JSX.Element {
   return (
     <Show when={props.open}>
       <div
-        class="fixed inset-x-3 z-40 flex items-center gap-1 overflow-x-auto rounded-2xl bg-(--color-outl-bg-elev)/95 px-2 py-2 shadow-[var(--shadow-capsule)] backdrop-blur-2xl dark:shadow-[var(--shadow-capsule-dark)]"
+        class="fixed inset-x-3 z-40 flex items-center gap-1 overflow-x-auto rounded-2xl bg-(--color-outl-bg-elev)/95 px-2 py-2 shadow-[var(--shadow-capsule)] backdrop-blur-2xl"
         style={{ bottom: "max(env(safe-area-inset-bottom), 16px)" }}
       >
         <span class="shrink-0 px-2 text-[13px] font-medium text-(--color-outl-fg)">

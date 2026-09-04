@@ -5,8 +5,11 @@
 //! The `AppState` structs themselves stay in the client crates (their
 //! fields differ); only what crosses the Tauri bridge lives here.
 
-use outl_actions::{Backlink, OutlineNode, PageMeta};
+use outl_actions::{ActionError, Backlink, OutlineNode, PageMeta};
 use serde::Serialize;
+
+/// Tauri event emitted when a post-mutation projection could not be written.
+pub const PROJECTION_WRITE_FAILED_EVENT: &str = "projection-write-failed";
 
 /// Sentinel error returned by workspace-touching commands while the
 /// workspace is still being opened (background thread) or while the
@@ -83,6 +86,9 @@ pub struct PageView {
     /// and two guesses drift.
     #[serde(default)]
     pub md_ahead_of_log_checked: bool,
+    /// Non-refusal projection failure after the mutation committed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_error: Option<String>,
 }
 
 impl PageView {
@@ -124,6 +130,104 @@ pub struct MdAheadOfLog {
     /// One of those lines (already quoted by `ActionError`), so the
     /// banner names what is at risk instead of only counting it.
     pub sample: String,
+}
+
+/// Projection failure carried internally after a mutation already succeeded.
+#[derive(Debug, Clone)]
+pub(crate) struct ProjectionFailure {
+    pub path: Option<String>,
+    pub md_ahead_of_log: Option<MdAheadOfLog>,
+    pub error: String,
+}
+
+impl ProjectionFailure {
+    pub fn from_error(error: &ActionError) -> Self {
+        Self::from_error_at(None, error)
+    }
+
+    pub fn from_error_at(path: Option<&std::path::Path>, error: &ActionError) -> Self {
+        Self {
+            path: path.map(|path| path.to_string_lossy().into_owned()),
+            md_ahead_of_log: MdAheadOfLog::from_error(error),
+            error: error.to_string(),
+        }
+    }
+}
+
+/// Failure reported after a mutation was already persisted in the op log.
+///
+/// This is an event rather than a command error because returning `Err` would
+/// falsely tell the caller that the mutation failed. `md_ahead_of_log` selects
+/// the sticky recovery banner; other failures retain their original message.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectionWriteFailed {
+    pub page_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub md_ahead_of_log: Option<MdAheadOfLog>,
+    pub error: String,
+}
+
+impl ProjectionWriteFailed {
+    pub fn from_error(page_id: outl_core::id::NodeId, error: &ActionError) -> Self {
+        Self {
+            page_id: page_id.to_string(),
+            md_ahead_of_log: MdAheadOfLog::from_error(error),
+            error: error.to_string(),
+        }
+    }
+}
+
+impl MdAheadOfLog {
+    pub(crate) fn from_error(error: &ActionError) -> Option<Self> {
+        match error {
+            ActionError::PageMarkdownAheadOfLog {
+                path,
+                lines,
+                sample,
+            } => Some(Self {
+                path: path.clone(),
+                lines: *lines,
+                sample: sample.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectionWriteFailed;
+    use outl_actions::ActionError;
+    use outl_core::id::NodeId;
+
+    #[test]
+    fn post_mutation_refusal_keeps_structured_banner_data() {
+        let failure = ProjectionWriteFailed::from_error(
+            NodeId::new(),
+            &ActionError::PageMarkdownAheadOfLog {
+                path: "/w/pages/notes.md".into(),
+                lines: 2,
+                sample: "\"offline note\"".into(),
+            },
+        );
+
+        let notice = failure
+            .md_ahead_of_log
+            .expect("ahead-of-log refusal must select the sticky banner");
+        assert_eq!(notice.lines, 2);
+        assert!(failure.error.contains("offline note"));
+    }
+
+    #[test]
+    fn other_projection_failures_are_not_mislabelled_as_a_refusal() {
+        let failure = ProjectionWriteFailed::from_error(
+            NodeId::new(),
+            &ActionError::NotInTree("missing".into()),
+        );
+
+        assert!(failure.md_ahead_of_log.is_none());
+        assert!(failure.error.contains("missing"));
+    }
 }
 
 /// Reply shape for the lazy `page_backlinks` command.

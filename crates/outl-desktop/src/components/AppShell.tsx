@@ -15,6 +15,7 @@ import { takePendingDeepLink, workspaceStats } from "../lib/api";
 import {
   onDeepLinkNavigate,
   onPeerOpsChanged,
+  onProjectionWriteFailed,
   onWorkspaceReady,
 } from "../lib/events";
 import type { DeepLinkNavigate } from "../lib/events";
@@ -235,6 +236,17 @@ export function AppShell() {
       void onPeerChange();
     });
     onCleanup(() => unlisten());
+
+    const unlistenProjection = await onProjectionWriteFailed((failure) => {
+      if (failure.md_ahead_of_log && appState.page?.id === failure.page_id) {
+        setAppState("mdAheadOfLog", failure.md_ahead_of_log);
+      } else {
+        // An off-screen refusal still froze a page. It cannot use the
+        // current page's sticky banner, but it must reach the user.
+        setError(failure.error);
+      }
+    });
+    onCleanup(() => unlistenProjection());
 
     // `outl://` deep links opened while the app is running (issue #98).
     const unlistenDeepLink = await onDeepLinkNavigate((payload) => {

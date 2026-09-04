@@ -127,6 +127,8 @@ pub(crate) enum PluginRequest {
 pub struct SyncHooksOutcome {
     pub applied: usize,
     pub views: Vec<String>,
+    /// Projection failures after hook intents were durably applied.
+    pub(crate) projection_errors: Vec<crate::state::ProjectionFailure>,
 }
 
 /// `Send + Sync` handle to the plugin thread. Stored in `AppState`.

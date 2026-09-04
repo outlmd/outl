@@ -199,7 +199,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           {/* Guide line connecting parent bullet to children */}
           <span
             aria-hidden="true"
-            class="absolute top-0 bottom-0 w-px bg-(--color-outl-border)/35 dark:bg-(--color-outl-border)/30"
+            class="absolute top-0 bottom-0 w-px bg-(--color-outl-border)/35"
             style={{ left: `${16 + props.depth * INDENT_PX + 5}px` }}
           />
           <For each={props.block.children}>
@@ -527,7 +527,7 @@ function BlockBody(props: {
             <QuoteWrap
               quoted={isBlockQuoted(props.block.text)}
               baseClass="flex min-w-0 flex-1"
-              chromeClass="rounded-r-md border-l-2 border-(--color-outl-fg-dim)/40 bg-(--color-outl-fg-dim)/[0.05] pl-2 dark:bg-(--color-outl-fg-dim)/[0.07]"
+              chromeClass="rounded-r-md border-l-2 border-(--color-outl-fg-dim)/40 bg-(--color-outl-fg-dim)/[0.05] pl-2"
             >
               {bodyDiv}
             </QuoteWrap>

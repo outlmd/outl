@@ -23,10 +23,12 @@ Four ways to pick, in precedence order:
    ```toml
    # ~/.config/outl/config.toml
    [theme]
-   preset = "outl"
+   preset = "outl-light"
+   preset_dark = "outl"
+   mode = "auto"
    ```
    The desktop's Settings modal writes here, so changing the theme there propagates to the next `outl-tui` launch automatically.
-4. **Default** — `outl` (brand palette) when nothing is configured.
+4. **Default** — the `outl-light` / `outl` brand pair when nothing is configured.
 
 Names are case- and separator-insensitive.
 `dracula`, `Dracula`, `DRACULA`, `Solarized Dark`, `solarized_dark`, `solarized-dark` all resolve to the same theme.
@@ -62,12 +64,15 @@ This is a deliberate, permanent behaviour of the TUI client, not a bug to file.
 All three clients read `mode` / `preset_dark`, validated by `outl doctor`'s pairing check.
 The desktop and mobile both call the shared `get_theme_config` command (`outl-tauri-shared::commands::theme`), which resolves `[theme]` — `preset_dark` already falls back to `preset` on the Rust side.
 Both feed the result to the shared `installTheme` (`@outl/shared/theme`, moved out of `outl-mobile/src/lib/theme.ts`).
-Both sides of the pair are fetched once at boot and held in memory; a `prefers-color-scheme` listener repaints locally on an OS appearance flip, with no backend round-trip mid-repaint.
-The desktop's `App.tsx::hydrateTheme` and mobile's `App.tsx` `onMount` are the two call sites.
+Both sides of the pair are fetched and held in memory; a `prefers-color-scheme` listener repaints locally on an OS appearance flip, with no backend round-trip mid-repaint.
+`installTheme` owns the single active installation: installing a saved or restored config replaces both the cached pair and the listener, so Settings cannot leave boot-time values active.
+The desktop's `App.tsx::hydrateTheme`, its Settings modal, and mobile's `App.tsx` `onMount` are the call sites.
+A fresh config defaults to the brand pair `outl-light` / `outl`; an older config that explicitly contains only `preset` keeps that preset on both sides through `ThemeCfg::dark()`.
 
 **The desktop Settings modal now writes the whole pair.**
 `SettingsModal.tsx` renders a mode selector (`light` / `dark` / `auto`) plus one picker per side, backed by two new `Settings` DTO fields — `theme_dark` and `theme_mode` — alongside the existing `theme` (the light side).
-Each picker's live preview reuses `pickSide` (the same function `installTheme` uses) to decide whether an edit to that side should repaint the document immediately, so the modal never has a second opinion about which side is on screen.
+Each preview reinstalls the draft pair through `installTheme`, so mode changes, preset changes, and later OS flips all use the same cached configuration.
+Save installs the persisted reply; Cancel and backdrop click reinstall the configuration captured when the modal opened.
 `crates/outl-desktop/src-tauri/src/settings.rs::restore_unmodeled_sections` no longer restores `preset_dark` / `mode` from disk.
 Now that the modal owns all three fields, restoring any of them would silently discard the user's pick instead of protecting it.
 
@@ -173,7 +178,7 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 |---|---|
 | **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). The six RGB presets (`outl`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`) are one-line delegates; `default-dark` and `light` stay manual on ANSI named colors. |
 | **`outl-desktop`** | The Tauri commands `list_themes()` and `get_theme(name)` return the `Palette` as JSON. The frontend writes each field as a CSS custom property on `<html>` (`--color-outl-accent`, `--color-outl-ref-link-fg`, …) so Tailwind class utilities like `text-(--color-outl-accent)` resolve at runtime, and flips `color-scheme` (light/dark) from the palette's `bg` luminance so native controls and scrollbars follow. Settings modal exposes the dropdown. Chrome surfaces never hardcode a hue — translucent layers derive from `--color-outl-fg` (`bg-(--color-outl-fg)/10`) so they adapt to light and dark presets alike. |
-| **`outl-mobile`** | `src/lib/theme.ts::installTheme` fetches both sides of the configured pair from the same `get_theme` Tauri command at boot and holds both `Palette` objects in memory, then calls the shared `applyPaletteToRoot` (RFC 0022, issue #22 — closed by moving the command bodies into `outl-tauri-shared`). A `prefers-color-scheme` media-query listener swaps tokens on an OS appearance flip without a second backend round-trip — see the opposite-direction cost this trades away in [RFC 0022](rfcs/0022-unified-design-tokens.md). |
+| **`outl-mobile`** | Shared `@outl/shared/theme::installTheme` fetches both sides of the configured pair and holds both `Palette` objects in memory, then calls `applyPaletteToRoot` (RFC 0022, issue #22). A `prefers-color-scheme` media-query listener swaps tokens on an OS appearance flip without a second backend round-trip; a fresh default config uses `outl-light` / `outl`. |
 
 ### Desktop CSS custom-property namespaces
 

@@ -320,8 +320,14 @@ fn run_command(path: &Path, plugin_id: &str, command_id: &str) -> Result<()> {
 
     // Re-render every `.md`: the op log is the source of truth, the files
     // are a projection. Skipping this leaves the change invisible on disk.
-    apply_all_pages_md(&wc.workspace, &wc.root)
-        .map_err(|e| anyhow::anyhow!("re-rendering pages after plugin run: {e}"))?;
+    let projection = apply_all_pages_md(&wc.workspace, &wc.root);
+    for failure in projection.failures {
+        eprintln!(
+            "warning: plugin changes were saved, but markdown projection failed for {}: {}",
+            failure.path.display(),
+            failure.error
+        );
+    }
 
     for line in &outcome.logs {
         println!("[log] {line}");

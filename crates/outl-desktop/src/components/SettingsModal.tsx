@@ -1,7 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal, onMount } from "solid-js";
 
-import { getTheme, listThemes } from "@outl/shared/api/commands";
-import { applyPaletteToRoot, pickSide, type ThemeMode } from "@outl/shared/theme";
+import { listThemes } from "@outl/shared/api/commands";
+import { installTheme, pickSide, type ThemeConfig, type ThemeMode } from "@outl/shared/theme";
 
 import { getSettings, updateSettings, type Settings } from "../lib/api";
 import { appState, setAppState } from "../lib/store";
@@ -19,6 +19,7 @@ import { SyncPanel } from "./SyncPanel";
 export function SettingsModal() {
   const [draft, setDraft] = createSignal<Settings | null>(null);
   const [busy, setBusy] = createSignal(false);
+  let activeTheme: ThemeConfig | null = null;
   const [themes] = createResource(async () => {
     try {
       return await listThemes();
@@ -47,13 +48,23 @@ export function SettingsModal() {
     ),
   );
 
-  function close() {
+  function themeConfig(s: Settings): ThemeConfig {
+    return {
+      mode: s.theme_mode as ThemeMode,
+      preset: s.theme,
+      presetDark: s.theme_dark,
+    };
+  }
+
+  function close(restore = true) {
+    if (restore && activeTheme) void installTheme(activeTheme);
     setAppState("settingsOpen", false);
   }
 
   onMount(async () => {
     try {
       const s = await getSettings();
+      activeTheme = themeConfig(s);
       setDraft(s);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
@@ -66,10 +77,9 @@ export function SettingsModal() {
    * it from the dropdown, so they can preview without committing.
    * Save (or Cancel) is what persists / reverts.
    */
-  async function previewTheme(name: string) {
+  async function previewTheme(next: ThemeConfig) {
     try {
-      const palette = await getTheme(name);
-      applyPaletteToRoot(palette);
+      await installTheme(next);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     }
@@ -81,8 +91,10 @@ export function SettingsModal() {
     setBusy(true);
     try {
       const persisted = await updateSettings(d);
+      activeTheme = themeConfig(persisted);
       setDraft(persisted);
-      close();
+      await installTheme(activeTheme);
+      close(false);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     } finally {
@@ -135,12 +147,9 @@ export function SettingsModal() {
                     onChange={(e) => {
                       const d = draft()!;
                       const nextMode = e.currentTarget.value as ThemeMode;
-                      setDraft({ ...d, theme_mode: nextMode });
-                      const osIsLight = !window.matchMedia(
-                        "(prefers-color-scheme: dark)",
-                      ).matches;
-                      const side = pickSide(nextMode, osIsLight);
-                      void previewTheme(side === "dark" ? d.theme_dark : d.theme);
+                      const next = { ...d, theme_mode: nextMode };
+                      setDraft(next);
+                      void previewTheme(themeConfig(next));
                     }}
                     class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
                   >
@@ -160,8 +169,9 @@ export function SettingsModal() {
                       value={draft()!.theme}
                       onChange={(e) => {
                         const next = e.currentTarget.value;
-                        setDraft({ ...draft()!, theme: next });
-                        if (renderedSide() === "light") void previewTheme(next);
+                        const updated = { ...draft()!, theme: next };
+                        setDraft(updated);
+                        void previewTheme(themeConfig(updated));
                       }}
                       class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
                     >
@@ -180,8 +190,9 @@ export function SettingsModal() {
                       value={draft()!.theme_dark}
                       onChange={(e) => {
                         const next = e.currentTarget.value;
-                        setDraft({ ...draft()!, theme_dark: next });
-                        if (renderedSide() === "dark") void previewTheme(next);
+                        const updated = { ...draft()!, theme_dark: next };
+                        setDraft(updated);
+                        void previewTheme(themeConfig(updated));
                       }}
                       class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
                     >

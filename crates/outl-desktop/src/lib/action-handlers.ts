@@ -711,6 +711,7 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       // Blocking the toggle on the plugin JS just delayed the checkbox.
       void safeCall(pluginSyncHooks(pageId)).then((hooked) => {
         if (hooked?.view) deps.applyView(hooked.view);
+        for (const err of hooked?.errors ?? []) deps.setError(err);
         if (hooked) playPluginViews(hooked.views);
       });
     },

@@ -12,6 +12,7 @@
  *   `reload_workspace` straight through without extra throttling.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ProjectionWriteFailed } from "@outl/shared/api/types";
 
 /**
  * Register a handler for the `workspace-ready` event. Returns an
@@ -27,6 +28,15 @@ export function onWorkspaceReady(handler: () => void): Promise<UnlistenFn> {
  */
 export function onPeerOpsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("peer-ops-changed", () => handler());
+}
+
+/** Report a projection failure without turning its committed mutation into an error. */
+export function onProjectionWriteFailed(
+  handler: (payload: ProjectionWriteFailed) => void,
+): Promise<UnlistenFn> {
+  return listen<ProjectionWriteFailed>("projection-write-failed", (event) =>
+    handler(event.payload),
+  );
 }
 
 /**

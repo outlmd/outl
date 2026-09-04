@@ -28,37 +28,44 @@ export function pickSide(mode: ThemeMode, osIsLight: boolean): "light" | "dark" 
   return osIsLight ? "light" : "dark";
 }
 
-export async function installTheme(cfg: {
+export interface ThemeConfig {
   mode: ThemeMode;
   preset: string;
   presetDark: string;
-}): Promise<() => void> {
-  // A rejection here must not escape: `onMount` in the caller awaits
-  // this before registering `onCleanup(unsubscribe)`, so an uncaught
-  // throw would skip that registration entirely (mirrors the
-  // desktop's `hydrateTheme` fallback in App.tsx).
-  let sides: Record<"light" | "dark", Palette>;
-  try {
-    const [light, dark] = await Promise.all([
-      getTheme(cfg.preset),
-      getTheme(cfg.presetDark),
-    ]);
-    sides = { light, dark };
-  } catch {
-    try {
-      const fallback = await getTheme(null);
-      sides = { light: fallback, dark: fallback };
-    } catch {
-      // No backend at all (shouldn't happen) — keep the static boot
-      // frame and skip wiring the OS-appearance listener.
-      return () => {};
-    }
-  }
+}
 
+let latestRequest = 0;
+let activeInstallation = 0;
+let removeActiveListener: (() => void) | undefined;
+
+export async function installTheme(cfg: ThemeConfig): Promise<() => void> {
+  const request = ++latestRequest;
+  // Unknown preset names already fall back in the Rust command. Transport
+  // failures must escape so Settings can tell the user that its preview or
+  // saved palette was not installed; boot callers own their static-frame
+  // fallback.
+  const [light, dark] = await Promise.all([
+    getTheme(cfg.preset),
+    getTheme(cfg.presetDark),
+  ]);
+  const sides: Record<"light" | "dark", Palette> = { light, dark };
+
+  if (request !== latestRequest) return () => {};
+
+  removeActiveListener?.();
+  removeActiveListener = undefined;
+  const installation = ++activeInstallation;
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const paint = () => applyPaletteToRoot(sides[pickSide(cfg.mode, !mq.matches)]);
+  const remove = () => mq.removeEventListener("change", paint);
 
   paint();
   mq.addEventListener("change", paint);
-  return () => mq.removeEventListener("change", paint);
+  removeActiveListener = remove;
+
+  return () => {
+    if (installation !== activeInstallation) return;
+    remove();
+    removeActiveListener = undefined;
+  };
 }

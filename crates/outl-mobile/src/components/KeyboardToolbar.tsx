@@ -38,7 +38,7 @@ export function KeyboardToolbar(props: {
   }
 
   return (
-    <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)] dark:shadow-[var(--shadow-capsule-dark)]">
+    <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)]">
       <ToolbarButton action={PINNED_FIRST} onFire={fire} />
       <div class="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <For each={order()}>
@@ -61,7 +61,7 @@ function ToolbarButton(props: {
     <button
       type="button"
       aria-label={meta.label}
-      class="flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-(--color-outl-fg) active:bg-black/5 dark:active:bg-white/10"
+      class="flex h-9 w-10 shrink-0 items-center justify-center rounded-full text-(--color-outl-fg) active:bg-(--color-outl-border)/30"
       classList={{
         "text-(--color-outl-destructive)":
           destructive,

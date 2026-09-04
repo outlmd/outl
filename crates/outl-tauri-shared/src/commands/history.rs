@@ -70,16 +70,19 @@ fn step_history<S: AppHost>(
     // queued ahead of this flush, so calling `flush()` while already
     // holding the lock would deadlock the two against each other.
     if let Some(writer) = state.projection_writer() {
-        writer.flush();
+        writer.flush()?;
     }
     with_ws_mut(state, |ws| {
         let current = render_page_md(ws, page);
-        let snapshot = {
+        let restored = {
             let mut map = history.lock();
             let stacks = map.entry(page).or_default();
+            let restore = |snapshot: &String| {
+                outl_actions::restore_page_md(ws, state.hlc(), &root, page, snapshot)
+            };
             match direction {
-                Direction::Undo => stacks.undo(current),
-                Direction::Redo => stacks.redo(current),
+                Direction::Undo => stacks.try_undo(current, restore),
+                Direction::Redo => stacks.try_redo(current, restore),
             }
         }
         .ok_or_else(|| {
@@ -89,8 +92,7 @@ fn step_history<S: AppHost>(
             }
             .to_string()
         })?;
-        outl_actions::restore_page_md(ws, state.hlc(), &root, page, &snapshot)
-            .map_err(|e| e.to_string())?;
+        restored.map_err(|e| e.to_string())?;
         build_page_view(ws, &root, page).map_err(|e| e.to_string())
     })
 }

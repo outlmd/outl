@@ -144,6 +144,17 @@ pub enum ActionError {
     )]
     PageSidecarUnreadable(String),
 
+    /// A guarded writer detected that the `.md` changed after it was
+    /// inspected but before it could replace the file.
+    ///
+    /// Editors do not participate in outl's advisory page lock, so the
+    /// writer re-reads immediately before rename and refuses rather than
+    /// knowingly overwrite a save that landed during projection work.
+    #[error(
+        "refusing to rewrite `{0}`: the markdown changed while the projection was being prepared"
+    )]
+    PageMarkdownChangedDuringProjection(String),
+
     /// Underlying workspace failure (storage, etc).
     #[error(transparent)]
     Workspace(#[from] WorkspaceError),

@@ -273,8 +273,9 @@ Design:
 - Each request (`ListCommands` / `RunCommand` / `SyncHooks`) carries a one-shot `std::sync::mpsc::Sender` reply channel.
   The Tauri command sends the request, then **blocks on `recv()` with the workspace `Mutex` released** (never held across the reply) — the plugin thread is the one that locks the workspace to run the host.
   No `.await` ever holds the lock.
-- After a plugin mutation (`run.applied > 0`), the plugin thread re-projects **every** page's `.md` via `outl_actions::apply_all_pages_md` before replying.
+- After a plugin mutation (`run.applied > 0`), the plugin thread re-projects **every** page's `.md` + sidecar via `outl_actions::apply_all_pages_md` before replying. One refused page does not skip later pages; the sweep returns every failure separately from the already-committed plugin mutation.
   A plugin can move blocks to any page — same rationale as the TUI's `reproject_after_plugin`.
+  Each page uses the post-mutation ahead-of-log guard, so the sweep refuses rather than overwriting unlogged content.
 
 Capabilities honored: `slash-command` + `op-hook` + `ui-render` + `keybinding` + `toolbar-button`.
 The host filters `keybinding` / `toolbar-button` by declared capability **before** `keybindings("desktop")` / `toolbar_buttons("desktop")` return anything,
@@ -366,5 +367,5 @@ The five touch points are:
   Lang match: the fence's raw info-string first (custom langs like `mermaid`), then the canonical alias via `outl_md::lang::canonical` (so a transformer registered as `rust` fires on `` ```rs ``).
   Best-effort: a plugin error or `Ok(None)` (declined) leaves the block to render as a raw fence — never crashes.
 
-A plugin mutation lands in the op log via `outl-actions` but does **not** write `.md`, so `reproject_after_plugin` runs `outl_actions::apply_all_pages_md` (a plugin can touch any page) then `load_current`.
+A plugin mutation lands in the op log via `outl-actions` but does **not** write `.md`, so `reproject_after_plugin` runs `outl_actions::apply_all_pages_md` (a plugin can touch any page, and every page uses the post-mutation ahead-of-log guard) then `load_current`.
 If a plugin declares a capability the TUI lacks, the host filters it; `host.missing_capabilities(id)` lists the gap.

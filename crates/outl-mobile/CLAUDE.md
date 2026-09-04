@@ -423,8 +423,8 @@ Contract-by-contract table (moved out to keep this file under the per-crate size
 
 ## Theming (RFC 0022)
 
-`src/lib/theme.ts::installTheme` fetches both pair sides via the shared `get_theme` command at boot, holds both `Palette`s in memory, and repaints through `applyPaletteToRoot` on a `prefers-color-scheme` flip (no backend round-trip mid-repaint).
-`App.tsx` hardcodes the pair (`outl-light` / `outl`) instead of reading `outl_config::ThemeCfg` — no settings surface exists yet to expose `[theme]`, so `preset` / `preset_dark` / `mode` are ignored here until one lands.
+`@outl/shared/theme::installTheme` fetches both pair sides via the shared `get_theme` command, holds both `Palette`s in memory, and repaints through `applyPaletteToRoot` on a `prefers-color-scheme` flip (no backend round-trip mid-repaint).
+`App.tsx` reads `outl_config::ThemeCfg`; a fresh config already resolves to the brand pair `outl-light` / `outl`, while older configs with only `preset` keep that preset on both sides.
 Field reference: [`docs/config.md` § `[theme]`](../../docs/config.md#theme).
 
 ## Logging (device console)

@@ -143,6 +143,12 @@ pub struct PluginRunDto {
     /// runs each in an ephemeral sandboxed `<iframe>` overlay — these
     /// are untrusted plugin strings, never trusted app markup.
     pub views: Vec<String>,
+    /// Projection failures after the intents were durably applied.
+    /// Kept off the wire here; the command layer assigns the current
+    /// page's failure when possible and reports every other one through
+    /// `errors`.
+    #[serde(skip)]
+    pub(crate) projection_errors: Vec<crate::state::ProjectionFailure>,
 }
 
 impl From<PluginRun> for PluginRunDto {
@@ -152,6 +158,7 @@ impl From<PluginRun> for PluginRunDto {
             notifications: r.notifications,
             errors: r.errors,
             views: r.views,
+            projection_errors: Vec::new(),
         }
     }
 }

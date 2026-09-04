@@ -21,8 +21,8 @@
 //! last = "/Users/me/iCloud/outl"
 //!
 //! [theme]
-//! preset = "outl"        # name from outl_theme::PRESETS; the light side of the pair
-//! preset_dark = "dracula"   # optional; dark side. Omit = falls back to `preset`
+//! preset = "outl-light"  # name from outl_theme::PRESETS; the light side of the pair
+//! preset_dark = "outl"   # optional; dark side. Omit = falls back to `preset`
 //! mode = "auto"          # "light" | "dark" | "auto" (default)
 //!
 //! [editor]

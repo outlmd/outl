@@ -150,7 +150,8 @@ fn async_host_with_page() -> (TempDir, AsyncHistoryHost, NodeId, String) {
     let block = append_block(&mut ws, &hlc, Some(page), Some("one")).unwrap();
 
     let workspace = Arc::new(Mutex::new(Some(ws)));
-    let projection_writer = ProjectionWriter::spawn(workspace.clone(), tmp.path().to_path_buf());
+    let projection_writer =
+        ProjectionWriter::spawn(workspace.clone(), tmp.path().to_path_buf(), |_| {});
     let host = AsyncHistoryHost {
         workspace,
         hlc,
@@ -275,6 +276,29 @@ fn redo_replays_the_edit_undo_reverted() {
 
     undo_page(&host, page_id.clone()).expect("undo_page");
     redo_page(&host, page_id).expect("redo_page");
+    assert_eq!(page_text(&host, page), "title:: Ideas\n\n- two\n");
+}
+
+#[test]
+fn failed_restore_does_not_consume_or_corrupt_undo_redo() {
+    let (tmp, mut host, page, block_id) = host_with_page();
+    let page_id = page.to_string();
+    edit_block(&host, page_id.clone(), block_id, "two".into()).expect("edit_block");
+
+    host.root = tmp.path().join("missing").join("workspace");
+    assert!(undo_page(&host, page_id.clone()).is_err());
+    assert_eq!(page_text(&host, page), "title:: Ideas\n\n- two\n");
+
+    host.root = tmp.path().to_path_buf();
+    undo_page(&host, page_id.clone()).expect("retry undo");
+    assert_eq!(page_text(&host, page), "title:: Ideas\n\n- one\n");
+
+    host.root = tmp.path().join("missing").join("workspace");
+    assert!(redo_page(&host, page_id.clone()).is_err());
+    assert_eq!(page_text(&host, page), "title:: Ideas\n\n- one\n");
+
+    host.root = tmp.path().to_path_buf();
+    redo_page(&host, page_id).expect("retry redo");
     assert_eq!(page_text(&host, page), "title:: Ideas\n\n- two\n");
 }
 

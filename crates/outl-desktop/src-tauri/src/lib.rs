@@ -272,8 +272,18 @@ pub fn run() {
             // here so the `.md` + sidecar write happens off the IPC
             // thread (async-writes default). Shares the same workspace
             // slot + swap-capable storage root the commands lock.
-            let projection_writer =
-                outl_tauri_shared::ProjectionWriter::spawn(workspace.clone(), storage_root.clone());
+            let projection_app = app.handle().clone();
+            let projection_writer = outl_tauri_shared::ProjectionWriter::spawn(
+                workspace.clone(),
+                storage_root.clone(),
+                move |failure| {
+                    if let Err(error) = projection_app
+                        .emit(outl_tauri_shared::PROJECTION_WRITE_FAILED_EVENT, failure)
+                    {
+                        tracing::warn!("failed to emit projection failure: {error}");
+                    }
+                },
+            );
 
             app.manage(AppState {
                 workspace,

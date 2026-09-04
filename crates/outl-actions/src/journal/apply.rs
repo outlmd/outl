@@ -1,8 +1,10 @@
 //! Write `.md` + `.outl` projections to disk — the `apply_*` family,
 //! `mutate_page_md`, and the workspace-wide sweep.
 
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use outl_md::sidecar::{content_hash, file_hash, sidecar_path_for, Sidecar, SidecarBlock};
@@ -125,6 +127,7 @@ pub fn apply_page_md_with_sidecar_guarded(
     let meta = page_meta(workspace, page_root)
         .ok_or_else(|| ActionError::NotInTree(page_root.to_string()))?;
     let path = page_md_path(root, &meta);
+    let _lock = ProjectionLock::acquire(&path)?;
 
     // Absent `.md` → nothing on disk can be lost. An unreadable one is
     // *not* treated as absent: that is how a transient I/O error or an
@@ -138,7 +141,7 @@ pub fn apply_page_md_with_sidecar_guarded(
         // turns into an overwrite.
         Err(e) => return Err(e.into()),
     };
-    if let Some(disk) = disk {
+    if let Some(disk) = disk.as_deref() {
         // **An unreadable sidecar is a refusal, not a fall-through.**
         //
         // Missing, corrupt, or written by a newer binary
@@ -174,7 +177,44 @@ pub fn apply_page_md_with_sidecar_guarded(
     }
 
     let md = render_page_md(workspace, page_root);
-    write_page_projection(workspace, root, page_root, &meta, &md)
+    write_page_projection_if_unchanged(workspace, root, page_root, &meta, &md, disk.as_deref())
+}
+
+/// Cross-process serialization for a page's guarded check-and-write.
+///
+/// The stable sibling stays locked while the atomic write replaces the
+/// `.md` inode, closing the check-to-rename window between outl processes.
+pub(crate) struct ProjectionLock {
+    file: File,
+}
+
+impl ProjectionLock {
+    pub(crate) fn acquire(md_path: &Path) -> Result<Self, ActionError> {
+        let parent = md_path.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "page path has no parent")
+        })?;
+        std::fs::create_dir_all(parent)?;
+        let name = md_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid page filename")
+            })?;
+        let lock_path = md_path.with_file_name(format!(".{name}.lock"));
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        file.lock_exclusive()?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for ProjectionLock {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
 }
 
 /// Like [`apply_page_md_with_sidecar`] but reuses an already-rendered
@@ -207,10 +247,54 @@ fn write_page_projection(
     md: &str,
 ) -> Result<PathBuf, ActionError> {
     let path = page_md_path(root, meta);
+    let _lock = ProjectionLock::acquire(&path)?;
+    write_page_projection_unlocked(workspace, root, page_root, meta, md)
+}
+
+fn write_page_projection_unlocked(
+    workspace: &Workspace,
+    root: &Path,
+    page_root: NodeId,
+    meta: &PageMeta,
+    md: &str,
+) -> Result<PathBuf, ActionError> {
+    let path = page_md_path(root, meta);
     write_md_atomic(&path, md)?;
     let sidecar = build_sidecar(workspace, page_root, md);
     outl_md::sidecar::write(&sidecar_path_for(&path), &sidecar)?;
     Ok(path)
+}
+
+/// Best-effort compare-before-replace for editors that do not honour
+/// [`ProjectionLock`].
+///
+/// There is no portable atomic compare-and-swap for a pathname. The page lock
+/// closes the window between cooperating outl processes; this final re-read
+/// closes the practical window where rendering or sidecar construction gave an
+/// external editor time to save. If the bytes no longer match the revision the
+/// guard authorized, refuse and let the filesystem reconciliation path ingest
+/// the external edit.
+fn write_page_projection_if_unchanged(
+    workspace: &Workspace,
+    root: &Path,
+    page_root: NodeId,
+    meta: &PageMeta,
+    md: &str,
+    expected_disk: Option<&str>,
+) -> Result<PathBuf, ActionError> {
+    let path = page_md_path(root, meta);
+    let unchanged = match (expected_disk, std::fs::read_to_string(&path)) {
+        (Some(expected), Ok(current)) => current == expected,
+        (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => true,
+        (_, Err(error)) => return Err(error.into()),
+        _ => false,
+    };
+    if !unchanged {
+        return Err(ActionError::PageMarkdownChangedDuringProjection(
+            path.display().to_string(),
+        ));
+    }
+    write_page_projection_unlocked(workspace, root, page_root, meta, md)
 }
 
 /// Like [`apply_page_md_with_sidecar`], but **skips the write when the
@@ -234,10 +318,12 @@ pub fn apply_page_md_with_sidecar_if_absent(
     let meta = page_meta(workspace, page_root)
         .ok_or_else(|| ActionError::NotInTree(page_root.to_string()))?;
     let path = page_md_path(root, &meta);
+    let _lock = ProjectionLock::acquire(&path)?;
     if path.exists() {
         return Ok(None);
     }
-    apply_page_md_with_sidecar(workspace, root, page_root).map(Some)
+    let rendered = render_page_md(workspace, page_root);
+    write_page_projection_unlocked(workspace, root, page_root, &meta, &rendered).map(Some)
 }
 
 /// Like [`apply_page_md_with_sidecar`], but writes **only when the on-disk
@@ -279,11 +365,15 @@ pub fn apply_page_md_with_sidecar_if_stale(
     let meta = page_meta(workspace, page_root)
         .ok_or_else(|| ActionError::NotInTree(page_root.to_string()))?;
     let path = page_md_path(root, &meta);
+    let _lock = ProjectionLock::acquire(&path)?;
     let disk = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Genuinely absent → project it (issue #120).
-            return apply_page_md_with_sidecar(workspace, root, page_root).map(Some);
+            // Genuinely absent → project it (issue #120). The page lock is
+            // already held, so call the unlocked transaction tail directly.
+            let rendered = render_page_md(workspace, page_root);
+            return write_page_projection_unlocked(workspace, root, page_root, &meta, &rendered)
+                .map(Some);
         }
         // Present but unreadable (permissions, non-UTF8, …): do NOT treat as
         // absent — re-projecting would clobber a file that may hold an external
@@ -359,7 +449,8 @@ pub fn apply_page_md_with_sidecar_if_stale(
     if let Some(e) = unlogged_content_error(&path, &disk, &sidecar.blocks) {
         return Err(e);
     }
-    write_page_projection(workspace, root, page_root, &meta, &rendered).map(Some)
+    write_page_projection_if_unchanged(workspace, root, page_root, &meta, &rendered, Some(&disk))
+        .map(Some)
 }
 
 /// The content lines in `disk` that **no block the op log knows** can
@@ -635,16 +726,42 @@ fn walk_ast_for_sidecar(
 /// Render **every** page in the workspace to its `.md` file. Useful
 /// after a workspace-wide change (sync pull, migration, …) when we
 /// don't know which pages actually moved.
-pub fn apply_all_pages_md(workspace: &Workspace, root: &Path) -> Result<Vec<PathBuf>, ActionError> {
-    let mut written = Vec::new();
+///
+/// Each page uses the post-mutation guard: a bulk plugin mutation may
+/// advance the tree, but it must never overwrite content ahead of the log.
+/// Pages are independent, so the pass continues after a refusal and returns
+/// every success and failure in [`ProjectionSweep`].
+pub fn apply_all_pages_md(workspace: &Workspace, root: &Path) -> ProjectionSweep {
+    let mut report = ProjectionSweep::default();
     for meta in list_pages(workspace) {
-        let id = parse_node_id(&meta.id)?;
-        let md = render_page_md(workspace, id);
-        let path = page_md_path(root, &meta);
-        write_md_atomic(&path, &md)?;
-        written.push(path);
+        let result = parse_node_id(&meta.id)
+            .and_then(|id| apply_page_md_with_sidecar_guarded(workspace, root, id));
+        match result {
+            Ok(path) => report.written.push(path),
+            Err(error) => report.failures.push(ProjectionFailure {
+                path: page_md_path(root, &meta),
+                error,
+            }),
+        }
     }
-    Ok(written)
+    report
+}
+
+/// Non-atomic result of a workspace-wide projection pass.
+///
+/// Pages are independent projections, so one refusal must not leave every page
+/// after it stale. Callers surface `failures` separately from the plugin ops
+/// that were already committed.
+#[derive(Debug, Default)]
+pub struct ProjectionSweep {
+    pub written: Vec<PathBuf>,
+    pub failures: Vec<ProjectionFailure>,
+}
+
+#[derive(Debug)]
+pub struct ProjectionFailure {
+    pub path: PathBuf,
+    pub error: ActionError,
 }
 
 fn parse_node_id(s: &str) -> Result<NodeId, ActionError> {

@@ -244,17 +244,33 @@ pub fn move_block_after<S: AppHost>(
         // delete content the op log never saw (invariant 8). The move
         // itself is already in the log; only the on-disk `.md` lags, and
         // the open path raises a banner explaining why.
-        if let Err(e) = apply_page_md_with_sidecar_guarded(ws, &root, page) {
+        let destination_failure = apply_page_md_with_sidecar_guarded(ws, &root, page).err();
+        if let Some(e) = &destination_failure {
             warn!("destination page md+sidecar sync skipped: {e}");
         }
-        if let Some(src) = source_page {
-            if src != page {
-                if let Err(e) = apply_page_md_with_sidecar_guarded(ws, &root, src) {
-                    warn!("source page md+sidecar sync skipped: {e}");
-                }
+        let source_failure = if let Some(src) = source_page.filter(|src| *src != page) {
+            let failure = apply_page_md_with_sidecar_guarded(ws, &root, src).err();
+            if let Some(e) = &failure {
+                warn!("source page md+sidecar sync skipped: {e}");
+            }
+            failure.map(|e| (src, e))
+        } else {
+            None
+        };
+        let mut view = build_page_view(ws, &root, page).map_err(|e| e.to_string())?;
+        if let Some(e) = destination_failure {
+            let failure = crate::state::ProjectionWriteFailed::from_error(page, &e);
+            view.md_ahead_of_log = failure.md_ahead_of_log.clone();
+            view.projection_error = failure.md_ahead_of_log.is_none().then_some(failure.error);
+        }
+        if let Some((src, e)) = source_failure {
+            // The reply renders the destination, so notify the source page via
+            // the event bridge instead of attaching its notice to this view.
+            if let Some(writer) = state.projection_writer() {
+                writer.report_failure(src, &e);
             }
         }
-        build_page_view(ws, &root, page).map_err(|e| e.to_string())
+        Ok(view)
     })
 }
 

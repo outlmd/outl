@@ -54,6 +54,7 @@ use parking_lot::Mutex;
 use tracing::warn;
 
 use crate::host::StorageRootProvider;
+use crate::state::ProjectionWriteFailed;
 
 /// One message on the worker's channel: a page to project, or a
 /// synchronization barrier (see [`ProjectionWriter::flush`]).
@@ -62,28 +63,35 @@ enum Msg {
     /// Acked once every `Page` queued *before* this `Flush` has been
     /// written. `std::sync::mpsc` preserves per-sender FIFO order, so a
     /// `Flush` queued after a `Page` is guaranteed to drain behind it.
-    Flush(Sender<()>),
+    Flush(Sender<Result<(), String>>),
 }
 
 /// Handle to the background projection worker. Cheap to hold in
 /// `AppState`; cloning the `Sender` is how a command queues a write.
 pub struct ProjectionWriter {
     tx: Sender<Msg>,
+    report_failure: Arc<dyn Fn(ProjectionWriteFailed) + Send + Sync>,
 }
 
 impl ProjectionWriter {
     /// Spawn the worker. It owns clones of the same workspace slot every
     /// command locks, plus the client's storage-root provider (a fixed
     /// `PathBuf` on mobile, a swap-capable `Arc<Mutex<Option<PathBuf>>>`
-    /// on desktop — both implement [`StorageRootProvider`]).
-    pub fn spawn<R: StorageRootProvider>(
-        workspace: Arc<Mutex<Option<Workspace>>>,
-        root: R,
-    ) -> Self {
+    /// on desktop — both implement [`StorageRootProvider`]). `report_failure`
+    /// runs after a refused write so the host can emit it to the webview.
+    pub fn spawn<R, F>(workspace: Arc<Mutex<Option<Workspace>>>, root: R, report_failure: F) -> Self
+    where
+        R: StorageRootProvider,
+        F: Fn(ProjectionWriteFailed) + Send + Sync + 'static,
+    {
         let (tx, rx) = mpsc::channel::<Msg>();
+        let report_failure: Arc<dyn Fn(ProjectionWriteFailed) + Send + Sync> =
+            Arc::new(report_failure);
+        let worker_report_failure = report_failure.clone();
         thread::Builder::new()
             .name("outl-projection".into())
             .spawn(move || {
+                let mut failure_since_flush: Option<String> = None;
                 // Block until something is queued, then coalesce every
                 // other pending page into one batch. A `Flush` seen while
                 // draining ends the batch there (so everything queued
@@ -92,19 +100,28 @@ impl ProjectionWriter {
                 // blocking on `recv`.
                 while let Ok(first) = rx.recv() {
                     let mut dirty: HashSet<NodeId> = HashSet::new();
-                    let mut pending_acks: Vec<Sender<()>> = Vec::new();
-                    match first {
+                    let mut pending_acks: Vec<Sender<Result<(), String>>> = Vec::new();
+                    let drain_until_flush = match first {
                         Msg::Page(id) => {
                             dirty.insert(id);
+                            true
                         }
-                        Msg::Flush(ack) => pending_acks.push(ack),
-                    }
-                    while let Ok(more) = rx.try_recv() {
-                        match more {
-                            Msg::Page(id) => {
-                                dirty.insert(id);
+                        Msg::Flush(ack) => {
+                            pending_acks.push(ack);
+                            false
+                        }
+                    };
+                    if drain_until_flush {
+                        while let Ok(more) = rx.try_recv() {
+                            match more {
+                                Msg::Page(id) => {
+                                    dirty.insert(id);
+                                }
+                                Msg::Flush(ack) => {
+                                    pending_acks.push(ack);
+                                    break;
+                                }
                             }
-                            Msg::Flush(ack) => pending_acks.push(ack),
                         }
                     }
                     if let Some(root) = root.current() {
@@ -116,6 +133,8 @@ impl ProjectionWriter {
                             // it can't interleave with another projection.
                             let guard = workspace.lock();
                             let Some(ws) = guard.as_ref() else {
+                                failure_since_flush =
+                                    Some("projection skipped: workspace is loading".into());
                                 break;
                             };
                             // Guarded, not the plain write. This worker runs
@@ -132,19 +151,36 @@ impl ProjectionWriter {
                             // path raises already tells the user why.
                             if let Err(e) = apply_page_md_with_sidecar_guarded(ws, &root, page) {
                                 warn!("background projection skipped for {page}: {e}");
+                                if failure_since_flush.is_none() {
+                                    failure_since_flush = Some(e.to_string());
+                                }
+                                worker_report_failure(ProjectionWriteFailed::from_error(page, &e));
                             }
                         }
+                    } else if !dirty.is_empty() {
+                        failure_since_flush = Some(
+                            "projection skipped: no workspace storage root is available".into(),
+                        );
                     }
                     // Ack every flush collected in this batch now that its
                     // pages (if any) are written. A dropped receiver (the
                     // caller stopped waiting) makes the send a silent no-op.
-                    for ack in pending_acks {
-                        let _ = ack.send(());
+                    if !pending_acks.is_empty() {
+                        let result = failure_since_flush.take().map_or(Ok(()), Err);
+                        for ack in pending_acks {
+                            let _ = ack.send(result.clone());
+                        }
                     }
                 }
             })
             .expect("spawning the projection writer thread should not fail");
-        Self { tx }
+        Self { tx, report_failure }
+    }
+
+    /// Surface a synchronous projection failure through the same bridge the
+    /// worker uses, without changing the already-committed command result.
+    pub fn report_failure(&self, page: NodeId, error: &outl_actions::ActionError) {
+        (self.report_failure)(ProjectionWriteFailed::from_error(page, error));
     }
 
     /// Queue a page for background `.md` + sidecar projection.
@@ -165,13 +201,15 @@ impl ProjectionWriter {
     /// reconcile-from-disk step, which `undo_page` / `redo_page` run, is
     /// the concrete case — cannot assume the background worker has
     /// caught up just because `queue()` returned; `queue()` only proves
-    /// the page was *accepted*, not written. A dropped receiver (worker
-    /// gone) makes this return immediately rather than block forever.
-    pub fn flush(&self) {
-        let (ack_tx, ack_rx) = mpsc::channel::<()>();
-        if self.tx.send(Msg::Flush(ack_tx)).is_err() {
-            return;
-        }
-        let _ = ack_rx.recv();
+    /// the page was *accepted*, not written. Returns the first queued
+    /// projection failure, and returns an error if the worker has stopped.
+    pub fn flush(&self) -> Result<(), String> {
+        let (ack_tx, ack_rx) = mpsc::channel::<Result<(), String>>();
+        self.tx
+            .send(Msg::Flush(ack_tx))
+            .map_err(|_| "projection writer stopped before flush".to_string())?;
+        ack_rx
+            .recv()
+            .map_err(|_| "projection writer stopped during flush".to_string())?
     }
 }

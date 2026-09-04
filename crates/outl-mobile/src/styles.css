@@ -147,13 +147,10 @@
   --color-outl-highlight-fg: #0c0814;
 
   /* Chrome tokens — applied to floating capsules (header actions, edit
-     toolbar). Bear-style: rounded-full pills with a soft drop shadow
-     and subtle glass background. Light vs dark only differ on the
-     shadow alpha (dark needs more opacity to be visible), which no
-     palette expresses — kept as static tokens, not swapped at runtime. */
+     toolbar). The shadow derives from the active palette instead of
+     opening a second, OS-selected light/dark path. */
   --radius-capsule: 9999px;
-  --shadow-capsule: 0 4px 16px rgba(12, 8, 20, 0.08);
-  --shadow-capsule-dark: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-capsule: 0 4px 16px color-mix(in srgb, var(--color-outl-fg) 10%, transparent);
   --blur-chrome: 24px;
 
   --font-sans:

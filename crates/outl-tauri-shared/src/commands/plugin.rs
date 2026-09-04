@@ -48,6 +48,8 @@ pub struct PluginSyncHooksReply {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<PageView>,
     pub views: Vec<String>,
+    /// Failures not attributable to the page currently on screen.
+    pub errors: Vec<String>,
 }
 
 /// Run a plugin command. `page_id` is the page currently on screen; the
@@ -62,7 +64,7 @@ pub fn run<S: AppHost>(
     command_id: String,
     page_id: Option<String>,
 ) -> Result<PluginRunReply, String> {
-    let run = plugins.run_command(plugin_id, command_id)?;
+    let mut run = plugins.run_command(plugin_id, command_id)?;
 
     if run.applied > 0 {
         // The plugin mutated the workspace (any page), so the backlinks
@@ -77,9 +79,32 @@ pub fn run<S: AppHost>(
         Some(id) => {
             let page = parse_node_id(&id)?;
             let root = state.storage_root()?;
-            with_ws(state, |ws| Ok(build_page_view(ws, &root, page).ok())).unwrap_or(None)
+            let mut view =
+                with_ws(state, |ws| Ok(build_page_view(ws, &root, page).ok())).unwrap_or(None);
+            for error in run.projection_errors.drain(..) {
+                if let Some(current) = view.as_mut().filter(|view| {
+                    projection_matches_path(&error, &outl_actions::page_md_path(&root, &view.page))
+                }) {
+                    apply_projection_error(current, &error);
+                } else {
+                    run.errors.push(format!(
+                        "markdown projection failed after plugin mutation: {}",
+                        error.error
+                    ));
+                }
+            }
+            view
         }
-        None => None,
+        None => {
+            run.errors
+                .extend(run.projection_errors.drain(..).map(|error| {
+                    format!(
+                        "markdown projection failed after plugin mutation: {}",
+                        error.error
+                    )
+                }));
+            None
+        }
     };
 
     Ok(PluginRunReply {
@@ -157,7 +182,8 @@ pub fn sync_hooks<S: AppHost>(
     plugins: &PluginService,
     page_id: Option<String>,
 ) -> Result<PluginSyncHooksReply, String> {
-    let outcome = plugins.sync_hooks();
+    let mut outcome = plugins.sync_hooks();
+    let mut errors = Vec::new();
     let view = if outcome.applied > 0 {
         // A plugin mutated the workspace (any page), so the backlinks
         // index is stale — drop it; the next `page_backlinks` rebuilds.
@@ -166,9 +192,34 @@ pub fn sync_hooks<S: AppHost>(
             Some(id) => {
                 let page = parse_node_id(&id)?;
                 let root = state.storage_root()?;
-                with_ws(state, |ws| Ok(build_page_view(ws, &root, page).ok())).unwrap_or(None)
+                let mut view =
+                    with_ws(state, |ws| Ok(build_page_view(ws, &root, page).ok())).unwrap_or(None);
+                for error in outcome.projection_errors.drain(..) {
+                    if let Some(current) = view.as_mut().filter(|view| {
+                        projection_matches_path(
+                            &error,
+                            &outl_actions::page_md_path(&root, &view.page),
+                        )
+                    }) {
+                        apply_projection_error(current, &error);
+                    } else {
+                        errors.push(format!(
+                            "markdown projection failed after plugin hook mutation: {}",
+                            error.error
+                        ));
+                    }
+                }
+                view
             }
-            None => None,
+            None => {
+                errors.extend(outcome.projection_errors.drain(..).map(|error| {
+                    format!(
+                        "markdown projection failed after plugin hook mutation: {}",
+                        error.error
+                    )
+                }));
+                None
+            }
         }
     } else {
         None
@@ -176,5 +227,54 @@ pub fn sync_hooks<S: AppHost>(
     Ok(PluginSyncHooksReply {
         view,
         views: outcome.views,
+        errors,
     })
+}
+
+fn projection_matches_path(
+    failure: &crate::state::ProjectionFailure,
+    current_path: &std::path::Path,
+) -> bool {
+    failure
+        .md_ahead_of_log
+        .as_ref()
+        .is_some_and(|ahead| current_path.to_string_lossy() == ahead.path)
+        || failure
+            .path
+            .as_deref()
+            .is_some_and(|path| current_path.to_string_lossy() == path)
+}
+
+fn apply_projection_error(view: &mut PageView, failure: &crate::state::ProjectionFailure) {
+    if let Some(ahead) = failure.md_ahead_of_log.clone() {
+        view.md_ahead_of_log = Some(ahead);
+    } else {
+        view.projection_error = Some(failure.error.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::projection_matches_path;
+    use outl_actions::ActionError;
+    use std::path::Path;
+
+    #[test]
+    fn ahead_of_log_matches_only_its_page_path() {
+        let error = ActionError::PageMarkdownAheadOfLog {
+            path: "/workspace/pages/frozen.md".into(),
+            lines: 1,
+            sample: "\"offline\"".into(),
+        };
+        let failure = crate::state::ProjectionFailure::from_error(&error);
+
+        assert!(projection_matches_path(
+            &failure,
+            Path::new("/workspace/pages/frozen.md")
+        ));
+        assert!(!projection_matches_path(
+            &failure,
+            Path::new("/workspace/pages/current.md")
+        ));
+    }
 }
