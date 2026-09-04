@@ -115,14 +115,27 @@ It happens when a page's `.md` holds content that exists in no op.
 outl refuses to overwrite such a file (root `CLAUDE.md` invariant 8, [RFC 0210](rfcs/0210-md-content-outside-op-log.md)), because that write deletes the content for good.
 The cost of refusing is that the page is frozen in both directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
 
+This table is generated from `outl_actions::refusal` (RFC 0255), the single owner of "which surface tells the user about which refusal" — the same mechanism `outl_shortcuts::support` uses for chords.
+**MCP** is a fifth surface here, deliberately not part of `outl_shortcuts::Client` (three members: TUI, desktop, mobile — see `outl-shortcuts/CLAUDE.md`).
+A refusal is owed to whoever asked for the write, whether or not that asker draws an outline.
+
+<!-- BEGIN GENERATED: refusal-matrix -->
+
+**`PageMarkdownAheadOfLog`**
+
 | Client | Surface |
-|--------|---------|
-| CLI | `outl doctor` names the page, the line count and one sample; `outl reconcile --ahead-of-log` is the recovery. |
+|---|---|
+| CLI | Every write subcommand that touches an existing page (`page update`, `block append`, `template apply`/`run`, ...) returns the same structured `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. `outl doctor` names the page, the line count and one sample outside any write attempt; `outl reconcile --ahead-of-log` is the recovery. |
 | Desktop | `<PageAheadOfLogBanner client="desktop" />` above the outline, from `PageView.md_ahead_of_log`. Names the command to run in the workspace folder. |
 | Mobile | Same banner, `client="mobile"`. **There is no `outl` binary on iOS**, so the copy says to open the workspace on a computer instead of pointing at a terminal that doesn't exist. |
-| TUI | Not surfaced yet — the TUI does not call `apply_page_md_with_sidecar_if_stale` on its load path. |
+| TUI | A status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). The TUI still does not call `apply_page_md_with_sidecar_if_stale` on its own page-open path, so a page that drifted ahead of the log with no local write attempt in between stays silent until the next write touches it. |
+| MCP | A structured tool refusal — `PAGE_MARKDOWN_AHEAD_OF_LOG` — naming the page, line count, sample, and the recovery command, instead of a generic failure. |
+<!-- END GENERATED: refusal-matrix -->
 
-The user-facing wording is owned by `@outl/shared/warnings::aheadOfLogNotice` (unit-tested), never written inline in a client.
+Regenerate with `OUTL_UPDATE_CLIENTS_DOC=1 cargo test -p outl-actions refusal::`, pinned by `outl_actions::refusal::tests::the_clients_doc_matches_the_refusal_matrix` — never hand-edit the region between the markers.
+
+The user-facing wording on the GUI clients is owned by `@outl/shared/warnings::aheadOfLogNotice` (unit-tested), never written inline in a client.
+The MCP's wording has no shared owner across the Rust/TypeScript boundary — see the module doc on `crates/outl-cli/src/mcp/tools/dispatch.rs` for why, and what it does instead: it forwards `ActionError::PageMarkdownAheadOfLog`'s own `Display` verbatim rather than writing a second sentence.
 Both banners also warn against editing the page in the meantime: a local edit is safe: `ProjectionWriter` routes through `apply_page_md_with_sidecar_guarded`, which refuses to project over unlogged content exactly as the open path does. The `.md` simply stays behind until the lines are recorded.
 
 The page **still opens** and still shows what is on disk — the guard withheld a write, not the page.

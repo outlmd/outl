@@ -18,6 +18,9 @@
 //!   refs, sync-conflict copies. Files on disk.
 //! - `tree` — trash contents, ops that never materialized, projection
 //!   drift. Needs a booted `Workspace`.
+//! - `theme` — `[theme]` pair validation (light slot actually light,
+//!   dark slot actually dark). The global user config, not this
+//!   workspace's.
 //! - `repair` — the `--repair` pass.
 
 mod files;
@@ -26,6 +29,7 @@ mod ops_guard;
 mod repair;
 #[cfg(test)]
 mod tests;
+mod theme;
 mod tree;
 
 use crate::output::{emit, ApiError};
@@ -187,7 +191,14 @@ pub fn collect_scoped(
     do_repair: bool,
     scope: RepairScope,
 ) -> Result<DoctorReport, ApiError> {
-    collect_internal(path, true, do_repair, scope, &DeviceStore::open_default())
+    collect_internal(
+        path,
+        true,
+        do_repair,
+        scope,
+        &DeviceStore::open_default(),
+        &outl_config::load().theme,
+    )
 }
 
 /// Same as [`collect_scoped`] but skips the workspace-lock probe.
@@ -208,6 +219,7 @@ pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
         false,
         RepairScope::Guarded,
         &DeviceStore::open_default(),
+        &outl_config::load().theme,
     )
 }
 
@@ -221,12 +233,22 @@ pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
 /// #211 exactly, reintroduced by its own fix. Root `CLAUDE.md`
 /// invariant 9's third question (*how does a test get its own copy?*) has
 /// to be answered where the state is reached, and this is that place.
+///
+/// `theme` is the same story. It is the `[theme]` section of the
+/// **global** `~/.config/outl/config.toml` (`outl_config::load()`), not
+/// `cfg.theme` — the workspace-local `Config` this function reads two
+/// lines below (`outl_ws::layout::Config`) carries only `workspace`, no
+/// theme section at all. Resolving the global config inside this pass
+/// would make every test in the battery judge whatever theme pair
+/// happens to be on the machine running the suite, the exact bug the
+/// `store` parameter above exists to avoid for the device store.
 fn collect_internal(
     path: &Path,
     probe_lock: bool,
     do_repair: bool,
     scope: RepairScope,
     store: &DeviceStore,
+    theme: &outl_config::ThemeCfg,
 ) -> Result<DoctorReport, ApiError> {
     let paths = Paths::at(path.to_path_buf());
     let cfg = read_config(&paths).map_err(|e| {
@@ -253,6 +275,11 @@ fn collect_internal(
     let mut b = Builder::new(paths.root.display().to_string(), actor.to_string());
     let mut plan = Plan::default();
     let mut health = oplog::OpLogHealth::default();
+
+    // 0. `[theme]` pair validation. Global preference, not this
+    //    workspace's, and it needs neither the op log nor a booted
+    //    tree — check it before anything that does.
+    theme::check_theme_pair(&mut b, theme);
 
     // 1. Raw op-log sweep, before any storage open. `JsonlStorage::open`
     //    skips malformed records and reports them only through

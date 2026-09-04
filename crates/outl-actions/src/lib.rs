@@ -75,6 +75,7 @@ pub mod person;
 pub mod property;
 pub mod quote;
 pub mod recover;
+pub mod refusal;
 pub mod reminders;
 pub mod resolve;
 pub mod storage_scope;

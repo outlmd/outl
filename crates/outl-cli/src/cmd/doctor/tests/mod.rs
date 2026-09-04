@@ -118,6 +118,11 @@ fn collect_with_scope(
         do_repair,
         scope,
         &outl_core::device::DeviceStore::at(store_dir.path()),
+        // The battery is not exercising `[theme]` validation — that check
+        // has its own unit tests in `doctor::theme`. A default `ThemeCfg`
+        // (no `preset_dark`) is never flagged, so it stays inert here
+        // rather than reading the developer's real global config.
+        &outl_config::ThemeCfg::default(),
     )
 }
 

@@ -11,7 +11,7 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 
 use outl_actions::{
-    append_block, append_forest, append_tree, apply_page_md_with_sidecar, children_of,
+    append_block, append_forest, append_tree, apply_page_md_with_sidecar_guarded, children_of,
     create_after, enclosing_page_id, page_meta, project_outline, split_todo, ActionError,
     BlockTreeSpec, PageMeta,
 };
@@ -454,8 +454,7 @@ pub fn move_block(
     write_enclosing_page(ctx, id)?;
     if new_parent != current_parent {
         if let Some(old_page) = enclosing_page_id(&ctx.workspace, current_parent) {
-            apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, old_page)
-                .map_err(ApiError::internal)?;
+            apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, old_page)?;
         }
     }
 
@@ -490,7 +489,7 @@ pub fn delete(ctx: &mut WsCtx, id_str: &str) -> Result<Value, ApiError> {
     let page = enclosing_page_id(&ctx.workspace, id);
     outl_actions::block::delete(&mut ctx.workspace, &ctx.hlc, id).map_err(ApiError::internal)?;
     if let Some(p) = page {
-        apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, p).map_err(ApiError::internal)?;
+        apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, p)?;
     }
     Ok(json!({ "id": id.to_string() }))
 }
@@ -549,7 +548,7 @@ fn write_enclosing_page(ctx: &mut WsCtx, node: NodeId) -> Result<Option<PageMeta
         return Ok(None);
     };
     let meta = page_meta(&ctx.workspace, page);
-    apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page).map_err(ApiError::internal)?;
+    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page)?;
     Ok(meta)
 }
 

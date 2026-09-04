@@ -11,9 +11,8 @@ use serde_json::{json, Value};
 
 use outl_actions::page::SLUG_KEY;
 use outl_actions::{
-    apply_page_md_with_sidecar, find_by_slug, list_pages, open_or_create_page, page_meta,
-    project_outline, read_text_prop, render_page_md, set_property, walk_subtree, BlockTreeSpec,
-    PageKind,
+    find_by_slug, list_pages, open_or_create_page, page_meta, project_outline, read_text_prop,
+    render_page_md, set_property, walk_subtree, BlockTreeSpec, PageKind,
 };
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
@@ -517,8 +516,19 @@ fn write_page_property(
     set_property(&mut ctx.workspace, &ctx.hlc, id, key, val).map_err(ApiError::internal)
 }
 
+/// Re-render `id`'s `.md` + sidecar after a mutation.
+///
+/// Routes through the **guarded** projection — the same one every GUI
+/// write path uses (`outl-tauri-shared/CLAUDE.md` → "A page that
+/// stopped syncing") — rather than the unconditional one: a page whose
+/// `.md` holds content the op log never recorded must refuse the
+/// write and surface `ActionError::PageMarkdownAheadOfLog`, not
+/// silently delete it. Before this, `outl page update` / `outl block
+/// append` (and every other CLI mutation) used the unconditional
+/// writer, so the CLI/MCP surface was the one place invariant 8's
+/// guard was never wired in (RFC 0255).
 fn write_projection(ctx: &mut WsCtx, id: NodeId) -> Result<(), ApiError> {
-    apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, id).map_err(ApiError::internal)?;
+    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
     Ok(())
 }
 

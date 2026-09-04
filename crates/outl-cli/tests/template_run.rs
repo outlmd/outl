@@ -182,3 +182,86 @@ fn template_apply_rejects_block_on_other_page() {
     let env: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(env["error"]["code"], "INVALID_ARG");
 }
+
+/// RFC 0255 follow-up: `apply()` / `run_template()` re-render an
+/// *existing* page's `.md` after instantiating a template under it.
+/// Before this fix both routed through the unconditional
+/// `apply_page_md_with_sidecar` and discarded the `Result` (`let _ =
+/// ...`), so a frozen page — one whose `.md` holds content the op log
+/// never recorded — had that content silently deleted, with nobody told.
+/// This is the same class of bug the CLI/MCP write paths had (page
+/// update, block append, ...); `template apply` was simply the last
+/// place it survived.
+///
+/// This test reproduces the frozen-page state by hand (same
+/// construction `outl-actions`'s own
+/// `if_stale_refuses_when_the_md_carries_content_the_log_lacks` and the
+/// MCP's `frozen_page_update_returns_structured_refusal_not_a_generic_error`
+/// use): write a line to `notes.md` that no op ever produced, then
+/// re-stamp the sidecar's hash so the hash gate alone would call the
+/// file "faithful". `template apply` must refuse to reproject rather
+/// than delete that line, and it must say so instead of swallowing the
+/// refusal into a discarded `Result`.
+#[test]
+fn template_apply_refuses_to_reproject_a_frozen_page() {
+    let ws = init_workspace();
+
+    // Structural template page.
+    create_page(&ws, "tpl-struct");
+    set_prop(&ws, "tpl-struct", "template=struct");
+    append_block(&ws, "tpl-struct", "seed block");
+
+    // Target page with real, already-projected content.
+    create_page(&ws, "notes");
+    append_block(&ws, "notes", "existing content");
+
+    let md_path = ws.path().join("pages").join("notes.md");
+    let mut md = std::fs::read_to_string(&md_path).expect("read notes.md");
+    md.push_str(
+        "- only ever on disk
+",
+    );
+    std::fs::write(&md_path, &md).expect("write unlogged line");
+
+    let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+    let mut sidecar = outl_md::sidecar::read(&sidecar_path).expect("read sidecar");
+    sidecar.last_synced_hash = outl_md::sidecar::file_hash(&md);
+    outl_md::sidecar::write(&sidecar_path, &sidecar).expect("restamp sidecar");
+
+    let out = outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["template", "apply", "struct", "--page", "notes", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "applying a template onto a frozen page must fail, got success: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let env: Value = serde_json::from_slice(&out.stdout).expect("non-JSON stdout");
+    assert_eq!(
+        env["error"]["code"], "PAGE_MARKDOWN_AHEAD_OF_LOG",
+        "must be the distinct refusal, not INTERNAL or silent success: {env}"
+    );
+    assert_eq!(env["error"]["data"]["lines"], 1);
+    assert!(
+        env["error"]["data"]["sample"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("only ever on disk"),
+        "the sample must name the content at risk: {env}"
+    );
+    assert_eq!(
+        env["error"]["data"]["recovery_command"],
+        outl_actions::error::AHEAD_OF_LOG_RECOVERY_COMMAND
+    );
+
+    // The whole point: the unlogged line must survive on disk, not get
+    // silently deleted by the refused reprojection.
+    let after = std::fs::read_to_string(&md_path).expect("re-read notes.md");
+    assert!(
+        after.contains("only ever on disk"),
+        "a refused reprojection must never delete the unlogged content: {after:?}"
+    );
+}
