@@ -36,7 +36,7 @@ use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
-use crate::journal::apply_page_md_with_sidecar;
+use crate::journal::apply_page_md_with_sidecar_guarded;
 
 /// Reachability snapshot for one known peer, derived from the
 /// transport's own dial outcomes (never a fresh probe endpoint).
@@ -428,17 +428,37 @@ impl SyncEngine {
         Ok(workspace)
     }
 
-    /// Re-project a single page's `.md` + sidecar from `workspace`.
+    /// Re-project a single page's `.md` + sidecar from `workspace`,
+    /// after merging a peer's ops.
     ///
-    /// Safe to call after [`Self::reload_workspace`] so the on-disk
-    /// `.md` reflects the merged state (own ops + peer ops). Other
-    /// pages get re-projected lazily when the user navigates to them.
+    /// Call this after [`Self::reload_workspace`] so the on-disk `.md`
+    /// picks up the merged state (own ops + peer ops). Other pages get
+    /// re-projected lazily when the user navigates to them.
+    ///
+    /// **Can refuse.** This re-renders the page from the tree, which is
+    /// the direction root `CLAUDE.md` invariant 8 forbids doing
+    /// unconditionally: a peer's merge is exactly the case where the
+    /// user never touched this page, so a `.md` that has drifted ahead
+    /// of the op log here is the worst version of the bug — content
+    /// vanishing with no local edit to blame. `Err(ActionError::PageMarkdownAheadOfLog)`
+    /// means the write was withheld, not that the merge failed: `workspace`
+    /// already holds the peer's ops regardless of what this call returns.
+    ///
+    /// **Every caller must treat this as one page's problem, not the
+    /// whole sync pass's.** Bubbling the error out of a loop that
+    /// reprojects many pages would let one frozen page stop every other
+    /// page from converging — worse than the bug this guards against.
+    /// Both current callers already reproject a single, specific page
+    /// (the TUI's focused page, the GUI's "today" journal) and log a
+    /// refusal rather than letting it abort the reload; see
+    /// `outl-tui/src/actions/lifecycle/peer_sync.rs::reload_workspace_from_disk`
+    /// and the mobile/desktop `reload_workspace` Tauri commands.
     pub fn reproject_page(
         &self,
         workspace: &Workspace,
         page_id: NodeId,
     ) -> Result<(), ActionError> {
-        apply_page_md_with_sidecar(workspace, &self.workspace_root, page_id)?;
+        apply_page_md_with_sidecar_guarded(workspace, &self.workspace_root, page_id)?;
         Ok(())
     }
 
@@ -448,6 +468,13 @@ impl SyncEngine {
     /// This is the typical entry point for the "peer fired, pull
     /// new state" path. Clients call this from their detector once
     /// they have decided it's safe (e.g. user is not mid-edit).
+    ///
+    /// Propagates [`Self::reproject_page`]'s refusal as-is. Unlike the
+    /// TUI and GUI reload paths, this helper isn't currently called from
+    /// production code (see call sites above) — if a future caller
+    /// reaches for it, it inherits the same rule: a refusal here means
+    /// this one page's `.md` didn't update, not that the reload failed,
+    /// and it must not be allowed to abort a larger sync pass.
     pub fn refresh_page(&self, page_id: NodeId) -> Result<Workspace, ActionError> {
         let ws = self.reload_workspace()?;
         self.reproject_page(&ws, page_id)?;
@@ -753,6 +780,66 @@ mod tests {
         assert!(
             ws2.booted_from_snapshot(),
             "second reload must adopt the refreshed snapshot instead of full-replaying forever"
+        );
+    }
+
+    /// The site this test guards: `reproject_page` used to call the
+    /// unconditional writer, so a page a peer never touched — its `.md`
+    /// merely holding content no op has seen — got flattened by the very
+    /// next reload. Root `CLAUDE.md` invariant 8.
+    #[test]
+    fn reproject_page_refuses_a_frozen_page_instead_of_deleting_it() {
+        use crate::block::append_block;
+        use crate::journal::{apply_page_md_with_sidecar, page_md_path};
+        use crate::page::{open_or_create, page_meta, PageKind};
+        use outl_core::hlc::HlcGenerator;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let ops_dir = root.join("ops");
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+
+        // Write-side workspace: create the page, project it once while
+        // it is healthy, then drop it — the next reload below mirrors
+        // "another process/device reopens after a peer merge".
+        let mut ws = Workspace::open_with_storage(
+            actor,
+            Box::new(JsonlStorage::open(ops_dir.clone(), actor).unwrap()),
+            Some(root.to_path_buf()),
+        )
+        .unwrap();
+        let page = open_or_create(&mut ws, &hlc, "notes", "Notes", PageKind::Page).unwrap();
+        append_block(&mut ws, &hlc, Some(page), Some("first")).unwrap();
+        apply_page_md_with_sidecar(&ws, root, page).unwrap();
+        let md_path = page_md_path(root, &page_meta(&ws, page).unwrap());
+        drop(ws);
+
+        // Simulate the state a `reconcile_md` that missed invariant 8
+        // leaves behind: content on disk the op log never recorded, with
+        // the sidecar re-stamped to call those exact bytes faithful.
+        let mut md = std::fs::read_to_string(&md_path).unwrap();
+        md.push_str("- only ever on disk\n");
+        std::fs::write(&md_path, &md).unwrap();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sidecar = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sidecar.last_synced_hash = outl_md::sidecar::file_hash(&md);
+        outl_md::sidecar::write(&sidecar_path, &sidecar).unwrap();
+
+        let engine = SyncEngine::new(root.to_path_buf(), actor);
+        let fresh = engine.reload_workspace().expect("reload after merge");
+
+        match engine.reproject_page(&fresh, page) {
+            Err(ActionError::PageMarkdownAheadOfLog { sample, .. }) => assert!(
+                sample.contains("only ever on disk"),
+                "the error must name the content at risk, got {sample:?}"
+            ),
+            other => panic!("expected PageMarkdownAheadOfLog, got {other:?}"),
+        }
+        let after = std::fs::read_to_string(&md_path).unwrap();
+        assert!(
+            after.contains("only ever on disk"),
+            "a refused reprojection must never delete the unlogged content: {after:?}"
         );
     }
 }

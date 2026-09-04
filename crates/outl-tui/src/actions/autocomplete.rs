@@ -333,10 +333,13 @@ impl App {
         // creates a fresh one tagged `type:: person` when missing.
         //
         // Three steps after the resolve:
-        // 1. Project the page's `.md` + sidecar to disk via
-        //    `apply_page_md_with_sidecar`. Otherwise the page exists
-        //    only in the op log and the next `WorkspaceIndex` query
-        //    won't see it.
+        // 1. Project the page's `.md` + sidecar to disk via the
+        //    **guarded** writer (root `CLAUDE.md` invariant 8) —
+        //    `open_or_create_by_ref` is idempotent and can return an
+        //    *existing* page, whose `.md` may already hold content the
+        //    op log never saw, so this can't be the unconditional
+        //    writer. Otherwise the page exists only in the op log and
+        //    the next `WorkspaceIndex` query won't see it.
         // 2. Re-parse the rendered `.md` and `WorkspaceIndex::patch_page`
         //    so `pages_by_type(PERSON_TYPE)` includes the new person
         //    on the next keystroke. Without this, `@sam` types in
@@ -356,7 +359,7 @@ impl App {
                 }
                 Ok(id) => {
                     let workspace_root = self.workspace_root.clone();
-                    match outl_actions::apply_page_md_with_sidecar(
+                    match outl_actions::apply_page_md_with_sidecar_guarded(
                         &self.workspace,
                         &workspace_root,
                         id,
@@ -580,7 +583,7 @@ pub(crate) fn detect_trigger(chars: &[char], cursor: usize) -> Option<(Autocompl
 
 #[cfg(test)]
 mod tests {
-    use crate::state::AutocompleteKind;
+    use crate::state::{AutocompleteKind, AutocompleteState, Mode};
 
     #[test]
     fn detect_trigger_mention_at_buffer_start() {
@@ -630,5 +633,102 @@ mod tests {
         let trigger = super::detect_trigger(&chars, chars.len());
         // Should be PageRef, not Mention.
         assert_eq!(trigger, Some((AutocompleteKind::PageRef, "av".to_string())));
+    }
+
+    /// Unlike this crate's `open_in_memory` test convention, this test
+    /// needs the real disk-root path: the mention-sugar reprojection
+    /// is gated on `self.workspace_root` being real (it always is in
+    /// production — `runtime.rs` opens with a real root). See
+    /// `template.rs`'s identical helper for the same reasoning.
+    fn test_app_with_root() -> (crate::state::App, tempfile::TempDir) {
+        use outl_core::id::ActorId;
+        use outl_core::storage::JsonlStorage;
+        use outl_core::workspace::Workspace;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ops_dir = dir.path().join("ops");
+        let storage = JsonlStorage::open(ops_dir, actor).unwrap();
+        let ws =
+            Workspace::open_with_storage(actor, Box::new(storage), Some(dir.path().to_path_buf()))
+                .unwrap();
+        let app = crate::state::App::new(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// The site this test guards: accepting a `@mention` completion
+    /// used to reproject the resolved person page through the
+    /// unconditional writer — and `open_or_create_by_ref` can resolve
+    /// to an *existing* page, whose `.md` may already hold content the
+    /// op log never saw. Root `CLAUDE.md` invariant 8.
+    #[test]
+    fn mention_autocomplete_refuses_to_reproject_a_frozen_person_page() {
+        use crate::edit_buffer::EditBuffer;
+        use crate::state::EditTarget;
+
+        let (mut app, _dir) = test_app_with_root();
+
+        // Pre-existing person page with a real block so its sidecar
+        // can "answer" (see `sidecar_can_answer`). `open_or_create_by_ref`
+        // must resolve the mention to THIS page, not create a new one.
+        let person = outl_actions::open_or_create_page(
+            &mut app.workspace,
+            &app.hlc,
+            "avelino",
+            "Avelino",
+            outl_actions::PageKind::Page,
+        )
+        .unwrap();
+        outl_actions::append_block(&mut app.workspace, &app.hlc, Some(person), Some("first"))
+            .unwrap();
+        outl_actions::apply_page_md_with_sidecar(&app.workspace, &app.workspace_root, person)
+            .unwrap();
+
+        // Freeze the person page's `.md`: content the op log has never
+        // seen, sidecar re-stamped to call those exact bytes faithful.
+        let meta = outl_actions::page_meta(&app.workspace, person).unwrap();
+        let md_path = outl_actions::page_md_path(&app.workspace_root, &meta);
+        let mut md = std::fs::read_to_string(&md_path).unwrap();
+        md.push_str("- only ever on disk\n");
+        std::fs::write(&md_path, &md).unwrap();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sc.last_synced_hash = outl_md::sidecar::file_hash(&md);
+        outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+
+        // Arm the popup as if the user typed `@Avelino` and accepted
+        // the first (only) candidate.
+        app.mode = Mode::Insert {
+            target: EditTarget::CurrentPage,
+            block_path: vec![0],
+            buffer: EditBuffer::from_text("@"),
+            original_text: String::new(),
+        };
+        app.autocomplete = Some(AutocompleteState {
+            kind: AutocompleteKind::Mention,
+            query: String::new(),
+            candidates: vec!["Avelino".to_string()],
+            selected: 0,
+        });
+
+        app.accept_autocomplete();
+
+        assert!(
+            app.status.contains("md projection failed"),
+            "status must surface the refusal instead of staying silent, got: {}",
+            app.status
+        );
+        let after = std::fs::read_to_string(&md_path).unwrap();
+        assert!(
+            after.contains("only ever on disk"),
+            "a refused reprojection must never delete the unlogged content: {after:?}"
+        );
     }
 }

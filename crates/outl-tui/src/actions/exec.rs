@@ -57,11 +57,19 @@ impl App {
         )
         .map_err(|e| e.to_string())?;
 
-        // Re-render the page projection, then reload the AST.
+        // Re-render the page projection, then reload the AST. Guarded
+        // (root `CLAUDE.md` invariant 8): the template's result is
+        // already durably in the op log from `run_callable_block` above,
+        // so a refusal here means only the `.md` didn't pick it up — but
+        // that has to reach the caller, not vanish, so it propagates
+        // like `run_callable_block`'s own error instead of being
+        // swallowed. Both callers (`maybe_run_call_block`,
+        // `rerun_call_block_at`) already show `Err` on the status line.
         if let Some(root) = self.workspace.root.clone() {
             let slug = self.current_slug();
             if let Some(page_id) = outl_actions::find_by_slug(&self.workspace, &slug) {
-                let _ = outl_actions::apply_page_md_with_sidecar(&self.workspace, &root, page_id);
+                outl_actions::apply_page_md_with_sidecar_guarded(&self.workspace, &root, page_id)
+                    .map_err(|e| e.to_string())?;
             }
         }
         self.load_current();
@@ -447,5 +455,108 @@ mod tests {
         assert!(!is_safe_external_url("file:///etc/passwd"));
         assert!(!is_safe_external_url("javascript:alert(1)"));
         assert!(!is_safe_external_url("outl.app"));
+    }
+
+    /// Unlike this crate's `open_in_memory` test convention, this test
+    /// needs the real disk-root path: `run_callable_template`'s
+    /// reprojection guard is gated on `self.workspace.root.is_some()`,
+    /// exactly like production (`runtime.rs` always opens with
+    /// `Some(root)`). See `template.rs`'s identical helper for the
+    /// same reasoning.
+    fn test_app_with_root() -> (crate::state::App, tempfile::TempDir) {
+        use outl_core::id::ActorId;
+        use outl_core::storage::JsonlStorage;
+        use outl_core::workspace::Workspace;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ops_dir = dir.path().join("ops");
+        let storage = JsonlStorage::open(ops_dir, actor).unwrap();
+        let ws =
+            Workspace::open_with_storage(actor, Box::new(storage), Some(dir.path().to_path_buf()))
+                .unwrap();
+        let app = crate::state::App::new(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// The site this test guards: `run_callable_template` used to
+    /// reproject today's journal through the unconditional writer right
+    /// after the callable template's blocks landed in the op log, so a
+    /// frozen page got flattened by a successful `call:`/`/template`
+    /// run. Root `CLAUDE.md` invariant 8.
+    #[test]
+    fn run_callable_template_refuses_to_reproject_a_frozen_page() {
+        let (mut app, _dir) = test_app_with_root();
+
+        // Give today's journal one real block so its sidecar can
+        // "answer" (see `sidecar_can_answer` — an all-empty-text
+        // sidecar is treated as pre-0.11 and always let through).
+        let slug = app.current_slug();
+        let page_id = outl_actions::find_by_slug(&app.workspace, &slug).unwrap();
+        let anchor =
+            outl_actions::append_block(&mut app.workspace, &app.hlc, Some(page_id), Some("first"))
+                .unwrap();
+        outl_actions::apply_page_md_with_sidecar(&app.workspace, &app.workspace_root, page_id)
+            .unwrap();
+        app.load_current_no_autorun();
+
+        // Callable template using the built-in test-only `echo` runtime
+        // (always registered under `cfg(any(test, debug_assertions))`).
+        let tpl = outl_actions::open_or_create_page(
+            &mut app.workspace,
+            &app.hlc,
+            "template-echoer",
+            "echoer",
+            outl_actions::PageKind::Page,
+        )
+        .unwrap();
+        outl_actions::set_property(
+            &mut app.workspace,
+            &app.hlc,
+            tpl,
+            outl_actions::TEMPLATE_KEY,
+            Some(outl_core::property::PropValue::Text("echoer".into())),
+        )
+        .unwrap();
+        outl_actions::append_block(
+            &mut app.workspace,
+            &app.hlc,
+            Some(tpl),
+            Some("```echo\nhi\n```"),
+        )
+        .unwrap();
+
+        // Freeze today's journal `.md`: content the op log has never
+        // seen, sidecar re-stamped to call those exact bytes faithful.
+        let md_path = app.current_path();
+        let mut md = std::fs::read_to_string(&md_path).unwrap();
+        md.push_str("- only ever on disk\n");
+        std::fs::write(&md_path, &md).unwrap();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sc.last_synced_hash = outl_md::sidecar::file_hash(&md);
+        outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+
+        let result = app.run_callable_template("echoer", &[], anchor);
+
+        match result {
+            Err(e) => assert!(
+                e.contains("only ever on disk") || e.contains("no op"),
+                "error must surface the refusal, got: {e}"
+            ),
+            Ok(dur) => panic!("expected a refusal, got Ok({dur:?})"),
+        }
+        let after = std::fs::read_to_string(&md_path).unwrap();
+        assert!(
+            after.contains("only ever on disk"),
+            "a refused reprojection must never delete the unlogged content: {after:?}"
+        );
     }
 }

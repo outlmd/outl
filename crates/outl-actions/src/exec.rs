@@ -129,7 +129,18 @@ pub fn run_code_block(
         // `run_callable_block` mutates the op log; project the `.md` so
         // the on-disk page matches (the normal path's `run_block_at_index`
         // does this itself).
-        let _ = crate::journal::apply_page_md_with_sidecar(workspace, storage_root, page_id);
+        //
+        // Guarded, not unconditional: this re-renders the WHOLE page from
+        // the tree, which is exactly the direction invariant 8 (root
+        // `CLAUDE.md`) forbids doing blindly — a `.md` holding content no
+        // op has seen must refuse the overwrite, not lose it. Propagating
+        // the refusal (rather than swallowing it, as this used to) matches
+        // every other mutation-then-project call site in the workspace
+        // (RFC 0255, `outl-cli/src/cmd/page.rs::write_projection`): the
+        // template result is already durably in the op log either way, so
+        // returning `Err` here costs the caller this round-trip's stdout,
+        // not the data.
+        crate::journal::apply_page_md_with_sidecar_guarded(workspace, storage_root, page_id)?;
         return Ok(RunCodeBlockOutcome {
             language: format!("call:{name}"),
             result_ok,
@@ -178,4 +189,79 @@ pub fn run_code_block(
         result_ok,
         error,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block::append_block;
+    use crate::journal::apply_page_md_with_sidecar;
+    use crate::page::{open_or_create, page_meta, set_property, PageKind};
+    use crate::template::TEMPLATE_KEY;
+    use outl_core::id::ActorId;
+    use outl_core::property::PropValue;
+    use tempfile::TempDir;
+
+    /// The site this test guards: the `call:` branch used to reproject
+    /// through the unconditional writer after a successful template run,
+    /// so a page whose `.md` held content no op has seen got flattened by
+    /// the very next `call:` execution. Root `CLAUDE.md` invariant 8.
+    #[test]
+    fn call_branch_refuses_to_reproject_a_frozen_page() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+
+        // Callable template: `template:: echoer`, body is the built-in
+        // test-only `echo` runtime (registered under
+        // `cfg(any(test, debug_assertions))` — see `outl-exec`'s registry).
+        let tpl =
+            open_or_create(&mut ws, &hlc, "template-echoer", "echoer", PageKind::Page).unwrap();
+        set_property(
+            &mut ws,
+            &hlc,
+            tpl,
+            TEMPLATE_KEY,
+            Some(PropValue::Text("echoer".into())),
+        )
+        .unwrap();
+        append_block(&mut ws, &hlc, Some(tpl), Some("```echo\nhi\n```")).unwrap();
+
+        // Host page: a block invoking the template.
+        let page = open_or_create(&mut ws, &hlc, "host", "Host", PageKind::Page).unwrap();
+        let block = append_block(&mut ws, &hlc, Some(page), Some("```call:echoer\n```")).unwrap();
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        apply_page_md_with_sidecar(&ws, root, page).unwrap();
+        let meta = page_meta(&ws, page).unwrap();
+        let md_path = page_md_path(root, &meta);
+
+        // A `.md` holding content no op has seen, with the sidecar
+        // re-stamped to call those exact bytes faithful — the state a
+        // `reconcile_md` that missed invariant 8 leaves behind.
+        let mut md = std::fs::read_to_string(&md_path).unwrap();
+        md.push_str("- only ever on disk\n");
+        std::fs::write(&md_path, &md).unwrap();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sidecar = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sidecar.last_synced_hash = outl_md::sidecar::file_hash(&md);
+        outl_md::sidecar::write(&sidecar_path, &sidecar).unwrap();
+
+        let registry = RuntimeRegistry::with_builtins();
+        let result = run_code_block(&mut ws, &hlc, root, &registry, page, block);
+
+        match result {
+            Err(ActionError::PageMarkdownAheadOfLog { sample, .. }) => assert!(
+                sample.contains("only ever on disk"),
+                "the error must name the content at risk, got {sample:?}"
+            ),
+            other => panic!("expected PageMarkdownAheadOfLog, got {other:?}"),
+        }
+        let after = std::fs::read_to_string(&md_path).unwrap();
+        assert!(
+            after.contains("only ever on disk"),
+            "a refused reprojection must never delete the unlogged content: {after:?}"
+        );
+    }
 }
