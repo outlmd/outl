@@ -776,7 +776,9 @@ fn guarded_projection_checks_disk_only_after_acquiring_the_page_lock() {
 
     std::thread::scope(|scope| {
         let (tx, rx) = std::sync::mpsc::channel();
-        scope.spawn(|| {
+        // `Workspace` is `Send` but not `Sync` (its content store caches
+        // through `RefCell`), so the writer thread owns it outright.
+        scope.spawn(move || {
             tx.send(apply_page_md_with_sidecar_guarded(&ws, root, page))
                 .expect("send");
         });
