@@ -273,6 +273,14 @@ impl App {
     /// invoking this while the user is in Insert mode — the
     /// in-flight AST would be lost. See [`Self::poll_jsonl_updates`]
     /// for the deferral logic and `commit_insert` for the drain.
+    ///
+    /// The re-project step is guarded (root `CLAUDE.md` invariant 8):
+    /// `SyncEngine::reproject_page` can refuse when this page's `.md`
+    /// holds content the merged op log never saw. That refusal is this
+    /// one page's problem, not the reload's — the workspace still swaps
+    /// in below either way, so every other page keeps converging. What
+    /// must not happen is the refusal vanishing into a discarded
+    /// `Result`, so it surfaces as a toast instead.
     pub(crate) fn reload_workspace_from_disk(&mut self) {
         // Persist any coalesced local edit before swapping the workspace
         // out from under it — otherwise the reproject below would render
@@ -284,7 +292,12 @@ impl App {
         let focused_page = self.current_page_meta_id();
         let fresh = match (engine.reload_workspace(), focused_page) {
             (Ok(ws), Some(page_id)) => {
-                let _ = engine.reproject_page(&ws, page_id);
+                if let Err(e) = engine.reproject_page(&ws, page_id) {
+                    self.toast(
+                        crate::state::ToastKind::Warning,
+                        format!("page stopped syncing: {e}"),
+                    );
+                }
                 ws
             }
             (Ok(ws), None) => ws,

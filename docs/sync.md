@@ -663,7 +663,7 @@ engine.reproject_page(&fresh, focused_page_id)?; // rewrite the focused .md + si
 | Method | What it does |
 |--------|--------------|
 | `reload_workspace()` | Reopens the workspace from disk, merging every `ops-<actor>.jsonl` by HLC and replaying through the move-op algorithm. |
-| `reproject_page(ws, page_id)` | Re-emits the page's `.md` + sidecar from the materialised tree. Other pages get re-projected lazily when the user navigates to them. |
+| `reproject_page(ws, page_id)` | Re-emits the page's `.md` + sidecar from the materialised tree, through the **guarded** writer (invariant 8). Can return `Err(PageMarkdownAheadOfLog)` — the merge already landed in the tree either way, only this page's on-disk projection was withheld. Callers treat that as one page's problem, never a reason to abort the reload. Other pages get re-projected lazily when the user navigates to them. |
 | `refresh_page(page_id)` | Convenience: reload + reproject in one call. The typical "peer fired, pull the new state in" entry point. |
 | `snapshot()` | Lists every `ops-*.jsonl` in the workspace with size + mtime. Used by polling detectors (TUI) to decide whether to fire a reload. |
 | `snapshot_peers()` | Like `snapshot()` but **filters out the local actor's file**. Reacting to your own writes closes a destructive save-reload-race loop; only peer files should trigger reloads. |
