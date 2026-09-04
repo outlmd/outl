@@ -28,7 +28,8 @@ outl-mobile (this crate)
    │       ├── peers.rs            (outl_peer_list / outl_peer_remove — read/edit <workspace>/.outl/peers.json, no workspace lock)
    │       ├── plugin.rs           (plugin_list / plugin_run / plugin_sync_hooks — thin shims over PluginService)
    │       ├── property.rs         (known_property_keys — the key catalogue the Properties sheet's chips come from)
-   │       └── exec.rs             (run_code_block — thin shim over outl_actions::exec::run_code_block)
+   │       ├── exec.rs (run_code_block)
+   │       └── theme.rs (list_themes / get_theme)
    ├── gen/apple/.../main.mm       (NSMetadataQuery + NSFileCoordinator iCloud watcher)
    ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
    ├── gen/android/.../MainActivity.kt            (NativeSetup.install + OutlBackgroundSync.install, before Tauri boots)
@@ -384,20 +385,10 @@ Mobile just wires it: `Journal.tsx`'s `onMount` calls `loadTransformers()`, and 
 
 ## Peer / device management (`outl_peer_list` / `outl_peer_remove`)
 
-`commands/peers.rs` exposes two Tauri commands over the iroh peers file (`<workspace>/.outl/peers.json`, via `outl_sync_iroh::PeersStore`):
-
-- `outl_peer_list() -> Vec<PeerDto>` — lists paired devices (`node_id`, `alias`, `added_at`).
-- `outl_peer_remove(id: String) -> bool` — removes peers whose `node_id` starts with the prefix; `true` if any matched.
-
-The peer list is per-**graph** (resolved from `AppState::storage_root` via `outl_sync_iroh::workspace_peers_path`), NOT next to the device identity.
-The device `identity.key` stays per-**install** in the Tauri app local data dir ([`iroh_sync::iroh_dir`]) — one node id per install.
-Each command runs `migrate_global_peers_if_absent` first, so a legacy global
-`~/.outl/peers.json` is copied into the workspace once on first open.
-These are the **only** commands that touch `peers.json` directly instead of
-the workspace lock — the list is graph-scoped sync-transport state, so they
-read `storage_root` without going through `outl-actions`.
-
-`commands/peers.rs` also exposes `outl_sync_now()` (reads `state.iroh`, calls the transport's `sync_now()`) — the force-sync trigger behind the refresh button.
+`commands/peers.rs` wraps the same three Tauri commands `docs/sync.md` § Managing peers documents (`outl_peer_list`, `outl_peer_remove`, `outl_sync_now`) over `<workspace>/.outl/peers.json` (`outl_sync_iroh::PeersStore`).
+Mobile-specific: the peer list is per-**graph** (`outl_sync_iroh::workspace_peers_path`), the device `identity.key` is per-**install** ([`iroh_sync::iroh_dir`]).
+Each command runs `migrate_global_peers_if_absent` first (legacy global `~/.outl/peers.json` copied in once).
+These are the **only** commands that touch `peers.json` directly instead of the workspace lock — graph-scoped sync-transport state reads `storage_root` without going through `outl-actions`.
 
 ## Sync dot + refresh (iroh-driven)
 
@@ -425,19 +416,16 @@ See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "Force-sync tr
 
 ## Cross-runtime contracts (now in `@outl/shared`)
 
-The four TS pieces that mirror Rust canonical sources used to live as copies under `lib/`.
-They were extracted to **`crates/outl-frontend-shared/`** so mobile and desktop import the same file — drift between two TS implementations is geometrically impossible.
+TS pieces mirroring a Rust canonical source (`looksLikeOutline`, `<MarkdownInline />`, `detectRefContext`, `autoPairBracket`, `utf16OffsetToCharOffset`, …) used to live as copies under `lib/`.
+Extracted to `crates/outl-frontend-shared/` so mobile and desktop share one file.
+Contract-by-contract table (moved out to keep this file under the per-crate size ceiling): [`docs/primitives-markdown.md` § 9](../../docs/primitives-markdown.md#9-cross-runtime-ts-contracts-outlshared).
+**A new contract goes in `@outl/shared` from day one**, never under a client's own `src/lib/` first.
 
-| Contract | Path | Mirrors (Rust) |
-|---|---|---|
-| `looksLikeOutline` | `@outl/shared/paste` | `outl_actions::paste::looks_like_outline` |
-| `<MarkdownInline />` (renderer of `InlineToken[]`) | `@outl/shared/markdown` | `outl_md::tokenize_owned` (backend produces the tokens; the renderer is a discriminant-to-JSX switch) |
-| `detectRefContext` (+ `autoClose/DeletePair`, `insertPair/Text`, `applySuggestion`) | `@outl/shared/autocomplete` | `outl_tui::actions::overlay::detect_trigger` (the `[[` and `((` triggers; TUI also covers `#` and `/`) |
-| `autoPairBracket` (auto-pair `(`/`[`/`{` + step over auto-inserted closers; wired via `onBeforeInput` since iOS soft keyboards skip per-char `keydown`) | `@outl/shared/autocomplete` | `outl_tui::input::insert` (`insert_pair`) + `EditBuffer::delete_pair_back` |
-| `utf16OffsetToCharOffset` | `@outl/shared/paste` | runtime gap, no Rust mirror — `selectionStart` is UTF-16, the backend expects codepoints, or the splice shifts per supplementary-plane char |
+## Theming (RFC 0022)
 
-**Adding a new cross-runtime contract = add it in `@outl/shared` from day one.**
-Never add it under `outl-mobile/src/lib/` first — the next time desktop catches up to the feature, it has to consume from the same file.
+`src/lib/theme.ts::installTheme` fetches both pair sides via the shared `get_theme` command at boot, holds both `Palette`s in memory, and repaints through `applyPaletteToRoot` on a `prefers-color-scheme` flip (no backend round-trip mid-repaint).
+`App.tsx` hardcodes the pair (`outl-light` / `outl`) instead of reading `outl_config::ThemeCfg` — no settings surface exists yet to expose `[theme]`, so `preset` / `preset_dark` / `mode` are ignored here until one lands.
+Field reference: [`docs/config.md` § `[theme]`](../../docs/config.md#theme).
 
 ## Logging (device console)
 

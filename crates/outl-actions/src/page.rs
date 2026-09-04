@@ -493,6 +493,34 @@ pub fn read_text_prop(workspace: &Workspace, node: NodeId, key: &str) -> Option<
     }
 }
 
+/// Toggle the `pinned:: true` page-level property (TUI's `g P` chord;
+/// `outl-tauri-shared`'s `toggle_pin` command, RFC 0254 phase 4).
+///
+/// `pinned` already lives in the op log as an ordinary `Op::SetProp` —
+/// it converges the same way any other page property does, so this is
+/// not new shared state per root `CLAUDE.md` invariant 7, just the
+/// first place two GUI clients write it instead of only reading it off
+/// [`PageMeta::pinned`].
+///
+/// Refuses journal pages (see [`ActionError::CannotPinJournal`]).
+/// Returns the page's new pinned state.
+pub fn toggle_pin(
+    workspace: &mut Workspace,
+    hlc: &HlcGenerator,
+    page: NodeId,
+) -> Result<bool, ActionError> {
+    if PageKind::parse(workspace.tree().property(page, KIND_KEY)) == PageKind::Journal {
+        return Err(ActionError::CannotPinJournal(page.to_string()));
+    }
+    let was_pinned = match workspace.tree().property(page, "pinned") {
+        Some(PropValue::Text(s)) => is_truthy(s),
+        _ => false,
+    };
+    let new_value = (!was_pinned).then(|| PropValue::Text("true".to_string()));
+    set_property(workspace, hlc, page, "pinned", new_value)?;
+    Ok(!was_pinned)
+}
+
 // ---------------------------------------------------------------------------
 // Journal helpers
 // ---------------------------------------------------------------------------
@@ -633,6 +661,33 @@ mod tests {
         assert_eq!(pages[0].slug, "ideas");
         assert_eq!(pages[0].title, "Ideas");
         assert_eq!(pages[0].kind, PageKind::Page);
+    }
+
+    #[test]
+    fn toggle_pin_flips_the_property_and_reports_the_new_state() {
+        let (mut w, hlc) = ws();
+        let id = open_or_create(&mut w, &hlc, "inbox", "Inbox", PageKind::Page).unwrap();
+        assert!(!page_meta(&w, id).unwrap().pinned);
+
+        let now_pinned = toggle_pin(&mut w, &hlc, id).unwrap();
+        assert!(now_pinned);
+        assert!(page_meta(&w, id).unwrap().pinned);
+
+        let now_unpinned = toggle_pin(&mut w, &hlc, id).unwrap();
+        assert!(!now_unpinned);
+        assert!(!page_meta(&w, id).unwrap().pinned);
+    }
+
+    #[test]
+    fn toggle_pin_refuses_a_journal_page() {
+        let (mut w, hlc) = ws();
+        let date = NaiveDate::from_ymd_opt(2026, 7, 9).unwrap();
+        let journal = open_journal(&mut w, &hlc, date).unwrap();
+
+        let err = toggle_pin(&mut w, &hlc, journal).unwrap_err();
+        assert!(matches!(err, ActionError::CannotPinJournal(_)));
+        // Refusing must not leave a half-written property behind.
+        assert!(!page_meta(&w, journal).unwrap().pinned);
     }
 
     /// Define a `journal` template page with one body block.

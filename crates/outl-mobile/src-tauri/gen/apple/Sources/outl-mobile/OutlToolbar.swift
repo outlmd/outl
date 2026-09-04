@@ -49,6 +49,8 @@ public final class OutlToolbarView: UIView {
         .outdent:     ActionMeta(label: "Outdent",          style: .symbol("decrease.indent", destructive: false)),
         .moveUp:      ActionMeta(label: "Move up",          style: .symbol("arrow.up", destructive: false)),
         .moveDown:    ActionMeta(label: "Move down",        style: .symbol("arrow.down", destructive: false)),
+        .undo:        ActionMeta(label: "Undo",             style: .symbol("arrow.uturn.left", destructive: false)),
+        .redo:        ActionMeta(label: "Redo",             style: .symbol("arrow.uturn.right", destructive: false)),
         .bold:        ActionMeta(label: "Bold",             style: .symbol("bold", destructive: false)),
         .italic:      ActionMeta(label: "Italic",           style: .symbol("italic", destructive: false)),
         .code:        ActionMeta(label: "Code",             style: .symbol("chevron.left.forwardslash.chevron.right", destructive: false)),

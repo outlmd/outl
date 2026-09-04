@@ -117,6 +117,11 @@ pub(crate) fn resolve_ref(
     shared::resolve_ref(state.inner(), target)
 }
 
+#[tauri::command]
+pub(crate) fn toggle_pin(page_id: String, state: State<'_, AppState>) -> Result<PageView, String> {
+    shared::toggle_pin(state.inner(), page_id)
+}
+
 /// Delete a page by slug. Caller confirms before invoking — this
 /// command does not re-prompt. Returns a fresh `PageView` of today's
 /// journal so the frontend navigates away from the (now-gone) page.

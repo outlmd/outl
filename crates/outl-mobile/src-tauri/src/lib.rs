@@ -36,6 +36,8 @@
 #[cfg(target_os = "android")]
 mod android_jni;
 mod bg_sync;
+#[cfg(test)]
+mod capability_parity;
 mod commands;
 mod iroh_sync;
 mod plugin_service;
@@ -54,19 +56,20 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tracing::info;
 
 use crate::commands::{
-    add_block, attach_asset, copy_block_markdown, copy_markdown, create_block, date_title,
-    delete_block, delete_page, edit_block, exec, import_asset_file, indent_block,
-    instantiate_template_at, list_all_pages, list_outline, list_templates_cmd, move_block_after,
-    move_block_down, move_block_up, next_day, open_asset, open_journal_for, open_page_by_slug,
-    open_ref, open_today_journal, outdent_block, outl_emoji_search, outl_peer_list,
-    outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove, outl_peer_status, outl_sync_now,
-    page_backlinks, paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
+    add_block, attach_asset, copy_block_markdown, copy_block_ref, copy_markdown, create_block,
+    cut_block, date_title, delete_block, delete_page, edit_block, exec, get_theme,
+    get_theme_config, import_asset_file, indent_block, instantiate_template_at, list_all_pages,
+    list_outline, list_templates_cmd, list_themes, move_block_after, move_block_down,
+    move_block_up, next_day, open_asset, open_journal_for, open_page_by_slug, open_ref,
+    open_today_journal, outdent_block, outl_emoji_search, outl_peer_list, outl_peer_pair_host,
+    outl_peer_pair_join, outl_peer_remove, outl_peer_status, outl_sync_now, page_backlinks,
+    paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
     plugin_install_official, plugin_list, plugin_registry_list, plugin_run, plugin_secret_remove,
     plugin_secret_set, plugin_set_enabled, plugin_settings_describe, plugin_sync_hooks,
     plugin_toolbar, plugin_transform, plugin_transformers, plugin_uninstall, previous_day,
-    read_asset_data_url, reload_workspace, resolve_page_labels, resolve_ref, search_blocks,
-    search_pages, search_persons, set_backlinks_order, set_block_collapsed, split_block,
-    today_slug_cmd, toggle_quote, toggle_todo, workspace_stats,
+    read_asset_data_url, redo_page, reload_workspace, resolve_page_labels, resolve_ref,
+    search_blocks, search_pages, search_persons, set_backlinks_order, set_block_collapsed,
+    split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo, undo_page, workspace_stats,
 };
 use crate::commands::{
     clear_reminder_snooze, deliver_due_reminders, known_property_keys, list_reminders,
@@ -270,6 +273,7 @@ pub fn run() {
                 storage_root,
                 registry,
                 iroh,
+                history: Mutex::new(std::collections::HashMap::new()),
                 backlink_index: Arc::new(Mutex::new(None)),
                 projection_writer,
             });
@@ -333,6 +337,10 @@ pub fn run() {
             date_title,
             workspace_stats,
             resolve_ref,
+            // Theme
+            list_themes,
+            get_theme,
+            get_theme_config,
             delete_page,
             page_backlinks,
             set_backlinks_order,
@@ -358,6 +366,13 @@ pub fn run() {
             paste_plain_at,
             copy_markdown,
             copy_block_markdown,
+            cut_block,
+            copy_block_ref,
+            // Pages
+            toggle_pin,
+            // Undo / redo
+            undo_page,
+            redo_page,
             // Assets (open uploaded file / import a file as a block /
             // read bytes as a data URL for inline render)
             open_asset,

@@ -17,6 +17,8 @@ public enum ToolbarAction: String, CaseIterable, Sendable {
     case italic
     case moveUp
     case moveDown
+    case undo
+    case redo
     case insertHash
     case insertBlock
     case code
@@ -36,6 +38,8 @@ public enum ToolbarAction: String, CaseIterable, Sendable {
         .italic,
         .moveUp,
         .moveDown,
+        .undo,
+        .redo,
         .insertHash,
         .insertBlock,
         .code,
