@@ -55,10 +55,20 @@ use tracing::warn;
 
 use crate::host::StorageRootProvider;
 
+/// One message on the worker's channel: a page to project, or a
+/// synchronization barrier (see [`ProjectionWriter::flush`]).
+enum Msg {
+    Page(NodeId),
+    /// Acked once every `Page` queued *before* this `Flush` has been
+    /// written. `std::sync::mpsc` preserves per-sender FIFO order, so a
+    /// `Flush` queued after a `Page` is guaranteed to drain behind it.
+    Flush(Sender<()>),
+}
+
 /// Handle to the background projection worker. Cheap to hold in
 /// `AppState`; cloning the `Sender` is how a command queues a write.
 pub struct ProjectionWriter {
-    tx: Sender<NodeId>,
+    tx: Sender<Msg>,
 }
 
 impl ProjectionWriter {
@@ -70,46 +80,66 @@ impl ProjectionWriter {
         workspace: Arc<Mutex<Option<Workspace>>>,
         root: R,
     ) -> Self {
-        let (tx, rx) = mpsc::channel::<NodeId>();
+        let (tx, rx) = mpsc::channel::<Msg>();
         thread::Builder::new()
             .name("outl-projection".into())
             .spawn(move || {
                 // Block until something is queued, then coalesce every
-                // other pending page into one batch.
+                // other pending page into one batch. A `Flush` seen while
+                // draining ends the batch there (so everything queued
+                // ahead of it gets written first) and is acked once that
+                // batch's writes land, before the loop goes back to
+                // blocking on `recv`.
                 while let Ok(first) = rx.recv() {
                     let mut dirty: HashSet<NodeId> = HashSet::new();
-                    dirty.insert(first);
-                    while let Ok(more) = rx.try_recv() {
-                        dirty.insert(more);
-                    }
-                    let Some(root) = root.current() else {
-                        continue;
-                    };
-                    for page in dirty {
-                        // Lock per page and drop between writes so a
-                        // synchronous command isn't starved during a
-                        // large batch. The write (render + sidecar) is
-                        // atomic per file and happens under this lock, so
-                        // it can't interleave with another projection.
-                        let guard = workspace.lock();
-                        let Some(ws) = guard.as_ref() else {
-                            break;
-                        };
-                        // Guarded, not the plain write. This worker runs
-                        // after a real mutation, so it must write — but
-                        // "must write" is not "may delete". A page whose
-                        // `.md` carries content the op log never saw is
-                        // exactly what `apply_page_md_with_sidecar_if_stale`
-                        // refuses on the open path, and writing it here
-                        // deleted the same bytes one keystroke later.
-                        // The user's edit is safe either way: it went
-                        // through `Workspace::apply` and is in the log.
-                        // Only the on-disk projection lags, which is the
-                        // recoverable direction, and the banner the open
-                        // path raises already tells the user why.
-                        if let Err(e) = apply_page_md_with_sidecar_guarded(ws, &root, page) {
-                            warn!("background projection skipped for {page}: {e}");
+                    let mut pending_acks: Vec<Sender<()>> = Vec::new();
+                    match first {
+                        Msg::Page(id) => {
+                            dirty.insert(id);
                         }
+                        Msg::Flush(ack) => pending_acks.push(ack),
+                    }
+                    while let Ok(more) = rx.try_recv() {
+                        match more {
+                            Msg::Page(id) => {
+                                dirty.insert(id);
+                            }
+                            Msg::Flush(ack) => pending_acks.push(ack),
+                        }
+                    }
+                    if let Some(root) = root.current() {
+                        for page in dirty {
+                            // Lock per page and drop between writes so a
+                            // synchronous command isn't starved during a
+                            // large batch. The write (render + sidecar) is
+                            // atomic per file and happens under this lock, so
+                            // it can't interleave with another projection.
+                            let guard = workspace.lock();
+                            let Some(ws) = guard.as_ref() else {
+                                break;
+                            };
+                            // Guarded, not the plain write. This worker runs
+                            // after a real mutation, so it must write — but
+                            // "must write" is not "may delete". A page whose
+                            // `.md` carries content the op log never saw is
+                            // exactly what `apply_page_md_with_sidecar_if_stale`
+                            // refuses on the open path, and writing it here
+                            // deleted the same bytes one keystroke later.
+                            // The user's edit is safe either way: it went
+                            // through `Workspace::apply` and is in the log.
+                            // Only the on-disk projection lags, which is the
+                            // recoverable direction, and the banner the open
+                            // path raises already tells the user why.
+                            if let Err(e) = apply_page_md_with_sidecar_guarded(ws, &root, page) {
+                                warn!("background projection skipped for {page}: {e}");
+                            }
+                        }
+                    }
+                    // Ack every flush collected in this batch now that its
+                    // pages (if any) are written. A dropped receiver (the
+                    // caller stopped waiting) makes the send a silent no-op.
+                    for ack in pending_acks {
+                        let _ = ack.send(());
                     }
                 }
             })
@@ -124,6 +154,24 @@ impl ProjectionWriter {
     /// receiver (worker gone at shutdown) is a silent no-op — the next
     /// boot re-projects from the op log.
     pub fn queue(&self, page: NodeId) {
-        let _ = self.tx.send(page);
+        let _ = self.tx.send(Msg::Page(page));
+    }
+
+    /// Block until every page queued **before** this call has been
+    /// written to disk.
+    ///
+    /// Exists because a caller that needs the on-disk `.md` + sidecar to
+    /// reflect the current tree — `outl_actions::restore_page_md`'s
+    /// reconcile-from-disk step, which `undo_page` / `redo_page` run, is
+    /// the concrete case — cannot assume the background worker has
+    /// caught up just because `queue()` returned; `queue()` only proves
+    /// the page was *accepted*, not written. A dropped receiver (worker
+    /// gone) makes this return immediately rather than block forever.
+    pub fn flush(&self) {
+        let (ack_tx, ack_rx) = mpsc::channel::<()>();
+        if self.tx.send(Msg::Flush(ack_tx)).is_err() {
+            return;
+        }
+        let _ = ack_rx.recv();
     }
 }
