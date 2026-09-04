@@ -11,7 +11,7 @@
 //! Exit codes: `0` success, `1` user error, `2` internal error.
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Suggested exit code for a successful command.
 pub const EXIT_OK: i32 = 0;
@@ -46,6 +46,13 @@ pub mod codes {
     pub const INTERNAL: &str = "INTERNAL";
     /// Generic user-input validation failure.
     pub const INVALID_ARG: &str = "INVALID_ARG";
+    /// A page's `.md` holds content that exists in no op (root
+    /// `CLAUDE.md` invariant 8) — the write was refused rather than
+    /// silently deleting it. Distinct from `INTERNAL` so a caller
+    /// (the MCP's agent in particular) can tell "this page stopped
+    /// syncing" from an opaque failure and act on it instead of just
+    /// retrying. See RFC 0255.
+    pub const PAGE_MARKDOWN_AHEAD_OF_LOG: &str = "PAGE_MARKDOWN_AHEAD_OF_LOG";
 }
 
 /// Stable error body used in both CLI (`--json`) and MCP responses.
@@ -55,6 +62,14 @@ pub struct ApiError {
     pub code: String,
     /// Human-readable explanation.
     pub message: String,
+    /// Structured detail beyond `message`, for a caller that wants to
+    /// act on the error rather than just display it (e.g.
+    /// `PAGE_MARKDOWN_AHEAD_OF_LOG`'s `path` / `lines` / `sample` /
+    /// `recovery_command`). Absent from the JSON body entirely for
+    /// every other error, so the envelope shape most callers already
+    /// parse doesn't change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 impl ApiError {
@@ -63,6 +78,16 @@ impl ApiError {
         Self {
             code: code.to_string(),
             message: message.into(),
+            data: None,
+        }
+    }
+
+    /// Build an error carrying structured detail alongside the message.
+    pub fn with_data(code: &str, message: impl Into<String>, data: Value) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+            data: Some(data),
         }
     }
 
@@ -92,6 +117,16 @@ impl std::error::Error for ApiError {}
 impl From<outl_actions::ActionError> for ApiError {
     fn from(e: outl_actions::ActionError) -> Self {
         use outl_actions::ActionError::*;
+        // Captured before the match moves `e` — `Display` only needs
+        // `&self`, and this is the *one* variant below that reuses it
+        // rather than writing its own `format!`. Reusing it here is
+        // deliberate: `ActionError::PageMarkdownAheadOfLog`'s message is
+        // already the single Rust-side sentence for this condition
+        // (`outl doctor` and this crate's other call sites both let it
+        // flow through as-is), and inventing a second phrasing for the
+        // MCP's structured response is exactly the drift RFC 0255 exists
+        // to prevent.
+        let message = e.to_string();
         match e {
             NotInTree(s) => ApiError::new(codes::BLOCK_NOT_FOUND, format!("block {s} not in tree")),
             MissingPosition(s) => ApiError::new(
@@ -111,6 +146,20 @@ impl From<outl_actions::ActionError> for ApiError {
                 format!("cannot outdent {s}: parent has no grandparent"),
             ),
             InvalidSlug(s) => ApiError::new(codes::INVALID_ARG, format!("invalid page slug `{s}`")),
+            PageMarkdownAheadOfLog {
+                path,
+                lines,
+                sample,
+            } => ApiError::with_data(
+                codes::PAGE_MARKDOWN_AHEAD_OF_LOG,
+                message,
+                json!({
+                    "path": path,
+                    "lines": lines,
+                    "sample": sample,
+                    "recovery_command": outl_actions::error::AHEAD_OF_LOG_RECOVERY_COMMAND,
+                }),
+            ),
             other => ApiError::internal(other),
         }
     }
@@ -235,5 +284,50 @@ mod tests {
     fn user_errors_exit_with_1() {
         let err = ApiError::new(codes::PAGE_NOT_FOUND, "missing");
         assert_eq!(err.exit_code(), EXIT_USER);
+    }
+
+    /// RFC 0255 Part 1, test 4: the refusal wording has one owner.
+    ///
+    /// `ActionError::PageMarkdownAheadOfLog`'s `Display` is already the
+    /// single Rust-side sentence for this condition — `outl doctor`
+    /// asks the same underlying `content_lines_missing_from` question
+    /// and phrases its own listing, but nothing else in this crate
+    /// wrote a competing full sentence for the refusal itself before
+    /// this conversion existed. Pinning that the `ApiError`'s message
+    /// is *exactly* that `Display` — not a paraphrase built fresh in
+    /// this `From` impl — is what stops a future edit from quietly
+    /// forking it into a second sentence for the same condition.
+    ///
+    /// A byte-identical sentence between this Rust message and
+    /// `@outl/shared/warnings::aheadOfLogNotice` (the GUI clients' TS
+    /// copy) isn't pinned here, or anywhere: there is no mechanism in
+    /// this repo that shares a literal string across the Rust/MCP and
+    /// TypeScript/GUI boundary, the way `outl_shortcuts::support`
+    /// shares one Rust enum's text across TUI and desktop. Reusing the
+    /// existing Rust sentence verbatim is the honest substitute — it
+    /// guarantees no *second* Rust copy exists to drift, which is the
+    /// half of "one owner" this codebase can actually enforce today.
+    #[test]
+    fn ahead_of_log_wording_is_the_actionerrors_display_not_a_second_sentence() {
+        let action_err = outl_actions::ActionError::PageMarkdownAheadOfLog {
+            path: "pages/frozen.md".to_string(),
+            lines: 3,
+            sample: "\"only ever on disk\"".to_string(),
+        };
+        let expected = action_err.to_string();
+
+        let api_err: ApiError = outl_actions::ActionError::PageMarkdownAheadOfLog {
+            path: "pages/frozen.md".to_string(),
+            lines: 3,
+            sample: "\"only ever on disk\"".to_string(),
+        }
+        .into();
+
+        assert_eq!(api_err.code, codes::PAGE_MARKDOWN_AHEAD_OF_LOG);
+        assert_eq!(
+            api_err.message, expected,
+            "the MCP/CLI message must forward ActionError's own Display verbatim, \
+             never a second phrasing of the same refusal",
+        );
     }
 }

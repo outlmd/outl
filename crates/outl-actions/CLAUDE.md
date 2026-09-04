@@ -76,6 +76,10 @@ Disk layout when projected to `.md`:
 `migrate_legacy_into_today` reshuffles any pre-page-model blocks (direct children of root that lack `page-slug`) under today's journal.
 Clients call it once on startup; it's idempotent.
 
+`page::toggle_pin` is the single owner of flipping the `pinned::` property (RFC 0254 phase 4).
+It already writes an ordinary `Op::SetProp`, so pinned state converges through the op log like any other page property — root `CLAUDE.md` invariant 7 is satisfied, not something this function had to add.
+Refuses journal pages (`ActionError::CannotPinJournal`), same rule the TUI's `g P` enforces.
+
 ## Task state convention
 
 Task state lives **in the block's text** as a prefix:

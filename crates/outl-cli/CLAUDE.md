@@ -69,6 +69,10 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   `tree.rs` — trash contents, unmaterialized ops, projection drift (needs a booted `Workspace`).
   Its drift check asks `outl_actions::content_lines_missing_from` before offering a page for re-projection, because the sidecar hash gate proves the sidecar agrees with the bytes on disk and **not** that those bytes came from the log.
   A page holding unlogged content is reported and withheld from the plan, so the read-only listing never promises a repair `--repair` then refuses (invariant 4 below).
+  `theme.rs` — warns when a `[theme]` pair's `preset` holds a dark palette or `preset_dark` holds a light one (`Palette::is_light()`), checked for every `mode` (RFC 0022).
+  It reads the **global** `~/.config/outl/config.toml` (`outl_config::load().theme`), not the per-workspace `cfg` this module also reads (`outl_ws::layout::Config` — actor id only, no theme section).
+  `collect_internal` takes `theme: &outl_config::ThemeCfg` as a parameter for the same test-isolation reason it takes `store: &DeviceStore`.
+  A config with no `preset_dark` (every pre-RFC-0022 config) is silently skipped, never a finding.
   `repair.rs` — the `--repair` pass.
   `mod.rs` — report types + orchestration.
 
@@ -295,6 +299,7 @@ src/
 │   │   ├── files.rs       #   .md ↔ sidecar, parse warnings, conflicts
 │   │   ├── tree.rs        #   trash, unmaterialized ops, projection drift
 │   │   ├── ops_guard.rs   #   restores ops/ byte-for-byte after the run
+│   │   ├── theme.rs       #   [theme] pair validation (global config)
 │   │   └── repair.rs      #   the --repair pass
 │   ├── reconcile.rs       # outl reconcile
 │   ├── recover.rs         # outl recover — op-log-side text recovery
