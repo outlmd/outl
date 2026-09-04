@@ -52,6 +52,28 @@ fn backlinks_order_str(o: BacklinksOrder) -> String {
     .to_string()
 }
 
+/// Parse the flat wire string into a theme mode. Anything that isn't an
+/// explicit `"light"` or `"dark"` resolves to `Auto` — matches
+/// `ThemeMode::default()`, so an empty/unknown string from an older
+/// frontend keeps today's behaviour.
+fn parse_theme_mode(s: &str) -> outl_config::ThemeMode {
+    match s {
+        "light" => outl_config::ThemeMode::Light,
+        "dark" => outl_config::ThemeMode::Dark,
+        _ => outl_config::ThemeMode::Auto,
+    }
+}
+
+/// Render a theme mode to the lowercase wire string the frontend uses.
+fn theme_mode_str(m: outl_config::ThemeMode) -> String {
+    match m {
+        outl_config::ThemeMode::Light => "light",
+        outl_config::ThemeMode::Dark => "dark",
+        outl_config::ThemeMode::Auto => "auto",
+    }
+    .to_string()
+}
+
 /// Flat shape the Solid frontend's `Settings` interface
 /// (`crates/outl-desktop/src/lib/api.ts`) expects. Matches what
 /// `SettingsModal.tsx` reads and writes.
@@ -63,8 +85,18 @@ pub struct Settings {
     /// behaviour ships in the TUI.
     pub vim_mode: bool,
     /// Palette preset name from `outl_theme::PRESETS`. Default
-    /// `"outl"` (brand purple).
+    /// `"outl"` (brand purple). The light side of the RFC 0022 pair,
+    /// and the only side used when `theme_mode == "light"`.
     pub theme: String,
+    /// The dark side of the RFC 0022 pair, used when `theme_mode ==
+    /// "dark"` or `"auto"` resolves dark. Always a concrete preset
+    /// name here (never empty) — `From<Config>` resolves it through
+    /// `ThemeCfg::dark()`, which already falls back to `theme` for a
+    /// config that never set a second preset.
+    pub theme_dark: String,
+    /// Which side of the pair to render: `"light"`, `"dark"`, or
+    /// `"auto"` (default) to follow the OS appearance setting.
+    pub theme_mode: String,
     /// Outline font size in pixels.
     pub font_size: u32,
     /// Sync transport: `"iroh"` (P2P, default) or `"file"` (iCloud /
@@ -96,10 +128,18 @@ impl Settings {
 
 impl From<Config> for Settings {
     fn from(c: Config) -> Self {
+        // Resolve `dark()` (never the raw `Option`) and read `mode`
+        // before moving `preset` out of `c.theme` below — both borrow
+        // `c.theme` immutably and `dark()`'s fallback needs `preset`
+        // still in place.
+        let theme_dark = c.theme.dark().to_string();
+        let theme_mode = theme_mode_str(c.theme.mode);
         Self {
             last_workspace: c.workspace.last,
             vim_mode: c.editor.vim_mode,
             theme: c.theme.preset,
+            theme_dark,
+            theme_mode,
             font_size: c.editor.font_size,
             sync_transport: transport_str(c.sync.transport),
             backlinks_order: backlinks_order_str(c.display.backlinks_order),
@@ -115,7 +155,24 @@ impl From<Settings> for Config {
             workspace: WorkspaceCfg {
                 last: s.last_workspace,
             },
-            theme: ThemeCfg { preset: s.theme },
+            theme: ThemeCfg {
+                preset: s.theme,
+                // Always `Some`, never restored back to `None`: the
+                // modal now owns the whole pair, and `Settings::theme_dark`
+                // is always a concrete preset name (see its doc comment).
+                // A config that only ever had `preset` therefore gets an
+                // explicit `preset_dark` equal to it on the first modal
+                // save, rather than staying implicit — a one-time,
+                // behaviour-preserving rewrite of the file: `dark()`
+                // already resolved to the same value either way, so
+                // nothing the client renders changes. The alternative
+                // (writing `None` back when `theme_dark == theme`) would
+                // require guessing whether the user meant to pin the pair
+                // or just hadn't touched it, which is exactly the
+                // ambiguity this DTO change removes.
+                preset_dark: Some(s.theme_dark),
+                mode: parse_theme_mode(&s.theme_mode),
+            },
             editor: EditorCfg {
                 vim_mode: s.vim_mode,
                 font_size: s.font_size,
@@ -181,31 +238,50 @@ pub fn load(_app_config_dir: &std::path::Path) -> Settings {
     outl_config::load().into()
 }
 
-/// Save the flat wire shape as `config.toml`. Same path
-/// (`~/.config/outl/config.toml`) regardless of where the OS
-/// thinks the app's config directory is.
-pub fn save(_app_config_dir: &std::path::Path, settings: &Settings) -> anyhow::Result<()> {
-    let mut cfg: Config = settings.clone().into();
+/// Overwrite the sections of `cfg` that the flat `Settings` wire shape
+/// doesn't model with whatever is currently on disk (`on_disk`), so a
+/// settings-modal save can only ever touch the fields it actually owns.
+///
+/// Split out from [`save`] as a pure function (no I/O) so the
+/// restore-on-save contract for each section — including the
+/// `[theme]` pair added in RFC 0022 — can be pinned by a unit test
+/// without touching the real `~/.config/outl/config.toml`.
+fn restore_unmodeled_sections(cfg: &mut Config, on_disk: &Config) {
     // The flat `Settings` carries the transport choice (the Sync panel
     // writes it), so `into()` already set `cfg.sync.transport`. It does NOT
     // model `relay_url` or `[calendar]`, so restore those from disk in one
     // read — otherwise saving the transport would wipe a custom relay or a
     // hand-set timezone (and two reads could mix fields across a concurrent
     // edit).
-    let on_disk = outl_config::load();
-    cfg.sync.relay_url = on_disk.sync.relay_url;
-    cfg.calendar = on_disk.calendar;
+    cfg.sync.relay_url = on_disk.sync.relay_url.clone();
+    cfg.calendar = on_disk.calendar.clone();
+    // `[theme]` (all three fields: `preset`, `preset_dark`, `mode`) is now
+    // FULLY modeled in `Settings` — the modal owns the whole pair. Do NOT
+    // add a restore-from-disk line for any of them here: that was the
+    // previous shape (`preset_dark` / `mode` unmodeled), and restoring them
+    // now would silently overwrite whatever the user just picked in the
+    // modal with the stale on-disk pair. See `settings.rs`'s theme-pair
+    // test for the regression this guards against.
     // The backlinks toggle owns `[display]` via `set_backlinks_order`;
     // restore it so a modal save can't revert the user's direction.
-    cfg.display = on_disk.display;
+    cfg.display = on_disk.display.clone();
     // `[assets]` (upload size cap) is core-managed and not modeled in the
     // flat Settings; restore it so a modal save keeps a custom max_bytes.
-    cfg.assets = on_disk.assets;
+    cfg.assets = on_disk.assets.clone();
     // `[backup]` is core-managed and not modeled in the flat Settings.
     // Restoring it matters more than the others: dropping to the default
     // here would be a *silent* change to the user's safety net, and the
     // only way they'd find out is the day they needed it.
-    cfg.backup = on_disk.backup;
+    cfg.backup = on_disk.backup.clone();
+}
+
+/// Save the flat wire shape as `config.toml`. Same path
+/// (`~/.config/outl/config.toml`) regardless of where the OS
+/// thinks the app's config directory is.
+pub fn save(_app_config_dir: &std::path::Path, settings: &Settings) -> anyhow::Result<()> {
+    let mut cfg: Config = settings.clone().into();
+    let on_disk = outl_config::load();
+    restore_unmodeled_sections(&mut cfg, &on_disk);
     outl_config::save(&cfg)
 }
 
@@ -223,6 +299,11 @@ mod tests {
             "vim mode is on by default — outl is keyboard-first"
         );
         assert_eq!(s.theme, "outl");
+        assert_eq!(
+            s.theme_dark, "outl",
+            "no preset_dark set on a fresh config — dark() falls back to preset"
+        );
+        assert_eq!(s.theme_mode, "auto", "auto is ThemeMode::default()");
         assert_eq!(s.font_size, 15);
         assert_eq!(s.sync_transport, "iroh", "P2P is the default transport");
         assert_eq!(s.backlinks_order, "newest", "newest-first is the default");
@@ -239,6 +320,8 @@ mod tests {
             last_workspace: Some(PathBuf::from("/tmp/ws")),
             vim_mode: false,
             theme: "dracula".into(),
+            theme_dark: "nord".into(),
+            theme_mode: "dark".into(),
             font_size: 18,
             sync_transport: "file".into(),
             backlinks_order: "oldest".into(),
@@ -250,10 +333,74 @@ mod tests {
         assert_eq!(back.last_workspace, s.last_workspace);
         assert_eq!(back.vim_mode, s.vim_mode);
         assert_eq!(back.theme, s.theme);
+        assert_eq!(back.theme_dark, s.theme_dark);
+        assert_eq!(back.theme_mode, s.theme_mode);
         assert_eq!(back.font_size, s.font_size);
         assert_eq!(back.sync_transport, s.sync_transport);
         assert_eq!(back.backlinks_order, s.backlinks_order);
         assert_eq!(back.reminders_enabled, s.reminders_enabled);
         assert_eq!(back.reminders_quiet_hours, s.reminders_quiet_hours);
+    }
+
+    /// Regression test for the RFC 0022 follow-up that added
+    /// `theme_dark` / `theme_mode` to the flat `Settings` DTO.
+    ///
+    /// Before this change, `preset_dark` / `mode` weren't modeled at
+    /// all, so `restore_unmodeled_sections` had to pull both back
+    /// from disk after every save — otherwise `From<Settings> for
+    /// Config` would reset them to their literal defaults (`None` /
+    /// `Auto`) and silently wipe a hand-configured pair. That old
+    /// test (`save_keeps_the_theme_pair_but_lets_the_modal_pick_the_preset`)
+    /// pinned exactly that restore.
+    ///
+    /// Now that the modal owns all three `[theme]` fields, restoring
+    /// any of them from disk would be the *opposite* bug: it would
+    /// silently discard whatever the user just picked for `theme_dark`
+    /// / `theme_mode` in the modal, making those controls appear to do
+    /// nothing. This test pins the new contract instead: a save must
+    /// carry the modal's full theme pick through untouched, while a
+    /// section the modal still doesn't model (`[calendar]`, used here
+    /// as the representative unmodelled section) is still restored
+    /// from disk.
+    #[test]
+    fn save_round_trips_the_whole_theme_pair_and_still_restores_unmodelled_sections() {
+        use outl_config::ThemeMode;
+
+        let mut on_disk = Config::default();
+        // Stale on-disk pair the modal is about to override.
+        on_disk.theme.preset = "logseq-light".into();
+        on_disk.theme.preset_dark = Some("outl".into());
+        on_disk.theme.mode = ThemeMode::Light;
+        // A hand-set value in a still-unmodelled section, distinct from
+        // the default, so a lost restore would show up as a mismatch.
+        on_disk.calendar.timezone = Some("America/Sao_Paulo".into());
+
+        let modal_settings = Settings {
+            theme: "dracula".into(),
+            theme_dark: "nord".into(),
+            theme_mode: "dark".into(),
+            ..Settings::fresh()
+        };
+        let mut cfg: Config = modal_settings.into();
+        restore_unmodeled_sections(&mut cfg, &on_disk);
+
+        assert_eq!(
+            cfg.theme.preset, "dracula",
+            "the modal's light pick must win over the stale on-disk value"
+        );
+        assert_eq!(
+            cfg.theme.preset_dark,
+            Some("nord".to_string()),
+            "the modal's dark pick must win — it is modeled now, so it must NOT be restored from disk"
+        );
+        assert_eq!(
+            cfg.theme.mode,
+            ThemeMode::Dark,
+            "the modal's mode pick must win — it is modeled now, so it must NOT be restored from disk"
+        );
+        assert_eq!(
+            cfg.calendar, on_disk.calendar,
+            "[calendar] is still unmodelled by Settings and must still be restored from disk"
+        );
     }
 }

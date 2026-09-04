@@ -148,9 +148,15 @@ Convention: [`docs/clients.md` → Surfacing a page that stopped syncing](../../
 
 ## Theme tokens
 
-`src/lib/palette.ts::applyPaletteToRoot` writes the canonical `--color-outl-*` namespace plus the legacy `--color-ios-*` one `MarkdownInline` still consumes.
-New desktop code uses only `--color-outl-*`.
-Both namespaces, the boot defaults in `styles.css`, and the condition for deleting the legacy writes: [`docs/theming.md`](../../docs/theming.md#desktop-css-custom-property-namespaces).
+`applyPaletteToRoot` (now `@outl/shared/theme`, moved out of this crate's `src/lib/palette.ts` by RFC 0022) writes only the canonical `--color-outl-*` namespace.
+The legacy `--color-ios-*` / `--color-iosd-*` writes are gone.
+`@outl/shared/markdown` (`MarkdownInline`, `EmbeddedSubtree`) reads `--color-outl-*` too, so the desktop's OS appearance setting no longer changes markdown block elevation through Tailwind's `dark:` variant.
+`src/styles.css`'s `@theme` block declares only the `--color-outl-*` namespace now — the legacy `--color-ios-*` / `--color-iosd-*` tokens were deleted once nothing read them (RFC 0022).
+Details: [`docs/theming.md`](../../docs/theming.md#desktop-css-custom-property-namespaces).
+
+`commands/theme.rs`'s `list_themes` / `get_theme` are now thin wrappers over `outl_tauri_shared::commands::theme` (RFC 0022).
+The body moved to the shared crate so mobile can register the identical two commands instead of hardcoding palette hex values.
+This crate keeps only the `#[tauri::command]` attribute + `invoke_handler!` registration; no logic lives here anymore.
 
 ## Running
 
@@ -374,6 +380,10 @@ Schema (`crates/outl-desktop/src-tauri/src/settings.rs::Settings`):
 The Sync transport select in `SettingsModal` writes `sync_transport`.
 `settings.rs` maps it to/from `[sync] transport` and preserves `relay_url` on save; takes effect on next launch.
 `backlinks_order` is read-only here — `save` restores it from disk (same pattern as `[calendar]`) so the modal can't clobber the dedicated `set_backlinks_order` command's write.
+`theme` only carries the preset name (the modal owns it).
+`[theme] preset_dark` and `mode` (RFC 0022's light/dark pair) aren't modeled in this flat shape at all, so `save` restores both from disk the same way — otherwise a modal save would silently reset a hand-configured pair back to defaults.
+`settings.rs::restore_unmodeled_sections` is the single place that lists every section/field `save` restores this way.
+A new field added to `[theme]` (or any other unmodeled section) that isn't added there will get silently dropped on the next modal save.
 
 The actor id (one per device) lives next to it as `actor` — a plain ULID.
 Switching workspaces does not rotate it.

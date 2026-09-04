@@ -77,6 +77,14 @@ The only thing a default run writes is its own stdout.
   Reported as `info` on a plain run, with the count only; `--repair` is what drops them.
   The rule — and, more to the point, everything it refuses to touch — is under [The device store's stale actor bindings](#the-device-stores-stale-actor-bindings).
 
+**Global preferences (`~/.config/outl/config.toml`), not this workspace.**
+
+- **A `[theme]` pair whose sides are not one light and one dark.**
+  `preset` is meant to be the light side and `preset_dark` the dark side, but nothing enforces that when you set them, so a warning names whichever slot holds the wrong kind of palette.
+  Checked regardless of `mode` — a pair only in the wrong slots is still wrong once you flip `mode`.
+  A config with no `preset_dark` (every config written before the light/dark pair existed) is never flagged.
+  Always a warning, never an error: a bad theme should never stop you from reaching your notes.
+
 ## `--repair`
 
 Applies **only** the fixes that cannot lose data, and prints exactly what it will do before doing it (the same list a read-only run shows under `N repairable item(s)`).
