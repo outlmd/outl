@@ -9,7 +9,7 @@
 
 use tauri::State;
 
-use crate::state::{AppState, CreateBlockReply, PageView};
+use crate::state::{AppState, CreateBlockReply, CutBlockReply, PageView};
 use outl_tauri_shared::commands::block as shared;
 
 #[tauri::command]
@@ -173,4 +173,18 @@ pub(crate) fn copy_markdown(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     shared::copy_markdown(state.inner(), block_ids)
+}
+
+#[tauri::command]
+pub(crate) fn cut_block(
+    page_id: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<CutBlockReply, String> {
+    shared::cut_block(state.inner(), page_id, id)
+}
+
+#[tauri::command]
+pub(crate) fn copy_block_ref(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    shared::copy_block_ref(state.inner(), id)
 }

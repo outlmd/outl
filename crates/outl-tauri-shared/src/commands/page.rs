@@ -18,7 +18,8 @@ use outl_core::workspace::Workspace;
 use parking_lot::Mutex;
 
 use crate::helpers::{
-    build_page_view, parse_date, parse_node_id, reproject_stale_md, with_ws, with_ws_mut,
+    build_page_view, finish_in_page, parse_date, parse_node_id, reproject_stale_md, with_ws,
+    with_ws_mut,
 };
 use crate::host::AppHost;
 use crate::state::{BacklinksReply, BlockHit, PageView, ERR_LOADING};
@@ -517,6 +518,19 @@ pub fn resolve_ref<S: AppHost>(state: &S, target: String) -> Result<Option<PageM
         Ok(list_pages(ws)
             .into_iter()
             .find(|p| p.title.to_lowercase() == lower))
+    })
+}
+
+/// Toggle the `pinned::` page property (TUI's `g P`, RFC 0254 phase 4).
+/// `outl_actions::page::toggle_pin` already owns the read + write —
+/// this is the IPC wrapper. Refuses journal pages
+/// (`ActionError::CannotPinJournal`) with the same rule the TUI
+/// enforces: a daily note auto-rotates, so pinning one would dilute
+/// the sidebar's `Pinned` list with date-shaped entries.
+pub fn toggle_pin<S: AppHost>(state: &S, page_id: String) -> Result<PageView, String> {
+    let page = parse_node_id(&page_id)?;
+    finish_in_page(state, page, |ws| {
+        outl_actions::page::toggle_pin(ws, state.hlc(), page).map(|_| ())
     })
 }
 

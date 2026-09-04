@@ -101,35 +101,35 @@ The TUI is vim-style by definition.
 | Enter Insert at end of block (vim `A`) | `A` | `A` | — |
 | Substitute block (clear + Insert at col 0; `S` / `cc`) | `S` | `S` | — |
 | Substitute char under cursor (= `xi`) | `s` | — *(char cursor only)* | — |
-| Yank current block to register + OS clipboard (`Y`, alias of `y y`) | `Y` | `Y` | — |
+| Yank current block to register + OS clipboard (`Y`, alias of `y y`) | `Y` | `Y` | long-press → "Copy text" |
 | Paste OS clipboard **with** formatting (outline structure / multi-paragraph split) | `p` | `Cmd/Ctrl+V` | paste |
 | Paste OS clipboard **without** formatting (raw text, single block) | `P` | `Cmd/Ctrl+Shift+V` | — |
 | Open `[[ref]]` / `#tag` / `((blk-…))` under cursor | `Enter` | `Enter` | tap |
 | New block below + Insert | `o` | `o` / `Cmd/Ctrl+Shift+Enter` *(no vim needed)* | toolbar `+` |
-| New block above + Insert (creates a sibling *before* the selected block) | `O` | `O` | — |
+| New block above + Insert (creates a sibling *before* the selected block) | `O` | `O` | long-press → "New block above" |
 | Indent block | `Tab` | `Tab` | drag right |
 | Outdent block | `Shift+Tab` | `Shift+Tab` | drag left |
 | Move block up among siblings | `K` | `Cmd/Ctrl+Shift+↑` | drag |
 | Move block down among siblings | `J` | `Cmd/Ctrl+Shift+↓` | drag |
-| Cut block + subtree (move-by-id; paste keeps `((blk-…))` refs) | — | `Cmd/Ctrl+X` | — |
-| Copy block + subtree (paste duplicates with fresh ids) | — | `Cmd/Ctrl+C` | — |
-| Paste block after the selection (cut → move, copy → duplicate) | — | `Cmd/Ctrl+V` | — |
+| Cut block + subtree (move-by-id; paste keeps `((blk-…))` refs) | — | `Cmd/Ctrl+X` | long-press → "Cut block" *(fresh id on paste, see note below)* |
+| Copy block + subtree (paste duplicates with fresh ids) | — | `Cmd/Ctrl+C` | long-press → "Copy block" |
+| Paste block after the selection (cut → move, copy → duplicate) | — | `Cmd/Ctrl+V` | long-press → "Paste block" |
 | Cancel a pending cut | — | `Esc` | — |
 | Delete block (chord) | `d d` | `d d` | swipe left |
 | Fold / unfold (toggle collapsed) | `c` | `c` | tap bullet |
-| Unfold all on the page (chord) | `z R` | `z R` | — |
-| Fold all on the page (chord) | `z M` | `z M` | — |
+| Unfold all on the page (chord) | `z R` | `z R` | tap header "Unfold all" button |
+| Fold all on the page (chord) | `z M` | `z M` | tap header "Fold all" button |
 | Center viewport on cursor (chord) | `z z` | `z z` | — |
 | Zoom in on block (make it the outline root) | `z i` | `z i` / `Cmd/Ctrl+Shift+]` | tap bullet |
 | Zoom out (back up one level toward the page) | `z o` | `z o` / `Cmd/Ctrl+Shift+[` | tap breadcrumb / back |
 | Last block (jump) | `G` | `G` | — |
 | First block (chord) | `g g` | `g g` | — |
 | Reselect last Visual range (chord) | `g v` | `g v` | — |
-| Search workspace for word / block text — forward | `*` | `*` *(seeds picker)* | — |
-| Search workspace for word / block text — backward | `#` | `#` *(seeds picker)* | — |
-| Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | — _(issue [#14](https://github.com/outlmd/outl/issues/14))_ |
-| Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | — _(issue [#14](https://github.com/outlmd/outl/issues/14))_ |
-| Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | — |
+| Search workspace for word / block text — forward | `*` | `*` *(seeds picker)* | page switcher "Blocks" tab *(no hit-stepping)* |
+| Search workspace for word / block text — backward | `#` | `#` *(seeds picker)* | page switcher "Blocks" tab *(no hit-stepping)* |
+| Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | keyboard toolbar |
+| Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | keyboard toolbar |
+| Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | long-press → "Copy block ref" |
 | Enter Visual | `v` | `v` | — |
 | Open command palette | `:` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | — |
 | Open slash menu | `/` | `/` | `/` |
@@ -137,6 +137,11 @@ The TUI is vim-style by definition.
 > **About `a` / `*` / `#` on the desktop.** The desktop's Normal mode has only a selected block id — no character cursor inside the block. So `a` collapses to `i` (the textarea's own caret takes over), and `*` / `#` seed the picker with the first few words of the selected block's text instead of doing a word-under-cursor search. The catalog still ships these chords so muscle memory from the TUI carries over.
 
 > **`Cmd+X` / `Cmd+C` / `Cmd+V` are mode-aware on the desktop.** Inside a block editor (Insert mode, a `<textarea>` is focused) they are the OS-native text cut / copy / paste — the chords aren't in the catalog there, so the keystroke reaches the webview untouched. In **view mode** (Normal, nothing focused) they act on the whole selected block + its subtree: cut marks it to *move by id* (the paste emits a single `Op::Move`, so `((blk-…))` refs and backlinks survive — and the target may live on another page, moving the block across pages), copy snapshots it as markdown (the paste duplicates with fresh ids). This is also why **run code block** moved off `Cmd+X` to `Cmd+Shift+X` (view mode): a text-editing app has to let the OS-wide cut win.
+
+> **Mobile's "Cut block" mints a fresh id, unlike the desktop's `Cmd/Ctrl+X`.**
+> The desktop's block clipboard tags a cut with `{kind: "cut", nodeId}` and pastes it as a single `Op::Move`, so the block keeps its identity and every `((blk-…))` ref to it stays valid.
+> Mobile's long-press "Cut block" instead renders the subtree to markdown and deletes the source in one round-trip, then pastes it back via the same fresh-id path its "Copy block" already uses — a `((blk-…))` ref pointing at the cut block goes stale across the round-trip.
+> Use "Copy block ref" first if something else in the workspace links to the block you're about to cut.
 
 > **`Cmd/Ctrl+Shift+Enter` works without vim mode.**
 > Unlike `o`, the chord is not vim-gated: with no textarea focused the desktop falls into Normal dispatch regardless of the `vim_mode` setting, so every user can append a block from view mode.

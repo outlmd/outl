@@ -14,6 +14,7 @@ use outl_actions::{
     toggle_quote as action_toggle_quote, toggle_todo as action_toggle_todo, ActionError,
     PasteAnchor,
 };
+use outl_md::index::WorkspaceIndex;
 use tracing::warn;
 
 use crate::helpers::{
@@ -21,7 +22,7 @@ use crate::helpers::{
     with_ws, with_ws_mut,
 };
 use crate::host::AppHost;
-use crate::state::{CreateBlockReply, PageView};
+use crate::state::{CreateBlockReply, CutBlockReply, PageView};
 
 /// Create a block. Precedence: `before_id` (vim `O` /
 /// `Cmd/Ctrl+Shift+Enter` at col 0) wins over `after_id` (vim `o` /
@@ -284,6 +285,32 @@ pub fn paste_block_after<S: AppHost>(
     })
 }
 
+/// Cut the block `id` (and its subtree): renders it to clipboard
+/// markdown exactly like [`copy_block_markdown`], then removes it via
+/// `outl_actions::delete` — `Op::Move(node, TRASH_ROOT)`, never a
+/// physical removal (root `CLAUDE.md` invariant 6).
+///
+/// Paste with [`paste_block_after`], which mints fresh ids for the
+/// pasted copy — a cut+paste round trip duplicates identity rather
+/// than preserving it. That is deliberately different from the
+/// desktop frontend's own view-mode Cmd+X/Cmd+V (which reparents the
+/// block via [`move_block_after`] and keeps every `((blk-…))` ref
+/// valid): this command exists for a client whose block clipboard is
+/// a plain markdown string, with no anchor back to the original node
+/// once the cut has happened — the mobile long-press "Cut" gesture,
+/// RFC 0254 phase 4.
+pub fn cut_block<S: AppHost>(
+    state: &S,
+    page_id: String,
+    id: String,
+) -> Result<CutBlockReply, String> {
+    let page = parse_node_id(&page_id)?;
+    let node = parse_node_id(&id)?;
+    let markdown = with_ws(state, |ws| Ok(render_block_md(ws, node)))?;
+    let view = finish_in_page(state, page, |ws| delete(ws, state.hlc(), node))?;
+    Ok(CutBlockReply { markdown, view })
+}
+
 /// Set or flip the `collapsed` flag on a block. Deliberately bypasses
 /// `finish_in_page` — `Op::SetCollapsed` changes neither the `.md` body
 /// nor the sidecar, so reprojecting would just bump file-transport
@@ -378,4 +405,27 @@ pub fn copy_markdown<S: AppHost>(state: &S, block_ids: Vec<String>) -> Result<St
         .map(|id| parse_node_id(id))
         .collect::<Result<_, _>>()?;
     with_ws(state, |ws| Ok(action_copy_markdown(ws, &roots)))
+}
+
+/// Produce the `((blk-XXXXXX))` reference string for block `id`
+/// (issue #18) — the mobile/desktop counterpart of the TUI's `y r`
+/// chord (`outl-tui/src/actions/yank.rs::yank_current_ref`).
+///
+/// Reuses the **same** handle the TUI copies: `WorkspaceIndex` (built
+/// fresh from disk, same as [`crate::commands::page::search_blocks`])
+/// is the one owner of ref-handle assignment, including the lazy
+/// collision expansion past the default 6-char tail — deriving the
+/// handle straight from the `NodeId` here would produce a ref that
+/// silently disagrees with the sidecar's expanded form and never
+/// resolves. Errors when the block has no sidecar entry yet (created
+/// this session, not saved) — an unresolvable ref is worse than none.
+pub fn copy_block_ref<S: AppHost>(state: &S, id: String) -> Result<String, String> {
+    let node = parse_node_id(&id)?;
+    let root = state.storage_root()?;
+    let index = WorkspaceIndex::build(&root);
+    let entry = index
+        .block_index()
+        .get(node)
+        .ok_or_else(|| "no ref handle yet — save and retry".to_string())?;
+    Ok(format!("(({}))", entry.ref_handle))
 }
