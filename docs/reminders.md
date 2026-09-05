@@ -142,6 +142,12 @@ Chords are in the shared catalog, so they can't drift — see [Shortcuts](shortc
 ## Background delivery — what ships today
 
 **Today: reminders fire whenever the app is running**, foreground or backgrounded, on macOS / Linux / Windows / iOS — and in the TUI, which fires an OSC 9 desktop notification plus a toast on its event loop.
+
+**On mobile the banner is actionable.**
+It carries **Snooze 1h** and **Done**, both of which resolve the reminder without opening the app, and tapping the banner itself opens the page scrolled to the block that buzzed.
+The TUI and the desktop deliver the same reminder as a banner you can only read: neither delivery channel carries a callback (OSC 9 is one string to the terminal; `tauri-plugin-notification`'s actions and `actionPerformed` event are `#[cfg(mobile)]`, and its desktop `show()` drops the `notify-rust` handle).
+On those two, the reminders surface (`Ctrl+R` / `Cmd+Ctrl+Shift+R`) is where you snooze or tick off what came due.
+That split is declared once, for all three clients, in `outl_shortcuts::capability_support` (`Capability::ReminderNotificationActions`) and shows up in [`docs/client-parity.md`](client-parity.md).
 (OSC 9 is honoured by iTerm2, kitty, WezTerm and ghostty; terminals that ignore it still show the toast. Same best-effort contract as the OSC 52 the yank path uses.)
 The GUI clients poll every 30 seconds, the TUI every tick; the backend keeps a device-local "already fired" log (`<root>/.outl/reminders-fired.json`, 7-day TTL) so polling twice never double-buzzes and losing the file costs you at most one duplicate.
 A reminder that comes due with the TUI **closed** is lost to that client, which is the honest limit of a terminal session.
@@ -203,6 +209,12 @@ Grouping + the "in 3h" column come from `@outl/shared` (`groupReminders` / `form
 
 Delivery is a 30s `setInterval` in `Journal.tsx` calling `deliver_due_reminders` (`tauri-plugin-notification` → `UNUserNotificationCenter`).
 It fires whenever the app is running, foreground or backgrounded.
+
+Every banner is stamped with the `outl.reminder` category and carries the block's `blockId` / `pageSlug` as extras.
+The category and its buttons come from the `reminder_action_catalog` command, so the ids the OS is told about are the same constants `deliver_due_reminders` stamps — a rename cannot turn a button into a no-op.
+Registration happens at boot, not on first delivery: iOS resolves a banner's category at delivery time, and one naming an unregistered category still shows, just with no buttons and no error.
+
+What each does: **Snooze 1h** writes `Op::SnoozeRemind` (so it silences every device), **Done** resolves the block's own page first and marks it `DONE` (the banner can arrive while you are looking at any page), and a plain tap opens the page and scrolls the block into view rather than zooming into it.
 
 **Both device-local settings live in the sheet, not in a settings screen** — mobile has none, and `config.toml` sits inside the iOS sandbox, so they'd otherwise be unreachable from the device.
 Delivery is a switch; quiet hours are two native `<input type="time">` pickers rather than the desktop's text field, because typing `22:00-07:00` on a phone means switching keyboard layouts twice.

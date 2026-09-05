@@ -336,6 +336,22 @@ The header bell opens `<RemindersSheet />`, a block long-press authors a rule vi
 Sheet wiring, why authoring is a prompt instead of a native time picker, and why both device-local settings live in the sheet: [`docs/reminders.md`](../../docs/reminders.md#mobile-outl-mobile).
 The one rule that matters here: **the schedule is never computed in TS** — `groupReminders` / `formatNextFire` only format what `outl_actions::reminders` decided.
 
+### Actionable banners (mobile only)
+
+A reminder banner carries **Snooze 1h** and **Done**, and a plain tap lands on the block rather than the journal.
+Three pieces, and the split between them is the point:
+
+- `commands/reminders.rs` owns the ids (`REMINDER_CATEGORY` / `ACTION_SNOOZE_1H` / `ACTION_DONE`), stamps the category onto every banner via `action_type_id`, and attaches `blockId` / `pageSlug` as extras so the handler knows the subject.
+  `reminder_action_catalog` hands the same constants to the frontend, with a declared `kind` (`snooze` / `done`) so the handler dispatches on meaning instead of pattern-matching the id.
+- `lib/reminder-actions.ts` is the decision table (which button → which call), pure and unit-tested, including the tap identifiers both platforms send and the "banner with no subject" case an upgrade can produce.
+- `lib/reminder-notifications.ts` is the IPC + listener wiring, which can only run on a device.
+
+**Why the frontend registers something Rust owns:** the plugin's `ActionType` / `Action` are `#[cfg(mobile)]` structs with private fields, no constructor and no `Deserialize`, so `Notification::register_action_types` is unreachable from a consumer crate.
+`registerActionTypes()` in JS reaches the same command through IPC, so that is the only door.
+
+**Never move this into `@outl/shared`.** The command, `registerActionTypes` and the `actionPerformed` event are mobile-only; the desktop plugin registers no such command and emits no such event, so a shared wrapper would hand the desktop an IPC call that fails.
+The per-client verdict is declared once, in `outl_shortcuts::capability_support` (`Capability::ReminderNotificationActions`), and pinned here by `capability_parity.rs`.
+
 ## Plugins
 
 JS plugins (`outl_plugins::PluginHost`) run on mobile; the design is the desktop's.

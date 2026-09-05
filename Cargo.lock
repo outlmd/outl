@@ -6205,6 +6205,7 @@ version = "0.12.0"
 dependencies = [
  "chrono",
  "chrono-tz",
+ "fs2",
  "outl-core",
  "outl-exec",
  "outl-md",

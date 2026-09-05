@@ -162,6 +162,7 @@ the drift this RFC exists to prevent.
 | `Templates` | ✅ | ✅ | ✅ |
 | `Assets` | ✅ | ✅ | ✅ |
 | `PeerPairing` | ❌ Pairing a new device isn't in the TUI — run `outl peer pair` or `outl peer qr` from a terminal, or pair from the desktop or mobile app. | ⚠️ The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — to join an existing workspace from a desktop, run `outl peer pair` in a terminal. | ✅ |
+| `ReminderNotificationActions` | ❌ Reminder banners can't carry buttons here — open the reminders list (Ctrl+R in the TUI, Cmd/Ctrl+Shift+R on desktop) to snooze or tick off what came due. | ❌ Reminder banners can't carry buttons here — open the reminders list (Ctrl+R in the TUI, Cmd/Ctrl+Shift+R on desktop) to snooze or tick off what came due. | ✅ |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

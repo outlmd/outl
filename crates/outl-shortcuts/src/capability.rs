@@ -48,6 +48,15 @@ pub enum Capability {
     /// Pairing a new device into the workspace's peer set — hosting
     /// a ticket / QR for another device to scan, or scanning one.
     PeerPairing,
+    /// Acting on a reminder from the notification itself — snoozing
+    /// or marking it done from the banner's own buttons, and being
+    /// taken to the block when the banner is tapped.
+    ///
+    /// Distinct from *delivering* the notification, which every
+    /// client does. This is whether the banner is a dead end: a
+    /// client without it can still buzz you, but you have to open
+    /// the app and find the block by hand.
+    ReminderNotificationActions,
 }
 
 impl Capability {
@@ -66,6 +75,7 @@ impl Capability {
         Capability::Templates,
         Capability::Assets,
         Capability::PeerPairing,
+        Capability::ReminderNotificationActions,
     ];
 }
 
@@ -77,7 +87,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_6: usize = 6;
+    const EXPECTED_7: usize = 7;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -87,6 +97,7 @@ mod tests {
             Capability::Templates => "Templates",
             Capability::Assets => "Assets",
             Capability::PeerPairing => "PeerPairing",
+            Capability::ReminderNotificationActions => "ReminderNotificationActions",
         }
     }
 
@@ -103,9 +114,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_6,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_6} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_6)",
+            EXPECTED_7,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_7} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_7)",
             names.len(),
         );
     }

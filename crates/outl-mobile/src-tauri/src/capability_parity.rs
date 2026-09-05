@@ -72,5 +72,15 @@ mod tests {
              (DevicesSheet's scan + \"show my QR\" paths) — the catalog's \
              PeerPairing verdict for mobile must track that.",
         );
+
+        let _ = crate::commands::reminder_action_catalog;
+        assert_eq!(
+            capability_support(Capability::ReminderNotificationActions).mobile,
+            Support::Full,
+            "outl-mobile registers reminder_action_catalog (the category + buttons \
+             the frontend hands to registerActionTypes, and the same ids \
+             deliver_due_reminders stamps onto every banner) — the catalog's \
+             ReminderNotificationActions verdict for mobile must track that.",
+        );
     }
 }

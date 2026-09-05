@@ -47,6 +47,23 @@ mod why {
     /// comment says "There is no camera path here." A desktop user
     /// can invite a device in, but has no way to *join* an existing
     /// workspace from the desktop UI itself.
+    /// Neither the TUI nor the desktop can put buttons on the banner
+    /// it already shows, and the reason is the same in both: the
+    /// delivery channel carries no callback. The TUI writes an OSC 9
+    /// escape, which is one string to the terminal. The desktop goes
+    /// through `tauri-plugin-notification`, whose `ActionType` /
+    /// `register_action_types` / `onAction` surface is `#[cfg(mobile)]`
+    /// — its desktop `show()` spawns `notify-rust` and drops the
+    /// handle, so there is nothing to attach an action to and nothing
+    /// to hear back from.
+    ///
+    /// Both clients already have a surface that does the same job in
+    /// one more keystroke, so the nudge names it rather than
+    /// apologising.
+    pub const NO_BANNER_ACTIONS: &str =
+        "Reminder banners can't carry buttons here — open the reminders list (Ctrl+R in the \
+         TUI, Cmd/Ctrl+Shift+R on desktop) to snooze or tick off what came due.";
+
     pub const DESKTOP_HOSTS_ONLY: &str =
         "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
          to join an existing workspace from a desktop, run `outl peer pair` in a terminal.";
@@ -134,6 +151,24 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Partial(why::DESKTOP_HOSTS_ONLY),
             mobile: Full,
         },
+
+        // Every client *delivers* a reminder. Only mobile can make
+        // the banner actionable, and the split is a platform fact
+        // rather than an unbuilt feature: `register_action_types` /
+        // `onAction` exist solely under `#[cfg(mobile)]`, and the
+        // desktop plugin's `show()` discards the `notify-rust` handle,
+        // so there is no callback to hang "Snooze" on. The TUI's OSC 9
+        // escape has no callback either.
+        //
+        // Recorded as `Missing` rather than left out, because the
+        // difference the user feels is real: on mobile a reminder is
+        // two taps from resolved, everywhere else it is a prompt to go
+        // find the block.
+        Capability::ReminderNotificationActions => ClientSupport {
+            tui: Missing(why::NO_BANNER_ACTIONS),
+            desktop: Missing(why::NO_BANNER_ACTIONS),
+            mobile: Full,
+        },
     }
 }
 
@@ -179,7 +214,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 6, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 7, "Capability::ALL changed size");
     }
 
     #[test]

@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Reminder banners are no longer a dead end on mobile — they carry Snooze and Done, and a tap lands on the block.**
+  A reminder fired, and then what? The banner said what was due and offered nothing to do about it. You opened the app, found the page, found the block. On a phone, at the moment the thing you were reminded about is happening, that is enough friction to make the reminder worth less than the interruption cost.
+
+  The banner now carries **Snooze 1h** (`Op::SnoozeRemind`, so it silences every device, not just the one you tapped) and **Done** (resolves the block's own page first, since the banner can arrive while you are looking at anything else). A plain tap opens the page and scrolls the block into view. Scroll rather than zoom on purpose: zoom makes a block the outline root, which is a deliberate gesture, and doing it to someone who tapped a notification hides the rest of their page and leaves them pressing Back.
+
+  **The ids have one owner.** `reminder_action_catalog` hands the frontend the same constants `deliver_due_reminders` stamps onto every banner, each with a declared `kind` (`snooze` / `done`) so the handler dispatches on meaning rather than pattern-matching how the id is spelled. Registration happens at boot, not on the first delivery: iOS resolves a banner's category at delivery time, and one naming a category nobody registered still shows — with no buttons and no error. Registering lazily would mean the first reminder of every session is the one that silently loses them.
+
+  **Mobile only, and that is a platform fact rather than an unbuilt feature.** `ActionType`, `register_action_types` and the `actionPerformed` event are `#[cfg(mobile)]` in `tauri-plugin-notification`, and its desktop `show()` spawns `notify-rust` and drops the handle — there is nothing to attach a button to and nothing to hear back from. The TUI's OSC 9 escape is one string to the terminal, with the same result. Rather than leave that difference for a user to find by pressing something, it is declared for all three clients as `Capability::ReminderNotificationActions` and published in [`docs/client-parity.md`](docs/client-parity.md); on the TUI and desktop the reminders list (`Ctrl+R`, `Cmd/Ctrl+Shift+R`) is what the nudge points at.
+
+  One more thing worth knowing, because it is the reason the ids live in Rust and the registration lives in TS: the plugin's `ActionType` / `Action` are structs with private fields, no constructor and no `Deserialize`, so `Notification::register_action_types` cannot be called from a consumer crate at all. `registerActionTypes()` in JS reaches the same command through IPC, and is the only door.
+  ([#63](https://github.com/outlmd/outl/issues/63))
+
 - **`outl peer qr` — turn a pairing ticket into a scannable QR, and stop printing broken ones.**
   The mobile app pairs by camera, so for a phone the QR is not a convenience, it is the only route in. It has been printed by `outl peer pair` all along — and silently ruined by any terminal narrower than it. A ticket carries one entry per network address the host found, so it runs 400 to 750 characters and its QR runs 77 to 101 columns; anything past two direct addresses stops fitting an 80-column SSH window, which wrapped every row of it. A wrapped QR is not a degraded QR: no camera will ever decode it, and nothing on screen said why.
 

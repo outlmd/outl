@@ -72,6 +72,7 @@ import { isAssetLink } from "@outl/shared/links";
 import { installFileDrop } from "@outl/shared/drag-drop";
 import { peersOnline } from "@outl/shared/peers";
 import { detectFence } from "@outl/shared/highlight";
+import { setupReminderNotifications } from "../lib/reminder-notifications";
 import {
   countDescendants,
   findBlock,
@@ -389,6 +390,35 @@ export function Journal() {
     setView(v);
   }
 
+  /**
+   * Open the page a reminder is on and bring its block into view.
+   *
+   * Used by the notification tap, which is the one navigation the user
+   * did not initiate from inside the app: the banner is the context,
+   * so landing on the page without showing the block would leave them
+   * hunting for the line that just buzzed.
+   *
+   * Scroll, not zoom. `handleFocusBlock` makes a block the outline
+   * root, which is a deliberate gesture — doing it to someone who
+   * tapped a banner would hide the rest of their page and leave them
+   * pressing Back.
+   *
+   * The scroll is best-effort by design: the row may be inside a
+   * collapsed parent, or off the end of a long page. Failing to scroll
+   * still leaves the user on the right page, which is the part that
+   * matters.
+   */
+  async function navigateToBlock(slug: string, blockId: string) {
+    const v = await openPageBySlug(slug);
+    applyView(v);
+    // One frame, so the outline the block lives in has rendered.
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-block-id="${CSS.escape(blockId)}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
   // Imperative bridge to `<PluginViewOverlay />`: it hands us its `push`
   // fn on mount so any path that receives plugin `ctx.ui.render` payloads
   // (the sheet's `run`, the `commitEdit` hook sweep) can paint a sandboxed
@@ -486,11 +516,24 @@ export function Journal() {
         // toast every 30 seconds would be worse than silence.
       });
     }, 30_000);
+    // Make the banner actionable: "Snooze 1h" / "Done" buttons, and a
+    // plain tap that lands on the block instead of the journal. The
+    // category has to be registered before any reminder can come due —
+    // iOS resolves it at delivery time, and an unregistered one shows
+    // as a banner with no buttons and no error.
+    let stopReminderActions: (() => void) | undefined;
+    void setupReminderNotifications({
+      navigateToBlock,
+      onError: (m) => setError(m),
+    }).then((stop) => {
+      stopReminderActions = stop;
+    });
     onCleanup(() => {
       window.removeEventListener("online", upOnline);
       window.removeEventListener("offline", upOffline);
       window.clearInterval(peerPoll);
       window.clearInterval(reminderPoll);
+      stopReminderActions?.();
     });
   }
 

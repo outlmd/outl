@@ -73,8 +73,8 @@ use crate::commands::{
 };
 use crate::commands::{
     clear_reminder_snooze, deliver_due_reminders, known_property_keys, list_reminders,
-    mark_block_done, reminder_settings, set_block_property, set_block_remind, set_page_property,
-    set_reminder_settings, snooze_presets, snooze_reminder,
+    mark_block_done, reminder_action_catalog, reminder_settings, set_block_property,
+    set_block_remind, set_page_property, set_reminder_settings, snooze_presets, snooze_reminder,
 };
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
@@ -330,6 +330,7 @@ pub fn run() {
             known_property_keys,
             set_page_property,
             deliver_due_reminders,
+            reminder_action_catalog,
             // Page / journal navigation
             list_all_pages,
             search_pages,
