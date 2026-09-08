@@ -153,6 +153,19 @@ fn waiters() -> &'static Waiters {
 /// reason.
 type Discovered = Mutex<HashMap<EndpointId, LookupItem>>;
 
+/// Upper bound on [`DISCOVERED`]. Every parseable instance name on the LAN
+/// lands in the cache, and the LAN is untrusted input, so without a cap a noisy
+/// or hostile network (or a long-lived process moving across many of them) is
+/// an unbounded memory sink. A workspace has a handful of peers; this is
+/// generous for every real LAN and still small enough that the whole cache
+/// costs nothing to hold.
+///
+/// Coarse on purpose: when it fills, the map is cleared rather than evicted by
+/// age. A peer this drops re-announces on its own, and the replay this cache
+/// exists for (an answer that arrived before the first `resolve`) is lost only
+/// for peers seen before the flood.
+const DISCOVERED_CAP: usize = 256;
+
 static DISCOVERED: OnceLock<Discovered> = OnceLock::new();
 
 fn discovered() -> &'static Discovered {
@@ -207,10 +220,14 @@ pub fn peer_discovered(endpoint_id: &str, addrs: &str, relay: &str) {
 
     // Record before waking anyone: a `resolve` that arrives after this point
     // still gets the answer, which is the common ordering on iOS.
-    discovered()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(endpoint_id, item.clone());
+    {
+        let mut cache = discovered().lock().unwrap_or_else(|p| p.into_inner());
+        if cache.len() >= DISCOVERED_CAP && !cache.contains_key(&endpoint_id) {
+            debug!("lan: discovered cache full, clearing");
+            cache.clear();
+        }
+        cache.insert(endpoint_id, item.clone());
+    }
 
     let mut map = waiters().lock().unwrap_or_else(|p| p.into_inner());
     let Some(senders) = map.get_mut(&endpoint_id) else {
@@ -451,6 +468,25 @@ mod tests {
         peer_discovered(&id, "not-an-address,also-not-one", "");
         // Valid id and address, unusable relay — the addresses must still count.
         peer_discovered(&id, "192.168.1.9:41234", "not a url");
+    }
+
+    /// The discovered cache is fed by the LAN, which is untrusted input, so it
+    /// must stay bounded no matter how many distinct ids show up.
+    ///
+    /// Asserted as `<= DISCOVERED_CAP` rather than an exact count because the
+    /// cache is process-wide and other tests in this module feed it
+    /// concurrently; the bound is the invariant, the exact size is not.
+    #[test]
+    fn the_discovered_cache_never_outgrows_its_cap() {
+        for _ in 0..(DISCOVERED_CAP + 8) {
+            let id = iroh::SecretKey::generate().public();
+            peer_discovered(&id.to_string(), "192.168.1.9:41234", "");
+        }
+        let len = discovered().lock().unwrap_or_else(|p| p.into_inner()).len();
+        assert!(
+            len <= DISCOVERED_CAP,
+            "the discovered cache must be bounded, got {len} entries",
+        );
     }
 
     /// A resolve with nobody listening for it must not leak a waiter, and a

@@ -96,7 +96,7 @@ const DEFAULT_RELAY_URL: &str = "https://use1-1.relay.avelino.outl.iroh.link";
 /// — it resolves to [`DEFAULT_RELAY_URL`] like everything else, so they ride
 /// outl's relay too. Only a deployment that overrides `[sync] relay_url` gets
 /// a split, and it is the long-lived sync endpoint that matters there.
-pub(crate) fn n0_builder_ipv4_only(relay_url: Option<&str>) -> Builder {
+fn n0_builder_ipv4_only(relay_url: Option<&str>) -> Builder {
     // `clear_ip_transports()` drops the pre-configured 0.0.0.0 + [::] sockets;
     // `bind_addr("0.0.0.0:0")` re-adds IPv4 only. `bind_addr` only errors on an
     // unparseable socket address, and this constant is a valid literal, so the

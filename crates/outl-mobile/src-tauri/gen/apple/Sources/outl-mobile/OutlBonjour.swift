@@ -25,7 +25,9 @@ import Foundation
 /// protocol to reimplement:
 ///
 /// - service type `_irohv1._udp.local.`
-/// - instance name = the endpoint id, exactly as iroh prints it
+/// - instance name = the endpoint id in lowercase base32
+///   (`outl_sync_iroh::lan::instance_label`), **not** iroh's `Display`, which
+///   is 64 hex chars and one byte over RFC 6763's 63-byte cap on a DNS label
 /// - a TXT record whose `relay` key holds the home relay URL
 /// - SRV + A/AAAA for the direct addresses
 ///

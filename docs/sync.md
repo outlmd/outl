@@ -661,7 +661,8 @@ Wiring the service is not the same as the service working, and the difference is
 | iOS | the system's `mDNSResponder` | `NSBonjourServices` + `NSLocalNetworkUsageDescription`, and the user's consent |
 
 All three interoperate, because none of them invents a protocol.
-`swarm-discovery` publishes plain DNS-SD (RFC 6763) — service type `_irohv1._udp.local.`, instance name = the endpoint id, a TXT record whose `relay` key holds the home relay URL, SRV + A/AAAA for the direct addresses.
+`swarm-discovery` publishes plain DNS-SD (RFC 6763) — service type `_irohv1._udp.local.`, instance name = the endpoint id in lowercase base32 (`outl_sync_iroh::lan::instance_label`), a TXT record whose `relay` key holds the home relay URL, SRV + A/AAAA for the direct addresses.
+The label is **not** `EndpointId`'s `Display`: that is 64 hex characters, one over RFC 6763's 63-byte cap on a DNS label, so publishing it fails outright — and because `from_str` accepts both encodings, a client that gets this wrong still *finds* everyone else while nobody finds it.
 A laptop advertising through `swarm-discovery` and an iPhone browsing through `mDNSResponder` resolve each other unchanged.
 
 **Android needed more than the permission, and the failure it avoids is a silent one.**
