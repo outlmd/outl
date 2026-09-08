@@ -36,6 +36,13 @@ on:
       - "crates/outl-core/**"
       - "crates/outl-md/**"
       - "crates/outl-exec/**"
+      # Catalogs the TS side mirrors: `shortcuts.support.test.ts` pins the
+      # desktop handler map against `outl_shortcuts::support` (invariant 12)
+      # and the theme suites pin token names against `outl_theme::Palette`
+      # (invariant 13). Editing a catalog without these listed left both
+      # parity gates unrun on the change that could break them.
+      - "crates/outl-shortcuts/**"
+      - "crates/outl-theme/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "package.json"
@@ -50,6 +57,13 @@ on:
       - "crates/outl-core/**"
       - "crates/outl-md/**"
       - "crates/outl-exec/**"
+      # Catalogs the TS side mirrors: `shortcuts.support.test.ts` pins the
+      # desktop handler map against `outl_shortcuts::support` (invariant 12)
+      # and the theme suites pin token names against `outl_theme::Palette`
+      # (invariant 13). Editing a catalog without these listed left both
+      # parity gates unrun on the change that could break them.
+      - "crates/outl-shortcuts/**"
+      - "crates/outl-theme/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "package.json"

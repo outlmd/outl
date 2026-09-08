@@ -48,8 +48,26 @@ The wrapper files therefore read identically to desktop's.
 A command both clients need gets its body in `outl-tauri-shared` and a wrapper + `invoke_handler!` entry in **both** clients — never in just one.
 
 The op log backend is the shared `outl_core::storage::JsonlStorage`;
-there is no `icloud_storage.rs` because the only iCloud-specific work is resolving the ubiquity container path (via `icloud_path.rs`) and forcing peer-file materialisation before reads (via `OutlOpsWatcher.swift`).
+there is no `icloud_storage.rs`, and no iCloud-specific Rust at all: the ubiquity-container resolution that used to live in `icloud_path.rs` was removed along with the file (see "Change detection: the iroh signal" below).
 The storage trait stays generic; the transport gets handled outside it.
+
+## `Journal.tsx` and what has been split out of it
+
+`Journal.tsx` is the mobile app's one large component and the single biggest file in the repo.
+It reached 3,212 lines because the frontend sat outside `file-size-guard.sh`, which only read `.rs` until 2026-09 — so nothing ever warned.
+
+Two pieces are now siblings, and new code of either shape belongs there rather than back in the parent:
+
+- **`JournalHeader.tsx`** — `JournalHeader`, `PageHeader`, `ChevronLeft`, `ChevronRight`.
+  Pure render: props in, markup out, no state and no commands.
+- **`Journal.context-actions.ts`** — `buildContextActions` plus its only helper `locateSiblings`.
+  A pure function from (block id, page view, handlers) to the typed row list `<BlockContextMenu>` renders.
+  It has no Solid import at all, which is why it is `.ts` and not `.tsx`.
+  `Journal.buildContextActions.test.ts` drives it directly.
+
+What is left is still ~2,800 lines, almost all of it one `Journal()` function.
+That is real debt, not a finished job: the remaining split is a state/effects question (edit lifecycle, selection, sync signals, keyboard accessory), not a "move these functions" question, and it wants its own plan.
+`.github/file-size-baseline.txt` holds the current number, and the CI ratchet means it can go down but not up.
 
 ## Storage is a chosen folder, not forced iCloud (Fase 2)
 
@@ -64,7 +82,7 @@ Boot resolution (`workspace_open::resolve_storage_root`):
 2. Else the app-local default `<app-data-dir>/outl/` — synced by iroh, no iCloud.
 
 The old behaviour (force `<ubiquity-container>/Documents/`, fall back to local only if iCloud was unavailable) is gone.
-iCloud is reachable on demand via `workspace_open::icloud_workspace_root()` (used by `workspace_picker::pick_in_icloud`).
+iCloud is reachable only as a path the user picks through the OS file picker — there is no `icloud_workspace_root()` / `pick_in_icloud` in the Rust path any more, and nothing in this crate resolves a ubiquity container.
 
 **Folder selection.**
 `workspace_picker.rs` owns the choice.
@@ -74,7 +92,7 @@ iCloud is reachable on demand via `workspace_open::icloud_workspace_root()` (use
   Frontend wrapper: `setWorkspace(path) → Promise<void>` in `src/lib/api.ts`.
   No caller wires it yet — the arbitrary-folder native picker (`UIDocumentPickerViewController` + security-scoped bookmark) is deferred, so the local default is the only root a fresh install opens.
 
-> **Registration note:** both commands are registered in `lib.rs`'s `invoke_handler!` list (`workspace_picker::set_workspace`, `workspace_picker::pick_in_icloud`).
+> **Registration note:** `workspace_picker::set_workspace` is registered in `lib.rs`'s `invoke_handler!` list. There is no `pick_in_icloud` any more (see the iCloud note above).
 
 ## First-run onboarding
 
@@ -476,7 +494,7 @@ Skip either and you race the iCloud download daemon.
 
 ## Bundle / signing
 
-Bundle id + iCloud container are **global** in the Apple Developer ecosystem, so changing either means updating six files in lockstep.
+Bundle id + iCloud container are **global** in the Apple Developer ecosystem, so changing either means updating five files in lockstep.
 Identifiers, team, entitlements and that checklist: [`docs/ios-platform.md`](../../docs/ios-platform.md#bundle--signing).
 
 ## Running

@@ -1,6 +1,7 @@
 /**
- * `buildContextActions` (exported from `Journal.tsx` for exactly this)
- * is what decides which rows the block long-press menu shows. This
+ * `buildContextActions` (in `Journal.context-actions.ts`, extracted out
+ * of `Journal.tsx`) is what decides which rows the block long-press
+ * menu shows. This
  * file covers the RFC 0254 phase 2 addition — "Copy block" / "Paste
  * block" — and the one thing worth pinning: "Paste block" is armed
  * ("Copy block" always is), not the other way round, and it never
@@ -12,15 +13,14 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-// `Journal.tsx` imports real `@tauri-apps/plugin-*` packages and the
-// full `@outl/shared/api/commands` surface at module scope — none of
-// that runs at import time (every export is a lazy `invoke()` call),
-// but mocking the Tauri dialog module keeps this test from depending
-// on that staying true if a future refactor moves work to module load.
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "ios" }));
+// No Tauri mocks: the module under test imports only `@outl/shared`
+// (`detectFence`, `findBlock`) and a type. It used to live in
+// `Journal.tsx`, which does pull the real `@tauri-apps/plugin-*`
+// packages at module scope, and the mocks below existed for that. If
+// re-adding one is ever necessary here, that is the signal a Tauri
+// dependency leaked into what is meant to stay a pure function.
 
-import { buildContextActions } from "./Journal";
+import { buildContextActions } from "./Journal.context-actions";
 import type { BlockNode, PageView } from "@outl/shared/api/types";
 
 const BLOCK_ID = "blk-1";

@@ -12,6 +12,7 @@
     "desktop": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "test:watch": "vitest"
   },
   "license": "MIT",

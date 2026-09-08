@@ -182,3 +182,77 @@ jobs:
           prefix-key: "v0.8-rust"
       - name: cargo test (sync convergence)
         run: cargo test -p outl-core -p outl-sync-iroh --all-targets
+
+  # Frontend gate for the whole bun workspace, in `ci.yml` rather than
+  # in the per-client workflows on purpose.
+  #
+  # `desktop.yml` runs `bun --filter outl-desktop test` and `mobile.yml`
+  # runs vitest with `working-directory: crates/outl-mobile`, so each
+  # covers only its own package. That left `@outl/shared` — 22 test
+  # files, 335 assertions, the library both clients import — with no
+  # gate anywhere, and it left every client suite behind a `paths:`
+  # filter that does not list the crates it actually depends on
+  # (`outl-frontend-shared`, `outl-shortcuts`, `outl-theme`). A change
+  # to the shared library or to a Rust catalog the TS side mirrors could
+  # go green without a single frontend test running.
+  #
+  # `ci.yml` has no `paths:` allowlist (only `paths-ignore` for docs and
+  # assets), so this job runs on effectively every code change — which
+  # is the property the parity tests need. `shortcuts.support.test.ts`
+  # pins the desktop handler map against `outl_shortcuts::support`
+  # (invariant 12) and the theme suites pin the token names against
+  # `outl_theme::Palette` (invariant 13); both are worthless if they
+  # only run when someone happens to touch the client directory.
+  #
+  # Cheapest runner on purpose: vitest across all three packages is
+  # ~4s wall clock and never saturated 2 vCPU. No GTK / Tauri system
+  # deps here — these are happy-dom unit suites, not app builds.
+  frontend:
+    name: frontend
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # `setup-bun` caches the bun binary, not the packages it installs.
+      - name: Cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+      - name: bun install
+        run: bun install --frozen-lockfile
+      # Root scripts fan out over every workspace package that declares
+      # the script (`bun --filter '*'`), so a new client is covered the
+      # day its package.json lands — no edit here required.
+      - name: vitest (all packages)
+        run: bun run test
+      # tsc was desktop-only before this job existed: `@outl/shared` and
+      # `outl-mobile` type-checked nowhere despite shipping in both apps.
+      - name: tsc --noEmit (all packages)
+        run: bun run typecheck
+
+  # Repo hygiene checks that used to exist only as Claude Code
+  # `PostToolUse` hooks — and therefore only ran when Claude was the one
+  # editing. A human in an editor, a Copilot PR and a dependabot bump all
+  # bypassed them entirely, which is how the four largest files in the
+  # repo became frontend files the Rust-only hook never looked at.
+  #
+  # Only the objectively-checkable guard is ported here. The prose ones
+  # (semantic line breaks, doc-sync, section refs) stay advisory: they
+  # need judgement about intent, and a CI job that is wrong 10% of the
+  # time gets ignored 100% of the time.
+  hygiene:
+    name: hygiene
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      # Ratchet, not a cliff: the 66 files already past the threshold are
+      # frozen in `.github/file-size-baseline.txt`. This fails only when a
+      # new file crosses it or a recorded one grows, so existing large
+      # files stay editable while the ceiling can only come down.
+      - name: file size ratchet
+        run: ./scripts/check-file-size.sh

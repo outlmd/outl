@@ -34,10 +34,12 @@ describe("highlight/aliases", () => {
 
   it("mirrors the Rust canonical set", () => {
     // Failsafe: if the Rust side drops a canonical, this test still
-    // passes (the row is just absent) — the hard guard is the
-    // catalog-sync hook on `outl-md/src/lang.rs`. What this catches
-    // locally is a typo / duplicate canonical introduced when
-    // editing this file in isolation.
+    // passes (the row is just absent) — the hard guard is
+    // `lang_alias_table_matches_ts_mirror` in
+    // `crates/outl-md/tests/lang.rs`, which parses this file and
+    // compares it row-for-row against `outl_md::lang::KNOWN_ALIASES`.
+    // What this catches locally is a typo / duplicate canonical
+    // introduced when editing this file in isolation.
     const canonicals = KNOWN_ALIASES.map(([c]) => c);
     expect(new Set(canonicals).size).toBe(canonicals.length);
   });

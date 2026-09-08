@@ -3,6 +3,10 @@
   "private": true,
   "description": "outl frontend monorepo \u2014 shared Solid+Tailwind lib consumed by mobile and desktop clients.",
   "license": "MIT",
+  "scripts": {
+    "test": "bun --filter '*' test",
+    "typecheck": "bun --filter '*' typecheck"
+  },
   "workspaces": {
     "packages": [
       "crates/outl-frontend-shared",

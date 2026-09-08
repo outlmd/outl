@@ -34,7 +34,7 @@ keyring.workspace = true
 # code-block engine in outl-exec; the plugin runtime reuses it behind the
 # `PluginEngine` trait. Optional so a "no-JS" build (or a future QuickJS
 # swap) can drop it.
-boa_engine = { version = "0.21", optional = true }
+boa_engine = { version = "0.22", optional = true }
 
 # Blocking HTTP for `ctx.net.fetch`. rustls (never OpenSSL) per the workspace
 # TLS policy. The fetch runs on the plugin's own thread (GUI) or inline

@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "ios": "tauri ios dev",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "test:watch": "vitest"
   },
   "license": "MIT",

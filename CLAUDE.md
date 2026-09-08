@@ -171,13 +171,15 @@ Violating any one breaks user trust irreversibly.
     Not theory.
     Issue #244 asked for a background sync daemon.
     `outl serve` was already the long-lived background process and already had no P2P at all, so the obvious move was to give it the transport.
-    That got rejected on the grounds that a permanently-running `serve` holds the device write actor, which pushes every later GUI and TUI launch onto a fresh ephemeral actor and a fresh `ops-<ulid>.jsonl` — 16 such files, 1 to 221 ops each, had already accumulated in a real 20-actor workspace.
+    That got rejected on the grounds that a permanently-running `serve` holds the device write actor, which pushes every later GUI and TUI launch onto a fresh ephemeral actor and a fresh `ops-<ulid>.jsonl`.
+    16 such files, 1 to 221 ops each, had already accumulated in a real 20-actor workspace.
     The conclusion drawn was "so sync needs its own command".
 
     The attribution was wrong.
     The actor cost comes from running *any* process permanently, not from what that process does while it runs.
     `outl serve` under `launchd` holds the write actor whether or not it also syncs.
-    The proposed second command only dodged the cost because it dropped the **file watcher** — and a flag drops the watcher just as well, at the price of one boolean instead of a second daemon, a second `launchd` job, and a second thing that can die quietly.
+    The proposed second command only dodged the cost because it dropped the **file watcher**.
+    A flag drops the watcher just as well, at the price of one boolean instead of a second daemon, a second `launchd` job, and a second thing that can die quietly.
 
     Before a cost rules a design out:
 
@@ -324,7 +326,8 @@ The rule, past incidents, and what to do when a primitive doesn't exist yet live
 
 ## How we work in this repo
 
-- **Build / test:** `/check` runs fmt + clippy + test on the whole workspace.
+- **Build / test:** `/check` runs fmt + clippy + test + doc on the Rust workspace, then vitest + `tsc --noEmit` across every bun workspace package.
+  Both halves are required before "done": roughly a third of each GUI client is TypeScript, and two invariants (12 and 13) are enforced only by TS parity tests.
   Full dev loop (slash commands, hooks, agents, CI walkthrough) is in [`docs/development.md`](docs/development.md).
 - **Specialized agents** (invoke proactively when their `When to use` matches):
   `crdt-invariant-checker`, `paper-verifier`, `markdown-roundtrip-tester`, `refactor-architect`, `doc-keeper`.
@@ -338,10 +341,11 @@ The rule, past incidents, and what to do when a primitive doesn't exist yet live
 - **Markdown style:** semantic line breaks (one sentence per line, no column reflow).
   Full rule in [`docs/contributing.md` → Markdown / documentation style](docs/contributing.md#markdown--documentation-style).
 - **File size discipline.**
-  The `file-size-guard.sh` PostToolUse hook nudges at 600 lines and stops at 900.
+  The `file-size-guard.sh` PostToolUse hook nudges at 600 lines and stops at 900, for `.rs`, `.ts` and `.tsx` alike.
   When it fires, invoke the `refactor-architect` agent.
-- **`cargo doc` is part of CI** with `RUSTDOCFLAGS=-D warnings`.
-  Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` before reporting "done" on any patch that adds or changes module-level doc comments (`//!` blocks) — `/check` does not include this today.
+  A hook only fires when Claude Code is the editor, so CI enforces the same limit for everyone as a ratchet: [`docs/development.md` → Hooks](docs/development.md#hooks-run-automatically) is the owner of how that works.
+- **`cargo doc` is part of CI** with `RUSTDOCFLAGS=-D warnings`, and is step 4 of `/check`.
+  It breaks on intra-doc links to private items — ``[`Foo`]`` where `Foo` is `pub(crate)`; drop the brackets to `` `Foo` ``.
 
 ## Decisions you don't get to revisit
 

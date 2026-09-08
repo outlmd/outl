@@ -13,6 +13,16 @@ on:
       - "crates/outl-actions/**"
       - "crates/outl-core/**"
       - "crates/outl-md/**"
+      # The mobile app imports `@outl/shared` and mirrors the same Rust
+      # catalogs the desktop does, yet none of them were listed: a change
+      # confined to the shared library (or to a catalog) skipped this
+      # workflow entirely, so neither the mobile vitest suite nor the iOS
+      # build ran on the change most likely to break them.
+      - "crates/outl-frontend-shared/**"
+      - "crates/outl-shortcuts/**"
+      - "crates/outl-theme/**"
+      - "package.json"
+      - "bun.lock"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/mobile.yml"
@@ -23,6 +33,16 @@ on:
       - "crates/outl-actions/**"
       - "crates/outl-core/**"
       - "crates/outl-md/**"
+      # The mobile app imports `@outl/shared` and mirrors the same Rust
+      # catalogs the desktop does, yet none of them were listed: a change
+      # confined to the shared library (or to a catalog) skipped this
+      # workflow entirely, so neither the mobile vitest suite nor the iOS
+      # build ran on the change most likely to break them.
+      - "crates/outl-frontend-shared/**"
+      - "crates/outl-shortcuts/**"
+      - "crates/outl-theme/**"
+      - "package.json"
+      - "bun.lock"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/mobile.yml"

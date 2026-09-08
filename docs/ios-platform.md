@@ -22,11 +22,12 @@ Bundle ID + iCloud container are **global** in the Apple Developer ecosystem.
 If you change either, also update:
 
 1. `tauri.conf.json` → `identifier`
-2. `src-tauri/src/lib.rs` → `ICLOUD_CONTAINER_ID`
-3. `gen/apple/outl-mobile.xcodeproj/project.pbxproj` → `PRODUCT_BUNDLE_IDENTIFIER`
-4. `gen/apple/outl-mobile_iOS/outl-mobile_iOS.entitlements`
-5. `gen/apple/outl-mobile_iOS/Info.plist` → `NSUbiquitousContainers` key
-6. `gen/apple/project.yml` → `bundleIdPrefix` and `PRODUCT_BUNDLE_IDENTIFIER`
+2. `gen/apple/outl-mobile.xcodeproj/project.pbxproj` → `PRODUCT_BUNDLE_IDENTIFIER`
+3. `gen/apple/outl-mobile_iOS/outl-mobile_iOS.entitlements`
+4. `gen/apple/outl-mobile_iOS/Info.plist` → `NSUbiquitousContainers` key
+5. `gen/apple/project.yml` → `bundleIdPrefix` and `PRODUCT_BUNDLE_IDENTIFIER`
+
+There is no sixth entry in Rust: `lib.rs` holds no `ICLOUD_CONTAINER_ID`, because the Rust-side iCloud path was removed.
 
 ---
 
@@ -121,7 +122,8 @@ Sync still works meanwhile: the relay path is untouched.
 
 ## iCloud layout (opt-in destination)
 
-When the user opts into iCloud, the root is `<ubiquity-container>/Documents/` (`workspace_open::icloud_workspace_root()`) — **one option**, not the default.
+When the user opts into iCloud, the root is `<ubiquity-container>/Documents/` — **one option**, not the default, and one the user reaches through the OS file picker.
+No Rust code resolves it: `workspace_open::icloud_workspace_root()` was removed (see `crates/outl-mobile/CLAUDE.md` → "Change detection: the iroh signal").
 The container is already the `outl` namespace, so no extra `outl/` nesting; the TUI uses `--path "<container>/Documents"`.
 Layout is the standard `journals/` + `pages/` (`.md` + `.outl` sidecar) + `ops/` (one `ops-<actor>.jsonl` per device).
 **iCloud trap:** every path must be undotted — iCloud Documents skips `.`-prefixed paths across devices, so `ops/` (not `.ops/`) and `pages/<slug>.outl`, else the file never leaves its origin.

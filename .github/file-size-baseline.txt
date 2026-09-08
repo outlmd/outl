@@ -1,0 +1,74 @@
+# Files at or past 600 lines, frozen as a ratchet.
+# Regenerate with: scripts/check-file-size.sh --update
+#
+# This file records existing debt so CI can block *growth* without
+# blocking every edit to a file that was already too big. Numbers
+# here should only ever go down. Adding a row is not a normal part
+# of landing a change — it means a new file crossed the line, and
+# the split should happen instead.
+612 crates/outl-actions/src/backlinks_index.rs
+668 crates/outl-actions/src/backlinks.rs
+761 crates/outl-actions/src/block/create.rs
+781 crates/outl-actions/src/journal/apply.rs
+942 crates/outl-actions/src/journal/tests.rs
+699 crates/outl-actions/src/outline.rs
+980 crates/outl-actions/src/page.rs
+702 crates/outl-actions/src/paste/mod.rs
+845 crates/outl-actions/src/sync.rs
+642 crates/outl-actions/src/timeline/tests.rs
+600 crates/outl-cli/src/cmd/block.rs
+724 crates/outl-cli/src/cmd/doctor/mod.rs
+685 crates/outl-cli/src/cmd/doctor/repair.rs
+744 crates/outl-cli/src/cmd/doctor/tests/mod.rs
+693 crates/outl-cli/src/cmd/doctor/tests/safety.rs
+622 crates/outl-cli/src/cmd/page.rs
+1047 crates/outl-cli/src/main.rs
+730 crates/outl-config/src/schema.rs
+757 crates/outl-core/src/storage/jsonl/read.rs
+810 crates/outl-core/src/storage/jsonl/tests.rs
+1418 crates/outl-core/src/workspace.rs
+760 crates/outl-core/src/workspace/batch.rs
+833 crates/outl-core/tests/convergence_property.rs
+712 crates/outl-core/tests/tree_unit.rs
+1603 crates/outl-desktop/src/components/BlockRow.tsx
+967 crates/outl-desktop/src/components/OutlineView.tsx
+1048 crates/outl-desktop/src/lib/action-handlers.ts
+732 crates/outl-exec/src/runtimes/query.rs
+1262 crates/outl-frontend-shared/src/api/commands.ts
+813 crates/outl-frontend-shared/src/api/types.ts
+617 crates/outl-md/src/block_index.rs
+621 crates/outl-md/src/diff.rs
+657 crates/outl-md/src/matching.rs
+785 crates/outl-md/src/parse.rs
+853 crates/outl-md/src/reconcile.rs
+731 crates/outl-md/src/sidecar.rs
+662 crates/outl-md/tests/inline.rs
+743 crates/outl-md/tests/mixed_version_sidecar.rs
+833 crates/outl-mobile/src/components/BlockRow.tsx
+2827 crates/outl-mobile/src/components/Journal.tsx
+796 crates/outl-plugins/src/engine.rs
+862 crates/outl-plugins/src/host_tests.rs
+830 crates/outl-plugins/src/host.rs
+800 crates/outl-shortcuts/src/defaults.rs
+706 crates/outl-shortcuts/src/support.rs
+764 crates/outl-sync-iroh/src/engine_pairing.rs
+767 crates/outl-sync-iroh/src/engine_sync.rs
+870 crates/outl-sync-iroh/src/engine.rs
+1245 crates/outl-sync-iroh/src/pairing.rs
+1022 crates/outl-sync-iroh/src/peers.rs
+821 crates/outl-sync-iroh/tests/chaos.rs
+956 crates/outl-sync-iroh/tests/integration.rs
+1210 crates/outl-sync-iroh/tests/regression.rs
+715 crates/outl-tauri-shared/src/commands/page.rs
+671 crates/outl-theme/src/presets.rs
+734 crates/outl-tui/src/actions/autocomplete.rs
+798 crates/outl-tui/src/actions/nav.rs
+924 crates/outl-tui/src/actions/overlay.rs
+985 crates/outl-tui/src/actions/plugins.rs
+620 crates/outl-tui/src/actions/properties.rs
+661 crates/outl-tui/src/input/normal.rs
+646 crates/outl-tui/src/input/overlay.rs
+688 crates/outl-tui/src/runtime.rs
+976 crates/outl-tui/src/state.rs
+741 crates/outl-tui/src/view/outline.rs
+1179 crates/outl-tui/src/view/overlays.rs

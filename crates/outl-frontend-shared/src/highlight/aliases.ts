@@ -6,8 +6,15 @@
  * highlight.js grammar to apply, and the Rust side uses the same
  * table when dispatching `outl-exec` runtimes. If you add/rename a
  * row in one, do the matching edit on the other side in the same
- * commit — `lang.rs::tests::*` and the catalog-sync hook are the
- * canaries.
+ * commit — `lang_alias_table_matches_ts_mirror` in
+ * `crates/outl-md/tests/lang.rs` is the canary. It parses THIS file
+ * and compares row-for-row, in order, so a divergence fails CI on the
+ * commit that introduced it.
+ *
+ * Ordering is part of the contract, not incidental: both `canonical`
+ * implementations scan top to bottom and return the first match, so
+ * the same rows in a different order would resolve an overlapping
+ * token differently per client.
  *
  * The shape is `[canonical, [...aliases including the canonical]]`;
  * ordering matters (first match wins) but no rows overlap today.

@@ -27,7 +27,7 @@ It must never crash the app or materialise a stray page.
 
 Registration is per-client transport, not shared logic:
 the desktop registers the scheme via `tauri-plugin-deep-link` (+ `tauri-plugin-single-instance` so the URL reaches an already-running instance on Linux/Windows);
-iOS registers the same scheme through the plugin's mobile config, which injects `CFBundleURLTypes` into the generated `Info.plist`.
+iOS registers the same scheme by a hand-maintained `CFBundleURLTypes` entry in `gen/apple/outl-mobile_iOS/Info.plist` — *not* through plugin config, which for `deep-link` is desktop-only (see [Mobile wiring](#mobile-wiring-outl-mobile)).
 Universal Links (`https://outl.app/…`) are a later addition — they need an Associated Domains entitlement and a hosted `apple-app-site-association`, so the custom scheme ships first.
 
 ---

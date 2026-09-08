@@ -191,7 +191,7 @@ The schedule math is never here — see [For contributors](#for-contributors) be
 Grouping labels and the "in 3h" column come from `@outl/shared` (`groupReminders` / `formatNextFire`) — the same functions the mobile sheet uses — and the instants behind them come from `outl_actions::reminders` in Rust.
 **Nothing about when a reminder fires is computed in the frontend.**
 
-Delivery is a 30s `setInterval` in `<AppShell />` calling `deliver_due_reminders`, which turns the shared "what's due" answer into an OS banner via `tauri-plugin-notification`.
+Delivery is driven from `<AppShell />`, on the poll cadence declared in [Background delivery](#background-delivery--what-ships-today); it calls `deliver_due_reminders` and turns the shared "what's due" answer into an OS banner via `tauri-plugin-notification`.
 The Rust side keeps the device-local fired log, so polling twice never double-buzzes and a laptop that was asleep owes one banner, not a backlog.
 `[reminders] enabled` (Settings modal) defaults to **on**: `remind::` on a block is already the opt-in, and a device with no rules never fires, so defaulting off only bought the user a rule that silently did nothing.
 macOS asks for permission on the first actual fire.
@@ -207,7 +207,7 @@ The picker is a follow-up, not a substitute.
 
 Grouping + the "in 3h" column come from `@outl/shared` (`groupReminders` / `formatNextFire`), shared byte-for-byte with the desktop panel; the instants come from `outl_actions::reminders` in Rust.
 
-Delivery is a 30s `setInterval` in `Journal.tsx` calling `deliver_due_reminders` (`tauri-plugin-notification` → `UNUserNotificationCenter`).
+Delivery is driven from `Journal.tsx`, on the same poll cadence as the desktop (declared in [Background delivery](#background-delivery--what-ships-today)), calling `deliver_due_reminders` (`tauri-plugin-notification` → `UNUserNotificationCenter`).
 It fires whenever the app is running, foreground or backgrounded.
 
 Every banner is stamped with the `outl.reminder` category and carries the block's `blockId` / `pageSlug` as extras.

@@ -16,8 +16,14 @@
 //! Keep this in sync with the TS mirror at
 //! `crates/outl-frontend-shared/src/highlight/aliases.ts`. The
 //! `lang_alias_table_matches_ts_mirror` test in
-//! `crates/outl-md/tests/lang.rs` (TODO) is the canary; a CI failure
-//! there means one of the two drifted.
+//! `crates/outl-md/tests/lang.rs` is the canary: it parses the real
+//! `.ts` file and compares row-for-row, in order. A CI failure there
+//! means one of the two drifted — edit both in the same commit.
+//!
+//! That test carried a `(TODO)` here for long enough to be worth a
+//! note: the comment named a guard that did not exist, and the TS side
+//! pointed back at this file for the same guarantee. Neither end was
+//! checking anything.
 
 /// `(canonical, &[aliases including the canonical itself])` table.
 ///

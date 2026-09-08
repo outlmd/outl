@@ -44,7 +44,7 @@ tracing.workspace = true
 # and so users with no `rustup wasm32-wasip1` target still get Lisp/JS/
 # Python/Lua out of the box.
 steel-core = { version = "0.8", optional = true }
-boa_engine = { version = "0.21", optional = true }
+boa_engine = { version = "0.22", optional = true }
 rustpython-vm = { version = "0.5", optional = true, default-features = false, features = ["compiler"] }
 mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 
@@ -53,9 +53,9 @@ mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 sha2 = { workspace = true }
 
 # WASM sandbox stack (gated behind `wasm`). Workspace MSRV is rust 1.95.
-wasmtime = { version = "47", optional = true }
-wasmtime-wasi = { version = "47", optional = true }
-dirs = { version = "6", optional = true }
+wasmtime = { version = "48", optional = true }
+wasmtime-wasi = { version = "48", optional = true }
+dirs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

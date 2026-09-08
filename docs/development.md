@@ -41,7 +41,7 @@ Press `?` inside the TUI for the keymap.
 |---|---|
 | `outl-mobile` (iOS app) | macOS + Xcode 15+ + Bun (`curl -fsSL https://bun.sh/install \| bash`) |
 | `outl-desktop` (Tauri 2) | Bun + the Tauri prerequisites for your OS (Linux: `webkit2gtk-4.1`, `libgtk-3-dev`; Windows: WebView2 runtime) |
-| Frontend tests (`crates/outl-mobile/src/**`, `crates/outl-frontend-shared/**`) | Bun + `bun test` |
+| Frontend tests (`crates/outl-mobile/src/**`, `crates/outl-desktop/src/**`, `crates/outl-frontend-shared/**`) | Bun + `bun run test` |
 | Bench job locally | `cargo install hyperfine --locked` for the CLI side; criterion ships with `cargo bench` |
 
 The CI containers don't install GTK, so `outl-mobile` and `outl-desktop` are **excluded from the workspace `cargo clippy/test/doc` runs** (see [CI walkthrough](#9-ci-walkthrough)).
@@ -149,6 +149,10 @@ bun run tauri ios dev           # boots the iOS simulator with hot reload
 
 `crates/outl-mobile/CLAUDE.md` covers the versioning + TestFlight contract.
 **Do not touch `tauri.conf.json`'s `version` field** — the version is read from `Cargo.toml` at build time on purpose.
+
+The commands below spell this `cargo tauri` rather than `bun run tauri`.
+Both drive the same Tauri CLI and either works: `bun run tauri` goes through the `@tauri-apps/cli` dev-dependency pinned in `package.json` (nothing to install beyond `bun install`), while `cargo tauri` uses a globally installed `cargo-tauri`.
+CI uses the `cargo` spelling, so that is what the release-shaped commands show.
 
 #### Simulator, device, and release archive
 
@@ -289,7 +293,7 @@ The expected per-edit cycle:
 
 | Command | What it does |
 |---|---|
-| `/check` | Full gate: `cargo fmt --check` + `cargo clippy -D warnings` + `cargo test --workspace`. Run before reporting done. |
+| `/check` | Full gate, both halves: `cargo fmt --check` + `cargo clippy -D warnings` + `cargo test --workspace` + `cargo doc`, then `bun run test` (vitest) + `bun run typecheck` (tsc). Run before reporting done. |
 | `/check-invariants` | Faster than `/check`. Runs only the tree CRDT invariant test battery in `outl-core`. |
 | `/roundtrip` | `outl-md` `md ↔ ops ↔ md` roundtrip suite. Also invokes the `markdown-roundtrip-tester` agent for extra validation. |
 | `/coverage [crate]` | Uses `cargo-llvm-cov`. Flags uncovered branches in the four critical CRDT functions (the 100% rule). |
@@ -301,8 +305,18 @@ The expected per-edit cycle:
 `.claude/settings.json` wires these PostToolUse hooks on every `Edit` / `Write`:
 
 - **fmt + clippy** on the touched crate (faster than `/check`, runs per save).
-- **`file-size-guard.sh`** — informational at 400–600 lines, warns at 600–900, blocks at 900+.
+- **`file-size-guard.sh`** — informational at 400–600 lines, warns at 600–900, blocks at 900+, for `.rs`, `.ts` and `.tsx` alike.
   When it fires, invoke the `refactor-architect` agent to propose a split.
+  It covered only `.rs` until 2026-09, which is why the largest files in the repo are frontend ones it never looked at.
+
+  **A hook only runs when Claude Code is the editor.** A human in an editor, a Copilot PR and a dependabot bump all bypass it, so the same limit is enforced for everyone in CI by `scripts/check-file-size.sh` (the `hygiene` job).
+  That runs as a **ratchet**, not a cliff: the files already past the threshold are frozen with their current line counts in `.github/file-size-baseline.txt`, and the job fails only when a file **not** in the baseline crosses 600 lines, or one in it grows past its recorded number.
+  Large files therefore stay editable and the ceiling only moves down.
+  After a split lowers a count, re-record it with `scripts/check-file-size.sh --update`; the script refuses to write a baseline from a scan that matched nothing, so a broken checkout cannot silently empty it.
+- **`file-size-sweep.sh`** — the same ratchet, wired as a **`Stop`** hook so it runs once at the end of a turn.
+  Every hook above it is `PostToolUse` on `Edit|Write`, and **that matcher does not include the Bash tool**: a file created with `python3 - <<'PY'`, `sed -i`, `cat >` or `git mv` lands on disk having passed no guard at all.
+  The per-edit hook answers "Claude used Edit/Write on a big file"; this one answers "something got big, however it arrived".
+  It exits 2 once with the failure, then reports without blocking if it fires again (`stop_hook_active`), so a condition Claude cannot clear does not loop.
 - **`section-ref-guard.sh`** — flags a quoted section title that no longer exists.
   `doc-sync-guard.sh` reasons about *files touched*, so renaming a heading passes it clean while leaving the old title quoted in every file that pointed at it.
   This one resolves `` `path.md` → "Title" `` and `see "Title"` against the target's headings, bold labels and table rows.
@@ -339,8 +353,7 @@ Fix: drop the brackets, keep the backticks.
 /// See `MyInternalThing` for details.
 ```
 
-`/check` does **not** run `cargo doc` today.
-Run it by hand before reporting done on any patch that touches module-level `//!` blocks.
+`/check` runs `cargo doc` as step 4, so a broken intra-doc link fails there before CI sees it.
 
 ---
 
@@ -355,7 +368,7 @@ Run it by hand before reporting done on any patch that touches module-level `//!
 | CRDT invariants | `crates/outl-core/tests/crdt_*.rs` | Convergence, idempotency, cycle no-op, replay determinism. |
 | Roundtrip | `crates/outl-md/tests/roundtrip_*.rs` | `md → parse → render → md` is byte-stable. `md → ops → md` preserves ids via sidecar. |
 | Bench | `crates/outl-md/benches/*.rs` (criterion) + `xtask/src/bin/gen-10k.rs` for CLI hyperfine | Hot-path regression detection. Run weekly + per PR via `bench.yml`. |
-| Frontend | `crates/outl-mobile/src/**/*.test.ts`, `crates/outl-frontend-shared/**/*.test.ts` (`bun test`) | Pure helpers and DTO conversions. |
+| Frontend | `crates/outl-mobile/src/**/*.test.ts`, `crates/outl-desktop/src/**/*.test.ts`, `crates/outl-frontend-shared/**/*.test.ts` (`bun run test`) | Pure helpers and DTO conversions. |
 | Swift (`OutlKit`) | `crates/outl-mobile/swift/OutlKit/Tests/OutlKitTests/` (`swift test`) | Pure native helpers — brand color, suggester chip parser, toolbar MFU, peer-file predicates, JS escape. **Required** for new pure Swift logic. |
 | Native iOS bridges (`gen/apple/.../*.swift`, `main.mm`) | None (yet) — observed via `NSLog` probes on boot | UIKit / Foundation glue that needs the iOS runtime. If you add a piece that *can* be tested without UIKit, extract it into `OutlKit` first. |
 
@@ -366,7 +379,7 @@ Two layers cover each GUI client.
 
 | Layer | Tool | What it covers |
 |-------|------|----------------|
-| Rust commands + storage | `cargo test -p outl-mobile` | `ICloudStorage`, command shims, page model glue |
+| Rust commands + storage | `cargo test -p outl-mobile` | command shims, page model glue, capability parity |
 | Frontend pure logic | `bun run test` (Vitest + happy-dom) | textarea/native-suggester helpers, future helpers (outline walks are tested in `@outl/shared/outline`) |
 
 Every bug fixed in a pure helper (the tokenize duplicate, refs/tags extraction, fuzzy matching) must land with a unit test before merge so it never regresses.
@@ -447,11 +460,12 @@ A bug fix without a regression test is a blocker in review.
 ```bash
 # From repo root:
 bun install              # first time
-bun test                 # all packages
+bun run test             # vitest across every package that declares the script
+bun run typecheck        # tsc --noEmit across the same set
 
 # Or per-package:
-cd crates/outl-mobile && bun test
-cd crates/outl-frontend-shared && bun test
+cd crates/outl-mobile && bun run test
+cd crates/outl-frontend-shared && bun run test
 ```
 
 Most shared helpers (`looksLikeOutline`, `utf16OffsetToCharOffset`, `detectRefContext`) have direct unit tests under `crates/outl-frontend-shared/src/**`.
@@ -645,7 +659,7 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`). Excludes `outl-mobile` + `outl-desktop`. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package) and a **`hygiene`** job (`scripts/check-file-size.sh`). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
 | [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-md`, plus weekly cron | Criterion (small/medium/large) on every PR; xlarge + CLI hyperfine on cron / manual dispatch. Artifacts retained 14–30 days. | No (informational) |
@@ -672,7 +686,7 @@ Sizes as of the Blacksmith migration, from a full run of every workflow:
 | Job | SKU | Why |
 |---|---|---|
 | `ci.yml::fmt` | 2 vCPU | rustfmt compiles nothing (16s) |
-| `mobile.yml::frontend` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU |
+| `mobile.yml::frontend`, `ci.yml::frontend`, `ci.yml::hygiene` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU; the `ci.yml` pair is ~4s of vitest and a line-count scan, with no compilation at all |
 | `release.yml` orchestration (`prepare`, `tag`, `create_release`, `publish_*`, `update_tap`), `cleanup-tags.yml` | 2 vCPU | shell + `gh` calls, no compilation |
 | `ci.yml::docs`, `ci.yml::sync`, `bench.yml` | 4 vCPU | doc/proptest jobs already finish in ~100s; bench stays fixed so numbers remain comparable run over run |
 | `ci.yml::clippy`, `ci.yml::test (linux)`, `desktop.yml::check`, release builds | 8 vCPU | measured 71–76% average CPU on 4 vCPU with 2.6–4.7 GB of 16 GB used and zero OOM: CPU-bound, so more cores cut wall clock at roughly flat billing |
