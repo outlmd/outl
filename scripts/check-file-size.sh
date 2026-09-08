@@ -42,8 +42,8 @@ baseline_file="${repo_root}/.github/file-size-baseline.txt"
 THRESHOLD=600
 
 # Emit `<lines> <repo-relative-path>` for every source file we police,
-# sorted by path so the baseline diffs cleanly.
-collect() {
+# regardless of size.
+scan() {
   cd "$repo_root" || exit 1
   # `-prune` rather than `-not -path`: the latter filters results but still
   # walks into node_modules/ and target/, which is most of the bytes on disk.
@@ -51,17 +51,39 @@ collect() {
     \( -path '*/target' -o -path '*/node_modules' -o -path '*/dist' -o -path '*/gen' \) -prune \
     -o \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
     -print0 \
-  | xargs -0 wc -l 2>/dev/null \
-  | awk -v t="$THRESHOLD" '$2 != "total" && $1 >= t { print $1, substr($0, index($0, $2)) }' \
-  | sort -k2
+  | xargs -0 -r wc -l 2>/dev/null \
+  | awk 'NF >= 2 && $2 != "total" { print $1, substr($0, index($0, $2)) }'
 }
+
+# Filter a `scan` down to the files at or past the threshold, sorted by
+# path so the baseline diffs cleanly.
+oversized() {
+  awk -v t="$THRESHOLD" '$1 >= t' | sort -k2
+}
+
+# A scan that matched nothing is a broken scan, not a clean repo. Without
+# this the script prints "PASS: 0 file(s)" and exits 0 when `crates/` was
+# renamed, the checkout is partial, or `find` failed — the ratchet silently
+# stops ratcheting. `set -e` is deliberately absent (the loop below needs to
+# keep going past a missing baseline row) and `wc -l 2>/dev/null` swallows
+# errors, so nothing else would catch it.
+#
+# The check is on *source files found*, not on files over the threshold:
+# the oversized set is allowed to be empty, otherwise the ratchet could
+# never be tightened all the way down.
+scanned=$(scan)
+if [ -z "$scanned" ]; then
+  echo "error: scanned 0 source files under crates/. Expected hundreds." >&2
+  echo "Something is wrong with the checkout or the find filters, not with the repo." >&2
+  exit 1
+fi
 
 if [ "${1:-}" = "--update" ]; then
   # Build into a temp file and move it into place only once the scan
   # succeeded. Writing straight to `$baseline_file` truncates it first, and
-  # `collect`'s `cd … || exit 1` is not in a subshell, so a failed scan left a
-  # header-only baseline on disk — after which every one of the 66 recorded
-  # files reads as a new violation on the next CI run.
+  # a failed scan used to leave a header-only baseline on disk — after which
+  # every one of the 66 recorded files reads as a new violation on the next
+  # CI run.
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
 
@@ -76,14 +98,10 @@ if [ "${1:-}" = "--update" ]; then
 # of landing a change — it means a new file crossed the line, and
 # the split should happen instead.
 HEADER
-    collect
+    printf '%s\n' "$scanned" | oversized
   } > "$tmp"
 
   found=$(grep -vc '^#' "$tmp")
-  if [ "$found" -eq 0 ]; then
-    echo "error: scanned 0 files under crates/. Baseline left untouched." >&2
-    exit 1
-  fi
 
   mv "$tmp" "$baseline_file"
   trap - EXIT
@@ -96,7 +114,7 @@ if [ ! -f "$baseline_file" ]; then
   exit 1
 fi
 
-current=$(collect)
+current=$(printf '%s\n' "$scanned" | oversized)
 
 violations=()
 shrunk=0
@@ -115,18 +133,6 @@ while read -r lines path; do
     shrunk=$((shrunk + 1))
   fi
 done <<< "$current"
-
-# A scan that matched nothing is a broken scan, not a clean repo. Without
-# this the script prints "PASS: 0 file(s)" and exits 0 when `crates/` was
-# renamed, the checkout is partial, or `find` failed — the ratchet silently
-# stops ratcheting. `set -e` is deliberately absent (the loop needs to keep
-# going past a missing baseline row) and `wc -l 2>/dev/null` swallows errors,
-# so nothing else would catch it.
-if [ "$total" -eq 0 ]; then
-  echo "error: scanned 0 files under crates/. Expected hundreds." >&2
-  echo "Something is wrong with the checkout or the find filters, not with the repo." >&2
-  exit 1
-fi
 
 if [ "${#violations[@]}" -gt 0 ]; then
   echo "FAIL: ${#violations[@]} file(s) over the ${THRESHOLD}-line ratchet"
