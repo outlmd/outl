@@ -79,6 +79,46 @@ The simulator has no `BGTaskScheduler` daemon, so `submit` always fails there an
 
 ---
 
+## LAN peer discovery (Bonjour, and why not multicast)
+
+Same-LAN peer discovery ([issue #149](https://github.com/outlmd/outl/issues/149)) reaches every client through `outl-sync-iroh`'s `bind::attach_mdns`, but iOS is the one platform that cannot take the path behind it.
+
+`iroh-mdns-address-lookup` speaks mDNS over a plain BSD socket — `bind` on `0.0.0.0:5353`, then `IP_ADD_MEMBERSHIP` on `224.0.0.251`.
+Since iOS 14 that group join needs `com.apple.developer.networking.multicast`, a restricted entitlement Apple grants by request and **commonly declines**, with the suggestion to use Bonjour.
+
+So iOS does not join a multicast group at all.
+`OutlBonjour.swift` asks `mDNSResponder`, the system's own mDNS daemon, to advertise and browse on the app's behalf.
+Apple's [Local Network Privacy FAQ](https://developer.apple.com/forums/thread/663875) names exactly two Bonjour operations that still require the entitlement — working with **arbitrary** service types, and browsing for advertised service types (`_services._dns-sd._udp.local.`) — and outl does neither.
+
+> **Never add `com.apple.developer.networking.multicast` to the entitlements.**
+> It is not needed, and an entitlement the provisioning profile does not carry **fails code signing**, breaking the TestFlight pipeline.
+
+Two `Info.plist` keys are what this does need, and both are already in place:
+
+| Key | Why |
+|---|---|
+| `NSBonjourServices` = `_irohv1._udp` | The fixed service type. Declaring it is what keeps this out of the "arbitrary service type" case that would need the entitlement |
+| `NSLocalNetworkUsageDescription` | The reason string on the one-time local-network prompt |
+
+### Why `NetService`, not `NWListener` / `NWBrowser`
+
+`Network.framework` is the modern API and does not fit, in both directions:
+
+- **Publishing.** `NWListener` advertises a port *it* opened. The port that has to be advertised is the one iroh's QUIC socket already holds, and no `Network.framework` type will advertise a socket it did not create. `NetService(domain:type:name:port:)` publishes a record for an arbitrary port.
+- **Browsing.** `NWBrowser` returns an opaque `NWEndpoint.service` by design — the framework wants you to connect *through* it rather than learn addresses. iroh needs the actual socket addresses to hand to QUIC, and `NetService.addresses` is what exposes them.
+
+`NetService` is soft-deprecated, not removed, and deprecation has no bearing on App Review.
+
+### The failure mode that has no error
+
+If the user declines the local-network prompt, **iOS tells the app nothing**.
+Browsing continues, resolves nobody, and looks exactly like a LAN with no peers on it.
+Nothing in the app can distinguish the two, so there is no in-app warning to write — when an iPhone never finds a peer its laptop finds fine, the answer is **Settings › Privacy & Security › Local Network › outl**.
+
+Sync still works meanwhile: the relay path is untouched.
+
+---
+
 ## iCloud layout (opt-in destination)
 
 When the user opts into iCloud, the root is `<ubiquity-container>/Documents/` (`workspace_open::icloud_workspace_root()`) — **one option**, not the default.

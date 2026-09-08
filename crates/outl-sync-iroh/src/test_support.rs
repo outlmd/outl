@@ -62,12 +62,25 @@ pub async fn bind_sync_endpoint(identity: &crate::IrohIdentity) -> Result<iroh::
     // carries only the 127.0.0.1 direct addr, so the test connect never races a
     // `[::1]` path. Revert when iroh > 1.0.0 ships the multipath fallback fix.
     // See `crate::bind`.
-    crate::bind::n0_builder_ipv4_only(None)
-        .secret_key(identity.secret_key().clone())
-        .alpns(vec![SYNC_ALPN.to_vec()])
-        .bind()
-        .await
-        .context("bind sync endpoint")
+    crate::bind::bind_ipv4_only(
+        None,
+        identity.secret_key(),
+        vec![SYNC_ALPN.to_vec()],
+        // No LAN discovery in the harness at all.
+        //
+        // `Advertise::No` was not enough and the reason is worth keeping:
+        // upstream gates only `with_addrs` on that flag and spawns the
+        // `Discoverer` regardless, so every test endpoint still bound 5353 and
+        // browsed. At the endpoint counts `tests/chaos.rs` reaches, that was
+        // enough contention to time out loopback dials, and it browsed the
+        // developer's LAN on every `cargo test`.
+        //
+        // These tests dial explicit `127.0.0.1` addresses, so discovery could
+        // never have contributed to them.
+        crate::bind::Advertise::Off,
+    )
+    .await
+    .context("bind sync endpoint")
 }
 
 /// A responder that completes the sync exchange up to — but NOT

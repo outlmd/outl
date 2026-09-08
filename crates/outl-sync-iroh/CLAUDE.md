@@ -16,6 +16,16 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   `default_device_dir()` resolves that path and **logs one `WARN` per process when `$OUTL_DEVICE_DIR` redirects it** — a `cargo run` build is a *separate device*, and deleting its store voids every pairing.
   See [`docs/development.md` → Testing P2P sync from a source build](../../docs/development.md#testing-p2p-sync-from-a-source-build).
 - `EndpointLease` (`lease.rs`) — the device-wide election backing it (see "One endpoint per identity, elected not assigned")
+- `bind::bind_ipv4_only(relay_url, secret_key, alpns, advertise)` — the **single owner** of *how* an endpoint reaches the network, once `build_transport` has decided it may.
+  Two things must hold for every endpoint and neither is optional per call site: the IPv4-only STOPGAP (dial and accept must agree or the iroh 1.0.0 multipath stall returns) and mDNS LAN discovery (issue #149).
+  The STOPGAP is expressible on a shared builder; the mDNS attach is **not**, because iroh runs a registered `AddressLookupBuilder` inside `bind()` and a service that cannot start fails the whole bind — so it is attached *after* the bind and swallows its own error.
+  A new endpoint calling `n0_builder_ipv4_only` + `.bind()` directly would compile and silently have no LAN discovery, which nothing would surface (sync still works over the relay).
+  `every_endpoint_in_this_crate_binds_through_the_one_owner` (`bind.rs`) fails instead — **do not relax it**.
+  On iOS `attach_mdns` routes to `lan::PlatformAddressLookup` instead: a socket-level multicast join needs an Apple entitlement, so discovery is driven by the platform's own mDNS daemon through a bridge in `outl-mobile` (`ios_bonjour.rs`). This crate is `#![forbid(unsafe_code)]` and stays that way — `lan` is a plain-Rust seam (`register_advertiser` out, `peer_discovered` in), and the FFI lives in the client.
+  `lan::SERVICE_TYPE`, `lan::RELAY_TXT_KEY` and `lan::instance_label` are the **entire** agreement with the other clients, since `swarm-discovery` publishes plain DNS-SD. Drift there breaks discovery with no error on either side, so `the_lan_wire_constants_match_the_platform_bridge` reads the Swift and the `Info.plist` off disk, and two label tests pin the encoding.
+  The label is **not** `EndpointId`'s `Display`: that is 64 hex chars, one over RFC 6763's 63-byte cap on a DNS label, so publishing it fails outright — and `from_str` accepts both encodings, so the breakage is one-directional and silent.
+  `Advertise::No` is for a **transient** endpoint (the `outl peer status` probe): all endpoints share the device node id, so a short-lived one that publishes leaves a dead address for this device on every LAN peer, and multipath stalls on it — a diagnostic that degrades everyone's next dial.
+  iOS never needs `com.apple.developer.networking.multicast` and **must not declare it** (a profile without it fails code signing); a fixed, declared Bonjour service type is exempt. What a user can hit there is declining the local-network prompt, which iOS reports to nobody; [`docs/sync.md`](../../docs/sync.md) says where to look.
 - `IrohSyncTransport` — implements `SyncTransport` trait, including the
   gossip-backed `announce_local_ops` hook (sync side → tokio task via an
   `mpsc` channel set up in `start()`) and the `peer_health()` reachability

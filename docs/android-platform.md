@@ -8,7 +8,7 @@ The user-facing background-sync behaviour is [sync.md → Background sync on And
 
 ## Where the Android-specific code lives
 
-Six files, none of which holds business logic — the same rule as every other client.
+Seven files, none of which holds business logic — the same rule as every other client.
 
 | Piece | Path | Job |
 |---|---|---|
@@ -18,6 +18,7 @@ Six files, none of which holds business logic — the same rule as every other c
 | Native binding | `gen/android/…/NativeSync.kt` | `external fun` declarations matching the JNI symbols |
 | Scheduler | `gen/android/…/OutlBackgroundSync.kt` | Lifecycle observer + the two WorkManager schedules |
 | Worker | `gen/android/…/SyncWorker.kt` | Drives one forced pass, then finishes |
+| Multicast lock | `gen/android/…/OutlMulticast.kt` | Lifts the Wi-Fi multicast filter so mDNS peer discovery can hear an answer |
 
 Everything under `gen/android/app/build/` is **build output** — never edit it.
 
@@ -151,6 +152,7 @@ That is what keeps them covered by the host test suite, where neither platform's
 ## Gradle and manifest
 
 `AndroidManifest.xml` needs **no change** for background sync, and this was verified against the merged manifest rather than assumed.
+It does need one for **LAN peer discovery** — see below.
 `androidx.work:work-runtime` merges in `WAKE_LOCK`, `ACCESS_NETWORK_STATE`, `RECEIVE_BOOT_COMPLETED` and `FOREGROUND_SERVICE`, plus the `androidx.startup` `WorkManagerInitializer` that boots WorkManager with no `Configuration.Provider` of our own.
 
 Two dependencies in `gen/android/app/build.gradle.kts`:
@@ -164,6 +166,30 @@ Two dependencies in `gen/android/app/build.gradle.kts`:
 > The failure is not confined to the new code — it breaks every file in the module, including Tauri's generated `WryActivity.kt`.
 > `2.10.5` is the newest version that builds today.
 > Raising it means bumping the Kotlin Gradle plugin first.
+
+---
+
+## mDNS peer discovery (the permission is not the whole story)
+
+Same-LAN peer discovery ([issue #149](https://github.com/outlmd/outl/issues/149)) is wired once in `outl-sync-iroh`'s `bind::attach_mdns`, so Android gets it from the shared Rust path with no Android-specific code — **and it would have found nobody.**
+
+Android's Wi-Fi driver drops multicast and broadcast frames not addressed to this device, as a battery optimisation.
+That filter sits **below** the socket API, so every call `swarm-discovery` makes succeeds: the `IP_ADD_MEMBERSHIP` join returns `Ok`, queries go out on the wire, and answers are discarded before the socket ever sees them.
+Nothing errors. Discovery just returns nothing, which is indistinguishable from "there are no peers on this LAN" — the exact silent-degradation shape this repo keeps paying for.
+
+Two pieces lift it, and both are needed:
+
+- `android.permission.CHANGE_WIFI_MULTICAST_STATE` in `AndroidManifest.xml`. It is a normal permission (no runtime prompt).
+- A held `WifiManager.MulticastLock`, in `OutlMulticast.kt`.
+
+**The lock follows `onResume` / `onPause`, not the activity's lifetime.**
+Holding it is a documented battery drain — the radio stops filtering and the CPU processes every multicast frame on the network.
+It is worth that only while a foreground session wants to find a peer *now*; background sync runs off known peers and the relay, which need no multicast at all.
+`setReferenceCounted(false)` so one `release()` is enough however many times `acquire()` ran.
+
+Failures are logged and swallowed, matching `attach_mdns`: a device with no `WifiManager`, or an OEM that refuses the lock, still syncs over the relay.
+
+> Wired multicast (Android TV on Ethernet) does not go through the Wi-Fi filter and needs no lock. `getSystemService(WIFI_SERVICE)` still returns a `WifiManager` on any device with Wi-Fi hardware regardless of the active transport, so the lock is taken and simply does nothing there.
 
 ---
 

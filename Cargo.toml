@@ -112,6 +112,9 @@ yrs = "0.27"
 # on its own: `system()` must be passed explicitly (default stays EmbeddedWebPki).
 iroh = { version = "1.0.0", features = ["platform-verifier"] }
 iroh-gossip = "0.101.0"
+# LAN-local peer discovery (issue #149). Attached POST-bind and fail-soft, not
+# through `Builder::address_lookup` — see `outl-sync-iroh/src/bind.rs`.
+iroh-mdns-address-lookup = "0.5"
 
 # Markdown
 comrak = { version = "0.52", default-features = false }

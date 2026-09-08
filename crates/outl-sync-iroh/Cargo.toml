@@ -29,9 +29,19 @@ tokio = { version = "1", features = ["full"] }
 # See workspace Cargo.toml for why iroh keeps default-features ON.
 iroh = { workspace = true }
 iroh-gossip = { workspace = true }
+# mDNS address lookup for same-LAN peers (issue #149).
+iroh-mdns-address-lookup = { workspace = true }
 # `StreamExt` for the gossip receiver stream lives in `n0-future`, re-exported
 # by iroh-gossip's public API surface.
 n0-future = "0.3"
+# `ReceiverStream` adapts the Bonjour resolve channel into the `BoxStream`
+# iroh's `AddressLookup::resolve` returns. Same adapter
+# `iroh-mdns-address-lookup` uses for the same job.
+tokio-stream = "0.1"
+# The DNS-SD instance label. `EndpointId`'s `Display` is hex (64 chars), which
+# is 1 byte over the 63-byte cap on a DNS label, so the label has to be encoded
+# the way `iroh-mdns-address-lookup` encodes it. See `lan::instance_label`.
+data-encoding = "2"
 blake3 = "1"
 # CSPRNG for the pairing-ticket secret (issue #159). Already in the tree as an
 # iroh dependency; named here because this crate uses it directly.

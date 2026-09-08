@@ -368,6 +368,10 @@ What it gives you:
   See [relay.md](relay.md) for the relay's exact threat model and the `relay_url` config.
 - **E2E encrypted by default.**
   Every iroh connection is QUIC + TLS 1.3 keyed to the peers' identities.
+- **LAN-local peer discovery (mDNS).**
+  Two devices on the same Wi-Fi find each other's *current* address off the network itself, with no relay and no internet on the path.
+  This is additive: the relay stays as the cross-network fallback, and a host that blocks multicast logs one line and syncs over the relay exactly as before.
+  Every client has it, though iOS reaches it through the system's Bonjour daemon rather than a socket — see the note below.
 - **Vector-clock delta sync, both directions.**
   On connect, each side exchanges a per-actor clock — max HLC plus a distinct-op count — and streams only the ops the other hasn't seen.
   The count is a gap detector: a peer holding fewer ops below its own watermark than the sender (an op arrived ahead of a pending backlog) gets that actor's full log resent, and the receiver deduplicates on ingest so nothing is applied twice.
@@ -639,9 +643,48 @@ The usual sources of an unreachable address:
   Stop the VM / VPN interfaces and mint a fresh ticket.
 - **The peer's address is stale** — a phone that changed Wi-Fi, took a new DHCP lease or went to cellular still advertises the old LAN IP.
   `arp -a | grep <ip>` showing `(incomplete)` confirms it; re-pair to refresh, or put both devices on the same network.
+  On a LAN this now self-heals: mDNS resolves the peer's live address, so a new DHCP lease no longer needs a re-pair.
+  An iPhone whose owner declined the local-network prompt is the exception, and it looks identical to an empty LAN (below).
 - **The network blocks device-to-device traffic** — guest Wi-Fi and AP client isolation make the LAN path unreachable by design, even on the same subnet.
 
 outl already binds IPv4-only to remove the most common case (a dead global IPv6 addr); an unreachable IPv4 addr reproduces it exactly, and closing that for good needs the multipath fallback fix upstream.
+
+##### What each platform needs before mDNS actually works
+
+Wiring the service is not the same as the service working, and the difference is per-platform.
+`iroh-mdns-address-lookup` speaks mDNS over a plain BSD socket — `bind` on `0.0.0.0:5353`, then `IP_ADD_MEMBERSHIP` on `224.0.0.251` — rather than through any OS-level Bonjour API, and that choice is what decides who needs permission for it.
+
+| Platform | How it discovers | What it needed |
+|---|---|---|
+| macOS, Linux, Windows (TUI, CLI, desktop) | `iroh-mdns-address-lookup` | Nothing — an unsandboxed process joins a multicast group freely |
+| Android | `iroh-mdns-address-lookup` | `CHANGE_WIFI_MULTICAST_STATE` plus a held `WifiManager.MulticastLock` |
+| iOS | the system's `mDNSResponder` | `NSBonjourServices` + `NSLocalNetworkUsageDescription`, and the user's consent |
+
+All three interoperate, because none of them invents a protocol.
+`swarm-discovery` publishes plain DNS-SD (RFC 6763) — service type `_irohv1._udp.local.`, instance name = the endpoint id, a TXT record whose `relay` key holds the home relay URL, SRV + A/AAAA for the direct addresses.
+A laptop advertising through `swarm-discovery` and an iPhone browsing through `mDNSResponder` resolve each other unchanged.
+
+**Android needed more than the permission, and the failure it avoids is a silent one.**
+The Wi-Fi driver drops multicast frames not addressed to this device to save battery, and that filter sits *below* the socket API — so the join succeeds, queries go out, and answers never arrive.
+Discovery finds nobody, and no error distinguishes that from an empty LAN.
+`OutlMulticast` (`gen/android/…/OutlMulticast.kt`) holds the lock across `onResume` / `onPause`: the lock is a real battery drain, and background sync runs off known peers and the relay, which need no multicast at all.
+
+**iOS goes through the system daemon instead of a socket, and that is what makes it shippable.**
+Since iOS 14 an app may not join a multicast group without `com.apple.developer.networking.multicast`, which Apple grants by request — and commonly declines, pointing applicants at Bonjour.
+So iOS does not join one. `OutlBonjour.swift` asks `mDNSResponder` to advertise and browse on its behalf, through `NetService` / `NetServiceBrowser`.
+
+Apple's [Local Network Privacy FAQ](https://developer.apple.com/forums/thread/663875) names exactly two Bonjour operations that still need that entitlement: working with **arbitrary** service types, and browsing for advertised service types (the `_services._dns-sd._udp.local.` meta-query).
+outl does neither — one fixed service type, declared in `NSBonjourServices`.
+There is no entitlement, no request form and nothing to wait on.
+
+What the user does see is the iOS local-network prompt, once, explained by `NSLocalNetworkUsageDescription`.
+**Declining it is indistinguishable from an empty LAN**: iOS reports no error to an app it has denied, so discovery simply resolves nobody and sync falls back to the relay.
+If an iPhone never finds a peer that its laptop finds fine, check **Settings › Privacy & Security › Local Network › outl**.
+
+> `NWBrowser` is the modern API and is deliberately not used here.
+> It hands back an opaque `NWEndpoint.service`, by design — the framework wants you to connect *through* it rather than learn addresses.
+> iroh needs the actual socket addresses to give QUIC, and `NetService.addresses` is what exposes them.
+> The same constraint applies to publishing: `NWListener` advertises a port it opened itself, and the port that must be advertised is the one iroh's QUIC socket already holds.
 
 ---
 

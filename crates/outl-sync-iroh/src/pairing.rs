@@ -570,12 +570,22 @@ async fn bind_pairing_endpoint(identity: &IrohIdentity) -> Result<Endpoint> {
     // IPv6 direct addr, so the peer never stores (and later dials) a dead path.
     // Revert to the plain dual-stack builder when iroh > 1.0.0 ships the
     // multipath fallback fix. See `crate::bind`.
-    crate::bind::n0_builder_ipv4_only(None)
-        .secret_key(identity.secret_key().clone())
-        .alpns(vec![PAIRING_ALPN.to_vec()])
-        .bind()
-        .await
-        .context("bind pairing endpoint")
+    crate::bind::bind_ipv4_only(
+        None,
+        identity.secret_key(),
+        vec![PAIRING_ALPN.to_vec()],
+        // This endpoint lives at most `HOST_ACCEPT_TIMEOUT` and then closes, so
+        // it is the transient case `Advertise::No` exists for, and it is worse
+        // than the status probe: it accepts only `PAIRING_ALPN`, so a LAN peer
+        // that resolved this address and dials `SYNC_ALPN` gets
+        // CONNECTION_REFUSED. It also publishes a second SRV record under the
+        // device's own instance name whenever another process already holds the
+        // advertising sync endpoint. Nothing is lost by staying quiet: the
+        // ticket already carries the host's freshly captured `ready_addr`.
+        crate::bind::Advertise::No,
+    )
+    .await
+    .context("bind pairing endpoint")
 }
 
 /// Wait (bounded) for the endpoint to discover its addresses, then snapshot a

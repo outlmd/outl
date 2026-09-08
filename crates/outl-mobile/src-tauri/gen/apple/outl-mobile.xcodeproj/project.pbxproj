@@ -31,6 +31,7 @@
 		F0A1B2C00000000001000007 /* OutlBackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C00000000001000008 /* OutlBackgroundRefresh.swift */; };
 		F0A1B2C00000000001000009 /* OutlOpsWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C0000000000100000A /* OutlOpsWatcher.swift */; };
 		F0A1B2C0000000000100000B /* OutlBrandChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C0000000000100000C /* OutlBrandChrome.swift */; };
+		F0A1B2C0000000000100000D /* OutlBonjour.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C0000000000100000E /* OutlBonjour.swift */; };
 		F0BEB4AE563193FCE5465D6D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04D1082CDE08E6CFF900477A /* Metal.framework */; };
 /* End PBXBuildFile section */
 
@@ -65,6 +66,7 @@
 		F0A1B2C00000000001000008 /* OutlBackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlBackgroundRefresh.swift; sourceTree = "<group>"; };
 		F0A1B2C0000000000100000A /* OutlOpsWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlOpsWatcher.swift; sourceTree = "<group>"; };
 		F0A1B2C0000000000100000C /* OutlBrandChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlBrandChrome.swift; sourceTree = "<group>"; };
+		F0A1B2C0000000000100000E /* OutlBonjour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlBonjour.swift; sourceTree = "<group>"; };
 		F164B16BCE3D8D774DEB42C9 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -205,6 +207,7 @@
 				F0A1B2C00000000001000008 /* OutlBackgroundRefresh.swift */,
 				F0A1B2C0000000000100000A /* OutlOpsWatcher.swift */,
 				F0A1B2C0000000000100000C /* OutlBrandChrome.swift */,
+				F0A1B2C0000000000100000E /* OutlBonjour.swift */,
 				941954E8B021B2B253747A0D /* bindings */,
 			);
 			path = "outl-mobile";
@@ -316,6 +319,7 @@
 				F0A1B2C00000000001000007 /* OutlBackgroundRefresh.swift in Sources */,
 				F0A1B2C00000000001000009 /* OutlOpsWatcher.swift in Sources */,
 				F0A1B2C0000000000100000B /* OutlBrandChrome.swift in Sources */,
+				F0A1B2C0000000000100000D /* OutlBonjour.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

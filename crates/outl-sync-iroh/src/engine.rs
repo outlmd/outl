@@ -48,7 +48,7 @@ pub struct IrohSyncTransport {
     /// Relay URL for the sync endpoint, from `[sync] relay_url` in the user
     /// config. `None` (or empty, normalized to `None` by `SyncConfig::relay_url`)
     /// uses outl's default relay (`use1-1.relay.avelino.outl.iroh.link`); `Some(url)` swaps in a
-    /// different relay via [`crate::bind::n0_builder_ipv4_only`]. Only the
+    /// different relay via [`crate::bind::bind_ipv4_only`]. Only the
     /// long-lived sync endpoint threads it; pairing / status / test endpoints
     /// pass `None` and resolve the same `use1-1.relay.avelino.outl.iroh.link` default.
     relay_url: Option<String>,
@@ -591,17 +591,19 @@ async fn run_iroh(
     // endpoint registers with: `None` uses outl's `use1-1.relay.avelino.outl.iroh.link` default,
     // `Some(url)` swaps in a different relay. Pairing / status / test endpoints
     // pass `None` and resolve the same default.
-    let endpoint = crate::bind::n0_builder_ipv4_only(relay_url.as_deref())
-        .secret_key(identity.secret_key().clone())
-        .alpns(vec![
+    let endpoint = crate::bind::bind_ipv4_only(
+        relay_url.as_deref(),
+        identity.secret_key(),
+        vec![
             SYNC_ALPN.to_vec(),
             PAIRING_ALPN.to_vec(),
             SNAPSHOT_ALPN.to_vec(),
             ASSET_ALPN.to_vec(),
-        ])
-        .bind()
-        .await
-        .context("bind iroh endpoint")?;
+        ],
+        crate::bind::Advertise::Yes,
+    )
+    .await
+    .context("bind iroh endpoint")?;
 
     info!(node_id = %endpoint.id().fmt_short(), "iroh endpoint bound");
 

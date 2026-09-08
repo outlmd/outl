@@ -20,6 +20,21 @@ class MainActivity : TauriActivity() {
     OutlBackgroundSync.install(applicationContext)
     super.onCreate(savedInstanceState)
   }
+
+  // The Wi-Fi driver filters multicast frames not addressed to this device, so
+  // mDNS peer discovery (issue #149) sends queries fine and never hears an
+  // answer until the lock is held. Tied to resume/pause rather than to the
+  // activity: the lock is a real battery drain, and background sync runs off
+  // known peers and the relay, which need no multicast. See OutlMulticast.
+  override fun onResume() {
+    super.onResume()
+    OutlMulticast.acquire(applicationContext)
+  }
+
+  override fun onPause() {
+    OutlMulticast.release()
+    super.onPause()
+  }
 }
 
 /// Loads the Rust lib and bridges to `Java_app_outl_mobile_1app_NativeSetup_install`.

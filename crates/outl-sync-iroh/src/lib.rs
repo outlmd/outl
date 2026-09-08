@@ -43,6 +43,9 @@
 #![warn(missing_docs)]
 
 mod bind;
+// Only iOS constructs the lookup (`bind::attach_mdns`), but the module compiles
+// everywhere so its tests do: the address parsing and the advertise guard are
+// platform-independent, and needing a phone to test them is how they would rot.
 mod coordination;
 mod device;
 mod engine;
@@ -55,6 +58,8 @@ mod engine_snapshot;
 mod engine_sync;
 mod health;
 mod identity;
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+pub mod lan;
 mod lease;
 mod oplog;
 pub(crate) mod pairing;

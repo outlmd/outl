@@ -39,6 +39,11 @@ mod bg_sync;
 #[cfg(test)]
 mod capability_parity;
 mod commands;
+// iOS-only: LAN peer discovery through the system Bonjour daemon. iOS cannot
+// join a multicast group without an Apple-granted entitlement, so the
+// socket-level mDNS every other platform uses is unavailable here.
+#[cfg(target_os = "ios")]
+mod ios_bonjour;
 mod iroh_sync;
 mod plugin_service;
 mod state;
@@ -166,6 +171,13 @@ pub fn run() {
     // `ring` (the provider in our dep graph) explicitly so every rustls user
     // shares it. Ignore the error: a second call just means it's already set.
     let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // Start LAN peer discovery before the transport binds. Order is not
+    // load-bearing (an unregistered advertiser makes `publish` a no-op, and
+    // iroh republishes on every address change), but browsing early means the
+    // first sync pass already has the LAN answers.
+    #[cfg(target_os = "ios")]
+    ios_bonjour::install();
 
     let builder = tauri::Builder::default()
         // Unified logging (React-Native-style): the frontend logs via

@@ -19,6 +19,7 @@ outl-mobile (this crate)
    │   ├── iroh_sync.rs            (wire_iroh_transport — boot the P2P transport, register the bg-sync handle)
    │   ├── bg_sync.rs              (one forced-sync core + per-platform exports: iOS C ABI, Android JNI)
    │   ├── android_jni.rs          (Android-only: primes rustls-platform-verifier + ndk_context before iroh's first QUIC connect)
+   │   ├── ios_bonjour.rs          (iOS-only: LAN peer discovery bridge to OutlBonjour.swift, over the outl_sync_iroh::lan seam)
    │   ├── plugin_service.rs       (PluginService + dedicated plugin thread — Boa Context is !Send, so it can't live in AppState)
    │   └── commands/               (Tauri command surface — split mirrors outl-desktop)
    │       ├── mod.rs
@@ -32,6 +33,7 @@ outl-mobile (this crate)
    │       └── theme.rs (list_themes / get_theme)
    ├── gen/apple/.../main.mm       (NSMetadataQuery + NSFileCoordinator iCloud watcher)
    ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
+   ├── gen/apple/.../OutlBonjour.swift            (NetService advertise + NetServiceBrowser resolve, the iOS mDNS path)
    ├── gen/android/.../MainActivity.kt            (NativeSetup.install + OutlBackgroundSync.install, before Tauri boots)
    ├── gen/android/.../NativeSync.kt              (external fun bindings for the bg_sync JNI symbols)
    ├── gen/android/.../OutlBackgroundSync.kt      (ProcessLifecycleOwner observer + the two WorkManager schedules)
@@ -109,6 +111,15 @@ There is no filesystem watcher in the Rust path.
 The iOS-native `OutlOpsWatcher.swift` (`NSMetadataQuery` + `NSFileCoordinator`), the iCloud container entitlements, and the `Info.plist`/`pbxproj` references are still present from before the Rust teardown.
 Because the chosen folder is now always local, the watcher's `NSMetadataQueryUbiquitousDocumentsScope` query matches nothing and stays **dormant** — it does nothing and breaks nothing.
 Removing it (watcher → no-op, strip the entitlements + plist keys) is a follow-up that touches code-signing, so it must be validated with a device build, not done blind.
+
+## LAN peer discovery (mDNS)
+
+Both mobile platforms enter through `outl-sync-iroh`'s `bind::attach_mdns`, but *how* discovery happens diverges below it, and neither platform's answer is plain Rust:
+
+- **Android works**, and needed `CHANGE_WIFI_MULTICAST_STATE` plus a held `WifiManager.MulticastLock` (`gen/android/…/OutlMulticast.kt`, taken across `onResume` / `onPause`). Without the lock the Wi-Fi driver discards multicast answers below the socket API, so discovery finds nobody with **no error anywhere** — see [`docs/android-platform.md` → mDNS peer discovery](../../docs/android-platform.md#mdns-peer-discovery-the-permission-is-not-the-whole-story).
+- **iOS works too, but not through that crate.** A socket-level multicast join needs `com.apple.developer.networking.multicast`, which Apple grants by request and commonly declines. So iOS does not join one: `ios_bonjour.rs` + `gen/apple/.../OutlBonjour.swift` ask the system's `mDNSResponder` to advertise and browse via `NetService` / `NetServiceBrowser`, which Apple's Local Network Privacy FAQ exempts as long as the service type is fixed and declared — ours is, in `NSBonjourServices`. **Never add the multicast entitlement**: it is not needed, and a provisioning profile that lacks it fails code signing and breaks the TestFlight pipeline.
+  The seam is `outl_sync_iroh::lan` (plain Rust — that crate is `#![forbid(unsafe_code)]`, so the FFI lives here beside `bg_sync.rs`). `SERVICE_TYPE` / `RELAY_TXT_KEY` are the entire agreement with the other clients; drift breaks discovery with **no error on either side**, so they are pinned by `the_lan_wire_constants_match_the_platform_bridge`.
+  A user who declines the local-network prompt is indistinguishable from an empty LAN — iOS reports nothing to a denied app. See [`docs/sync.md`](../../docs/sync.md#what-each-platform-needs-before-mdns-actually-works).
 
 ## Background sync (iOS + Android)
 
