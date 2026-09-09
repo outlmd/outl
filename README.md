@@ -24,7 +24,7 @@ Tree CRDT sync ([Kleppmann et al. 2022][paper]), per-device append-only op log, 
 # macOS / Linux via Homebrew (beta channel — every push to main)
 brew tap outlmd/outl https://github.com/outlmd/outl
 brew trust outlmd/outl # one-time, third-party tap
-brew install outl-beta # TUI/CLI/MCP
+brew install outlmd/outl/outl-beta # TUI/CLI/MCP
 brew install --cask outl-desktop-beta # GUI
 ```
 
