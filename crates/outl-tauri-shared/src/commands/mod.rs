@@ -40,6 +40,7 @@ pub mod peers;
 pub mod plugin;
 pub mod property;
 pub mod reminders;
+pub mod shortcuts;
 pub mod template;
 pub mod theme;
 pub mod timeline;

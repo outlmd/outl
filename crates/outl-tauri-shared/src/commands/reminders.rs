@@ -127,7 +127,7 @@ pub fn reminder_settings() -> ReminderSettingsDto {
 /// restore-on-save policy the desktop's `Settings` adapter follows).
 pub fn set_reminder_settings(
     enabled: bool,
-    quiet_hours: &str,
+    quiet_hours: String,
 ) -> Result<ReminderSettingsDto, String> {
     let mut cfg = outl_config::load();
     cfg.reminders.enabled = enabled;
@@ -175,10 +175,14 @@ pub fn snooze_presets() -> Vec<SnoozePresetDto> {
 /// Takes no page id because it touches no `.md`: the snooze lives only
 /// in the op log, by design (writing it into the markdown would put a
 /// device-local *time* into the user's clean notes).
-pub fn snooze_reminder<S: AppHost>(state: &S, block_id: &str, preset: &str) -> Result<(), String> {
-    let node = parse_node_id(block_id)?;
+pub fn snooze_reminder<S: AppHost>(
+    state: &S,
+    block_id: String,
+    preset: String,
+) -> Result<(), String> {
+    let node = parse_node_id(&block_id)?;
     let preset =
-        SnoozePreset::from_id(preset).ok_or_else(|| format!("unknown snooze preset: {preset}"))?;
+        SnoozePreset::from_id(&preset).ok_or_else(|| format!("unknown snooze preset: {preset}"))?;
     let until = preset.resolve(clock::now_local().naive_local());
     let hlc = state.hlc().clone();
     with_ws_mut(state, |ws| {
@@ -187,8 +191,8 @@ pub fn snooze_reminder<S: AppHost>(state: &S, block_id: &str, preset: &str) -> R
 }
 
 /// Clear a block's snooze so it resumes on its normal schedule.
-pub fn clear_reminder_snooze<S: AppHost>(state: &S, block_id: &str) -> Result<(), String> {
-    let node = parse_node_id(block_id)?;
+pub fn clear_reminder_snooze<S: AppHost>(state: &S, block_id: String) -> Result<(), String> {
+    let node = parse_node_id(&block_id)?;
     let hlc = state.hlc().clone();
     with_ws_mut(state, |ws| {
         snooze(ws, &hlc, node, None).map_err(|e| e.to_string())
@@ -207,15 +211,15 @@ pub fn clear_reminder_snooze<S: AppHost>(state: &S, block_id: &str) -> Result<()
 /// for free: the schedule is derived on every scan, never cached.
 pub fn set_block_property<S: AppHost>(
     state: &S,
-    page_id: &str,
-    block_id: &str,
-    key: &str,
-    value: &str,
+    page_id: String,
+    block_id: String,
+    key: String,
+    value: String,
 ) -> Result<PageView, String> {
-    let page = parse_node_id(page_id)?;
-    let node = parse_node_id(block_id)?;
+    let page = parse_node_id(&page_id)?;
+    let node = parse_node_id(&block_id)?;
     // Same order as `set_page_property`: clean first, judge after.
-    let key = outl_actions::property::normalize_key(key);
+    let key = outl_actions::property::normalize_key(&key);
     if let Some(why) = outl_actions::property::key_rejection(&key) {
         return Err(why);
     }
@@ -240,17 +244,17 @@ pub fn set_block_property<S: AppHost>(
 /// Renaming is `page_rename`, which moves the projection too.
 pub fn set_page_property<S: AppHost>(
     state: &S,
-    page_id: &str,
-    key: &str,
-    value: &str,
+    page_id: String,
+    key: String,
+    value: String,
 ) -> Result<PageView, String> {
-    let page = parse_node_id(page_id)?;
+    let page = parse_node_id(&page_id)?;
     // Normalise BEFORE the guards. Checking the raw text let
     // `page-slug::` through: it is not equal to `page-slug`, so the
     // structural guard passed, and the key was then written as the
     // real thing — silently repointing the page every `[[ref]]`
     // resolves through.
-    let key = outl_actions::property::normalize_key(key);
+    let key = outl_actions::property::normalize_key(&key);
     if let Some(why) = outl_actions::property::key_rejection(&key) {
         return Err(why);
     }
@@ -274,11 +278,11 @@ pub fn set_page_property<S: AppHost>(
 /// and says what it means.
 pub fn mark_block_done<S: AppHost>(
     state: &S,
-    page_id: &str,
-    block_id: &str,
+    page_id: String,
+    block_id: String,
 ) -> Result<PageView, String> {
-    let page = parse_node_id(page_id)?;
-    let node = parse_node_id(block_id)?;
+    let page = parse_node_id(&page_id)?;
+    let node = parse_node_id(&block_id)?;
     let hlc = state.hlc().clone();
     finish_in_page(state, page, |ws| {
         let current = ws.block_text(node).unwrap_or_default();
@@ -292,9 +296,15 @@ pub fn mark_block_done<S: AppHost>(
 /// reminder specifically and shouldn't have to know the key string.
 pub fn set_block_remind<S: AppHost>(
     state: &S,
-    page_id: &str,
-    block_id: &str,
-    rule: &str,
+    page_id: String,
+    block_id: String,
+    rule: String,
 ) -> Result<PageView, String> {
-    set_block_property(state, page_id, block_id, outl_md::remind::REMIND_KEY, rule)
+    set_block_property(
+        state,
+        page_id,
+        block_id,
+        outl_md::remind::REMIND_KEY.to_string(),
+        rule,
+    )
 }

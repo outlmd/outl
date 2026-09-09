@@ -25,9 +25,7 @@ use parking_lot::Mutex;
 use crate::fs_watcher::WatcherHandle;
 use crate::settings::Settings;
 
-pub(crate) use outl_tauri_shared::{
-    CreateBlockReply, CutBlockReply, PageView, WorkspaceSummary, ERR_LOADING,
-};
+pub(crate) use outl_tauri_shared::{PageView, WorkspaceSummary, ERR_LOADING};
 
 /// Shared mutable state held by Tauri.
 pub(crate) struct AppState {

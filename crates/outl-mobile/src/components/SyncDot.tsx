@@ -39,8 +39,8 @@ export function SyncDot(props: SyncDotProps): JSX.Element {
             style={{
               background:
                 props.status === "synced"
-                  ? "#34c759"
-                  : "#ff9500",
+                  ? "var(--color-outl-accent-alt)"
+                  : "var(--color-outl-warn)",
             }}
           />
         }

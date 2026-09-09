@@ -171,7 +171,7 @@ On `Cmd+Shift+X` the `Insert` `WrapStrike` row wins inside a textarea and the `G
 
 ## Wire format (Tauri / JSON)
 
-The desktop ships the whole binding table to the frontend on boot via the `list_shortcut_bindings` Tauri command (`crates/outl-desktop/src-tauri/src/commands/shortcuts.rs`).
+Both GUI clients ship the whole binding table to the frontend on boot via the `list_shortcut_bindings` Tauri command. The body lives in `crates/outl-tauri-shared/src/commands/shortcuts.rs`; each client registers it through `outl_tauri_shared::shortcut_commands!`.
 Serde format is stable and load-bearing:
 
 ```json

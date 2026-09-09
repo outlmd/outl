@@ -18,6 +18,7 @@
 
 * [TUI manual](tui.md)
 * [Paste](paste.md)
+* [Design specification](../DESIGN.md)
 * [Theming](theming.md)
 * [Configuration](config.md)
 * [Shortcuts](shortcuts.md)
@@ -57,6 +58,7 @@
 ## Project
 
 * [Development guide](development.md)
+* [Mobile UX behaviour](mobile-ux.md)
 * [iOS platform integration](ios-platform.md)
 * [Android platform integration](android-platform.md)
 * [Contributing & code review](contributing.md)

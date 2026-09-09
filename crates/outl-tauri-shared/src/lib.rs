@@ -43,6 +43,7 @@ pub mod projection;
 pub mod reminder_runtime;
 pub mod state;
 pub mod workspace_open;
+pub mod wrappers;
 
 pub use host::{AppHost, StorageRootProvider};
 pub use plugin_service::PluginService;

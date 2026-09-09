@@ -37,4 +37,7 @@ pub mod view;
 
 pub use app::{run, run_with_theme_override};
 pub use edit_buffer::EditBuffer;
-pub use theme::{by_name as theme_by_name, default_theme, Theme, PRESETS as THEME_PRESETS};
+// `PRESETS` is deliberately NOT re-exported here. It belongs to
+// `outl-theme`; callers that need the list (the CLI's `outl theme
+// list`) take it from there, so there is no second name for it.
+pub use theme::{by_name as theme_by_name, default_theme, Theme};

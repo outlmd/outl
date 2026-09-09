@@ -448,7 +448,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                       type="button"
                       disabled={normalizeKey(keyDraft()) === ""}
                       onClick={() => pickKey(keyDraft())}
-                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40"
+                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-(--color-outl-bg) active:opacity-70 disabled:opacity-40"
                     >
                       Next
                     </button>
@@ -536,7 +536,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
                       type="button"
                       disabled={busy()}
                       onClick={() => void write(m().key, valueDraft())}
-                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-white active:opacity-70 disabled:opacity-40"
+                      class="flex-1 rounded-lg bg-(--color-outl-accent) py-2 text-[15px] font-semibold text-(--color-outl-bg) active:opacity-70 disabled:opacity-40"
                     >
                       Save
                     </button>

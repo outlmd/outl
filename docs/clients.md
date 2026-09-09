@@ -44,7 +44,8 @@ The TS+Solid frontends share `@outl/shared` (`crates/outl-frontend-shared`) for 
 | Committed-mutation undo / redo (snapshot stacks + `.md` restore via reconcile) | `outl-actions::history` |
 | Code-block execution (runtimes + orchestration) | `outl-exec`            |
 | Cross-client "run a fence" glue (`run_code_block`) | `outl-actions::exec` |
-| Tauri command bodies, wire DTOs, plugin thread (Boa `!Send`), `AppHost` / `StorageRootProvider` traits — shared by `outl-desktop` and `outl-mobile` src-tauri; both clients are thin wrappers | `outl-tauri-shared` |
+| Tauri command bodies **and the one declaration of the command surface** (`wrappers/catalog.rs`), wire DTOs, plugin thread (Boa `!Send`), `AppHost` / `StorageRootProvider` traits — shared by `outl-desktop` and `outl-mobile` src-tauri. A client's `commands/<module>.rs` is one macro invocation; a client takes a whole module or declares the gap, pinned by `tests/command_parity.rs` | `outl-tauri-shared` |
+| The post-mutation commit sequence — undo snapshot, backlink invalidation, peer announce, `.md` projection — as `commit_page` + the `CommitHooks` trait, callable from any client holding a `&mut Workspace` | `outl-actions` |
 | TUI: keymaps, modes, overlays, in-flight AST manipulation | `outl-tui`         |
 | Desktop: FS watcher, settings IO, Solid frontend (3-pane, OS-standard shortcuts) | `outl-desktop` |
 | Mobile: iCloud container resolution, iOS-native bridges (`NSMetadataQuery`, `BGTaskScheduler`), Solid frontend | `outl-mobile` |

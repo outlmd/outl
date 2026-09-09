@@ -269,6 +269,19 @@ It is a detached background thread on purpose: a snapshot walks the whole worksp
 Don't "improve" this by hanging it off the idle tick or `flush_pending_save` — the interval floor is read back out of the git history, so a session that ends before a snapshot simply gets one on the next launch.
 Policy + the "which client snapshots" table live in [`docs/clients.md` → Automatic backups](../../docs/clients.md#automatic-backups).
 
+## The commit pipeline this crate does not use yet
+
+`outl_actions::commit_page` owns what happens around a page mutation: pre-mutation undo snapshot, the mutation, backlink-index invalidation, the peer announce, then the `.md` + sidecar projection.
+It takes `&mut Workspace`, so this crate *can* call it.
+
+It does not, yet.
+`save_page_with` in `actions/lifecycle/persistence.rs` writes the same sequence by hand.
+`render` → `write_atomic` → `reconcile_md` → `index.patch_page` → `spawn_backlink_index_rebuild` → `announce_local_ops`.
+It does that because this crate mutates an in-memory AST and derives ops from the rendered markdown — the inverted direction [issue 263](https://github.com/outlmd/outl/issues/263) tracks.
+
+**New code here should call `commit_page` rather than extending `save_page_with`.**
+Adding a sixth step to the hand-written sequence deepens the divergence the issue exists to close, and the shared pipeline already has the ordering right.
+
 ## Theme mode: `auto` means dark here
 
 `runtime::resolve_preset_name(&ThemeCfg) -> &str` decides which side of the `[theme] preset` / `preset_dark` pair the global-config fallback resolves to: `Light` → `preset`, `Dark` and `Auto` → `ThemeCfg::dark()`.

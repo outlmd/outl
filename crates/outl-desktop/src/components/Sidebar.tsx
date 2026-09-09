@@ -260,7 +260,7 @@ export function Sidebar(props: {
             }}
             aria-label={`Delete page "${props.label}"`}
             title="Delete page"
-            class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded px-1 text-[13px] text-(--color-outl-fg-dimmer) opacity-0 transition-opacity hover:text-(--color-outl-error,--color-outl-fg) group-hover:opacity-100 focus:opacity-100"
+            class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded px-1 text-[13px] text-(--color-outl-fg-dimmer) opacity-0 transition-opacity hover:text-(--color-outl-destructive) group-hover:opacity-100 focus:opacity-100"
           >
             ×
           </button>

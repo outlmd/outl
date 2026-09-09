@@ -17,7 +17,7 @@ use outl_sync_iroh::IrohSyncTransport;
 use outl_tauri_shared::{AppHost, ProjectionWriter};
 use parking_lot::Mutex;
 
-pub(crate) use outl_tauri_shared::{CreateBlockReply, CutBlockReply, PageView, WorkspaceSummary};
+pub(crate) use outl_tauri_shared::{PageView, WorkspaceSummary};
 
 /// Shared mutable state held by Tauri.
 ///

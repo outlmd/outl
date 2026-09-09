@@ -45,7 +45,21 @@ $1 {
 - Add a paragraph in the "Operations" section describing semantics.
 - Add a concurrent example if the op has non-obvious interactions.
 
-## 7. Pre-flight before PR
+## 7. Reaching the clients
+
+An `Op` a user can trigger needs a way to trigger it, and that path is declared, not hand-rolled:
+
+- **Action + capability.** Add the `Action` to `outl-shortcuts`; `support()` is an exhaustive `match`, so it will not compile until all three clients state what they do with it (root `CLAUDE.md` invariant 12).
+- **The command.** Body in `outl-tauri-shared/src/commands/`, one entry in the matching `*_commands!` list in `src/wrappers/catalog.rs`, then an `invoke_handler!` entry in **both** clients.
+  Never hand-write the `#[tauri::command]` wrapper.
+  Shared bodies take `String`, not `&str`.
+- **The mutation.** Route it through `outl_actions::commit_page` so the undo snapshot, backlink invalidation, peer announce and projection all happen, in order.
+- **The wire shape.** If the reply carries a new DTO, mirror it in `crates/outl-frontend-shared/src/api/types.ts` and pin it in `outl-tauri-shared/tests/wire_types.rs`.
+- **The TUI.** It still derives ops from rendered markdown ([issue 263](https://github.com/outlmd/outl/issues/263)), so a new op reaches it through `outl-actions`, not through `save_page_with`.
+
+Skipping any of these compiles fine and ships an op no client can produce.
+
+## 8. Pre-flight before PR
 
 - [ ] `cargo fmt`
 - [ ] `cargo clippy -- -D warnings`
@@ -53,5 +67,6 @@ $1 {
 - [ ] 100% coverage on the new branches in `do_op`/`undo_op`
 - [ ] Invoke the `crdt-invariant-checker` agent
 - [ ] Invoke the `paper-verifier` agent if the op has an analog in the paper
+- [ ] `cargo test -p outl-tauri-shared` — the command-parity and wire-type pins
 
 **Do not skip steps.** A new op that breaks convergence destroys trust in outl.

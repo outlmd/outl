@@ -68,7 +68,7 @@ export function SelectionToolbar(props: SelectionToolbarProps): JSX.Element {
         <button
           type="button"
           onClick={props.onDone}
-          class="shrink-0 rounded-xl bg-(--color-outl-accent) px-3 py-1.5 text-[14px] font-semibold text-white active:opacity-70"
+          class="shrink-0 rounded-xl bg-(--color-outl-accent) px-3 py-1.5 text-[14px] font-semibold text-(--color-outl-bg) active:opacity-70"
         >
           Done
         </button>

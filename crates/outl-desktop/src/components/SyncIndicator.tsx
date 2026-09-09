@@ -47,7 +47,12 @@ export function SyncIndicator() {
   function color(): string {
     const o = online();
     if (o === null) return "var(--color-outl-fg-dim)";
-    return o ? "#34c759" : "#ff9500";
+    // `accent_alt` is the palette's success hue and `warn` its warning
+    // one — a hex here would be a second definition of a colour with no
+    // `Palette` field behind it (root CLAUDE.md invariant 13).
+    return o
+      ? "var(--color-outl-accent-alt)"
+      : "var(--color-outl-warn)";
   }
 
   function label(): string {

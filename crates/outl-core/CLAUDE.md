@@ -398,6 +398,9 @@ src/
 ├── workspace.rs        # Workspace entry point
 ├── workspace/
 │   ├── batch.rs         # Workspace::begin_batch / WorkspaceBatch (deferred-persist batching)
+│   ├── router.rs        # StorageRouter — which storage owns an op, and how the shards read back as one log
+│   ├── router/tests.rs  #   routing + the HLC merge rule, against MemoryStorage
+│   ├── snapshot_policy.rs # SnapshotPolicy — when the boot cache is written, and the workers writing it
 │   └── text_history.rs  # Workspace::block_text_history — replay a block's past text from storage
 ├── page.rs             # Page model (projection over op log)
 ├── journal.rs          # Journal (page with date-key)

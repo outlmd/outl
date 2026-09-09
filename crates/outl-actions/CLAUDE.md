@@ -56,6 +56,51 @@ It wraps its whole body in one `Workspace::begin_batch()` so the N ops flush as 
 Each op still goes through `apply` individually (dedup, Yrs merge, and the CRDT stay untouched); only the persist is deferred to the guard's `commit()`.
 See `outl-core/CLAUDE.md` → "Batch append" and [`docs/storage.md`](../../docs/storage.md) for the mechanics and durability contract — this crate only needs to know: open a batch around a multi-`apply` action, commit it before returning.
 
+## The commit pipeline
+
+A mutation is never just the mutation. Five things happen around it, and
+the order matters:
+
+1. snapshot the page's `.md` **before** the change, for undo — kept only
+   when the change actually altered the render, so a no-op command does
+   not turn `Cmd+Z` into a visible nothing;
+2. run the mutation;
+3. drop the cached backlinks index;
+4. announce the new ops to peers, so a device pulls now rather than on
+   the next catch-up sweep;
+5. project the page back to `.md` + sidecar.
+
+`commit::commit_page(ws, hooks, page, mutate)` is that sequence.
+It takes `&mut Workspace`, so a plain workspace from anywhere can run it
+— no lock, no `Arc`, no DTO in the signature.
+
+`CommitHooks` has exactly **one** required method, `project`. Undo,
+backlink invalidation and the peer announce all default to no-ops, so a
+CLI command with none of that state implements one method and still gets
+the ordering guarantee.
+
+Only the mutation can fail the commit. A projection failure arrives after
+the op log already holds the truth, so `project` returns nothing and an
+implementation that needs to surface the failure keeps it on `self` — the
+Tauri clients do exactly that (`TauriCommitHooks` in
+`outl-tauri-shared/src/helpers.rs`). Aborting there would report an error
+for a change that did happen.
+
+**Why it lives here.** The sequence had one implementation, generic over
+a trait that wanted `&Mutex<Option<Workspace>>` — the Tauri state shape.
+The TUI holds a plain `Workspace` and the CLI holds one in a command
+context, so neither could reach it and both re-derived the parts they
+thought applied. Repo-wide that left 34 direct calls to
+`apply_page_md_with_sidecar_guarded` across 18 files: step 5 alone, each
+one a caller that decided the other four did not apply to it. Some of
+those calls are right. None of them were written down.
+[#264](https://github.com/outlmd/outl/issues/264).
+
+**Reach for it whenever you mutate a page and then want the world to
+agree with the op log.** A bare `apply_page_md_with_sidecar_guarded` is
+only correct when you can say which of the other four steps you are
+skipping and why — put that reason in a comment next to the call.
+
 ## Page model
 
 Pages are **regular nodes** directly under [`NodeId::root`] tagged with a `page-slug` property.

@@ -224,7 +224,7 @@ export function PluginSheet(props: {
                                 type="button"
                                 disabled={busyId() === i.id}
                                 onClick={() => void install(i)}
-                                class="rounded-full bg-(--color-outl-accent) px-3 py-1.5 text-[13px] font-medium text-white active:opacity-80 disabled:opacity-50"
+                                class="rounded-full bg-(--color-outl-accent) px-3 py-1.5 text-[13px] font-medium text-(--color-outl-bg) active:opacity-80 disabled:opacity-50"
                               >
                                 {busyId() === i.id ? "…" : "Install"}
                               </button>
@@ -322,7 +322,7 @@ function TabButton(props: {
       onClick={props.onTap}
       class={`rounded-full px-3 py-1 text-[14px] font-medium ${
         props.active
-          ? "bg-(--color-outl-accent) text-white"
+          ? "bg-(--color-outl-accent) text-(--color-outl-bg)"
           : "text-(--color-outl-fg-dim) active:opacity-60"
       }`}
     >
