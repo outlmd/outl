@@ -7,6 +7,11 @@ Shared palette definitions consumed by every outl renderer:
 
 One palette, two render strategies, **zero forking**.
 
+> **The design specification is [`DESIGN.md`](../../DESIGN.md).**
+> This file is the crate's contract — how `Palette` is built, tested and consumed.
+> `DESIGN.md` is what the colours *mean*: every role, the theming resolution, spacing, the component inventory, and the live exceptions named so none of them is cited as precedent.
+> A new token or preset touches both.
+
 ## Why this crate exists
 
 The TUI used to own its own `Theme` struct (`outl-tui/src/theme.rs`) with hardcoded `ratatui::Color` variants per preset.
@@ -68,7 +73,9 @@ This is what lets every other crate cheaply depend on us.
        theme_from_palette("my-preset", &outl_theme::presets::my_preset())
    }
    ```
-   Also add the name to `PRESETS` and a match arm in `by_name` in that file.
+   Also add a match arm in `by_name` in that file.
+   **Do not add the name to a TUI `PRESETS`** — there isn't one.
+   `crates/outl-tui/src/theme.rs` re-exports [`PRESETS`] from here, so step 3 is the only place the list is edited, and `crates/outl-tui/tests/theme_parity.rs` fails if the two `by_name` resolvers stop accepting the same names.
    `default-dark` and `light` are the only two TUI presets that bypass `theme_from_palette` — they use ANSI named colors so the terminal's palette shows through.
 6. Desktop and mobile clients pick up the preset automatically via `list_themes` / `get_theme` Tauri commands — no extra wiring needed there.
 7. Update `docs/theming.md` with a one-line description.

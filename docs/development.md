@@ -317,6 +317,17 @@ The expected per-edit cycle:
   Every hook above it is `PostToolUse` on `Edit|Write`, and **that matcher does not include the Bash tool**: a file created with `python3 - <<'PY'`, `sed -i`, `cat >` or `git mv` lands on disk having passed no guard at all.
   The per-edit hook answers "Claude used Edit/Write on a big file"; this one answers "something got big, however it arrived".
   It exits 2 once with the failure, then reports without blocking if it fires again (`stop_hook_active`), so a condition Claude cannot clear does not loop.
+- **`single-declaration-guard.sh`** — catches code written where a cross-client surface *used* to live.
+  Three surfaces are declared once and consumed everywhere, each having replaced N hand-maintained copies.
+  The Tauri command surface (`outl-tauri-shared/src/wrappers/catalog.rs`), the post-mutation commit sequence (`outl_actions::commit_page`), and the Rust ↔ TypeScript wire contract (`tests/wire_types.rs`).
+  Each already has a test that fails when a client drifts; this hook solves a different problem.
+  A model working from the shape of the *old* code writes the hand-rolled version again, because the git history is full of it.
+  The test catches that in CI; this catches it at the keystroke, with the file the change belongs in.
+  Every check is deliberately narrow, because a hook that fires on correct code teaches the reader to ignore it.
+  It compares command wrappers **per function signature**, so `open_ref` — which needs an `AppHandle` — stays silent while a plain duplicate does not.
+  It flags a bare `apply_page_md_with_sidecar_guarded` only in a file that also mutates.
+  And it carries a frozen baseline of the CLI / TUI call sites [issue 264](https://github.com/outlmd/outl/issues/264) already tracks.
+  That baseline may only get shorter: migrating a file to `commit_page` deletes its row.
 - **`section-ref-guard.sh`** — flags a quoted section title that no longer exists.
   `doc-sync-guard.sh` reasons about *files touched*, so renaming a heading passes it clean while leaving the old title quoted in every file that pointed at it.
   This one resolves `` `path.md` → "Title" `` and `see "Title"` against the target's headings, bold labels and table rows.

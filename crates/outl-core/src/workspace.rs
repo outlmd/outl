@@ -21,17 +21,19 @@ use crate::op::{op_node, LogOp, Op};
 use crate::snapshot::{self, SnapshotBody};
 use crate::storage::{Storage, StorageError};
 use crate::tree::Tree;
+use router::{Route, StorageRouter};
+use snapshot_policy::SnapshotPolicy;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::thread::JoinHandle;
 use tracing::{debug, warn};
 
 mod batch;
+mod router;
+mod snapshot_policy;
 mod text_history;
 
 pub use text_history::TextRevision;
 
-use batch::BatchRoute;
 pub use batch::WorkspaceBatch;
 
 /// Errors a workspace may surface to its caller.
@@ -62,39 +64,12 @@ pub struct Workspace {
     log: OpLog,
     /// Block text content (Yrs docs).
     content: ContentStore,
-    /// Pluggable storage backend (Global scope — the legacy
-    /// single-file-per-actor layout). Per-page shards live in
-    /// `page_storages`.
-    storage: Box<dyn Storage>,
-    /// Per-page storage backends (Phase B of RFC #137). Keyed by page
-    /// slug. Empty for workspaces that haven't migrated to per-page
-    /// shards. When non-empty, `apply` routes each op to the storage
-    /// that owns the op's node.
-    page_storages: HashMap<String, Box<dyn Storage>>,
-    /// `NodeId → slug` map for page roots. Populated by the client
-    /// (which reads sidecars via `outl-md`) via
-    /// [`Self::register_page_root`]. `apply` walks the parent chain
-    /// from an op's node up to a page root, then uses this map to
-    /// find the slug and route to the right `page_storages` entry.
-    page_root_to_slug: HashMap<NodeId, String>,
-    /// `<root>/.outl/snapshots` when `root` is set, `None` for
-    /// in-memory workspaces. Background snapshot writes go straight
-    /// here — they don't go through `storage` (the snapshot is a local
-    /// cache, not part of the source-of-truth op log).
-    snapshots_dir: Option<PathBuf>,
-    /// Background snapshot writers still in flight. `apply` drains
-    /// finished handles on every trigger (cheap, non-blocking) so the
-    /// list stays bounded; `wait_for_snapshots` joins the rest.
-    snapshot_workers: Vec<JoinHandle<()>>,
-    /// Number of ops applied since the last successful snapshot write.
-    /// `apply` increments this and spawns a snapshot worker once it
-    /// crosses `snapshot_threshold`. Reset to `0` on every spawn and
-    /// on policy change.
-    ops_since_snapshot: u32,
-    /// Trigger threshold for background snapshot writes inside `apply`.
-    /// `0` disables the in-band trigger (the CLI sets this — it's
-    /// ephemeral and shouldn't churn the snapshots dir).
-    snapshot_threshold: u32,
+    /// Which storage owns an op, and how the shards read back as one
+    /// log. Holds the global backend plus any per-page shards.
+    router: StorageRouter,
+    /// When to write the local boot cache, and the workers doing it.
+    /// Policy, not document state — see [`SnapshotPolicy`].
+    snapshots: SnapshotPolicy,
     /// Whether `self.log` carries every op ever persisted (`true` after
     /// full replay) or only the delta posted after a snapshot cutoff
     /// (`false` after snapshot boot). When `false`, `Doc` rebuilds that
@@ -114,7 +89,7 @@ pub struct Workspace {
     /// (page routing walks the tree the op may itself have mutated). The
     /// ops already live in the CRDT + in-memory log; this buffer is only
     /// the not-yet-durable persistence queue.
-    pending: Vec<(BatchRoute, LogOp)>,
+    pending: Vec<(Route, LogOp)>,
 }
 
 impl Workspace {
@@ -147,13 +122,8 @@ impl Workspace {
             tree: Tree::new(),
             log: OpLog::new(),
             content: ContentStore::default(),
-            storage,
-            page_storages: HashMap::new(),
-            page_root_to_slug: HashMap::new(),
-            snapshots_dir,
-            snapshot_workers: Vec::new(),
-            ops_since_snapshot: 0,
-            snapshot_threshold: Workspace::DEFAULT_SNAPSHOT_THRESHOLD,
+            router: StorageRouter::new(storage),
+            snapshots: SnapshotPolicy::new(snapshots_dir),
             log_complete: true,
             batch_depth: 0,
             pending: Vec::new(),
@@ -193,11 +163,6 @@ impl Workspace {
         !self.log_complete
     }
 
-    /// Default `apply`-count between in-band snapshot writes. Clients
-    /// override with [`Self::set_snapshot_policy`] from `[snapshot]`
-    /// in `outl.toml`. The CLI forces `0` to opt out.
-    const DEFAULT_SNAPSHOT_THRESHOLD: u32 = 10_000;
-
     /// Try to hydrate the workspace from a snapshot + the ops posted
     /// since its cutoff. Returns `Ok(false)` when there's nothing to
     /// load (so the caller falls through to [`Self::boot_from_full_replay`]).
@@ -207,8 +172,8 @@ impl Workspace {
         // storage backend (the op log). An in-memory workspace
         // (`root = None`) has nowhere to read from, so it never boots
         // from snapshot.
-        let snapshots_dir = match &self.snapshots_dir {
-            Some(d) => d.clone(),
+        let snapshots_dir = match self.snapshots.dir() {
+            Some(d) => d.to_path_buf(),
             None => return Ok(false),
         };
         // Prefer this device's own snapshot; when it has none yet (a fresh
@@ -364,7 +329,7 @@ impl Workspace {
         // without a snapshot on disk doesn't have to wait a full
         // `threshold` worth of new ops before producing one. If the log
         // already crosses the threshold, the next `apply` snapshots.
-        self.ops_since_snapshot = (self.log.len() as u32).min(self.snapshot_threshold);
+        self.snapshots.seed_from_log_len(self.log.len());
 
         Ok(())
     }
@@ -529,17 +494,8 @@ impl Workspace {
         // Route to the right storage. If the op's node belongs to a
         // registered page, write to that page's shard; otherwise write
         // to the global storage (legacy behaviour).
-        let slug = op_node(&op.op).and_then(|node| self.slug_for_node(node));
-        match slug {
-            Some(ref slug) if self.page_storages.contains_key(slug) => {
-                if let Some(s) = self.page_storages.get_mut(slug) {
-                    s.append_op(&op)?;
-                }
-            }
-            _ => {
-                self.storage.append_op(&op)?;
-            }
-        }
+        let route = self.router.route(&self.tree, op_node(&op.op));
+        self.router.append_op(&route, &op)?;
 
         // Background snapshot trigger. `snapshot_threshold = 0` is the
         // opt-out (CLI). When the threshold is crossed we build the
@@ -635,10 +591,6 @@ impl Workspace {
     /// Non-blocking: the encode + fsync + rename happen off the calling
     /// thread. If the body can't be built (e.g. empty log) we no-op.
     fn spawn_background_snapshot(&mut self) {
-        let snapshots_dir = match &self.snapshots_dir {
-            Some(p) => p.clone(),
-            None => return,
-        };
         let body = match self.build_snapshot_body() {
             Ok(Some(b)) => b,
             Ok(None) => return,
@@ -648,15 +600,7 @@ impl Workspace {
             }
         };
 
-        let handle = std::thread::Builder::new()
-            .name(format!("outl-snapshot-{}", self.actor))
-            .spawn(move || {
-                if let Err(e) = snapshot::write_to_disk(&snapshots_dir, &body) {
-                    warn!("background snapshot write failed (non-fatal): {e}");
-                }
-            })
-            .expect("spawn snapshot worker");
-        self.snapshot_workers.push(handle);
+        self.snapshots.spawn_write(self.actor, body);
     }
 
     /// Block until every background snapshot worker finishes.
@@ -666,12 +610,7 @@ impl Workspace {
     /// process exit and could leave a stale `.tmp` behind). Errors
     /// inside the workers are already logged; this just joins.
     pub fn wait_for_snapshots(&mut self) {
-        let workers = std::mem::take(&mut self.snapshot_workers);
-        for h in workers {
-            if let Err(e) = h.join() {
-                warn!("snapshot worker panicked: {e:?}");
-            }
-        }
+        self.snapshots.wait();
     }
 
     /// Configure when the workspace writes snapshots to disk during
@@ -688,8 +627,7 @@ impl Workspace {
     /// ws.set_snapshot_policy(cfg.snapshot.enabled, cfg.snapshot.op_threshold);
     /// ```
     pub fn set_snapshot_policy(&mut self, enabled: bool, threshold: u32) {
-        self.snapshot_threshold = if enabled { threshold.max(1) } else { 0 };
-        self.ops_since_snapshot = 0;
+        self.snapshots.set_policy(enabled, threshold);
     }
 
     /// Persist a snapshot of the materialized state under the current
@@ -709,8 +647,8 @@ impl Workspace {
     /// workspace has no root (`open_in_memory`), which has nowhere to
     /// write.
     pub fn save_snapshot(&mut self) -> Result<(), WorkspaceError> {
-        let snapshots_dir = match &self.snapshots_dir {
-            Some(d) => d.clone(),
+        let snapshots_dir = match self.snapshots.dir() {
+            Some(d) => d.to_path_buf(),
             None => return Ok(()),
         };
         let body = match self.build_snapshot_body()? {
@@ -828,7 +766,7 @@ impl Workspace {
 
     /// Whether any per-page storage shards have been registered.
     pub fn has_page_storages(&self) -> bool {
-        !self.page_storages.is_empty()
+        self.router.has_pages()
     }
 
     /// Register a per-page storage backend. The client (CLI / TUI /
@@ -837,7 +775,7 @@ impl Workspace {
     /// Ops whose node belongs to `slug` will be routed to this storage
     /// instead of the global one.
     pub fn register_page_storage(&mut self, slug: &str, storage: Box<dyn Storage>) {
-        self.page_storages.insert(slug.to_string(), storage);
+        self.router.register_page(slug, storage);
     }
 
     /// Register a page root → slug mapping. The client calls this for
@@ -845,7 +783,7 @@ impl Workspace {
     /// `outl-md`). `apply` uses this to resolve which page an op
     /// belongs to by walking the parent chain up to a page root.
     pub fn register_page_root(&mut self, root_id: NodeId, slug: &str) {
-        self.page_root_to_slug.insert(root_id, slug.to_string());
+        self.router.register_root(root_id, slug);
     }
 
     /// Walk `tree.parent(node)` up until we hit a registered page root.
@@ -858,26 +796,14 @@ impl Workspace {
     /// (`register_page_root`) — an unregistered or not-yet-materialized node
     /// returns `None`, so callers treat it as best-effort.
     pub fn slug_for_node(&self, node: NodeId) -> Option<String> {
-        let mut current = node;
-        loop {
-            if let Some(slug) = self.page_root_to_slug.get(&current) {
-                return Some(slug.clone());
-            }
-            current = self.tree.parent(current)?;
-        }
+        self.router.slug_for_node(&self.tree, node)
     }
 
     /// Merge ops from the global storage and every registered
     /// per-page storage, sorted by HLC. Used by boot and read-side
     /// accessors (`all_ops`, `ops_since`, `ops_for_node`, etc.).
     fn all_ops_combined(&self) -> Result<Vec<LogOp>, StorageError> {
-        let mut all = self.storage.all_ops()?;
-        for s in self.page_storages.values() {
-            all.extend(s.all_ops()?);
-        }
-        all.sort_by_key(|op| op.ts);
-        all.dedup_by_key(|op| op.ts);
-        Ok(all)
+        self.router.all_ops()
     }
 
     /// Merge the per-actor delta (see [`Storage::ops_since_per_actor`])
@@ -887,24 +813,12 @@ impl Workspace {
         &self,
         cutoff: &std::collections::BTreeMap<ActorId, crate::hlc::Hlc>,
     ) -> Result<Vec<LogOp>, StorageError> {
-        let mut all = self.storage.ops_since_per_actor(cutoff)?;
-        for s in self.page_storages.values() {
-            all.extend(s.ops_since_per_actor(cutoff)?);
-        }
-        all.sort_by_key(|op| op.ts);
-        all.dedup_by_key(|op| op.ts);
-        Ok(all)
+        self.router.ops_since_per_actor(cutoff)
     }
 
     /// Merge ops for `node` from every storage.
     fn ops_for_node_combined(&self, node: NodeId) -> Result<Vec<LogOp>, StorageError> {
-        let mut all = self.storage.ops_for_node(node)?;
-        for s in self.page_storages.values() {
-            all.extend(s.ops_for_node(node)?);
-        }
-        all.sort_by_key(|op| op.ts);
-        all.dedup_by_key(|op| op.ts);
-        Ok(all)
+        self.router.ops_for_node(node)
     }
 
     /// Merge `last_ts_per_actor` from every storage — the per-actor
@@ -912,19 +826,7 @@ impl Workspace {
     fn last_ts_per_actor_combined(
         &self,
     ) -> Result<HashMap<ActorId, crate::hlc::Hlc>, StorageError> {
-        let mut map = self.storage.last_ts_per_actor()?;
-        for s in self.page_storages.values() {
-            for (actor, ts) in s.last_ts_per_actor()? {
-                map.entry(actor)
-                    .and_modify(|existing| {
-                        if ts > *existing {
-                            *existing = ts;
-                        }
-                    })
-                    .or_insert(ts);
-            }
-        }
-        Ok(map)
+        self.router.last_ts_per_actor()
     }
 
     /// Apply the LRU cap configured by the client, after boot has
@@ -941,10 +843,7 @@ impl Workspace {
     /// default). Idempotent and safe to call at any point in the
     /// lifecycle (clients may resize on config change).
     pub fn apply_lru_cap(&mut self, cap: usize) {
-        self.storage.resize_cache(cap);
-        for s in self.page_storages.values_mut() {
-            s.resize_cache(cap);
-        }
+        self.router.resize_cache(cap);
     }
 }
 

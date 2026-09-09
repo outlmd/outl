@@ -155,6 +155,17 @@ The legacy `--color-ios-*` / `--color-iosd-*` writes are gone.
 Details: [`docs/theming.md`](../../docs/theming.md#desktop-css-custom-property-namespaces).
 
 `commands/theme.rs`'s `list_themes` / `get_theme` are now thin wrappers over `outl_tauri_shared::commands::theme` (RFC 0022).
+
+Every purely-delegating command module here is a single macro
+invocation now — `outl_tauri_shared::block_commands!(crate::state::AppState);`
+and friends. Do not hand-write a `#[tauri::command]` wrapper: add the
+line to `outl-tauri-shared/src/wrappers/catalog.rs` so both clients get
+it, and `tests/command_parity.rs` fails if either stops taking a module.
+See `outl-tauri-shared/CLAUDE.md` → "One command surface, not two".
+What stays hand-written here is what needs more than
+`State<'_, AppState>`: `open_ref` (AppHandle), `outl_sync_now`,
+`deliver_due_reminders`, the pairing commands, and the whole `plugin`
+module (second `State` for the plugin thread).
 The body moved to the shared crate so mobile can register the identical two commands instead of hardcoding palette hex values.
 This crate keeps only the `#[tauri::command]` attribute + `invoke_handler!` registration; no logic lives here anymore.
 

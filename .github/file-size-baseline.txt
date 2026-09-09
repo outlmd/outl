@@ -26,8 +26,8 @@
 730 crates/outl-config/src/schema.rs
 757 crates/outl-core/src/storage/jsonl/read.rs
 810 crates/outl-core/src/storage/jsonl/tests.rs
-1418 crates/outl-core/src/workspace.rs
-760 crates/outl-core/src/workspace/batch.rs
+1317 crates/outl-core/src/workspace.rs
+725 crates/outl-core/src/workspace/batch.rs
 833 crates/outl-core/tests/convergence_property.rs
 712 crates/outl-core/tests/tree_unit.rs
 1603 crates/outl-desktop/src/components/BlockRow.tsx
@@ -45,7 +45,7 @@
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 833 crates/outl-mobile/src/components/BlockRow.tsx
-2827 crates/outl-mobile/src/components/Journal.tsx
+2551 crates/outl-mobile/src/components/Journal.tsx
 796 crates/outl-plugins/src/engine.rs
 862 crates/outl-plugins/src/host_tests.rs
 830 crates/outl-plugins/src/host.rs

@@ -114,7 +114,7 @@ Two paths trigger execution:
 2. **Auto-run loop** (TUI `actions/exec.rs:run_auto_run_blocks`) — calls `run_block_at_index_if_source_changed`.
    Normally gated by the `auto-run::` block property.
    **Runtimes with `auto_run() == true`** (only `query` today) are also collected as auto-run targets, regardless of the property.
-   The TUI collector (`exec.rs`) and desktop (`run_auto_run_blocks` command) both honor this — query blocks auto-run on every page load and after every save.
+   The TUI collector (`exec.rs`) and both GUI clients (the `run_auto_run_blocks` command, registered by `exec_commands!` on desktop and mobile alike) honor this — query blocks auto-run on every page load and after every save.
 
 ## What this crate does NOT own
 

@@ -3,6 +3,11 @@
 Tauri 2 mobile client (iOS first, Android later).
 Solid.js + Tailwind frontend, Rust backend that **must stay thin** — every workspace operation is delegated to `outl-actions`.
 
+## `Journal.tsx` is being broken up
+
+2,551 lines in one component, nearly 3x the `file-size-guard.sh` ceiling.
+The chrome came out first (`JournalChrome.tsx`); the remaining seams are in [issue 265](https://github.com/outlmd/outl/issues/265), and the props rule an extraction must not break is in `outl-frontend-shared/CLAUDE.md`.
+
 ## Layering
 
 ```text
@@ -21,7 +26,7 @@ outl-mobile (this crate)
    │   ├── android_jni.rs          (Android-only: primes rustls-platform-verifier + ndk_context before iroh's first QUIC connect)
    │   ├── ios_bonjour.rs          (iOS-only: LAN peer discovery bridge to OutlBonjour.swift, over the outl_sync_iroh::lan seam)
    │   ├── plugin_service.rs       (PluginService + dedicated plugin thread — Boa Context is !Send, so it can't live in AppState)
-   │   └── commands/               (Tauri command surface — split mirrors outl-desktop)
+   │   └── commands/               (Tauri command surface — one `outl_tauri_shared::*_commands!` invocation per module; see outl-tauri-shared/CLAUDE.md → "One command surface, not two")
    │       ├── mod.rs
    │       ├── workspace.rs        (workspace_stats, reload_workspace)
    │       ├── page.rs             (list_all_pages / search_pages / search_persons / outl_emoji_search / open_* / *_day / resolve_ref / legacy compat shims)
@@ -29,8 +34,10 @@ outl-mobile (this crate)
    │       ├── peers.rs            (outl_peer_list / outl_peer_remove — read/edit <workspace>/.outl/peers.json, no workspace lock)
    │       ├── plugin.rs           (plugin_list / plugin_run / plugin_sync_hooks — thin shims over PluginService)
    │       ├── property.rs         (known_property_keys — the key catalogue the Properties sheet's chips come from)
-   │       ├── exec.rs (run_code_block)
-   │       └── theme.rs (list_themes / get_theme)
+   │       ├── exec.rs (run_code_block / run_auto_run_blocks / resolve_embeds)
+   │       ├── shortcuts.rs (list_shortcut_bindings / list_action_support — the invariant-12 matrix)
+   │       ├── timeline.rs (page_timeline — the command exists, no UI yet)
+   │       └── theme.rs (list_themes / get_theme / get_theme_config)
    ├── gen/apple/.../main.mm       (NSMetadataQuery + NSFileCoordinator iCloud watcher)
    ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
    ├── gen/apple/.../OutlBonjour.swift            (NetService advertise + NetServiceBrowser resolve, the iOS mDNS path)
@@ -132,43 +139,21 @@ Removing it (watcher → no-op, strip the entitlements + plist keys) is a follow
 
 ## LAN peer discovery (mDNS)
 
-Both mobile platforms enter through `outl-sync-iroh`'s `bind::attach_mdns`, but *how* discovery happens diverges below it, and neither platform's answer is plain Rust:
+Both platforms enter through `outl-sync-iroh`'s `bind::attach_mdns`, and *how* they discover diverges completely: Android joins the multicast group at socket level and needs a held `WifiManager.MulticastLock`; iOS cannot, so it browses through `mDNSResponder` (`OutlBonjour.swift`) and needs no entitlement.
 
-- **Android works**, and needed `CHANGE_WIFI_MULTICAST_STATE` plus a held `WifiManager.MulticastLock` (`gen/android/…/OutlMulticast.kt`, taken across `onResume` / `onPause`). Without the lock the Wi-Fi driver discards multicast answers below the socket API, so discovery finds nobody with **no error anywhere** — see [`docs/android-platform.md` → mDNS peer discovery](../../docs/android-platform.md#mdns-peer-discovery-the-permission-is-not-the-whole-story).
-- **iOS works too, but not through that crate.** A socket-level multicast join needs `com.apple.developer.networking.multicast`, which Apple grants by request and commonly declines. So iOS does not join one: `ios_bonjour.rs` + `gen/apple/.../OutlBonjour.swift` ask the system's `mDNSResponder` to advertise and browse via `NetService` / `NetServiceBrowser`, which Apple's Local Network Privacy FAQ exempts as long as the service type is fixed and declared — ours is, in `NSBonjourServices`. **Never add the multicast entitlement**: it is not needed, and a provisioning profile that lacks it fails code signing and breaks the TestFlight pipeline.
-  The seam is `outl_sync_iroh::lan` (plain Rust — that crate is `#![forbid(unsafe_code)]`, so the FFI lives here beside `bg_sync.rs`). `SERVICE_TYPE` / `RELAY_TXT_KEY` are the entire agreement with the other clients; drift breaks discovery with **no error on either side**, so they are pinned by `the_lan_wire_constants_match_the_platform_bridge`.
-  A user who declines the local-network prompt is indistinguishable from an empty LAN — iOS reports nothing to a denied app. See [`docs/sync.md`](../../docs/sync.md#what-each-platform-needs-before-mdns-actually-works).
+The seam is `outl_sync_iroh::lan` — plain Rust, because that crate is `#![forbid(unsafe_code)]`, so the FFI lives here in `ios_bonjour.rs`.
+
+Full reasoning, the two wire constants both paths must agree on, and the permission traps: [`docs/ios-platform.md`](../../docs/ios-platform.md#lan-peer-discovery-bonjour-and-why-not-multicast) and [`docs/android-platform.md`](../../docs/android-platform.md#mdns-peer-discovery-the-permission-is-not-the-whole-story).
 
 ## Background sync (iOS + Android)
 
-Neither OS lets a backgrounded app keep syncing: iOS suspends the process and its sockets, Android freezes the cached process (cgroup freezer, API 30+, ~10s after caching on API 34+).
-Same outcome — an iroh delta sync in flight is torn down and the peer logs `peer did not confirm durable ingest (closed: timed out)`.
-So each platform gets a scheduler that **actively** drives a forced pass inside whatever window the OS grants.
+Neither OS lets a backgrounded app keep syncing, and an iroh delta torn down mid-flight makes the peer log `peer did not confirm durable ingest`.
+So each platform drives a **forced** pass inside whatever window the OS grants.
 
 **`bg_sync.rs` is the one owner of that pass, for both.**
-`Registration` / `register` / `drive_sync` / `wait_until` / `registered_peer_count` are platform-agnostic and unconditional.
-Only the **exported symbols** are `cfg`-gated — `target_os = "ios"` for the C ABI `@_silgen_name` binds against, `target_os = "android"` for the JNI symbols `NativeSync.kt` declares.
-That split is deliberate and load-bearing: it is what keeps the shared bodies covered by the host test suite, where neither platform's exports compile.
-Adding a fourth operation means adding it to the core plus *both* export blocks — never to one platform's block alone.
+A platform scheduler calls into it; it never reimplements the pass.
 
-Two rules that outlive any refactor here:
-
-1. **Wait on your own pass, never on "the counter moved".**
-   `drive_sync` calls `IrohSyncTransport::sync_now_seq()` and waits for `completed_sync_passes() >= seq && inbound_serves() == 0`.
-   The naive version shipped and was wrong.
-   The completed-pass counter is global and `Journal.tsx` fires `syncNow()` on a 3s foreground timer, so a background flush watched the *foreground* pass complete ~250ms later and released the OS window with its own request still queued.
-   A `seq` of `0` means the runtime is down — return immediately, do not burn the cap waiting for a request that was never enqueued.
-2. **Never panic or throw across the boundary.**
-   No `unwrap`/`expect` in this module; the JNI wrappers additionally go through `with_env` (`catch_unwind`) + `LogErrorAndDefault`, so a failure degrades to `JNI_FALSE` / `0` instead of failing the Kotlin job or aborting the process.
-
-Per-platform wiring, and what each one does **not** guarantee:
-[`docs/ios-platform.md`](../../docs/ios-platform.md#background-sync-ios) · [`docs/android-platform.md`](../../docs/android-platform.md#background-sync-android).
-
-The Android side needs `androidx.work:work-runtime` **≤ 2.10.5** until the Kotlin Gradle plugin moves off 1.9.25.
-2.11.x pulls `kotlin-stdlib:2.1.20`, whose metadata the 1.9 compiler cannot read — and that breaks every file in the module, including Tauri's generated ones.
-
-Neither path can be validated on a host or a simulator.
-iOS's simulator has no `BGTaskScheduler` daemon (`submit` always fails); Android's schedules need `adb shell cmd jobscheduler run`, and the real acceptance test is two paired devices with no timed-out-ingest row after locking the phone.
+The schedulers, their windows, and what can only be verified on a device: [`docs/ios-platform.md`](../../docs/ios-platform.md#background-sync-ios) and [`docs/android-platform.md`](../../docs/android-platform.md#background-sync-android).
 
 ## Hard rule
 
@@ -201,56 +186,6 @@ What this crate **does** own:
 - Tauri command surface (argument parsing, error mapping).
 - Solid frontend that consumes the commands.
 
-## Opening a ref that may not exist yet
-
-`[[avelino/outl]]`, `[[2026-06-04]]`, `#code-review`, picker entries — every "tap a ref → see a page" path on the frontend goes through **one** Tauri command, `open_ref(target)`, which wraps `outl_actions::page::open_or_create_by_ref`.
-The single decision tree (date → journal, else literal/slugified/title match → existing page, else create as page) lives in the shared crate so a frontend regex cannot drift from a backend parser the way it did before `open_ref` existed.
-
-What used to be wrong: the frontend split the journal-vs-page
-decision with `/^\d{4}-\d{2}-\d{2}$/` and routed to one of two
-strict-validating commands (`open_journal_for` / `open_page_by_slug`).
-`[[2026-13-01]]` matched the regex, hit `open_journal_for`, and
-surfaced an `invalid date slug` toast — even though falling through
-to "create a regular page" was clearly the right behaviour.
-
-`open_page_by_slug` is kept for the picker (the picker already hands the command a clean slug from a known page).
-`open_journal_for` stays for date-navigation commands (`previousDay` / `nextDay`) whose input is derived from controlled state, not from a user tap.
-Every **ref-click** code path on the frontend (`handleRefClick`, `handleTagClick`) must call `openRef` so the decision tree is single-sourced.
-
-`resolve_ref` survives for autocomplete previews ("this ref will
-land on `<page>`") but is **not** the navigation entry point — for
-that, always call `openRef`.
-
-## Page switcher — long-press to delete
-
-`PageSwitcher.tsx` renders each page as a row button; spreading `longPressHandlers(p)` arms a 500 ms sustained-touch detector (canceled if the finger moves more than 10 px).
-On fire, `handleDelete(p)` runs `window.confirm(...)` → `deletePage(slug)` → navigates to the returned today's journal → refetches the list.
-Journals are excluded — only regular pages can be deleted from the switcher.
-The backend command is the shared `outl_tauri_shared::commands::page::delete_page` body — no mobile-specific logic.
-`Action::DeletePage` carries a `g d` chord in the shared catalog (Normal mode), but mobile has no keyboard surface — long-press in the page switcher remains the only trigger on touch devices.
-
-`BacklinksSection.tsx`'s `order`/`onToggleOrder` flips order via `setBacklinksOrder` (returns `PageBacklinks`); backlinks are lazy in `Journal.tsx` via `createResource(slug, pageBacklinks)` since `PageView.backlinks` is empty.
-
-## Opening an external `[label](url)` link
-
-Tapping an external link opens it in the system browser via **`tauri-plugin-opener`** (registered in `lib.rs`, capability `opener:allow-open-url` for `http(s)`/`mailto`).
-`Journal.tsx`'s `handleLinkClick` calls the shared `openExternalUrl` — same as desktop, so the allow-list (`http(s)`/`mailto`; `file:`/`javascript:` rejected) lives in one place.
-`<MarkdownInline />` gets `onLinkClick` threaded from `Journal.tsx` → `BlockRow` → the renderer.
-An `assets/…` link routes instead (via `isAssetLink`) to `openAsset` — `open_asset` opens the file in the OS viewer.
-The block long-press **Attach file** action picks a file (`@tauri-apps/plugin-dialog`) → `attachAsset` (shared `commands::asset`).
-On iPad, dragging a file onto a block imports it the same way via the shared `installFileDrop` + `importAssetFile` (`@outl/shared/drag-drop`), best-effort — iPhone rarely delivers a webview drop, so long-press stays the only import path there.
-`[[ref]]`/`#tag` taps still route through `openRef`; backlink rows stay inert.
-
-## Blockquote chrome
-
-A `"> "`-prefixed block gets a left border + ~5% tint, right-rounded, body full-colour (refs / bold / tags keep their palette).
-The outline bullet and `<CollapseTriangle />` stay outside the quote chrome; a non-quoted block degrades to a plain flex container (byte-identical).
-Detection is `splitQuote` + `stripQuoteFromTokens` (`@outl/shared/markdown`, mirror of `outl_actions::quote::split_quote`) so the `> ` isn't rendered twice; it composes with the task checkbox.
-The checkbox has three filled states: DONE is a solid accent circle with a tick, **DOING is an accent ring with a small filled centre**, TODO is a neutral empty ring.
-One tap walks one stop of `TODO → DOING → DONE → none`.
-Toggling: `toggleQuote(id)` → `toggle_quote` → `outl_actions::block::toggle_quote` (no TS string surgery).
-Convention (three-surface parity): [`docs/clients.md` → Blockquote convention](../../docs/clients.md#blockquote-convention).
-
 ## "This page isn't syncing" banner
 
 `<PageAheadOfLogBanner client="mobile" />` (from `@outl/shared/warnings`) renders above the outline when `PageView.md_ahead_of_log` comes back set.
@@ -260,42 +195,12 @@ The flag is held in `Journal.tsx`'s own `aheadOfLog` signal, **not** read off `v
 It is cleared by a reply carrying `md_ahead_of_log_checked` with no notice (the next open / refresh once the page is healthy again), so the banner can't outlive the condition — same rule as desktop.
 Convention: [`docs/clients.md` → Surfacing a page that stopped syncing](../../docs/clients.md#surfacing-a-page-that-stopped-syncing).
 
-## Zoom / focus on a block
+## Per-feature behaviour lives in `docs/mobile-ux.md`
 
-Tap a block's plain bullet dot to zoom in — it becomes the outline root (Roam/Workflowy focus); `← Back` + breadcrumb zoom out.
-Local view state (`focusBlockId` in `Journal.tsx`), never a Tauri round-trip; the shared `focusSubtree` (`@outl/shared/outline`) does the subtree + breadcrumb.
-Mobile owns only the touch chrome: the bullet tap moves mark-as-TODO to the long-press menu; checkbox + `<CollapseTriangle>` untouched.
-Convention: [`docs/clients.md` → Zoom / focus on a block](../../docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
+Nine sections moved out: how a ref that does not exist yet is opened, the page switcher's long-press delete, external links, blockquote chrome, zoom / focus, paste from external apps, the keyboard accessory bar, code execution, and template insertion.
 
-## Paste from external apps
-
-The textarea in `BlockRow.tsx` intercepts paste (with formatting only — mobile has no `Cmd+Shift+V`).
-Rich `text/html` converts via `htmlToOutlMarkdown` (`@outl/shared/paste`); plain text routes to `paste_markdown_at` when `looksLikeOutline` **or** `hasMultipleParagraphs`, splitting multi-paragraph into one block each (else native splice).
-
-`create_block` has a **stale-anchor fallback**: if `after_id` is not in the tree (`NotInTree`), the block is appended at the end of the page instead of returning an error (mirrors the desktop fix).
-
-The long-press context menu's "Copy" action calls `copy_markdown` (`commands/block.rs` → `outl_actions::copy_markdown`), serialising the block and its full subtree as clean outl markdown to the iOS clipboard.
-
-## Keyboard accessory bar (Android web bar / iOS native bar)
-
-The keyboard toolbar + suggester strip have two renderings.
-iOS is native (`OutlToolbarView` swizzled onto `WKContentView`), untouched.
-Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToolbar />`, gated in `Journal.tsx` on `isAndroid && editingId()`.
-Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
-Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/clients.md` → Keyboard accessory bar](../../docs/clients.md#keyboard-accessory-bar-mobile).
-
-## Code execution (`run_code_block`)
-
-Long-press a `` ```lang …``` `` block → "Run `<lang>`" fires `runCodeBlock`.
-Mobile's `src-tauri/src/exec.rs` is a **thin adapter** over `outl_actions::exec::run_code_block` (shared with desktop), wrapping the outcome with a refreshed `PageView`.
-The action only shows when `detectFence` matches; the backend re-validates in `run_block_at_index`, so a false-positive is a toast, not damage.
-Runtimes on iOS: **Lisp, JS, Python, Lua** — `lang-rust` is off in `Cargo.toml`.
-Flow + runtime-catalog rationale: [`docs/clients.md` → Running code blocks](../../docs/clients.md#running-code-blocks).
-
-## Insert template (structural templates)
-
-The block long-press menu's "Insert template" action opens `TemplateSheet` (bottom sheet listing `listTemplates()`); picking one calls `instantiateTemplateAt(name, blockId)` and applies the returned `PageView`.
-Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/clients.md` → Structural templates](../../docs/clients.md#structural-templates).
+They are reference — you look one up when you touch that feature — and this file is loaded into context on every session in this crate, where the budget belongs to the rules you must not break.
+[`docs/mobile-ux.md`](../../docs/mobile-ux.md) is their owner now.
 
 ## Properties (`key:: value`) — the sheet (issue #13)
 
@@ -488,9 +393,10 @@ Layout + the undotted-path trap: [`docs/ios-platform.md`](../../docs/ios-platfor
 
 ## Peer-file materialisation (the iCloud catch)
 
-iCloud syncs file metadata aggressively and file content lazily, so a freshly notified peer `ops-<actor>.jsonl` can read as an empty placeholder — truncated op log, wrong merge, broken `.md` written back.
-`main.mm`'s `OutlOpsWatcher.onUpdate:` forces materialisation before notifying the frontend; the two mandatory steps are in [`docs/ios-platform.md`](../../docs/ios-platform.md#peer-file-materialisation-the-icloud-catch).
-Skip either and you race the iCloud download daemon.
+iCloud syncs file metadata eagerly and content lazily, so a freshly notified peer `ops-<actor>.jsonl` can exist at zero bytes.
+`main.mm`'s `OutlOpsWatcher.onUpdate:` forces materialisation before notifying the frontend — skip it and you race the download daemon.
+
+The two mandatory calls: [`docs/ios-platform.md`](../../docs/ios-platform.md#peer-file-materialisation-the-icloud-catch).
 
 ## Bundle / signing
 

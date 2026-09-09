@@ -27,27 +27,9 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::state::AppState;
-use outl_tauri_shared::commands::peers::{self as shared, PeerDto, PeerStatusDto};
+use outl_tauri_shared::commands::peers::{self as shared, PeerDto};
 
-/// List all paired devices.
-#[tauri::command]
-pub fn outl_peer_list(state: State<'_, AppState>) -> Result<Vec<PeerDto>, String> {
-    shared::peer_list(state.inner())
-}
-
-/// Remove a peer by node_id prefix.
-#[tauri::command]
-pub fn outl_peer_remove(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    shared::peer_remove(state.inner(), id)
-}
-
-/// Reachability for each paired peer, read from the **running** iroh
-/// transport's own dial outcomes — see the shared body for why a fresh
-/// probe endpoint is never bound.
-#[tauri::command]
-pub fn outl_peer_status(state: State<'_, AppState>) -> Result<Vec<PeerStatusDto>, String> {
-    shared::peer_status(state.inner())
-}
+outl_tauri_shared::peer_commands!(crate::state::AppState);
 
 /// Force an immediate P2P sync pass against every paired peer — the
 /// trigger behind the refresh button / pull-to-refresh.

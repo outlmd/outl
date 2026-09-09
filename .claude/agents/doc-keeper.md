@@ -61,6 +61,12 @@ For each `.rs` that changed, identify:
 - **New TUI shortcuts** (new chords, slash commands, keybinds).
 - **Changed file formats** (sidecar version, config schema).
 - **Invariants added or relaxed.**
+- **A new entry in a single-declaration surface.** Three of these exist, and each has a doc home *and* a test that fails when the two disagree:
+  a new `*_commands!` entry (`outl-tauri-shared/src/wrappers/catalog.rs` → that crate's `CLAUDE.md` module table + both clients' `invoke_handler!`),
+  a new wire DTO or `export interface` (`tests/wire_types.rs` pin, or an `UNPINNED` row with a reason),
+  a new shared primitive (`docs/primitives-*.md` **and** the mirror at `.github/instructions/shared-primitives.instructions.md` — `catalog-sync-guard.sh` fires on that pair).
+- **A capability a client does not have.** Invariant 12 says the difference is declared, never discovered: `outl_shortcuts::{support, capability_support}`, `command_parity.rs`'s `DECLARED_GAPS`, `wire_types.rs`'s `UNPINNED`.
+  A gap with no reason written next to it is the finding.
 
 ### Step 2 — Map affected docs
 

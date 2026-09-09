@@ -11,9 +11,10 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use outl_actions::{
-    apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_stale, date_from_slug,
-    page_meta as page_meta_action, project_outline, read_page_outline_with_workspace,
-    render_page_md, ActionError, HistoryStacks, PageOutline,
+    apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_stale, commit_page,
+    date_from_slug, page_meta as page_meta_action, project_outline,
+    read_page_outline_with_workspace, render_page_md, ActionError, CommitHooks, HistoryStacks,
+    PageOutline,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
@@ -254,36 +255,21 @@ where
 {
     let root = state.storage_root()?;
     with_ws_mut(state, |ws| {
-        // Undo snapshot: record the pre-mutation `.md` only when the page
-        // actually changed. The render also covers the async path's diff.
-        let before = state.history().map(|_| render_page_md(ws, page_id));
-        let value = f(ws).map_err(|e| e.to_string())?;
-        if let (Some(history), Some(before)) = (state.history(), before) {
-            if render_page_md(ws, page_id) != before {
-                history.lock().entry(page_id).or_default().record(before);
-            }
-        }
-        // The mutation changed the tree, so the cached backlinks index is
-        // stale. Drop it (under the workspace lock, so it serializes with
-        // the rebuild `page_backlinks` does); the next read rebuilds it.
-        invalidate_backlink_index(state);
-        announce_after_commit(state, ws, page_id);
+        let mut hooks = TauriCommitHooks {
+            state,
+            root: &root,
+            projection_failure: None,
+        };
+        let value = commit_page(ws, &mut hooks, page_id, f).map_err(|e| e.to_string())?;
+        let projection_failure = hooks.projection_failure;
 
-        if let Some(writer) = state.projection_writer() {
-            // Async-writes default: the op log already has the truth, so
-            // queue the `.md` + sidecar write off-thread and build the
-            // reply straight from the tree. The commit never blocks the
-            // next keystroke on a render + SHA-256 + disk write.
-            writer.queue(page_id);
+        if state.projection_writer().is_some() {
+            // Async-writes default: the hook queued the write, so the
+            // `.md` on disk is momentarily behind. Read the reply off the
+            // tree, which is the source of truth either way.
             let view = build_page_view_from_tree(ws, page_id).map_err(|e| e.to_string())?;
             Ok((value, view))
         } else {
-            // Synchronous fallback (host without a projection worker):
-            // project inline and read the view back off the `.md`.
-            let projection_failure = apply_page_md_with_sidecar_guarded(ws, &root, page_id).err();
-            if let Some(e) = &projection_failure {
-                warn!("page md+sidecar sync failed: {e}");
-            }
             let mut view = build_page_view(ws, &root, page_id).map_err(|e| e.to_string())?;
             if let Some(e) = projection_failure {
                 let failure = crate::state::ProjectionWriteFailed::from_error(page_id, &e);
@@ -293,6 +279,58 @@ where
             Ok((value, view))
         }
     })
+}
+
+/// The Tauri clients' half of [`commit_page`].
+///
+/// Holds the borrowed host plus the one thing the sequence produces that
+/// the caller still needs: a projection failure. That failure arrives
+/// *after* the op log already holds the mutation, which is why
+/// [`CommitHooks::project`] returns nothing — the commit succeeded, and
+/// what is left is reporting.
+struct TauriCommitHooks<'a, S: AppHost> {
+    state: &'a S,
+    root: &'a Path,
+    projection_failure: Option<ActionError>,
+}
+
+impl<S: AppHost> CommitHooks for TauriCommitHooks<'_, S> {
+    fn project(&mut self, workspace: &Workspace, page: NodeId) {
+        if let Some(writer) = self.state.projection_writer() {
+            // The op log already has the truth, so queue the render +
+            // SHA-256 + disk write off-thread. The commit never blocks
+            // the next keystroke (the outl async-writes default).
+            writer.queue(page);
+            return;
+        }
+        // Synchronous fallback for a host with no projection worker.
+        if let Err(e) = apply_page_md_with_sidecar_guarded(workspace, self.root, page) {
+            warn!("page md+sidecar sync failed: {e}");
+            self.projection_failure = Some(e);
+        }
+    }
+
+    fn records_undo(&self) -> bool {
+        self.state.history().is_some()
+    }
+
+    fn record_undo(&mut self, page: NodeId, before: String) {
+        if let Some(history) = self.state.history() {
+            history.lock().entry(page).or_default().record(before);
+        }
+    }
+
+    fn invalidate_backlinks(&mut self) {
+        // Dropped under the workspace lock, so it serializes with the
+        // rebuild `page_backlinks` does; the next read rebuilds it.
+        invalidate_backlink_index(self.state);
+    }
+
+    fn announce(&mut self, workspace: &Workspace, page: NodeId) {
+        // One owner: `set_block_collapsed` bypasses the commit pipeline
+        // and calls the same function directly.
+        announce_after_commit(self.state, workspace, page);
+    }
 }
 
 /// Drop the host's cached backlinks index so the next `page_backlinks`
@@ -318,6 +356,15 @@ pub fn invalidate_backlink_index<S: AppHost>(state: &S) {
 /// This is the GUI mirror of the TUI's `save()` tail. Without it, edits
 /// committed the op locally but never woke peers — so propagation
 /// depended entirely on the catch-up timing.
+///
+/// Called through [`CommitHooks::announce`] for every commit, and
+/// directly by `commands::block::set_block_collapsed`, which skips the
+/// commit pipeline on purpose (it does not reproject).
+///
+/// The transport check comes **before** `page_meta` deliberately: a host
+/// running the file transport has nothing to announce, and resolving the
+/// slug costs five property lookups plus a `block_text` on a path that
+/// runs once per keystroke commit.
 pub fn announce_after_commit<S: AppHost>(state: &S, ws: &Workspace, page_id: NodeId) {
     let Some(transport) = state.sync_transport() else {
         return;

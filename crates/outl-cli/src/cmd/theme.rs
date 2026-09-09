@@ -7,7 +7,12 @@
 
 use crate::ThemeSubcommand;
 use anyhow::Result;
-use outl_tui::{theme_by_name, THEME_PRESETS};
+// The preset *list* comes from `outl-theme`, its owner. `show` still
+// goes through the TUI's `by_name` because it prints ratatui `Style`
+// values, which only exist once a `Palette` has been lowered to a
+// terminal theme.
+use outl_theme::PRESETS;
+use outl_tui::theme_by_name;
 
 /// Run the `theme` subcommand. `None` defaults to `list`.
 pub fn run(sub: Option<&ThemeSubcommand>) -> Result<()> {
@@ -19,7 +24,7 @@ pub fn run(sub: Option<&ThemeSubcommand>) -> Result<()> {
 
 fn list() -> Result<()> {
     println!("Available theme presets:");
-    for name in THEME_PRESETS {
+    for name in PRESETS {
         println!("  {name}");
     }
     println!();

@@ -389,3 +389,120 @@ fn theme_block_color_outl_names(css: &str) -> Vec<String> {
     }
     names
 }
+
+// ─────────────────────────────────────────────────────────────────
+// 3. every_token_a_component_uses_has_a_palette_field
+// ─────────────────────────────────────────────────────────────────
+
+/// The same rule as [`the_theme_tokens_match_the_palette`], asked of
+/// the place tokens are actually *consumed*.
+///
+/// That test scans `@theme` blocks, which is where a token is
+/// **declared**. Tailwind v4's `bg-(--var)` / `text-(--var)` shorthand
+/// resolves a custom property at paint time whether or not `@theme`
+/// declares it, so a token invented directly inside a component never
+/// reaches a stylesheet and never reaches that test either. It renders
+/// as an unset property — the element inherits, or goes transparent —
+/// with no error anywhere.
+///
+/// That is not hypothetical. `Sidebar.tsx` carried
+/// `text-(--color-outl-error,--color-outl-fg)` for months: `error` is
+/// not a `Palette` field, and the `(--a,--b)` form is not a CSS
+/// fallback either, so the hover colour simply did nothing. Writing
+/// `DESIGN.md` found it by hand; this test finds the next one.
+///
+/// **Two things are deliberately not offenders.** A match that ends in
+/// `-` or is immediately followed by `*` is a prefix, not a token:
+/// `StatusBar.tsx` documents its family as `--color-outl-status-*` in
+/// prose, and a component may build a name by concatenation. Neither
+/// names a colour, so neither can be checked here.
+#[test]
+fn every_token_a_component_uses_has_a_palette_field() {
+    let root = workspace_root();
+    let valid_fields: HashSet<&'static str> = outl_theme::default()
+        .fields()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    let mut scanned = 0usize;
+    let mut offenders = Vec::new();
+
+    for crate_name in ["outl-desktop", "outl-mobile", "outl-frontend-shared"] {
+        let src = root.join("crates").join(crate_name).join("src");
+        for path in source_files(&src) {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+            for (name, followed_by_star) in color_outl_names_in_source(&text) {
+                if followed_by_star || name.ends_with('-') {
+                    continue;
+                }
+                scanned += 1;
+                let snake = name.replace('-', "_");
+                if !valid_fields.contains(snake.as_str()) {
+                    offenders.push(format!(
+                        "{}: --color-outl-{name} (no Palette field `{snake}`)",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        scanned > 50,
+        "only {scanned} token uses found across the three client crates — the \
+         scanner is reading the wrong shape and this test proves nothing"
+    );
+    assert!(
+        offenders.is_empty(),
+        "a component uses a --color-outl-* token with no matching \
+         `outl_theme::Palette` field:\n  {}\n\
+         Tailwind's `bg-(--var)` resolves at paint time, so an invented name \
+         does not fail to compile — it renders as an unset property and the \
+         element silently inherits. Either add the field to `Palette` \
+         (crates/outl-theme/src/palette.rs) and give every preset a value, or \
+         use the token that already means this (see DESIGN.md → Colors).",
+        offenders.join("\n  ")
+    );
+}
+
+/// Every `.ts` / `.tsx` / `.css` under `dir`, recursively.
+fn source_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(source_files(&path));
+        } else if matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("ts" | "tsx" | "css")
+        ) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// `--color-outl-<name>` occurrences, with a flag for the ones a `*`
+/// immediately follows (a documented family, not a token).
+fn color_outl_names_in_source(text: &str) -> Vec<(String, bool)> {
+    const PREFIX: &str = "--color-outl-";
+    let mut found = Vec::new();
+    for (idx, _) in text.match_indices(PREFIX) {
+        let rest = &text[idx + PREFIX.len()..];
+        let end = rest
+            .find(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-')
+            .unwrap_or(rest.len());
+        let name = &rest[..end];
+        if name.is_empty() {
+            continue;
+        }
+        let star = rest[end..].starts_with('*');
+        found.push((name.to_string(), star));
+    }
+    found
+}

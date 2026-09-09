@@ -275,7 +275,9 @@ export function SyncPanel() {
               }
               class="inline-block h-2 w-2 rounded-full"
               style={{
-                background: peersOnline(statuses()) ? "#34c759" : "#ff9500",
+                background: peersOnline(statuses())
+                  ? "var(--color-outl-accent-alt)"
+                  : "var(--color-outl-warn)",
               }}
             />
             <span>Sync</span>

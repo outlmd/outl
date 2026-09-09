@@ -338,6 +338,18 @@ New tools land by:
 2. Threading it through the local `Subcommand` and `run()` switch.
 3. Registering the tool in `mcp/tools::list` (schema) and `mcp/tools::run_tool` (dispatch).
 
+## Mutating a page: use the commit pipeline
+
+`outl_actions::commit_page(ws, hooks, page, mutate)` owns the five steps a mutation needs around it — undo snapshot, the mutation, backlink invalidation, peer announce, projection.
+Only `CommitHooks::project` is required; the rest default to no-ops, so a subcommand with no undo stack and no backlink cache implements one method and still gets the ordering.
+
+Several subcommands (`page`, `prop`, `asset`, `block`, `daily`, `template`) still call `apply_page_md_with_sidecar_guarded` directly.
+That is step 5 alone.
+Those call sites are frozen in `.claude/hooks/single-declaration-guard.sh`'s baseline and tracked by [issue 264](https://github.com/outlmd/outl/issues/264); the list may only get shorter.
+
+**A new mutating subcommand goes through `commit_page`.**
+If it deliberately skips a step — a bulk import that announces once at the end rather than per page, say — put that reason in a comment next to the call.
+
 ## Conventions
 
 - `clap` derive for parsing.

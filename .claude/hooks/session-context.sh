@@ -30,6 +30,49 @@ You are working on **outl**, a local-first outliner with CRDT-based tree sync.
 5. **Storage is a trait, not a struct.** Never call into `rusqlite`
    from `outl-core`. Everything goes through the `Storage` trait.
 
+6. **A `.md` holding lines the op log never saw is never overwritten.**
+   A sidecar hash match proves outl wrote the file last, NOT that the
+   ops exist. Ask `outl_actions::content_lines_missing_from` before
+   re-projecting. Root `CLAUDE.md` invariant 8 has the incident.
+
+7. **A capability difference between clients is declared, never
+   discovered.** `outl_shortcuts::support` / `capability_support` are
+   exhaustive `match`es; `outl-tauri-shared/tests/{command_parity,
+   wire_types}.rs` are the same rule for commands and wire DTOs.
+
+## Where new code goes (do NOT hand-roll these)
+
+The four things most likely to be written in the wrong place:
+
+- **A new Tauri command** → body in `outl-tauri-shared/src/commands/`,
+  one line in `src/wrappers/catalog.rs`, then an `invoke_handler!`
+  entry in **both** clients. Never hand-write a `#[tauri::command]`
+  wrapper in a client crate — `tests/command_parity.rs` fails if a
+  client skips a module or leaves a generated command unregistered.
+  Shared bodies take `String`, not `&str`.
+
+- **A page mutation** → `outl_actions::commit_page(ws, hooks, page, f)`.
+  It owns the five-step sequence (undo snapshot, mutation, backlink
+  invalidation, peer announce, projection). A bare
+  `apply_page_md_with_sidecar_guarded` is step 5 alone and is only
+  correct with a comment naming which steps you skip and why.
+
+- **A new wire DTO / TS interface** → both sides, plus a pin in
+  `outl-tauri-shared/tests/wire_types.rs` (or an `UNPINNED` row with a
+  reason). The frontend contract is hand-written on purpose; the test
+  is what makes that safe.
+
+- **Anything visual** (a colour, token, spacing value, component, or
+  interaction) → read `DESIGN.md` first. Colours come from
+  `outl_theme::Palette`; a hex in a client stylesheet, or a
+  `--color-outl-*` token with no `Palette` field behind it, is a second
+  definition of that colour.
+
+- **A new shared helper** → `outl-actions` (or core/md), listed in
+  `docs/primitives-*.md` **and** mirrored in
+  `.github/instructions/shared-primitives.instructions.md`. Grep the
+  catalog before writing it.
+
 ## Reminders
 
 - Read `CLAUDE.md` in the crate you're touching before making changes.
@@ -39,10 +82,18 @@ You are working on **outl**, a local-first outliner with CRDT-based tree sync.
 
 ## State
 
-TUI, CLI, desktop (Tauri 2), mobile (iOS), and the JavaScript plugin system
-(Boa) are all shipped, along with code-block execution and iCloud Drive sync.
-Not yet built: P2P sync via iroh (iCloud Drive is the transport today),
-the query DSL (`{{query}}`), ChronDB storage, Android, and graph view.
+Shipped: TUI, CLI, desktop (Tauri 2), mobile (iOS **and** Android), the
+JavaScript plugin system (Boa), code-block execution, the query DSL
+(`{{query}}`), and P2P sync over **iroh** — which is the default
+transport (`[sync] transport = "iroh"`), with `"file"` (iCloud Drive /
+shared FS) as the explicit opt-out. LAN peer discovery over mDNS landed
+too.
+
+Not built: ChronDB storage (issue #1), graph view, app-closed reminder
+delivery, per-page op-log shards beyond the current layout.
+
+Do not describe iroh, Android or the query DSL as future work — they are
+in `main`.
 EOF
 
 exit 0

@@ -121,7 +121,26 @@ Quote the invariant by name in your comment.
 9. **No reintroduction of SQLite, rusqlite, or any binary log format.**
    Cross-device sync depends on per-actor append-only JSONL.
 
-10. **Settled decisions are off-limits in a PR.**
+10. **One declaration per cross-client surface.**
+    Three of these exist and each is enforced by a test that fails rather than a doc that goes stale:
+    the Tauri command surface (`outl-tauri-shared/src/wrappers/catalog.rs`, pinned by `tests/command_parity.rs`),
+    the post-mutation commit sequence (`outl_actions::commit_page`),
+    and the Rust ↔ TypeScript wire contract (`tests/wire_types.rs`).
+    A hand-written `#[tauri::command]` wrapper in a client crate, a client taking only part of a `*_commands!` module,
+    a page mutation followed by a bare `apply_page_md_with_sidecar_guarded`,
+    or a new `export interface` with no pin — each is a blocker, and each names the file the change belongs in.
+
+11. **Design decisions come from `DESIGN.md` and `outl_theme::Palette`.**
+    A hex literal in a client stylesheet, a `--color-outl-*` token with no `Palette` field behind it,
+    or a token that means one thing on one client and another elsewhere, is a blocker (invariant 13).
+    The only exception is a client's `@theme` boot block, which exists so the first painted frame is branded before the palette arrives over the wire.
+
+12. **A capability difference between clients is declared, never discovered.**
+    `outl_shortcuts::{support, capability_support}` are exhaustive `match`es;
+    `command_parity.rs`'s `DECLARED_GAPS` and `wire_types.rs`'s `UNPINNED` are the same rule with an escape hatch.
+    Every escape hatch row carries a reason. A row with no reason, or one whose gap has since closed, is a blocker.
+
+13. **Settled decisions are off-limits in a PR.**
     ULID for IDs, `uhlc` for time, MIT license, JSONL-per-actor, Tauri for mobile, iroh as the default sync transport (file/iCloud opt-in) — do not suggest changing these in a code-review comment.
     If a contributor disagrees, the path is an issue, not a PR.
 

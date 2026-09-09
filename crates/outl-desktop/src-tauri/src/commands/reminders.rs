@@ -1,90 +1,18 @@
-//! `remind::` command wrappers — thin delegates to
-//! `outl_tauri_shared::commands::reminders`. Mobile registers the same
-//! set; behaviour lives upstream so the two can't drift.
+//! `remind::` commands.
 //!
-//! The one desktop-specific piece is [`deliver_due_reminders`], which
-//! turns the shared "what's due" answer into an actual OS banner
-//! through `tauri-plugin-notification`.
+//! Everything except [`deliver_due_reminders`] is generated from the
+//! shared catalog. That one turns the shared "what's due" answer into an
+//! actual OS banner through `tauri-plugin-notification`, which needs the
+//! client's `AppHandle`.
 
 use tauri::{AppHandle, State};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::state::AppState;
-use outl_tauri_shared::commands::reminders::{
-    self as shared, ReminderDto, ReminderSettingsDto, SnoozePresetDto,
-};
+use outl_tauri_shared::commands::reminders::ReminderDto;
 use outl_tauri_shared::reminder_runtime;
-use outl_tauri_shared::state::PageView;
 
-#[tauri::command]
-pub(crate) fn list_reminders(state: State<'_, AppState>) -> Result<Vec<ReminderDto>, String> {
-    shared::list_reminders(state.inner())
-}
-
-#[tauri::command]
-pub(crate) fn reminder_settings() -> ReminderSettingsDto {
-    shared::reminder_settings()
-}
-
-#[tauri::command]
-pub(crate) fn set_reminder_settings(
-    enabled: bool,
-    quiet_hours: String,
-) -> Result<ReminderSettingsDto, String> {
-    shared::set_reminder_settings(enabled, &quiet_hours)
-}
-
-#[tauri::command]
-pub(crate) fn snooze_reminder(
-    block_id: String,
-    preset: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    shared::snooze_reminder(state.inner(), &block_id, &preset)
-}
-
-#[tauri::command]
-pub(crate) fn snooze_presets() -> Vec<SnoozePresetDto> {
-    shared::snooze_presets()
-}
-
-#[tauri::command]
-pub(crate) fn clear_reminder_snooze(
-    block_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    shared::clear_reminder_snooze(state.inner(), &block_id)
-}
-
-#[tauri::command]
-pub(crate) fn set_block_property(
-    page_id: String,
-    block_id: String,
-    key: String,
-    value: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::set_block_property(state.inner(), &page_id, &block_id, &key, &value)
-}
-
-#[tauri::command]
-pub(crate) fn set_block_remind(
-    page_id: String,
-    block_id: String,
-    rule: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::set_block_remind(state.inner(), &page_id, &block_id, &rule)
-}
-
-#[tauri::command]
-pub(crate) fn mark_block_done(
-    page_id: String,
-    block_id: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::mark_block_done(state.inner(), &page_id, &block_id)
-}
+outl_tauri_shared::reminder_commands!(crate::state::AppState);
 
 /// Deliver every reminder that came due, as an OS notification.
 ///

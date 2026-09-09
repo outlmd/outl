@@ -217,18 +217,14 @@ impl Theme {
 }
 
 /// List of preset names exposed to users (CLI / config / `outl theme list`).
-pub const PRESETS: &[&str] = &[
-    "outl",
-    "outl-light",
-    "default-dark",
-    "light",
-    "logseq-light",
-    "dracula",
-    "solarized-dark",
-    "nord",
-    "monokai",
-    "gruvbox",
-];
+///
+/// Re-exported from [`outl_theme::PRESETS`], which is the owner. The TUI
+/// renders these through ratatui `Style`s rather than hex, but *which
+/// presets exist* is one fact, and it used to be declared here as a
+/// second identical array — with `outl theme list` reading this copy
+/// while the GUI read the other one. Adding a preset to one and not the
+/// other is a divergence nothing would have caught.
+pub use outl_theme::PRESETS;
 
 /// Look up a preset by name. Case-insensitive; dashes and underscores
 /// are interchangeable so `"Solarized Dark"` and `"solarized_dark"`

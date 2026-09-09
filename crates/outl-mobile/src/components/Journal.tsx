@@ -136,7 +136,7 @@ import { PluginSheet } from "./PluginSheet";
 import { PluginViewOverlay } from "./PluginViewOverlay";
 import { PageSwitcher } from "./PageSwitcher";
 import { PullToRefresh } from "./PullToRefresh";
-import { SyncDot } from "./SyncDot";
+import { JournalChrome } from "./JournalChrome";
 import { BlockRow } from "./BlockRow";
 import { SkeletonOutline } from "./Skeleton";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
@@ -155,8 +155,6 @@ import {
 import { Toast } from "./Toast";
 import {
   ChevronLeft,
-  JournalHeader,
-  PageHeader,
 } from "./JournalHeader";
 import { buildContextActions } from "./Journal.context-actions";
 
@@ -2057,302 +2055,28 @@ export function Journal() {
           the canvas, with no divider underneath. Actions sit inside
           two floating capsules (left = back, right = grouped icons)
           so the title can breathe in the middle. */}
-      <header
-        class="z-30 shrink-0 bg-(--color-outl-bg)/80 px-3 pt-2 pb-3 backdrop-blur-xl"
-        style="padding-top: max(env(safe-area-inset-top), 12px);"
-      >
-        <div class="grid grid-cols-[auto_auto_1fr] items-center gap-2">
-          {/* Left capsule — visible only when the user has navigated
-              away from today's journal. We always reserve a placeholder
-              of the same width so the title doesn't jump horizontally
-              when the back button appears / disappears. */}
-          <Show
-            when={view() && view()!.page.kind !== "journal"}
-            fallback={<span aria-hidden="true" class="block h-9 w-9" />}
-          >
-            <div class="inline-flex rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl">
-              <button
-                type="button"
-                aria-label="Back to today's journal"
-                onClick={handleJumpToday}
-                class="flex h-9 w-9 items-center justify-center rounded-full text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M9 14L4 9l5-5" />
-                  <path d="M4 9h11a5 5 0 0 1 5 5v6" />
-                </svg>
-              </button>
-            </div>
-          </Show>
-
-          {/* Center — title region. `min-w-0` is what lets the inner
-              truncate work in PageHeader. Press-and-hold anywhere in
-              here opens the page's properties (see `titleLongPress`);
-              the journal arrows below are buttons, so they keep their
-              own taps. */}
-          <div
-            class="min-w-0"
-            onPointerDown={titleLongPress.onPointerDown}
-            onPointerMove={titleLongPress.onPointerMove}
-            onPointerUp={titleLongPress.onPointerUp}
-            onPointerCancel={titleLongPress.onPointerUp}
-            onClick={(e) => {
-              // Swallow the click the completed hold produces, or the
-              // journal header would also step a day.
-              if (titleLongPress.consumedClick()) {
-                e.preventDefault();
-                e.stopPropagation();
-              }
-            }}
-          >
-            <Show
-              when={view()?.page.kind === "journal"}
-              fallback={
-                <PageHeader
-                  title={view()?.page.title ?? ""}
-                  kind={view()?.page.kind ?? null}
-                />
-              }
-            >
-              <JournalHeader
-                slug={view()?.page.slug ?? ""}
-                todaySlug={todaySlugValue()}
-                onPrev={handlePrevDay}
-                onNext={handleNextDay}
-                onToday={handleJumpToday}
-              />
-            </Show>
-          </div>
-
-          {/* Right capsule — grouped page actions. SyncDot lives inline
-              between pages-search and refresh so the user reads it as
-              "status of the data this capsule controls". */}
-          <div class="ios-scroll inline-flex max-w-full items-center justify-self-end overflow-x-auto rounded-full bg-(--color-outl-bg-elev)/85 shadow-[var(--shadow-capsule)] backdrop-blur-xl">
-            <button
-              type="button"
-              aria-label="Calendar"
-              onClick={() => {
-                haptic("light");
-                setCalendarOpen(true);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="4" width="18" height="18" rx="3" />
-                <path d="M3 10h18M8 2v4m8-4v4" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Pages"
-              onClick={() => {
-                haptic("light");
-                setSwitcherOpen(true);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M21 21l-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z" />
-              </svg>
-            </button>
-            {/* Fold all / unfold all (RFC 0254 phase 4b, mirrors the
-                desktop's `z M` / `z R`) — walks the whole page, not just
-                the zoomed subtree, same as the desktop's `zM`/`zR`. */}
-            <button
-              type="button"
-              aria-label="Fold all"
-              onClick={handleFoldAll}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M7 14l5 5 5-5M7 5l5 5 5-5" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Unfold all"
-              onClick={handleUnfoldAll}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M7 9l5-5 5 5M7 19l5-5 5 5" />
-              </svg>
-            </button>
-            {/* Plugin-contributed toolbar buttons — one inline glyph per
-                entry, sitting among the native header actions. Discreet:
-                the plugin's `icon` rendered as text, tap runs its command
-                (re-render + toast handled by `runToolbarButton`). */}
-            <For each={toolbarButtons()}>
-              {(btn) => (
-                <button
-                  type="button"
-                  aria-label={btn.title ?? `Plugin: ${btn.command_id}`}
-                  title={btn.title ?? btn.command_id}
-                  onClick={() => void runToolbarButton(btn)}
-                  class="flex h-9 w-9 items-center justify-center rounded-full text-[17px] leading-none text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
-                >
-                  {btn.icon}
-                </button>
-              )}
-            </For>
-            <button
-              type="button"
-              aria-label="Reminders"
-              onClick={() => {
-                haptic("light");
-                setRemindersOpen(true);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              {/* Bell glyph — the reminders surface. */}
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Plugin commands"
-              onClick={() => {
-                haptic("light");
-                setPluginsOpen(true);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              {/* Stacked-squares "extensions/plugins" glyph, mirrors the
-                  desktop's `⧉` toggle. */}
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="8" height="8" rx="1.5" />
-                <rect x="13" y="3" width="8" height="8" rx="1.5" />
-                <rect x="3" y="13" width="8" height="8" rx="1.5" />
-                <rect x="13" y="13" width="8" height="8" rx="1.5" />
-              </svg>
-            </button>
-            {/* The sync dot IS the devices/pairing affordance: it shows the
-                mesh status AND opens the pairing sheet on tap — no separate
-                (ugly) devices glyph. Mirrors the desktop's clickable dot. */}
-            <button
-              type="button"
-              aria-label="Devices and sync — tap to pair"
-              onClick={() => {
-                haptic("light");
-                setDevicesOpen(true);
-              }}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <SyncDot
-                status={
-                  // PRIMARY signal is iroh peer health, not navigator.onLine.
-                  // A force-sync in flight wins (spinner); else a reachable
-                  // peer → synced (green); else offline/orange — either the
-                  // device has no radio, or peers exist but none answered
-                  // (or none are paired, so there's nothing to sync with).
-                  syncing()
-                    ? "syncing"
-                    : online() && peersUp()
-                      ? "synced"
-                      : "offline"
-                }
-              />
-            </button>
-            <button
-              type="button"
-              aria-label="Sync now"
-              onClick={handleRefresh}
-              class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-outl-accent)"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style={{
-                  transform: refreshing() ? "rotate(360deg)" : "rotate(0deg)",
-                  transition: "transform 800ms ease-in-out",
-                }}
-                aria-hidden="true"
-              >
-                <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
+      <JournalChrome
+        view={view()}
+        online={online()}
+        peersUp={peersUp()}
+        syncing={syncing()}
+        refreshing={refreshing()}
+        todaySlug={todaySlugValue()}
+        toolbarButtons={toolbarButtons()}
+        titleLongPress={titleLongPress}
+        onJumpToday={handleJumpToday}
+        onPrevDay={handlePrevDay}
+        onNextDay={handleNextDay}
+        onFoldAll={handleFoldAll}
+        onUnfoldAll={handleUnfoldAll}
+        onRefresh={handleRefresh}
+        onRunToolbarButton={(btn) => void runToolbarButton(btn)}
+        onOpenCalendar={() => setCalendarOpen(true)}
+        onOpenSwitcher={() => setSwitcherOpen(true)}
+        onOpenReminders={() => setRemindersOpen(true)}
+        onOpenPlugins={() => setPluginsOpen(true)}
+        onOpenDevices={() => setDevicesOpen(true)}
+      />
 
       <main class="ios-scroll flex-1 pb-32">
         <PullToRefresh onRefresh={handleRefresh}>
@@ -2426,7 +2150,7 @@ export function Journal() {
                         setLoaded(false);
                         void loadTodayWithRetry();
                       }}
-                      class="mt-3 rounded-full bg-(--color-outl-accent) px-5 py-2 text-[14px] font-medium text-white active:opacity-70"
+                      class="mt-3 rounded-full bg-(--color-outl-accent) px-5 py-2 text-[14px] font-medium text-(--color-outl-bg) active:opacity-70"
                     >
                       Retry
                     </button>
@@ -2490,7 +2214,7 @@ export function Journal() {
                   <button
                     type="button"
                     onClick={() => void handleAppendBlock()}
-                    class="rounded-full bg-(--color-outl-accent) px-4 py-2 text-[15px] font-medium text-white active:opacity-70"
+                    class="rounded-full bg-(--color-outl-accent) px-4 py-2 text-[15px] font-medium text-(--color-outl-bg) active:opacity-70"
                   >
                     Add a block
                   </button>

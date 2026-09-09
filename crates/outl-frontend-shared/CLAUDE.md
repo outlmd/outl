@@ -166,6 +166,17 @@ When in doubt, ship in the client; promote later when the second client appears.
 | `ImportedAsset` (`rel_path`, `display_name`, `is_image`, `markdown`) — reply of `importAssetFile`, mirror of `outl_actions::ImportedAsset` | `@outl/shared/api/commands` | `outl_actions::ImportedAsset` |
 | `installFileDrop(handlers)` → `Promise<UnlistenFn>` — wires the Tauri webview's `onDragDropEvent` (`onEnter`/`onOver`/`onLeave` optional, `onDrop(paths, blockId)` required); resolves the hit-tested block id under the drop from the raw physical-pixel position. `physicalToCss(position, dpr)` (HiDPI physical→CSS), `blockIdFromElement(el)` / `blockIdAtPhysical(position)` (`.closest("[data-block-id]")` hit-test), `joinAssetMarkdowns(markdowns)` (space-join, drop empties), `appendMarkdownToBlock(existing, markdown)` (space-separated append, no leading space on an empty block) are the pure helpers underneath, unit-tested; `installFileDrop` itself needs a real webview. Desktop and mobile both wire it identically so the drop geometry can't drift between clients | `@outl/shared/drag-drop` | no Rust mirror — OS drag-drop only reaches the GUI webview clients; the import itself rides `importAssetFile` |
 
+## Props are read lazily, never destructured
+
+Solid's reactivity rides the getter.
+`function Foo({ view })` snapshots `view` at first render and never updates again — the component simply stops reacting, with no error, no warning and no failing test.
+`props.view` is the only correct form, in this library and in every client component.
+
+This is the one bug an extraction reliably introduces, because pulling JSX out of a big component is exactly when the temptation to destructure a fifteen-prop signature shows up.
+`JournalChrome.tsx` (extracted from `outl-mobile`'s `Journal.tsx`) carries the rule in its own doc comment for that reason.
+
+The same care applies to an optional prop's sentinel: `todaySlug: string | null` means `null`, and collapsing it to `""` at the call site destroys the distinction the receiving component tests on.
+
 ## What does NOT enter the library
 
 - **Chrome.** `<Sidebar />`, `<Picker />`, `<BacklinksPanel />`, `<BlockRow />`, app shells — they diverge between mobile (single-pane, touch) and desktop (3-pane, mouse + vim mode).

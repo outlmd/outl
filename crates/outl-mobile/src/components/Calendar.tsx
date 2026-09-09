@@ -196,7 +196,7 @@ export function Calendar(props: CalendarProps) {
                   onClick={() => props.onPick(cell.slug)}
                   class="relative flex aspect-square items-center justify-center rounded-full text-[15px] tabular-nums active:opacity-50"
                   classList={{
-                    "bg-(--color-outl-accent) text-white font-semibold":
+                    "bg-(--color-outl-accent) text-(--color-outl-bg) font-semibold":
                       isSelected,
                     "text-(--color-outl-accent) font-semibold":
                       isToday && !isSelected,

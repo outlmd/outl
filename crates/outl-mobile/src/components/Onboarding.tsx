@@ -72,10 +72,10 @@ export function Onboarding(props: { onFinish: () => void }) {
                 onClick={continueToSync}
                 class="flex w-full flex-col items-start gap-1 rounded-2xl bg-(--color-outl-accent) px-5 py-4 text-left active:opacity-80"
               >
-                <span class="text-[17px] font-semibold text-white">
+                <span class="text-[17px] font-semibold text-(--color-outl-bg)">
                   Keep on this device
                 </span>
-                <span class="text-[13px] text-white/80">
+                <span class="text-[13px] text-(--color-outl-bg)/80">
                   Works offline, syncs peer-to-peer — no account, no cloud
                 </span>
               </button>
@@ -123,7 +123,7 @@ export function Onboarding(props: { onFinish: () => void }) {
               <button
                 type="button"
                 onClick={finish}
-                class="w-full rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80"
+                class="w-full rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-(--color-outl-bg) active:opacity-80"
               >
                 {FINISH_CTA}
               </button>

@@ -362,7 +362,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
             type="button"
             onClick={handleScan}
             disabled={scanning() || busy()}
-            class="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-white active:opacity-80 disabled:opacity-50"
+            class="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-(--color-outl-accent) px-4 py-3 text-[16px] font-semibold text-(--color-outl-bg) active:opacity-80 disabled:opacity-50"
           >
             <svg
               width="20"

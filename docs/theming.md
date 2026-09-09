@@ -177,7 +177,7 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 
 | Client | What it does with the hex |
 |---|---|
-| **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). The seven RGB presets (`outl`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`) are one-line delegates; `default-dark` and `light` stay manual on ANSI named colors. |
+| **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). The eight RGB presets (`outl`, `outl-light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`) are one-line delegates; `default-dark` and `light` stay manual on ANSI named colors. |
 | **`outl-desktop`** | The Tauri commands `list_themes()` and `get_theme(name)` return the `Palette` as JSON. The frontend writes each field as a CSS custom property on `<html>` (`--color-outl-accent`, `--color-outl-ref-link-fg`, …) so Tailwind class utilities like `text-(--color-outl-accent)` resolve at runtime, and flips `color-scheme` (light/dark) from the palette's `bg` luminance so native controls and scrollbars follow. Settings modal exposes the dropdown. Chrome surfaces never hardcode a hue — translucent layers derive from `--color-outl-fg` (`bg-(--color-outl-fg)/10`) so they adapt to light and dark presets alike. |
 | **`outl-mobile`** | Shared `@outl/shared/theme::installTheme` fetches both sides of the configured pair and holds both `Palette` objects in memory, then calls `applyPaletteToRoot` (RFC 0022, issue #22). A `prefers-color-scheme` media-query listener swaps tokens on an OS appearance flip without a second backend round-trip; a fresh default config uses `outl-light` / `outl`. |
 
@@ -187,7 +187,7 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 
 The legacy `--color-ios-*` / `--color-iosd-*` namespace it used to also write is gone.
 `@outl/shared/markdown` (`MarkdownInline`, `EmbeddedSubtree`) no longer reads it either — see [`outl-frontend-shared/CLAUDE.md`](../crates/outl-frontend-shared/CLAUDE.md#theming-note).
-`src/styles.css` still declares the legacy tokens in its `@theme` block; nothing reads them, and deleting the block is a later, gated task.
+`src/styles.css` no longer declares the legacy tokens in its `@theme` block — they were removed, and `the_theme_tokens_match_the_palette` fails if any come back.
 
 `src/styles.css` provides boot-default values for `--color-outl-*` so the page isn't flash-unstyled before `applyPaletteToRoot` runs.
 `color-scheme` is set from the palette's `bg` luminance so native controls (scrollbars, `<select>`) follow the active preset.

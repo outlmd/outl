@@ -25,94 +25,10 @@ pub(crate) const ACTION_SNOOZE_1H: &str = "snooze-1h";
 pub(crate) const ACTION_DONE: &str = "done";
 
 use crate::state::AppState;
-use outl_tauri_shared::commands::reminders::{
-    self as shared, ReminderDto, ReminderSettingsDto, SnoozePresetDto,
-};
+use outl_tauri_shared::commands::reminders::ReminderDto;
 use outl_tauri_shared::reminder_runtime;
-use outl_tauri_shared::state::PageView;
 
-#[tauri::command]
-pub(crate) fn list_reminders(state: State<'_, AppState>) -> Result<Vec<ReminderDto>, String> {
-    shared::list_reminders(state.inner())
-}
-
-#[tauri::command]
-pub(crate) fn reminder_settings() -> ReminderSettingsDto {
-    shared::reminder_settings()
-}
-
-#[tauri::command]
-pub(crate) fn set_reminder_settings(
-    enabled: bool,
-    quiet_hours: String,
-) -> Result<ReminderSettingsDto, String> {
-    shared::set_reminder_settings(enabled, &quiet_hours)
-}
-
-#[tauri::command]
-pub(crate) fn snooze_reminder(
-    block_id: String,
-    preset: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    shared::snooze_reminder(state.inner(), &block_id, &preset)
-}
-
-#[tauri::command]
-pub(crate) fn snooze_presets() -> Vec<SnoozePresetDto> {
-    shared::snooze_presets()
-}
-
-#[tauri::command]
-pub(crate) fn clear_reminder_snooze(
-    block_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    shared::clear_reminder_snooze(state.inner(), &block_id)
-}
-
-#[tauri::command]
-pub(crate) fn set_block_property(
-    page_id: String,
-    block_id: String,
-    key: String,
-    value: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::set_block_property(state.inner(), &page_id, &block_id, &key, &value)
-}
-
-/// Set (or clear, with an empty value) a property on the **page**
-/// itself (`icon::`, `type::`, …). Refuses the structural keys
-/// upstream — renaming a page is `page_rename`, not a property edit.
-#[tauri::command]
-pub(crate) fn set_page_property(
-    page_id: String,
-    key: String,
-    value: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::set_page_property(state.inner(), &page_id, &key, &value)
-}
-
-#[tauri::command]
-pub(crate) fn set_block_remind(
-    page_id: String,
-    block_id: String,
-    rule: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::set_block_remind(state.inner(), &page_id, &block_id, &rule)
-}
-
-#[tauri::command]
-pub(crate) fn mark_block_done(
-    page_id: String,
-    block_id: String,
-    state: State<'_, AppState>,
-) -> Result<PageView, String> {
-    shared::mark_block_done(state.inner(), &page_id, &block_id)
-}
+outl_tauri_shared::reminder_commands!(crate::state::AppState);
 
 /// Deliver every reminder that came due, as an OS notification.
 #[tauri::command]

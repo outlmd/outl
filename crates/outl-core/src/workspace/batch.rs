@@ -23,22 +23,9 @@ use std::ops::{Deref, DerefMut};
 
 use tracing::warn;
 
+use super::router::Route;
 use super::{Workspace, WorkspaceError};
 use crate::op::{op_node, LogOp};
-
-/// Storage destination an op is bound for, resolved **at apply time**.
-///
-/// Page routing walks the parent chain of the op's node, and that node
-/// may be one the same op just created or moved, so the route has to be
-/// captured while the tree is in the exact state `apply` left it —
-/// re-resolving it at flush time could route to a different shard.
-#[derive(Debug)]
-pub(super) enum BatchRoute {
-    /// The global single-file-per-actor storage.
-    Global,
-    /// A registered per-page shard, keyed by slug.
-    Page(String),
-}
 
 impl Workspace {
     /// Enter deferred-persistence (batch) mode.
@@ -100,11 +87,8 @@ impl Workspace {
     /// Resolve the storage route for `op` against the current tree state.
     /// Called by [`Workspace::apply`] the moment the op is applied, so
     /// page routing reflects the tree the op itself may have mutated.
-    pub(super) fn route_for_op(&self, op: &LogOp) -> BatchRoute {
-        match op_node(&op.op).and_then(|node| self.slug_for_node(node)) {
-            Some(slug) if self.page_storages.contains_key(&slug) => BatchRoute::Page(slug),
-            _ => BatchRoute::Global,
-        }
+    pub(super) fn route_for_op(&self, op: &LogOp) -> Route {
+        self.router.route(&self.tree, op_node(&op.op))
     }
 
     /// Run the shared snapshot trigger, counting `applied` new ops.
@@ -113,15 +97,8 @@ impl Workspace {
     /// calls it once with the whole batch size. `snapshot_threshold = 0`
     /// (the CLI) and in-memory workspaces (`snapshots_dir = None`) opt out.
     pub(super) fn trigger_snapshot(&mut self, applied: u32) {
-        if self.snapshot_threshold > 0 && self.snapshots_dir.is_some() {
-            self.ops_since_snapshot = self.ops_since_snapshot.saturating_add(applied);
-            if self.ops_since_snapshot >= self.snapshot_threshold {
-                // Drain finished workers (non-blocking) so the handle
-                // list doesn't grow unbounded over a long session.
-                self.snapshot_workers.retain(|h| !h.is_finished());
-                self.spawn_background_snapshot();
-                self.ops_since_snapshot = 0;
-            }
+        if self.snapshots.record(applied) {
+            self.spawn_background_snapshot();
         }
     }
 
@@ -145,26 +122,14 @@ impl Workspace {
         let pending = std::mem::take(&mut self.pending);
         let total = pending.len() as u32;
 
-        let mut global: Vec<LogOp> = Vec::new();
-        let mut per_page: HashMap<String, Vec<LogOp>> = HashMap::new();
+        // Group by destination so each shard takes one `append_ops`
+        // (one fsync), preserving each op's order within its own file.
+        let mut grouped: HashMap<Route, Vec<LogOp>> = HashMap::new();
         for (route, op) in pending {
-            match route {
-                BatchRoute::Global => global.push(op),
-                BatchRoute::Page(slug) => per_page.entry(slug).or_default().push(op),
-            }
+            grouped.entry(route).or_default().push(op);
         }
-
-        if !global.is_empty() {
-            self.storage.append_ops(&global)?;
-        }
-        for (slug, ops) in per_page {
-            match self.page_storages.get_mut(&slug) {
-                Some(s) => s.append_ops(&ops)?,
-                // A route only resolves to `Page` when the shard exists;
-                // if it somehow vanished, fall back to global rather than
-                // drop the ops.
-                None => self.storage.append_ops(&ops)?,
-            }
+        for (route, ops) in grouped {
+            self.router.append_ops(&route, &ops)?;
         }
 
         self.trigger_snapshot(total);

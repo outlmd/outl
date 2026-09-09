@@ -1,26 +1,10 @@
-//! Undo / redo commands — thin wrappers over
-//! `outl_tauri_shared::commands::history`. The body lives in the shared
-//! crate (RFC 0254 phase 1) so mobile registers the same two commands
-//! instead of `AppHost::history()`'s `None` default silently skipping
-//! snapshot recording forever.
-
-use tauri::State;
-
-use crate::state::{AppState, PageView};
-
-/// Revert the last committed mutation on `page_id`. Errors with
-/// `"nothing to undo"` when the stack is empty so the frontend can
-/// surface it as a status message.
-#[tauri::command]
-pub(crate) fn undo_page(page_id: String, state: State<'_, AppState>) -> Result<PageView, String> {
-    outl_tauri_shared::commands::history::undo_page(state.inner(), page_id)
-}
-
-/// Re-apply the mutation the last `undo_page` reverted.
-#[tauri::command]
-pub(crate) fn redo_page(page_id: String, state: State<'_, AppState>) -> Result<PageView, String> {
-    outl_tauri_shared::commands::history::redo_page(state.inner(), page_id)
-}
+//! Undo / redo commands, generated from the shared catalog.
+//!
+//! The bodies live in `outl_tauri_shared::commands::history` (RFC 0254
+//! phase 1) so mobile registers the same two commands instead of
+//! `AppHost::history()`'s `None` default silently skipping snapshot
+//! recording forever.
+outl_tauri_shared::history_commands!(crate::state::AppState);
 
 #[cfg(test)]
 mod tests {
