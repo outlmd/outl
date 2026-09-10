@@ -83,7 +83,9 @@ MFU reorders the middle range, and both bars used to reorder it **on every tap**
 That moved the button the user had just hit out from under their finger before they could hit it again, so indent-indent-indent landed on three different buttons ([#269](https://github.com/outlmd/outl/issues/269)).
 Now the order is resolved once per editing session and held: the web bar reads it at mount (its parent gates it on `editingId()`, so a mount *is* a session), and the native bar reads it when the keyboard **appears** — `OutlSwizzle` keeps one `OutlToolbarView` for the whole app lifetime, so a keyboard notification is the only thing that marks a session boundary there.
 
-`keyboardWillShowNotification` is not one-per-session, which is the trap: iOS re-posts it while the keyboard is already up (input-mode switch, emoji, the QuickType bar appearing — which this app keeps on). Acting on every post puts the mid-session reshuffle straight back, so `OutlToolbarView` tracks `keyboardVisible` and rebuilds only on the rising edge. `OutlSuggestOverlay` already kept the same flag for the same reason.
+`keyboardWillShowNotification` is not one-per-session, which is the trap: iOS re-posts it while the keyboard is already up (input-mode switch, emoji, the QuickType bar appearing — which this app keeps on).
+Acting on every post puts the mid-session reshuffle straight back, so `OutlToolbarView` tracks `keyboardVisible` and rebuilds only on the rising edge.
+`OutlSuggestOverlay` already kept the same flag for the same reason.
 Taps are still counted the moment they happen; MFU just gets to act on the count at the next session rather than mid-gesture.
 
 ### Locking the order (`SettingsSheet`)

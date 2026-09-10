@@ -86,6 +86,14 @@ final class ToolbarStoreTests: XCTestCase {
         XCTAssertEqual(ToolbarStore.parseCounts("{\"bold\":0}"), ["bold": 0])
     }
 
+    /// `localStorage` is untrusted: a number outside `Int`'s range would
+    /// trap in `Int(Double)` and take the whole bar down. It is dropped
+    /// instead, and the counts around it survive.
+    func testCountsOutsideIntRangeAreDroppedNotTrapped() {
+        let raw = "{\"bold\":1e300,\"code\":-1e300,\"italic\":2}"
+        XCTAssertEqual(ToolbarStore.parseCounts(raw), ["italic": 2])
+    }
+
     // MARK: - cross-language contract
 
     /// The bar interpolates both keys into the JS it evaluates, and
