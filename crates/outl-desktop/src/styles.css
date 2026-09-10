@@ -56,6 +56,7 @@
   --color-outl-accent-alt: #d6ff47;
   --color-outl-warn: #fbbf24;
   --color-outl-destructive: #fb7185;
+  --color-outl-destructive-fg: #0c0814;
   --color-outl-ref-link-fg: #a78bfa;
   --color-outl-tag-link-fg: #f0abfc;
   --color-outl-md-link-fg: #7dd3fc;
@@ -117,5 +118,44 @@
     overflow: hidden;
     background-color: var(--color-outl-bg);
     color: var(--color-outl-fg);
+  }
+}
+
+/*
+ * Row chrome: visible when the row is, hidden when it is not.
+ *
+ * `.outl-row-chrome` marks the per-row affordances that would be noise
+ * on every line at rest. Today that is the fold chevron. The bullet is
+ * NOT chrome (it is how you read the outline) and neither are the indent
+ * guides (a column cue, see `BlockRow.tsx`).
+ *
+ * `focus-within` is not decoration. Without it the chevron is
+ * unreachable by keyboard, which turns "quieter at rest" into "fold is
+ * mouse-only".
+ *
+ * Deliberately unlayered. Tailwind utilities live in `@layer utilities`,
+ * and an `@layer` rule always loses to an unlayered one regardless of
+ * specificity, so this has to sit outside a layer to own the property.
+ */
+.outl-row-chrome {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.outl-row:hover .outl-row-chrome,
+.outl-row:focus-within .outl-row-chrome,
+.outl-row[data-selected="true"] .outl-row-chrome,
+.outl-row[data-visual="true"] .outl-row-chrome,
+.outl-row[data-editing="true"] .outl-row-chrome {
+  opacity: 1;
+}
+
+/*
+ * A reader who asked for less motion still gets the reveal, just
+ * without the fade.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .outl-row-chrome {
+    transition: none;
   }
 }

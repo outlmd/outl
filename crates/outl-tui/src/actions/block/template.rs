@@ -57,6 +57,9 @@ impl App {
             Ok(ids) => {
                 let count = ids.len();
 
+                // Step 5 alone; the pipeline does not fit this crate yet
+                // (issue #263, see the note in `actions/exec.rs`).
+                //
                 // Guarded (root `CLAUDE.md` invariant 8): the template's
                 // blocks are already in the op log regardless of what this
                 // write does, so a refusal here means the page's `.md`

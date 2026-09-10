@@ -528,7 +528,11 @@ fn write_page_property(
 /// writer, so the CLI/MCP surface was the one place invariant 8's
 /// guard was never wired in (RFC 0255).
 fn write_projection(ctx: &mut WsCtx, id: NodeId) -> Result<(), ApiError> {
-    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
+    // The mutation already ran at the call site, so this commits an
+    // empty one purely for the projection and the steps around it. The
+    // shape is worth keeping: when this context grows a transport, the
+    // announce lands here for every caller at once.
+    ctx.commit(id)?;
     Ok(())
 }
 

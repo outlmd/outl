@@ -91,7 +91,7 @@ export function SwipeRow(props: SwipeRowProps): JSX.Element {
   return (
     <div class="relative overflow-hidden">
       <div
-        class="absolute inset-y-0 right-0 flex items-center justify-end bg-(--color-outl-destructive) px-5 text-[15px] font-semibold text-white"
+        class="absolute inset-y-0 right-0 flex items-center justify-end bg-(--color-outl-destructive) px-5 text-[15px] font-semibold text-(--color-outl-destructive-fg)"
         style={{ width: `${threshold()}px` }}
       >
         {props.leftActionLabel ?? "Delete"}

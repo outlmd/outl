@@ -14,8 +14,7 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 
 use outl_actions::{
-    append_block, apply_page_md_with_sidecar_guarded, find_by_slug, import_asset, journal_slug,
-    open_today, today, ActionError,
+    append_block, find_by_slug, import_asset, journal_slug, open_today, today, ActionError,
 };
 
 use crate::output::{codes, emit, ApiError};
@@ -121,15 +120,11 @@ pub fn add_asset(
 
     // The link is ordinary workspace state — it goes through the op log
     // as a plain block append, never a hand-written `.md` edit.
-    let block_id = append_block(
-        &mut ctx.workspace,
-        &ctx.hlc,
-        Some(page_id),
-        Some(&imported.markdown),
-    )
-    .map_err(ApiError::internal)?;
-
-    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page_id)?;
+    let hlc = ctx.hlc.clone();
+    let markdown = imported.markdown.clone();
+    let block_id = ctx.commit_with(page_id, |ws| {
+        append_block(ws, &hlc, Some(page_id), Some(&markdown))
+    })?;
 
     Ok(json!({
         "block_id": block_id.to_string(),

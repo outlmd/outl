@@ -65,6 +65,26 @@ pub struct Palette {
     /// and mobile had `--color-ios-destructive` that no other
     /// client could see.
     pub destructive: String,
+    /// Foreground guaranteed readable **on** `destructive`, for the
+    /// surfaces that paint it as a solid fill (the mobile error toast,
+    /// swipe-to-delete).
+    ///
+    /// `destructive` was authored as *ink*: a red chosen to read against
+    /// `bg`. That is a different job from being a background, and the
+    /// numbers show it — measured across the ten presets, `#ffffff` on
+    /// `destructive` fails WCAG AA on six and `bg` fails on five, with
+    /// `nord`, `monokai` and `gruvbox` having no passing option at all
+    /// between the two. Neither could serve as the pair.
+    ///
+    /// So `destructive` joins the palette's other fill roles
+    /// (`highlight_*`, `selected_bullet_*`, `status_*_*`,
+    /// `list_selected_*`), which are all `_bg` / `_fg` pairs for exactly
+    /// this reason. `accent` deliberately stays unpaired: `bg` reads on
+    /// it in nine of ten presets because an accent is picked to contrast
+    /// with the canvas, so the inverse holds.
+    ///
+    /// `every_fill_pair_passes_contrast` keeps this honest.
+    pub destructive_fg: String,
 
     // ── inline markdown ──────────────────────────────────────────
     /// `[[page]]` reference foreground.
@@ -158,6 +178,7 @@ impl Palette {
             ("accent_alt", &self.accent_alt),
             ("warn", &self.warn),
             ("destructive", &self.destructive),
+            ("destructive_fg", &self.destructive_fg),
             ("ref_link_fg", &self.ref_link_fg),
             ("tag_link_fg", &self.tag_link_fg),
             ("md_link_fg", &self.md_link_fg),

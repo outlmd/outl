@@ -43,6 +43,9 @@ use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
 use outl_core::{resolve_write_actor, ActorWriteLock, WorkspaceLock};
 
+use outl_actions::{commit_page, ActionError, CommitHooks};
+use outl_core::id::NodeId;
+
 use crate::layout::{ensure_ops_dir, read_or_init_config, Paths};
 
 /// Why a workspace failed to open.
@@ -100,6 +103,75 @@ pub struct WsCtx {
     /// Hold the exclusive per-actor write lock too.
     #[allow(dead_code)]
     actor_lock: ActorWriteLock,
+}
+
+impl WsCtx {
+    /// Mutate `page` and run the four steps that go around it.
+    ///
+    /// Thin wrapper over [`outl_actions::commit_page`] bound to this
+    /// context. Reach for it instead of calling
+    /// `apply_page_md_with_sidecar_guarded` after a mutation: that is
+    /// step 5 of five, and a caller that takes it alone has silently
+    /// decided the other four do not apply
+    /// ([#264](https://github.com/outlmd/outl/issues/264)).
+    ///
+    /// Two of those four are genuinely no-ops here and stay defaulted.
+    /// A one-shot CLI command has no undo stack to snapshot into and no
+    /// cached backlink index to invalidate, both of which are per-process
+    /// state a long-lived client keeps. The **peer announce** is the one
+    /// worth naming: this context holds no transport, so a CLI write
+    /// reaches other devices on the next catch-up sweep rather than
+    /// immediately. That is the pre-existing behaviour, not a regression
+    /// introduced here, and wiring `SyncEngine` into the hook is the
+    /// obvious follow-up.
+    ///
+    /// A projection failure is returned as an error, matching what the
+    /// hand-written call sites did with `?`.
+    pub fn commit_with<T, F>(&mut self, page: NodeId, mutate: F) -> Result<T, ActionError>
+    where
+        F: FnOnce(&mut Workspace) -> Result<T, ActionError>,
+    {
+        let root = self.root.clone();
+        let mut hooks = CtxCommit {
+            root: &root,
+            failure: None,
+        };
+        let value = commit_page(&mut self.workspace, &mut hooks, page, mutate)?;
+        match hooks.failure {
+            Some(e) => Err(e),
+            None => Ok(value),
+        }
+    }
+
+    /// Run the pipeline for a page whose mutation already happened.
+    ///
+    /// Most CLI commands mutate through a plain `outl_actions::` call and
+    /// then need the steps around it, so they would otherwise all pass
+    /// `|_ws| Ok(())` to [`Self::commit_with`]. Same sequence, without
+    /// the empty closure at eight call sites.
+    pub fn commit(&mut self, page: NodeId) -> Result<(), ActionError> {
+        self.commit_with(page, |_ws| Ok(()))
+    }
+}
+
+/// [`WsCtx`]'s half of the commit pipeline.
+///
+/// `project` is the only hook implemented. It cannot return the failure
+/// directly (the trait keeps `project` infallible on purpose, since it
+/// runs after the op log already holds the mutation), so it parks it
+/// here and [`WsCtx::commit`] reads it back.
+struct CtxCommit<'a> {
+    root: &'a Path,
+    failure: Option<ActionError>,
+}
+
+impl CommitHooks for CtxCommit<'_> {
+    fn project(&mut self, workspace: &Workspace, page: NodeId) {
+        if let Err(e) = outl_actions::apply_page_md_with_sidecar_guarded(workspace, self.root, page)
+        {
+            self.failure = Some(e);
+        }
+    }
 }
 
 /// Tuning knobs for [`open_with`]. The derived `Default` is the

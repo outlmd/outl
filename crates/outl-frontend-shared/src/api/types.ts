@@ -30,6 +30,7 @@ export interface Palette {
   warn: string;
   /** Destructive action colour — delete, remove, irreversible. */
   destructive: string;
+  destructive_fg: string;
   ref_link_fg: string;
   tag_link_fg: string;
   md_link_fg: string;
