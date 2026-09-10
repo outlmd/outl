@@ -79,9 +79,14 @@ public enum ToolbarStore {
                 // CoreFoundation type instead, the only check that
                 // actually distinguishes the two.
                 CFGetTypeID(number) != CFBooleanGetTypeID(),
-                number.doubleValue.isFinite
+                number.doubleValue.isFinite,
+                // `Int(Double)` traps when the value is outside `Int`'s
+                // range, and this is `localStorage` — a corrupted or
+                // hand-edited blob must cost the bar one count, not a
+                // crash. `Int(exactly:)` returns `nil` instead.
+                let count = Int(exactly: number.doubleValue.rounded(.towardZero))
             else { continue }
-            counts[key] = Int(number.doubleValue)
+            counts[key] = count
         }
         return counts
     }
