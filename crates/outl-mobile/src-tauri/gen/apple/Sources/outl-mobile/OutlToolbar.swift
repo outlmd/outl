@@ -7,9 +7,35 @@ import WebKit
 ///
 /// Bear-style: a single rounded-full pill that floats over the
 /// keyboard, no dividers, no edge-to-edge bar. Buttons re-order by
-/// usage — `OutlKit.ToolbarMFU` owns the persistence + ordering
-/// algorithm (and its unit tests). This file only does the UIKit
-/// rendering and the JS bridge.
+/// usage — `OutlKit.ToolbarMFU` owns the ordering algorithm,
+/// `OutlKit.ToolbarLock` owns the user's opt-out from it (and both own
+/// their unit tests). This file only does the UIKit rendering and the
+/// JS bridge.
+///
+/// **The row is rebuilt when the keyboard *appears*, never on a tap
+/// and never while it is already up.** `OutlSwizzle` keeps one
+/// instance for the whole app lifetime, so a keyboard notification is
+/// what marks the start of an editing session. Rebuilding inside
+/// `handle` (which is what this did) moved the button the user had
+/// just hit out from under their finger before they could hit it
+/// again — indent, indent, indent landed on three different buttons,
+/// issue #269.
+///
+/// `keyboardWillShowNotification` is **not** one-per-session: iOS
+/// re-posts it while the keyboard is on screen (input-mode switch,
+/// emoji, the QuickType bar appearing — which this app keeps on).
+/// Acting on every post would put the mid-session reshuffle straight
+/// back. `keyboardVisible` reduces the stream to its rising edge, the
+/// same guard `OutlSuggestOverlay` already keeps for the same reason.
+///
+/// **Tap counts live in the webview's `localStorage`, not
+/// `UserDefaults`.** The bar is native but the settings sheet that
+/// reads those counts is web, so a `UserDefaults` store would be
+/// invisible to it: "Lock button order" would freeze a cold-start row
+/// instead of the user's, and "Reset button order" would do nothing.
+/// `window.__outlToolbar(action)` records the tap on the JS side, next
+/// to the dispatch, which makes `Journal.tsx` the single counter for
+/// both bars.
 ///
 /// Exposed to `main.mm` / `OutlSwizzle` via `@objc(OutlToolbarView)`;
 /// the swizzle instantiates this and returns it as the
@@ -62,6 +88,25 @@ public final class OutlToolbarView: UIView {
         .done:        ActionMeta(label: "Hide keyboard",    style: .symbol("keyboard.chevron.compact.down", destructive: false)),
     ]
 
+    // MARK: - Order state
+
+    /// The frozen order the user locked, or `nil` when the toolbar is
+    /// free to follow MFU. Cached from the webview's `localStorage`
+    /// (see `refreshOrderState`) because reading it is asynchronous
+    /// and `rebuildButtons` has to be able to run synchronously — at
+    /// init there is no webview bound yet.
+    private var lockedOrder: [ToolbarAction]?
+
+    /// Tap counts, cached from the same read as `lockedOrder`. Empty
+    /// until the first successful read, which is why the very first
+    /// build shows the cold-start order.
+    private var counts: [String: Int] = [:]
+
+    /// Whether the keyboard is currently on screen. Gates
+    /// `keyboardWillShow` down to its rising edge — see the type's doc
+    /// comment for why the raw notification is not a session boundary.
+    private var keyboardVisible = false
+
     // MARK: - Subviews
 
     /// Visual capsule background — single rounded pill behind
@@ -97,6 +142,25 @@ public final class OutlToolbarView: UIView {
         autoresizingMask = .flexibleWidth
         setupViews()
         rebuildButtons()
+        // A new editing session starts when the keyboard appears. This
+        // is the only place the row is allowed to change shape.
+        let nc = NotificationCenter.default
+        nc.addObserver(
+            self,
+            selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        nc.addObserver(
+            self,
+            selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     required init?(coder: NSCoder) {
@@ -204,8 +268,13 @@ public final class OutlToolbarView: UIView {
         }
         // 2. Pinned left (`pinnedFirst` = `.newLine`).
         leftPinned.addArrangedSubview(makeButton(for: ToolbarAction.pinnedFirst))
-        // 3. Middle (MFU-reordered, pinned slots excluded).
-        for action in ToolbarMFU.orderedMiddleActions() {
+        // 3. Middle (frozen order when locked, else MFU-reordered;
+        //    pinned slots excluded from both).
+        let middle = ToolbarLock.resolveMiddleActions(
+            counts: counts,
+            locked: lockedOrder
+        )
+        for action in middle {
             stack.addArrangedSubview(makeButton(for: action))
         }
         // 4. Pinned right (`pinnedLast` = `.done`, "Hide keyboard").
@@ -245,9 +314,74 @@ public final class OutlToolbarView: UIView {
     // MARK: - Tap handling
 
     private func handle(_ action: ToolbarAction) {
-        ToolbarMFU.record(action)
+        // No count written here and no `rebuildButtons()` — see the
+        // type's doc comment. `invoke` hands the action to JS, which
+        // records the tap into the same `localStorage` the settings
+        // sheet reads; the layout follows at the next keyboard
+        // appearance.
         invoke(action)
-        DispatchQueue.main.async { [weak self] in self?.rebuildButtons() }
+    }
+
+    // MARK: - Session boundary
+
+    /// Start of an editing session: re-read the stored order state,
+    /// then lay the row out once. Everything that can move the buttons
+    /// happens here and nowhere else.
+    ///
+    /// Guarded on the rising edge: iOS re-posts this while the keyboard
+    /// is already up, and rebuilding then is the mid-session reshuffle
+    /// issue #269 was about.
+    @objc private func keyboardWillShow(_ note: Notification) {
+        guard !keyboardVisible else { return }
+        keyboardVisible = true
+        refreshOrderState { [weak self] in self?.rebuildButtons() }
+    }
+
+    @objc private func keyboardWillHide(_ note: Notification) {
+        keyboardVisible = false
+    }
+
+    /// Pull the tap counts and the lock out of the webview's
+    /// `localStorage`, which is where both live (`OutlKit.ToolbarLock`
+    /// explains why the bar does not keep its own `UserDefaults` copy).
+    /// One `evaluateJavaScript` for both, so the two can't be read from
+    /// different moments.
+    ///
+    /// Async because `evaluateJavaScript` is; the keyboard animation
+    /// gives it far more time than it needs, and a failure (JS not
+    /// ready, storage disabled) leaves the previous values in place
+    /// rather than silently unlocking a bar the user locked.
+    ///
+    /// Resolves the webview through `resolveWebView()`, not the stored
+    /// property: `OutlSwizzle.bindWebView` gives up after ~4s, and
+    /// `invoke` already re-scans the hierarchy for exactly that reason.
+    /// Reading it the other way meant a bound-late webview left the bar
+    /// ignoring the user's lock with no error anywhere.
+    private func refreshOrderState(completion: @escaping () -> Void) {
+        guard let web = resolveWebView() else {
+            completion()
+            return
+        }
+        let js = """
+        JSON.stringify([
+          localStorage.getItem('\(ToolbarMFU.storageKey)'),
+          localStorage.getItem('\(ToolbarLock.storageKey)')
+        ])
+        """
+        web.evaluateJavaScript(js) { [weak self] result, error in
+            guard let self else {
+                completion()
+                return
+            }
+            if error == nil, let pair = ToolbarStore.parsePair(result as? String) {
+                // A missing key parses to "no counts" / "not locked",
+                // which are the correct answers and the one case where
+                // clearing the cache is right.
+                self.counts = pair.counts
+                self.lockedOrder = pair.locked
+            }
+            completion()
+        }
     }
 
     private func invoke(_ action: ToolbarAction) {

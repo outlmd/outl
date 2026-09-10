@@ -3,25 +3,9 @@ import XCTest
 
 final class ToolbarMFUTests: XCTestCase {
 
-    /// Each test runs against a fresh, named `UserDefaults` suite so
-    /// we never touch the developer's real device prefs and tests
-    /// don't bleed into one another.
-    private var defaults: UserDefaults!
-    private var suiteName: String!
-
-    override func setUp() {
-        super.setUp()
-        suiteName = "OutlKitTests.ToolbarMFU.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-    }
-
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults = nil
-        suiteName = nil
-        super.tearDown()
-    }
+    // `ToolbarMFU` is pure ordering now — the counts live in the
+    // webview's `localStorage` and are parsed by `ToolbarStore`, so
+    // there is no `UserDefaults` suite left to isolate.
 
     // MARK: - Pure ordering
 
@@ -95,42 +79,6 @@ final class ToolbarMFUTests: XCTestCase {
         }
     }
 
-    // MARK: - Persistence
-
-    func testRecordIncrementsCount() {
-        ToolbarMFU.record(.code, defaults: defaults)
-        ToolbarMFU.record(.code, defaults: defaults)
-        let counts = ToolbarMFU.readCounts(defaults: defaults)
-        XCTAssertEqual(counts["code"], 2)
-    }
-
-    func testRecordIsNoOpForPinnedFirstAndLast() {
-        ToolbarMFU.record(.newLine, defaults: defaults)
-        ToolbarMFU.record(.done, defaults: defaults)
-        let counts = ToolbarMFU.readCounts(defaults: defaults)
-        XCTAssertNil(counts["newLine"])
-        XCTAssertNil(counts["done"])
-    }
-
-    func testClearCountsRemovesEntry() {
-        ToolbarMFU.record(.bold, defaults: defaults)
-        XCTAssertEqual(ToolbarMFU.readCounts(defaults: defaults)["bold"], 1)
-        ToolbarMFU.clearCounts(defaults: defaults)
-        XCTAssertTrue(ToolbarMFU.readCounts(defaults: defaults).isEmpty)
-    }
-
-    func testOrderedActionsConvenienceReadsFromDefaults() {
-        ToolbarMFU.record(.italic, defaults: defaults)
-        ToolbarMFU.record(.italic, defaults: defaults)
-        ToolbarMFU.record(.code, defaults: defaults)
-        let order = ToolbarMFU.orderedActions(defaults: defaults)
-        // italic (2) > code (1) > everything else (0), so italic must
-        // land at index 1 (right after the pinned newLine).
-        XCTAssertEqual(order[0], .newLine)
-        XCTAssertEqual(order[1], .italic)
-        XCTAssertEqual(order.last, .done)
-    }
-
     // MARK: - Middle range (pinned-excluded)
 
     /// `orderedMiddleActions` is what the view layer feeds into the
@@ -154,14 +102,6 @@ final class ToolbarMFUTests: XCTestCase {
         // pinned `+`).
         let middle = ToolbarMFU.orderedMiddleActions(counts: ["code": 10])
         XCTAssertEqual(middle.first, .code)
-    }
-
-    func testOrderedMiddleActionsConvenienceReadsFromDefaults() {
-        ToolbarMFU.record(.bold, defaults: defaults)
-        let middle = ToolbarMFU.orderedMiddleActions(defaults: defaults)
-        XCTAssertEqual(middle.first, .bold)
-        XCTAssertFalse(middle.contains(.newLine))
-        XCTAssertFalse(middle.contains(.done))
     }
 
     /// Pinned + middle must reconstruct the full `orderedActions` list

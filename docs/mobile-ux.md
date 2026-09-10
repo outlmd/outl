@@ -77,6 +77,31 @@ Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToo
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
 Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/clients.md` → Keyboard accessory bar](clients.md#keyboard-accessory-bar-mobile).
 
+### The row only changes shape between editing sessions
+
+MFU reorders the middle range, and both bars used to reorder it **on every tap** (`rebuildButtons()` in Swift, a re-read signal in `KeyboardToolbar.tsx`).
+That moved the button the user had just hit out from under their finger before they could hit it again, so indent-indent-indent landed on three different buttons ([#269](https://github.com/outlmd/outl/issues/269)).
+Now the order is resolved once per editing session and held: the web bar reads it at mount (its parent gates it on `editingId()`, so a mount *is* a session), and the native bar reads it when the keyboard **appears** — `OutlSwizzle` keeps one `OutlToolbarView` for the whole app lifetime, so a keyboard notification is the only thing that marks a session boundary there.
+
+`keyboardWillShowNotification` is not one-per-session, which is the trap: iOS re-posts it while the keyboard is already up (input-mode switch, emoji, the QuickType bar appearing — which this app keeps on). Acting on every post puts the mid-session reshuffle straight back, so `OutlToolbarView` tracks `keyboardVisible` and rebuilds only on the rising edge. `OutlSuggestOverlay` already kept the same flag for the same reason.
+Taps are still counted the moment they happen; MFU just gets to act on the count at the next session rather than mid-gesture.
+
+### Locking the order (`SettingsSheet`)
+
+The header's gear opens `components/SettingsSheet.tsx`, mobile's first **preferences** surface (every other sheet shows workspace content).
+It carries two toolbar controls: "Lock button order", which freezes the row the user has today, and "Reset button order", which forgets the MFU counts.
+Reset re-freezes on the cold-start order when the bar is locked — a locked bar renders its snapshot, so wiping the counts alone would change nothing on screen, and the user asked for the default back, not to be unlocked.
+
+Both are **per-device UI state in `localStorage`**, never the op log: two devices disagreeing about their own toolbar layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7).
+
+**Neither the lock nor the tap counts live in `UserDefaults`, and that is what makes these two buttons work on iOS.**
+The bar there is native, but the sheet that locks and resets it is web.
+While the counts sat in `UserDefaults`, the sheet read an always-empty store: "Lock button order" froze the *cold-start* row rather than the user's own — reintroducing the very reshuffle it exists to stop — and "Reset button order" did nothing at all.
+So `localStorage` is the single home for both, `Journal.tsx`'s `dispatchToolbarAction` is the single counter (every tap from either bar passes through it), and `OutlToolbar.swift` reads the pair back with one `evaluateJavaScript` when the keyboard appears.
+A failed read keeps the previous values rather than silently unlocking a bar the user locked.
+
+The two storage keys are pinned on both sides — `ToolbarStoreTests` in Swift, `keys.test.ts` in TypeScript — because nothing fails at build time when one language renames one: the bar just stops seeing the user's taps and lock, silently.
+
 ## Code execution (`run_code_block`)
 
 Long-press a `` ```lang …``` `` block → "Run `<lang>`" fires `runCodeBlock`.

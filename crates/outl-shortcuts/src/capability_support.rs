@@ -15,7 +15,7 @@
 use crate::support::{ClientSupport, Support};
 use crate::Capability;
 
-use Support::{Full, Missing, Partial};
+use Support::{Full, Missing, NotApplicable, Partial};
 
 /// Reasons repeated across rows, named once so a re-wording lands on
 /// every row at once instead of some.
@@ -63,6 +63,16 @@ mod why {
     pub const NO_BANNER_ACTIONS: &str =
         "Reminder banners can't carry buttons here — open the reminders list (Ctrl+R in the \
          TUI, Cmd/Ctrl+Shift+R on desktop) to snooze or tick off what came due.";
+
+    /// Neither the TUI nor the desktop renders a keyboard accessory
+    /// bar: both are driven by a physical keyboard, where every
+    /// toolbar action is a fixed chord from `defaults.rs`. A chord
+    /// does not move, so there is no order to pin and nothing a
+    /// lock would buy — this is a property of the input device, not
+    /// work left undone.
+    pub const NO_SOFT_KEYBOARD_BAR: &str =
+        "There's no on-screen toolbar to pin here — these actions have fixed keyboard \
+         shortcuts, so they never move.";
 
     pub const DESKTOP_HOSTS_ONLY: &str =
         "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
@@ -169,6 +179,15 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Missing(why::NO_BANNER_ACTIONS),
             mobile: Full,
         },
+        // Mobile: the header gear opens `SettingsSheet.tsx` — "Lock
+        // button order" freezes the row, "Reset button order" drops
+        // the MFU counts. The other two clients have no soft-keyboard
+        // bar for the setting to act on.
+        Capability::ToolbarOrderLock => ClientSupport {
+            tui: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
+            desktop: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
+            mobile: Full,
+        },
     }
 }
 
@@ -214,7 +233,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 7, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 8, "Capability::ALL changed size");
     }
 
     #[test]

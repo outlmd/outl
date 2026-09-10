@@ -5,22 +5,34 @@
  * tap counts and re-order the *middle* of the row by count desc on each
  * read, keeping the first/last slots pinned (`newLine` / `done`).
  *
- * The store is `localStorage` (the web equivalent of the iOS bar's
- * `UserDefaults`) under the same versioned key. The two stores are
- * independent — a device driving the native iOS bar and a device driving
- * the web bar keep their own counts — which is correct: MFU is per-device
- * UI state, never a synced value.
+ * The store is `localStorage`, and it is the **only** one: the iOS bar
+ * is native but records its taps through `window.__outlToolbar` into
+ * this same key (`Journal.tsx`'s `dispatchToolbarAction` is the single
+ * counter for both bars), and reads them back through
+ * `OutlKit.ToolbarStore`.
+ *
+ * It used to keep a second copy in `UserDefaults`, on the argument that
+ * only one bar runs per device so the two could not disagree. The
+ * argument was wrong: the **settings sheet** is web on iOS too, so it
+ * read an always-empty store — "Lock button order" froze a cold-start
+ * row instead of the user's, and "Reset button order" did nothing.
+ * Counts are still per-device UI state, never a synced value.
  *
  * The pure `orderedMiddleActions(counts)` / `record(action, counts)`
  * overloads take an explicit map so they stay deterministic and testable;
  * the `*FromStore` convenience wrappers read/write `localStorage`.
+ *
+ * MFU decides the order usage *suggests*. Whether that suggestion is
+ * applied at all is `./lock`'s question — see `resolveMiddleOrder`.
  */
 import {
   DEFAULT_ORDER,
+  MIDDLE_ORDER,
   PINNED_FIRST,
   PINNED_LAST,
   type ToolbarAction,
 } from "./actions";
+import { safeGet, safeRemove, safeSet } from "./storage";
 
 /** Versioned so a future schema change can't misread old shapes.
  *  Same string as the Swift `ToolbarMFU.storageKey`. */
@@ -28,7 +40,11 @@ export const MFU_STORAGE_KEY = "outl.toolbar.mfu.v1";
 
 export type ToolbarCounts = Partial<Record<ToolbarAction, number>>;
 
-function isToolbarAction(key: string): key is ToolbarAction {
+/** Is this string one of the catalog's action ids? Exported because the
+ *  iOS bar ships its action as a bare string over the
+ *  `window.__outlToolbar` bridge, and an id the catalog doesn't have
+ *  must not reach `recordToStore` — it would be persisted forever. */
+export function isToolbarAction(key: string): key is ToolbarAction {
   return (DEFAULT_ORDER as readonly string[]).includes(key);
 }
 
@@ -60,10 +76,7 @@ export function parseCounts(raw: string | null): ToolbarCounts {
  * `ToolbarMFU.orderedMiddleActions(counts:)`.
  */
 export function orderedMiddleActions(counts: ToolbarCounts): ToolbarAction[] {
-  const middle = DEFAULT_ORDER.filter(
-    (a) => a !== PINNED_FIRST && a !== PINNED_LAST,
-  );
-  return [...middle].sort((a, b) => {
+  return [...MIDDLE_ORDER].sort((a, b) => {
     const ca = counts[a] ?? 0;
     const cb = counts[b] ?? 0;
     if (ca !== cb) return cb - ca;
@@ -83,38 +96,8 @@ export function record(action: ToolbarAction, counts: ToolbarCounts): ToolbarCou
 }
 
 // ── localStorage-backed convenience ──────────────────────────────────
-// `localStorage` may be unavailable (SSR, private-mode quotas); every
-// wrapper degrades to in-memory defaults rather than throwing, so a
-// storage failure never breaks the toolbar.
-
-/** Resolve the `Storage` from whichever global exposes it (the bare
- *  `localStorage` identifier resolves against `window` in the webview
- *  and against the happy-dom global in tests; `globalThis.localStorage`
- *  is undefined in some of those environments). Returns `null` when
- *  storage is unavailable (SSR, private-mode). */
-function store(): Storage | null {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage : null;
-  } catch {
-    return null;
-  }
-}
-
-function safeGet(key: string): string | null {
-  try {
-    return store()?.getItem(key) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function safeSet(key: string, value: string): void {
-  try {
-    store()?.setItem(key, value);
-  } catch {
-    // ignore — MFU is best-effort UI polish, not durable state
-  }
-}
+// Reads/writes go through `./storage`, which degrades to in-memory
+// defaults rather than throwing when `localStorage` is unavailable.
 
 /** Read counts from `localStorage`. */
 export function readCountsFromStore(): ToolbarCounts {
@@ -131,4 +114,12 @@ export function recordToStore(action: ToolbarAction): ToolbarCounts {
 /** MFU-ordered middle range read straight from `localStorage`. */
 export function orderedMiddleFromStore(): ToolbarAction[] {
   return orderedMiddleActions(readCountsFromStore());
+}
+
+/** Wipe every count, sending the row back to `DEFAULT_ORDER` on the
+ *  next read. Backs the settings sheet's "Reset button order", for both
+ *  bars: Swift's `ToolbarMFU.clearCounts` used to be the iOS half and
+ *  is gone along with the `UserDefaults` store it cleared. */
+export function clearCountsInStore(): void {
+  safeRemove(MFU_STORAGE_KEY);
 }
