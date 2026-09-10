@@ -14,20 +14,14 @@ Anything visual — colours, tokens, spacing, components — is specified in [`D
 `[[avelino/outl]]`, `[[2026-06-04]]`, `#code-review`, picker entries — every "tap a ref → see a page" path on the frontend goes through **one** Tauri command, `open_ref(target)`, which wraps `outl_actions::page::open_or_create_by_ref`.
 The single decision tree (date → journal, else literal/slugified/title match → existing page, else create as page) lives in the shared crate so a frontend regex cannot drift from a backend parser the way it did before `open_ref` existed.
 
-What used to be wrong: the frontend split the journal-vs-page
-decision with `/^\d{4}-\d{2}-\d{2}$/` and routed to one of two
-strict-validating commands (`open_journal_for` / `open_page_by_slug`).
-`[[2026-13-01]]` matched the regex, hit `open_journal_for`, and
-surfaced an `invalid date slug` toast — even though falling through
-to "create a regular page" was clearly the right behaviour.
+What used to be wrong: the frontend split the journal-vs-page decision with `/^\d{4}-\d{2}-\d{2}$/` and routed to one of two strict-validating commands (`open_journal_for` / `open_page_by_slug`).
+`[[2026-13-01]]` matched the regex, hit `open_journal_for`, and surfaced an `invalid date slug` toast — even though falling through to "create a regular page" was clearly the right behaviour.
 
 `open_page_by_slug` is kept for the picker (the picker already hands the command a clean slug from a known page).
 `open_journal_for` stays for date-navigation commands (`previousDay` / `nextDay`) whose input is derived from controlled state, not from a user tap.
 Every **ref-click** code path on the frontend (`handleRefClick`, `handleTagClick`) must call `openRef` so the decision tree is single-sourced.
 
-`resolve_ref` survives for autocomplete previews ("this ref will
-land on `<page>`") but is **not** the navigation entry point — for
-that, always call `openRef`.
+`resolve_ref` survives for autocomplete previews ("this ref will land on `<page>`") but is **not** the navigation entry point — for that, always call `openRef`.
 
 ## Page switcher — long-press to delete
 
