@@ -158,7 +158,7 @@ pub fn apply(
     // file over. A refusal must reach the caller: the ops just applied are
     // safe in the log, but the user asked for a projection and needs to
     // know it did not land on disk.
-    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page)?;
+    ctx.commit(page)?;
 
     Ok(json!({
         "template": name,
@@ -211,7 +211,7 @@ pub fn run_template(
     // disk. Guarded + propagated for the same reason as `apply` above: this
     // is an existing page's `.md`, and a frozen one must refuse rather than
     // silently drop unlogged content (RFC 0255).
-    outl_actions::apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, page)?;
+    ctx.commit(page)?;
 
     let dto = ExecOutputDto::from(&out);
     Ok(json!({

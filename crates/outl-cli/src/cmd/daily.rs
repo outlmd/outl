@@ -11,8 +11,8 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 
 use outl_actions::{
-    append_block, apply_page_md_with_sidecar_guarded, journal_slug, open_journal, open_today,
-    page_meta, project_outline, render_page_md, today,
+    append_block, journal_slug, open_journal, open_today, page_meta, project_outline,
+    render_page_md, today,
 };
 
 use crate::human::print_outline_tree;
@@ -109,16 +109,21 @@ pub fn run(cmd: &DailyCommand, path: &Path) -> i32 {
 
 /// Open today's journal, render its projection, return meta + outline.
 pub fn today_handler(ctx: &mut WsCtx) -> Result<Value, ApiError> {
-    let id = open_today(&mut ctx.workspace, &ctx.hlc).map_err(ApiError::internal)?;
-    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
+    let hlc = ctx.hlc.clone();
+    // `open_today` may create the journal, so the page id is not known
+    // until the mutation runs. Open it first, then commit an empty
+    // mutation for the projection and the steps around it.
+    let id = open_today(&mut ctx.workspace, &hlc).map_err(ApiError::internal)?;
+    ctx.commit(id)?;
     journal_payload(ctx, id, today())
 }
 
 /// Open the journal for `date`.
 pub fn get(ctx: &mut WsCtx, date: &str) -> Result<Value, ApiError> {
     let parsed = parse_date(date)?;
-    let id = open_journal(&mut ctx.workspace, &ctx.hlc, parsed).map_err(ApiError::internal)?;
-    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
+    let hlc = ctx.hlc.clone();
+    let id = open_journal(&mut ctx.workspace, &hlc, parsed).map_err(ApiError::internal)?;
+    ctx.commit(id)?;
     journal_payload(ctx, id, parsed)
 }
 
@@ -128,11 +133,12 @@ pub fn append(ctx: &mut WsCtx, date: Option<&str>, text: &str) -> Result<Value, 
         Some(d) => parse_date(d)?,
         None => today(),
     };
-    let journal_id =
-        open_journal(&mut ctx.workspace, &ctx.hlc, parsed).map_err(ApiError::internal)?;
-    let block_id = append_block(&mut ctx.workspace, &ctx.hlc, Some(journal_id), Some(text))
-        .map_err(ApiError::internal)?;
-    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, journal_id)?;
+    let hlc = ctx.hlc.clone();
+    let journal_id = open_journal(&mut ctx.workspace, &hlc, parsed).map_err(ApiError::internal)?;
+    let text = text.to_string();
+    let block_id = ctx.commit_with(journal_id, |ws| {
+        append_block(ws, &hlc, Some(journal_id), Some(&text))
+    })?;
     Ok(json!({
         "date": journal_slug(parsed),
         "block_id": block_id.to_string(),

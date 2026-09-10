@@ -358,6 +358,10 @@ impl App {
                     self.status = format!("create person {choice} failed: {e}");
                 }
                 Ok(id) => {
+                    // Step 5 alone, on a *different* page than the one being
+                    // edited (the person page just created). The pipeline
+                    // does not fit this crate yet — see issue #263 and the
+                    // note in `actions/exec.rs`.
                     let workspace_root = self.workspace_root.clone();
                     match outl_actions::apply_page_md_with_sidecar_guarded(
                         &self.workspace,

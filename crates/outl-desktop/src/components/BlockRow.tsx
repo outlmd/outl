@@ -882,26 +882,31 @@ export function BlockRow(props: {
         </Show>
 
         {/*
-         * Indent guides — one per ancestor level. Hairline only,
-         * fades in when the row chrome is visible (hover / selected /
-         * editing). Keeps the reading surface clean when at rest.
+         * Indent guides, one per ancestor level. Hairline at 20 %, and
+         * deliberately **not** `.outl-row-chrome`: a guide is a column
+         * cue, read as a vertical line down the whole page, so revealing
+         * it per row makes it flicker under the pointer and never shows
+         * the structure it exists to show. The chevron is per-row chrome
+         * and does hide; these do not.
          */}
         <For each={Array.from({ length: props.depth })}>
           {() => (
             <span
               aria-hidden="true"
-              class="outl-row-chrome ml-[10px] w-3 shrink-0 self-stretch border-l border-(--color-outl-border)/20"
+              class="ml-[10px] w-3 shrink-0 self-stretch border-l border-(--color-outl-border)/20"
             />
           )}
         </For>
 
-        {/* Fold chevron — opacity 0 at rest (via `.outl-row-chrome`
-         * styles), visible on hover / selection. */}
+        {/* Fold chevron. `.outl-row-chrome` owns its opacity: 0 at
+         * rest, 1 on hover / focus-within / selected / visual / editing
+         * (see `styles.css`). A chevron on every row at rest is noise;
+         * `focus-within` is what keeps it reachable without a mouse. */}
         <button
           type="button"
           class={`outl-row-chrome ml-[6px] mt-[6px] min-w-[16px] select-none whitespace-nowrap text-left text-[9px] font-mono ${
             props.block.children.length === 0 ? "" : "cursor-pointer"
-          } opacity-60 hover:opacity-100 disabled:cursor-default`}
+          } disabled:cursor-default`}
           disabled={props.block.children.length === 0}
           onClick={(e) => {
             e.stopPropagation();
@@ -949,7 +954,7 @@ export function BlockRow(props: {
                 else void props.cb.onToggleTodo(props.block.id);
               }}
               {...(isInteractive() ? { "data-todo": "true" } : {})}
-              class={`outl-row-chrome mt-[5px] mr-2 w-3 shrink-0 cursor-pointer select-none text-center text-[13px] leading-none transition-opacity hover:opacity-70 ${bulletClass()}`}
+              class={`mt-[5px] mr-2 w-3 shrink-0 cursor-pointer select-none text-center text-[13px] leading-none transition-opacity hover:opacity-70 ${bulletClass()}`}
               title={
                 props.block.todo === "DONE"
                   ? "Click to uncheck"

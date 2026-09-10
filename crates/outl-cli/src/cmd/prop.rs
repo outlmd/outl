@@ -10,7 +10,7 @@ use std::path::Path;
 use clap::Subcommand;
 use serde_json::{json, Value};
 
-use outl_actions::{apply_page_md_with_sidecar_guarded, find_by_slug, set_property};
+use outl_actions::{find_by_slug, set_property};
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 
@@ -110,16 +110,11 @@ pub fn set(ctx: &mut WsCtx, page: &str, assignment: &str) -> Result<Value, ApiEr
 /// Used by the MCP shim so we don't have to `format!("{k}={v}")`.
 pub fn set_kv(ctx: &mut WsCtx, page: &str, key: &str, value: &str) -> Result<Value, ApiError> {
     let id = resolve_page(ctx, page)?;
-    set_property(
-        &mut ctx.workspace,
-        &ctx.hlc,
-        id,
-        key,
-        Some(PropValue::Text(value.to_string())),
-    )
-    .map_err(ApiError::internal)?;
-
-    apply_page_md_with_sidecar_guarded(&ctx.workspace, &ctx.root, id)?;
+    let hlc = ctx.hlc.clone();
+    let owned = value.to_string();
+    ctx.commit_with(id, |ws| {
+        set_property(ws, &hlc, id, key, Some(PropValue::Text(owned)))
+    })?;
     Ok(json!({ "page": page, "key": key, "value": value }))
 }
 

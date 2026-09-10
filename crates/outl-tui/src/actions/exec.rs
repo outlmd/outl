@@ -65,6 +65,13 @@ impl App {
         // like `run_callable_block`'s own error instead of being
         // swallowed. Both callers (`maybe_run_call_block`,
         // `rerun_call_block_at`) already show `Err` on the status line.
+        // Step 5 of the commit pipeline, taken alone. This crate derives
+        // its ops from rendered markdown rather than applying them (issue
+        // #263), so `outl_actions::commit_page` does not fit here yet: its
+        // announce would double up with the one `save_page_with` already
+        // does on the next flush, and its undo hook expects
+        // `HistoryStacks<String>` while the TUI undoes on the AST.
+        // Migrating these sites is part of #263, not a separate cleanup.
         if let Some(root) = self.workspace.root.clone() {
             let slug = self.current_slug();
             if let Some(page_id) = outl_actions::find_by_slug(&self.workspace, &slug) {

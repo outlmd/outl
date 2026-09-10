@@ -75,6 +75,14 @@ pub fn instantiate_template_at<S: AppHost>(
     let projection_failure = with_ws_mut(state, |ws| {
         instantiate_template(ws, state.hlc(), &name, node, &slug, page_date)
             .map_err(|e| e.to_string())?;
+        // Takes step 5 of the commit pipeline directly rather than
+        // going through `outl_actions::commit_page`. Deliberate for two
+        // of the four steps it skips: instantiating a template is not
+        // undoable as one unit today, and the announce happens below
+        // instead, outside the workspace lock, because the slug it needs
+        // was already resolved. The backlink-index invalidation is a
+        // genuine gap — a template can carry `[[refs]]`. Issue #264.
+        //
         // Guarded — same reason as every other post-mutation projection:
         // the write is required, deleting unlogged bytes to achieve it is
         // not (invariant 8).

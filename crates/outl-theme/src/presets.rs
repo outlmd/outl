@@ -39,6 +39,7 @@ pub fn outl() -> Palette {
         accent_alt: accent_alt.into(),
         warn: warn.into(),
         destructive: "#fb7185".into(), // rose-400, the value mobile already ships
+        destructive_fg: "#0c0814".into(), // the canvas itself, 7.36:1
         ref_link_fg: accent.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: blue.into(),
@@ -121,6 +122,7 @@ pub fn outl_light() -> Palette {
         accent_alt: accent_alt.into(),
         warn: warn.into(),
         destructive: "#e11d48".into(), // rose-600, the value mobile already shipped
+        destructive_fg: "#ffffff".into(), // 4.70:1; this palette's own bg is 4.31 and fails
         ref_link_fg: accent.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: blue.into(),
@@ -187,7 +189,8 @@ pub fn default_dark() -> Palette {
         accent_soft: "#55ffff".into(),
         accent_alt: green.into(),
         warn: yellow.into(),
-        destructive: "#ff5555".into(), // ANSI bright red
+        destructive: "#ff5555".into(),    // ANSI bright red
+        destructive_fg: "#000000".into(), // ANSI black, 6.68:1
         ref_link_fg: cyan.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: blue.into(),
@@ -247,7 +250,8 @@ pub fn light() -> Palette {
         accent_soft: "#3399ff".into(),
         accent_alt: green.into(),
         warn: yellow.into(),
-        destructive: "#dc2626".into(), // red-600, readable on white
+        destructive: "#dc2626".into(),    // red-600, readable on white
+        destructive_fg: "#ffffff".into(), // the canvas itself, 4.83:1
         ref_link_fg: blue.into(),
         tag_link_fg: red.into(),
         md_link_fg: blue.into(),
@@ -320,6 +324,7 @@ pub fn logseq_light() -> Palette {
         accent_alt: green.into(),
         warn: orange.into(),
         destructive: "#c5372c".into(), // Blueprint red, matches its link blue
+        destructive_fg: "#ffffff".into(), // the canvas itself, 5.31:1
         ref_link_fg: blue.into(),
         tag_link_fg: blue_deep.into(),
         md_link_fg: blue.into(),
@@ -379,7 +384,8 @@ pub fn dracula() -> Palette {
         accent_soft: purple.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
-        destructive: "#ff5555".into(), // Dracula "red"
+        destructive: "#ff5555".into(),    // Dracula "red"
+        destructive_fg: "#21222c".into(), // Dracula bg_elev, 5.03:1 (plain bg is 4.53, too thin)
         ref_link_fg: cyan.into(),
         tag_link_fg: pink.into(),
         md_link_fg: purple.into(),
@@ -443,7 +449,8 @@ pub fn solarized_dark() -> Palette {
         accent_soft: violet.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
-        destructive: red.into(), // Solarized red
+        destructive: red.into(),          // Solarized red
+        destructive_fg: "#ffffff".into(), // 4.63:1; every Solarized base tone fails
         ref_link_fg: blue.into(),
         tag_link_fg: magenta.into(),
         md_link_fg: violet.into(),
@@ -507,7 +514,8 @@ pub fn nord() -> Palette {
         accent_soft: frost2.into(),
         accent_alt: aurora_green.into(),
         warn: aurora_yellow.into(),
-        destructive: aurora_red.into(), // nord11
+        destructive: aurora_red.into(),   // nord11
+        destructive_fg: "#000000".into(), // 5.13:1; nord0 is the darkest Nord tone and only reaches 3.05
         ref_link_fg: frost1.into(),
         tag_link_fg: aurora_purple.into(),
         md_link_fg: frost3.into(),
@@ -567,7 +575,8 @@ pub fn monokai() -> Palette {
         accent_soft: purple.into(),
         accent_alt: green.into(),
         warn: yellow.into(),
-        destructive: pink.into(), // Monokai pink
+        destructive: pink.into(),         // Monokai pink
+        destructive_fg: "#141511".into(), // 4.85:1; darker than Monokai bg, which reaches only 3.93
         ref_link_fg: blue.into(),
         tag_link_fg: pink.into(),
         md_link_fg: blue.into(),
@@ -636,6 +645,7 @@ pub fn gruvbox() -> Palette {
         accent_alt: green.into(),
         warn: orange.into(),
         destructive: red.into(),
+        destructive_fg: "#1d2021".into(), // gruvbox dark0_hard, 4.77:1
         ref_link_fg: aqua.into(),
         tag_link_fg: purple.into(),
         md_link_fg: blue.into(),

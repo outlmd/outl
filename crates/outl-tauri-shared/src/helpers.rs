@@ -303,7 +303,8 @@ impl<S: AppHost> CommitHooks for TauriCommitHooks<'_, S> {
             writer.queue(page);
             return;
         }
-        // Synchronous fallback for a host with no projection worker.
+        // This *is* step 5 of the commit pipeline, not a caller taking it
+        // alone: synchronous fallback for a host with no projection worker.
         if let Err(e) = apply_page_md_with_sidecar_guarded(workspace, self.root, page) {
             warn!("page md+sidecar sync failed: {e}");
             self.projection_failure = Some(e);

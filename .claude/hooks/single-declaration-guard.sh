@@ -136,18 +136,15 @@ case "$file_path" in
         *tests*|*/tests/*) ;;
         # Known-pending call sites, frozen so the hook is quiet on
         # existing debt and loud on new code — the same shape as the
-        # file-size ratchet. These are the CLI and TUI callers issue
-        # #264's definition of done names: each takes step 5 alone and
-        # none of them wrote down which of the other four it skips.
+        # file-size ratchet.
+        #
+        # The CLI rows are gone: those commands go through
+        # `WsCtx::commit` now. What is left is the TUI, whose migration
+        # is gated on issue #263 (it derives ops from rendered markdown
+        # rather than applying them, so the pipeline does not fit yet).
         #
         # This list may only ever get shorter. Migrating a file to
         # `commit_page` means deleting its row, not editing it.
-        */outl-cli/src/cmd/page.rs) ;;
-        */outl-cli/src/cmd/prop.rs) ;;
-        */outl-cli/src/cmd/asset.rs) ;;
-        */outl-cli/src/cmd/block.rs) ;;
-        */outl-cli/src/cmd/daily.rs) ;;
-        */outl-cli/src/cmd/template.rs) ;;
         */outl-tui/src/actions/exec.rs) ;;
         */outl-tui/src/actions/autocomplete.rs) ;;
         */outl-tui/src/actions/block/template.rs) ;;

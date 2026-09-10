@@ -240,6 +240,18 @@ pub fn move_block_after<S: AppHost>(
         // one it landed on.
         let source_page = enclosing_page_id(ws, node);
         move_after(ws, state.hlc(), node, after).map_err(|e| e.to_string())?;
+        // **Not** routed through `outl_actions::commit_page`, and this is
+        // the one shape that cannot be: a cross-page move dirties two
+        // pages, and `commit_page` is scoped to one. Splitting it into
+        // two commits would take two undo snapshots and announce twice
+        // for a single user gesture.
+        //
+        // What that costs, stated rather than hidden: this path takes
+        // step 5 alone. No undo snapshot, no backlink-index
+        // invalidation, no peer announce — and a cross-page move is
+        // exactly the mutation most likely to change backlinks. Issue
+        // #264 tracks giving the pipeline a multi-page shape.
+        //
         // Guarded: a mutation must project, but projecting must not
         // delete content the op log never saw (invariant 8). The move
         // itself is already in the log; only the on-disk `.md` lags, and

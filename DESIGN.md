@@ -383,19 +383,26 @@ Desktop renders it structurally — one hairline guide element per ancestor leve
   {() => (
     <span
       aria-hidden="true"
-      class="outl-row-chrome ml-[10px] w-3 shrink-0 self-stretch border-l border-(--color-outl-border)/20"
+      class="ml-[10px] w-3 shrink-0 self-stretch border-l border-(--color-outl-border)/20"
     />
   )}
 </For>
 ```
 
 `ml-[10px]` + `w-3` (12px) = 22px per level. Mobile's hairline sits at `16 + depth * 22 + 5` px, at 35 % border
-opacity; the desktop's at 20 %. Both are `aria-hidden`, both carry the `.outl-row-chrome` marker class that is
-meant to hold them at rest and reveal them on hover / selection / editing.
+opacity; the desktop's at 20 %. Both are `aria-hidden`, and both are deliberately **not** `.outl-row-chrome`.
+A guide is a *column* cue, read as a line down the whole page, so revealing it per row makes it flicker under
+the pointer and never shows the structure it exists to show. The fold chevron is per-row chrome and does hide.
 That is the layout principle in one element: **structure visible on demand, prose visible always.**
 
-> `.outl-row-chrome` and `.outl-row` are referenced in `BlockRow.tsx` but **no CSS rule defines either**
-> anywhere in the repo. The intent above is the design; the reveal-on-hover behaviour is currently unimplemented.
+`.outl-row-chrome` is defined in the desktop's `styles.css`, unlayered so it wins over Tailwind's utilities:
+`opacity: 0` at rest, `1` on `:hover`, `:focus-within`, and the row's `data-selected` / `data-visual` /
+`data-editing` states. `focus-within` is load-bearing rather than decorative, since without it the chevron is
+unreachable by keyboard and "quieter at rest" becomes "fold is mouse-only". The fade is dropped under
+`prefers-reduced-motion`.
+
+It marks the fold chevron and nothing else. The bullet carried it once, which would have hidden the primary
+affordance of an outliner; the class had been applied to three elements and only one of them was chrome.
 
 ### The two odd numbers
 
@@ -624,12 +631,9 @@ so nobody has to rediscover them, and so nobody cites one as precedent.
 
 | Where | What | Standing |
 |---|---|---|
-| `SyncIndicator.tsx`, `SyncPanel.tsx` (desktop), `SyncDot.tsx` (mobile) | `"#34c759"` / `"#ff9500"` — iOS system green and orange, hardcoded in **three** places | A second definition of a colour, triplicated, with no `Palette` field behind it. The kind of drift invariant 13 exists to prevent. |
 | `@outl/shared/highlight/styles.css` | 11 hex literals — a complete single-theme syntax palette | **Deliberate.** Code blocks read against the brand-dark canvas on every preset; the file says so. A syntax theme is its own vocabulary, not a `Palette` role. |
 | `@outl/shared/peers/styles.css` | `#fff` on the pairing QR | **Deliberate.** The quiet zone must stay white or the code stops scanning. |
 | mobile `styles.css` `.scan-*`, both `index.html` files | `#fff`, `#000`, raw `rgba()`, `#0c0814` / `#f6f4fb` | **Deliberate.** The scan overlay sits on a live camera feed, not a themed surface; `index.html` values are the pre-JS boot frame, and the desktop's are `var()` *fallbacks* rather than overrides. |
-| `Sidebar.tsx` | `hover:text-(--color-outl-error,--color-outl-fg)` | `--color-outl-error` is **not** a `Palette` field. `the_theme_tokens_match_the_palette` only scans `@theme` blocks, so a bogus token used in a component escapes it. `destructive` is the field this wanted. |
-| `SelectionToolbar.tsx`, `Journal.tsx`, `Toast.tsx` | literal `text-white` on `bg-(--color-outl-accent)` / `bg-(--color-outl-destructive)` | Correct on every dark preset, wrong on `outl-light`, where the accent's paired foreground is `bg` (`#f6f4fb`), not white. |
 | `ErrorToast.tsx` | uses `--color-outl-status-message-fg`, absent from both `@theme` blocks | The utility resolves; only the first painted frame is unstyled. Same shape as the `ref-link` incident above. |
 
 ## Theming — light, dark, and who resolves it
