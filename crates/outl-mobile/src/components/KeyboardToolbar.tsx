@@ -1,9 +1,8 @@
-import { createSignal, For, type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 import {
-  orderedMiddleFromStore,
   PINNED_FIRST,
   PINNED_LAST,
-  recordToStore,
+  resolveMiddleFromStore,
   type ToolbarAction,
   TOOLBAR_META,
 } from "@outl/shared/toolbar";
@@ -22,18 +21,30 @@ import {
  * just the pill. The catalog + ordering live in `@outl/shared/toolbar`, so
  * this file is pure chrome (icons + capsule + the focus-preserving tap
  * glue).
+ *
+ * **The order is resolved once per mount and never during a session.**
+ * The parent gates this component on `editingId()`, so a mount *is* an
+ * editing session: the row is laid out when the keyboard comes up and
+ * holds still until it goes down. Re-reading after every tap (which is
+ * what this did, mirroring the native bar's `rebuildButtons()`) moved
+ * the button the user had just hit out from under their finger before
+ * they could hit it again, so indent-indent-indent landed on three
+ * different buttons — issue #269. MFU still counts every tap; it just
+ * gets to act on the count at the next session rather than mid-gesture.
  */
 export function KeyboardToolbar(props: {
   onAction: (action: ToolbarAction) => void;
 }): JSX.Element {
-  // Re-read the MFU order after every tap so the middle row reflows just
-  // like the native bar's `rebuildButtons()`. A bumped signal is cheaper
-  // than diffing and the row is tiny.
-  const [order, setOrder] = createSignal<ToolbarAction[]>(orderedMiddleFromStore());
+  // Resolved at mount: the frozen order when the user has locked the
+  // toolbar, otherwise what MFU makes of the counts so far. Deliberately
+  // a plain const, not a signal — nothing during an editing session is
+  // allowed to change it, and a signal would invite exactly that.
+  const order: ToolbarAction[] = resolveMiddleFromStore();
 
+  // The tap is counted by `Journal.tsx`'s `dispatchToolbarAction`,
+  // which both bars fire through — counting here too would double
+  // every Android tap relative to an iOS one.
   function fire(action: ToolbarAction) {
-    recordToStore(action);
-    setOrder(orderedMiddleFromStore());
     props.onAction(action);
   }
 
@@ -41,7 +52,7 @@ export function KeyboardToolbar(props: {
     <div class="outl-kb-capsule pointer-events-auto flex max-w-full items-center gap-1 rounded-full bg-(--color-outl-bg-elev) px-2 py-1 shadow-[var(--shadow-capsule)]">
       <ToolbarButton action={PINNED_FIRST} onFire={fire} />
       <div class="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <For each={order()}>
+        <For each={order}>
           {(action) => <ToolbarButton action={action} onFire={fire} />}
         </For>
       </div>

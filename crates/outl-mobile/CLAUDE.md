@@ -5,8 +5,8 @@ Solid.js + Tailwind frontend, Rust backend that **must stay thin** — every wor
 
 ## `Journal.tsx` is being broken up
 
-2,551 lines in one component, nearly 3x the `file-size-guard.sh` ceiling.
-The chrome came out first (`JournalChrome.tsx`); the remaining seams are in [issue 265](https://github.com/outlmd/outl/issues/265), and the props rule an extraction must not break is in `outl-frontend-shared/CLAUDE.md`.
+2,489 lines in one component, over 4x the `file-size-guard.sh` ceiling.
+The chrome came out first (`JournalChrome.tsx`), then the delete prompts (`JournalDeleteDialogs.tsx`) and the toolbar dispatch (`Journal.toolbar-dispatch.ts`); the remaining seams are in [issue 265](https://github.com/outlmd/outl/issues/265), and the props rule an extraction must not break is in `outl-frontend-shared/CLAUDE.md`.
 
 ## Layering
 
@@ -63,7 +63,7 @@ The storage trait stays generic; the transport gets handled outside it.
 `Journal.tsx` is the mobile app's one large component and the single biggest file in the repo.
 It reached 3,212 lines because the frontend sat outside `file-size-guard.sh`, which only read `.rs` until 2026-09 — so nothing ever warned.
 
-Two pieces are now siblings, and new code of either shape belongs there rather than back in the parent:
+Four pieces are now siblings, and new code of any of those shapes belongs there rather than back in the parent:
 
 - **`JournalHeader.tsx`** — `JournalHeader`, `PageHeader`, `ChevronLeft`, `ChevronRight`.
   Pure render: props in, markup out, no state and no commands.
@@ -71,8 +71,15 @@ Two pieces are now siblings, and new code of either shape belongs there rather t
   A pure function from (block id, page view, handlers) to the typed row list `<BlockContextMenu>` renders.
   It has no Solid import at all, which is why it is `.ts` and not `.tsx`.
   `Journal.buildContextActions.test.ts` drives it directly.
+- **`Journal.toolbar-dispatch.ts`** — `dispatchToolbarAction(action, handlers)`, the switch both keyboard bars fire through, plus the tap counting that feeds MFU and the settings sheet.
+  Same shape as `Journal.context-actions.ts`: a pure function from (action, handlers) to effects, no Solid import, so it is `.ts` and `Journal.toolbar-dispatch.test.ts` drives it directly.
+  It counts the tap **before** routing it, so a button pressed with nothing focused still registers — the user pressed it, which is what MFU measures.
+- **`JournalDeleteDialogs.tsx`** — both delete confirmations (single block, and range) plus the copy that goes in them.
+  `Journal` keeps the pending-delete signals and the `performDelete*` calls; this only renders and reports back.
+  The **wording** is what made the pair worth extracting together — pluralising a count, warning about children, "can't be undone" — since two copies of that drift into saying different things about the same action.
+  The markup is one `<ConfirmDialog />` each and would not have earned a file on its own.
 
-What is left is still ~2,800 lines, almost all of it one `Journal()` function.
+What is left is still ~2,490 lines, almost all of it one `Journal()` function.
 That is real debt, not a finished job: the remaining split is a state/effects question (edit lifecycle, selection, sync signals, keyboard accessory), not a "move these functions" question, and it wants its own plan.
 `.github/file-size-baseline.txt` holds the current number, and the CI ratchet means it can go down but not up.
 
@@ -263,6 +270,22 @@ page-identity pair (`page-slug` / `page-kind`) local.
 Covered by `PropertiesSheet.test.tsx` (chips exclude keys already set,
 two-tap add, `::` normalisation, edit, both delete affordances, page
 scope, the `[[` picker) and `lib/properties.test.ts`.
+
+## Settings (`SettingsSheet.tsx`) — the first preferences surface
+
+The header capsule's gear opens `components/SettingsSheet.tsx`.
+It is the client's **only** preferences screen: every other sheet here (`DevicesSheet`, `TemplateSheet`, `RemindersSheet`, `PropertiesSheet`) shows workspace content, which is why the toolbar lock ([#271](https://github.com/outlmd/outl/issues/271)) had nowhere to live before it.
+
+Two rules govern what may go in it:
+
+- **Per-device UI state only, in `localStorage`.** Nothing here goes through the op log — two devices disagreeing about their own toolbar layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7). The sheet calls no Tauri command at all today, and a preference that *is* workspace data belongs in `outl.toml`, not here.
+- **The setting's logic lives in `@outl/shared`, not in the sheet.** The toolbar lock is `@outl/shared/toolbar`'s `lock.ts`; this file only renders the row and calls it. A preference implemented inside the sheet is a preference the other bar can't honour.
+
+**The sheet is mounted for the app's lifetime, not per open** — `<Show>` gates its markup, and `Journal` renders it unconditionally. So state it reads out of a store goes in a `createEffect` guarded on `props.open`, the way `TemplateSheet` and `RemindersSheet` already do. A plain `createSignal(readSomething())` in the body reads once, at app start, and then quietly shows a stale value forever.
+
+**A preference this sheet writes has to be readable by whoever acts on it.** The toolbar lock's first version stored the counts it derives from in `UserDefaults` on the iOS side, where this sheet — which is web on both platforms — could not see them: Lock froze a cold-start row instead of the user's, and Reset was a no-op. Before adding a setting, check that the surface which consumes it reads the same store this sheet writes.
+
+Toolbar behaviour it controls (lock, reset, and why the row now only reshuffles between editing sessions): [`docs/mobile-ux.md` → Keyboard accessory bar](../../docs/mobile-ux.md#keyboard-accessory-bar-android-web-bar--ios-native-bar).
 
 ## Reminders (`remind::`)
 

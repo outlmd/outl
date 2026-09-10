@@ -45,7 +45,7 @@
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 833 crates/outl-mobile/src/components/BlockRow.tsx
-2551 crates/outl-mobile/src/components/Journal.tsx
+2489 crates/outl-mobile/src/components/Journal.tsx
 796 crates/outl-plugins/src/engine.rs
 862 crates/outl-plugins/src/host_tests.rs
 830 crates/outl-plugins/src/host.rs

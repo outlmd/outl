@@ -128,10 +128,13 @@ import {
 } from "../lib/native-suggester";
 import { platform } from "@tauri-apps/plugin-os";
 import type { ToolbarAction } from "@outl/shared/toolbar";
+import { dispatchToolbarAction as dispatch } from "./Journal.toolbar-dispatch";
 import { Calendar } from "./Calendar";
 import { KeyboardAccessory } from "./KeyboardAccessory";
 import { DevicesSheet } from "./DevicesSheet";
 import { RemindersSheet } from "./RemindersSheet";
+import { SettingsSheet } from "./SettingsSheet";
+import { JournalDeleteDialogs } from "./JournalDeleteDialogs";
 import { PluginSheet } from "./PluginSheet";
 import { PluginViewOverlay } from "./PluginViewOverlay";
 import { PageSwitcher } from "./PageSwitcher";
@@ -145,7 +148,6 @@ import { editableProperties } from "../lib/properties";
 import { haptic } from "../lib/haptics";
 import { BacklinksSection } from "./BacklinksSection";
 import { BlockContextMenu } from "./BlockContextMenu";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { TemplateSheet } from "./TemplateSheet";
 import {
@@ -207,6 +209,7 @@ export function Journal() {
   const [devicesOpen, setDevicesOpen] = createSignal(false);
   const [remindersOpen, setRemindersOpen] = createSignal(false);
   const [pluginsOpen, setPluginsOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   // Plugin-contributed toolbar buttons — one inline glyph each in the
   // header. Loaded after the workspace opens (plugins load lazily on the
   // host's first request), refreshed alongside the plugin-command list.
@@ -920,71 +923,27 @@ export function Journal() {
    * Bridge between the native UIKit keyboard accessory view (defined
    * in `gen/apple/Sources/outl-mobile/main.mm`) and the Solid handlers
    * below. The native buttons call `evaluateJavaScript` with
-   * `window.__outlToolbar(action)` and we map each action onto the
-   * existing handler.
-   */
-  /**
-   * Single dispatch for a toolbar action, shared by the two surfaces that
-   * fire them: the iOS native bar (via `window.__outlToolbar`) and the web
-   * `<KeyboardAccessory />` (Android). Keeping one switch means the two
-   * bars can't drift on what a button does.
+   * `window.__outlToolbar(action)`; the switch (and the tap counting)
+   * lives in `Journal.toolbar-dispatch.ts`, shared with the Android bar.
    */
   function dispatchToolbarAction(action: string) {
-    const id = editingId();
-    switch (action) {
-      case "indent":
-        if (id) handleIndent(id);
-        return;
-      case "outdent":
-        if (id) handleOutdent(id);
-        return;
-      case "moveUp":
-        if (id) handleMoveUp(id);
-        return;
-      case "moveDown":
-        if (id) handleMoveDown(id);
-        return;
-      case "undo":
-        void handleUndo();
-        return;
-      case "redo":
-        void handleRedo();
-        return;
-      case "todo":
-        if (id) handleToggleTodo(id);
-        return;
-      case "delete":
-        if (id) handleDelete(id);
-        return;
-      case "newLine":
-        if (id) {
-          handleCreateAfter(id);
-        } else {
-          handleAppendBlock();
-        }
-        return;
-      case "bold":
-        wrapSelection("bold");
-        return;
-      case "italic":
-        wrapSelection("italic");
-        return;
-      case "code":
-        wrapSelection("code");
-        return;
-      case "insertRef":
-        insertAtCursor("pair", "[[", "]]");
-        return;
-      case "insertBlock":
-        insertAtCursor("pair", "((", "))");
-        return;
-      case "insertHash":
-        insertAtCursor("text", "#");
-        return;
-      case "done":
-        if (editingId()) commitEdit();
-        return;
-    }
+    dispatch(action, {
+      editingId,
+      indent: handleIndent,
+      outdent: handleOutdent,
+      moveUp: handleMoveUp,
+      moveDown: handleMoveDown,
+      undo: () => void handleUndo(),
+      redo: () => void handleRedo(),
+      toggleTodo: handleToggleTodo,
+      delete: handleDelete,
+      createAfter: handleCreateAfter,
+      appendBlock: handleAppendBlock,
+      wrapSelection,
+      insertPair: (open, close) => insertAtCursor("pair", open, close),
+      insertText: (text) => insertAtCursor("text", text),
+      commitEdit,
+    });
   }
 
   function registerNativeToolbarBridge() {
@@ -1429,7 +1388,7 @@ export function Journal() {
     exitSelection();
   }
 
-  /** Toolbar "Delete" — always confirms (`<ConfirmDialog>` via
+  /** Toolbar "Delete" — always confirms (`<JournalDeleteDialogs>` via
    *  `pendingRangeDelete`), unlike the single-block swipe delete
    *  (which only prompts when that one block has descendants): a
    *  range is N blocks, any of which may carry children the user
@@ -2076,6 +2035,7 @@ export function Journal() {
         onOpenReminders={() => setRemindersOpen(true)}
         onOpenPlugins={() => setPluginsOpen(true)}
         onOpenDevices={() => setDevicesOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <main class="ios-scroll flex-1 pb-32">
@@ -2397,6 +2357,11 @@ export function Journal() {
         onClose={() => setDevicesOpen(false)}
       />
 
+      <SettingsSheet
+        open={settingsOpen()}
+        onClose={() => setSettingsOpen(false)}
+      />
+
       <RemindersSheet
         open={remindersOpen()}
         onClose={() => setRemindersOpen(false)}
@@ -2419,22 +2384,13 @@ export function Journal() {
           `showPluginViews`. */}
       <PluginViewOverlay bind={(push) => (pushPluginView = push)} />
 
-      <ConfirmDialog
-        open={pendingDelete() !== null}
-        title="Delete block?"
-        message={
-          pendingDelete()
-            ? `This block has ${pendingDelete()!.descendants} ${
-                pendingDelete()!.descendants === 1 ? "child" : "children"
-              } that will also be deleted. This can't be undone.`
-            : ""
-        }
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={() => {
-          const p = pendingDelete();
-          setPendingDelete(null);
-          if (p) void performDelete(p.id);
-        }}
+      <JournalDeleteDialogs
+        pendingBlock={pendingDelete()}
+        pendingRange={pendingRangeDelete()}
+        onCancelBlock={() => setPendingDelete(null)}
+        onConfirmBlock={(id) => void performDelete(id)}
+        onCancelRange={() => setPendingRangeDelete(null)}
+        onConfirmRange={(ids) => void performDeleteRange(ids)}
       />
 
       <BlockContextMenu
@@ -2509,24 +2465,6 @@ export function Journal() {
         onCopy={() => void handleYankRange()}
         onDelete={handleDeleteRangeRequest}
         onDone={exitSelection}
-      />
-
-      <ConfirmDialog
-        open={pendingRangeDelete() !== null}
-        title="Delete blocks?"
-        message={
-          pendingRangeDelete()
-            ? `This will delete ${pendingRangeDelete()!.length} ${
-                pendingRangeDelete()!.length === 1 ? "block" : "blocks"
-              }, including any nested children. This can't be undone.`
-            : ""
-        }
-        onCancel={() => setPendingRangeDelete(null)}
-        onConfirm={() => {
-          const ids = pendingRangeDelete();
-          setPendingRangeDelete(null);
-          if (ids) void performDeleteRange(ids);
-        }}
       />
 
       <TemplateSheet

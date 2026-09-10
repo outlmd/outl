@@ -57,6 +57,15 @@ pub enum Capability {
     /// client without it can still buzz you, but you have to open
     /// the app and find the block by hand.
     ReminderNotificationActions,
+    /// Pinning the on-screen keyboard toolbar's button order so it
+    /// stops rearranging itself by usage, plus resetting that usage
+    /// back to the shipped layout.
+    ///
+    /// Presupposes a toolbar whose order *moves on its own*, which
+    /// is a soft-keyboard affordance: a client driven by a physical
+    /// keyboard reaches the same actions through fixed chords, so
+    /// there is no order to pin.
+    ToolbarOrderLock,
 }
 
 impl Capability {
@@ -76,6 +85,7 @@ impl Capability {
         Capability::Assets,
         Capability::PeerPairing,
         Capability::ReminderNotificationActions,
+        Capability::ToolbarOrderLock,
     ];
 }
 
@@ -87,7 +97,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_7: usize = 7;
+    const EXPECTED_8: usize = 8;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -98,6 +108,7 @@ mod tests {
             Capability::Assets => "Assets",
             Capability::PeerPairing => "PeerPairing",
             Capability::ReminderNotificationActions => "ReminderNotificationActions",
+            Capability::ToolbarOrderLock => "ToolbarOrderLock",
         }
     }
 
@@ -114,9 +125,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_7,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_7} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_7)",
+            EXPECTED_8,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_8} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_8)",
             names.len(),
         );
     }

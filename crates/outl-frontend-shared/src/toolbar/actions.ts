@@ -102,3 +102,12 @@ export const PINNED_FIRST: ToolbarAction = "newLine";
 /** Always sits last — "hide keyboard" lives where muscle memory
  *  expects "Done". */
 export const PINNED_LAST: ToolbarAction = "done";
+
+/** The scrollable middle of the row: the catalog minus the two pinned
+ *  slots, in cold-start order. Everything that reorders the toolbar
+ *  (MFU, the lock) permutes exactly this set, so it is defined once —
+ *  a second copy of the filter is a second answer to "which buttons
+ *  are allowed to move". Mirrors `ToolbarAction.middleOrder` in Swift. */
+export const MIDDLE_ORDER: readonly ToolbarAction[] = DEFAULT_ORDER.filter(
+  (a) => a !== PINNED_FIRST && a !== PINNED_LAST,
+);

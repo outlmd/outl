@@ -55,4 +55,14 @@ public enum ToolbarAction: String, CaseIterable, Sendable {
     /// Always sits at the last index — "hide keyboard" lives where iOS
     /// muscle memory expects "Done".
     public static let pinnedLast: ToolbarAction = .done
+
+    /// The scrollable middle of the row: the catalog minus the two
+    /// pinned slots, in cold-start order. Everything that reorders the
+    /// toolbar (`ToolbarMFU`, `ToolbarLock`) permutes exactly this
+    /// set, so it is defined once — a second copy of the filter is a
+    /// second answer to "which buttons are allowed to move". Mirrors
+    /// `MIDDLE_ORDER` in `@outl/shared/toolbar`.
+    public static let middleOrder: [ToolbarAction] = defaultOrder.filter {
+        $0 != pinnedFirst && $0 != pinnedLast
+    }
 }
