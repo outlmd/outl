@@ -43,6 +43,8 @@ The Tauri clients used to take **neither** workspace lock, which made a running 
 Making the fallback available means making the client's `HlcGenerator` swappable at workspace-open time (a plain field on both `AppState`s today, read from ~56 call sites); that is client-side work, tracked separately.
 
 Re-picking the workspace already open is handled inside `acquire_guards`, not by the caller: a POSIX `flock` belongs to an open file description, so a second `open` + `LOCK_EX|LOCK_NB` of `ops/.lock-<actor>` fails *inside the process that already holds it*.
+The guards already in the slot are lifted out and reused, never released and retaken, and a reopen that fails puts them back.
+Dropping them first would leave the still-published workspace unguarded for the whole reopen, and permanently if the reopen failed.
 
 **The regression net** is `tests/workspace_locks.rs` — compaction refuses while a GUI is open and runs once it closes, a contended actor refuses rather than sharing the file, a refused open strands no lock, a re-pick does not refuse itself, a switch releases the old root, and a running GUI does **not** lock the TUI or MCP server out (the workspace lock is shared on purpose).
 
