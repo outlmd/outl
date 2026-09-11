@@ -20,7 +20,7 @@ outl-cli / outl-tui / outl-mobile / future clients
 ## Public surface
 
 The full catalogue — every function, its signature and when to reach for it — lives in
-[`docs/primitives-actions.md`](../../docs/primitives-actions.md) → "The `outl-actions` public surface".
+[`docs/outl-actions-surface.md`](../../docs/outl-actions-surface.md).
 
 It is reference material: you look up an entry, you do not read it top to bottom.
 Keeping it here cost every task in this crate the context to load it, and pushed this file past the size ceiling (issue #216).
@@ -100,6 +100,39 @@ those calls are right. None of them were written down.
 agree with the op log.** A bare `apply_page_md_with_sidecar_guarded` is
 only correct when you can say which of the other four steps you are
 skipping and why — put that reason in a comment next to the call.
+
+## The `tree → .md` executor
+
+`journal::survey_page_projections` is the **single owner** of "where does this page's `.md` stand relative to the op log", and `journal::reproject_stale_pages` is the executor built on it.
+Both live in `journal/survey.rs`.
+
+The classification used to be inline and private inside `outl doctor`, which is why this direction had no executor at all: the only code that knew which pages were safe to re-project was a read-only report a human had to run by hand.
+The `.md → tree` direction has had a permanent executor since `outl serve` existed; this one had none, so ops arriving by sync left a page's `.md` wrong until somebody opened it.
+Measured on a real 2,574-page workspace: **704 stale pages**, 702 of them re-projecting with zero content lines removed.
+[RFC 0260](../../docs/rfcs/0260-tree-to-md-executor.md).
+
+Three rules that are not negotiable here:
+
+- **The survey selects; `apply_page_md_with_sidecar_if_stale` decides.**
+  The executor hands every candidate back to that function, which re-asks the verdict under the page lock.
+  A second opinion about which pages are safe to overwrite is how a read-only listing promises a repair the writing pass then refuses (root `CLAUDE.md` invariant 8).
+- **The executor writes only what removes nothing.**
+  A stale page whose re-projection would drop a content line lands in `ReprojectionSweep::withheld` and stays for `outl doctor --repair`, which backs every file up into `.outl/repair-backup/` and applies volume ceilings.
+  That gate is also what makes a torn op log safe here without this module knowing anything about op-log health: a truncated replay renders *less* than disk holds, so every page it touches reports `lines_removed > 0`.
+- **Every refusal is returned, never counted.**
+  `ReprojectionSweep::refused` carries the `ActionError` per page, because a page that stopped syncing has to be named to whoever ran the pass.
+  `ReprojectionSweep::unreadable` is the same rule for a page the sweep could not *look* at — an I/O error, or bytes that are not on this device yet.
+  The states it stays quiet about are the ones somebody else will act on: an unreconciled external edit and a withheld hash are the `.md → tree` watcher's next job, and a sidecar that cannot vouch for its page is named by `outl doctor`.
+
+`NotFound` is not "this page has no `.md`".
+An undownloaded iCloud file answers `NotFound` too — the real name does not exist, only `.foo.md.icloud` does — and so does a `.md` that vanished from beside a live sidecar.
+`journal::apply::guard_absent_markdown` is the single owner of that distinction, and **both** writers ask it.
+`mutate_page_md` would otherwise recreate the page as a single block;
+`apply_page_md_with_sidecar_if_stale` would otherwise write a file the arriving bytes collide with, unattended, on every `outl serve` sweep.
+The survey routes the same call into `PageProjectionState::MarkdownNotHereYet`, so the listing and the pass cannot reach different verdicts.
+
+`lines_removed` is measured by asking `content_lines_missing_from` about the **new render** ("will this line survive the write"), which is a different question from the guard's ("does the op log know this line", asked of the *sidecar*).
+Both are correct and they are not interchangeable — see the `lines_removed_by` doc comment.
 
 ## Page model
 

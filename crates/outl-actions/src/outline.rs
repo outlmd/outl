@@ -7,7 +7,6 @@
 //! [`project_outline`] variant stays around for tools that need to
 //! materialise straight from the op log (e.g. doctor, debug dumps).
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -102,8 +101,12 @@ pub fn flat_index_for_block(outline: &[OutlineNode], target: NodeId) -> Option<u
 /// backlinks builder so each backlink carries the *source block* with
 /// its children and properties, instead of forcing the caller to
 /// reach back into the workspace per backlink.
+///
+/// Materialises `node`'s whole subtree; `project_outline_node_shallow`
+/// is the cheaper answer when only the block itself is wanted.
 pub fn project_outline_node(workspace: &Workspace, node: NodeId) -> OutlineNode {
-    project_node(workspace, node, None)
+    let index = crate::tree::children_index(workspace, node);
+    project_node(workspace, node, &index)
 }
 use outl_md::parse::OutlineNode as ParsedOutlineNode;
 use outl_md::sidecar::SidecarBlock;
@@ -113,7 +116,6 @@ use crate::error::ActionError;
 use crate::journal::page_md_path;
 use crate::page::PageMeta;
 use crate::todo::{split_todo, TodoState};
-use crate::tree::children_of;
 
 /// A node in the outline as seen by the UI.
 ///
@@ -185,47 +187,45 @@ where
 
 /// A pre-built `parent -> children (in fractional order)` map.
 ///
-/// Built once and reused across a whole traversal so recursive
-/// projection / walking doesn't pay [`children_of`]'s per-call
-/// `O(total-nodes)` scan. See [`crate::backlinks`] for the builder and
-/// why the naive walk was quadratic without it.
-///
-/// Public because a full-workspace walk is not a private concern:
+/// Re-exported from [`crate::tree`], which owns both the type and the
+/// sibling order its entries carry. The name stays reachable here
+/// because a full-workspace walk is not a private concern:
 /// [`crate::index::derive`] and
-/// [`crate::backlinks_index::build_backlink_index`] both need one, and
-/// a caller doing both should build it once rather than twice.
-pub type ChildrenIndex = HashMap<NodeId, Vec<NodeId>>;
+/// [`crate::backlinks_index::build_backlink_index`] both need one.
+pub use crate::tree::ChildrenIndex;
 
 /// Walk the workspace tree starting from `parent` and return the
 /// outline below it. `NodeId::root()` is the usual starting point.
+///
+/// Builds one children index scoped to `parent`'s subtree and projects
+/// through it, where this used to call [`crate::tree::children_of`] per
+/// visited node — `O(nodes²)`, 7.2 s on a 64k-node workspace.
 pub fn project_outline(workspace: &Workspace, parent: NodeId) -> Vec<OutlineNode> {
-    project_children(workspace, parent, None)
+    let index = crate::tree::children_index(workspace, parent);
+    project_children(workspace, parent, &index)
 }
 
-/// Project the outline below `parent`. With `Some(index)` children are
-/// resolved in `O(children)`; with `None` through [`children_of`]
-/// (`O(total-nodes)` per level — fine for a one-off read, quadratic for
-/// a full-workspace walk). Shared by [`project_outline`] and the
-/// backlinks builder.
+/// Project the outline below `parent`, resolving each level through
+/// `index` in `O(children)`.
+///
+/// There is deliberately **no** fallback to [`crate::tree::children_of`]
+/// here. The `Option<&ChildrenIndex>` this used to take defaulted to
+/// the scanning path and every caller took the default — the doc
+/// comment admitted it was "quadratic for a full-workspace walk" and
+/// nothing made a caller notice.
 fn project_children(
     workspace: &Workspace,
     parent: NodeId,
-    index: Option<&ChildrenIndex>,
+    index: &ChildrenIndex,
 ) -> Vec<OutlineNode> {
-    match index {
-        Some(idx) => idx
-            .get(&parent)
-            .map(|kids| {
-                kids.iter()
-                    .map(|&child| project_node(workspace, child, index))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        None => children_of(workspace, parent)
-            .into_iter()
-            .map(|(child, _)| project_node(workspace, child, None))
-            .collect(),
-    }
+    index
+        .get(&parent)
+        .map(|kids| {
+            kids.iter()
+                .map(|&child| project_node(workspace, child, index))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Build one [`OutlineNode`] for `node` — body, todo, properties,
@@ -263,7 +263,7 @@ pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) 
     }
 }
 
-fn project_node(workspace: &Workspace, node: NodeId, index: Option<&ChildrenIndex>) -> OutlineNode {
+fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> OutlineNode {
     let raw = workspace.block_text(node).unwrap_or_default();
     let (todo, body) = split_todo(&raw);
     let mut properties: Vec<(String, String)> = workspace

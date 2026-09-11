@@ -1,13 +1,17 @@
 //! Backlinks: which blocks reference which pages.
 //!
-//! A reference is either a literal `[[target]]` substring inside a
-//! block's text or a `#tag` token whose slug form resolves to the
-//! target page — the same `slugify` rule a tag click goes through
+//! A reference is either a `[[target]]` **token** in a block's text or
+//! a `#tag` token whose slug form resolves to the target page — the
+//! same `slugify` rule a tag click goes through
 //! (`open_or_create_by_name`), so "what opens the page" and "what
 //! shows up in the page's backlinks" can't drift. `target` matches
 //! either a page's slug or its title (the page root's text). Block
 //! refs (`((blk-X))`) are handled by `outl-md::inline` — this module
 //! is the workspace-level "which page mentions me" view.
+//!
+//! **Token, not substring.** Both channels go through the inline
+//! tokenizer; [`crate::mentions`] owns that rule and explains what it
+//! replaced.
 //!
 //! **This is the single source of truth for backlinks.** Both the
 //! mobile client and the TUI consume [`backlinks_for_page`]; the
@@ -167,47 +171,11 @@ pub fn backlinks_for_page(workspace: &Workspace, root: &Path, meta: &PageMeta) -
     build_backlink_index(workspace, root).for_page(workspace, meta)
 }
 
-/// Extract every `[[ref]]` target out of a block's text. An
-/// unterminated `[[` is skipped without consuming anything inside it,
-/// so a later well-formed `[[ok]]` is still picked up.
-pub fn extract_refs(text: &str) -> Vec<String> {
-    let mut refs = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if !(bytes[i] == b'[' && bytes[i + 1] == b'[') {
-            i += 1;
-            continue;
-        }
-        let start = i + 2;
-        let mut j = start;
-        let mut closed = false;
-        while j + 1 < bytes.len() {
-            if bytes[j] == b'[' && bytes[j + 1] == b'[' {
-                // Outer was unterminated; bail so the inner gets its
-                // own attempt on the next outer-loop iteration.
-                break;
-            }
-            if bytes[j] == b']' && bytes[j + 1] == b']' {
-                closed = true;
-                break;
-            }
-            j += 1;
-        }
-        if closed {
-            if let Ok(s) = std::str::from_utf8(&bytes[start..j]) {
-                if !s.is_empty() {
-                    refs.push(s.to_string());
-                }
-            }
-            i = j + 2;
-        } else {
-            // Skip just the unterminated `[[` and try again.
-            i += 2;
-        }
-    }
-    refs
-}
+/// Re-exported so `outl_actions::backlinks::extract_refs` keeps
+/// resolving. The rule itself lives in [`crate::mentions`], which owns
+/// "what does this block text mention" for the backlink index and the
+/// reminder scanner alike.
+pub use crate::mentions::extract_refs;
 
 #[cfg(test)]
 mod tests {
@@ -240,10 +208,19 @@ mod tests {
         assert_eq!(refs, vec!["avelino".to_string(), "2026-05-27".to_string()]);
     }
 
+    /// **Changed deliberately**: the byte scan skipped an unterminated
+    /// `[[` and recovered the inner `[[ok]]`; the tokenizer is greedy to
+    /// the first `]]`, which is what the renderer draws. The property
+    /// this test protects is unchanged — an unbalanced opener never
+    /// swallows the rest of the text.
     #[test]
     fn extract_refs_ignores_unbalanced() {
         let refs = extract_refs("[[unterminated and [[ok]] mixed");
-        assert!(refs.contains(&"ok".to_string()));
+        assert_eq!(refs, vec!["unterminated and [[ok".to_string()]);
+        assert!(!refs.iter().any(|r| r.contains("mixed")));
+
+        let refs = extract_refs("[[no close at all and then [[ok]]");
+        assert_eq!(refs, vec!["no close at all and then [[ok".to_string()]);
     }
 
     /// Build a template page named `name` with a single code block, so

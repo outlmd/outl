@@ -270,6 +270,47 @@ mod tests {
     }
 
     #[test]
+    fn a_date_inside_a_code_span_does_not_anchor_a_reminder() {
+        // `anchor_dates` rides `extract_refs`, which now reads the same
+        // inline grammar the renderer does. A `[[date]]` the user
+        // escaped in backticks is prose about a date, not a date.
+        //
+        // **Nothing goes silent.** Losing the only explicit anchor falls
+        // back to implicit-today, so the reminder still fires — it moves
+        // from the quoted date to today. A reminder that stops firing
+        // would be the worse failure, and this path cannot produce one.
+        let today = day(2026, 8, 2);
+        assert_eq!(
+            anchor_dates("ship it, see `[[2026-12-12]]` for why", today),
+            vec![today]
+        );
+        // A real anchor alongside a quoted one keeps the real one.
+        assert_eq!(
+            anchor_dates("ping [[2026-12-15]], not `[[2026-12-12]]`", today),
+            vec![day(2026, 12, 15)]
+        );
+    }
+
+    #[test]
+    fn a_nested_ref_does_not_anchor_to_the_inner_date() {
+        // `[[a [[2026-12-12]] ]]` is one ref named `a [[2026-12-12`,
+        // which is not a date. The byte scan returned the inner `b`-side
+        // and scheduled a real notification off it.
+        let today = day(2026, 8, 2);
+        assert_eq!(anchor_dates("[[nota [[2026-12-12]] ]]", today), vec![today]);
+    }
+
+    #[test]
+    fn an_anchor_inside_emphasis_still_counts() {
+        // The transparency half: a bolded date is still a date.
+        let today = day(2026, 8, 2);
+        assert_eq!(
+            anchor_dates("**[[2026-12-12]]**: reunião", today),
+            vec![day(2026, 12, 12)]
+        );
+    }
+
+    #[test]
     fn the_same_date_twice_schedules_once() {
         let today = day(2026, 8, 2);
         assert_eq!(
