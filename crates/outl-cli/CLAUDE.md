@@ -220,6 +220,14 @@ The full mapping (CLI ↔ MCP tool) is documented in [`docs/cli.md`](../../docs/
 - `outl mcp serve [--workspace=…]` — JSON-RPC 2.0 over stdio implementing the MCP protocol surface Claude Desktop expects (`initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`).
   Every tool is a thin router that delegates to the same handler the CLI subcommand calls — there is no second business-logic path.
 
+**The response is projected for an LLM consumer, not a script — this is the one place the MCP surface diverges from the CLI, and the handler is untouched.**
+`mcp/tools/payload.rs` owns the wrapping.
+A **success** reply is content-only: the handler's `data` as compact JSON in `content[0].text` (no `structuredContent` — at protocol `2024-11-05` that was a discarded second copy), or the raw `.md` for markdown-first tools (`export_md`, `page_render`, `daily_*`).
+It also drops fields only a GUI renderer reads — an outline node's `tokens` (a pre-tokenized inline AST that restates `text`), and default-valued `collapsed` / `todo` / empty `properties` — because the shared `project_outline` shape serves the Tauri clients too and an LLM already has `text`.
+The CLI's own `--json` keeps every field.
+An **error** reply is the deliberate exception: it sets `isError: true` and keeps `structuredContent: { ok: false, error }` so `error.data` (RFC 0255's `PAGE_MARKDOWN_AHEAD_OF_LOG` carries `path` / `lines` / `sample` / `recovery_command`) is machine-readable.
+Pruning keys off the outline-node signature (`text` + `children`) so a same-named field on another payload (`page_prop_list`'s `properties`) is never touched; pinned by `mcp/tools/payload.rs`'s tests.
+
 ## P2P sync: the MCP takes the endpoint when nobody else has it
 
 iroh's relay routes only ONE endpoint per `node_id` at a time.
@@ -324,19 +332,23 @@ src/
 │   ├── batch.rs           # outl batch
 │   └── workspace_info.rs  # outl workspace info
 └── mcp/
-    ├── mod.rs             # stdio loop, dispatch
+    ├── mod.rs             # stdio loop, dispatch, ServerCtx
     ├── protocol.rs        # JSON-RPC 2.0 shapes + error codes
-    ├── tools.rs           # tool registry + handler dispatch
+    ├── tools/
+    │   ├── mod.rs         #   shared helpers (tool_def, require_str, …)
+    │   ├── registry.rs    #   tools/list schema list
+    │   ├── dispatch.rs    #   tools/call router → cmd/* handlers
+    │   └── payload.rs     #   LLM-facing result projection (see MCP section)
     ├── resources.rs       # outl:// URI handlers + templates
     └── prompts.rs         # /outl-* prompts
 ```
 
-Every `commands/*.rs` handler is `pub fn` so `mcp/tools.rs` reuses it directly.
+Every `commands/*.rs` handler is `pub fn` so `mcp/tools/dispatch.rs` reuses it directly.
 New tools land by:
 
 1. Adding a function in the relevant `cmd/*.rs` returning `Result<Value, ApiError>`.
 2. Threading it through the local `Subcommand` and `run()` switch.
-3. Registering the tool in `mcp/tools::list` (schema) and `mcp/tools::run_tool` (dispatch).
+3. Registering the tool in `mcp/tools::registry::list` (schema) and `mcp/tools::dispatch::run_tool` (dispatch).
 
 ## Mutating a page: use the commit pipeline
 

@@ -91,8 +91,12 @@ A script can then tell "I flushed" from "someone else will" without reading eith
 
 Add `--json` to any command to force JSON.
 Without the flag, output is human-readable (tables, colored).
-MCP tools wrap the same envelope in the MCP tool-result shape: `structuredContent` carries the full `{ ok, data, error }` envelope and `content[].text` carries either a pretty-printed payload or, for markdown-first tools (`outl_export_md`, `outl_page_render`, `outl_daily_today`, `outl_daily_get`), the raw `.md` string.
-Clients should read `structuredContent.data` for typed access.
+MCP tools return the same data, projected for an LLM consumer rather than a script.
+A **success** reply is content-only: `content[].text` carries the payload as compact JSON, or — for markdown-first tools (`outl_export_md`, `outl_page_render`, `outl_daily_today`, `outl_daily_get`) — the raw `.md` string.
+There is no `structuredContent` on success; at the server's protocol version (`2024-11-05`) it was a second, discarded copy of the same payload.
+The MCP copy also drops fields only a GUI renderer reads (an outline node's `tokens`, and default-valued `collapsed` / `todo` / empty `properties`); the CLI's own `--json` output keeps them.
+An **error** reply is the deliberate exception: it sets `isError: true` and keeps `structuredContent: { ok: false, error }`.
+That lets a caller read `error.data` — e.g. `PAGE_MARKDOWN_AHEAD_OF_LOG`'s `path` / `lines` / `sample` / `recovery_command` — instead of parsing prose.
 
 ## Commands by domain
 

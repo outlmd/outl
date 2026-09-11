@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use crate::output::ApiError;
 
 mod dispatch;
+mod payload;
 mod registry;
 
 pub use dispatch::call;
