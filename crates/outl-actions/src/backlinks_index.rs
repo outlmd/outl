@@ -33,8 +33,9 @@ use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use tracing::warn;
 
-use crate::backlinks::{extract_refs, Backlink, BacklinkCrumb};
+use crate::backlinks::{Backlink, BacklinkCrumb};
 use crate::journal::page_md_path;
+use crate::mentions::extract_refs_and_tags;
 use crate::outline::{project_outline_node_shallow, read_page_outline, ChildrenIndex, OutlineNode};
 use crate::page::{page_meta, PageMeta};
 use crate::todo::split_todo;
@@ -360,25 +361,24 @@ fn shallow_parsed(node: &OutlineNode) -> OutlineNode {
 /// Every key a block mentions — the single source of truth for "does
 /// this block reference something".
 ///
-/// `[[X]]` targets come through [`extract_refs`] (literal); `#tag`s go
-/// through the real inline tokenizer and `slugify` (so a tag in a code
-/// span doesn't count and `#avelino-foo` doesn't reduce to `avelino`);
-/// the callable channel reads the fence invocation name from the text.
+/// `[[X]]` targets and `#tag`s both come out of **one** walk over the
+/// inline token tree ([`extract_refs_and_tags`]), so a code span is
+/// inert for both and `#avelino-foo` doesn't reduce to `avelino`; they
+/// used to be read by two different rules, and one `` `code` `` span
+/// then produced two opposite verdicts inside a single block. The
+/// callable channel reads the fence invocation name from the text.
 /// The `from-template::` provenance value is passed in by the caller —
 /// the workspace build reads it off the tree, the from-disk build reads
 /// it off the parsed `.md` block properties — so this one function stays
 /// the sole owner of "what counts as a mention" regardless of source.
 fn mentions_of(text: &str, from_template: Option<&str>) -> Vec<TargetKey> {
     let mut keys: Vec<TargetKey> = Vec::new();
-    for r in extract_refs(text) {
+    let (refs, tags) = extract_refs_and_tags(text);
+    for r in refs {
         keys.push(TargetKey::Ref(r));
     }
-    if text.contains('#') {
-        for tok in outl_md::inline::tokenize(text) {
-            if let outl_md::inline::InlineTok::Tag { name } = tok {
-                keys.push(TargetKey::Tag(outl_md::slug::slugify(name)));
-            }
-        }
+    for t in tags {
+        keys.push(TargetKey::Tag(outl_md::slug::slugify(&t)));
     }
     if let Some(name) = crate::template::call_target_name(text) {
         keys.push(TargetKey::Call(name));
@@ -495,8 +495,9 @@ fn walk_page(
 /// Build a `parent -> children (in fractional order)` map in one scan
 /// over the workspace, so the DFS walk + subtree projection don't pay
 /// [`crate::tree::children_of`]'s per-call `O(total-nodes)` rescan
-/// (which made the whole pass `O(n²)`). Pages are the children of
-/// [`NodeId::root`].
+/// (which made the whole pass `O(n²)`). Whole-workspace, trash
+/// included; per page use `crate::tree::children_index`, whose
+/// `sort_siblings` owns the order here too — see there for why.
 pub fn build_children_index(workspace: &Workspace) -> ChildrenIndex {
     let mut grouped: HashMap<NodeId, Vec<(NodeId, Fractional)>> = HashMap::new();
     for (id, parent, pos) in workspace.tree().iter_nodes() {
@@ -505,7 +506,7 @@ pub fn build_children_index(workspace: &Workspace) -> ChildrenIndex {
     grouped
         .into_iter()
         .map(|(parent, mut kids)| {
-            kids.sort_by(|a, b| a.1.cmp(&b.1));
+            crate::tree::sort_siblings(&mut kids);
             (parent, kids.into_iter().map(|(id, _)| id).collect())
         })
         .collect()

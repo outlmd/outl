@@ -34,6 +34,49 @@ pub fn assets_dir(root: &Path) -> PathBuf {
     root.join(ASSETS_DIR)
 }
 
+/// Copy `bytes` to `dest` via a hidden scratch file in `dir`, atomically.
+///
+/// The scratch is owned by an [`outl_md::atomic::TempFile`] guard, which
+/// unlinks it on **every** in-process exit path. The two hand-written
+/// `remove_file` calls this replaced covered the `rename` arms only, so a
+/// failed *write* — `ENOSPC` on a large attachment is the realistic one —
+/// left a `.import-<pid>-<n>.tmp` in `assets/` forever.
+///
+/// The name is unique per import so two concurrent imports of the same
+/// content can't rename each other's half-written file, and hidden so a
+/// scratch abandoned by a `SIGKILL` (the one exit a guard cannot reach)
+/// stays off the file-sync surface — iCloud skips dotted paths.
+///
+/// Both `fsync`s are deliberate. An import is the only copy of the bytes
+/// outl will ever hold (the source file is the user's, and may be gone by
+/// the next boot); a partial file published under the content-addressed
+/// name is never re-fetched, because every reader short-circuits on
+/// `dest.exists()`; and a rename that is not durable leaves the `.md` link
+/// the caller is about to write pointing at nothing.
+fn publish_asset(dir: &Path, dest: &Path, bytes: &[u8]) -> Result<(), ActionError> {
+    use std::io::Write as _;
+
+    let guard = outl_md::atomic::TempFile::new(dir.join(format!(
+        ".import-{}-{}.tmp",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    )));
+    {
+        let mut file = std::fs::File::create(guard.path())?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    match std::fs::rename(guard.path(), dest) {
+        Ok(()) => guard.keep(),
+        // Another import won the race and created the same content-addressed
+        // file; the guard drops our scratch and we treat it as done.
+        Err(_) if dest.exists() => {}
+        Err(e) => return Err(e.into()),
+    }
+    outl_md::atomic::sync_dir(dir);
+    Ok(())
+}
+
 /// The result of importing a file: where it landed and the markdown to
 /// insert.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -124,27 +167,7 @@ pub fn import_asset_bytes(
     let dest = root.join(&rel_path);
     // Content-addressed: identical bytes already on disk need no rewrite.
     if !dest.exists() {
-        // Unique hidden temp so two concurrent imports of the same content
-        // can't rename each other's half-written file. iCloud skips dotted
-        // paths, so a temp leaked by a crash never syncs as garbage.
-        let tmp = dir.join(format!(
-            ".import-{}-{}.tmp",
-            std::process::id(),
-            TMP_SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::write(&tmp, bytes)?;
-        match std::fs::rename(&tmp, &dest) {
-            Ok(()) => {}
-            // Another import won the race and created the same content-
-            // addressed file; drop our temp and treat it as done.
-            Err(_) if dest.exists() => {
-                let _ = std::fs::remove_file(&tmp);
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(e.into());
-            }
-        }
+        publish_asset(&dir, &dest, bytes)?;
     }
 
     let display_name = if display_name.is_empty() {
@@ -257,6 +280,66 @@ mod tests {
         assert!(!a.is_image);
         assert_eq!(a.markdown, format!("[report.pdf]({})", a.rel_path));
         assert!(ws.path().join(&a.rel_path).exists());
+    }
+
+    /// Every `*.tmp` sibling in `dir`, whatever it is called.
+    fn leftover_temps(dir: &Path) -> Vec<PathBuf> {
+        let mut found: Vec<_> = std::fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_successful_import_leaves_no_scratch_file() {
+        let ws = tempdir().unwrap();
+        let a = import_asset_bytes(ws.path(), b"payload", "pdf", "doc.pdf", 0).unwrap();
+        assert!(ws.path().join(&a.rel_path).exists());
+        assert_eq!(
+            leftover_temps(&assets_dir(ws.path())),
+            Vec::<PathBuf>::new()
+        );
+    }
+
+    /// The failure path `import_asset`'s own tests never reach. Forced with
+    /// a real I/O error, no injection: renaming into a directory that does
+    /// not exist fails on every platform we ship, and `dest.exists()` is
+    /// false there so the "another import won the race" arm cannot swallow
+    /// it.
+    ///
+    /// Before the guard, the equivalent leak was one step earlier — a failed
+    /// `std::fs::write` (`ENOSPC` on a large attachment) returned straight
+    /// past both hand-written `remove_file` calls.
+    #[test]
+    fn a_failed_publish_leaves_no_scratch_file() {
+        let ws = tempdir().unwrap();
+        let dir = assets_dir(ws.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("missing-subdir").join("abc.pdf");
+
+        publish_asset(&dir, &dest, b"payload").expect_err("rename into a missing dir must fail");
+        assert_eq!(
+            leftover_temps(&dir),
+            Vec::<PathBuf>::new(),
+            "a failed asset publish must not leak its scratch file"
+        );
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn publish_asset_writes_the_bytes_and_cleans_up() {
+        let ws = tempdir().unwrap();
+        let dir = assets_dir(ws.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("abc.pdf");
+
+        publish_asset(&dir, &dest, b"payload").unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"payload");
+        assert_eq!(leftover_temps(&dir), Vec::<PathBuf>::new());
     }
 
     #[test]

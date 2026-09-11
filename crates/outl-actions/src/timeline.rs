@@ -217,7 +217,12 @@ fn page_nodes(workspace: &Workspace, page_root: NodeId) -> Vec<NodeId> {
     // `push_subtree` calls it once per node, so the naive version is
     // O(page x workspace) under the client's workspace lock — measured at
     // 240ms for the largest page of a 64k-node graph.
-    let children = children_index(workspace);
+    // Deliberately the **unordered** index: this collects a set of
+    // nodes to read history for and `sort_newest_first` imposes the
+    // order afterwards, so it skips the sibling sort the rendering
+    // walks cannot skip. The opt-out is the function name, not a
+    // second copy of the builder.
+    let children = crate::tree::children_index_unordered(workspace);
     let mut nodes = Vec::new();
     push_subtree(&children, page_root, &mut nodes);
     let mut known: HashSet<NodeId> = nodes.iter().copied().collect();
@@ -251,20 +256,6 @@ fn page_nodes(workspace: &Workspace, page_root: NodeId) -> Vec<NodeId> {
             return nodes;
         }
     }
-}
-
-/// `parent -> children` for the whole tree, in one scan.
-///
-/// Order within a parent is arbitrary: this feeds a set of nodes to read
-/// history for, and the events are sorted by `Hlc` afterwards. Nothing
-/// here depends on sibling order, which is why it can skip the
-/// fractional-position sort `children_of` pays for.
-fn children_index(workspace: &Workspace) -> HashMap<NodeId, Vec<NodeId>> {
-    let mut map: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    for (id, parent, _) in workspace.tree().iter_nodes() {
-        map.entry(parent).or_default().push(id);
-    }
-    map
 }
 
 /// Append `root` and everything under it to `out`.
