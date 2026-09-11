@@ -150,6 +150,35 @@ impl ProjectionFailure {
     }
 }
 
+/// Payload of the `ref-projection-failed` event: `open_ref` resolved the
+/// target (the page is in the op log) but writing `pages/<slug>.md` +
+/// sidecar failed. Transient — the next save or the orphan scanner
+/// retries — so the client shows a toast, not the sticky banner.
+///
+/// A struct rather than the `serde_json::json!` literal it used to be.
+/// The literal emitted the same two keys, and that was exactly the
+/// problem: a payload with no Rust type has nothing for
+/// `tests/wire_types.rs` to serialize, so the desktop's
+/// `RefProjectionFailedPayload` mirror was unpinnable by construction —
+/// the same blind spot enums were in. The JSON is byte-identical.
+#[derive(Debug, Clone, Serialize)]
+pub struct RefProjectionFailed {
+    /// The ref target the user clicked, as written.
+    pub target: String,
+    /// Why the projection could not be written.
+    pub error: String,
+}
+
+impl RefProjectionFailed {
+    /// Build the payload from the borrowed values the emit site holds.
+    pub fn new(target: &str, error: &str) -> Self {
+        Self {
+            target: target.to_string(),
+            error: error.to_string(),
+        }
+    }
+}
+
 /// Failure reported after a mutation was already persisted in the op log.
 ///
 /// This is an event rather than a command error because returning `Err` would
