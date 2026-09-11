@@ -32,6 +32,8 @@
 pub(crate) mod apply;
 mod paths;
 mod render;
+mod sidecar;
+mod survey;
 
 #[cfg(test)]
 mod tests;
@@ -45,3 +47,7 @@ pub use apply::{
 };
 pub use paths::{journals_dir, page_md_path, pages_dir, remove_page_projection, write_md_atomic};
 pub use render::{render_block_md, render_page_md};
+pub use survey::{
+    reproject_stale_pages, survey_page_projections, PageProjection, PageProjectionState,
+    ReprojectionSweep, UnreadablePage, WithheldPage,
+};

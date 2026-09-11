@@ -197,7 +197,11 @@ pub fn refusal_support(refusal: Refusal) -> SurfaceSupport {
                  `block append`, `template apply`/`run`, ...) returns the same structured \
                  `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. \
                  `outl doctor` names the page, the line count and one sample outside any \
-                 write attempt; `outl reconcile --ahead-of-log` is the recovery."
+                 write attempt. `outl serve`'s `tree → .md` sweep discovers it with nobody \
+                 asking: it names the page and the recovery on the first sweep that sees it \
+                 and on every change to the set, never once per 30s tick, and says so once \
+                 more when the set clears. `outl reconcile --ahead-of-log` is the recovery \
+                 on all three."
             ),
             Full(
                 "A structured tool refusal — `PAGE_MARKDOWN_AHEAD_OF_LOG` — naming the page, \
@@ -247,6 +251,24 @@ mod tests {
             }
         }
         assert_eq!(Refusal::ALL.len(), 1, "Refusal::ALL changed size");
+    }
+
+    /// `outl serve` discovers this refusal without anybody asking for a
+    /// write: its `tree → .md` sweep hands every stale page to
+    /// `apply_page_md_with_sidecar_if_stale`, and a frozen page comes
+    /// back refused. A daemon that finds a page has stopped converging
+    /// and says nothing is the failure invariant 8 exists to prevent,
+    /// moved one layer up — so the CLI row has to account for it, or
+    /// the matrix is a fourth stale copy of the fact.
+    #[test]
+    fn the_cli_row_accounts_for_the_background_projection_sweep() {
+        let cli = refusal_support(Refusal::PageMarkdownAheadOfLog).cli;
+        assert!(
+            cli.text().contains("outl serve"),
+            "the CLI row must say what the daemon does with a refusal it \
+             discovers: {}",
+            cli.text()
+        );
     }
 
     #[test]

@@ -52,6 +52,39 @@ The TS+Solid frontends share `@outl/shared` (`crates/outl-frontend-shared`) for 
 | CLI subcommands                      | `outl-cli`                      |
 | Chord catalog, and **which client performs which action** | `outl-shortcuts` |
 
+## Workspace locks on open
+
+Every client that opens a workspace takes the same two advisory locks, through the same `outl-core` API.
+No client implements the protocol itself.
+
+| Lock | Scope | Taken by |
+|---|---|---|
+| `<root>/.outl/.lock` | **shared** — every well-behaved opener piles on | `outl_core::WorkspaceLock::acquire` |
+| `<root>/ops/.lock-<actor>` | **exclusive** — one process per actor id | `outl_core::ActorWriteLock::try_acquire` |
+
+The shared lock is not mutual exclusion; it is a presence signal.
+`outl compact --apply` answers *"is anyone in this workspace?"* by taking that same file **exclusively**, because compaction renames each `ops-<actor>.jsonl` and a live client holds in-memory byte offsets into the pre-compaction layout.
+A client that holds nothing lets that gate pass, and every later index-driven read in that session seeks into a renumbered file.
+The exclusive per-actor lock is the stated precondition of `JsonlStorage::append_ops`: one writer per `ops-<actor>.jsonl`, ever.
+
+The CLI and TUI resolve theirs through `outl_ws::open`; the desktop and mobile clients resolve theirs through `outl_tauri_shared::workspace_open::open_workspace_at`, which is the **single writer** of the client's `workspace_guards` slot.
+It installs the new guards only after the open succeeds, which is also what releases the previous workspace's.
+A client never acquires or drops one of these itself.
+
+Both locks are `flock`-based: advisory, machine-local, and released by the OS if a process dies.
+They arbitrate between processes on one machine and can never arbitrate between devices — the per-device actor binding (`outl-core`'s `DeviceStore`) is what handles that.
+
+### What happens when the actor lock is contended
+
+The CLI and TUI mint a fresh ephemeral actor and write to a brand-new `ops-<ephemeral>.jsonl` (`outl_core::resolve_write_actor`).
+**The GUI clients refuse the open instead**, and the difference is not an oversight.
+
+A GUI's `HlcGenerator` is built in `setup()`, before a workspace is picked, and every op it stamps carries that generator's actor for the life of the process.
+Swapping only the *storage* actor would write ops stamped with the device actor into the ephemeral file and leave two live generators sharing one actor id — two generators that tick in the same millisecond emit the identical `(time, counter, actor)` triple, which *is* op identity, so `Workspace::apply`'s dedup silently drops one of the two ops.
+A fallback that loses ops is worse than the collision it dodges.
+
+In practice the refusal is a safety net rather than a path users hit: the desktop is single-instanced by `tauri-plugin-single-instance`, mobile is single-instanced by the OS, and the CLI / TUI resolve a *different* actor for the same workspace (`DeviceStore::device_actor` reads `<config>/actor`, `DeviceStore::actor_for_instance` reads `<config>/actors/<key>`), so they never contend with a GUI.
+
 ## When a client can't do the thing
 
 Not every client performs every action, and that is fine.
@@ -93,6 +126,28 @@ A user can drop a `.md` into the workspace by hand, paste an exported Roam/Logse
 When that file doesn't match the outl dialect (e.g. starts with `# heading`, contains a free paragraph, or imports a markdown table), the parser **does not** drop content.
 It preserves the line as a regular block and records the recovery in `ParsedPage.warnings: Vec<outl_md::ParseWarning>`.
 
+### Two families, not one
+
+`ParseWarningKind` has six members and they do not mean the same thing.
+Read `warning.kind` before wording anything.
+
+| Kind | What actually happened |
+|---|---|
+| `unrecognized_block_marker` | A line outside the dialect, kept verbatim as a block. |
+| `remind_missing_anchor` | `remind:: every 1h` — a repeat with nothing to repeat from. |
+| `remind_invalid_time` | `remind:: 25:00` — not a wall-clock time the dialect recognises. |
+| `remind_invalid_interval` | `remind:: 10am every 30s` — below the 1min floor, or a bad unit. |
+| `remind_invalid_stop` | `remind:: 10am until yesterday` — unusable stop clause, dropped. |
+| `remind_max_clamped` | `remind:: 10am max 50` — clamped down to the 10-fire ceiling. |
+
+For a `remind_*` warning the line **is** in the dialect and **was not** preserved as a block: it is a valid `remind::` property whose *rule* the scheduler could not take at face value.
+The reminder either did not schedule or scheduled differently than written, which is the part a user needs told — "a line outside the dialect" describes neither.
+
+**This is open work.** Every surface currently renders the single fixed sentence `N line(s) outside outl dialect — preserved as blocks`, with no reader of `kind` anywhere:
+`@outl/shared`'s `ParseWarningsBanner.tsx`, the TUI's `view/warnings_banner.rs` and its status chip in `actions/lifecycle/loading.rs`, and the sample output in [`docs/tui.md`](tui.md).
+The wording is wrong for all five `remind_*` kinds, and was invisible for as long as it was because `types.ts` modelled only one of the six — closed now by `outl-tauri-shared/tests/wire_enums.rs`.
+The fix is to split the count (`N line(s) outside outl dialect`, `N reminder rule(s) outl could not schedule as written`) and give each row a per-kind sentence, in the shared banner and the TUI together so the two cannot drift.
+
 Every client surfaces these warnings to the user instead of pretending the file is clean:
 
 | Client | Surface |
@@ -126,7 +181,7 @@ A refusal is owed to whoever asked for the write, whether or not that asker draw
 
 | Client | Surface |
 |---|---|
-| CLI | Every write subcommand that touches an existing page (`page update`, `block append`, `template apply`/`run`, ...) returns the same structured `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. `outl doctor` names the page, the line count and one sample outside any write attempt; `outl reconcile --ahead-of-log` is the recovery. |
+| CLI | Every write subcommand that touches an existing page (`page update`, `block append`, `template apply`/`run`, ...) returns the same structured `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. `outl doctor` names the page, the line count and one sample outside any write attempt. `outl serve`'s `tree → .md` sweep discovers it with nobody asking: it names the page and the recovery on the first sweep that sees it and on every change to the set, never once per 30s tick, and says so once more when the set clears. `outl reconcile --ahead-of-log` is the recovery on all three. |
 | Desktop | `<PageAheadOfLogBanner client="desktop" />` above the outline, from `PageView.md_ahead_of_log`. Names the command to run in the workspace folder. |
 | Mobile | Same banner, `client="mobile"`. **There is no `outl` binary on iOS**, so the copy says to open the workspace on a computer instead of pointing at a terminal that doesn't exist. |
 | TUI | A status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). The TUI still does not call `apply_page_md_with_sidecar_if_stale` on its own page-open path, so a page that drifted ahead of the log with no local write attempt in between stays silent until the next write touches it. |
@@ -549,9 +604,12 @@ Once detection fires, the call site is identical:
 
 ```rust
 let engine = SyncEngine::new(workspace_root, actor);
-let fresh = engine.reload_workspace()?;
+let fresh = engine.reload_workspace(&hlc)?;
 engine.reproject_page(&fresh, focused_page_id)?;
 ```
+
+`hlc` is the client's live generator, and passing it is not optional plumbing: the reload raises it past every op it just merged.
+See [`docs/sync.md` → The shared sync engine](sync.md#the-shared-sync-engine) for why.
 
 The TUI defers the reload while the user is in Insert mode (the in-flight `ParsedPage` would be clobbered) via a `pending_reload` flag drained on commit.
 Mobile applies immediately because every mutation is one atomic Tauri command.
