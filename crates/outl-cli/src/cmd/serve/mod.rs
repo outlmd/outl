@@ -29,6 +29,8 @@
 //! the device actor **read-only** and takes no write lock at all — the mode to
 //! run permanently next to a GUI you also use.
 
+mod projection;
+
 use crate::cmd::sync_supervisor;
 use crate::sync_engine::{reconcile_dir, reconcile_md, ReconcileReport};
 use crate::workspace_layout::{ensure_ops_dir, is_workspace_md, read_config, Paths};
@@ -39,6 +41,7 @@ use outl_actions::SyncEngine;
 use outl_core::hlc::HlcGenerator;
 use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
+use projection::{project_stale_pages, ProjectionReporter, PROJECTION_MIN_INTERVAL};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
@@ -104,12 +107,25 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     let storage = JsonlStorage::open(paths.ops.clone(), actor)?;
     let mut ws = Workspace::open_with_storage(actor, Box::new(storage), Some(paths.root.clone()))?;
     let hlc = HlcGenerator::new(actor);
+    // This path opens its own workspace instead of going through
+    // `outl_ws::open_with`, so it owns this step itself. Raise the
+    // generator above the log before the initial scan emits its first op
+    // (see `Workspace::seed_clock`). Propagated: `serve` is a daemon that
+    // writes for weeks, so a storage read that fails at boot is worth
+    // refusing to start over.
+    ws.seed_clock(&hlc)
+        .with_context(|| "seeding the clock from the op log")?;
 
     info!("starting outl serve at {}", paths.root.display());
 
     // Initial scan: reconcile every .md in pages/ and journals/.
     let initial = initial_scan(&mut ws, &hlc, &paths)?;
     summarize(&initial);
+    // …then the other direction. `.md → tree` runs first on purpose: a
+    // local hand edit becomes ops before the projection pass renders the
+    // tree back out, so the two never fight over the same file.
+    let mut reporter = ProjectionReporter::default();
+    project_stale_pages(&ws, &paths.root, &mut reporter);
 
     if once {
         return Ok(());
@@ -163,10 +179,24 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     // cannot tell a dead watcher from a clean SIGTERM, so the process exits 0
     // and `Restart=on-failure` never brings the daemon back.
     let mut watcher_died = false;
+    // Peer ops that landed and whose pages have not been projected yet.
+    // A burst of batches sets it many times and costs one sweep.
+    let mut projection_due = false;
+    let mut last_projection = std::time::Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
         // Keeps the snapshot current on an idle daemon; correctness is the
         // second call, just before the reconcile.
-        reload_if_peer_ops(&peer_rx, &engine, &mut ws);
+        projection_due |= reload_if_peer_ops(&peer_rx, &engine, &hlc, &mut ws);
+        // The whole reason this daemon now has a `tree → .md` half: ops
+        // that arrive by sync change the tree and nothing else, so the
+        // `.md` stays wrong until a human opens the page. Throttled
+        // because the sweep renders every page, and a sync burst would
+        // otherwise render the graph once per batch.
+        if projection_due && last_projection.elapsed() >= PROJECTION_MIN_INTERVAL {
+            project_stale_pages(&ws, &paths.root, &mut reporter);
+            projection_due = false;
+            last_projection = std::time::Instant::now();
+        }
         match rx.recv_timeout(TICK) {
             Ok(Ok(events)) => {
                 let mut paths_to_sync: std::collections::BTreeSet<std::path::PathBuf> =
@@ -181,7 +211,7 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
                 // Again, right before reconciling: the call above ran before
                 // a block of up to TICK, and peer ops that landed during it
                 // would otherwise be diffed against the pre-peer tree.
-                reload_if_peer_ops(&peer_rx, &engine, &mut ws);
+                reload_if_peer_ops(&peer_rx, &engine, &hlc, &mut ws);
                 for p in paths_to_sync {
                     match reconcile_md(&mut ws, &hlc, &paths, &p) {
                         Ok(r) if r.ops_applied > 0 || r.orphans > 0 => {
@@ -274,23 +304,38 @@ fn run_sync_only(paths: &Paths, actor: outl_core::id::ActorId) -> Result<()> {
 
 /// Reload `ws` from the op log when the transport signals peer ops.
 ///
+/// `hlc` rides along because the reload raises it past the peer ops it just
+/// merged; a daemon that never restarts would otherwise keep stamping local
+/// ops below a peer that runs ahead of its clock.
+///
 /// Drains the whole burst first: one reload covers every signal in it.
 /// A failed reload is logged and left alone — the next signal retries, and
 /// reconciling against the tree we already have beats not reconciling at all.
+///
+/// Returns whether the tree moved, which is what tells the caller a
+/// `tree → .md` sweep now has something to do.
 fn reload_if_peer_ops(
     peer_rx: &std::sync::mpsc::Receiver<()>,
     engine: &SyncEngine,
+    hlc: &HlcGenerator,
     ws: &mut Workspace,
-) {
+) -> bool {
     if peer_rx.try_iter().count() == 0 {
-        return;
+        return false;
     }
-    match engine.reload_workspace() {
+    match engine.reload_workspace(hlc) {
         Ok(fresh) => {
             *ws = fresh;
             info!("peer ops landed; workspace reloaded");
+            true
         }
-        Err(e) => error!("reloading after peer ops failed: {e:#}"),
+        Err(e) => {
+            error!("reloading after peer ops failed: {e:#}");
+            // The signal is spent either way, and a sweep against the
+            // tree we already have is the ordinary case, not a repair —
+            // it just finds nothing.
+            false
+        }
     }
 }
 
