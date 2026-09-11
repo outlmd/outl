@@ -19,11 +19,9 @@ Treat matching with the same paranoia as the CRDT.
   Nothing is silently dropped, at any depth; surfaces show the warning list so the user can clean the file at their pace.
   Multi-line bodies (including `> ` blockquote continuation lines, `TODO ` / `DOING ` / `DONE ` continuations, and free-text continuations) land verbatim in `OutlineNode.text` separated by `\n`;
   the prefix on each continuation line is preserved by the same "trim leading indent, append to text" path so blockquote bodies round-trip cleanly as CommonMark.
-  **Blank lines and indentation inside a block's text now round-trip.**
-  A whitespace-only line indented deeper than the block (what `render::write_block_text` emits for a blank line mid-continuation) folds into `text`; only a genuinely empty line closes continuation.
-  A continuation line's own indentation survives via the private `strip_indent_levels` helper, which strips only the levels the renderer added.
-  An over-indented line the grammar still can't place is recovered as a **child block** at its written depth (warning, not a silent drop).
-  Getting any of these three wrong is the issue #210 producer — measured at 41 pages / 387 lines on a real workspace, and 0 after the fix.
+  **What the parser preserves (blank lines, own indentation, a leading newline, both fence characters, a BOM), and the four shapes that are known-unfixed on purpose: [`docs/markdown-format.md`](../../docs/markdown-format.md#what-the-parser-preserves-and-what-it-still-gets-wrong).**
+  Getting any of them wrong is the issue #210 producer, measured at 41 pages / 387 lines on a real workspace and 0 after the fix.
+
 - Render outline AST → `.md` (clean, no IDs).
   Each line in `OutlineNode.text` after the first is emitted at `indent + 1`; the renderer **does not invent** prefixes on continuation lines — whatever the user (or the parser) put in `text` round-trips as-is.
   Block-kind markers (`TODO `, `DOING `, `DONE `, `> `) are owned by `outl-actions` (`todo.rs`, `quote.rs`); this crate only preserves them verbatim, which is why `DOING ` needed no parser change.
@@ -277,6 +275,8 @@ tags:: #project
 src/
 ├── lib.rs
 ├── parse.rs        # md → AST (no IDs): the grammar + the block-list reader
+├── parse/
+│   └── tests.rs    # the grammar's unit tests (split out to keep parse.rs under the guard, never a seam inside the parser)
 ├── ast.rs          # OutlineNode, ParsedPage, ParseWarning(Kind) — re-exported by parse
 ├── property.rs     # `key:: value` line + the page-property header run (private mod)
 ├── fence.rs        # fenced code: literal capture while the outline grammar is suspended
@@ -318,7 +318,9 @@ tests/
 ├── heavy_edit.rs             # >20% content change → level 2 warning
 ├── similarity_contention.rs  # two new blocks claim one old entry: confidence decides, not index order
 ├── mixed_version_sidecar.rs  # shipped v2 binary + current one over one folder: no dup, no handle rotation
-└── multiline_block_roundtrip.rs  # render → parse roundtrip for multi-line/blank-line/indented block text (issue #210 producer)
+├── multiline_block_roundtrip.rs  # render → parse roundtrip for multi-line/blank-line/indented/leading-newline block text (issue #210 producer)
+├── block_text_roundtrip_properties.rs  # the corpus gate's three properties, generated (proptest) over block text
+└── corpus_gate.rs            # the three properties over tests/corpus/
 
 benches/
 └── block_index.rs            # resolve / search_block_text on 100k blocks
@@ -354,6 +356,10 @@ Property 3 did not exist until the defect it catches had already shipped, inside
 
 **Maintenance rule, the whole of it: when a `.md` bug is found in the wild, its shape becomes a file in `tests/corpus/`.**
 Reduce it to the smallest input that reproduces, and do not clean it up — the ugliness is the point.
+
+Two of those files hold bytes an editor's "strip trailing whitespace" would quietly neuter, which is exactly what they exist to pin:
+`leading_newline_block.md` **must** keep the trailing space on its `- ` line (that space is how the renderer says "this text starts with a newline"), and `blank_line_before_fence.md` **must** keep its whitespace-only line.
+Normalise either and the file still passes while pinning nothing.
 
 ## Invariants
 

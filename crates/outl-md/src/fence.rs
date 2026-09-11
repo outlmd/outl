@@ -12,6 +12,25 @@
 
 use crate::parse::{leading_indent, INDENT_WIDTH};
 
+/// The fence marker that `stripped` opens a fenced code block with, if it
+/// opens one at all.
+///
+/// CommonMark has **two** fence characters and this dialect advertises
+/// "fenced code", not "backtick-fenced code", so `~~~` suspends the
+/// outline grammar exactly as ``` ``` ``` does. Recognising only one of
+/// them meant a bullet inside a tilde fence became a real block — content
+/// promoted into the tree, with an `UnrecognizedBlockMarker` raised
+/// against a line the user wrote correctly.
+///
+/// The marker travels with the opener because a fence closes only on its
+/// **own** character: the other one appearing in the body is content, and
+/// treating it as a closer ends the fence early and hands the rest of the
+/// body back to the outline grammar.
+pub(crate) fn fence_marker(stripped: &str) -> Option<&'static str> {
+    const MARKERS: [&str; 2] = ["```", "~~~"];
+    MARKERS.into_iter().find(|m| stripped.starts_with(m))
+}
+
 /// Consume a fenced code block from `lines[*i]` (the opening fence)
 /// up to and including the matching closing fence. The full literal
 /// content — including the fences themselves — gets appended to
@@ -25,21 +44,33 @@ use crate::parse::{leading_indent, INDENT_WIDTH};
 ///
 /// `i` is advanced past the closing fence on success, or to the end
 /// of the input if the closing fence is missing (graceful close).
+///
+/// `separate` says whether the opener starts a new line of `target`.
+/// The caller decides, because only it knows whether an empty `target`
+/// means "this block has no text yet" or "this block's text starts with
+/// an empty first line" — `- ` followed by a fence is the second, and
+/// deciding it here from `target.is_empty()` dropped that empty line.
+/// See `parse::needs_newline_separator`, the one owner of the answer.
 pub(crate) fn consume_fence(
     lines: &[&str],
     i: &mut usize,
     fence_indent: usize,
+    separate: bool,
     target: &mut String,
 ) {
     // The opening fence line itself.
     let opener = lines[*i];
     let opener_stripped = opener.trim();
-    if !target.is_empty() {
+    // The opener decides which character closes this fence. Callers reach
+    // here only after `fence_marker` already said yes, so the fallback is
+    // unreachable in practice and still has to be total.
+    let marker = fence_marker(opener_stripped).unwrap_or("```");
+    if separate {
         target.push('\n');
     }
     target.push_str(opener_stripped);
     *i += 1;
-    consume_fence_until_close(lines, i, fence_indent, target);
+    consume_fence_until_close(lines, i, fence_indent, marker, target);
 }
 
 /// Same as [`consume_fence`], but the opener line is assumed to be
@@ -50,14 +81,17 @@ pub(crate) fn consume_fence_until_close(
     lines: &[&str],
     i: &mut usize,
     fence_indent: usize,
+    marker: &str,
     target: &mut String,
 ) {
+    // A fence closes only on the character that opened it.
+    let fence_char = marker.chars().next().unwrap_or('`');
     while *i < lines.len() {
         let raw = lines[*i];
         let stripped = raw.trim();
-        // A closing fence is exactly three (or more) backticks alone.
-        let is_closing = stripped == "```"
-            || (stripped.starts_with("```") && stripped.chars().skip(3).all(|c| c == '`'));
+        // A closing fence is three (or more) of that character, alone.
+        let is_closing = stripped.starts_with(marker)
+            && stripped.chars().skip(marker.len()).all(|c| c == fence_char);
         if is_closing && leading_indent(raw) == fence_indent {
             target.push('\n');
             target.push_str(stripped);
@@ -82,9 +116,11 @@ pub(crate) fn consume_fence_until_close(
     }
     // Reached EOF (or an out-dented sibling) without a closing fence.
     // Leave a synthetic close so the rendered output stays well-formed
-    // and the next parse round-trips.
+    // and the next parse round-trips. It has to be the *opener's* marker,
+    // or the synthesized close would not close the fence it was written
+    // for and the next parse would swallow the rest of the document.
     target.push('\n');
-    target.push_str("```");
+    target.push_str(marker);
 }
 
 /// Drop `level * INDENT_WIDTH` leading spaces from a line if present.
