@@ -79,6 +79,14 @@ fn seed_workspace(paths: &Paths, actor: ActorId, scope: PageScope) -> Result<()>
     let mut ws = Workspace::open_with_storage(actor, Box::new(storage), Some(paths.root.clone()))
         .with_context(|| "materializing workspace")?;
     let hlc = HlcGenerator::new(actor);
+    // `init` is idempotent, so this workspace is not always empty — a
+    // re-init over an existing graph seeds through the same generator.
+    // Raise it above whatever is already logged before the first op (see
+    // `Workspace::seed_clock`); a no-op on the fresh case this mostly
+    // runs in. Propagated, like every other failure in `init`: a
+    // workspace that cannot be read is not one to scaffold into.
+    ws.seed_clock(&hlc)
+        .with_context(|| "seeding the clock from the op log")?;
 
     // Create the journal template page once (idempotent on re-init).
     if !has_journal_template(&ws) {

@@ -81,9 +81,14 @@ fn run_allow_bulk_delete(path: &Path) -> Result<()> {
     let root = ctx.root.clone();
     let orphan_log = outl_actions::sync::orphans_log_path(&root);
 
-    let stale = collect_stale(&ctx.workspace, &root);
+    let scan = collect_stale(&ctx.workspace, &root);
+    let stale = &scan.picked;
     if stale.is_empty() {
-        println!("no page has an unreconciled external edit");
+        println!(
+            "no page has an unreconciled external edit ({} page(s) judged)",
+            scan.judged
+        );
+        print_unjudged(&scan.skipped);
         return Ok(());
     }
 
@@ -96,7 +101,7 @@ fn run_allow_bulk_delete(path: &Path) -> Result<()> {
 
     let mut ops_total = 0usize;
     let mut failed = 0usize;
-    for (md_path, slug) in &stale {
+    for (md_path, slug) in stale {
         match outl_md::reconcile_md_with_guard(
             &mut ctx.workspace,
             &ctx.hlc,
@@ -128,6 +133,7 @@ fn run_allow_bulk_delete(path: &Path) -> Result<()> {
         stale.len() - failed
     );
     println!("Deleted blocks are in the trash, not gone — `outl doctor` lists them.");
+    print_unjudged(&scan.skipped);
     if failed > 0 {
         anyhow::bail!("{failed} page(s) failed to reconcile");
     }
@@ -139,13 +145,15 @@ fn run_allow_bulk_delete(path: &Path) -> Result<()> {
 fn collect_stale(
     ws: &outl_core::workspace::Workspace,
     root: &Path,
-) -> Vec<(std::path::PathBuf, String)> {
-    let mut out = scan_pages(ws, root, |meta, md_path, disk, sidecar| {
-        (sidecar.last_synced_hash != outl_md::sidecar::file_hash(disk))
-            .then(|| (md_path.to_path_buf(), meta.slug.clone()))
+) -> Scan<(std::path::PathBuf, String)> {
+    let mut scan = scan_pages(ws, root, |meta, md_path, disk, sidecar| {
+        if sidecar.last_synced_hash == outl_md::sidecar::file_hash(disk) {
+            return Verdict::Clean;
+        }
+        Verdict::Take((md_path.to_path_buf(), meta.slug.clone()))
     });
-    out.sort_by(|a, b| a.1.cmp(&b.1));
-    out
+    scan.picked.sort_by(|a, b| a.1.cmp(&b.1));
+    scan
 }
 
 /// The original read-only listing.
@@ -194,9 +202,14 @@ fn run_ahead_of_log(path: &Path, guard: OrphanGuard) -> Result<()> {
     let root = ctx.root.clone();
     let orphan_log = outl_actions::sync::orphans_log_path(&root);
 
-    let ahead = collect_ahead(&ctx.workspace, &root);
+    let scan = collect_ahead(&ctx.workspace, &root);
+    let ahead = &scan.picked;
     if ahead.is_empty() {
-        println!("no page holds content outside the op log");
+        println!(
+            "no page holds content outside the op log ({} page(s) judged)",
+            scan.judged
+        );
+        print_unjudged(&scan.skipped);
         return Ok(());
     }
 
@@ -210,7 +223,7 @@ fn run_ahead_of_log(path: &Path, guard: OrphanGuard) -> Result<()> {
 
     let mut ops_total = 0usize;
     let mut failed = 0usize;
-    for page in &ahead {
+    for page in ahead {
         // `reconcile_md` short-circuits on the recorded hash, which is
         // exactly the state these pages are in — that is why the ordinary
         // reconcile skips them.
@@ -250,6 +263,7 @@ fn run_ahead_of_log(path: &Path, guard: OrphanGuard) -> Result<()> {
         "reconciled {} page(s), {ops_total} op(s) applied, {failed} failed",
         ahead.len() - failed
     );
+    print_unjudged(&scan.skipped);
     if failed > 0 {
         println!("Re-run to retry the failures; their `.md` is untouched.");
         // Exit non-zero. A partial migration that reports success is how a
@@ -289,8 +303,8 @@ fn invalidate_synced_hash(md_path: &Path) -> Result<()> {
 /// Walk every page, rendering it from the tree and comparing against the
 /// `.md` on disk. A page is "ahead" when disk holds content lines the
 /// render does not account for.
-fn collect_ahead(ws: &outl_core::workspace::Workspace, root: &Path) -> Vec<AheadPage> {
-    let mut out = scan_pages(ws, root, |meta, md_path, disk, sidecar| {
+fn collect_ahead(ws: &outl_core::workspace::Workspace, root: &Path) -> Scan<AheadPage> {
+    let mut scan = scan_pages(ws, root, |meta, md_path, disk, sidecar| {
         // Same reference the write-side guard uses: the sidecar's blocks,
         // not a render. A render answers "do disk and tree disagree",
         // which every remote edit also answers yes to, and reconciling
@@ -300,50 +314,206 @@ fn collect_ahead(ws: &outl_core::workspace::Workspace, root: &Path) -> Vec<Ahead
         // here rather than inside the verdict, so the render-based
         // caller in `doctor` is not silenced by the same rule.
         if !outl_actions::sidecar_can_answer(&sidecar.blocks) {
-            return None;
+            // A sidecar that cannot answer only matters when there is a
+            // question to answer. `outl init` leaves two pages holding a
+            // single empty block, and every page created for a `[[link]]`
+            // that was never filled is the same shape: their sidecars
+            // record no text, so they can answer nothing — but their
+            // `.md` holds no text either, so nothing on disk could be
+            // outside the log.
+            //
+            // Reporting those would make the unjudged list mostly empty
+            // pages on a real workspace, which teaches the user to skim
+            // past the entries that mean something. Asked through the
+            // same owner with an empty reference — "what is on disk that
+            // nothing accounts for" — so this is not a second opinion
+            // about what a content line is.
+            let on_disk = outl_actions::content_lines_missing_from(disk, &[]);
+            if on_disk.iter().all(String::is_empty) {
+                return Verdict::Clean;
+            }
+            return Verdict::Unjudged(Unjudged::SidecarCannotAnswer);
         }
         let missing = outl_actions::content_lines_missing_from(disk, &sidecar.blocks).len();
-        (missing > 0).then(|| AheadPage {
+        if missing == 0 {
+            return Verdict::Clean;
+        }
+        Verdict::Take(AheadPage {
             md_path: md_path.to_path_buf(),
             slug: meta.slug.clone(),
             missing,
         })
     });
     // Stable order so two runs report the same list.
-    out.sort_by(|a, b| a.slug.cmp(&b.slug));
-    out
+    scan.picked.sort_by(|a, b| a.slug.cmp(&b.slug));
+    scan
+}
+
+/// Why a page could not be judged.
+///
+/// The third state, and it needs a name of its own. "Scanned and clean"
+/// and "never read" are different facts, and only one of them is good
+/// news — collapsing them is how a recovery command reports a healthy
+/// workspace it never looked at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unjudged {
+    /// The `.md` exists and could not be read (permissions, an
+    /// undownloaded iCloud placeholder, a mid-write truncation).
+    UnreadableMd,
+    /// No sidecar could be read next to an existing `.md`.
+    MissingSidecar,
+    /// A sidecar is there and will not parse.
+    UnparseableSidecar,
+    /// The sidecar parses but records no text for any of its blocks, so
+    /// it cannot say what the op log held.
+    SidecarCannotAnswer,
+}
+
+impl Unjudged {
+    /// The sentence the user reads. Written here rather than at each
+    /// call site so two modes cannot describe the same skip differently.
+    fn reason(self) -> &'static str {
+        match self {
+            Self::UnreadableMd => "its `.md` could not be read",
+            Self::MissingSidecar => {
+                "it has a `.md` but no sidecar, so nothing records what the log held"
+            }
+            Self::UnparseableSidecar => "its sidecar will not parse",
+            Self::SidecarCannotAnswer => {
+                "its sidecar records no block text, so it cannot say what the log held"
+            }
+        }
+    }
+}
+
+/// What `pick` says about one page.
+enum Verdict<T> {
+    /// The page qualifies for this mode.
+    Take(T),
+    /// Read end to end, nothing to do.
+    Clean,
+    /// Could not be looked at. Never folded into `Clean`.
+    Unjudged(Unjudged),
+}
+
+/// The outcome of one whole-workspace walk.
+struct Scan<T> {
+    /// The pages this mode will act on.
+    picked: Vec<T>,
+    /// Pages that were never read, with the reason, sorted by slug.
+    skipped: Vec<(String, Unjudged)>,
+    /// How many pages this walk could answer for — `picked` included.
+    /// A page with no `.md` counts: "there is no file" is an answer.
+    judged: usize,
+}
+
+impl<T> Default for Scan<T> {
+    fn default() -> Self {
+        Self {
+            picked: Vec::new(),
+            skipped: Vec::new(),
+            judged: 0,
+        }
+    }
 }
 
 /// Walk every page, handing `pick` the ones whose `.md` **and** sidecar
-/// both read cleanly.
+/// both read cleanly, and recording the ones that did not.
 ///
 /// The skip rule is the reason this is one function rather than two
 /// copies: **a `.md` we cannot read is not a page in any interesting
 /// state — it is a read failure**, and guessing "empty" there is exactly
-/// how content gets deleted (RFC 0210). `doctor` reports those
-/// separately. A sidecar that will not parse is skipped for the same
-/// reason: without it there is no record of what the log held, so no
-/// question here can be answered about the page.
+/// how content gets deleted (RFC 0210). A sidecar that will not parse is
+/// skipped for the same reason: without it there is no record of what
+/// the log held, so no question here can be answered about the page.
+///
+/// What changed once the skips were counted: **a page with no `.md` at
+/// all is answerable and is not a skip.** There is no file, so it cannot
+/// hold content the log lacks and cannot carry an unreconciled external
+/// edit. That is the ordinary state of every page on a freshly paired
+/// device, and reporting thousands of them as unjudged would bury the
+/// handful that mean something. Only an `.md` that exists and refuses to
+/// be read is a skip.
 fn scan_pages<T>(
     ws: &outl_core::workspace::Workspace,
     root: &Path,
-    pick: impl Fn(&outl_actions::PageMeta, &Path, &str, &outl_md::sidecar::Sidecar) -> Option<T>,
-) -> Vec<T> {
-    let mut out = Vec::new();
+    pick: impl Fn(&outl_actions::PageMeta, &Path, &str, &outl_md::sidecar::Sidecar) -> Verdict<T>,
+) -> Scan<T> {
+    let mut scan = Scan::default();
     for meta in outl_actions::list_pages(ws) {
         let md_path = outl_actions::page_md_path(root, &meta);
-        let Ok(disk) = fs::read_to_string(&md_path) else {
-            continue;
+        let disk = match fs::read_to_string(&md_path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                scan.judged += 1;
+                continue;
+            }
+            Err(_) => {
+                scan.skipped
+                    .push((meta.slug.clone(), Unjudged::UnreadableMd));
+                continue;
+            }
         };
-        let Ok(sidecar) = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(&md_path))
-        else {
-            continue;
+        let sidecar = match outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(&md_path)) {
+            Ok(sidecar) => sidecar,
+            Err(e) => {
+                scan.skipped.push((meta.slug.clone(), unjudged_sidecar(&e)));
+                continue;
+            }
         };
-        if let Some(item) = pick(&meta, &md_path, &disk, &sidecar) {
-            out.push(item);
+        match pick(&meta, &md_path, &disk, &sidecar) {
+            Verdict::Take(item) => {
+                scan.judged += 1;
+                scan.picked.push(item);
+            }
+            Verdict::Clean => scan.judged += 1,
+            Verdict::Unjudged(why) => scan.skipped.push((meta.slug.clone(), why)),
         }
     }
-    out
+    scan.skipped.sort_by(|a, b| a.0.cmp(&b.0));
+    scan
+}
+
+/// Missing and corrupt are both unjudgeable and they are not the same
+/// advice: one wants a projection, the other wants `doctor`.
+fn unjudged_sidecar(e: &outl_md::sidecar::SidecarError) -> Unjudged {
+    match e {
+        outl_md::sidecar::SidecarError::Io(io) if io.kind() == std::io::ErrorKind::NotFound => {
+            Unjudged::MissingSidecar
+        }
+        _ => Unjudged::UnparseableSidecar,
+    }
+}
+
+/// How many unjudged pages to name before eliding.
+const UNJUDGED_SAMPLE: usize = 20;
+
+/// Report the pages the walk could not read.
+///
+/// Silence here is the defect this prints against. Both modes used to
+/// drop an unreadable `.md`, an unparseable sidecar and a sidecar that
+/// cannot answer without counting any of them, so a workspace where
+/// **every** page was skipped printed "no page holds content outside the
+/// op log" and exited 0 — a refusal that never reached the user, on the
+/// command they run after a refusal already cost them content (root
+/// `CLAUDE.md` invariant 8).
+fn print_unjudged(skipped: &[(String, Unjudged)]) {
+    if skipped.is_empty() {
+        return;
+    }
+    println!();
+    println!(
+        "{} page(s) could NOT be judged and were not reconciled:",
+        skipped.len()
+    );
+    for (slug, why) in skipped.iter().take(UNJUDGED_SAMPLE) {
+        println!("  {slug} — {}", why.reason());
+    }
+    if skipped.len() > UNJUDGED_SAMPLE {
+        println!("  … {} more", skipped.len() - UNJUDGED_SAMPLE);
+    }
+    println!("None of these is clean — each was skipped before its content was read.");
+    println!("`outl doctor` reports an unreadable `.md` and a broken sidecar separately.");
 }
 
 #[cfg(test)]
