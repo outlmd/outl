@@ -61,6 +61,23 @@ impl McpClient {
     }
 }
 
+/// Parse the data payload out of a **successful** `tools/call` result.
+///
+/// Success replies are content-only (no `structuredContent` at this
+/// protocol version); the data lives as compact JSON in
+/// `content[0].text`. Markdown-first tools put raw `.md` there instead,
+/// so this is only for the JSON-shaped tools.
+fn success_data(result: &Value) -> Value {
+    assert_eq!(
+        result["isError"], false,
+        "expected a success reply: {result}"
+    );
+    let text = result["content"][0]["text"]
+        .as_str()
+        .expect("content[0].text is a string");
+    serde_json::from_str(text).expect("success content is JSON")
+}
+
 impl Drop for McpClient {
     fn drop(&mut self) {
         // Closing stdin makes the MCP loop exit.
@@ -109,9 +126,8 @@ fn initialize_then_call_workspace_info() {
         }
     }));
     assert_eq!(call["id"], 3);
-    let structured = &call["result"]["structuredContent"];
-    assert_eq!(structured["ok"], true);
-    assert!(structured["data"]["root"].is_string());
+    let data = success_data(&call["result"]);
+    assert!(data["root"].is_string());
 }
 
 #[test]
@@ -137,9 +153,8 @@ fn doctor_via_mcp_does_not_lie_about_lock() {
         "method": "tools/call",
         "params": { "name": "outl_workspace_doctor", "arguments": {} }
     }));
-    let structured = &resp["result"]["structuredContent"];
-    assert_eq!(structured["ok"], true, "doctor must succeed inside MCP");
-    let findings = structured["data"]["findings"].as_array().unwrap();
+    let data = success_data(&resp["result"]);
+    let findings = data["findings"].as_array().unwrap();
     let has_lock_warning = findings.iter().any(|f| {
         f["message"]
             .as_str()
@@ -220,9 +235,8 @@ fn page_create_then_get_via_mcp() {
             "arguments": { "slug": "ideas", "title": "Ideas" }
         }
     }));
-    let structured = &create["result"]["structuredContent"];
-    assert_eq!(structured["ok"], true);
-    assert_eq!(structured["data"]["meta"]["slug"], "ideas");
+    let data = success_data(&create["result"]);
+    assert_eq!(data["meta"]["slug"], "ideas");
 
     let get = client.call(serde_json::json!({
         "jsonrpc": "2.0",
@@ -233,9 +247,8 @@ fn page_create_then_get_via_mcp() {
             "arguments": { "slug": "ideas" }
         }
     }));
-    let s2 = &get["result"]["structuredContent"];
-    assert_eq!(s2["ok"], true);
-    assert_eq!(s2["data"]["meta"]["title"], "Ideas");
+    let data = success_data(&get["result"]);
+    assert_eq!(data["meta"]["title"], "Ideas");
 }
 
 /// RFC 0255 Part 1: a page that stopped syncing must come back as a
@@ -271,7 +284,7 @@ fn frozen_page_update_returns_structured_refusal_not_a_generic_error() {
                 }
             }
         }));
-        assert_eq!(create["result"]["structuredContent"]["ok"], true);
+        assert_eq!(create["result"]["isError"], false);
     }
 
     // Reproduce the exact state invariant 8 guards against: the `.md`

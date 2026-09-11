@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use crate::output::{codes, ApiError, Envelope};
+use crate::output::{codes, ApiError};
 use crate::ws::{self, WsCtx};
 use outl_actions::SyncTransport;
 use outl_md::index::WorkspaceIndex;
@@ -394,74 +394,6 @@ fn dispatch(
         "prompts/get" => prompts::get(params, ctx),
         other => Err(protocol::JsonRpcError::method_not_found(other)),
     }
-}
-
-/// Wrap an [`ApiError`] into MCP tool output. MCP tool errors flow
-/// through the response shape `{ content: [...], isError: true }`
-/// rather than as JSON-RPC errors, so the client gets a recoverable
-/// signal instead of a protocol-level fault.
-///
-/// `structuredContent` carries the same `Envelope` shape a success
-/// reply does (`{ ok, data, error }`), so a caller that already reads
-/// structured replies doesn't need a second parser for the failure
-/// case. This is what makes `ApiError::data` reach the wire: a code
-/// like `PAGE_MARKDOWN_AHEAD_OF_LOG` alone tells a caller *that* a
-/// page stopped syncing, but `error.data.path` / `.lines` / `.sample`
-/// / `.recovery_command` is what lets it act instead of just
-/// reporting the failure onward (RFC 0255).
-pub(crate) fn tool_error_payload(err: &ApiError) -> Value {
-    let envelope = Envelope::<Value>::failure(err.clone());
-    json!({
-        "content": [
-            { "type": "text", "text": format!("{}: {}", err.code, err.message) }
-        ],
-        "structuredContent": serde_json::to_value(&envelope).unwrap_or(Value::Null),
-        "isError": true,
-    })
-}
-
-/// Wrap a successful tool result into the MCP tool-output envelope.
-///
-/// `tool_name` lets us pick a more useful `text` representation than
-/// "pretty-printed JSON" for the tools where the user is asking for
-/// raw markdown (`export_md`, `page_render`, etc.). The
-/// `structuredContent` field always carries the full envelope so
-/// callers that prefer machine shape still get it.
-pub(crate) fn tool_success_payload(tool_name: &str, payload: &Value) -> Value {
-    let text = preferred_text_for(tool_name, payload);
-    let envelope = Envelope::success(payload.clone());
-    json!({
-        "content": [ { "type": "text", "text": text } ],
-        "structuredContent": serde_json::to_value(&envelope).unwrap_or(Value::Null),
-        "isError": false,
-    })
-}
-
-/// Pick a text content best suited for `tool_name`.
-///
-/// Tools that produce a single big string (rendered markdown, summary
-/// text) flatten the payload by reading its natural field. Everything
-/// else stays as pretty-printed JSON so structured callers always see
-/// the same shape.
-fn preferred_text_for(tool_name: &str, payload: &Value) -> String {
-    let take_field = |field: &str| -> Option<String> {
-        payload
-            .get(field)
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
-
-    match tool_name {
-        // Pure-markdown surfaces: prefer the raw `md` field.
-        "outl_export_md" | "outl_page_render" => take_field("md"),
-        // Daily / page surfaces ship both `md` and a structured outline;
-        // the host shows the markdown as the "natural" text content.
-        "outl_daily_today" | "outl_daily_get" => take_field("md"),
-        _ => None,
-    }
-    .unwrap_or_else(|| {
-        serde_json::to_string_pretty(payload).unwrap_or_else(|_| payload.to_string())
-    })
 }
 
 #[cfg(test)]

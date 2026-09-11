@@ -201,11 +201,7 @@ impl Envelope<Value> {
 /// Print a success envelope as JSON to stdout. Convenience for CLI
 /// handlers that always emit JSON when `--json` is set.
 pub fn print_success_json<T: Serialize>(data: &T) {
-    let env = Envelope {
-        ok: true,
-        data: Some(data),
-        error: None::<ApiError>,
-    };
+    let env = Envelope::success(data);
     match serde_json::to_string(&env) {
         Ok(s) => println!("{s}"),
         Err(e) => eprintln!("internal: could not serialize success envelope: {e}"),
