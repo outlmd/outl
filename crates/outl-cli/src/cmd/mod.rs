@@ -5,6 +5,7 @@ pub mod backlinks;
 pub mod backup;
 pub mod batch;
 pub mod block;
+pub mod compact;
 pub mod daily;
 pub mod doctor;
 pub mod export;
