@@ -30,7 +30,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use outl_core::hlc::Hlc;
+use outl_core::hlc::{Hlc, HlcGenerator};
 use outl_core::id::{ActorId, NodeId};
 use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
@@ -387,7 +387,17 @@ impl SyncEngine {
     /// Reads every `ops-*.jsonl` in `<root>/ops/`, merges them by
     /// HLC, and replays the resulting ordered sequence into the
     /// materialised tree.
-    pub fn reload_workspace(&self) -> Result<Workspace, ActionError> {
+    ///
+    /// `hlc` is the caller's live generator — the same one its next local
+    /// edit will stamp from — and it is raised here past everything the
+    /// merged log holds ([`Workspace::seed_clock`]). Boot seeding alone
+    /// does not cover this path: a peer that is ahead of our wall clock
+    /// lands its ops *after* boot, so without this the next local edit is
+    /// stamped below them and pays the paper's undo/redo window over every
+    /// newer entry. That is a **cost**, not a convergence bug — `apply_op`
+    /// reorders to the same tree either way — but it is paid synchronously
+    /// on a foreground keystroke, and it recurs on every sync tick.
+    pub fn reload_workspace(&self, hlc: &HlcGenerator) -> Result<Workspace, ActionError> {
         let ops_dir = self.workspace_root.join("ops");
         let storage = JsonlStorage::open(ops_dir, self.actor)
             .map_err(|e| ActionError::Io(std::io::Error::other(format!("jsonl open: {e}"))))?;
@@ -396,6 +406,16 @@ impl SyncEngine {
             Box::new(storage),
             Some(self.workspace_root.clone()),
         )?;
+        // Propagated, exactly as the boot sites do. `seed_clock` reads the
+        // per-actor maxima off the index the `open_with_storage` above just
+        // built, so a failure here means storage stopped being readable
+        // between two statements — and then the workspace we would hand back
+        // is no more trustworthy than the seeding. Every reload caller
+        // already has a safe answer for `Err`: keep the workspace you have
+        // and retry on the next signal. Swallowing it would leave the clock
+        // unseeded with no signal anywhere, which is this bug returning
+        // invisibly.
+        workspace.seed_clock(hlc)?;
 
         // Write-through snapshot after a big cold replay.
         //
@@ -475,8 +495,12 @@ impl SyncEngine {
     /// reaches for it, it inherits the same rule: a refusal here means
     /// this one page's `.md` didn't update, not that the reload failed,
     /// and it must not be allowed to abort a larger sync pass.
-    pub fn refresh_page(&self, page_id: NodeId) -> Result<Workspace, ActionError> {
-        let ws = self.reload_workspace()?;
+    pub fn refresh_page(
+        &self,
+        hlc: &HlcGenerator,
+        page_id: NodeId,
+    ) -> Result<Workspace, ActionError> {
+        let ws = self.reload_workspace(hlc)?;
         self.reproject_page(&ws, page_id)?;
         Ok(ws)
     }
@@ -646,200 +670,4 @@ fn needs_reconcile(md_path: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn snapshot_returns_empty_when_no_ops_dir() {
-        let tmp = TempDir::new().unwrap();
-        let actor = ActorId::new();
-        let engine = SyncEngine::new(tmp.path().to_path_buf(), actor);
-        assert!(engine.snapshot().is_empty());
-    }
-
-    #[test]
-    fn snapshot_lists_ops_files_and_skips_others() {
-        let tmp = TempDir::new().unwrap();
-        let ops = tmp.path().join("ops");
-        std::fs::create_dir(&ops).unwrap();
-        std::fs::write(ops.join("ops-A.jsonl"), b"x").unwrap();
-        std::fs::write(ops.join("ops-B.jsonl"), b"yz").unwrap();
-        std::fs::write(ops.join("README.md"), b"hello").unwrap();
-
-        let actor = ActorId::new();
-        let engine = SyncEngine::new(tmp.path().to_path_buf(), actor);
-        let snap = engine.snapshot();
-        assert_eq!(snap.len(), 2);
-        assert_eq!(snap[0].name, "ops-A.jsonl");
-        assert_eq!(snap[0].size, 1);
-        assert_eq!(snap[1].name, "ops-B.jsonl");
-        assert_eq!(snap[1].size, 2);
-    }
-
-    #[test]
-    fn reload_workspace_opens_empty_workspace_when_no_ops() {
-        let tmp = TempDir::new().unwrap();
-        let actor = ActorId::new();
-        let engine = SyncEngine::new(tmp.path().to_path_buf(), actor);
-        let ws = engine.reload_workspace().expect("should open clean");
-        // Materialised tree starts empty.
-        assert_eq!(
-            crate::tree::children_of(&ws, outl_core::id::NodeId::root()).len(),
-            0
-        );
-    }
-
-    /// Regression: a small (well under the old 10k-op threshold) workspace
-    /// whose on-disk snapshot gets rejected by the convergence guard once
-    /// must NOT be stuck full-replaying on every subsequent incremental
-    /// reload. This is the routine two-actor case — see
-    /// `snapshot_late_op.rs::late_low_hlc_op_from_unseen_actor_survives_snapshot_boot`
-    /// for why a legitimate peer op can sort below another actor's cutoff.
-    #[test]
-    fn reload_workspace_refreshes_snapshot_after_guard_rejection_even_below_threshold() {
-        use outl_core::fractional::Fractional;
-        use outl_core::hlc::Hlc;
-        use outl_core::id::NodeId;
-        use outl_core::op::{LogOp, Op};
-        use outl_core::storage::{JsonlStorage, Storage};
-
-        fn hlc(physical_ms: u64, actor: ActorId) -> Hlc {
-            Hlc {
-                physical_ms,
-                logical: 0,
-                actor,
-            }
-        }
-
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        let ops_dir = root.join("ops");
-        let actor_a = ActorId::new();
-        let actor_b = ActorId::new();
-
-        // Actor A creates one node at a HIGH physical time and snapshots.
-        let mut ws = Workspace::open_with_storage(
-            actor_a,
-            Box::new(JsonlStorage::open(ops_dir.clone(), actor_a).unwrap()),
-            Some(root.to_path_buf()),
-        )
-        .unwrap();
-        ws.set_snapshot_policy(false, 0);
-        let n_a = NodeId::new();
-        ws.apply(LogOp {
-            ts: hlc(10_000, actor_a),
-            actor: actor_a,
-            op: Op::Create {
-                node: n_a,
-                parent: NodeId::root(),
-                position: Fractional::first(),
-            },
-        })
-        .unwrap();
-        ws.save_snapshot().unwrap();
-        drop(ws);
-
-        // Actor B's op arrives via sync with a LOW physical time (B was
-        // offline / its clock lags), sitting below A's cutoff — the
-        // convergence guard must reject the stale snapshot for this boot.
-        let n_b = NodeId::new();
-        {
-            let mut storage_b = JsonlStorage::open(ops_dir.clone(), actor_b).unwrap();
-            storage_b
-                .append_op(&LogOp {
-                    ts: hlc(5, actor_b),
-                    actor: actor_b,
-                    op: Op::Create {
-                        node: n_b,
-                        parent: NodeId::root(),
-                        position: Fractional::first(),
-                    },
-                })
-                .unwrap();
-        }
-
-        let engine = SyncEngine::new(root.to_path_buf(), actor_a);
-
-        // Well under the old 10_000-op "worth the write" gate.
-        let ws1 = engine.reload_workspace().expect("first reload");
-        assert!(ws1.tree().contains(n_a));
-        assert!(ws1.tree().contains(n_b));
-        assert!(
-            !ws1.booted_from_snapshot(),
-            "first boot must full-replay: the stale snapshot's cutoff sits above B's late op"
-        );
-        drop(ws1);
-
-        // No new ops landed since. A fresh snapshot persisted after the
-        // first reload's full replay should let this second reload adopt
-        // it directly instead of full-replaying again.
-        let ws2 = engine.reload_workspace().expect("second reload");
-        assert!(ws2.tree().contains(n_a));
-        assert!(ws2.tree().contains(n_b));
-        assert!(
-            ws2.booted_from_snapshot(),
-            "second reload must adopt the refreshed snapshot instead of full-replaying forever"
-        );
-    }
-
-    /// The site this test guards: `reproject_page` used to call the
-    /// unconditional writer, so a page a peer never touched — its `.md`
-    /// merely holding content no op has seen — got flattened by the very
-    /// next reload. Root `CLAUDE.md` invariant 8.
-    #[test]
-    fn reproject_page_refuses_a_frozen_page_instead_of_deleting_it() {
-        use crate::block::append_block;
-        use crate::journal::{apply_page_md_with_sidecar, page_md_path};
-        use crate::page::{open_or_create, page_meta, PageKind};
-        use outl_core::hlc::HlcGenerator;
-
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        let ops_dir = root.join("ops");
-        let actor = ActorId::new();
-        let hlc = HlcGenerator::new(actor);
-
-        // Write-side workspace: create the page, project it once while
-        // it is healthy, then drop it — the next reload below mirrors
-        // "another process/device reopens after a peer merge".
-        let mut ws = Workspace::open_with_storage(
-            actor,
-            Box::new(JsonlStorage::open(ops_dir.clone(), actor).unwrap()),
-            Some(root.to_path_buf()),
-        )
-        .unwrap();
-        let page = open_or_create(&mut ws, &hlc, "notes", "Notes", PageKind::Page).unwrap();
-        append_block(&mut ws, &hlc, Some(page), Some("first")).unwrap();
-        apply_page_md_with_sidecar(&ws, root, page).unwrap();
-        let md_path = page_md_path(root, &page_meta(&ws, page).unwrap());
-        drop(ws);
-
-        // Simulate the state a `reconcile_md` that missed invariant 8
-        // leaves behind: content on disk the op log never recorded, with
-        // the sidecar re-stamped to call those exact bytes faithful.
-        let mut md = std::fs::read_to_string(&md_path).unwrap();
-        md.push_str("- only ever on disk\n");
-        std::fs::write(&md_path, &md).unwrap();
-        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
-        let mut sidecar = outl_md::sidecar::read(&sidecar_path).unwrap();
-        sidecar.last_synced_hash = outl_md::sidecar::file_hash(&md);
-        outl_md::sidecar::write(&sidecar_path, &sidecar).unwrap();
-
-        let engine = SyncEngine::new(root.to_path_buf(), actor);
-        let fresh = engine.reload_workspace().expect("reload after merge");
-
-        match engine.reproject_page(&fresh, page) {
-            Err(ActionError::PageMarkdownAheadOfLog { sample, .. }) => assert!(
-                sample.contains("only ever on disk"),
-                "the error must name the content at risk, got {sample:?}"
-            ),
-            other => panic!("expected PageMarkdownAheadOfLog, got {other:?}"),
-        }
-        let after = std::fs::read_to_string(&md_path).unwrap();
-        assert!(
-            after.contains("only ever on disk"),
-            "a refused reprojection must never delete the unlogged content: {after:?}"
-        );
-    }
-}
+mod tests;
