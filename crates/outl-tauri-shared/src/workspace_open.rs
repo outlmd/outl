@@ -120,16 +120,30 @@ fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Take both locks for `path`, releasing the ones this process already
-/// holds **for that same root** first.
+/// What [`acquire_guards`] handed back, and where it came from.
+struct Acquired {
+    guards: WorkspaceGuards,
+    /// The guards were lifted out of `held` rather than newly taken: the
+    /// slot already covered this root and actor. The workspace they
+    /// protect is still published until the caller replaces it, so a
+    /// failed open has to put them **back**, not drop them.
+    lifted_from_slot: bool,
+}
+
+/// Take both locks for `path`, or reuse the ones this process already
+/// holds **for that same root**.
 ///
-/// The retry is not a race workaround. A POSIX `flock` is owned by an
+/// The reuse is not a race workaround. A POSIX `flock` is owned by an
 /// open file description, so a second `open` + `LOCK_EX|LOCK_NB` of
 /// `ops/.lock-<actor>` fails *even inside the process that already holds
 /// it*. Re-picking the workspace that is already open (the folder dialog
-/// pointed at the current root) would therefore refuse itself. Releasing
-/// and retaking is correct there and nowhere else: the workspace being
-/// released is the one this open is replacing.
+/// pointed at the current root) would therefore refuse itself. The
+/// guards in the slot are for exactly this root and actor, so they are
+/// the guards this open would take; lifting them out and handing them
+/// on keeps both flocks held continuously. Releasing and retaking would
+/// open a window in which the live workspace is unguarded, and a reopen
+/// that then failed would leave it that way — with `outl compact` free
+/// to rewrite files it still holds byte offsets into.
 ///
 /// Any other `AlreadyHeld` is a genuinely different process on this
 /// actor and is surfaced, never worked around — see the module docs on
@@ -138,30 +152,27 @@ fn acquire_guards(
     held: &Mutex<Option<WorkspaceGuards>>,
     path: &Path,
     actor: ActorId,
-) -> Result<WorkspaceGuards, LockError> {
+) -> Result<Acquired, LockError> {
     let canonical = canonical(path);
     match WorkspaceGuards::acquire(path, &canonical, actor) {
+        Ok(guards) => Ok(Acquired {
+            guards,
+            lifted_from_slot: false,
+        }),
         Err(LockError::AlreadyHeld(path_held)) => {
-            // Read the slot and release it in two statements, never in a
-            // match guard: `parking_lot::Mutex` is not reentrant, so a
-            // guard temporary still alive over the arm body would deadlock
-            // this thread against itself.
-            let ours = {
-                let slot = held.lock();
-                slot.as_ref()
-                    .is_some_and(|g| g.root == canonical && g.actor == actor)
-            };
-            if !ours {
+            let mut slot = held.lock();
+            let ours = slot
+                .as_ref()
+                .is_some_and(|g| g.root == canonical && g.actor == actor);
+            let Some(guards) = (if ours { slot.take() } else { None }) else {
                 return Err(LockError::AlreadyHeld(path_held));
-            }
-            // Dropping here loses the guards if the reopen below fails.
-            // That window is the re-pick path only, where the workspace
-            // was being replaced anyway, and it degrades to exactly the
-            // unguarded state every GUI was in before this existed.
-            *held.lock() = None;
-            WorkspaceGuards::acquire(path, &canonical, actor)
+            };
+            Ok(Acquired {
+                guards,
+                lifted_from_slot: true,
+            })
         }
-        other => other,
+        Err(e) => Err(e),
     }
 }
 
@@ -184,8 +195,11 @@ fn acquire_guards(
 /// `held` is the client's [`WorkspaceGuards`] slot. This function is its
 /// **single writer**: the new guards are installed only once the open has
 /// succeeded, which is also what releases the previous workspace's. A
-/// client never acquires or drops a lock itself — a second opinion about
-/// who holds the workspace is the defect this replaces.
+/// re-pick of the root already open reuses the guards in the slot rather
+/// than retaking them, and a failed open puts them back, so the live
+/// workspace is never left unguarded. A client never acquires or drops a
+/// lock itself — a second opinion about who holds the workspace is the
+/// defect this replaces.
 ///
 /// # Errors
 ///
@@ -206,9 +220,47 @@ pub fn open_workspace_at(
 
     // Before a byte is read: announce this process to every other `outl`
     // on the machine. Held in `guards` until the open succeeds, so a
-    // failed open leaves no lock behind.
-    let guards = acquire_guards(held, path, actor)?;
+    // failed open leaves no lock behind — unless the guards came out of
+    // the slot (a re-pick of the root already open), in which case the
+    // workspace they protect is still live and they go back where they
+    // were.
+    let Acquired {
+        guards,
+        lifted_from_slot,
+    } = acquire_guards(held, path, actor)?;
 
+    let workspace = match boot(actor, hlc, path, lru_cap) {
+        Ok(workspace) => workspace,
+        Err(e) => {
+            if lifted_from_slot {
+                *held.lock() = Some(guards);
+            }
+            return Err(e);
+        }
+    };
+
+    // The open succeeded, so publish the guards — which is what releases
+    // the previous workspace's. Doing it here rather than at acquisition
+    // means a failed open never parks a lock on a workspace nobody has
+    // open (compaction would then refuse forever with nothing running).
+    info!(
+        "workspace locks held for {} (actor {actor})",
+        guards.root().display()
+    );
+    *held.lock() = Some(guards);
+
+    Ok(workspace)
+}
+
+/// Everything [`open_workspace_at`] does between taking the locks and
+/// publishing them: open the storage, replay, seed the clock, run the
+/// boot repairs, apply the LRU cap and the snapshot policy.
+fn boot(
+    actor: ActorId,
+    hlc: &HlcGenerator,
+    path: &Path,
+    lru_cap: usize,
+) -> anyhow::Result<Workspace> {
     let storage = JsonlStorage::open(path.join("ops"), actor)?;
     let mut workspace =
         Workspace::open_with_storage(actor, Box::new(storage), Some(path.to_path_buf()))?;
@@ -297,16 +349,6 @@ pub fn open_workspace_at(
             warn!("boot: could not persist snapshot: {e}");
         }
     }
-
-    // The open succeeded, so publish the guards — which is what releases
-    // the previous workspace's. Doing it here rather than at acquisition
-    // means a failed open never parks a lock on a workspace nobody has
-    // open (compaction would then refuse forever with nothing running).
-    info!(
-        "workspace locks held for {} (actor {actor})",
-        guards.root().display()
-    );
-    *held.lock() = Some(guards);
 
     Ok(workspace)
 }

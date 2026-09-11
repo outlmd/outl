@@ -264,7 +264,9 @@ fn a_running_gui_does_not_lock_out_another_outl_process() {
 /// `open` + `LOCK_EX|LOCK_NB` of `ops/.lock-<actor>` fails *inside the
 /// process that already holds it*. Re-picking the folder already open
 /// (the desktop's `set_workspace` pointed at the current root) must
-/// therefore release before it retakes, not refuse itself.
+/// therefore reuse the guards it already holds, not refuse itself — and
+/// not release them either, since the live workspace stays published
+/// until the reopen succeeds.
 #[test]
 fn re_picking_the_open_workspace_does_not_refuse_itself() {
     let dir = TempDir::new().expect("tempdir");
