@@ -256,3 +256,9 @@ jobs:
       # files stay editable while the ceiling can only come down.
       - name: file size ratchet
         run: ./scripts/check-file-size.sh
+
+      # The docs index was silently wrong five times in a row: five RFCs
+      # landed, none was listed, and nothing failed. A step everyone
+      # forgets needs to fail, not a reminder.
+      - name: docs index
+        run: ./scripts/check-docs-index.sh
