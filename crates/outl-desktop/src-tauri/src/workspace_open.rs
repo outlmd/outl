@@ -25,7 +25,9 @@ use tracing::{info, warn};
 
 use crate::fs_watcher::{self, WatcherHandle};
 
-pub(crate) use outl_tauri_shared::workspace_open::{load_or_create_actor, open_workspace_at};
+pub(crate) use outl_tauri_shared::workspace_open::{
+    load_or_create_actor, open_workspace_at, WorkspaceGuards,
+};
 
 /// Background reconcile pass for pages whose `.md` is ahead of the
 /// op log: pages authored via vim, pulled from peers without a
@@ -146,6 +148,7 @@ pub(crate) fn spawn_background_reconcile(
 pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
     storage_root_slot: Arc<Mutex<Option<PathBuf>>>,
+    workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
     fs_watcher_slot: Arc<Mutex<Option<WatcherHandle>>>,
     iroh_transport_slot: Arc<Mutex<Option<Arc<dyn SyncTransport>>>>,
     iroh_pairing_slot: Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>>,
@@ -167,16 +170,17 @@ pub(crate) fn spawn_workspace_opener(
         // resolved; legacy blocks moved under it. **No orphan
         // reconcile here** — that runs after we publish the workspace
         // so the user sees today's journal immediately.
-        let workspace = match open_workspace_at(actor, &hlc, &last_workspace, lru_cap) {
-            Ok(w) => w,
-            Err(e) => {
-                warn!(
-                    "background open failed for {}: {e}",
-                    last_workspace.display()
-                );
-                return;
-            }
-        };
+        let workspace =
+            match open_workspace_at(actor, &hlc, &last_workspace, lru_cap, &workspace_guards) {
+                Ok(w) => w,
+                Err(e) => {
+                    warn!(
+                        "background open failed for {}: {e}",
+                        last_workspace.display()
+                    );
+                    return;
+                }
+            };
         // Start the FS watcher BEFORE we swap the slot so the first
         // peer change after boot is captured. Failure is logged but
         // non-fatal — the user can still work, just without

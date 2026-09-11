@@ -10,58 +10,16 @@
 
 use crate::action::Action;
 use crate::binding::{Binding, Mode};
-use crate::chord::{Chord, ChordSequence, Key, Modifiers};
+use crate::chord::Key;
 
-fn ctrl(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::ctrl(c))
-}
-fn meta(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::meta(c))
-}
-fn ch(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::ch(c))
-}
-fn key(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::plain(k))
-}
-fn shift(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::SHIFT, k))
-}
-fn shift_ch(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::SHIFT, Key::char(c)))
-}
-fn shift_meta_ch(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::META | Modifiers::SHIFT, Key::char(c)))
-}
-fn shift_ctrl_ch(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::CTRL | Modifiers::SHIFT, Key::char(c)))
-}
-fn meta_key(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::META, k))
-}
-fn shift_meta_key(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::META | Modifiers::SHIFT, k))
-}
-fn ctrl_key(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::CTRL, k))
-}
-fn shift_ctrl_key(k: Key) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::CTRL | Modifiers::SHIFT, k))
-}
-fn pair(a: char, b: char) -> ChordSequence {
-    ChordSequence::pair(Chord::ch(a), Chord::ch(b))
-}
-/// `g` then `Shift+r` — a lead-in char followed by a shifted one.
-/// Distinct from [`shift_pair`], which shifts **both** (that's `ZZ`).
-fn pair_shift_second(a: char, b: char) -> ChordSequence {
-    ChordSequence::pair(Chord::ch(a), Chord::new(Modifiers::SHIFT, Key::char(b)))
-}
-fn shift_pair(a: char, b: char) -> ChordSequence {
-    ChordSequence::pair(
-        Chord::new(Modifiers::SHIFT, Key::char(a)),
-        Chord::new(Modifiers::SHIFT, Key::char(b)),
-    )
-}
+/// Chord constructors. Read its module doc before adding a row:
+/// `ch` / `pair` lowercase, which has already mis-spelt two chords.
+mod chords;
+
+use chords::{
+    ch, ctrl, ctrl_key, key, meta, meta_key, pair, pair_shift_second, shift, shift_ch,
+    shift_ctrl_ch, shift_ctrl_key, shift_meta_ch, shift_meta_key, shift_pair,
+};
 
 /// Every binding outl ships with by default.
 ///
@@ -489,9 +447,24 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::SearchWordBackward,
             "Search word under cursor (backward)",
         ),
-        // Fold-control chord family.
-        Binding::new(pair('z', 'R'), Normal, Action::UnfoldAll, "Unfold all (zR)"),
-        Binding::new(pair('z', 'M'), Normal, Action::FoldAll, "Fold all (zM)"),
+        // Fold-control chord family. `pair` lowercases through
+        // `Key::char`, so `pair('z', 'R')` spelt these `z r` / `z m`
+        // for as long as the rows existed — and `z` then a lowercase
+        // `r` falls through the TUI's chord block onto its bare `r`
+        // arm, which arms replace-char. The catalog was handing out,
+        // as "unfold all", a chord that overwrites a character.
+        Binding::new(
+            pair_shift_second('z', 'R'),
+            Normal,
+            Action::UnfoldAll,
+            "Unfold all (zR)",
+        ),
+        Binding::new(
+            pair_shift_second('z', 'M'),
+            Normal,
+            Action::FoldAll,
+            "Fold all (zM)",
+        ),
         Binding::new(
             pair('z', 'z'),
             Normal,

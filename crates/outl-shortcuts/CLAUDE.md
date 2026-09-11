@@ -71,8 +71,19 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   `crossterm::KeyEvent → Chord` lives in `outl-tui`; `KeyboardEvent → Chord` lives in `outl-desktop/src/lib/shortcuts.ts`.
   > **Only the desktop actually resolves through [`lookup`].**
   > The TUI dispatches Normal-mode keys from its own `match` in `input/normal.rs`; `input/chord_adapter.rs` exists to match *plugin* chords and nothing else.
-  > So the catalog and the TUI's arms can disagree without failing to compile — `reminder_chord_tests` pins a handful of chords against `lookup`, and the rest are unpinned.
-  > `docs/shortcuts.md` claimed both clients called `lookup` for months. If you re-spell a chord in `defaults.rs`, grep `input/normal.rs` yourself; the build will not do it for you.
+  > So the catalog and the TUI's arms can disagree without failing to compile.
+  > `docs/shortcuts.md` claimed both clients called `lookup` for months.
+  >
+  > **They do disagree, on 17 chords, 6 of which mutate content, the op log, or the session.**
+  > `Ctrl+X` is `CutBlock` here and deletes a character there; `Ctrl+Shift+R` is `OpenReminders` here and redoes there; `Ctrl+Z` is `Undo` here and arms the `z` fold chord there, two keystrokes from a silent edit.
+  > `tests/tui_catalog_divergence.rs` owns that list.
+  > It pins **both** halves — the catalog rows through `lookup`, the TUI's arm patterns by reading `input/normal.rs`.
+  > So a new divergence, a re-spelled chord, or a quietly deleted row fails the build.
+  > It is deliberately **not** a fix: which side is right is a product decision, and a pinned divergence is the invariant-12-compliant state until someone makes it.
+  > `reminder_chord_tests` keeps its own pins on chords that agree; those also appear in that test's `AGREED` table.
+  >
+  > The test covers `Normal` / `Global` chords a terminal can deliver (no `META` — crossterm never emits it).
+  > For `Insert` / `Visual` / `Overlay`, grep `input/` yourself; the build will not do it for you.
 - ❌ User-level overrides (rebinding `i` to `a`).
   When that ships, it'll go through the same `Vec<Binding>` shape — a user override is just a different source list fed into the same `lookup` algorithm.
 - ❌ OS-specific chord rewriting (`Cmd` ↔ `Ctrl`).

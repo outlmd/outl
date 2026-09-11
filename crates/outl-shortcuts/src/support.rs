@@ -160,24 +160,10 @@ macro_rules! row {
 
 use Support::{Full, Missing, Native, NotApplicable, Partial};
 
-/// Reasons repeated across many rows, named once so a re-wording
-/// cannot land on some rows and miss others.
-mod why {
-    /// The desktop has no character cursor inside a block, so every
-    /// vim op that addresses a column has nowhere to land.
-    /// See RFC 0070 and `outl-desktop/CLAUDE.md` → "Vim parity".
-    pub const NO_CHAR_CURSOR: &str =
-        "This vim op needs a character cursor inside the block, which only the TUI has. \
-         Edit the block and use the arrow keys, or run it from the TUI.";
-
-    /// Mobile drives the outline by touch; there is no selection to
-    /// move and no modal Normal state to move it in.
-    pub const TOUCH_ONLY: &str =
-        "Not on mobile — tap the block you want instead of moving a selection.";
-
-    /// Mobile has no keyboard chord surface for vim-modal state.
-    pub const NO_VIM_MODE: &str = "Mobile has no vim modes — it edits directly on tap.";
-}
+/// The nudge text, one module over — see [invariant 12].
+///
+/// [invariant 12]: https://github.com/outlmd/outl/blob/main/CLAUDE.md
+mod why;
 
 /// Per-client support for every action in the catalog.
 ///
@@ -445,11 +431,25 @@ pub fn support(action: Action) -> ClientSupport {
         Action::RunCodeBlock => row!(Full, Full, Full),
 
         // ── inline markdown wrappers ─────────────────────────────
-        Action::WrapBold => row!(Full, Full, Full),
-        Action::WrapItalic => row!(Full, Full, Full),
-        Action::WrapCode => row!(Full, Full, Full),
-        Action::WrapStrike => row!(Full, Full, Full),
-        Action::InsertLink => row!(Full, Full, Full),
+        //
+        // All five said `row!(Full, Full, Full)` and three were
+        // wrong. The chords are `Insert`-mode `Cmd+…` spellings, and
+        // crossterm has no `Cmd`, so the TUI was never going to
+        // inherit them — a row is a claim about the *client*, and a
+        // chord in `defaults.rs` is not evidence for it.
+        Action::WrapBold => row!(Missing(why::NO_TUI_INLINE_WRAP), Full, Full),
+        Action::WrapItalic => row!(Missing(why::NO_TUI_INLINE_WRAP), Full, Full),
+        Action::WrapCode => row!(Missing(why::NO_TUI_INLINE_WRAP), Full, Full),
+        Action::WrapStrike => row!(
+            Missing(why::NO_TUI_INLINE_WRAP),
+            Full,
+            Missing(why::NO_MOBILE_STRIKE)
+        ),
+        Action::InsertLink => row!(
+            Missing(why::NO_TUI_LINK),
+            Full,
+            Missing(why::NO_MOBILE_LINK)
+        ),
 
         // ── undo / redo ──────────────────────────────────────────
         // RFC 0254 phase 1: the undo/redo logic was already shared
