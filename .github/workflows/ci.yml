@@ -17,6 +17,7 @@ on:
       - '.gitignore'
       - '.github/workflows/mobile.yml'
       - '.github/workflows/bench.yml'
+      - '.github/workflows/hygiene.yml'
       - '.github/workflows/release.yml'
       - '.github/workflows/testflight.yml'
   pull_request:
@@ -30,6 +31,7 @@ on:
       - '.gitignore'
       - '.github/workflows/mobile.yml'
       - '.github/workflows/bench.yml'
+      - '.github/workflows/hygiene.yml'
       - '.github/workflows/release.yml'
       - '.github/workflows/testflight.yml'
 
@@ -235,30 +237,7 @@ jobs:
       - name: tsc --noEmit (all packages)
         run: bun run typecheck
 
-  # Repo hygiene checks that used to exist only as Claude Code
-  # `PostToolUse` hooks — and therefore only ran when Claude was the one
-  # editing. A human in an editor, a Copilot PR and a dependabot bump all
-  # bypassed them entirely, which is how the four largest files in the
-  # repo became frontend files the Rust-only hook never looked at.
-  #
-  # Only the objectively-checkable guard is ported here. The prose ones
-  # (semantic line breaks, doc-sync, section refs) stay advisory: they
-  # need judgement about intent, and a CI job that is wrong 10% of the
-  # time gets ignored 100% of the time.
-  hygiene:
-    name: hygiene
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-      # Ratchet, not a cliff: the 66 files already past the threshold are
-      # frozen in `.github/file-size-baseline.txt`. This fails only when a
-      # new file crosses it or a recorded one grows, so existing large
-      # files stay editable while the ceiling can only come down.
-      - name: file size ratchet
-        run: ./scripts/check-file-size.sh
-
-      # The docs index was silently wrong five times in a row: five RFCs
-      # landed, none was listed, and nothing failed. A step everyone
-      # forgets needs to fail, not a reminder.
-      - name: docs index
-        run: ./scripts/check-docs-index.sh
+  # The repo hygiene checks (file size ratchet, docs index) live in
+  # `hygiene.yml`, not here: this workflow's `paths-ignore` skips
+  # `docs/**` and `**/*.md`, which is exactly the change set a docs
+  # index check has to run on.

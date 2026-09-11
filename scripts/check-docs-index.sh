@@ -31,6 +31,14 @@ if [ ! -f "$summary" ]; then
   exit 1
 fi
 
+# Fail closed. A missing or renamed RFC directory would otherwise make
+# the glob below match nothing, the loop run zero times, and the script
+# print PASS for a check it never performed.
+if [ ! -d "$rfc_dir" ]; then
+  printf 'check-docs-index: %s is not a directory\n' "$rfc_dir" >&2
+  exit 1
+fi
+
 missing=()
 count=0
 
@@ -38,12 +46,21 @@ for path in "$rfc_dir"/[0-9][0-9][0-9][0-9]-*.md; do
   [ -e "$path" ] || continue
   file="$(basename "$path")"
   count=$((count + 1))
-  # Match the filename as it would appear in a link target. Any link
-  # shape is fine — the question is reachability, not formatting.
-  if ! grep -qF "rfcs/$file" "$summary"; then
+  # Match the filename as a Markdown link *target*: `](rfcs/<file>)` or
+  # `](./rfcs/<file>)`, with an optional `#fragment`. A bare mention in
+  # prose (`see rfcs/0256-…md`) is not a link and does not make the RFC
+  # reachable, so it must not count. The link text is still the RFC
+  # author's to write — the question is reachability, not wording.
+  escaped="${file//./\\.}"
+  if ! grep -qE "\]\((\./)?rfcs/${escaped}(#[^)]*)?\)" "$summary"; then
     missing+=("$file")
   fi
 done
+
+if [ "$count" -eq 0 ]; then
+  printf 'check-docs-index: no RFC files found under %s\n' "$rfc_dir" >&2
+  exit 1
+fi
 
 if [ ${#missing[@]} -gt 0 ]; then
   printf 'FAIL: %d RFC(s) not reachable from docs/SUMMARY.md\n\n' "${#missing[@]}" >&2

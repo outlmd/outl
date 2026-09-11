@@ -1,0 +1,46 @@
+name: Hygiene
+
+# Repo hygiene checks that used to exist only as Claude Code
+# `PostToolUse` hooks — and therefore only ran when Claude was the one
+# editing. A human in an editor, a Copilot PR and a dependabot bump all
+# bypassed them entirely, which is how the four largest files in the
+# repo became frontend files the Rust-only hook never looked at.
+#
+# Only the objectively-checkable guards are ported here. The prose ones
+# (semantic line breaks, doc-sync, section refs) stay advisory: they
+# need judgement about intent, and a CI job that is wrong 10% of the
+# time gets ignored 100% of the time.
+#
+# Deliberately NO `paths-ignore`. This job started life inside `ci.yml`,
+# whose trigger skips `docs/**` and `**/*.md` — so a PR that added an RFC
+# without listing it in `docs/SUMMARY.md` never ran the check written to
+# catch exactly that. A docs-only change is the case this workflow
+# exists for, and it costs a 2 vCPU runner a few seconds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: hygiene-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: hygiene
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      # Ratchet, not a cliff: the 66 files already past the threshold are
+      # frozen in `.github/file-size-baseline.txt`. This fails only when a
+      # new file crosses it or a recorded one grows, so existing large
+      # files stay editable while the ceiling can only come down.
+      - name: file size ratchet
+        run: ./scripts/check-file-size.sh
+
+      # The docs index was silently wrong five times in a row: five RFCs
+      # landed, none was listed, and nothing failed. A step everyone
+      # forgets needs to fail, not a reminder.
+      - name: docs index
+        run: ./scripts/check-docs-index.sh
