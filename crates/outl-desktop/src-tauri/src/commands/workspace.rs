@@ -30,8 +30,17 @@ pub(crate) fn set_workspace(
 ) -> Result<(), String> {
     let path = PathBuf::from(&path);
     let lru_cap = outl_config::load().storage.lru_cap;
-    let workspace = open_workspace_at(state.hlc.actor(), &state.hlc, &path, lru_cap)
-        .map_err(|e| format!("open workspace at {}: {e}", path.display()))?;
+    // `open_workspace_at` owns the lock slot: it releases the guards
+    // of the workspace being replaced (including a re-pick of this very
+    // root) and installs the new ones only once the open succeeded.
+    let workspace = open_workspace_at(
+        state.hlc.actor(),
+        &state.hlc,
+        &path,
+        lru_cap,
+        &state.workspace_guards,
+    )
+    .map_err(|e| format!("open workspace at {}: {e}", path.display()))?;
 
     *state.workspace.lock() = Some(workspace);
     *state.storage_root.lock() = Some(path.clone());
@@ -182,7 +191,7 @@ pub(crate) async fn reload_workspace(
         move || -> Result<outl_core::workspace::Workspace, String> {
             let engine = outl_actions::SyncEngine::new(replay_root, replay_hlc.actor());
             let mut fresh = engine
-                .reload_workspace()
+                .reload_workspace(&replay_hlc)
                 .map_err(|e| format!("reload workspace: {e}"))?;
             let today_id = open_today(&mut fresh, &replay_hlc).map_err(|e| e.to_string())?;
             // Guarded (root `CLAUDE.md` invariant 8) — can refuse when

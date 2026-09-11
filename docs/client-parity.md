@@ -119,11 +119,11 @@ It is the string the client shows when the user reaches for the action, so it is
 | `MoveVisualRangeUp` | ✅ | ✅ | ✅ |
 | `MoveVisualRangeDown` | ✅ | ✅ | ✅ |
 | `RunCodeBlock` | ✅ | ✅ | ✅ |
-| `WrapBold` | ✅ | ✅ | ✅ |
-| `WrapItalic` | ✅ | ✅ | ✅ |
-| `WrapCode` | ✅ | ✅ | ✅ |
-| `WrapStrike` | ✅ | ✅ | ✅ |
-| `InsertLink` | ✅ | ✅ | ✅ |
+| `WrapBold` | ❌ The TUI has no chord for inline markdown — edit the block and type the markers around the text yourself: `**bold**`, `_italic_`, `` `code` ``, `~~strike~~`. | ✅ | ✅ |
+| `WrapItalic` | ❌ The TUI has no chord for inline markdown — edit the block and type the markers around the text yourself: `**bold**`, `_italic_`, `` `code` ``, `~~strike~~`. | ✅ | ✅ |
+| `WrapCode` | ❌ The TUI has no chord for inline markdown — edit the block and type the markers around the text yourself: `**bold**`, `_italic_`, `` `code` ``, `~~strike~~`. | ✅ | ✅ |
+| `WrapStrike` | ❌ The TUI has no chord for inline markdown — edit the block and type the markers around the text yourself: `**bold**`, `_italic_`, `` `code` ``, `~~strike~~`. | ✅ | ❌ Strikethrough isn't on the mobile toolbar — type `~~` on each side of the text instead (the bold, italic and code buttons are there). |
+| `InsertLink` | ❌ The TUI has no link chord — edit the block and type `[label](url)`, or `[[page]]` to link another page in the workspace. | ✅ | ❌ There's no link button on the mobile toolbar — type `[label](url)` by hand, or use the `[[` button to link another page in the workspace. |
 | `Undo` | ✅ | ✅ | ✅ |
 | `Redo` | ✅ | ✅ | ✅ |
 <!-- END GENERATED: client-parity -->
@@ -158,7 +158,7 @@ the drift this RFC exists to prevent.
 |---|---|---|---|
 | `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ❌ Page history isn't on mobile yet — open the same page in the desktop app and use the ⏱ button. |
 | `PluginMarketplace` | ❌ Browsing and installing plugins from a marketplace isn't in the TUI — install by id from a terminal with `outl plugin install <id>`, or use the desktop or mobile app. | ✅ | ✅ |
-| `Calendar` | ❌ There's no calendar grid here — open the quick switcher (Cmd/Ctrl+P) and type the date (YYYY-MM-DD) to jump straight to that journal page. | ❌ There's no calendar grid here — open the quick switcher (Cmd/Ctrl+P) and type the date (YYYY-MM-DD) to jump straight to that journal page. | ✅ |
+| `Calendar` | ⚠️ The TUI's month grid shows which days have journals but can't open one — press `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date (YYYY-MM-DD) to jump straight there. | ✅ | ✅ |
 | `Templates` | ✅ | ✅ | ✅ |
 | `Assets` | ✅ | ✅ | ✅ |
 | `PeerPairing` | ❌ Pairing a new device isn't in the TUI — run `outl peer pair` or `outl peer qr` from a terminal, or pair from the desktop or mobile app. | ⚠️ The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — to join an existing workspace from a desktop, run `outl peer pair` in a terminal. | ✅ |

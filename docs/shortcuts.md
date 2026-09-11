@@ -13,8 +13,16 @@ The mobile app doesn't expose a keyboard surface (touch + on-screen keyboard); t
 > The desktop calls `outl_shortcuts::lookup(mode, chord) → Action` for every keystroke, so a chord change in `defaults.rs` reaches it on the next build.
 > **The TUI does not.**
 > It dispatches Normal-mode keys through its own `match` in `input/normal.rs`, and `input/chord_adapter.rs` exists only to match plugin-contributed chords.
-> The catalog and those match arms can disagree without anything failing to compile; a handful of reminder chords are pinned by `reminder_chord_tests`, and the rest are not.
+> The catalog and those match arms can disagree without anything failing to compile.
 > Treat a TUI cell below as documentation of the `match`, not of the catalog.
+>
+> **They do disagree, on 17 chords, 6 of them destructive.**
+> `Ctrl+X` is `CutBlock` in the catalog and deletes a character in the TUI.
+> `Ctrl+Shift+R` is `OpenReminders` in the catalog and redoes in the TUI.
+> `Ctrl+Z` is `Undo` in the catalog and arms the `z` fold chord in the TUI, two keystrokes from a silent content edit.
+> The full list is `crates/outl-shortcuts/tests/tui_catalog_divergence.rs`, which pins both halves: the catalog rows through `lookup`, the TUI arms by reading `input/normal.rs`.
+> Which side is right is a product decision nobody has made yet, so the list is pinned rather than resolved — a new divergence, or a change to a listed one, fails the test.
+> The reminder chords keep their own pins in `reminder_chord_tests` (`outl-tui/src/input/normal.rs`); those rows agree.
 
 If a row below disagrees with what you observe in the app, **the code is right and this doc is stale** — file an issue or fix the row.
 
@@ -38,7 +46,7 @@ If a row below disagrees with what you observe in the app, **the code is right a
 | Action | TUI | Desktop | Mobile |
 |---|---|---|---|
 | Quick switcher (fuzzy pages + journals) | `Ctrl+P` | `Cmd/Ctrl+P` | tap toolbar |
-| Open today's **j**ournal | `t` / `Home` | `Cmd/Ctrl+J` | toolbar |
+| Open today's **j**ournal | `t` / `g j` (chord) | `Cmd/Ctrl+J` | toolbar |
 | Cycle task state on focused or selected block — `(none) → TODO → DOING → DONE → (none)`, one stop per press (T for **t**ask) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox |
 | Run code block under cursor / selected block (X for e**x**ecute). TUI: when the block isn't code, `g x` instead opens the markdown link `[text](url)` under the cursor — an asset link in the OS default app, anything else in the browser (issue #183) | `g x` chord / `:run` | `Cmd/Ctrl+Shift+X` (inside a textarea the Insert-mode strikethrough wins — commit first or use the Run button; plain `Cmd+X` is the OS cut / block cut) | tap "Run" button |
 | Previous journal day | `[` | `Cmd/Ctrl+[` | swipe right |
@@ -79,8 +87,12 @@ Mirrors the convention every markdown editor on the planet ships.
 | Bold (`**…**`) | type `**` | `Cmd/Ctrl+B` | toolbar B |
 | Italic (`_…_`) | type `_` | `Cmd/Ctrl+I` | toolbar I |
 | Inline code (`` `…` ``) | type `` ` `` | `Cmd/Ctrl+E` | toolbar `<>` |
-| Strikethrough (`~~…~~`) | type `~~` | `Cmd/Ctrl+Shift+X` | toolbar S |
-| Link (`[label](url)`) | type `[` | `Cmd/Ctrl+K` | toolbar 🔗 |
+| Strikethrough (`~~…~~`) | type `~~` | `Cmd/Ctrl+Shift+X` | type `~~` |
+| Link (`[label](url)`) | type `[` | `Cmd/Ctrl+K` | type `[` |
+
+> The TUI has no chord for any of these — it renders the markup but never writes it, so the "type it" cell is the whole story there, not a fallback.
+> Mobile's keyboard toolbar carries bold, italic and code and stops: `ToolbarAction` in `@outl/shared` is the entire button set, and it has no strikethrough and no link.
+> This table claimed "toolbar S" and "toolbar 🔗" for both until the catalog was re-checked against that union.
 
 > outl ships `_…_` as the canonical italic. The parser still accepts `*…*` for compatibility, but `.md` projections emit underscores.
 
@@ -130,7 +142,7 @@ The TUI is vim-style by definition.
 | Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | keyboard toolbar |
 | Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | keyboard toolbar |
 | Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | long-press → "Copy block ref" |
-| Enter Visual | `v` | `v` | — |
+| Enter Visual | `V` _(the catalog spells this `v`; the TUI binds `V` only — [known divergence](../crates/outl-shortcuts/tests/tui_catalog_divergence.rs))_ | `v` | — |
 | Open command palette | `:` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | — |
 | Open slash menu | `/` | `/` | `/` |
 

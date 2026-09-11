@@ -27,14 +27,23 @@ mod why {
         "Browsing and installing plugins from a marketplace isn't in the TUI — install by id \
          from a terminal with `outl plugin install <id>`, or use the desktop or mobile app.";
 
-    /// Neither the TUI nor the desktop has a month-grid date picker;
-    /// both step one day at a time (`PrevDay` / `NextDay` /
-    /// `OpenToday`). The quick switcher is the honest workaround:
-    /// journal pages are named `YYYY-MM-DD`, so typing the date finds
-    /// the page the calendar grid would have opened.
-    pub const NO_CALENDAR_GRID: &str =
-        "There's no calendar grid here — open the quick switcher (Cmd/Ctrl+P) and type the \
-         date (YYYY-MM-DD) to jump straight to that journal page.";
+    /// The TUI *does* draw a month grid (`view/sidebar.rs`
+    /// `render_calendar`, `Ctrl+E` to open the sidebar) with a dot on
+    /// every day that has a journal and a bullseye on today — but the
+    /// grid is a read-out, not a control: `SidebarSection::Calendar`
+    /// reports `0` items, so the cursor never enters it, and
+    /// `sidebar_activate` returns without doing anything on that
+    /// section. The month shown follows wherever the user already is.
+    ///
+    /// So the *grid* half of this capability is present and the
+    /// *random-access jump* half is not, which is what `Partial`
+    /// means. The previous verdict here was `Missing` with the
+    /// wording "There's no calendar grid here", on both the TUI and
+    /// the desktop — neither was true.
+    pub const TUI_CALENDAR_IS_READ_ONLY: &str =
+        "The TUI's month grid shows which days have journals but can't open one — press \
+         `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date \
+         (YYYY-MM-DD) to jump straight there.";
 
     /// The TUI has no pairing flow (no ticket display, no scanner) —
     /// pairing a device against a TUI-run workspace goes through the
@@ -114,13 +123,26 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             mobile: Full,
         },
 
-        // Mobile's `Calendar.tsx` is a month grid for jumping to an
-        // arbitrary journal date. Desktop and the TUI only step
-        // day-by-day (`PrevDay` / `NextDay` / `OpenToday`) — neither
-        // has a random-access date picker.
+        // All three clients draw a month grid; two of them let you
+        // click a day.
+        //
+        // Desktop: `Sidebar.tsx`'s `Calendar()` — `mondayIndex` /
+        // `daysInMonth` build a 7-column grid, `‹` / `›` step the
+        // month, and a day cell calls `openDay()` → `openJournalFor`.
+        // Mobile: `Calendar.tsx`, the same gesture by tap.
+        // TUI: `view/sidebar.rs::render_calendar` paints the grid and
+        // marks journal days, but nothing opens one from it — see
+        // `why::TUI_CALENDAR_IS_READ_ONLY`.
+        //
+        // This row said `Missing` for the TUI *and* the desktop, with
+        // a nudge sending desktop users to the quick switcher to do
+        // what the sidebar in front of them already does. A catalog
+        // that under-claims is not the safe direction of wrong: the
+        // nudge is shown to the user, so a stale `Missing` actively
+        // steers them away from a shipped feature.
         Capability::Calendar => ClientSupport {
-            tui: Missing(why::NO_CALENDAR_GRID),
-            desktop: Missing(why::NO_CALENDAR_GRID),
+            tui: Partial(why::TUI_CALENDAR_IS_READ_ONLY),
+            desktop: Full,
             mobile: Full,
         },
 

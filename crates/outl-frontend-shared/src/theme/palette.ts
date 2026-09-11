@@ -58,9 +58,19 @@ export function applyPaletteToRoot(palette: Palette) {
  * Tauri bridge for it. This is the client-side copy kept in sync by
  * hand; used only to pick `color-scheme`. A malformed hex is treated
  * as dark, matching the boot default.
+ *
+ * "Exactly" is load-bearing, so the regex has to answer the same
+ * question `outl_theme::parse_hex` does: the whole string after `#`,
+ * 6 or 8 hex digits, nothing else. Hence the end anchor (without it
+ * `#ffffffgh` matched its own prefix and came back light, where Rust
+ * reads a malformed 8-digit hex and falls to dark) and the optional
+ * fourth pair (`parse_hex` accepts `#rrggbbaa` and ignores alpha, so
+ * anchoring to 6 alone would drift the opposite way).
  */
 function isLightHex(hex: string): boolean {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex);
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})(?:[0-9a-f]{2})?$/i.exec(
+    hex,
+  );
   if (!m) return false;
   const [r, g, b] = [m[1], m[2], m[3]].map((c) => parseInt(c, 16));
   return 0.299 * r + 0.587 * g + 0.114 * b > 128;
