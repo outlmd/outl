@@ -344,7 +344,7 @@ src/
     └── prompts.rs         # /outl-* prompts
 ```
 
-Every `commands/*.rs` handler is `pub fn` so `mcp/tools/dispatch.rs` reuses it directly.
+Every `cmd/*.rs` handler is `pub fn` so `mcp/tools/dispatch.rs` reuses it directly.
 New tools land by:
 
 1. Adding a function in the relevant `cmd/*.rs` returning `Result<Value, ApiError>`.

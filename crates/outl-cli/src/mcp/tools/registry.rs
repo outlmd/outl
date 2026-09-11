@@ -124,7 +124,7 @@ pub fn list() -> Vec<Value> {
         ),
         tool_def(
             "outl_block_append_tree",
-            "Append a subtree as the last child of a page or block in one call. `tree` is `{text, children?}`. Prefer over chained `outl_block_append` for structured content.",
+            "Append a subtree as the last child of a page or block in one call. `tree` is `{text, children?: [tree, …]}` — `children` is an array of recursive tree objects, not strings. Prefer over chained `outl_block_append` for structured content.",
             json!({
                 "type": "object",
                 "properties": {
