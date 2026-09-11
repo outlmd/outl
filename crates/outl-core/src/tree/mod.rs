@@ -23,6 +23,7 @@
 //! See `crates/outl-core/CLAUDE.md` for the five invariants.
 
 use crate::fractional::Fractional;
+use crate::hlc::Hlc;
 use crate::id::NodeId;
 use crate::property::PropValue;
 use std::collections::{HashMap, HashSet};
@@ -52,6 +53,42 @@ pub struct Tree {
     /// distinguish "we know it's expanded" from "we never heard about
     /// this node".
     pub(super) collapsed: HashSet<NodeId>,
+    /// Which op materialized each live node: `node -> ts of the
+    /// [`crate::op::Op::Create`] that inserted it`.
+    ///
+    /// This is the paper's `LogMove.oldp` for `Create`, and it lives here
+    /// rather than on the op because `Op::Create` has no field for it. In
+    /// Kleppmann et al. 2022 the undo record is **not** part of the
+    /// transmitted operation at all — `Move t p m c` carries four fields and
+    /// `oldp` lives on the local `LogMove` log record (Fig. 4, §3.2). outl
+    /// merged those two types, so `Op::Move::old_parent` rides the JSONL; see
+    /// that field's doc for what riding the wire has already cost a reader of
+    /// the log as data. This map keeps `Create`'s answer on the side the
+    /// paper keeps it.
+    ///
+    /// **Only `undo_op` may read it**, and it answers exactly one question:
+    /// *did this `Create` insert this node, or did it find it already
+    /// there?* `do_op(Create)` is idempotent, so both outcomes are possible
+    /// for the same op on different replicas and at different points in one
+    /// replica's reorder history — and only the first has `remove` as its
+    /// inverse (paper Fig. 4 l.33 vs l.35).
+    ///
+    /// Not materialized state, so it is deliberately absent from
+    /// [`Self::snapshot_parts`] and left empty by [`Self::from_parts`]. That
+    /// is sound because it only ever has to cover ops in the **resident**
+    /// log, and every op that reaches the resident log passes through
+    /// `do_op` first — on the full-replay boot path, on the snapshot boot
+    /// path (the delta is replayed through `apply_op`), and in
+    /// `Workspace::apply`. Ops below a snapshot cutoff are not in the
+    /// resident log and can therefore never be undone. An entry that *is*
+    /// missing fails safe: `undo_op` keeps the node rather than deleting
+    /// it, which is the direction invariant 5 (no silent loss) cares about.
+    ///
+    /// Bounded by the number of live nodes, not by log length: a 16-byte
+    /// [`NodeId`] key and a 32-byte [`Hlc`] value per node, with no heap
+    /// allocation per entry. It does not reintroduce the O(log size) boot
+    /// cost [RFC 0137](../../../docs/rfcs/0137-storage-scale.md) removed.
+    pub(super) created_by: HashMap<NodeId, Hlc>,
     /// Nodes whose reminder is snoozed, mapped to the Unix-epoch
     /// millisecond at which firing resumes
     /// ([`crate::op::Op::SnoozeRemind`]).
@@ -239,6 +276,11 @@ impl Tree {
             properties,
             collapsed,
             snoozed,
+            // Deliberately empty: `created_by` is undo bookkeeping, not
+            // materialized state, and a snapshot-booted replica only ever
+            // undoes ops from the delta it replays on top of these parts.
+            // See the field's doc comment.
+            created_by: HashMap::new(),
         }
     }
 }
