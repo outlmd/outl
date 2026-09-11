@@ -67,6 +67,7 @@ pub mod exec;
 pub mod history;
 pub mod index;
 pub mod journal;
+pub mod mentions;
 pub mod outline;
 pub mod page;
 pub mod page_merge;

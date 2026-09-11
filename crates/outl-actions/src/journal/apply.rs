@@ -11,9 +11,9 @@ use outl_md::sidecar::{content_hash, file_hash, sidecar_path_for, Sidecar, Sidec
 
 use super::paths::{page_md_path, write_md_atomic};
 use super::render::render_page_md;
+use super::sidecar::build_sidecar;
 use crate::error::ActionError;
 use crate::page::{list_all as list_pages, page_meta, PageMeta};
-use crate::tree::children_of;
 
 /// Render `page_root`'s sub-tree and write it to its canonical path
 /// under `root`.
@@ -341,8 +341,13 @@ pub fn apply_page_md_with_sidecar_if_absent(
 /// keeps rendering blank even though the tree holds the blocks. That is the
 /// "day created on one device shows empty on another" bug.
 ///
-/// Four cases:
-/// - `.md` absent → project it (subsumes `_if_absent`, issue #120).
+/// Five cases:
+/// - `.md` absent **and nothing says otherwise** → project it (subsumes
+///   `_if_absent`, issue #120).
+/// - `.md` absent but an iCloud placeholder or a live sidecar says its
+///   bytes exist and are not here yet → refuse
+///   (`ActionError::PageMarkdownNotDownloaded` /
+///   `PageMarkdownVanished`). See `guard_absent_markdown`.
 /// - `.md` present and a **faithful projection** (its hash matches the
 ///   sidecar's `last_synced_hash`, i.e. no unreconciled external edit) but the
 ///   tree now renders to something different → re-project it. This is the sync
@@ -372,6 +377,17 @@ pub fn apply_page_md_with_sidecar_if_stale(
     let disk = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // **`NotFound` is not the same question as "this page has no
+            // `.md`".** An undownloaded iCloud file answers `NotFound`
+            // too: the real name does not exist, only `.notes.md.icloud`
+            // does. So does a `.md` that went missing beside a live
+            // sidecar. `guard_absent_markdown` is the single owner of
+            // that distinction and had exactly one caller
+            // (`mutate_page_md`); this door was never checked, which was
+            // survivable only while `_if_stale` ran on page-open with a
+            // user present. `outl serve`'s sweep runs it over every page,
+            // unattended, every 30 seconds.
+            guard_absent_markdown(&path, &sidecar_path_for(&path))?;
             // Genuinely absent → project it (issue #120). The page lock is
             // already held, so call the unlocked transaction tail directly.
             let rendered = render_page_md(workspace, page_root);
@@ -473,51 +489,6 @@ pub use outl_md::unlogged::content_lines_missing_from;
 
 pub use outl_md::unlogged::sidecar_can_answer;
 
-/// Construct a sidecar that lines up with the `.md` we just rendered
-/// from the workspace. Walks the page subtree in DFS preorder — the
-/// same order [`render_page_md`] emits — so every block's index in
-/// the walk maps 1:1 to its line in the `.md`.
-fn build_sidecar(workspace: &Workspace, page_root: NodeId, md: &str) -> Sidecar {
-    let mut blocks: Vec<SidecarBlock> = Vec::new();
-    let mut line = 1usize;
-    walk_sidecar(workspace, page_root, 0, &mut line, &mut blocks);
-    Sidecar {
-        // Never a literal: this builder writes whatever fields the
-        // current `SidecarBlock` carries, so a hardcoded number labels a
-        // v3 payload as v2 the moment the schema moves — and the reader
-        // trusts the label.
-        version: outl_md::sidecar::SIDECAR_VERSION,
-        page_id: page_root,
-        last_synced_hash: file_hash(md),
-        last_synced_at: chrono::Local::now().fixed_offset(),
-        blocks,
-        // This builder runs after a workspace-driven render — the
-        // workspace tree already holds the page properties, so by
-        // construction they're in the op log. Stamp the current
-        // pipeline version to keep the orphan scanner from looping
-        // on this page.
-        pipeline_version: outl_md::sidecar::CURRENT_PIPELINE_VERSION,
-    }
-}
-
-fn walk_sidecar(
-    workspace: &Workspace,
-    parent: NodeId,
-    indent: u32,
-    line: &mut usize,
-    out: &mut Vec<SidecarBlock>,
-) {
-    for (id, _) in children_of(workspace, parent) {
-        let text = workspace.block_text(id).unwrap_or_default();
-        // `from_text` keeps hash, handle and stored text derived from
-        // one revision — level-2 matching diffs against that text, so a
-        // hand-built literal that drifts would mis-assign ids.
-        out.push(SidecarBlock::from_text(id, *line, indent, &text));
-        *line += 1;
-        walk_sidecar(workspace, id, indent + 1, line, out);
-    }
-}
-
 /// Apply a pure-AST mutation to a page's `.md`, then rewrite both the
 /// `.md` and its sidecar.
 ///
@@ -604,9 +575,17 @@ where
 /// Decide whether an absent `.md` really means "this page does not
 /// exist yet".
 ///
-/// Two ways it does not, both of which used to end in the page being
-/// recreated as a single block and its real blocks trashed by the next
-/// `reconcile_md`:
+/// **Both writers that can create a `.md` ask this**, and for a while
+/// only one did. [`mutate_page_md`] rewrites the parsed AST, so an
+/// unguarded absence recreated the page as a single block;
+/// [`apply_page_md_with_sidecar_if_stale`] renders from the op log, so
+/// an unguarded absence writes a file the bytes still arriving then
+/// collide with. Different damage, same misreading of `NotFound`, and
+/// the second one runs unattended inside `outl serve`'s projection
+/// sweep.
+///
+/// Two ways an absence is not an absence, both of which used to end in
+/// a write:
 ///
 /// - **A sidecar is present.** The sidecar is only ever written next to
 ///   a `.md` this device projected, so its existence is proof the page
@@ -623,7 +602,10 @@ where
 ///   is `NotFound`, not the permission/IO error the `read_for_rewrite`
 ///   contract assumes. Same outcome, on a file that is not lost at all
 ///   and will materialise on its own.
-fn guard_absent_markdown(md_path: &Path, sidecar_path: &Path) -> Result<(), ActionError> {
+pub(super) fn guard_absent_markdown(
+    md_path: &Path,
+    sidecar_path: &Path,
+) -> Result<(), ActionError> {
     // Re-check existence rather than trusting the empty read: a page
     // that legitimately renders to an empty string is not absent.
     if md_path.exists() {
