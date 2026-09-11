@@ -36,3 +36,24 @@ proptest = { workspace = true }
 tempfile = { workspace = true }
 libc = { workspace = true }
 filetime = { workspace = true }
+criterion = { version = "0.8", default-features = false, features = ["html_reports"] }
+
+# `outl-core` had no benchmarks at all until this branch, which made
+# "the CRDT is fast" an unverifiable claim. Same shape as
+# `outl-md/benches`: one binary per area, `common.rs` shared by all via
+# `#[path = "common.rs"] mod common;`.
+
+[[bench]]
+name = "tree"
+harness = false
+path = "benches/tree.rs"
+
+[[bench]]
+name = "boot"
+harness = false
+path = "benches/boot.rs"
+
+[[bench]]
+name = "oplog"
+harness = false
+path = "benches/oplog.rs"
