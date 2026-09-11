@@ -13,7 +13,6 @@
 //! the dotted path costs nothing), acquisition blocks until the lock is free,
 //! and the lock releases when the fd closes on drop.
 
-use std::io::Write as _;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -48,27 +47,71 @@ impl PeersWriteLock {
     }
 }
 
-/// Atomically replace `path` with `bytes`: write a sibling `.tmp`, `fsync` it,
-/// then `rename` into place (same shape as `outl_core::snapshot::write_to_disk`).
-/// A crash leaves the old file intact or a stale `.tmp` — never a half-written
-/// target a concurrent reader could choke on. The caller must already hold the
-/// [`PeersWriteLock`] (this does not take it).
+/// Atomically replace `path` with `bytes`: write a hidden sibling scratch file,
+/// `fsync` it, `rename` into place, then `fsync` the parent directory so the
+/// rename itself survives a power loss. A crash leaves the old file intact —
+/// never a half-written target a concurrent reader could choke on. The caller
+/// must already hold the [`PeersWriteLock`] (this does not take it).
+///
+/// Delegates to [`outl_md::write_atomic`] rather than repeating the sequence.
+/// The hand-rolled copy this replaces cleaned up its scratch file on **zero**
+/// failure paths — `write_all`, `sync_all` and `rename` all `?`-returned past
+/// it — so every transient write error left a `.outl/peers.json.tmp` behind.
+/// `write_atomic` unlinks the scratch on every in-process exit path and hides
+/// it behind a leading dot for the ones it cannot reach.
+///
+/// The parent `fsync` matters here: `peers.json` is the paired-device registry,
+/// not a cache. Nothing rebuilds it — losing the rename means losing a paired
+/// peer, and the user has to re-run pairing to get it back.
 pub(crate) fn atomic_write_json(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp_path = path.with_extension("json.tmp");
-    let mut out = std::fs::File::create(&tmp_path)
-        .with_context(|| format!("create {}", tmp_path.display()))?;
-    out.write_all(bytes)
-        .with_context(|| format!("write {}", tmp_path.display()))?;
-    out.sync_all()
-        .with_context(|| format!("fsync {}", tmp_path.display()))?;
-    drop(out);
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("rename {} -> {}", tmp_path.display(), path.display()))
+    outl_md::write_atomic(path, bytes)
+        .with_context(|| format!("atomically write {}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::peers::{workspace_peers_path, PeerEntry, PeersStore};
+
+    /// Every `*.tmp` sibling in `dir`, whatever it is called.
+    fn leftover_temps(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found: Vec<_> = std::fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// The failure path the concurrency test below never reaches. The
+    /// hand-rolled writer this replaced cleaned up on *no* failure path at
+    /// all, so a transient error left `.outl/peers.json.tmp` sitting next to
+    /// the registry forever.
+    ///
+    /// Forced with a real I/O error, no injection: renaming onto a non-empty
+    /// directory fails on every platform we ship.
+    #[test]
+    fn a_failed_publish_leaves_no_scratch_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = workspace_peers_path(tmp.path());
+        let dir = path
+            .parent()
+            .expect("peers.json has a parent")
+            .to_path_buf();
+        std::fs::create_dir_all(&dir).expect("create .outl");
+
+        // Occupy the destination with a non-empty directory.
+        std::fs::create_dir(&path).expect("create dir at peers.json");
+        std::fs::write(path.join("occupant"), b"x").expect("occupy");
+
+        super::atomic_write_json(&path, b"{}").expect_err("rename onto a non-empty dir must fail");
+        assert_eq!(
+            leftover_temps(&dir),
+            Vec::<std::path::PathBuf>::new(),
+            "a failed peers.json publish must not leak its scratch file"
+        );
+    }
 
     /// Build a minimal, unique peer entry keyed on `n` — enough for a distinct
     /// node_id so the dedup-by-node_id in `PeersStore::add` never collapses two

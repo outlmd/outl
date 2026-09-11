@@ -33,15 +33,18 @@
 //! outl-membership/1\n<json array of PeerEntry>
 //! ```
 //!
-//! ## Trust model (load-bearing)
+//! ## Trust model (load-bearing, and only partly true)
 //!
-//! **Every device subscribed to the workspace gossip topic is already inside the
-//! trust domain.** The topic id is `blake3(workspace_id)` (see
-//! [`crate::engine::workspace_topic_id`]) — only devices that were paired into
-//! this mesh by *someone* ever subscribe to it. Membership gossip therefore only
-//! ever ADDS reachability for peers that are *already mesh members*; it never
-//! invites a stranger. A device that isn't on the topic can't inject a peer, and
-//! a peer we merge was already trusted by the device that gossiped it.
+//! The argument this module was built on: **every device subscribed to the
+//! workspace gossip topic is already inside the trust domain.** The topic id is
+//! `blake3(workspace_id)` (see [`crate::engine::workspace_topic_id`]) — only
+//! devices that were paired into this mesh by *someone* ever subscribe to it.
+//! Membership gossip therefore only ever ADDS reachability for peers that are
+//! *already mesh members*; it never invites a stranger.
+//!
+//! Two of that argument's premises turned out to be false. The first is fixed;
+//! the second is **open**, and is the reason this section is longer than the
+//! code below it.
 //!
 //! ### The premise that was false: "already a mesh member"
 //!
@@ -63,6 +66,48 @@
 //! [invariant 7](../../../CLAUDE.md) puts in the op log rather than in a
 //! last-write-wins file. See [RFC 0155](../../../docs/rfcs/0155-peer-trust.md)
 //! → Scope and [issue #158](https://github.com/outlmd/outl/issues/158).
+//!
+//! ### The premise that is STILL false: "a stranger can't reach the topic"
+//!
+//! **OPEN HOLE. Read this before trusting anything `peers.json` says.**
+//!
+//! The topic id is `blake3(workspace_id)`, and the workspace id is not a
+//! secret — it is disclosed to every device that has ever paired, and it lives
+//! in plaintext at `.outl/workspace-id`. A device the user revoked still knows
+//! it, so it can still subscribe, and a gossip message carries no proof of
+//! authorship that this module checks.
+//!
+//! That makes the merge below a way to **manufacture** authorization rather
+//! than merely to discover reachability. The tombstone above stops a revoked
+//! device re-adding *itself*; it does nothing about the same device generating
+//! a fresh keypair and gossiping *that* node id, which has no tombstone, gets
+//! merged, and is then honestly authorized by every check that reads
+//! `peers.json` — including [`crate::authz`], the one guarding the sync,
+//! snapshot and asset protocols. Revocation is defeated by one `SecretKey::generate`.
+//!
+//! **Why it is not fixed here.** Every candidate fix is a protocol decision,
+//! not a local one:
+//!
+//! - *Only merge from a sender already in `peers.json`* (filter on
+//!   `Message::delivered_from`) closes the direct-neighbour case, which is the
+//!   practical attack. It does **not** close the relayed case — gossip
+//!   forwards, so `delivered_from` is the neighbour we heard it from, not the
+//!   author — and it can starve discovery in a swarm whose neighbour set
+//!   drifts away from the peer list. Partial, with a real cost.
+//! - *Sign membership entries* (each `PeerEntry` signed by an approved device)
+//!   is the actual fix and needs a wire-format version, a key distribution
+//!   story, and an answer for a device signing for a peer it was itself lied
+//!   to about.
+//! - *Split discovery from authorization* — merge into a `discovered` list used
+//!   only for dialling, and let only pairing write the `peers` list that
+//!   [`crate::authz`] reads — is the cleanest, and changes the `peers.json`
+//!   schema, `outl peer list`, and revocation semantics.
+//!
+//! Pinned, not closed, by `gossip_can_manufacture_an_authorized_peer`
+//! (`tests/membership_trust.rs`, `#[ignore]`d with the reproduction in its
+//! body).
+//! What *is* closed here is the unbounded write: see
+//! [`MAX_MEMBERSHIP_ENTRIES`].
 //!
 //! Conservative guards on the merge:
 //!
@@ -95,6 +140,21 @@ pub(crate) const MEMBERSHIP_TAG: &str = "outl-membership/1";
 /// dials whatever this merges, so end-to-end discovery settles in well under a
 /// catch-up cycle plus a membership tick.
 pub(crate) const MEMBERSHIP_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Most peers one membership message may contribute.
+///
+/// A gossip message is unauthenticated bytes from the topic (see "The hole this
+/// does NOT close" above), and the merge below writes each accepted entry to
+/// `peers.json` — so an unbounded list is an unbounded write amplified by a 5s
+/// broadcast tick. A cap does not decide *who* may be merged; it only stops one
+/// message from deciding it for thousands at a time.
+///
+/// Sized far above any real mesh: a personal workspace runs a handful of
+/// devices, and a hundred is already implausible. A legitimate list larger than
+/// this is a signal, not a use case, so the message is refused whole rather than
+/// truncated — a half-applied peer list is a worse thing to debug than a
+/// rejected one.
+pub(crate) const MAX_MEMBERSHIP_ENTRIES: usize = 256;
 
 /// Build the membership broadcast payload from the current peer list on disk.
 ///
@@ -146,6 +206,17 @@ pub(crate) fn merge_membership(
     self_node_id: &str,
     incoming: Vec<PeerEntry>,
 ) -> Result<usize> {
+    // Refuse an implausibly large list whole. See `MAX_MEMBERSHIP_ENTRIES`:
+    // this bounds the damage one message can do, it does not authorize the
+    // ones under the cap.
+    if incoming.len() > MAX_MEMBERSHIP_ENTRIES {
+        tracing::warn!(
+            entries = incoming.len(),
+            cap = MAX_MEMBERSHIP_ENTRIES,
+            "refusing an oversized membership broadcast whole"
+        );
+        return Ok(0);
+    }
     // Drop self and any peer we can't actually reach before touching the store.
     let candidates: Vec<PeerEntry> = incoming
         .into_iter()

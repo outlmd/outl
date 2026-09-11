@@ -28,6 +28,9 @@ use crate::engine_catchup::run_catch_up;
 use crate::peers::{workspace_peers_path, PeerEntry, PeersStore};
 use crate::protocol::SYNC_ALPN;
 
+mod assets;
+pub use assets::{run_asset_pull, run_staged_asset_pull, spawn_asset_responder, write_test_asset};
+
 /// Authorize `peer` as an approved device for the responder rooted at
 /// `workspace_root`, by writing a minimal [`PeerEntry`] into its
 /// `<root>/.outl/peers.json` — the same file real pairing writes.
@@ -175,16 +178,26 @@ pub fn spawn_responder(
 
 /// Mount the production `SnapshotProtocolHandler` on a `Router` and return it.
 ///
-/// The responder serves `<workspace_root>/.outl/snapshots/snap-<actor>.bin` to
-/// any dialer on [`crate::SNAPSHOT_ALPN`] — an empty frame when it has no
-/// snapshot. Keep the returned `Router` alive for as long as it must accept
-/// connections. Lets a loopback test exercise the real Phase-2 snapshot transfer
-/// (server side) over real QUIC.
+/// The responder serves `<workspace_root>/.outl/snapshots/snap-<actor>.bin` on
+/// [`crate::SNAPSHOT_ALPN`] to an **approved** dialer — an empty frame when it
+/// has no snapshot. `authorized_peers` is seeded into the responder's
+/// `peers.json` before the handler goes up, exactly like [`spawn_responder`] and
+/// [`spawn_asset_responder`]; pass an empty slice to stand up a responder that
+/// trusts nobody, which is how the disclosure tests prove a revoked device gets
+/// nothing.
+///
+/// Keep the returned `Router` alive for as long as it must accept connections.
+/// Lets a loopback test exercise the real Phase-2 snapshot transfer (server
+/// side) over real QUIC.
 pub fn spawn_snapshot_responder(
     endpoint: iroh::Endpoint,
     workspace_root: PathBuf,
     actor: ActorId,
+    authorized_peers: &[iroh::EndpointId],
 ) -> Router {
+    for peer in authorized_peers {
+        authorize_peer(&workspace_root, *peer);
+    }
     Router::builder(endpoint)
         .accept(
             crate::protocol::SNAPSHOT_ALPN,
@@ -257,64 +270,6 @@ pub async fn run_snapshot_pull(
     .await
 }
 
-/// Mount the production `AssetProtocolHandler` on a `Router` and return it.
-///
-/// The responder serves `<workspace_root>/assets/` (the manifest + per-name
-/// bytes) to any dialer on [`crate::ASSET_ALPN`] — an empty manifest when the
-/// dir is absent. Keep the returned `Router` alive for as long as it must accept
-/// connections. Lets a loopback test exercise the real binary-asset transfer
-/// (server side) over real QUIC.
-pub fn spawn_asset_responder(endpoint: iroh::Endpoint, workspace_root: PathBuf) -> Router {
-    Router::builder(endpoint)
-        .accept(
-            crate::protocol::ASSET_ALPN,
-            crate::engine_assets::AssetProtocolHandler { workspace_root },
-        )
-        .spawn()
-}
-
-/// Write a content-addressed asset (`<root>/assets/<hash>.<ext>`) exactly like
-/// `outl_actions::import_asset` would, and return its basename.
-///
-/// Lets a loopback test seed a peer's `assets/` without pulling `outl-actions` /
-/// `outl-md` into the test crate's own dependency set — the filename IS the
-/// sha-256 of `bytes`, so the puller's content-hash check passes.
-pub fn write_test_asset(workspace_root: &Path, bytes: &[u8], ext: &str) -> String {
-    let dir = outl_actions::assets_dir(workspace_root);
-    std::fs::create_dir_all(&dir).expect("create assets dir");
-    let name = format!("{}.{ext}", outl_md::asset::hash_bytes(bytes));
-    std::fs::write(dir.join(&name), bytes).expect("write test asset");
-    name
-}
-
-/// Run the production asset pull (initiator side) against `peer` — the exact call
-/// `drain_pair_completions` / the catch-up loop make after the delta-sync.
-///
-/// Dials `peer` on [`crate::ASSET_ALPN`], negotiates the manifest, and writes
-/// every asset the peer holds that `workspace_root/assets/` lacks (atomically,
-/// content-hash-verified). Returns how many assets were written.
-pub async fn run_asset_pull(
-    endpoint: &iroh::Endpoint,
-    peer: impl Into<iroh::EndpointAddr>,
-    workspace_root: &Path,
-) -> Result<usize> {
-    crate::engine_assets::pull_assets_from_peer(
-        endpoint,
-        peer.into(),
-        workspace_root,
-        &crate::progress::ProgressSink::default(),
-    )
-    .await
-}
-
-/// [`run_delta_sync`] with a live progress sink, so a test can assert what the
-/// user is TOLD, not only whether the sync converged.
-///
-/// The two are different questions and the repo only ever tested the first.
-/// `SyncProgress` is cosmetic by design (a dropped update never breaks a sync),
-/// which is exactly why nothing else catches a wrong one: a pass classified as
-/// the wrong colour still errors, still re-pushes, still converges. The only
-/// symptom is on screen.
 /// The one body every `run_delta_sync*` helper shares: a fresh append lock,
 /// then the production initiator.
 ///
@@ -343,6 +298,43 @@ async fn drive_delta_sync(
     .await
 }
 
+/// Run the production op-log ingest directly — the exact call both sync
+/// directions make once a peer's ops blob has been read off the wire.
+///
+/// Skips the wire so a test can hand `received` ops that no honest peer would
+/// send (an op forged under the LOCAL actor's id) and assert what the ingest
+/// refuses. Returns how many ops were actually appended.
+///
+/// Exposed for the same reason `mint_ticket` is: the interesting inputs here
+/// are the ones a well-behaved peer never produces, and driving them through a
+/// real QUIC exchange would mean writing a malicious responder to say something
+/// the ingest is supposed to reject on its own.
+pub async fn ingest_ops(
+    workspace_root: &Path,
+    local_actor: ActorId,
+    received: &[outl_core::LogOp],
+) -> Result<usize> {
+    let (tx, _rx) = std::sync::mpsc::channel::<()>();
+    let append_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    let (applied, _touched) = crate::oplog::ingest_received_ops(
+        &workspace_root.join("ops"),
+        local_actor,
+        received,
+        &tx,
+        &append_lock,
+    )
+    .await?;
+    Ok(applied)
+}
+
+/// [`run_delta_sync`] with a live progress sink, so a test can assert what the
+/// user is TOLD, not only whether the sync converged.
+///
+/// The two are different questions and the repo only ever tested the first.
+/// `SyncProgress` is cosmetic by design (a dropped update never breaks a sync),
+/// which is exactly why nothing else catches a wrong one: a pass classified as
+/// the wrong colour still errors, still re-pushes, still converges. The only
+/// symptom is on screen.
 pub async fn run_delta_sync_with_progress(
     endpoint: &iroh::Endpoint,
     peer: impl Into<iroh::EndpointAddr>,

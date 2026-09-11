@@ -31,8 +31,7 @@ use crate::oplog::{ingest_received_ops, local_vector_clock, ops_missing_for};
 use crate::protocol::{
     classify_close, close_refusal_reason, decode_ops_blob, decode_request, decode_response,
     encode_blob_frame, encode_ops_blob, encode_request, encode_response, CloseVerdict, SyncRequest,
-    SyncResponse, ACK_DURABLE, CLOSE_NORMAL, CLOSE_UNKNOWN_PEER, CLOSE_WORKSPACE_MISMATCH,
-    SYNC_ALPN,
+    SyncResponse, ACK_DURABLE, CLOSE_NORMAL, CLOSE_WORKSPACE_MISMATCH, SYNC_ALPN,
 };
 
 /// Hard ceiling on a single sync frame's body, enforced before allocating.
@@ -609,44 +608,14 @@ impl SyncProtocolHandler {
         // workspace. The workspace_id check above only proves the peer THINKS it
         // belongs here — a device removed from `peers.json` still knows the id, so
         // without this it would keep pulling history and pushing edits (issue #158
-        // "removing a paired device doesn't revoke its access"). Read `peers.json`
-        // fresh on every inbound connection (not cached at boot): it can change
-        // while the transport runs, so a `peer remove` takes effect on the very
-        // next connection instead of after a restart.
-        let remote_id = conn.remote_id().to_string();
-        let peers_path = crate::peers::workspace_peers_path(&self.workspace_root);
-        let store = match tokio::task::spawn_blocking(move || {
-            crate::peers::PeersStore::load_or_default(&peers_path)
-        })
-        .await
-        {
-            Ok(Ok(store)) => store,
-            Ok(Err(e)) => {
-                // Fail CLOSED: if the peer list can't be read we can't prove the
-                // peer is approved, so reject rather than fall back to open access.
-                warn!(
-                    peer = %conn.remote_id().fmt_short(),
-                    "rejecting sync: peers.json unreadable ({e:#})"
-                );
-                conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
-                return Ok(());
-            }
-            Err(e) => {
-                warn!(
-                    peer = %conn.remote_id().fmt_short(),
-                    "rejecting sync: peers.json load task failed ({e})"
-                );
-                conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
-                return Ok(());
-            }
-        };
-        let authorized = store.list().iter().any(|p| p.node_id == remote_id);
-        if !authorized {
-            warn!(
-                peer = %conn.remote_id().fmt_short(),
-                "rejecting sync from an unknown / revoked peer (not in peers.json)"
-            );
-            conn.close(CLOSE_UNKNOWN_PEER.into(), b"unknown-peer");
+        // "removing a paired device doesn't revoke its access").
+        //
+        // The verdict lives in `crate::authz`, NOT here. It used to be inline,
+        // which is exactly why `SNAPSHOT_ALPN` and `ASSET_ALPN` — mounted on this
+        // same endpoint, answering these same dialers — shipped the whole
+        // materialized workspace and every uploaded file to anyone who asked.
+        // One owner, three callers; see that module's header.
+        if !crate::authz::authorize_or_close(conn, &self.workspace_root).await {
             return Ok(());
         }
 

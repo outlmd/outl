@@ -91,6 +91,8 @@ use crate::commands::{
 };
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
+use outl_tauri_shared::workspace_open::WorkspaceGuards;
+
 use crate::workspace_open::{load_or_create_actor, resolve_storage_root, spawn_workspace_opener};
 
 /// A deep link that arrived during cold start, before the frontend
@@ -249,9 +251,13 @@ pub fn run() {
             let hlc = HlcGenerator::new(actor);
 
             let workspace: Arc<Mutex<Option<Workspace>>> = Arc::new(Mutex::new(None));
+            // Cross-process workspace locks, held for as long as the
+            // workspace is open. Written only by `open_workspace_at`.
+            let workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>> = Arc::new(Mutex::new(None));
 
             spawn_workspace_opener(
                 workspace.clone(),
+                workspace_guards.clone(),
                 storage_root.clone(),
                 hlc.clone(),
                 app.handle().clone(),
@@ -299,6 +305,7 @@ pub fn run() {
 
             app.manage(AppState {
                 workspace,
+                workspace_guards,
                 hlc,
                 storage_root,
                 registry,

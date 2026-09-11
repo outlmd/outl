@@ -42,7 +42,9 @@ use parking_lot::Mutex;
 use tauri::Emitter;
 use tracing::{info, warn};
 
-pub(crate) use outl_tauri_shared::workspace_open::{load_or_create_actor, open_workspace_at};
+pub(crate) use outl_tauri_shared::workspace_open::{
+    load_or_create_actor, open_workspace_at, WorkspaceGuards,
+};
 
 /// Folder name for the **local** default workspace, created under the
 /// app's data dir when the user hasn't picked anything yet.
@@ -124,6 +126,7 @@ pub(crate) fn persist_workspace_path(path: &Path) {
 /// the reconcile finishing before first paint.
 pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
+    workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
     storage_root: PathBuf,
     hlc: HlcGenerator,
     app: tauri::AppHandle,
@@ -135,13 +138,14 @@ pub(crate) fn spawn_workspace_opener(
     // index. Keeps the long-lived client well under iOS jetsam.
     let lru_cap = outl_config::load().storage.lru_cap.min(5_000);
     thread::spawn(move || {
-        let workspace = match open_workspace_at(actor, &hlc, &storage_root, lru_cap) {
-            Ok(w) => w,
-            Err(e) => {
-                warn!("background open failed for {}: {e}", storage_root.display());
-                return;
-            }
-        };
+        let workspace =
+            match open_workspace_at(actor, &hlc, &storage_root, lru_cap, &workspace_guards) {
+                Ok(w) => w,
+                Err(e) => {
+                    warn!("background open failed for {}: {e}", storage_root.display());
+                    return;
+                }
+            };
         // Publish + fire `workspace-ready` FIRST so today's journal paints
         // immediately; the orphan reconcile runs after (see below).
         *workspace_slot.lock() = Some(workspace);

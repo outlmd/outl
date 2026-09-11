@@ -10,11 +10,13 @@
 //!
 //! - [`SnapshotProtocolHandler`] — the responder, mounted on the live sync
 //!   endpoint's router under [`SNAPSHOT_ALPN`] (the SAME endpoint — one endpoint
-//!   per identity). It reads THIS device's own `snap-<self.actor>.bin` off disk
-//!   and ships it as one length-prefixed frame (an empty frame when it has no
-//!   snapshot yet, which the peer skips). It never holds the workspace lock — it
-//!   reads a cache file straight off disk, and the transport has no `Workspace`
-//!   anyway.
+//!   per identity). It authorizes the dialer against `peers.json` via
+//!   [`crate::authz`] (the same verdict `SYNC_ALPN` uses — this frame is the
+//!   whole workspace, so an unauthorized dialer must never reach the disk read),
+//!   then ships THIS device's own `snap-<self.actor>.bin` as one length-prefixed
+//!   frame (an empty frame when it has no snapshot yet, which the peer skips).
+//!   It never holds the workspace lock — it reads a cache file straight off
+//!   disk, and the transport has no `Workspace` anyway.
 //! - [`pull_snapshot_from_peer`] — the initiator, fired from
 //!   [`crate::engine_pairing::drain_pair_completions`] right after the immediate
 //!   delta-sync. It dials the peer, reads the frame, and (when non-empty) writes
@@ -91,6 +93,16 @@ impl SnapshotProtocolHandler {
     /// Read our own `snap-<self.actor>.bin` off disk and write it back as one
     /// length-prefixed frame. Absent snapshot → an empty frame (the peer skips).
     async fn serve(&self, conn: Connection) -> Result<()> {
+        // `snap-<actor>.bin` IS the materialized workspace — every page, settled.
+        // Until this line it went to ANY dialer that spoke the ALPN: no peer
+        // check, no workspace check. `outl peer remove` took the revoked device
+        // off `SYNC_ALPN` and left this door open, so the device kept a complete,
+        // current copy of the graph. Authorize FIRST, before a byte is read off
+        // disk. Same owner as the sync handler's check — see `crate::authz`.
+        if !crate::authz::authorize_or_close(&conn, &self.workspace_root).await {
+            return Ok(());
+        }
+
         let (mut send, mut recv) = conn
             .accept_bi()
             .await
@@ -239,6 +251,28 @@ pub(crate) async fn pull_snapshot_from_peer(
             return Ok(false);
         }
     };
+    // A snapshot with NO per-actor cutoff is not merely useless — it is
+    // unattributable, and `outl_core`'s adoption guard is written as
+    // `if let Some(max) = body.cutoff.values().max()`, so an EMPTY cutoff makes
+    // that guard not run at all. The body is an opaque materialized tree the
+    // peer chose; adopting it unchecked lets a forged one install its own
+    // `nodes` / `block_text` and then replay our entire log on top of it (every
+    // actor absent from the cutoff means "we have seen none of your ops"),
+    // which is the divergence the guard exists to prevent and, since RFC 0263,
+    // also re-arms the duplicate-`Create` defect that RFC fixed.
+    //
+    // `build_snapshot_body` returns `None` rather than an empty cutoff, so no
+    // honest peer can produce this and refusing it costs nothing. `outl-core`
+    // owns the authoritative refusal — a snapshot can also arrive by a file
+    // transport or a restored backup, paths this function never sees — but a
+    // poisoned cache file is cheaper to never write than to fall back from.
+    if body.cutoff.is_empty() {
+        warn!(
+            "snapshot pull from {}: refusing a snapshot with no per-actor cutoff",
+            peer_node_id.fmt_short()
+        );
+        return Ok(false);
+    }
     let received_len = body_bytes.len();
 
     // Atomic write (tmp + fsync + rename) via the format's owner in `outl-core`.
