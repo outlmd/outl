@@ -239,10 +239,11 @@ The full mapping (CLI ↔ MCP tool) is documented in [`docs/cli.md`](../../docs/
 
 **The response is projected for an LLM consumer, not a script — this is the one place the MCP surface diverges from the CLI, and the handler is untouched.**
 `mcp/tools/payload.rs` owns the wrapping.
-A **success** reply is content-only: the handler's `data` as compact JSON in `content[0].text` (no `structuredContent` — at protocol `2024-11-05` that was a discarded second copy), or the raw `.md` for markdown-first tools (`export_md`, `page_render`, `daily_*`).
+A **success** reply is content-only: the handler's `data` as compact JSON in `content[0].text`, or the raw `.md` for markdown-first tools (`export_md`, `page_render`, `daily_*`).
+No `structuredContent` — the text already holds the full payload, so an envelope around it is a duplicate.
 It also drops fields only a GUI renderer reads — an outline node's `tokens` (a pre-tokenized inline AST that restates `text`), and default-valued `collapsed` / `todo` / empty `properties` — because the shared `project_outline` shape serves the Tauri clients too and an LLM already has `text`.
 The CLI's own `--json` keeps every field.
-An **error** reply is the deliberate exception: it sets `isError: true` and keeps `structuredContent: { ok: false, error }` so `error.data` (RFC 0255's `PAGE_MARKDOWN_AHEAD_OF_LOG` carries `path` / `lines` / `sample` / `recovery_command`) is machine-readable.
+An **error** reply is the deliberate exception: its text is only a `code: message` summary, so it sets `isError: true` and keeps `structuredContent: { ok: false, error }` — the sole machine-readable copy of `error.data` (RFC 0255's `PAGE_MARKDOWN_AHEAD_OF_LOG` carries `path` / `lines` / `sample` / `recovery_command`).
 Pruning keys off the outline-node signature (`text` + `children`) so a same-named field on another payload (`page_prop_list`'s `properties`) is never touched; pinned by `mcp/tools/payload.rs`'s tests.
 
 ## P2P sync: the MCP takes the endpoint when nobody else has it
