@@ -152,7 +152,7 @@ The fixed pieces are *what to read, how to bucket it, what to produce* — the t
 
 - **Markdown dialect.** Writes must follow [`docs/markdown-format.md`](markdown-format.md): ISO date links (`[[2026-04-22]]`), 2-space indent per level, literal `TODO` / `DONE` prefixes. The server doesn't transform input.
 - **Best-effort reads.** If a call fails or returns empty, continue with what the rest of the calls produced — don't block the whole command on one miss.
-- **Output shape.** Tools return `structuredContent: { ok, data, error }` and `content[].text`. For markdown-first tools (`outl_daily_*`, `outl_page_render`, `outl_export_md`), `content[].text` is the raw `.md` — easier to feed the model than the JSON form.
+- **Output shape.** Success is content-only — compact JSON in `content[].text`, or raw `.md` for markdown-first tools (`outl_daily_*`, `outl_page_render`, `outl_export_md`). Errors set `isError: true` and keep `structuredContent: { ok: false, error }` so `error.data` is readable.
 - **Workspace errors.** If `outl mcp serve` was launched without `--workspace` (and `OUTL_WORKSPACE` isn't set), every tool returns "no workspace". Tell the user to fix the host config — the prompt can't recover.
 
 ## See also

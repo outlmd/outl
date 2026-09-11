@@ -50,8 +50,10 @@ use crate::cmd::{
     template as tpl_cmd, workspace_info as wi_cmd,
 };
 use crate::mcp::protocol::JsonRpcError;
-use crate::mcp::{tool_error_payload, tool_success_payload, ServerCtx};
+use crate::mcp::ServerCtx;
 use crate::output::ApiError;
+
+use super::payload::{tool_error_payload, tool_success_payload};
 
 use super::{opt_params, opt_str, require_str};
 
