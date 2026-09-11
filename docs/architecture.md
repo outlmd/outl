@@ -119,10 +119,16 @@ Reusing it lets us focus on the part nobody else has solved (the tree).
 128 bits, lexicographically sortable, monotonic per millisecond, no central authority.
 Better than UUIDv4 (random, sorting nightmare) and better than UUIDv7 (good but ULID is established and the spec is finalized).
 
-### 8. uhlc for timestamps
+### 8. Hybrid logical clocks for timestamps
 
 Hybrid Logical Clock = wall clock + logical counter + actor.
 Comparing two HLCs gives a total order without coordination, and the wall-clock component keeps timestamps human-meaningful for debugging.
+
+**Hand-rolled in `crates/outl-core/src/hlc.rs`, not the `uhlc` crate.**
+This section was titled "uhlc for timestamps" for months while `uhlc` appeared in no manifest.
+The gap that matters is not the dependency but what came with it: uhlc clamps clock drift, and nothing here does.
+`HlcGenerator::next` is monotonic against its *own* state, so a local clock that jumps backwards keeps producing usable timestamps — but the generator is not seeded from the op log on boot, so after a backwards jump a new op can sort before ops already in the log.
+That is a correctness-adjacent cost (it drives `apply_op`'s undo/replay window, and trips `OpLog::append`'s ordering `debug_assert`), not a convergence bug: the CRDT reorders to the same state either way.
 
 ### 9. Journal is a first-class concept
 
@@ -247,7 +253,7 @@ The transport (iroh by default, file/iCloud opt-in) is responsible for shipping 
 `outl_actions::SyncEngine` is the shared piece that both the TUI poller and the mobile `NSMetadataQuery` watcher call when a peer file changes:
 
 - `snapshot_peers()` lists every `ops-*.jsonl` *except this device's* so a client never reacts to its own writes (the destructive save-reload-race loop is closed at this filter).
-- `reload_workspace()` reopens the workspace from disk, merging all per-actor jsonls by HLC and replaying through the move-op algorithm.
+- `reload_workspace(hlc)` reopens the workspace from disk, merging all per-actor jsonls by HLC and replaying through the move-op algorithm, and raises the caller's `HlcGenerator` above the merged log so the next local op does not sort below a peer that runs ahead of this device's clock (see [`docs/sync.md`](sync.md#why-the-reload-takes-the-clock)).
 - `reproject_page(workspace, page_id)` re-emits the focused page's `.md` + sidecar from the new tree state.
 - `scan_for_orphans()` finds `.md` files whose sidecar is missing or whose `last_synced_hash` no longer matches — fresh imports (Roam/Logseq dump, peer-shipped projection without sidecar) or external edits in vim.
   Both paths feed `outl_md::reconcile::reconcile_md`.

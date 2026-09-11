@@ -221,7 +221,7 @@ Binary formats and DB files don't merge across those transports.
 
 ### 10. Settled decisions are off-limits in a PR
 
-ULID for IDs, `uhlc` for time, MIT license, JSONL-per-actor, Tauri for mobile, iroh as the default sync transport (file/iCloud opt-in), `comrak` for markdown.
+ULID for IDs, hybrid logical clocks for time (hand-rolled, not the `uhlc` crate), MIT license, JSONL-per-actor, Tauri for mobile, iroh as the default sync transport (file/iCloud opt-in), `comrak` for markdown.
 These were debated and chosen at the start.
 The full table is in the root [`CLAUDE.md`](https://github.com/outlmd/outl/blob/main/CLAUDE.md#decisions-you-dont-get-to-revisit) and [`CONTRIBUTING.md`](https://github.com/outlmd/outl/blob/main/CONTRIBUTING.md#decisions-you-dont-get-to-revisit).
 
@@ -334,6 +334,17 @@ Past incidents:
   Caught in PR #47 review.
   Lesson: a "normalize markdown from outside" need always starts at `paste::normalize_external_syntax`; outline-level restructuring (headings → bullets, multi-paragraph merge, fence dedent) is the only thing the importer adds on top.
   (The `cmd/import/` directory has since been replaced by the adapter-based `crates/outl-import` — the lesson still applies there: adapters own dialect translation, shared coercions stay upstream.)
+
+- **Publish-by-rename** (write a scratch file, `fsync`, `rename`) was hand-rolled at six sites across five crates, and five of them cleaned the scratch up on only *some* failure paths.
+  `outl-md`'s `write_atomic` removed it on a failed `rename` and nowhere else; `outl-sync-iroh`'s `atomic_write_json` and `outl-config`'s `save_to` removed it on **no** failure path at all; `outl-sync-iroh`'s asset pull additionally leaked on task cancellation, which is the routine outcome of a transport shutdown mid-transfer.
+  The worst was `outl-md`'s, because its scratch was an *undotted* `pages/<name>.md.tmp`: on a `transport = "file"` workspace every leak replicated to every device, and nothing sweeps it (`doctor --repair` prunes `snap-*.bin.tmp` and the device-store scratch, and the sidecar GC matches only `*.tmp.<ulid>`).
+  The single owner is now **`outl_md::atomic::TempFile`** (plus `outl_md::atomic::sync_dir` for the parent-directory `fsync` that makes the rename durable), and the scratch is hidden behind a leading dot so the one exit a guard cannot reach — `SIGKILL`, jetsam, power loss — stays off the sync surface.
+  Lesson: **a cleanup that runs on one failure path is the same bug as no cleanup**, and the fix is an RAII guard, never another `remove_file` call.
+
+  Two copies survive that consolidation, deliberately, and both say so in their own doc comments:
+  `outl_core::storage::sidecar::TempFile` (that crate is upstream of `outl-md` — the edge cannot point the other way) and a private one in `outl-config` (a leaf crate that depends on no other `outl-*` crate, where inverting that so a config parser pulls in `comrak` and `yrs` to reuse twenty lines is the worse trade).
+  Every other call site uses the `outl-md` one.
+  **Do not add a fourth.**
 
 The rule:
 

@@ -313,13 +313,18 @@ The expected per-edit cycle:
   That runs as a **ratchet**, not a cliff: the files already past the threshold are frozen with their current line counts in `.github/file-size-baseline.txt`, and the job fails only when a file **not** in the baseline crosses 600 lines, or one in it grows past its recorded number.
   Large files therefore stay editable and the ceiling only moves down.
   After a split lowers a count, re-record it with `scripts/check-file-size.sh --update`; the script refuses to write a baseline from a scan that matched nothing, so a broken checkout cannot silently empty it.
+
+- **`scripts/check-docs-index.sh`** — every RFC in `docs/rfcs/` is reachable from [`docs/SUMMARY.md`](SUMMARY.md).
+  It exists because the index was silently wrong five times in a row: one branch added five RFCs — including the two documenting the changes most capable of destroying data — and listed none of them.
+  The index was complete each time it was last edited; five separate changes each forgot the same step, and nothing failed when they did.
+  It checks **reachability, not wording**: the summary line is the RFC author's to write, and a script that generated it would become a second owner of that fact.
 - **`file-size-sweep.sh`** — the same ratchet, wired as a **`Stop`** hook so it runs once at the end of a turn.
   Every hook above it is `PostToolUse` on `Edit|Write`, and **that matcher does not include the Bash tool**: a file created with `python3 - <<'PY'`, `sed -i`, `cat >` or `git mv` lands on disk having passed no guard at all.
   The per-edit hook answers "Claude used Edit/Write on a big file"; this one answers "something got big, however it arrived".
   It exits 2 once with the failure, then reports without blocking if it fires again (`stop_hook_active`), so a condition Claude cannot clear does not loop.
 - **`single-declaration-guard.sh`** — catches code written where a cross-client surface *used* to live.
   Three surfaces are declared once and consumed everywhere, each having replaced N hand-maintained copies.
-  The Tauri command surface (`outl-tauri-shared/src/wrappers/catalog.rs`), the post-mutation commit sequence (`outl_actions::commit_page`), and the Rust ↔ TypeScript wire contract (`tests/wire_types.rs`).
+  The Tauri command surface (`outl-tauri-shared/src/wrappers/catalog.rs`), the post-mutation commit sequence (`outl_actions::commit_page`), and the Rust ↔ TypeScript wire contract (`tests/wire_types.rs`, `tests/wire_enums.rs`, `tests/wire_mirrors.rs`).
   Each already has a test that fails when a client drifts; this hook solves a different problem.
   A model working from the shape of the *old* code writes the hand-rolled version again, because the git history is full of it.
   The test catches that in CI; this catches it at the keystroke, with the file the change belongs in.
@@ -413,7 +418,7 @@ Same file smoke-tests the block clipboard (cut arms `blockClipboard`; paste rout
 
 ### The 100% rule
 
-`do_op`, `undo_op`, `apply_op`, `creates_cycle` in `outl-core/src/tree/mod.rs` carry a **100% line and branch coverage rule**.
+`do_op` / `undo_op` (`outl-core/src/tree/op.rs`), `apply_op` (`tree/apply.rs`) and `creates_cycle` (`tree/cycle.rs`) carry a **100% line and branch coverage rule**.
 Any new branch needs a new test.
 
 ```bash
@@ -670,7 +675,7 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package) and a **`hygiene`** job (`scripts/check-file-size.sh`). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package) and a **`hygiene`** job (`scripts/check-file-size.sh` + `scripts/check-docs-index.sh`). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
 | [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-md`, plus weekly cron | Criterion (small/medium/large) on every PR; xlarge + CLI hyperfine on cron / manual dispatch. Artifacts retained 14–30 days. | No (informational) |

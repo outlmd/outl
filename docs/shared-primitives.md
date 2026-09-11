@@ -61,6 +61,8 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 7. [Reminders (`remind::`)](primitives-actions.md#7-reminders-remind)
 8. [Frontend shared primitives (`@outl/shared`)](primitives-actions.md#8-frontend-shared-primitives-outlshared)
 
+The module-by-module reference for `outl-actions` lives separately in [`outl-actions-surface.md`](outl-actions-surface.md) — this catalog is keyed by intent, that one by module.
+
 ---
 
 ## When your need isn't in this catalog

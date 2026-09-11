@@ -221,8 +221,7 @@ Violating any one breaks user trust irreversibly.
       `Backspace` on an empty textarea works on the desktop and has no handler, because the platform does it.
       A boolean would have forced that row to lie in one direction or the other, so `Support::Native` is its own state: reachable, no handler, no nudge.
 
-    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved, invariant 11 asks whether the cost is even yours.
-    This one asks **who does not have what you just built, and does anything fail if you don't say?**
+    **The general rule** (9 → 10 → 11 above): this one asks **who does not have what you just built, and does anything fail if you don't say?**
 
 13. **A colour token has exactly one meaning, on every client.**
     A token name that resolves to `bg` in one client and `bg_elev` in another is not a naming inconsistency — it is two definitions of one fact, and the wrong one gets selected by whatever signal happens to be wired to it.
@@ -249,8 +248,7 @@ Violating any one breaks user trust irreversibly.
     **The regression net:** `no_client_references_the_legacy_ios_namespace`, `the_theme_tokens_match_the_palette` (`crates/outl-theme/tests/tokens.rs`).
     [RFC 0022](docs/rfcs/0022-unified-design-tokens.md).
 
-    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved, invariant 11 asks whether the cost is even yours, invariant 12 asks who does not have what you just built.
-    This one asks **does this name mean the same fact everywhere it appears?**
+    **The general rule** (9 → 12 above): this one asks **does this name mean the same fact everywhere it appears?**
 
 
 ## Repo layout
@@ -356,7 +354,7 @@ Don't unilaterally pivot.
 | Decision | Why |
 |----------|-----|
 | `ULID` for IDs | Lexicographically sortable, 128 bits, no central server needed |
-| `uhlc` for time | HLC with actor tiebreak is total order without coordination |
+| Hybrid logical clocks for time | Actor tiebreak gives total order without coordination. **Hand-rolled, not `uhlc`** — that crate is in no manifest, so its drift bound was never inherited ([`architecture.md`](docs/architecture.md) §8) |
 | Yrs for block text | Battle-tested CRDT for strings, lets us focus on the tree |
 | `comrak` for markdown | CommonMark-compliant, fast, customizable |
 | `iroh` as the default sync transport | QUIC + hole punching + relay, no central server for data; iroh is `[sync] transport` default |
@@ -433,7 +431,7 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
 - ❌ Giving a shared command body a `&str` parameter — Tauri hands the wrapper an owned `String`.
 - ❌ Calling `apply_page_md_with_sidecar_guarded` for a page you just mutated.
   That is step 5 of five: use `outl_actions::commit_page`, or comment which steps you skip and why.
-- ❌ Adding a wire DTO field (or an `export interface`) without a pin in `outl-tauri-shared/tests/wire_types.rs`.
+- ❌ Adding a wire DTO field, an **enum variant**, or an `export interface` / `export type` without a pin in `outl-tauri-shared/tests/` (`wire_types.rs` for struct key sets, `wire_enums.rs` for variant sets, `wire_mirrors.rs` for mirrors living outside `@outl/shared/api/types.ts`).
   The Rust↔TS mirror is hand-written on purpose; the pin is what makes that safe.
 - ❌ Adding a field to `Workspace` without asking which of its four owners it belongs to: the document (`tree`/`log`/`content`), `StorageRouter`, `SnapshotPolicy`, or the batch buffer.
 - ❌ Destructuring props in a Solid component — reactivity rides the getter, so a destructured prop freezes at first render.
