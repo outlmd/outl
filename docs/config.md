@@ -330,8 +330,9 @@ The TOML reader (`outl-config::load`) is **forgiving by design**:
   Older binaries reading a newer config don't choke; you can add fields ahead of time.
 - Partial schema (e.g. only `[theme]` populated) → other sections fall back to their per-section `Default`.
 
-Saving (`outl-config::save`) writes atomically — the new content lands in `config.toml.tmp` and the file is renamed on top.
-A crash mid-write never leaves a truncated config.
+Saving (`outl-config::save`) publishes by rename: the new content lands in a hidden sibling scratch file (`.config.toml.tmp`), is `fsync`ed, renamed on top of `config.toml`, and the parent directory is `fsync`ed so the rename itself survives a power loss.
+A crash mid-write never leaves a truncated config, and never leaves the scratch file behind — it is unlinked on every failure path, not just a failed rename.
+Both `fsync`s matter here: a config that comes back zero-length silently resets the user to defaults (theme, vim mode, last workspace).
 
 ---
 

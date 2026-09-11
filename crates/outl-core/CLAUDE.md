@@ -11,7 +11,11 @@ Treat every change as production-bound.
 ## What this crate owns
 
 - `Op` enum and `LogOp` envelope
-- HLC timestamps (wrapper over `uhlc`)
+- HLC timestamps (**hand-rolled**, not `uhlc`; see `docs/architecture.md`).
+  `hlc::MAX_CLOCK_SKEW_MS` is the **single owner** of the 24h future-timestamp window: `outl-sync-iroh` drops an incoming op beyond it, and `seed_clock` clamps the boot seed to it.
+  It lives here, not in the transport, because the transport depends on this crate and not the reverse.
+  Two generator properties are load-bearing and easy to undo by "simplifying": the logical counter **carries** into `physical_ms` at `u32::MAX` rather than saturating (a pinned counter makes `Workspace::apply` dedup every later local write and return `Ok(())` without persisting, which is silent total write loss), and the boot seed is **clamped** (unclamped, one bad far-future line in any actor's log is absorbed into this device's own `ops-<own>.jsonl` on first boot and pins the clock forward permanently).
+  Both became reachable only when seeding landed; neither was a bug before it
 - `NodeId`, `ActorId` (ULID-based).
   `NodeId::from_slug(slug)` is the **single owner** of the deterministic page/journal-root id derivation (`sha256("outl-page:" + slug)[..16]`).
   Every path that materialises a page root routes here — in-app `open_or_create`, `outl-md`'s external-`.md` reconcile, `outl-actions::desync` recovery.
@@ -27,6 +31,7 @@ Treat every change as production-bound.
 - The CRDT itself: `do_op`, `undo_op`, `apply_op`, `creates_cycle`
 - Append-only `OpLog`
 - `Storage` trait + `JsonlStorage` (one file per actor, syncable via iCloud / Syncthing / shared FS) + `MemoryStorage` (test double)
+  - **Compaction (`storage/compact/`).** `Create` is idempotent, so a `Create`+`Move` pair also spells trashed-then-restored — there the `Move` *is* the work, hence six conditions ([RFC 0256](../../docs/rfcs/0256-op-log-compaction.md)).
   - **Batch append (`Storage::append_ops`).**
     Durable on `Ok` with ONE `.jsonl` fsync for the whole batch (`F_FULLFSYNC` on macOS is ~4ms; per-op fsync was the write bottleneck).
     Default trait impl loops `append_op`.
@@ -98,88 +103,16 @@ Two consequences for anyone touching `snapshot.rs`:
 
 ### Actor id is device-local, and the workspace cannot hold it
 
-"One `ops-<actor>.jsonl` per device, never shared" is what makes last-write-wins-per-file harmless on every file transport.
-That invariant is only as strong as where the actor id is stored.
+"One `ops-<actor>.jsonl` per device, never shared" is what makes last-write-wins-per-file harmless on every file transport, and that invariant is only as strong as where the actor id is stored.
 
-It used to live at `<root>/.outl/config.toml` — **inside** the directory the user syncs.
-Syncthing, Dropbox, NFS, a shared network volume and `git clone` all replicate `.outl/`, so both devices read the same `actor_id`.
-`ActorWriteLock` does not catch it: `flock(2)` is advisory and machine-local, so each device acquires its lock successfully and both append to one file.
-Last write wins, ops vanish, nothing errors.
-The only reason this was not a daily disaster is that iCloud Documents drops dot-prefixed paths, so `.outl/` never travelled — an accident of one transport.
+It used to live at `<root>/.outl/config.toml` — **inside** the directory the user syncs — so Syncthing, Dropbox, NFS and `git clone` all handed two devices the same `actor_id`.
+`ActorWriteLock` does not catch it: `flock(2)` is advisory and **machine-local**, so both devices take their lock successfully and append to one file.
+Ops vanish, nothing errors.
+The only reason it was not a daily disaster is that iCloud drops dot-prefixed paths, so `.outl/` never travelled — an accident of one transport.
 
-`device/` moves the answer outside the workspace:
-
-- `DeviceStore::actor_for_instance(&WorkspaceId, root, fallback)` → `<device_dir>/actors/<workspace-id>`.
-  Keyed by `WorkspaceId` because that is the id two paired devices *agree* on, which is what makes the actor they disagree on well-defined — **and** by the workspace directory, because the id lives at `<root>/.outl/workspace-id` and therefore travels inside a `cp -R`.
-  Two copies of one directory keyed on the id alone share an actor, and iroh keys its gossip topic on that same id, so the copies reconcile as one workspace and dedup each other's genuinely-distinct ops by `ts`.
-  A binding records the root it was made for; a mismatching root forks a second actor unless the recorded one is *provably gone* (a move or rename), and anything unreadable counts as still live.
-- `DeviceStore::device_actor()` → `<device_dir>/actor`, the single device-wide actor the Tauri clients have always used (their `HlcGenerator` is bound at app start, before a workspace exists).
-  Device-local already, so it never had the *cross-device* bug; it lives here so both GUI clients read one implementation.
-- `DeviceStore::machine_id()` → `<device_dir>/machine-id`, a device fingerprint that *may* be published into the shared config, because it is only ever compared against the local value.
-  Bound to a hash of an OS identifier of the physical machine (`/etc/machine-id`, `IOPlatformUUID`, `MachineGuid`) and **reminted when that changes**, because `$HOME` is replicated by Migration Assistant, Time Machine, VM images, chezmoi and NFS.
-  A remint invalidates every actor binding stamped with the old id, so each workspace forks.
-  Platforms exposing no such identifier (iOS above all) are inconclusive and change nothing — a documented gap, not a silent one.
-
-Every device-store file is `key=value` lines composed in a sibling temp file and published in one step, and a create is a compare-and-swap, so two processes racing a first open converge instead of minting two ids.
-The publish step is `link(2)`, not an `O_EXCL` open, because an `O_EXCL` open creates the file **empty** and fills it a moment later.
-A reader landing in that window parses a blank record as *absent* — exactly the answer that licenses it to overwrite the winner.
-`machine_id` mints under that same compare-and-swap, and it matters more there than for an actor binding.
-A lost actor costs one extra ops file; a lost machine id invalidates every binding **and** every `actor_claimed_by` claim already written into a workspace config, so those workspaces never adopt their own legacy ops file again.
-A bare legacy line (the Tauri clients' plain-ULID `actor` file) still parses.
-
-`device_dir()` honours `$OUTL_DEVICE_DIR` before the XDG layout.
-That override is what keeps the test suite (and any container) off the developer's real store — the repo's `.cargo/config.toml` points every cargo-spawned process at `.dev-device-store`.
-That path is deliberately **not** under `target/`, which `cargo clean` erases along with the iroh identity key that is this device's node id.
-`the_test_suite_runs_against_an_isolated_device_store` fails outright when that file is missing, because a suite that silently writes into `~/.config/outl/` is how 64 entries got there, 15 of them pointing at `TempDir` paths that no longer exist.
-
-#### The store has a GC now, and its whole design is what it refuses
-
-`device/gc.rs` answers invariant 9's fourth question for this store: *what cleans it up?*
-Until it existed, nothing did — `actors/` gained one record per workspace this device ever opened and lost none, so a workspace the user deleted kept its binding forever (1,208 records on a dev machine, 1,166 orphaned).
-
-**Dropping a binding is not free**, and that asymmetry is the entire design.
-The next open of that workspace mints a *fresh* actor — a second `ops-<actor>.jsonl` for a device that already had one, with every op it previously wrote no longer attributed to it.
-That is the fork this store exists to prevent, so a GC that guesses wrong causes the bug it is tidying up after.
-Keeping a stale record costs ~190 bytes.
-
-So "the root is missing" is **not** the rule, because an unplugged drive, an unmounted network volume, an undownloaded iCloud folder and an archived workspace all look exactly like a deleted one.
-A binding is `BindingVerdict::Stale` only when the root is gone, its *parent* directory is still present, and the record is older than `STALE_BINDING_TTL` (30 days).
-The parent check is what does the real work: a deleted folder leaves its parent behind, while a missing mount takes the whole path with it.
-A workspace that is *itself* a mount point would defeat the parent check alone (unmounting `/Volumes/Notes` leaves `/Volumes` behind), so each binding also stamps the root's filesystem device id (`dev=`) while the root is there to ask, and a surviving parent on a different filesystem keeps the entry.
-Everything else — including a record with no `root=`, and any path we failed to *read* rather than observed to be absent — is `Inconclusive`, which always keeps it.
-
-Two things about that rule are easy to misread, and both are pinned by tests:
-
-- **The TTL is the record's age, not time since the deletion.**
-  A binding is written on first open and rewritten only when its workspace *moves*, so nothing records when a directory went away.
-  A workspace bound years ago and deleted a minute ago is `Stale` immediately (`an_old_binding_whose_workspace_just_vanished_is_stale`).
-  Buying the stronger reading means stamping `seen=` on every open, which turns the common read path into a write on a store that may be read-only — a trade not made here.
-- **A record that does not survive the parse is not evidence.**
-  `write_record` does not escape and `parse` trims, so a root ending in a space (or holding a newline) reads back as a *different*, non-existent path whose parent exists — the exact shape that authorises a delete, for a workspace that is alive.
-  `Record::is_lossy` reports the failed round trip and `judge` drops the root rather than trusting it.
-  The same defect exists one layer earlier: the writer serializes the root via `Path::display()`, which replaces non-Unicode path data with U+FFFD before the parser ever sees the text, so `judge` also drops a root carrying the replacement character.
-  Before the GC that leniency cost one redundant rewrite per open; the GC is what changed its price.
-
-`gc.rs` is the **single owner** of that verdict.
-`DeviceStore::prune_binding` re-asks it immediately before deleting, because listing and pruning are two passes with a user in between, and a workspace can come back in that gap.
-It also refuses any path outside `actors/`: `iroh/identity.key` **is** this device's node id.
-
-The same module also collects **abandoned scratch files** (`STALE_SCRATCH_TTL`, 24h).
-`record.rs` composes every write in a `.<name>.<pid>.<seq>` sibling and removes it after publishing, so a killed process leaves one behind forever.
-They stay out of the binding listing on purpose: a scratch file names no workspace, so reporting one as "a binding whose workspace is gone" invents a graph that never existed.
-They are also never backed up, because a half-published write is by definition content that never became a record.
-Deleting one a live writer still holds is survivable on both publish paths — `create_new_record`'s `hard_link` fails with something other than `AlreadyExists` and falls through to `exclusive_create`, and `write_record` recomposes a scratch its `rename` found missing and publishes again.
-
-The surface is `outl doctor` (reports the count) and `outl doctor --repair` (drops them, after a backup) — see `outl-cli/CLAUDE.md`.
-`scripts/gc-dev-device-store.sh` is the *developer's* faster sweep of `.dev-device-store`, and it now differs in **exactly one** way: no TTL, because test debris does not deserve a 30-day wait.
-It carries the parent check, which is the condition that actually protects a live workspace.
-It used to skip that too, deleting on `[ -d "$root" ]` alone — the rule this module rejects — and since it reads `$OUTL_DEVICE_DIR`, pointing that at a real store applied the rejected rule to real bindings.
-If the two ever diverge again, align the **script** to `gc.rs`, never the reverse.
-
-**Migration lives in `outl_ws::actor`, not here**, because it needs `config.toml`.
-`config.toml`'s `actor_id` is a legacy value adopted only by the device named in `[workspace] actor_claimed_by`, and that marker is stamped when the config is **created**, never on first open — the default transport (iroh) never ships `config.toml`, so a claim written at open time propagates to nobody.
-A workspace with no claim is adopted by nobody: every device forks once and the old ops file stays readable.
-Read that module before changing anything about actor resolution.
+`device/` moves the answer outside the workspace: `DeviceStore::actor_for_instance` (per workspace), `device_actor()` (device-wide, what the Tauri clients use), `machine_id()` (reminted when the OS identifier changes, because `$HOME` gets replicated by Migration Assistant, Time Machine and VM images).
+`device/gc.rs` is the single owner of "may this binding be dropped", and its design is what it **refuses**.
+`$OUTL_DEVICE_DIR` is what keeps the test suite off the developer's real store.
 
 Rules that follow:
 
@@ -187,6 +120,8 @@ Rules that follow:
   A value two devices can read identically is not a device identity.
 - ❌ Never put the machine id, or any other device-local value, on the sync surface.
   It is the opposite of invariant #7: state that must **diverge** per device must never travel.
+
+**Full detail — the compare-and-swap publish, why `link(2)` and not `O_EXCL`, the GC's three-condition staleness rule and every reading it refuses, the TTL and lossy-record traps, and where migration lives: [`docs/device-store.md`](../../docs/device-store.md).**
 
 ### Snapshot dir has exactly one owner — the `Workspace`, keyed off `root`
 
@@ -198,6 +133,14 @@ But production passes `ops_dir = <root>/ops` (not `<root>/.outl/ops`), so the st
 They never met: snapshot boot was inert in production, while every test (which used `<root>/.outl/ops`) passed.
 The fix removed snapshot I/O from the `Storage` trait entirely: storage owns the op log, the workspace owns the snapshot cache, and there is now a single path derivation.
 Never re-add `save_snapshot` / `load_snapshot` to `Storage` — that reintroduces the two-owners divergence.
+
+#### The snapshot cache has a GC, and its rule is about the reader
+
+`snapshot/gc.rs` answers invariant 9's *what cleans it up?* — nothing did (54 MB in four files on a real workspace).
+**"Drop the snapshots of actors that are gone" is not the rule**: unanswerable like [RFC 0211](../../docs/rfcs/0211-state-that-leaves-a-boundary.md)'s, *and* irrelevant, since a snapshot's only readers are `read_best_from_disk` and the iroh responder — never its actor.
+Prunable is `Superseded` or `Unusable`; `Own`, `Selected` and anything we failed to *read* are kept.
+It runs on the background writer's worker, never as a bulk sweep on a read (`doctor` opens read-only).
+Rules and rejected dedup: [RFC 0258](../../docs/rfcs/0258-snapshot-cache-lifecycle.md).
 
 ### Block text is two-tier, not one live `Doc` per block
 
@@ -288,14 +231,17 @@ They are properties of the algorithm proven in Kleppmann et al. 2022.
    This extends to the **read** side: a damaged log may cost you the damaged bytes, never the healthy bytes after them, and never quietly.
    **Every sequential pass over a `.jsonl` skips an unreadable record and continues** — a `break` there discards every op past the damage and boots a truncated tree as if it were the whole workspace.
    That is `read_ops_file_into` (the full replay) *and* `rebuild_actor_indexes` / `index_stream` (the index build).
-   The index build is the one that hides best: a short index never *knows* about the ops past the damage, so `MissingOp` below can never fire for them and the tree comes out short with no error anywhere.
-   For the same reason a rebuild that hit a read error refuses to persist its `.idx` sidecars — caching a known-incomplete index is what turns a recoverable omission into a permanent one.
-   All four index-driven reads return `StorageError::MissingOp` when the index lists an op the file won't return, rather than a short result set.
-   Those four are `ops_since`, `ops_for_actor`, `ops_since_per_actor` and `ops_for_node`; snapshot boot falls back to a full replay on the error.
+   The index build hides best: a short index never *knows* about the ops past the damage, so `MissingOp` can never fire for them and the tree comes out short with no error anywhere — which is why a rebuild that hit a read error refuses to persist its sidecars.
+   The four index-driven reads (`ops_since`, `ops_for_actor`, `ops_since_per_actor`, `ops_for_node`) return `StorageError::MissingOp` rather than a short result set; snapshot boot falls back to a full replay.
    A short read there is the worst case in the crate: `build_snapshot_body` derives the next cutoff from the **index**, so an omitted op gets recorded as already-folded-in and no later boot replays it again.
    `ops_for_node` is the sharpest of the four, because its result is replayed into a fresh Yrs `Doc` — a short read there doesn't shorten a list anyone inspects, it produces **wrong block text** (#129).
    Pinned by `tests/op_log_truncation.rs` and `src/storage/jsonl/read_robustness.rs`.
    Full reasoning: [RFC 0129](../../docs/rfcs/0129-op-log-durability.md).
+6. **`undo_op` is the exact inverse of `do_op` for every op — including the ones `do_op` ignored.**
+   That is the paper's `do_undo_op_inv`, whose only hypothesis is a well-formed tree.
+   `Move` / `SetProp` / `SetCollapsed` / `SnoozeRemind` record what `do_op` found in their `old_*` fields; `Create` records it in `Tree::created_by`, because the variant has no field to carry it and the paper keeps that record **off** the transmitted op anyway (§3.2).
+   A `Create` that found the node already there must undo to *nothing*, not to a delete: `NodeId::from_slug` is deterministic, so two devices opening one journal offline both emit `Create` for the same id, and the unconditional remove let a delete be replayed away — a trashed page reappearing under `root`.
+   [RFC 0263](../../docs/rfcs/0263-create-is-invertible.md).
 
 ## Op log is the only sync surface
 
@@ -382,7 +328,7 @@ src/
 │   ├── mod.rs          # DeviceStore, MachineId, device_dir — device-local actor, OUTSIDE the workspace
 │   ├── host.rs         # host fingerprint (detects a cloned device store)
 │   └── record.rs       # key=value device-store files (atomic write, O_EXCL bind)
-├── hlc.rs              # HLC timestamps (uhlc wrapper)
+├── hlc.rs              # HLC timestamps (hand-rolled)
 ├── op.rs               # Op enum, LogOp envelope, serde
 ├── fractional.rs       # Fractional indexing (position between siblings)
 ├── tree.rs             # THE algorithm — do_op, undo_op, apply_op, creates_cycle

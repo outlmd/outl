@@ -85,6 +85,11 @@ Silently changing pinned behaviour is the regression this process exists to catc
 | [0253](0253-client-capability-catalog.md) | Chord parity is a compile error; feature parity is a rumour | Accepted | #253 |
 | [0254](0254-mobile-capability-gaps.md) | Most of mobile's missing features are not missing features | Accepted | #254, #14, #18, #19 |
 | [0255](0255-operation-vocabulary.md) | Three surfaces, three names, and one refusal that reaches two of them | Accepted | #255 |
+| [0256](0256-op-log-compaction.md) | Drop the `Move` ops that restate their own `Create` | Draft | #110 |
+| [0258](0258-snapshot-cache-lifecycle.md) | Snapshots are a cache with no eviction, and the rule is not "the actor is gone" | Draft | #110 |
+| [0260](0260-tree-to-md-executor.md) | The safe `tree → .md` re-projection existed and nothing ever ran it | Draft | #166, #210 |
+| [0263](0263-create-is-invertible.md) | `Op::Create` records whether it created anything | Draft | — |
+| [0265](0265-index-sidecar-lifecycle.md) | A rename is a boundary crossing: 134MB of index sidecars nothing reads, still syncing | Draft | #110 |
 
 ## How the retroactive set was chosen
 
