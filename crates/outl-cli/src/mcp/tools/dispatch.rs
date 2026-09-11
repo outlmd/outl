@@ -109,7 +109,7 @@ pub fn call(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
     }
 
     Ok(match outcome {
-        Ok(v) => tool_success_payload(name, &v),
+        Ok(v) => tool_success_payload(name, v),
         Err(e) => tool_error_payload(&e),
     })
 }
