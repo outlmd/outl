@@ -102,7 +102,13 @@ pub fn page_timeline<S: AppHost>(
     })
 }
 
-fn to_dto(event: &outl_actions::TimelineEvent) -> TimelineEventDto {
+/// Project one `outl_actions::TimelineEvent` onto the wire shape.
+///
+/// `pub` because it is the single owner of the `change` tag — the six
+/// strings below are hand-written, so `serde` proves nothing about them
+/// and `tests/wire_enums.rs` has to call *this* function rather than
+/// retype the mapping into a table that could drift from it.
+pub fn to_dto(event: &outl_actions::TimelineEvent) -> TimelineEventDto {
     use outl_actions::Change;
     let mut dto = TimelineEventDto {
         at_ms: event.ts.physical_ms,

@@ -52,7 +52,11 @@ pub fn get_theme_config() -> ThemeConfigDto {
 /// [`get_theme_config`] so tests can drive it with a constructed
 /// `Config` instead of whatever `config.toml` happens to be on the
 /// machine running the suite.
-fn theme_config_dto(cfg: &outl_config::Config) -> ThemeConfigDto {
+///
+/// `pub` for the same reason `commands::timeline::to_dto` is: `mode` is
+/// a hand-written tag, so the only honest way to pin it against the
+/// TypeScript union is to run the real mapping.
+pub fn theme_config_dto(cfg: &outl_config::Config) -> ThemeConfigDto {
     let mode = match cfg.theme.mode {
         outl_config::ThemeMode::Light => "light",
         outl_config::ThemeMode::Dark => "dark",

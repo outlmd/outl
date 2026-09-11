@@ -16,11 +16,35 @@ Before this crate existed, both clients kept near-identical copies of the same n
 | `commands/reminders.rs` | `list_reminders` / `reminder_settings` / `set_reminder_settings` / `snooze_reminder` / `clear_reminder_snooze` / `set_block_remind` / `mark_block_done` + the `ReminderDto` / `ReminderSettingsDto` wire shapes. `mark_block_done` sets DONE outright via `outl_actions::todo::set_todo`, never `toggle_todo`: a rule can sit on a block with no marker, and one toggle there lands on `TODO`, so the reminders list's "mark done (cancels the reminder)" button used to arm the nag instead of cancelling it. `set_reminder_settings` exists because mobile has no settings screen: it reads `config.toml` and writes back only the two reminder keys, so it can't clobber a hand-set timezone or relay URL. Times cross the bridge as ISO-8601 **local** strings, not epoch numbers — the backend already resolved them in the configured timezone (`outl_actions::clock`), and re-deriving a local time from an epoch in JS reintroduces exactly the bug that module exists to fix. `snooze_reminder` takes no page id because it touches no `.md`: the snooze lives only in the op log. |
 | `commands/shortcuts.rs` | `list_shortcut_bindings()` / `list_action_support()` + the `SupportDto` / `ActionSupportDto` wire shapes — the `(chord, action)` catalog and the per-client support matrix (root `CLAUDE.md` invariant 12). Moved here from `outl-desktop` so mobile registers the same two commands: a client can only tell the user *where* an action exists if it can read the matrix on the device asking. Pure functions over `outl_shortcuts`, no workspace access |
 | `commands/timeline.rs` | `page_timeline` + the `PageTimelineDto` / `TimelineEventDto` wire shapes — a page's history, read out of the op log (issue #241). **Read-only**; there is no restore counterpart, on purpose (see `outl_actions::timeline`). `TimelineEventDto` is deliberately **flat** with `change` as a string tag saying which optional fields are meaningful. It is not a discriminated union and nothing narrows on it, but a reader switches on one field instead of unwrapping a nested enum, and `@outl/shared` renders it directly. `total` is the count **before** the limit, never `events.len()` — a capped list that reports its own length as the total reads as the whole history. `limit: Some(0)` is read as the default rather than as "no events", so a client that forgets the field gets a usable panel instead of an empty one. Registered by **both** clients now (`timeline_commands!`); mobile has the command and no timeline UI yet, which is why `Capability::PageHistory`'s mobile column stays `Missing` — see "One command surface, not two". |
-| `workspace_open.rs` | `open_workspace_at` / `reconcile_orphan_md` primitives, plus **`load_or_create_actor(local_dir)`** — a thin wrapper over `outl_core::DeviceStore::device_actor`. Both GUI clients keep a **device-wide** actor (`<local_dir>/actor`: `~/.config/outl` on desktop, the app sandbox's data dir on mobile) rather than the per-workspace one the CLI / TUI resolve, because the `HlcGenerator` is bound at app start, before a workspace is picked. That is safe precisely because `local_dir` is outside every workspace — it never rides the file-sync surface, so the cross-device actor collision described in `outl-core/CLAUDE.md` → "Actor id is device-local" cannot reach it. **Never move this file into the workspace.** |
+| `workspace_open.rs` | `open_workspace_at` / `reconcile_orphan_md` primitives, plus **`WorkspaceGuards`** (the shared `<root>/.outl/.lock` + exclusive `<root>/ops/.lock-<actor>` flocks, held for as long as the workspace is open — see "Workspace locks" below) and **`load_or_create_actor(local_dir)`** — a thin wrapper over `outl_core::DeviceStore::device_actor`. Both GUI clients keep a **device-wide** actor (`<local_dir>/actor`: `~/.config/outl` on desktop, the app sandbox's data dir on mobile) rather than the per-workspace one the CLI / TUI resolve, because the `HlcGenerator` is bound at app start, before a workspace is picked. That is safe precisely because `local_dir` is outside every workspace — it never rides the file-sync surface, so the cross-device actor collision described in `outl-core/CLAUDE.md` → "Actor id is device-local" cannot reach it. **Never move this file into the workspace.** |
 | `iroh_sync.rs` | `start_with_reload_bridge` — bridges a started transport's two signals to Tauri events. Building one belongs to `outl_sync_iroh::build_transport` (config gate, identity, peers, relay, **and the device endpoint lease** — one endpoint per device, first process in wins); each client calls it with its own identity path and handles `EndpointBusy` / `Disabled` by staying on its watcher. |
 | `plugin_service.rs` + `plugin_thread.rs` | `PluginService` — the dedicated plugin thread (Boa `Context` is `!Send`), parametrized by client id + capability set + `StorageRootProvider` |
 | `plugin_dto.rs` | Plugin wire shapes (`PluginCommandDto`, `ToolbarButtonDto`, …) |
 | `wrappers/` | The one declaration of the Tauri command *surface*. `wrappers/mod.rs` holds the `tauri_commands!` generator; `wrappers/catalog.rs` holds one `*_commands!` macro per command module. A client's `commands/<module>.rs` is now a single macro invocation (`outl_tauri_shared::block_commands!(crate::state::AppState);`). **A client takes a whole module or none of it** — see "One command surface, not two" below |
+
+## Workspace locks
+
+The Tauri clients used to take **neither** workspace lock, which made a running GUI invisible to every other `outl` process on the machine.
+`outl compact --apply` answers *"is anyone in this workspace?"* by taking `<root>/.outl/.lock` exclusively; a GUI holding nothing let that gate pass, and compaction then renamed a rewritten `ops-<actor>.jsonl` under a live client still holding in-memory byte offsets into the pre-compaction layout — "a silently dropped op on every index-driven read", in compaction's own words.
+`JsonlStorage::append_ops`'s stated precondition ("the SINGLE writer for its own actor file, guarded by `ActorWriteLock`") was false for the same reason.
+
+`open_workspace_at` now takes both, through `outl_core::lock`, and is the **single writer** of the client's `workspace_guards` slot:
+
+- shared `WorkspaceLock` first, then exclusive `ActorWriteLock` — the order `outl_ws::open_with` uses and the order compaction checks them in;
+- the guards are installed only **after** the open succeeds, so a failed open never parks a lock on a workspace nobody has open (compaction would then refuse forever with nothing running);
+- installing them is what drops the previous workspace's, so switching roots releases the old one with no client-side sequencing.
+
+**Never acquire or drop one of these from a client crate.** A second opinion about who holds the workspace is the defect this replaced.
+
+**Lock ordering.** Both acquisitions are non-blocking `try_lock_*`, and both happen at open time — outside the process-wide `workspace` `Mutex`, and outside `ProjectionLock` (the *blocking* `flock` on `pages/.<name>.md.lock` that `apply_page_md_with_sidecar_guarded` takes under the workspace mutex). They add no wait-for edge to the existing `workspace` → `ProjectionLock` path. Keep it that way: a blocking cross-process lock taken above the workspace mutex would turn today's unbounded stall into a deadlock.
+
+**A contended actor lock refuses the open; it does not fall back to an ephemeral actor.**
+`outl_core::resolve_write_actor` is right for the CLI and TUI and unavailable here: a GUI's `HlcGenerator` is built in `setup()`, before a workspace is picked, so swapping only the *storage* actor would leave two live generators on one actor id — identical `(time, counter, actor)` triples, which is op identity, so `Workspace::apply`'s dedup silently drops one of the two ops.
+Making the fallback available means making the client's `HlcGenerator` swappable at workspace-open time (a plain field on both `AppState`s today, read from ~56 call sites); that is client-side work, tracked separately.
+
+Re-picking the workspace already open is handled inside `acquire_guards`, not by the caller: a POSIX `flock` belongs to an open file description, so a second `open` + `LOCK_EX|LOCK_NB` of `ops/.lock-<actor>` fails *inside the process that already holds it*.
+
+**The regression net** is `tests/workspace_locks.rs` — compaction refuses while a GUI is open and runs once it closes, a contended actor refuses rather than sharing the file, a refused open strands no lock, a re-pick does not refuse itself, a switch releases the old root, and a running GUI does **not** lock the TUI or MCP server out (the workspace lock is shared on purpose).
 
 ## Background passes yield, they do not race
 
@@ -168,5 +192,37 @@ the sequence moved.
   `finish_in_page_with` holds the workspace lock for a whole commit and drops the cached index from in there, so any thread that takes the index first and then waits on the workspace is an ABBA deadlock — `parking_lot::Mutex` has no timeout, so the app freezes until the user force-quits it.
   `compute_backlinks_offloaded` did exactly that and pasting was the reliable way in: a paste commits twice (draft flush + the paste) and every commit refreshes the panel, so the two collided within a keystroke.
   Pinned by `tests/backlinks_commit_deadlock.rs`, which stress-runs both paths against a watchdog — a re-inverted order fails the test instead of hanging the app.
-- Never change a DTO shape without checking the TS side (`@outl/shared/api/types`) — the frontends depend on the wire format.
+- Never change a DTO shape without checking the TS side — the frontends depend on the wire format, and the mirror is hand-written on purpose.
+  Three test binaries make that safe, and a change belongs in whichever one matches its shape.
+  `tests/wire_types.rs` pins a struct's key set.
+  `tests/wire_enums.rs` pins an enum's **variant** set, plus each tagged variant's fields.
+  `tests/wire_mirrors.rs` pins mirrors declared outside `@outl/shared/api/types.ts`.
+  The comparisons live once in `tests/wire_pin/`, the TypeScript reader in `tests/ts_parser/`.
 - Client identity (the `CLIENT` str + capability set) stays in each client's `plugin_service.rs` shim, never here.
+
+## The wire mirror is hand-written, so the pin is the safety
+
+Two gaps are worth remembering, because both were invisible in the same way.
+Neither was a hard problem — they were a reader that never looked.
+
+**An enum could not be pinned at all.**
+`wire_keys` panics on anything that is not a JSON object, and a `serde` enum is a string.
+So twelve enums had zero coverage.
+`outl_md::ParseWarningKind` shipped **one of its six variants** to TypeScript while the comment above that union claimed variants "land here in lockstep".
+A `serde` attribute is never assumed: every pin serializes a real value, so `rename_all`, `rename`, `tag` and `content` are accounted for by construction.
+Exhaustiveness is the other half.
+`wire_pin::wire_variants!` generates a `match`, so a variant added in Rust stops the pin file compiling, in the one place that also names the TypeScript union.
+
+**The coverage gate walked one file.**
+It reported 26 of 34 declarations pinned and the rest exempted, which was true of a universe it had chosen and silent about fourteen mirrors in three other files.
+`ts_parser::MIRROR_FILES` is the list now, and the gate prints the intersection of *declared* and *pinned*, not its own call count.
+A gate that overstates its reach is worse than no gate: the number it prints is what stops the next person from looking.
+
+Two consequences for anything new:
+
+- **A `serde_json::json!` event payload cannot be pinned**, because there is nothing to serialize.
+  `ref-projection-failed` used to be one and is now `state::RefProjectionFailed`, with identical JSON.
+  The deep-link payload still is one — built in both clients' `lib.rs`, out of this crate's reach — and `wire_types.rs`'s `UNTYPED_EVENTS` records that rather than letting it stay quiet.
+- **A hand-written tag needs the real producer.**
+  `TimelineEventDto.change`, `ThemeConfigDto.mode` and `SupportDto.kind` are `String`s a match writes, so `commands::timeline::to_dto` and `commands::theme::theme_config_dto` are `pub`.
+  A table retyped in a test is a second owner of the fact, which is the thing being prevented.

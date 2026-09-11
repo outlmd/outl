@@ -470,7 +470,7 @@ pub fn open_ref<S: AppHost>(
         let _ = tauri::Emitter::emit(
             app,
             "ref-projection-failed",
-            serde_json::json!({ "target": target, "error": msg }),
+            crate::state::RefProjectionFailed::new(&target, msg),
         );
     }
     with_ws(state, |ws| {

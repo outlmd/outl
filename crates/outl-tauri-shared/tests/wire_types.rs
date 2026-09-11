@@ -37,14 +37,22 @@
 //!
 //! Build a value with every optional field populated (a `None` behind
 //! `skip_serializing_if` emits no key, and a key that is never emitted
-//! cannot be compared), then call [`assert_wire_shape`].
+//! cannot be compared), then call `wire_pin::assert_wire_shape`.
+//!
+//! ## The other two halves
+//!
+//! A struct's key set is one third of the contract. `wire_enums.rs`
+//! pins the variant sets `wire_keys` cannot even look at (it panics on
+//! anything that is not a JSON object, and a `serde` enum is a string);
+//! `wire_mirrors.rs` pins the shapes whose TypeScript lives outside
+//! `types.ts`, which this file's coverage gate could not see until it
+//! learned to walk `ts_parser::MIRROR_FILES`.
 
 mod ts_parser;
+mod wire_pin;
 
-use std::collections::BTreeSet;
+mod wire_fixtures;
 
-use outl_actions::{Backlink, BacklinkCrumb, OutlineNode, PageKind, PageMeta, TodoState};
-use outl_md::parse::{ParseWarning, ParseWarningKind};
 use outl_tauri_shared::commands::exec::{EmbedContent, RunCodeBlockReply};
 use outl_tauri_shared::commands::peers::{PeerDto, PeerStatusDto};
 use outl_tauri_shared::commands::property::PropertyKey;
@@ -52,134 +60,14 @@ use outl_tauri_shared::commands::reminders::{ReminderDto, ReminderSettingsDto, S
 use outl_tauri_shared::commands::theme::ThemeConfigDto;
 use outl_tauri_shared::commands::timeline::{PageTimelineDto, TimelineEventDto};
 use outl_tauri_shared::state::{
-    BacklinksReply, CreateBlockReply, CutBlockReply, MdAheadOfLog, PageView, ProjectionWriteFailed,
-    TemplateDto, WorkspaceSummary,
+    BacklinksReply, CreateBlockReply, CutBlockReply, ProjectionWriteFailed, TemplateDto,
+    WorkspaceSummary,
 };
-use serde::Serialize;
 
-use ts_parser::{interface_fields, source, wire_keys};
-
-/// Compare what `value` serializes to against what `export interface
-/// <ts_name>` declares.
-///
-/// `rust_only` names fields the backend emits that the frontend
-/// deliberately does not model. Each entry is a decision someone made
-/// and had to write down here — which is the difference between a
-/// declared asymmetry and a drift nobody noticed.
-fn assert_wire_shape<T: Serialize>(value: &T, ts_name: &str, rust_only: &[&str]) {
-    let src = source();
-    let declared = interface_fields(&src, ts_name);
-    let emitted = wire_keys(&serde_json::to_value(value).expect("DTO serializes"));
-
-    let exempt: BTreeSet<String> = rust_only.iter().map(|s| (*s).to_string()).collect();
-    for name in &exempt {
-        assert!(
-            emitted.contains(name),
-            "{ts_name}: `{name}` is listed as backend-only but the backend does not emit it — \
-             drop the exemption"
-        );
-    }
-
-    let missing_in_ts: Vec<&String> = emitted
-        .difference(&declared)
-        .filter(|f| !exempt.contains(*f))
-        .collect();
-    let missing_in_rust: Vec<&String> = declared.difference(&emitted).collect();
-
-    assert!(
-        missing_in_ts.is_empty(),
-        "{ts_name}: the backend emits {missing_in_ts:?}, which `types.ts` does not declare.\n\
-         The frontend reads those as `undefined`. Add them to `export interface {ts_name}`, \
-         or list them in `rust_only` with a reason if the frontend deliberately ignores them."
-    );
-    assert!(
-        missing_in_rust.is_empty(),
-        "{ts_name}: `types.ts` declares {missing_in_rust:?}, which the backend never emits.\n\
-         The frontend is modelling a field that is always `undefined` — either the Rust DTO \
-         lost it, or the interface should."
-    );
-}
-
-// --- example values ------------------------------------------------------
-//
-// Every optional field is populated. A `None` behind
-// `skip_serializing_if` emits no key at all, so a value built with
-// defaults would silently exempt exactly the fields most likely to have
-// drifted.
-
-fn page_meta() -> PageMeta {
-    PageMeta {
-        id: "01JQ0000000000000000000000".into(),
-        slug: "infra".into(),
-        title: "Infra".into(),
-        kind: PageKind::Page,
-        icon: Some("🛠".into()),
-        pinned: true,
-        page_type: Some("person".into()),
-    }
-}
-
-fn outline_node() -> OutlineNode {
-    OutlineNode {
-        id: "01JQ0000000000000000000001".into(),
-        text: "restarted the ingest worker".into(),
-        todo: Some(TodoState::Todo),
-        collapsed: true,
-        properties: vec![("owner".into(), "avelino".into())],
-        tokens: Vec::new(),
-        children: Vec::new(),
-    }
-}
-
-fn backlink_crumb() -> BacklinkCrumb {
-    BacklinkCrumb {
-        id: "01JQ0000000000000000000002".into(),
-        text: "week 34".into(),
-    }
-}
-
-fn backlink() -> Backlink {
-    Backlink {
-        block_id: "01JQ0000000000000000000003".into(),
-        block_text: "see [[infra]]".into(),
-        todo: Some(TodoState::Done),
-        source_page: Some(page_meta()),
-        source_block: outline_node(),
-        source_block_path: vec![0, 2],
-        ancestors: vec![backlink_crumb()],
-        source_path: Some("/w/pages/journal.md".into()),
-    }
-}
-
-fn parse_warning() -> ParseWarning {
-    ParseWarning {
-        line: 3,
-        raw: "# a heading".into(),
-        kind: ParseWarningKind::UnrecognizedBlockMarker,
-    }
-}
-
-fn md_ahead_of_log() -> MdAheadOfLog {
-    MdAheadOfLog {
-        path: "/w/pages/infra.md".into(),
-        lines: 12,
-        sample: "\"restarted the ingest worker\"".into(),
-    }
-}
-
-fn page_view() -> PageView {
-    PageView {
-        page: page_meta(),
-        outline: vec![outline_node()],
-        backlinks: vec![backlink()],
-        backlinks_order: outl_config::BacklinksOrder::Newest,
-        page_properties: vec![("icon".into(), "🛠".into())],
-        warnings: vec![parse_warning()],
-        md_ahead_of_log: Some(md_ahead_of_log()),
-        md_ahead_of_log_checked: true,
-        projection_error: Some("disk full".into()),
-    }
-}
+use wire_fixtures::{
+    backlink, backlink_crumb, md_ahead_of_log, outline_node, page_meta, page_view, parse_warning,
+};
+use wire_pin::assert_wire_shape;
 
 // --- the pins ------------------------------------------------------------
 
@@ -447,120 +335,4 @@ fn backlinks_reply_matches_page_backlinks() {
         backlinks_order: outl_config::BacklinksOrder::Oldest,
     };
     assert_wire_shape(&dto, "PageBacklinks", &[]);
-}
-
-// --- coverage -------------------------------------------------------------
-
-/// Interfaces this file deliberately does not pin, each with a reason.
-///
-/// Adding a row is the escape hatch; leaving one out is the default. The
-/// point is that "nobody pinned it" stops being invisible.
-const UNPINNED: &[(&str, &str)] = &[
-    // The plugin surface is owned by `outl-plugins` and reaches the wire
-    // through `plugin_dto.rs`. Building one of these needs a live
-    // `PluginService` on its own thread (Boa's `Context` is `!Send`),
-    // which is a different kind of test than "does this struct's JSON
-    // match that interface". Pin them when the plugin DTOs get a
-    // constructible shape.
-    ("PluginCommand", "needs a live PluginService to construct"),
-    ("PluginRunReply", "needs a live PluginService to construct"),
-    (
-        "PluginSettingsField",
-        "needs a live PluginService to construct",
-    ),
-    (
-        "PluginSyncHooksReply",
-        "needs a live PluginService to construct",
-    ),
-    (
-        "PluginToolbarButton",
-        "needs a live PluginService to construct",
-    ),
-    (
-        "PluginTransformer",
-        "needs a live PluginService to construct",
-    ),
-    (
-        "PluginTransformResult",
-        "needs a live PluginService to construct",
-    ),
-    ("RegistryItem", "needs a live PluginService to construct"),
-];
-
-/// Every `export interface` in `types.ts` is pinned, or says why not.
-///
-/// The pins above are only as good as their coverage. Eleven interfaces
-/// were pinned when this file was written and `types.ts` declared
-/// thirty-four — so the next DTO to drift would have been one of the
-/// twenty-three nobody was watching, and nothing would have failed. That
-/// is the same by-omission gap `command_parity.rs` exists to close, one
-/// file over.
-#[test]
-fn every_wire_interface_is_pinned_or_declared_unpinned() {
-    let src = source();
-    let declared: BTreeSet<String> = src
-        .lines()
-        .filter_map(|line| line.strip_prefix("export interface "))
-        .filter_map(|rest| rest.split_whitespace().next())
-        .map(str::to_string)
-        .collect();
-    assert!(
-        declared.len() > 20,
-        "only {} interfaces parsed out of types.ts — the parser is reading \
-         the wrong shape and this test proves nothing",
-        declared.len()
-    );
-
-    let pinned = pinned_interface_names();
-    let exempt: BTreeSet<&str> = UNPINNED.iter().map(|(name, _)| *name).collect();
-
-    let unwatched: Vec<&String> = declared
-        .iter()
-        .filter(|n| !pinned.contains(n.as_str()) && !exempt.contains(n.as_str()))
-        .collect();
-    assert!(
-        unwatched.is_empty(),
-        "these wire interfaces have no pin and no exemption: {unwatched:?}.\n\
-         A field added to the Rust side of one of these reaches the \
-         frontend as `undefined` with nothing failing. Add an \
-         `assert_wire_shape` case, or a row in UNPINNED with the reason."
-    );
-
-    for (name, why) in UNPINNED {
-        assert!(
-            declared.contains(*name),
-            "UNPINNED names {name}, which types.ts does not declare — stale row"
-        );
-        assert!(
-            !pinned.contains(*name),
-            "{name} is both pinned and listed as unpinned — drop the UNPINNED row"
-        );
-        assert!(
-            !why.trim().is_empty(),
-            "the exemption for {name} has no reason"
-        );
-    }
-}
-
-/// Interface names this file passes to `assert_wire_shape`.
-///
-/// Read out of this file's own source rather than tracked by hand: a
-/// list maintained beside the calls is a list that drifts from them.
-fn pinned_interface_names() -> BTreeSet<String> {
-    let src = std::fs::read_to_string(file!())
-        .or_else(|_| {
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wire_types.rs"))
-        })
-        .expect("this test file is readable");
-    let mut names = BTreeSet::new();
-    for (idx, _) in src.match_indices("assert_wire_shape(") {
-        let rest = &src[idx..];
-        let Some(open) = rest.find('"') else { continue };
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('"') else {
-            continue;
-        };
-        names.insert(after[..close].to_string());
-    }
-    names
 }
