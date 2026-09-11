@@ -264,6 +264,19 @@ pub fn open_with(path: &Path, opts: OpenOptions) -> Result<WsCtx, WsError> {
         }
     }
     let hlc = HlcGenerator::new(actor);
+    // Raise the fresh generator above every timestamp already on disk,
+    // before anything below emits an op. A generator built by
+    // `HlcGenerator::new` knows nothing about the log, so after the wall
+    // clock moves backwards between two runs it issues timestamps that
+    // sort *below* what the log holds — a cost, not a divergence (see
+    // `Workspace::seed_clock`).
+    //
+    // Propagated rather than warned about: this reads the per-actor
+    // maxima off the index the boot above just built, so a failure here
+    // means storage stopped being readable between two statements, and a
+    // workspace that cannot answer "what is the newest op" has a bigger
+    // problem than an unseeded clock.
+    workspace.seed_clock(&hlc).map_err(WsError::internal)?;
 
     // Repair split-brain page/journal roots (two roots sharing one slug, e.g. a
     // sidecar-less `.md` reconciled to a fresh id) before any command reads or

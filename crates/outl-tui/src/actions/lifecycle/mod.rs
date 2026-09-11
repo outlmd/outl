@@ -19,7 +19,7 @@
 use crate::commands::CommandRegistry;
 use crate::state::{App, Focus, Mode, View};
 use crate::theme::Theme;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use outl_actions::clock;
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::ActorId;
@@ -29,6 +29,8 @@ use outl_md::index::WorkspaceIndex;
 use outl_md::parse::ParsedPage;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod clock_seed_tests;
 pub(crate) mod external;
 pub(crate) mod index_build;
 pub(crate) mod loading;
@@ -117,6 +119,17 @@ impl App {
             hidden_by_collapse: Vec::new(),
             transform_cache: std::collections::HashMap::new(),
         };
+        // Raise the generator above every timestamp the log already holds,
+        // before the repair below emits its first op. The generator is
+        // built inside the initializer above, so this is the earliest
+        // point it and the workspace exist together (see
+        // `Workspace::seed_clock`). Propagated: the TUI has just booted
+        // this workspace, so a storage read failing here means the open
+        // itself is not trustworthy, and starting the editor over it
+        // would be the wrong kind of resilience.
+        s.workspace
+            .seed_clock(&s.hlc)
+            .context("seeding the clock from the op log")?;
         // Repair split-brain page/journal roots (two roots sharing one slug,
         // e.g. a sidecar-less `.md` reconciled to a fresh id) before the first
         // render, so the outline never flickers between the duplicates.

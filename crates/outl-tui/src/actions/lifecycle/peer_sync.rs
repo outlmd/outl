@@ -290,7 +290,10 @@ impl App {
         // Resolve the focused page id *before* swapping the
         // workspace; the slug→id lookup needs a stable workspace.
         let focused_page = self.current_page_meta_id();
-        let fresh = match (engine.reload_workspace(), focused_page) {
+        // Bound before the `match` so the immutable borrow of `self.hlc`
+        // ends before an arm reaches for `&mut self` (the toast).
+        let reloaded = engine.reload_workspace(&self.hlc);
+        let fresh = match (reloaded, focused_page) {
             (Ok(ws), Some(page_id)) => {
                 if let Err(e) = engine.reproject_page(&ws, page_id) {
                     self.toast(
