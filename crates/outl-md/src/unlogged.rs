@@ -69,6 +69,28 @@ pub fn sidecar_can_answer(blocks: &[SidecarBlock]) -> bool {
 /// decides whether bytes get deleted, so it errs toward calling a line
 /// at-risk.
 pub fn content_lines_missing_from(disk: &str, sidecar_blocks: &[SidecarBlock]) -> Vec<String> {
+    content_lines_missing_from_texts(disk, sidecar_blocks.iter().map(|b| b.text.as_str()))
+}
+
+/// [`content_lines_missing_from`], taking only the block **texts**.
+///
+/// The verdict is byte-identical — the comparison reads nothing but
+/// `SidecarBlock::text`, and [`content_lines_missing_from`] is this
+/// function with that projection applied. It exists because one caller
+/// has no sidecar at all: `outl_actions`' survey measures what a
+/// re-projection would remove, so its reference is the *render*, and
+/// wrapping every rendered block in a throwaway `SidecarBlock` minted a
+/// ULID and a SHA-256 per block to feed a function that reads neither.
+/// On a 2.5k-page graph that is tens of thousands of both, per sweep,
+/// every 30 seconds.
+///
+/// Pinned equivalent by `the_texts_entry_point_agrees_with_the_block_one`
+/// — this is a data-loss guard, so the two forms are compared rather
+/// than assumed identical.
+pub fn content_lines_missing_from_texts<'a>(
+    disk: &str,
+    logged_texts: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
     /// One line of the `.md`, reduced to the text a sidecar block would
     /// hold, or `None` when the line is not block content at all.
     ///
@@ -144,8 +166,8 @@ pub fn content_lines_missing_from(disk: &str, sidecar_blocks: &[SidecarBlock]) -
     // A block's text can span lines (continuation), and each of those
     // lands as its own line in the `.md`, so index the pieces.
     let mut known: HashMap<&str, usize> = HashMap::new();
-    for block in sidecar_blocks {
-        for piece in logged_lines(&block.text) {
+    for text in logged_texts {
+        for piece in logged_lines(text) {
             *known.entry(piece).or_insert(0) += 1;
         }
     }
@@ -186,18 +208,35 @@ pub fn content_lines_missing_from(disk: &str, sidecar_blocks: &[SidecarBlock]) -
         } else {
             None
         };
-        let hit = match known.get_mut(line) {
+        // **Order matters, and for an indented line the verbatim form
+        // goes first.** Both forms were already tried; trying the
+        // stripped one first is what broke it.
+        //
+        // The renderer only writes `- ` as a *marker* on a block's first
+        // line, which is never indented. So for an indented line the
+        // verbatim reading is the likely one and the stripped reading is
+        // the fallback — the reverse of what the unindented case wants.
+        //
+        // Getting it backwards does not merely fail to match: it matches
+        // the **wrong** entry and consumes it, because `known` is a
+        // multiset that decrements. On `- a` / ` ``` ` / ` - j` / ` ``` `
+        // / ` j`, the continuation line `- j` stripped to `j`, spent the
+        // single `j` the log held for the *last* line, and that last
+        // line then found nothing — so a page whose every line the log
+        // holds reported one unlogged line and froze. Found by
+        // `a_rendered_page_never_reports_content_its_own_log_holds`;
+        // pinned deterministically by
+        // `a_fenced_bullet_does_not_steal_a_later_lines_match`.
+        let mut take = |key: &str| match known.get_mut(key) {
             Some(n) if *n > 0 => {
                 *n -= 1;
                 true
             }
-            _ => match verbatim.and_then(|v| known.get_mut(v)) {
-                Some(n) if *n > 0 => {
-                    *n -= 1;
-                    true
-                }
-                _ => false,
-            },
+            _ => false,
+        };
+        let hit = match verbatim {
+            Some(v) => take(v) || take(line),
+            None => take(line),
         };
         if !hit {
             missing.push(line.to_string());
@@ -299,6 +338,41 @@ mod tests {
         );
     }
 
+    /// The texts-only entry point must reach the **same** verdict as the
+    /// block one, on every shape the block one is pinned against.
+    ///
+    /// It exists for speed (the survey's reference is a render, so
+    /// wrapping each line in a `SidecarBlock` minted a ULID and a
+    /// SHA-256 it never reads). Speed is not a reason to take
+    /// equivalence on faith here: this decides whether a background pass
+    /// deletes bytes, so the two forms are compared rather than assumed.
+    #[test]
+    fn the_texts_entry_point_agrees_with_the_block_one() {
+        let cases: [(&str, &[&str]); 7] = [
+            (
+                "- intro\n  ```yaml\n  - endpoint:\n    method: POST\n  ```\n",
+                &["intro\n```yaml\n- endpoint:\n  method: POST\n```"],
+            ),
+            (
+                "- intro\n  ```yaml\n  - endpoint:\n  ```\n- a line the log never saw\n",
+                &["intro\n```yaml\n- endpoint:\n```"],
+            ),
+            ("- known\n  - unknown child\n", &["known"]),
+            ("- dup\n- dup\n", &["dup"]),
+            ("- line one\n- line two\n", &["", ""]),
+            ("- secret\n", &["```\n- secret\n```"]),
+            ("- a\n  ```\n  - j\n  ```\n  j\n", &["a\n```\n- j\n```\nj"]),
+        ];
+        for (disk, texts) in cases {
+            let blocks: Vec<SidecarBlock> = texts.iter().map(|t| blk(t)).collect();
+            assert_eq!(
+                content_lines_missing_from(disk, &blocks),
+                content_lines_missing_from_texts(disk, texts.iter().copied()),
+                "the two entry points disagree on {disk:?}"
+            );
+        }
+    }
+
     /// A root-level bullet does not get the verbatim second chance.
     ///
     /// The renderer never writes a continuation at column 0, so a bullet
@@ -314,6 +388,53 @@ mod tests {
             content_lines_missing_from(disk, &logged),
             vec!["secret".to_string()],
             "a root bullet must not borrow a fenced line's identity"
+        );
+    }
+
+    /// An indented bullet must not spend a later line's match.
+    ///
+    /// `known` is a **multiset** that decrements, so trying the wrong
+    /// form first does not merely fail — it consumes the entry another
+    /// line needed. Here the continuation `- j` strips to `j` and takes
+    /// the single `j` the log holds for the final line, which then
+    /// matches nothing: every line is logged and one is reported.
+    ///
+    /// A false positive is the expensive direction. It withholds
+    /// `last_synced_hash`, refuses re-projection, and `outl reconcile
+    /// --ahead-of-log` — the recovery the error names — re-runs this
+    /// same computation and refuses again. The page is frozen in both
+    /// directions with nothing wrong with it.
+    ///
+    /// Found by `a_rendered_page_never_reports_content_its_own_log_holds`
+    /// on a later proptest seed, which is why this deterministic twin
+    /// exists: a seed that finds a defect once is not a test.
+    #[test]
+    fn a_fenced_bullet_does_not_steal_a_later_lines_match() {
+        // Exactly what `render` emits for a single block whose text is
+        // "a\n```\n- j\n```\nj".
+        let disk = "- a\n  ```\n  - j\n  ```\n  j\n";
+        let logged = [blk("a\n```\n- j\n```\nj")];
+        assert!(
+            content_lines_missing_from(disk, &logged).is_empty(),
+            "every line here is in the block's own text"
+        );
+    }
+
+    /// The same shape, with the bullet's stripped form genuinely absent.
+    ///
+    /// Guards the fix from being "always prefer verbatim": the indented
+    /// `- k` is not in the log in any form, so it must still be
+    /// reported. Without this, a fix that stopped stripping altogether
+    /// would pass the test above and let unlogged content through —
+    /// which is the direction that deletes bytes.
+    #[test]
+    fn an_indented_bullet_the_log_lacks_is_still_reported() {
+        let disk = "- a\n  ```\n  - k\n  ```\n";
+        let logged = [blk("a\n```\n```")];
+        assert_eq!(
+            content_lines_missing_from(disk, &logged),
+            vec!["k".to_string()],
+            "an indented line absent from the log must fail both forms"
         );
     }
 }

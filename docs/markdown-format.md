@@ -847,3 +847,35 @@ Caret offsets in the mobile client are converted from UTF-16 code units (what `t
 This ensures pasting after an emoji or other supplementary-plane character lands the splice at the right spot.
 
 The orphan log is cleared as items are resolved.
+
+## What the parser preserves, and what it still gets wrong
+
+The rules below are the outcome of [issue #210](https://github.com/outlmd/outl/issues/210) and the four regressions introduced while fixing it.
+`crates/outl-md/CLAUDE.md` keeps the contract; this is the detail behind it, including the shapes that are **known, unfixed, and deliberately so**.
+
+**Blank lines and indentation inside a block's text now round-trip.**
+A whitespace-only line indented deeper than the block (what `render::write_block_text` emits for a blank line mid-continuation) folds into `text`; only a genuinely empty line closes continuation.
+A continuation line's own indentation survives via the private `strip_indent_levels` helper, which strips only the levels the renderer added.
+An over-indented line the grammar still can't place is recovered as a **child block** at its written depth (warning, not a silent drop).
+Getting any of these three wrong is the issue #210 producer — measured at 41 pages / 387 lines on a real workspace, and 0 after the fix.
+**A block's text may also *start* with a newline, and that round-trips too.**
+`outl_actions::block::edit_text` writes text verbatim, so `"\na"` is reachable from an ordinary paste, and the renderer writes it as `- ` (marker, space, nothing) plus one continuation line.
+Reading that back as the single-line block `"a"` dropped an empty line, and the dropped line was the **empty string** — exactly what `unlogged::disk_line` maps a bare marker to.
+So the page reported one unlogged line (`""`) on every pass, `reconcile_md` withheld `last_synced_hash` forever, and the invariant-8 guard refused to re-project.
+Worse, the recovery that error names (`outl reconcile --ahead-of-log`) re-runs the same reconcile, emits zero ops, recomputes the same `[""]` and withholds again: the page froze in **both** directions with no way out, and the message quoted the empty string at the user.
+`parse::declares_first_line` is the inverse of the renderer's only branch (`-` for empty text, `- ` for text whose first line is empty), and `parse::needs_newline_separator` is the **single owner** of "does what comes next need a `\n` in front of it".
+Three sites ask it — prose continuation, over-indented continuation, and a fence opener — and the fence one did not share the guard, so `"\n```"` still lost its empty first line until a property test found it.
+That same arm also failed to flush held blank lines, so `"a\n\n```…"` lost the blank before the fence.
+**Fences are both CommonMark fence characters.**
+`fence::fence_marker` recognises ``` ``` ``` and `~~~`, and the marker travels with the opener (including into the synthetic close) so a fence closes only on its **own** character — the other one inside the body is content.
+Before this, a bullet inside a `~~~` fence became a real block, with an `UnrecognizedBlockMarker` raised against a line the user wrote correctly.
+**A UTF-8 BOM is stripped at the top of `parse`.**
+U+FEFF is not whitespace, so `trim` left it glued to the first `- ` and the first line stopped being a bullet: the whole first block was recovered as verbatim text with its marker inside it, and a leading `title::` stopped being a page property the same way.
+Any `.md` written by a Windows editor lost its first block's identity on import.
+
+**Known, unfixed, and deliberately so.**
+All four are convergent and guard-safe — each costs one `Op::Edit` and none can freeze a page — and each would be a grammar decision rather than a bug fix:
+- a `- ` line **inside** a block's text splits the block in two, minting a fresh ULID and `((blk-…))` handle for the tail (reachable by pasting a markdown list into one block);
+- a `key:: value` line inside a block's text becomes a block *property*;
+- leading whitespace the indent machinery cannot count as a whole level (a single space, or U+00A0) is trimmed off a continuation line, and any leading whitespace is trimmed off a first line;
+- a fence marker stranded **after** a child block is recovered as verbatim child blocks that each re-open a fence on the next parse, so the document settles on the third save rather than the first (bounded — pass 3 is stable; 0 occurrences in 2,856 real files).

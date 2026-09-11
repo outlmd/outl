@@ -346,3 +346,161 @@ fn reconciling_a_projected_multiline_block_does_not_truncate_the_op_log() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// A block whose text *starts* with a newline — the fourth shape of the
+// same defect, and the only one that freezes a page in both directions.
+//
+// `outl_actions::block::edit_text` writes a block's text verbatim, so
+// `"\na"` is reachable from an ordinary paste. `render::write_block_text`
+// emits it as `- \n  a\n`: a bullet declaring an empty first line, then
+// one continuation. The parser used to read that back as the single-line
+// block `"a"`, dropping the empty first line.
+//
+// That drop is worse than the three the module doc lists, because the
+// line it loses is the empty string and the empty string is exactly what
+// `unlogged::disk_line` maps the bare marker to. The page therefore
+// reports one unlogged line — `""` — on every pass, `reconcile_md`
+// withholds `last_synced_hash`, and the invariant-8 guard refuses to
+// re-project. The documented recovery (`outl reconcile --ahead-of-log`)
+// re-runs the same reconcile, emits zero ops, recomputes the same `[""]`
+// and withholds again, so the page never thaws and the error message
+// quotes the empty string at the user.
+//
+// The inverse the renderer defines is exact: `- ` (marker plus a space)
+// declares a first line, a bare `-` does not.
+
+#[test]
+fn a_block_whose_text_starts_with_a_newline_survives_a_roundtrip() {
+    assert_text_roundtrips("\na");
+}
+
+#[test]
+fn a_block_text_that_is_all_leading_newlines_then_prose_survives() {
+    assert_text_roundtrips("\n\na");
+    assert_text_roundtrips("\n\n\nlate start");
+}
+
+#[test]
+fn a_leading_newline_survives_alongside_the_shapes_that_follow_it() {
+    assert_text_roundtrips("\nline one\nline two");
+    assert_text_roundtrips("\nhead\n  indented detail");
+    assert_text_roundtrips("\nfirst paragraph\n\nsecond paragraph");
+}
+
+/// An empty block is still an empty block: a bare `-` declares no first
+/// line, so nothing may be prepended to whatever follows it.
+#[test]
+fn a_bare_dash_marker_still_means_an_empty_first_line_is_absent() {
+    let back = parse("-\n  a\n");
+    assert_eq!(back.blocks.len(), 1);
+    assert_eq!(
+        back.blocks[0].text, "a",
+        "a bare `-` does not declare a first line"
+    );
+    assert_eq!(parse("-\n").blocks[0].text, "");
+}
+
+/// The consequence, on the pipeline that freezes: a page carrying a
+/// leading-newline block must advance its hash like any other.
+#[test]
+fn a_leading_newline_block_does_not_freeze_its_page() {
+    let body = "\na";
+    let projected = render(&page_of(vec![block(body)]));
+    assert_eq!(projected, "- \n  a\n", "the shape under test changed");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let md_path = dir.path().join("p.md");
+    std::fs::write(&md_path, &projected).expect("write md");
+
+    let actor = ActorId::new();
+    let mut ws = Workspace::open_in_memory(actor).expect("workspace");
+    let hlc = HlcGenerator::new(actor);
+
+    let report = outl_md::reconcile_md(&mut ws, &hlc, &md_path, None).expect("reconcile");
+    assert_eq!(
+        report.unlogged_lines, 0,
+        "the empty first line was reported as content the log lacks"
+    );
+    let sidecar =
+        outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(&md_path)).expect("sidecar");
+    assert!(
+        !sidecar.last_synced_hash.is_empty(),
+        "the hash was withheld — the page is frozen in both directions"
+    );
+
+    let again = outl_md::reconcile_md(&mut ws, &hlc, &md_path, None).expect("second reconcile");
+    assert_eq!(again.ops_applied, 0, "a second pass must be a no-op");
+}
+
+// ---------------------------------------------------------------------
+// Two producer-side gaps of the same family: an input the dialect claims
+// to accept, which `parse` cannot place, so the content is recovered as
+// literal text and the block loses its identity.
+
+/// CommonMark has **two** fence characters, and this dialect advertises
+/// "fenced code", not "backtick-fenced code". `~~~` used to fall through
+/// to the outline grammar, so a bullet inside the fence body became a
+/// real block — content promoted into the tree, plus an
+/// `UnrecognizedBlockMarker` on a line the user wrote correctly.
+#[test]
+fn a_tilde_fence_suspends_the_outline_grammar_like_a_backtick_fence() {
+    let back = parse("- x\n  ~~~\n  - a\n  ~~~\n");
+    assert_eq!(
+        back.blocks.len(),
+        1,
+        "the fence body must not become a block"
+    );
+    assert!(
+        back.blocks[0].children.is_empty(),
+        "a bullet inside a fence is literal text, not a child: {:?}",
+        back.blocks[0]
+    );
+    assert_eq!(back.blocks[0].text, "x\n~~~\n- a\n~~~");
+    assert!(back.warnings.is_empty(), "no line here is unrecognised");
+}
+
+#[test]
+fn a_tilde_fence_carries_an_info_string_and_roundtrips() {
+    assert_text_roundtrips("intro\n~~~rust\nfn main() {}\n~~~");
+    let once = render(&parse("- intro\n  ~~~rust\n  fn main() {}\n  ~~~\n"));
+    assert_eq!(once, render(&parse(&once)), "not a fixpoint:\n{once}");
+}
+
+/// A fence closes only on its **own** character. The other one inside the
+/// body is content, and reading it as a closer would end the fence early
+/// and hand the rest of the body back to the outline grammar.
+#[test]
+fn a_fence_does_not_close_on_the_other_fence_character() {
+    let back = parse("- x\n  ~~~\n  ```\n  - a\n  ~~~\n");
+    assert_eq!(back.blocks.len(), 1);
+    assert!(back.blocks[0].children.is_empty());
+    assert_eq!(back.blocks[0].text, "x\n~~~\n```\n- a\n~~~");
+}
+
+/// A UTF-8 BOM is what a Windows editor leaves at the head of a file. It
+/// is not whitespace, so it used to glue itself to the first `- ` and
+/// make the first line unparseable as a bullet: the block was recovered
+/// as verbatim text with the marker *inside* it, and the page's first
+/// block lost its identity on import.
+#[test]
+fn a_utf8_bom_does_not_destroy_the_first_block() {
+    let back = parse("\u{feff}- a\n- b\n");
+    assert_eq!(back.blocks.len(), 2);
+    assert_eq!(back.blocks[0].text, "a", "the BOM was folded into the text");
+    assert_eq!(back.blocks[1].text, "b");
+    assert!(back.warnings.is_empty(), "{:?}", back.warnings);
+    assert_eq!(render(&back), "- a\n- b\n");
+}
+
+/// The BOM must not survive into a page property key either — the header
+/// run reads the same first line.
+#[test]
+fn a_utf8_bom_does_not_destroy_a_leading_page_property() {
+    let back = parse("\u{feff}title:: Notes\n\n- a\n");
+    assert_eq!(
+        back.properties,
+        vec![("title".to_string(), "Notes".to_string())]
+    );
+    assert_eq!(back.blocks.len(), 1);
+}
