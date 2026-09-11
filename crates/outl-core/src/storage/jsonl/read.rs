@@ -17,7 +17,8 @@ use tracing::{debug, error, warn};
 use crate::hlc::Hlc;
 use crate::id::{ActorId, NodeId};
 use crate::op::LogOp;
-use crate::storage::{ActorIndex, ActorNodeIndex, NodeIndex, OffsetIndex, PageScope, StorageError};
+use crate::storage::sidecar::{self, SidecarKind};
+use crate::storage::{NodeIndex, OffsetIndex, PageScope, StorageError};
 
 use super::{
     parse_actor_from_ops_filename, parse_log_line, read_log_record, JsonlStorage, RecordRead,
@@ -194,8 +195,18 @@ impl JsonlStorage {
             // Load the persisted sidecars when they exactly cover the
             // `.jsonl`; rebuild via parse-lite otherwise. The `.idx` bytes are
             // the ~4.3s reload win — we skip re-tokenizing every `text_op`.
-            let hlc_path = ActorIndex::sidecar_path(&self.ops_dir, file_actor);
-            let node_path = ActorNodeIndex::sidecar_path(&self.ops_dir, file_actor);
+            let hlc_path = sidecar::path_for(
+                &self.ops_dir,
+                file_actor,
+                &PageScope::Global,
+                SidecarKind::Offset,
+            );
+            let node_path = sidecar::path_for(
+                &self.ops_dir,
+                file_actor,
+                &PageScope::Global,
+                SidecarKind::Node,
+            );
             let (hlc_idx, node_idx) = Self::load_actor_indexes(&path, &hlc_path, &node_path);
             let ops_indexed = hlc_idx.len();
             seen_hlc.insert(file_actor, hlc_idx);
@@ -237,8 +248,8 @@ impl JsonlStorage {
     fn reload_per_page(&mut self, slug: &str) -> Result<(), StorageError> {
         let path = self.own_ops_path();
         let own_dir = self.own_ops_dir();
-        let hlc_path = ActorIndex::sidecar_path(&own_dir, self.actor);
-        let node_path = ActorNodeIndex::sidecar_path(&own_dir, self.actor);
+        let hlc_path = sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Offset);
+        let node_path = sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Node);
 
         // Same load-or-rebuild path as `reload_global`, over the single
         // `<actor>/<slug>.jsonl` this storage owns. A missing file (fresh

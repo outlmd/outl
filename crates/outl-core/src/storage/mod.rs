@@ -10,44 +10,21 @@ use crate::op::LogOp;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
+pub mod compact;
 pub mod index;
 pub mod jsonl;
 pub mod memory;
 pub mod node_index;
+pub mod sidecar;
 
+pub use compact::{
+    apply_compaction, plan_compaction, CompactError, CompactOptions, CompactPlan, CompactReport,
+};
 pub use index::{ActorIndex, OffsetIndex};
 pub use jsonl::JsonlStorage;
 pub use memory::MemoryStorage;
 pub use node_index::{ActorNodeIndex, NodeIndex};
-
-/// Atomically replace `path`'s contents. Creates a unique temp — the per-write
-/// ULID suffix avoids the ENOENT race when two reindex passes for the same
-/// actor write concurrently (both write the same content, last rename wins) —
-/// lets `write_body` stream the lines into it, fsyncs, then renames over
-/// `path`, removing the temp on a failed rename. Shared by `ActorIndex::save`
-/// and `ActorNodeIndex::save`.
-fn write_atomic(
-    path: &std::path::Path,
-    write_body: impl FnOnce(&mut std::fs::File, &std::path::Path) -> Result<(), StorageError>,
-) -> Result<(), StorageError> {
-    let tmp = path.with_extension(format!("idx.tmp.{}", ulid::Ulid::new()));
-    let mut file = std::fs::File::create(&tmp)
-        .map_err(|e| StorageError::Backend(format!("create {}: {e}", tmp.display())))?;
-    write_body(&mut file, &tmp)?;
-    file.sync_all()
-        .map_err(|e| StorageError::Backend(format!("fsync {}: {e}", tmp.display())))?;
-    drop(file);
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        // Never leave an orphan temp behind on a failed rename.
-        let _ = std::fs::remove_file(&tmp);
-        return Err(StorageError::Backend(format!(
-            "rename {} -> {}: {e}",
-            tmp.display(),
-            path.display()
-        )));
-    }
-    Ok(())
-}
+pub use sidecar::SidecarKind;
 
 /// Which page a storage backend is responsible for.
 ///

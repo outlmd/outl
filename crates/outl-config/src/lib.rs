@@ -70,7 +70,7 @@ pub use schema::{
 };
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Load `config.toml` from the default path. Returns
 /// [`Config::default`] when the file doesn't exist (first launch),
@@ -99,22 +99,107 @@ pub fn load_from(path: &Path) -> Config {
     }
 }
 
-/// Save `config` to the default path atomically (`config.toml.tmp`
-/// → `config.toml` rename). Creates `~/.config/outl/` if missing.
+/// Save `config` to the default path atomically (hidden scratch file →
+/// `config.toml` rename). Creates `~/.config/outl/` if missing.
 pub fn save(config: &Config) -> anyhow::Result<()> {
     save_to(&config_path(), config)
 }
 
 /// Save to a specific path. Exposed mainly for tests.
+///
+/// Publishes by rename: write a hidden sibling scratch file, `fsync` it,
+/// `rename` it over `path`, then `fsync` the parent directory so the
+/// rename itself is durable. Both `fsync`s matter for this file — a
+/// config that comes back zero-length after a power loss silently resets
+/// the user to defaults (theme, vim mode, last workspace), and the old
+/// code had neither.
+///
+/// The scratch file is owned by a `TempFile` guard, so it is unlinked
+/// on every in-process exit path instead of being left next to the real
+/// config as `config.toml.tmp` on the first transient error.
 pub fn save_to(path: &Path, config: &Config) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("toml.tmp");
     let body = toml::to_string_pretty(config)?;
-    fs::write(&tmp, body)?;
-    fs::rename(&tmp, path)?;
+    let guard = TempFile::new(tmp_path(path));
+
+    {
+        let mut file = fs::File::create(guard.path())?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+    }
+    fs::rename(guard.path(), path)?;
+    guard.keep();
+
+    // Best-effort: Windows refuses to open a directory as a file, and
+    // failing the whole save there would be worse than the durability
+    // gap being closed.
+    if let Some(dir) = path.parent() {
+        if let Ok(handle) = fs::File::open(dir) {
+            let _ = handle.sync_all();
+        }
+    }
     Ok(())
+}
+
+/// Scratch path for an in-flight rewrite of `path`: the filename with a
+/// leading dot and a `.tmp` suffix, so `config.toml` becomes
+/// `.config.toml.tmp`.
+fn tmp_path(path: &Path) -> PathBuf {
+    let name = path.file_name().unwrap_or_default();
+    let mut scratch = std::ffi::OsString::from(if name.as_encoded_bytes().starts_with(b".") {
+        ""
+    } else {
+        "."
+    });
+    scratch.push(name);
+    scratch.push(".tmp");
+    path.with_file_name(scratch)
+}
+
+/// A temp file that deletes itself unless [`TempFile::keep`] is called.
+///
+/// **This is a deliberate third copy, and it is the only one that had no
+/// alternative.** The canonical guard is `outl_md::atomic::TempFile`
+/// (which `outl-actions` and `outl-sync-iroh` both use); a second,
+/// module-private one lives in `outl_core::storage::sidecar`. This crate
+/// is a leaf — it depends on no other `outl-*` crate, and inverting that
+/// so a config parser pulls in the markdown pipeline (comrak) and the
+/// CRDT kernel (yrs) to reuse twenty lines is a worse trade than the
+/// duplication.
+///
+/// Keep the three in sync by hand, and prefer the `outl-md` one for any
+/// new call site that can reach it. If this crate ever gains an
+/// `outl-md` edge for another reason, delete this copy.
+struct TempFile {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl TempFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The rename succeeded; there is nothing left at this path.
+    fn keep(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -147,6 +232,88 @@ mod tests {
         assert_eq!(back.theme.preset, "dracula");
         assert!(!back.editor.vim_mode);
         assert_eq!(back.editor.font_size, 18);
+    }
+
+    /// Every `*.tmp` sibling in `dir`, whatever it is called.
+    fn leftover_temps(dir: &Path) -> Vec<PathBuf> {
+        let mut found: Vec<_> = fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_successful_save_leaves_no_scratch_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        save_to(&path, &Config::default()).unwrap();
+        assert_eq!(leftover_temps(tmp.path()), Vec::<PathBuf>::new());
+    }
+
+    /// The failure path: a real I/O error, no injection — renaming onto a
+    /// non-empty directory fails on every platform we ship. The old code
+    /// cleaned up on no failure path at all, leaving `config.toml.tmp` in
+    /// `~/.config/outl/` after any transient error.
+    #[test]
+    fn a_failed_save_leaves_no_scratch_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("occupant"), b"x").unwrap();
+
+        save_to(&path, &Config::default()).expect_err("rename onto a non-empty dir must fail");
+        assert_eq!(
+            leftover_temps(tmp.path()),
+            Vec::<PathBuf>::new(),
+            "a failed config save must not leak its scratch file"
+        );
+    }
+
+    /// A failed save must not damage the config already on disk — the
+    /// whole reason this publishes by rename.
+    #[test]
+    fn a_failed_save_leaves_the_previous_config_intact() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        let mut cfg = Config::default();
+        cfg.theme.preset = "dracula".into();
+        save_to(&path, &cfg).unwrap();
+
+        // Occupy the scratch path with a directory so `File::create` fails.
+        fs::create_dir(tmp_path(&path)).unwrap();
+        save_to(&path, &Config::default()).expect_err("a blocked scratch path must fail the save");
+
+        assert_eq!(load_from(&path).theme.preset, "dracula");
+    }
+
+    #[test]
+    fn the_scratch_file_is_a_dotfile() {
+        assert_eq!(
+            tmp_path(Path::new("/x/config.toml")).file_name().unwrap(),
+            ".config.toml.tmp"
+        );
+    }
+
+    #[test]
+    fn the_guard_unlinks_an_unkept_temp() {
+        let tmp = TempDir::new().unwrap();
+        let scratch = tmp.path().join(".scratch.tmp");
+        fs::write(&scratch, b"half").unwrap();
+        drop(TempFile::new(scratch.clone()));
+        assert!(!scratch.exists(), "dropping an armed guard must unlink");
+    }
+
+    #[test]
+    fn the_guard_leaves_a_kept_temp_alone() {
+        let tmp = TempDir::new().unwrap();
+        let scratch = tmp.path().join(".scratch.tmp");
+        fs::write(&scratch, b"published").unwrap();
+        TempFile::new(scratch.clone()).keep();
+        assert!(scratch.exists(), "keep() must disarm the unlink");
     }
 
     #[test]

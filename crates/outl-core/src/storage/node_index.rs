@@ -12,17 +12,18 @@
 //! append-only. Pure cache; rebuilt from the `.jsonl` when missing.
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::hlc::Hlc;
 use crate::id::{ActorId, NodeId};
 use crate::op::LogOp;
+use crate::storage::sidecar;
 use crate::storage::StorageError;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -89,97 +90,38 @@ impl NodeIndex {
     /// - `Ok(None)` when missing, empty, or corrupt (caller rebuilds).
     /// - `Err` only on real I/O failure.
     pub fn load(path: &Path) -> Result<Option<Self>, StorageError> {
-        let file = match File::open(path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(StorageError::Backend(format!(
-                    "open node index {}: {e}",
-                    path.display()
-                )))
-            }
-        };
         let mut index = Self::new();
-        let mut recovered = 0usize;
-        for (lineno, line) in BufReader::new(file).lines().enumerate() {
-            let raw = match line {
-                Ok(l) if !l.is_empty() => l,
-                Ok(_) => continue,
-                Err(e) => {
-                    warn!("node index io error {}:{}: {e}", path.display(), lineno + 1);
-                    return Ok(None);
-                }
-            };
-            let stream = serde_json::Deserializer::from_str(&raw).into_iter::<NodeEntry>();
-            let mut saw_any = false;
-            for item in stream {
-                match item {
-                    Ok(entry) => {
-                        index.insert(entry.node, entry.ts, entry.offset);
-                        recovered += 1;
-                        saw_any = true;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "node index parse {}:{}: {e} — rebuilding from .jsonl",
-                            path.display(),
-                            lineno + 1
-                        );
-                        return Ok(None);
-                    }
-                }
-            }
-            if !saw_any {
-                return Ok(None);
-            }
-        }
-        if recovered == 0 {
+        let recovered = sidecar::load_entries::<NodeEntry, _>(path, "node index", |entry| {
+            index.insert(entry.node, entry.ts, entry.offset);
+        })?;
+        let Some(recovered) = recovered else {
             return Ok(None);
-        }
+        };
         debug!(
-            "node index loaded from {} ({} entries across {} nodes)",
+            "node index loaded from {} ({recovered} entries across {} nodes)",
             path.display(),
-            recovered,
-            index.node_count()
+            index.node_count(),
         );
         Ok(Some(index))
     }
 
     /// Persist the full index to `path` atomically.
     pub fn save(&self, path: &Path) -> Result<(), StorageError> {
-        super::write_atomic(path, |file, tmp| {
-            for (node, entries) in &self.entries {
-                for (ts, offset) in entries {
-                    let line = serde_json::to_string(&NodeEntry {
-                        node: *node,
-                        ts: *ts,
-                        offset: *offset,
-                    })
-                    .map_err(|e| StorageError::Serialize(e.to_string()))?;
-                    writeln!(file, "{line}").map_err(|e| {
-                        StorageError::Backend(format!("write {}: {e}", tmp.display()))
-                    })?;
-                }
-            }
-            Ok(())
-        })
+        sidecar::save_entries(
+            path,
+            self.entries.iter().flat_map(|(node, entries)| {
+                entries.iter().map(|(ts, offset)| NodeEntry {
+                    node: *node,
+                    ts: *ts,
+                    offset: *offset,
+                })
+            }),
+        )
     }
 
     /// Append one entry to `path` (hot path from `append_op`).
     pub fn append_to(path: &Path, node: NodeId, ts: Hlc, offset: u64) -> Result<(), StorageError> {
-        let line = serde_json::to_string(&NodeEntry { node, ts, offset })
-            .map_err(|e| StorageError::Serialize(e.to_string()))?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|e| {
-                StorageError::Backend(format!("open node index {}: {e}", path.display()))
-            })?;
-        writeln!(file, "{line}").map_err(|e| {
-            StorageError::Backend(format!("write node index {}: {e}", path.display()))
-        })?;
-        Ok(())
+        sidecar::append_entry(path, &NodeEntry { node, ts, offset })
     }
 
     /// Rebuild by streaming the `.jsonl` once and recording every op
@@ -253,18 +195,6 @@ impl ActorNodeIndex {
             .get(&actor)
             .map(|i| i.get(&node).to_vec())
             .unwrap_or_default()
-    }
-
-    /// Path of the `.nodes.idx` sidecar for `actor` inside `ops_dir`.
-    /// Path of the `.nodes.idx` sidecar for a given actor inside `ops_dir`.
-    ///
-    /// Dot-prefixed for the same reason as [`crate::storage::index::ActorIndex::sidecar_path`]: a
-    /// purely local boot cache must stay off the file-sync surface so a
-    /// torn-in-the-middle synced copy can never pass the freshness check and
-    /// feed a wrong offset into `read_op_at`. See that doc for the full
-    /// silent-loss argument.
-    pub fn sidecar_path(ops_dir: &Path, actor: ActorId) -> PathBuf {
-        ops_dir.join(format!(".ops-{actor}.nodes.idx"))
     }
 
     /// Snapshot of every actor known to the index. Used by
