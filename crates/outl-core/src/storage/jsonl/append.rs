@@ -18,7 +18,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use tracing::warn;
 
 use crate::op::LogOp;
-use crate::storage::{ActorIndex, ActorNodeIndex, NodeIndex, OffsetIndex, StorageError};
+use crate::storage::sidecar::{self, SidecarKind};
+use crate::storage::{NodeIndex, OffsetIndex, StorageError};
 
 use super::{op_node, JsonlStorage};
 
@@ -125,8 +126,10 @@ impl JsonlStorage {
         // index is a cache, a missing entry just means the next boot rebuilds
         // from the .jsonl.
         let own_dir = self.own_ops_dir();
-        let hlc_idx_path = ActorIndex::sidecar_path(&own_dir, self.actor);
-        let node_idx_path = ActorNodeIndex::sidecar_path(&own_dir, self.actor);
+        let hlc_idx_path =
+            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Offset);
+        let node_idx_path =
+            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Node);
         for (op, &offset) in ops.iter().zip(&offsets) {
             self.index.insert(op.actor, op.ts, offset);
             if let Err(e) = OffsetIndex::append_to(&hlc_idx_path, op.ts, offset) {

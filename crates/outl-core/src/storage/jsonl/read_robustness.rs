@@ -22,7 +22,8 @@ use super::*;
 use crate::fractional::Fractional;
 use crate::hlc::HlcGenerator;
 use crate::op::Op;
-use crate::storage::{NodeIndex, OffsetIndex, Storage};
+use crate::storage::sidecar;
+use crate::storage::{NodeIndex, OffsetIndex, PageScope, Storage};
 use tempfile::TempDir;
 
 fn mk_create(g: &HlcGenerator) -> LogOp {
@@ -166,8 +167,9 @@ fn index_rebuild_covers_ops_after_a_corrupt_middle_line() {
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     lines[3] = "{ not json at all".to_string();
     std::fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
-    let _ = std::fs::remove_file(ActorIndex::sidecar_path(tmp.path(), actor));
-    let _ = std::fs::remove_file(ActorNodeIndex::sidecar_path(tmp.path(), actor));
+    for path in sidecar::paths_for(tmp.path(), actor, &PageScope::Global) {
+        let _ = std::fs::remove_file(path);
+    }
 
     let storage = JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap();
 

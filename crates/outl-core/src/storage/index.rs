@@ -29,16 +29,17 @@
 //! index never makes boot slower than today.
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::hlc::Hlc;
 use crate::op::LogOp;
+use crate::storage::sidecar;
 use crate::storage::StorageError;
 
 /// One indexed entry: the HLC of an op + its byte offset inside the
@@ -140,67 +141,14 @@ impl OffsetIndex {
     /// We never propagate parse failures as hard errors — the index is
     /// a cache.
     pub fn load(path: &Path) -> Result<Option<Self>, StorageError> {
-        let file = match File::open(path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(StorageError::Backend(format!(
-                    "open index {}: {e}",
-                    path.display()
-                )))
-            }
-        };
         let mut index = Self::new();
-        let mut recovered = 0usize;
-        for (lineno, line) in BufReader::new(file).lines().enumerate() {
-            let raw = match line {
-                Ok(l) if !l.is_empty() => l,
-                Ok(_) => continue,
-                Err(e) => {
-                    warn!("index io error {}:{}: {e}", path.display(), lineno + 1);
-                    return Ok(None);
-                }
-            };
-            // Same glued-op recovery as the op log: stream every
-            // concatenated JSON value off the line. Two index entries
-            // glued together by an interleaved append should not lose
-            // either side.
-            let stream = serde_json::Deserializer::from_str(&raw).into_iter::<IndexEntry>();
-            let mut saw_any = false;
-            for item in stream {
-                match item {
-                    Ok(entry) => {
-                        index.insert(entry.ts, entry.offset);
-                        recovered += 1;
-                        saw_any = true;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "index parse {}:{}: {e} — rebuilding from .jsonl",
-                            path.display(),
-                            lineno + 1
-                        );
-                        return Ok(None);
-                    }
-                }
-            }
-            if !saw_any {
-                warn!(
-                    "index empty line {}:{} — rebuilding",
-                    path.display(),
-                    lineno + 1
-                );
-                return Ok(None);
-            }
-        }
-        if recovered == 0 {
+        let recovered = sidecar::load_entries::<IndexEntry, _>(path, "index", |entry| {
+            index.insert(entry.ts, entry.offset);
+        })?;
+        let Some(recovered) = recovered else {
             return Ok(None);
-        }
-        debug!(
-            "index loaded from {} ({} entries)",
-            path.display(),
-            recovered
-        );
+        };
+        debug!("index loaded from {} ({recovered} entries)", path.display());
         Ok(Some(index))
     }
 
@@ -210,37 +158,19 @@ impl OffsetIndex {
     /// per-append hot path writes one line via [`Self::append_to`]
     /// instead, so this full save is for checkpointing only.
     pub fn save(&self, path: &Path) -> Result<(), StorageError> {
-        super::write_atomic(path, |file, tmp| {
-            for (ts, offset) in &self.entries {
-                let line = serde_json::to_string(&IndexEntry {
-                    ts: *ts,
-                    offset: *offset,
-                })
-                .map_err(|e| StorageError::Serialize(e.to_string()))?;
-                writeln!(file, "{line}")
-                    .map_err(|e| StorageError::Backend(format!("write {}: {e}", tmp.display())))?;
-            }
-            Ok(())
-        })
+        sidecar::save_entries(
+            path,
+            self.entries.iter().map(|(ts, offset)| IndexEntry {
+                ts: *ts,
+                offset: *offset,
+            }),
+        )
     }
 
     /// Append a single entry to `path`. Cheap, durable, append-only —
     /// this is the hot path called from `JsonlStorage::append_op`.
     pub fn append_to(path: &Path, ts: Hlc, offset: u64) -> Result<(), StorageError> {
-        let line = serde_json::to_string(&IndexEntry { ts, offset })
-            .map_err(|e| StorageError::Serialize(e.to_string()))?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|e| StorageError::Backend(format!("open index {}: {e}", path.display())))?;
-        writeln!(file, "{line}")
-            .map_err(|e| StorageError::Backend(format!("write index {}: {e}", path.display())))?;
-        // No fsync here — the caller has just fsynced the .jsonl and
-        // will eventually fsync the .idx via `save` on shutdown, or
-        // rebuild on the next boot if the .idx is lost. The index is a
-        // cache; we don't pay double fsync per op for it.
-        Ok(())
+        sidecar::append_entry(path, &IndexEntry { ts, offset })
     }
 
     /// Rebuild the index by streaming the `.jsonl` once and recording
@@ -380,25 +310,6 @@ impl ActorIndex {
             }
         }
         out
-    }
-
-    /// Path of the `.idx` sidecar for a given actor inside `ops_dir`.
-    /// Public so `JsonlStorage` can compute the same path the index
-    /// layer would.
-    /// Path of the `.idx` sidecar for a given actor inside `ops_dir`.
-    ///
-    /// **Dot-prefixed on purpose.** The offset index is a purely *local*
-    /// boot cache (every device rebuilds it from its own `.jsonl`), so it
-    /// must NOT ride the file-sync surface: iCloud Documents drops
-    /// `.`-prefixed paths across devices, keeping this local, and iroh (the
-    /// default transport) never ships sidecars. A synced index could arrive
-    /// torn-in-the-middle with an intact tail and pass the freshness check
-    /// while carrying a wrong middle offset → silent op loss on the
-    /// index-driven reads. Keeping it off the sync surface removes that
-    /// vector, leaving only universal local bit-rot (recoverable: a bad
-    /// parse → rebuild, or the next full replay).
-    pub fn sidecar_path(ops_dir: &Path, actor: crate::id::ActorId) -> PathBuf {
-        ops_dir.join(format!(".ops-{actor}.idx"))
     }
 }
 
