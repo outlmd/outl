@@ -19,6 +19,19 @@
 //! this crate's to change, so [`OpsDirGuard`] takes the cheap route:
 //! photograph `ops/` before the open, put it back byte-for-byte after.
 //!
+//! ## The one announced exception
+//!
+//! [`OpsDirGuard::capture`] takes a list of paths to **ignore**: the dead
+//! index caches `--repair` has already announced it will collect (see
+//! `repair::index_sidecars`). Those are the only files in `ops/` this
+//! command deliberately removes, and the guard is told about them up
+//! front rather than discovering the deletion afterwards and undoing it.
+//!
+//! Passing them in rather than forgetting them later also keeps them out
+//! of RAM: `capture` reads every non-`.jsonl` file into memory so it can
+//! restore it byte-for-byte, and on the workspace this feature exists for
+//! that meant 134 MB of dead cache read on every `outl doctor`.
+//!
 //! The `.jsonl` payloads are deliberately **not** held in memory. They
 //! are the one thing in there the doctor must never write at all, and on
 //! the 66k-block graphs this feature exists for they are large. They are
@@ -46,6 +59,10 @@ enum Snapshot {
     },
     /// Captured neither way (unreadable at capture time). Left alone.
     Opaque,
+    /// Deliberately excluded: a dead cache this run announced it would
+    /// collect. Never read, never restored, never removed by the guard —
+    /// whatever the repair pass decides about it stands.
+    Ignored,
 }
 
 /// A before-photo of `ops/`, restored by [`OpsDirGuard::restore`].
@@ -59,13 +76,21 @@ pub(super) struct OpsDirGuard {
 }
 
 impl OpsDirGuard {
-    /// Photograph `dir` as it stands right now.
-    pub(super) fn capture(dir: &Path) -> Self {
+    /// Photograph `dir` as it stands right now, skipping `ignore`.
+    ///
+    /// `ignore` is the set of dead cache files `--repair` has announced;
+    /// see the module doc. They are recorded as [`Snapshot::Ignored`]
+    /// rather than simply left out, because a path absent from the
+    /// photograph is treated by [`Self::restore`] as a file that appeared
+    /// mid-run and gets removed.
+    pub(super) fn capture(dir: &Path, ignore: &[PathBuf]) -> Self {
         let existed = dir.is_dir();
         let mut before = HashMap::new();
         if existed {
             for path in walk(dir) {
-                let snap = if is_op_log(&path) {
+                let snap = if ignore.contains(&path) {
+                    Snapshot::Ignored
+                } else if is_op_log(&path) {
                     match std::fs::metadata(&path) {
                         Ok(meta) => Snapshot::Watched {
                             len: meta.len(),
@@ -172,7 +197,7 @@ impl OpsDirGuard {
                         }
                     }
                 }
-                Some(Snapshot::Opaque) => {}
+                Some(Snapshot::Opaque | Snapshot::Ignored) => {}
             }
         }
 
@@ -191,6 +216,9 @@ impl OpsDirGuard {
                         ));
                     }
                 }
+                // An ignored file is one this run announced it would
+                // collect; its absence is the announced outcome.
+                Snapshot::Ignored => {}
                 _ => unrestorable.push(format!(
                     "{} was deleted during a run that must only read it",
                     path.display()
@@ -252,7 +280,7 @@ mod tests {
         std::fs::create_dir_all(&ops).unwrap();
         std::fs::write(ops.join("ops-local.jsonl"), "{\"a\":1}\n").unwrap();
 
-        let guard = OpsDirGuard::capture(&ops);
+        let guard = OpsDirGuard::capture(&ops, &[]);
 
         // Mid-run arrivals: a peer's log (must survive) and an index
         // sidecar the storage layer rebuilt (ours to clean up).

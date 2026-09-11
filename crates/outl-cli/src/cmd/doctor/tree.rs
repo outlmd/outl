@@ -15,50 +15,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use outl_actions::page::list_all as list_pages;
-use outl_actions::{page_md_path, render_page_md};
+use outl_actions::journal::{survey_page_projections, PageProjectionState};
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
-use outl_md::sidecar::{file_hash, sidecar_path_for};
 
 use super::repair::PageWrite;
 use super::{Builder, Plan};
 
 /// Cap on how many individual items each listing names.
 const MAX_LISTED: usize = 20;
-
-/// How many content lines on disk the render would **not** reproduce —
-/// what a re-projection of this page removes.
-///
-/// The question is deliberately routed through
-/// `outl_md::content_lines_missing_from`, the single owner of "which of
-/// these disk lines does the reference not account for". A second
-/// line-comparison here would drift from the one the write-side guard
-/// uses, and then the doctor's count would describe a different
-/// operation than the one that runs. The only thing that changes is the
-/// reference: that function asks it of the *sidecar's* blocks ("does the
-/// op log know this line"), and this asks it of the blocks the new
-/// projection will contain ("will this line survive the write").
-///
-/// Those are genuinely different questions and both are correct here:
-/// content a peer legitimately deleted is not unlogged, but it is still
-/// content this write removes, and the user is entitled to the number
-/// before it happens.
-fn lines_removed_by(disk: &str, rendered: &str) -> usize {
-    let ast = outl_md::parse(rendered);
-    let mut blocks = Vec::new();
-    for (i, flat) in outl_md::matching::flatten(&ast.blocks).iter().enumerate() {
-        // Only `text` is read by the comparison; the id and line are
-        // structural fields the multiset never looks at.
-        blocks.push(outl_md::SidecarBlock::from_text(
-            NodeId::new(),
-            i + 1,
-            flat.indent,
-            flat.text,
-        ));
-    }
-    outl_md::content_lines_missing_from(disk, &blocks).len()
-}
 
 /// Report what sits in the trash, with a preview.
 ///
@@ -208,57 +173,51 @@ pub(super) fn check_projections(
     let mut ahead_lines = 0usize;
     let mut removed_lines = 0usize;
 
-    for meta in list_pages(ws) {
-        let Ok(page_root) = meta.id.parse::<ulid::Ulid>().map(NodeId) else {
-            continue;
-        };
-        let path = page_md_path(root, &meta);
-        let disk = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+    for page in survey_page_projections(ws, root, log_damaged) {
+        let path = page.path;
+        match page.state {
+            PageProjectionState::InSync => {}
+            PageProjectionState::Absent => {
                 absent += 1;
                 b.warn(format!(
                     "{}: page `{}` is in the op log but has no `.md` on disk",
                     path.display(),
-                    meta.slug
+                    page.slug
                 ));
                 // Nothing on disk, so nothing to remove. Counting it as
                 // a zero keeps the common bulk case — a device that just
                 // paired and has the whole graph unprojected — from
                 // tripping a guard aimed at deletion.
-                plan.reproject.push(PageWrite::additive(page_root, path));
-                continue;
+                plan.reproject
+                    .push(PageWrite::additive(page.page_root, path));
             }
-            Err(e) => {
-                b.warn(format!("{}: unreadable: {e}", path.display()));
-                continue;
+            PageProjectionState::Unreadable { error } => {
+                b.warn(format!("{}: unreadable: {error}", path.display()));
             }
-        };
-
-        let disk_hash = file_hash(&disk);
-        let sidecar_path = sidecar_path_for(&path);
-        // Read the sidecar once: the faithful test needs its hash and the
-        // unlogged-content check below needs its blocks.
-        let sidecar = outl_md::sidecar::read(&sidecar_path).ok();
-        let faithful = sidecar
-            .as_ref()
-            .map(|sc| sc.last_synced_hash == disk_hash)
-            .unwrap_or(false);
-        // Kept, not just hashed: the stale branch below has to measure
-        // what re-projecting it would remove, and rendering the page a
-        // second time to answer that would double the cost of the check
-        // on every drifted page.
-        let rendered = render_page_md(ws, page_root);
-        let rendered_matches = file_hash(&rendered) == disk_hash;
-
-        if !sidecar_path.exists() {
-            if rendered_matches {
+            // Neither of the next two adds to `plan.reproject`, and that
+            // is the point of both: a re-projection stops at the same
+            // gate the survey already hit, so offering one would promise
+            // a repair the writing pass refuses (root `CLAUDE.md`
+            // invariant 8).
+            PageProjectionState::MarkdownNotHereYet { reason } => {
+                b.warn(format!("{}: {reason}", path.display()));
+            }
+            PageProjectionState::HashWithheldButClean => {
+                b.warn(format!(
+                    "{}: its sidecar still carries the withheld-hash sentinel, but the \
+                     content it was withheld for is no longer on disk — `outl reconcile` \
+                     restamps it; `--repair` cannot (a re-projection stops at the same gate)",
+                    path.display()
+                ));
+            }
+            PageProjectionState::SidecarMissingButFaithful => {
                 sidecar_only += 1;
                 // Byte-identical by precondition — the sidecar is what
                 // is missing, not the content.
                 plan.rebuild_sidecar
-                    .push(PageWrite::additive(page_root, path));
-            } else {
+                    .push(PageWrite::additive(page.page_root, path));
+            }
+            PageProjectionState::SidecarMissingAndDrifted => {
                 b.warn(format!(
                     "{}: no sidecar AND content differs from the op log — \
                      `--repair` will not touch it, run `outl reconcile` so the `.md` \
@@ -266,79 +225,47 @@ pub(super) fn check_projections(
                     path.display()
                 ));
             }
-            continue;
-        }
-        if !faithful {
-            // **Except when the hash is empty**, which is not a stale
-            // projection but a withheld one: `reconcile_md` writes that
-            // sentinel when it read content it could not log
-            // (invariant 8). Counting it as a pending external edit is
-            // how the page the producer flagged becomes the one page
-            // this report never names — the guard erasing its own
-            // signal.
-            let withheld = sidecar
-                .as_ref()
-                .map(|sc| sc.last_synced_hash.is_empty())
-                .unwrap_or(false);
-            if !withheld || log_damaged {
-                // An external edit is pending. `outl reconcile` owns it;
-                // saying it twice as a warning would drown the real signal.
-                pending_edit += 1;
-                continue;
-            }
-        }
-        if !rendered_matches {
-            // `faithful` proves the sidecar agrees with these bytes, not
-            // that the bytes came from the log. Ask the same question
-            // `apply_page_md_with_sidecar_if_stale` asks before writing,
-            // so this listing never offers a repair that pass refuses.
-            //
-            // Skipped while the log is damaged: a torn `ops/` replays a
-            // truncated tree, so *every* page looks like it holds
-            // unlogged content and the real cause — the log — would never
-            // be named. The caller's `OpLogHealth` gate suppresses these
-            // repairs with the message that says how to recover, and it
-            // can only count what it sees in the plan.
-            let unlogged = match (log_damaged, &sidecar) {
-                // `sidecar_can_answer` is asked explicitly now: the
-                // stand-down used to live inside
-                // `content_lines_missing_from`, where it also silenced
-                // `lines_removed_by` above — which asks the same
-                // function about a *render*, whose empty blocks are an
-                // answer, not an absence of one.
-                (false, Some(sc)) if outl_actions::sidecar_can_answer(&sc.blocks) => {
-                    outl_actions::content_lines_missing_from(&disk, &sc.blocks)
-                }
-                _ => Vec::new(),
-            };
-            if let Some(sample) = unlogged.first() {
-                ahead += 1;
-                ahead_lines += unlogged.len();
+            // An external edit is pending. `outl reconcile` owns it;
+            // saying it twice as a warning would drown the real signal.
+            PageProjectionState::PendingExternalEdit => pending_edit += 1,
+            PageProjectionState::SidecarCannotAnswer => {
+                // Not "nothing at risk" — "I cannot tell". The write
+                // guard declines these, so offering a repair here would
+                // be a listing promising something the pass refuses.
                 b.warn(format!(
-                    "{}: `.md` holds {} line(s) that exist in no op (e.g. {sample:?}) — \
+                    "{}: the `.md` is stale but its sidecar cannot say whether the op log \
+                     knows the content on disk (written before 0.11) — `--repair` leaves \
+                     it alone; `outl reconcile` rebuilds the sidecar",
+                    path.display()
+                ));
+            }
+            PageProjectionState::AheadOfLog { lines, sample } => {
+                ahead += 1;
+                ahead_lines += lines;
+                b.warn(format!(
+                    "{}: `.md` holds {lines} line(s) that exist in no op (e.g. {sample:?}) — \
                      `--repair` will not touch it, run `outl reconcile --ahead-of-log` so they enter \
                      the op log first",
                     path.display(),
-                    unlogged.len(),
                 ));
-                continue;
             }
-            stale += 1;
-            // Measured here, before the plan is even offered, because
-            // `--repair` printing `708 fixed` after the fact is exactly
-            // how 1,426 lines went unnoticed (RFC 0210).
-            let removed = lines_removed_by(&disk, &rendered);
-            removed_lines += removed;
-            b.warn(format!(
-                "{}: `.md` is a stale projection — the op log renders different content \
-                 (re-projecting removes {removed} content line(s) from disk)",
-                path.display()
-            ));
-            plan.reproject.push(PageWrite {
-                page_root,
-                path,
-                lines_removed: removed,
-            });
+            PageProjectionState::Stale { lines_removed } => {
+                stale += 1;
+                // Measured before the plan is even offered, because
+                // `--repair` printing `708 fixed` after the fact is exactly
+                // how 1,426 lines went unnoticed (RFC 0210).
+                removed_lines += lines_removed;
+                b.warn(format!(
+                    "{}: `.md` is a stale projection — the op log renders different content \
+                     (re-projecting removes {lines_removed} content line(s) from disk)",
+                    path.display()
+                ));
+                plan.reproject.push(PageWrite {
+                    page_root: page.page_root,
+                    path,
+                    lines_removed,
+                });
+            }
         }
     }
 

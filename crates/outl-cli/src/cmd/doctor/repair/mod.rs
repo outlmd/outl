@@ -11,10 +11,11 @@
 //!    a `.md` that disagrees with it is by definition the wrong side.
 //! 2. Rebuild a missing sidecar for a `.md` whose bytes already equal
 //!    what the tree renders.
-//! 3. Delete a snapshot we read end-to-end and then failed to decode. It
-//!    is a pure boot cache; the next boot rebuilds it from a full
-//!    replay. A snapshot that could not be *read* is not this — see
-//!    `oplog::check_snapshots`.
+//! 3. Drop a boot snapshot `outl_core::snapshot::gc` says nothing can
+//!    reach any more (`Unusable` or `Superseded`), and delete a
+//!    `snap-*.bin.tmp` a killed writer abandoned. Pure cache, so the
+//!    whole cost of a wrong call is one slower boot — see `snapshots`
+//!    for the verdicts that mean *keep*.
 //!
 //! Plus one piece of housekeeping over its own output: pruning stale
 //! `.outl/repair-backup/` generations (below).
@@ -66,8 +67,17 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+mod index_sidecars;
+mod snapshots;
+
+pub(in crate::cmd::doctor) use index_sidecars::{
+    announced_paths, collect_dead, report_actor_locks, IndexSidecarDrop,
+};
+pub(in crate::cmd::doctor) use snapshots::SnapshotDrop;
+
 use outl_core::device::{ActorBinding, DeviceStore, STALE_BINDING_TTL, STALE_SCRATCH_TTL};
-use outl_core::id::NodeId;
+use outl_core::id::{ActorId, NodeId};
+use outl_core::snapshot::gc;
 use outl_core::workspace::Workspace;
 use serde::Serialize;
 
@@ -165,8 +175,25 @@ pub(super) struct Plan {
     pub reproject: Vec<PageWrite>,
     /// Pages whose `.md` already matches the tree but has no sidecar.
     pub rebuild_sidecar: Vec<PageWrite>,
-    /// Snapshot files that failed to decode.
-    pub corrupt_snapshots: Vec<PathBuf>,
+    /// Boot snapshots the GC says nothing can reach any more —
+    /// `Superseded` or `Unusable`. Pure cache; the op log is the source
+    /// of truth, so the only cost of a wrong call here is a slow boot.
+    pub drop_snapshots: Vec<SnapshotDrop>,
+    /// `snap-*.bin.tmp` files a killed snapshot writer abandoned. Not
+    /// snapshots: a scratch file is a write that never published, so it
+    /// is neither listed as one nor backed up.
+    pub prune_snapshot_tmp: Vec<PathBuf>,
+    /// Dead `ops/` index caches — the pre-dotfile generation and the
+    /// write temps a killed process abandoned.
+    ///
+    /// The **only** entry in this plan that writes inside `ops/`, which
+    /// `doctor` otherwise promises never to touch. The exception is
+    /// narrow and announced: these are pure caches rebuilt from the
+    /// `.jsonl` beside them, never an op, and `OpsDirGuard` is told about
+    /// them explicitly rather than discovering the deletion afterwards.
+    /// They are also the one deletion here that is not backed up — see
+    /// `index_sidecars`.
+    pub prune_index_sidecars: Vec<IndexSidecarDrop>,
     /// `.outl/repair-backup/` generations past **both** prune guards.
     ///
     /// Collected here rather than discovered inside [`run`] so the prune
@@ -200,7 +227,9 @@ impl Plan {
     pub fn is_empty(&self) -> bool {
         self.reproject.is_empty()
             && self.rebuild_sidecar.is_empty()
-            && self.corrupt_snapshots.is_empty()
+            && self.drop_snapshots.is_empty()
+            && self.prune_snapshot_tmp.is_empty()
+            && self.prune_index_sidecars.is_empty()
             && self.prune_backups.is_empty()
             && self.prune_bindings.is_empty()
             && self.prune_scratch.is_empty()
@@ -247,11 +276,19 @@ impl Plan {
                 page.path.display()
             ));
         }
-        for path in &self.corrupt_snapshots {
+        for drop in &self.drop_snapshots {
+            out.push(drop.describe());
+        }
+        for path in &self.prune_snapshot_tmp {
             out.push(format!(
-                "delete corrupt snapshot {} (pure cache, rebuilt on next boot)",
-                path.display()
+                "delete the abandoned snapshot scratch file {} (a snapshot write that was \
+                 killed before it published, untouched for over {} hour(s))",
+                path.display(),
+                gc::STALE_TMP_TTL.as_secs() / 3_600
             ));
+        }
+        for drop in &self.prune_index_sidecars {
+            out.push(drop.describe());
         }
         for path in &self.prune_backups {
             out.push(format!(
@@ -297,7 +334,8 @@ impl Plan {
 #[derive(Debug, Clone, Serialize)]
 pub struct RepairAction {
     /// `reproject` | `rebuild_sidecar` | `delete_snapshot` |
-    /// `prune_backup` | `prune_binding` | `prune_scratch`.
+    /// `prune_snapshot_tmp` | `prune_index_sidecar` | `prune_backup` |
+    /// `prune_binding` | `prune_scratch`.
     pub kind: String,
     /// Path the action targeted.
     pub path: String,
@@ -325,7 +363,13 @@ pub struct RepairReport {
 /// Never returns `Err`: a failure on one file is recorded in its
 /// [`RepairAction`] and the pass continues, because a permission error
 /// on one page must not block re-projecting the other 200.
-pub(super) fn run(ws: &Workspace, root: &Path, plan: &Plan, store: &DeviceStore) -> RepairReport {
+pub(super) fn run(
+    ws: &Workspace,
+    root: &Path,
+    actor: ActorId,
+    plan: &Plan,
+    store: &DeviceStore,
+) -> RepairReport {
     let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
     let backup_dir = root.join(".outl").join("repair-backup").join(&stamp);
     let mut actions: Vec<RepairAction> = Vec::new();
@@ -336,9 +380,19 @@ pub(super) fn run(ws: &Workspace, root: &Path, plan: &Plan, store: &DeviceStore)
     for page in &plan.rebuild_sidecar {
         actions.push(rebuild_sidecar(ws, root, &backup_dir, page));
     }
-    for path in &plan.corrupt_snapshots {
-        actions.push(delete_snapshot(root, &backup_dir, path));
+    actions.extend(snapshots::drop_snapshots(
+        root,
+        &backup_dir,
+        actor,
+        &plan.drop_snapshots,
+    ));
+    for path in &plan.prune_snapshot_tmp {
+        actions.push(snapshots::prune_snapshot_tmp(path));
     }
+    actions.extend(index_sidecars::drop_index_sidecars(
+        &root.join("ops"),
+        &plan.prune_index_sidecars,
+    ));
     for binding in &plan.prune_bindings {
         actions.push(prune_binding(store, &backup_dir, binding));
     }
@@ -457,39 +511,6 @@ fn rebuild_sidecar(
     match outl_actions::apply_page_md_with_sidecar(ws, root, page_root) {
         Ok(_) => action(true, format!("backup: {backed_up}")),
         Err(e) => action(false, format!("{e}")),
-    }
-}
-
-/// Move a corrupt snapshot into the backup dir instead of unlinking it,
-/// so "delete" stays reversible even for a file we believe is garbage.
-fn delete_snapshot(root: &Path, backup_dir: &Path, path: &Path) -> RepairAction {
-    match backup(root, backup_dir, path) {
-        Ok(Some(dest)) => match std::fs::remove_file(path) {
-            Ok(()) => RepairAction {
-                kind: "delete_snapshot".to_string(),
-                path: path.display().to_string(),
-                ok: true,
-                detail: format!("backup: {}", dest.display()),
-            },
-            Err(e) => RepairAction {
-                kind: "delete_snapshot".to_string(),
-                path: path.display().to_string(),
-                ok: false,
-                detail: format!("backed up but could not delete: {e}"),
-            },
-        },
-        Ok(None) => RepairAction {
-            kind: "delete_snapshot".to_string(),
-            path: path.display().to_string(),
-            ok: false,
-            detail: "already gone".to_string(),
-        },
-        Err(e) => RepairAction {
-            kind: "delete_snapshot".to_string(),
-            path: path.display().to_string(),
-            ok: false,
-            detail: format!("backup failed, file left alone: {e}"),
-        },
     }
 }
 
@@ -664,7 +685,11 @@ fn prune_backups(selected: &[PathBuf]) -> Vec<RepairAction> {
 
 /// Copy `file` into `backup_dir`, preserving its path relative to the
 /// workspace root. `Ok(None)` when there was nothing to copy.
-fn backup(root: &Path, backup_dir: &Path, file: &Path) -> std::io::Result<Option<PathBuf>> {
+pub(super) fn backup(
+    root: &Path,
+    backup_dir: &Path,
+    file: &Path,
+) -> std::io::Result<Option<PathBuf>> {
     if !file.exists() {
         return Ok(None);
     }

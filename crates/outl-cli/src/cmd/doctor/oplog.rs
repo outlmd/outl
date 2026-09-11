@@ -15,8 +15,8 @@
 //!    the framing whose defects we must name; the private helper isn't
 //!    reachable from this crate and the doctor needs per-line
 //!    positions the storage layer never surfaces.
-//! 2. [`check_snapshots`] — `.outl/snapshots/snap-<actor>.bin` decode +
-//!    hash verification via [`SnapshotBody::decode`].
+//! 2. [`check_snapshots`] — `.outl/snapshots/`, reported through
+//!    `outl_core::snapshot::gc`, which owns the verdict.
 //! 3. [`check_offset_indexes`] — every offset in `.ops-<actor>.idx` must
 //!    point at the first byte of a real record in its `.jsonl`.
 
@@ -25,10 +25,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use outl_core::id::ActorId;
 use outl_core::op::LogOp;
-use outl_core::snapshot::SnapshotBody;
-use outl_core::storage::{ActorIndex, OffsetIndex};
+use outl_core::snapshot::gc::{self, SnapshotVerdict};
+use outl_core::storage::sidecar::{self, SidecarKind};
+use outl_core::storage::{OffsetIndex, PageScope};
 
+use super::repair::SnapshotDrop;
 use super::Builder;
 
 /// Cap on how many individual bad lines we name per file. A file that
@@ -289,99 +292,120 @@ fn classify_record(raw: &[u8]) -> LineVerdict {
     }
 }
 
-/// Verify `.outl/snapshots/snap-*.bin`.
+/// Report `.outl/snapshots/`, through the GC that owns the verdict.
 ///
-/// A snapshot is a pure boot cache: a bad one is never fatal, it just
-/// means the next boot pays a full op-log replay. Reported as a warning
-/// and offered to `--repair` for deletion.
+/// **One owner.** `outl_core::snapshot::gc::survey` decides which
+/// snapshots the boot selector can still reach; this function only
+/// phrases the answer. It used to have its own read-and-decode loop and
+/// its own notion of "corrupt", which made it a second opinion about a
+/// fact the boot path also computes — the drift this repo keeps paying
+/// to remove. See [RFC 0258](../../../../../docs/rfcs/0258-snapshot-cache-lifecycle.md).
+///
+/// **Nothing here is at stake but boot time.** The op log is the source
+/// of truth; a snapshot is a pure cache, so the worst a wrong verdict
+/// costs is one full replay. That is why the report says so on every
+/// line: a user reading "deleting 3 files" about their notes directory
+/// should not have to work out whether their notes are in them.
 ///
 /// **"I could not read it" is not "I read it and it is garbage."** A
 /// permission error, a busy file, a half-arrived sync, an `EIO` off a
 /// flaky disk — none of those say anything about the bytes, and
-/// `--repair` deletes for real. Only a snapshot we read end-to-end and
-/// then failed to decode has earned that. An unreadable one is reported
-/// and left exactly where it is; the next boot ignores it anyway, so
-/// leaving it costs nothing but a replay.
-///
-/// Returns the paths of the snapshots that decoded incorrectly — never
-/// the ones that merely could not be read.
-pub(super) fn check_snapshots(b: &mut Builder, root: &Path) -> Vec<PathBuf> {
+/// `--repair` deletes for real. That case is
+/// [`SnapshotVerdict::Inconclusive`] and is reported and left exactly
+/// where it is.
+pub(super) fn check_snapshots(b: &mut Builder, root: &Path, actor: ActorId) -> SnapshotFindings {
     let dir = root.join(".outl").join("snapshots");
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            b.info("no snapshot yet — boot does a full op-log replay (correct, just slower)");
-            return Vec::new();
-        }
+    let survey = match gc::survey(&dir, actor) {
+        Ok(survey) => survey,
         Err(e) => {
             b.warn(format!("could not read {}: {e}", dir.display()));
-            return Vec::new();
+            return SnapshotFindings::default();
         }
     };
 
-    let mut good = 0usize;
-    let mut corrupt = Vec::new();
-    let mut unreadable = 0usize;
-    let mut stale_tmp = 0usize;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if name.ends_with(".bin.tmp") {
-            stale_tmp += 1;
-            continue;
-        }
-        if !name.starts_with("snap-") || !name.ends_with(".bin") {
-            continue;
-        }
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                // Deliberately NOT pushed onto `corrupt`: we never saw
-                // the bytes, so "delete it" would be a guess with a
-                // `remove_file` behind it.
-                unreadable += 1;
+    let mut findings = SnapshotFindings::default();
+    let mut seen = 0usize;
+    for entry in &survey.entries {
+        seen += 1;
+        let path = entry.path.display().to_string();
+        let bytes = std::fs::metadata(&entry.path).map(|m| m.len()).unwrap_or(0);
+        match entry.verdict {
+            SnapshotVerdict::Own => b.ok(format!(
+                "{path}: snapshot decodes, hash verified ({bytes} bytes) — this device's own \
+                 boot cache, read first on every boot"
+            )),
+            SnapshotVerdict::Selected => b.ok(format!(
+                "{path}: snapshot decodes, hash verified ({bytes} bytes) — the candidate a \
+                 boot with no own snapshot would adopt"
+            )),
+            // Not a warning: nothing is wrong, there is disk to reclaim.
+            // Counting it as a defect would make a healthy workspace read
+            // as a sick one every time the background writer publishes.
+            SnapshotVerdict::Superseded => {
+                b.info(format!(
+                    "{path}: snapshot superseded ({bytes} bytes) — it decodes, but another \
+                     snapshot outranks it, so the boot selector can never choose it again. \
+                     Pure cache, no notes are in it; `--repair` reclaims the space"
+                ));
+                findings.drops.push(SnapshotDrop {
+                    path: entry.path.clone(),
+                    verdict: entry.verdict,
+                    bytes,
+                });
+            }
+            SnapshotVerdict::Unusable => {
                 b.warn(format!(
-                    "{}: snapshot could not be read ({e}) — left alone, because an unreadable \
-                     file is not a proven-bad one. Boot ignores it and does a full op-log \
-                     replay; fix the permissions or the disk and re-run",
-                    path.display()
+                    "{path}: snapshot unusable ({bytes} bytes) — read end to end, and this \
+                     build cannot decode it. Boot falls back to a full op-log replay. No data \
+                     is at risk; `--repair` deletes it so it is rebuilt on next boot"
                 ));
-                continue;
+                findings.drops.push(SnapshotDrop {
+                    path: entry.path.clone(),
+                    verdict: entry.verdict,
+                    bytes,
+                });
             }
-        };
-        match SnapshotBody::decode(&bytes) {
-            Ok(body) => {
-                good += 1;
-                b.ok(format!(
-                    "{}: snapshot decodes, hash verified ({} nodes, {} bytes)",
-                    path.display(),
-                    body.nodes.len(),
-                    bytes.len()
-                ));
-            }
-            Err(e) => {
-                b.warn(format!(
-                    "{}: snapshot unusable ({e}) — boot falls back to a full op-log replay. \
-                     No data is at risk; `--repair` deletes it so it is rebuilt on next boot",
-                    path.display()
-                ));
-                corrupt.push(path);
-            }
+            // Deliberately NOT offered for deletion: either we never saw
+            // the bytes, or a newer build wrote them. Both are "I cannot
+            // tell", and `--repair` has a `remove_file` behind it.
+            SnapshotVerdict::Inconclusive => b.warn(format!(
+                "{path}: snapshot could not be judged — it could not be read, or it was \
+                 written by a newer build. Left alone, because a file we could not read is \
+                 not a file we read and proved bad. Boot ignores it and does a full op-log \
+                 replay; fix the permissions or the disk and re-run"
+            )),
         }
     }
 
-    if stale_tmp > 0 {
+    // Abandoned scratch files. `write_to_disk` composes every snapshot in
+    // one of these and publishes with `rename`, so a killed process
+    // leaves one behind and nothing ever removed it — the old check
+    // called them "harmless" and walked on. A fresh one is silent on
+    // purpose: it is most likely a co-resident process fsyncing a
+    // multi-MB body right now, which is not a finding.
+    findings.stale_tmp = gc::stale_tmp(&dir, gc::STALE_TMP_TTL).unwrap_or_default();
+    for path in &findings.stale_tmp {
+        let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         b.info(format!(
-            "{stale_tmp} leftover `snap-*.bin.tmp` in {} — a snapshot write was interrupted; harmless",
-            dir.display()
+            "{}: leftover snapshot scratch file ({bytes} bytes) — a snapshot write that was \
+             killed before it published. `--repair` deletes it",
+            path.display()
         ));
     }
-    if good == 0 && corrupt.is_empty() && unreadable == 0 {
+
+    if seen == 0 {
         b.info("no snapshot yet — boot does a full op-log replay (correct, just slower)");
     }
-    corrupt
+    findings
+}
+
+/// What [`check_snapshots`] found for the repair plan.
+#[derive(Debug, Default)]
+pub(super) struct SnapshotFindings {
+    /// Snapshots the GC judged reachable-by-nobody or undecodable.
+    pub drops: Vec<SnapshotDrop>,
+    /// `snap-*.bin.tmp` files a killed writer abandoned.
+    pub stale_tmp: Vec<PathBuf>,
 }
 
 /// Cross-check every `.ops-<actor>.idx` against the `.jsonl` it indexes.
@@ -407,7 +431,7 @@ pub(super) fn check_offset_indexes(b: &mut Builder, ops_dir: &Path, scans: &[(Pa
         else {
             continue;
         };
-        let idx_path = ActorIndex::sidecar_path(ops_dir, actor);
+        let idx_path = sidecar::path_for(ops_dir, actor, &PageScope::Global, SidecarKind::Offset);
         let index = match OffsetIndex::load(&idx_path) {
             // `load` folds a malformed file into `Ok(None)` on purpose
             // (the caller rebuilds). Absent and malformed are the same

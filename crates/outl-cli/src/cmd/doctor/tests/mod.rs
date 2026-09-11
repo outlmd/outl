@@ -11,7 +11,10 @@
 //! write while it looks.
 
 mod device_store;
+mod index_sidecars;
 mod safety;
+mod snapshots;
+mod volume;
 
 use super::*;
 use crate::workspace_layout::{init, Paths};
@@ -112,18 +115,56 @@ fn collect_with_scope(
     scope: RepairScope,
 ) -> Result<DoctorReport, ApiError> {
     let store_dir = tempfile::TempDir::new().expect("temp device store");
+    collect_with_store(
+        path,
+        do_repair,
+        scope,
+        &outl_core::device::DeviceStore::at(store_dir.path()),
+    )
+}
+
+/// A doctor run against a device store **the caller owns**.
+///
+/// Needed wherever a test cares about the actor the doctor resolves. A
+/// fresh store mints a fresh actor (`resolve_device_actor` only adopts
+/// `config.toml`'s when `actor_claimed_by` matches the store's machine
+/// id, which a `TempDir` store never does), so two `collect` calls that
+/// each build their own store are two different devices. Anything about
+/// `snap-<own actor>.bin` is unanswerable under that.
+fn collect_with_store(
+    path: &Path,
+    do_repair: bool,
+    scope: RepairScope,
+    store: &outl_core::device::DeviceStore,
+) -> Result<DoctorReport, ApiError> {
     super::collect_internal(
         path,
         true,
         do_repair,
         scope,
-        &outl_core::device::DeviceStore::at(store_dir.path()),
+        store,
         // The battery is not exercising `[theme]` validation — that check
         // has its own unit tests in `doctor::theme`. A default `ThemeCfg`
         // (no `preset_dark`) is never flagged, so it stays inert here
         // rather than reading the developer's real global config.
         &outl_config::ThemeCfg::default(),
     )
+}
+
+/// Backdate a path's mtime by `days`, so a TTL can be exercised without
+/// sleeping through it.
+///
+/// Shared: the backup-generation prune and the snapshot scratch-file
+/// prune both have one, and they must agree about what "old" means.
+fn backdate(dir: &Path, days: u64) {
+    let when = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 60 * 60);
+    let times = std::fs::FileTimes::new()
+        .set_accessed(when)
+        .set_modified(when);
+    std::fs::File::open(dir)
+        .expect("open the path to backdate")
+        .set_times(times)
+        .expect("backdate");
 }
 
 /// Every file under `dir`, by relative path and content.
@@ -269,8 +310,9 @@ fn a_corrupt_snapshot_is_flagged_and_repair_moves_it_to_the_backup() {
         report
             .repairable
             .iter()
-            .any(|r| r.contains("delete corrupt snapshot")),
-        "the corrupt snapshot must be listed as repairable: {:?}",
+            .any(|r| r.contains("delete boot snapshot") && r.contains("unusable")),
+        "an undecodable snapshot must be listed as repairable, and named as unusable \
+         rather than as something with notes in it: {:?}",
         report.repairable
     );
 
@@ -323,7 +365,8 @@ fn a_valid_snapshot_passes() {
 #[test]
 fn an_offset_index_pointing_past_eof_is_flagged() {
     use outl_core::hlc::HlcGenerator;
-    use outl_core::storage::{ActorIndex, OffsetIndex};
+    use outl_core::storage::sidecar::{self, SidecarKind};
+    use outl_core::storage::{OffsetIndex, PageScope};
 
     let (_dir, root, paths) = fresh();
     seed_page(&root, "notes", &["hello"]);
@@ -333,7 +376,12 @@ fn an_offset_index_pointing_past_eof_is_flagged() {
     let mut index = OffsetIndex::new();
     index.insert(HlcGenerator::new(actor).next(), 999_999_999);
     index
-        .save(&ActorIndex::sidecar_path(&paths.ops, actor))
+        .save(&sidecar::path_for(
+            &paths.ops,
+            actor,
+            &PageScope::Global,
+            SidecarKind::Offset,
+        ))
         .expect("write idx");
 
     let report = collect(&root, false).expect("doctor runs");
@@ -347,7 +395,8 @@ fn an_offset_index_pointing_past_eof_is_flagged() {
 #[test]
 fn an_offset_index_pointing_mid_line_is_flagged() {
     use outl_core::hlc::HlcGenerator;
-    use outl_core::storage::{ActorIndex, OffsetIndex};
+    use outl_core::storage::sidecar::{self, SidecarKind};
+    use outl_core::storage::{OffsetIndex, PageScope};
 
     let (_dir, root, paths) = fresh();
     seed_page(&root, "notes", &["hello"]);
@@ -361,7 +410,12 @@ fn an_offset_index_pointing_mid_line_is_flagged() {
     index.insert(HlcGenerator::new(actor).next(), 3);
     assert!(size > 3, "the seeded log must be longer than 3 bytes");
     index
-        .save(&ActorIndex::sidecar_path(&paths.ops, actor))
+        .save(&sidecar::path_for(
+            &paths.ops,
+            actor,
+            &PageScope::Global,
+            SidecarKind::Offset,
+        ))
         .expect("write idx");
 
     let report = collect(&root, false).expect("doctor runs");
