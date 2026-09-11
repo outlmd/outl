@@ -309,7 +309,7 @@ The expected per-edit cycle:
   When it fires, invoke the `refactor-architect` agent to propose a split.
   It covered only `.rs` until 2026-09, which is why the largest files in the repo are frontend ones it never looked at.
 
-  **A hook only runs when Claude Code is the editor.** A human in an editor, a Copilot PR and a dependabot bump all bypass it, so the same limit is enforced for everyone in CI by `scripts/check-file-size.sh` (the `hygiene` job).
+  **A hook only runs when Claude Code is the editor.** A human in an editor, a Copilot PR and a dependabot bump all bypass it, so the same limit is enforced for everyone in CI by `scripts/check-file-size.sh` (the `hygiene` job in `hygiene.yml`).
   That runs as a **ratchet**, not a cliff: the files already past the threshold are frozen with their current line counts in `.github/file-size-baseline.txt`, and the job fails only when a file **not** in the baseline crosses 600 lines, or one in it grows past its recorded number.
   Large files therefore stay editable and the ceiling only moves down.
   After a split lowers a count, re-record it with `scripts/check-file-size.sh --update`; the script refuses to write a baseline from a scan that matched nothing, so a broken checkout cannot silently empty it.
@@ -675,7 +675,8 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package) and a **`hygiene`** job (`scripts/check-file-size.sh` + `scripts/check-docs-index.sh`). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
+| [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet) + `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
 | [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-md`, plus weekly cron | Criterion (small/medium/large) on every PR; xlarge + CLI hyperfine on cron / manual dispatch. Artifacts retained 14–30 days. | No (informational) |
@@ -702,7 +703,7 @@ Sizes as of the Blacksmith migration, from a full run of every workflow:
 | Job | SKU | Why |
 |---|---|---|
 | `ci.yml::fmt` | 2 vCPU | rustfmt compiles nothing (16s) |
-| `mobile.yml::frontend`, `ci.yml::frontend`, `ci.yml::hygiene` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU; the `ci.yml` pair is ~4s of vitest and a line-count scan, with no compilation at all |
+| `mobile.yml::frontend`, `ci.yml::frontend`, `hygiene.yml::hygiene` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU; the other two are ~4s of vitest and a line-count scan, with no compilation at all |
 | `release.yml` orchestration (`prepare`, `tag`, `create_release`, `publish_*`, `update_tap`), `cleanup-tags.yml` | 2 vCPU | shell + `gh` calls, no compilation |
 | `ci.yml::docs`, `ci.yml::sync`, `bench.yml` | 4 vCPU | doc/proptest jobs already finish in ~100s; bench stays fixed so numbers remain comparable run over run |
 | `ci.yml::clippy`, `ci.yml::test (linux)`, `desktop.yml::check`, release builds | 8 vCPU | measured 71–76% average CPU on 4 vCPU with 2.6–4.7 GB of 16 GB used and zero OOM: CPU-bound, so more cores cut wall clock at roughly flat billing |

@@ -90,6 +90,7 @@ Silently changing pinned behaviour is the regression this process exists to catc
 | [0260](0260-tree-to-md-executor.md) | The safe `tree → .md` re-projection existed and nothing ever ran it | Draft | #166, #210 |
 | [0263](0263-create-is-invertible.md) | `Op::Create` records whether it created anything | Draft | — |
 | [0265](0265-index-sidecar-lifecycle.md) | A rename is a boundary crossing: 134MB of index sidecars nothing reads, still syncing | Draft | #110 |
+| [0266](0266-measure-before-you-believe.md) | The most dangerous stale fact is one that was true | Informational | — |
 
 ## How the retroactive set was chosen
 
