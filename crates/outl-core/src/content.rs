@@ -37,7 +37,6 @@
 
 use crate::id::NodeId;
 use crate::log::OpLog;
-use crate::op::Op;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use yrs::updates::decoder::Decode;
@@ -109,18 +108,31 @@ fn doc_string(doc: &Doc) -> String {
     text.get_string(&txn)
 }
 
-/// Rebuild a node's block text by replaying its `Edit` updates from `log`
-/// through a fresh `Doc`. The lazy read-path twin of the boot pass this
-/// replaces: Yrs is a CRDT, so this produces byte-identical text to the
-/// old eager materialization regardless of replay order (#179). `log`
-/// must carry the node's complete `Edit` history — the full-replay boot
-/// path guarantees that (`log_complete == true`).
+/// Rebuild a node's `Doc` by replaying its `Edit` updates from `log`.
+///
+/// **Routes through [`OpLog::edit_updates`], never a log scan.** That
+/// distinction is the whole point of this function existing: the index
+/// makes it `O(edits-of-node)` where the obvious
+/// `log.iter().filter_map(..)` is `O(total ops)` — 217,811 on the
+/// maintainer's workspace, per block.
+///
+/// This is the **single** owner of "replay one block's history into a
+/// `Doc`". It used to be written out twice, in
+/// [`materialize_text_from_log`] and in [`ContentStore::ensure_doc`], and
+/// only the first was ever fixed — see the note on `ensure_doc`.
+///
+/// Yrs is a CRDT, so the result is byte-identical regardless of replay
+/// order (#179). `log` must carry the node's complete `Edit` history; the
+/// full-replay boot path guarantees that (`log_complete == true`), and
+/// the snapshot-boot path routes through `Workspace::ensure_doc_for_edit`
+/// instead, which loads the history from storage first.
+fn doc_from_log(node: NodeId, log: &OpLog) -> Doc {
+    build_doc(log.edit_updates(node))
+}
+
+/// Rebuild a node's block text by replaying its `Edit` updates from `log`.
 fn materialize_text_from_log(node: NodeId, log: &OpLog) -> String {
-    let doc = build_doc(log.iter().filter_map(|logged| match &logged.op {
-        Op::Edit { node: n, text_op } if *n == node => Some(text_op.as_slice()),
-        _ => None,
-    }));
-    doc_string(&doc)
+    doc_string(&doc_from_log(node, log))
 }
 
 /// Bounded LRU of live Yrs documents.
@@ -262,19 +274,28 @@ impl ContentStore {
     /// Ensure `node`'s `Doc` is resident in the cache, rebuilding it from
     /// the block's `Edit` ops in `log` if it was evicted (or never loaded).
     /// No-op when already cached.
+    /// # This function is why the bug class needs a guard
+    ///
+    /// It used to scan the **whole** log (`log.iter().filter_map(..)`) to
+    /// find one node's edits. Its comment justified that by avoiding a
+    /// transient `Vec<Vec<u8>>` clone — true, and beside the point: the
+    /// cost was the `O(total ops)` scan, not the allocation.
+    ///
+    /// `block_text` had the identical defect and was fixed in #179 by
+    /// routing through [`OpLog::edit_updates`]. This sibling was not,
+    /// so the first keystroke on any cold block after a full-replay boot
+    /// paid a scan of all 217,811 ops on the maintainer's workspace —
+    /// on the foreground thread, per block.
+    ///
+    /// Both now go through [`doc_from_log`], which is the single owner.
+    /// A fix that leaves the sibling armed is root `CLAUDE.md`
+    /// invariant 9's general rule in miniature: the problem moves, it
+    /// does not leave.
     fn ensure_doc(&mut self, node: NodeId, log: &OpLog) {
         if self.cache.contains(node) {
             return;
         }
-        // Replay the block's edits straight from the log. `log` is a
-        // separate borrow from `self.cache`, so we can hand `build_doc`
-        // borrowed slices instead of cloning the block's whole history
-        // into a transient `Vec<Vec<u8>>` first.
-        let doc = build_doc(log.iter().filter_map(|logged| match &logged.op {
-            Op::Edit { node: n, text_op } if *n == node => Some(text_op.as_slice()),
-            _ => None,
-        }));
-        self.cache.insert(node, doc);
+        self.cache.insert(node, doc_from_log(node, log));
     }
 
     /// Merge a raw Yrs update into a node's live `Doc` and refresh its
