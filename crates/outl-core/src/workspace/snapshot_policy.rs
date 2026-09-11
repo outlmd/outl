@@ -122,13 +122,28 @@ impl SnapshotPolicy {
     /// attribute the cost before letting it decide). The sweep runs even
     /// when the write failed — the directory's existing garbage does not
     /// stop being garbage.
+    ///
+    /// Workers are **chained**, not parallel: the new one first joins
+    /// every worker still in flight, so publications for one actor land
+    /// in the order they were requested. Two writers for the same actor
+    /// share one `snap-<actor>.bin.tmp`, so running them side by side
+    /// let a slower older body rename over a newer one — or truncate the
+    /// scratch file the other was still writing — and let the sweep judge
+    /// a snapshot that had not finished landing. The join happens on the
+    /// worker, so the caller still returns immediately.
     pub(crate) fn spawn_write(&mut self, actor: ActorId, body: SnapshotBody) {
         let Some(dir) = self.dir.clone() else {
             return;
         };
+        let predecessors = std::mem::take(&mut self.workers);
         let handle = std::thread::Builder::new()
             .name(format!("outl-snapshot-{actor}"))
             .spawn(move || {
+                for h in predecessors {
+                    if let Err(e) = h.join() {
+                        warn!("snapshot worker panicked: {e:?}");
+                    }
+                }
                 if let Err(e) = snapshot::write_to_disk(&dir, &body) {
                     warn!("background snapshot write failed (non-fatal): {e}");
                 }
@@ -166,7 +181,7 @@ mod tests {
     use super::SnapshotPolicy;
     use crate::hlc::Hlc;
     use crate::id::ActorId;
-    use crate::snapshot::{write_to_disk, SnapshotBody};
+    use crate::snapshot::{read_from_disk, write_to_disk, SnapshotBody};
     use std::collections::{BTreeMap, BTreeSet};
     use tempfile::TempDir;
 
@@ -214,6 +229,35 @@ mod tests {
         assert!(
             dir.join(format!("snap-{ahead}.bin")).exists(),
             "the one a boot after an actor rotation would adopt survives"
+        );
+    }
+
+    /// Two writers for one actor share one `snap-<actor>.bin.tmp`. Run
+    /// side by side, the slower older body could rename over the newer
+    /// one; chained, the last request is the one on disk when the queue
+    /// drains.
+    #[test]
+    fn later_snapshots_publish_after_earlier_ones() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".outl").join("snapshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = ActorId::new();
+
+        let mut p = SnapshotPolicy::new(Some(dir.clone()));
+        for high in 1..=20u64 {
+            p.spawn_write(me, body_at(me, high));
+        }
+        p.wait();
+
+        let on_disk = read_from_disk(&dir, me).unwrap().expect("own snapshot");
+        assert_eq!(
+            on_disk.cutoff.get(&me).map(|h| h.physical_ms),
+            Some(20),
+            "the last requested body is the one published"
+        );
+        assert!(
+            !dir.join(format!("snap-{me}.bin.tmp")).exists(),
+            "no scratch file left behind"
         );
     }
 
