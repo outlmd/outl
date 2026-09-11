@@ -46,7 +46,7 @@ pub(crate) async fn reload_workspace(state: State<'_, AppState>) -> Result<(), S
         move || -> Result<outl_core::workspace::Workspace, String> {
             let engine = outl_actions::SyncEngine::new(storage_root, hlc.actor());
             let mut fresh = engine
-                .reload_workspace()
+                .reload_workspace(&hlc)
                 .map_err(|e| format!("reload workspace: {e}"))?;
             // NOTE: orphan-`.md` reconcile is a BOOT/recovery concern (it runs
             // md → ops and desync recovery, both of which MUTATE the op log). It

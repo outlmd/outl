@@ -133,6 +133,35 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         return;
     }
     let peer_node_id = msg.delivered_from;
+
+    // Authorize the node we are about to DIAL, not just the ones that dial us.
+    //
+    // Authorization was serve-side only, and a sync is bidirectional: the
+    // initiator reads the responder's ops blob and ingests it. So an announce
+    // from any device on the topic — a revoked one included, since the topic is
+    // `blake3(workspace_id)` and a revoked device still knows that id — made
+    // this device dial it and **accept ops from it**. Revocation stopped the
+    // peer pushing; it did nothing about the peer being pulled from.
+    //
+    // `delivered_from` is the neighbour we heard the message from, which gossip
+    // may have relayed, so this is not "the author is approved" — it is "we only
+    // pull from a device we approved", which is the property that matters. A
+    // relayed announce from an unlisted author still reaches us through a listed
+    // neighbour that holds the same ops.
+    //
+    // The announce's own `workspace_id` line (`parts[0]`) is deliberately NOT a
+    // gate. It is unauthenticated text with no bearing on whether the dial is
+    // safe, the responder validates the id we send it, and older clients put a
+    // page slug in that field — so gating on it would silently drop a
+    // mixed-version mesh to catch-up latency in exchange for no security at all.
+    if let Err(refusal) = crate::authz::authorize_blocking(&ctx.peers_path, peer_node_id) {
+        debug!(
+            "gossip: ignoring an announce from {} ({refusal:?})",
+            peer_node_id.fmt_short()
+        );
+        return;
+    }
+
     let conns = ctx.conns.clone();
     let wr = ctx.workspace_root.clone();
     let wid = ctx.workspace_id.clone();

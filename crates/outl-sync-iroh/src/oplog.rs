@@ -175,6 +175,24 @@ impl OpsDirAppendLock {
     }
 }
 
+/// Does `file` end in an un-terminated (torn) line, so the next append must
+/// write a separating newline first?
+///
+/// `false` for an empty / absent file (nothing to tear) and for one already
+/// ending in `\n`. Leaves the write position alone: the caller's handle is
+/// `O_APPEND`, so the seek here only moves the READ cursor.
+fn needs_tail_separator(file: &mut std::fs::File) -> std::io::Result<bool> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    if file.seek(SeekFrom::End(0))? == 0 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    Ok(last[0] != b'\n')
+}
+
 /// Blocking half of the ingest: dedup against the on-disk log and append.
 ///
 /// Runs under BOTH locks — the caller holds the in-process [`AppendLock`],
@@ -210,7 +228,37 @@ fn write_deduped_batch(
 
     let mut per_actor: HashMap<ActorId, Vec<u8>> = HashMap::new();
     let mut applied = 0usize;
+    let mut foreign_claims = 0usize;
     for op in candidates {
+        // A peer may not write OUR actor's file. This mirrors
+        // `outl_core::storage::jsonl::append`'s `append_ops_inner`, which
+        // rejects a whole batch carrying a foreign-actor op; that guard is
+        // `pub(super)` and reachable only through `Storage::append_ops`, which
+        // writes solely to `own_ops_path()` — so ingest, which legitimately
+        // writes OTHER actors' files, cannot call it and has to state the
+        // mirrored rule itself. Same invariant, opposite side of the fence:
+        // there, "only my own actor"; here, "anything but my own actor".
+        //
+        // Two things break without it, and only one is an attack:
+        //
+        // - **Corruption.** `ops-<local>.jsonl` has a single writer by design,
+        //   serialized by `outl-core`'s `ops/.lock-<actor>` — a DIFFERENT lock
+        //   from the `ops/.append.lock` this function holds. An ingest writing
+        //   that file races the local appender with nothing in common to
+        //   serialize them.
+        // - **Silent loss.** The dedup below is `(actor, ts)` and content-blind,
+        //   so an op forged under our actor id pre-claims an HLC slot; our real
+        //   op is then dropped as a duplicate when it is written. The forged
+        //   content wins and the genuine edit disappears with no error anywhere.
+        //
+        // A device that genuinely lost its own `ops-<actor>.jsonl` does not
+        // recover through this path (`outl recover` / the snapshot pull is the
+        // route); silently re-accepting our own actor's history from a peer is
+        // how the loss above gets a legitimate-looking cover story.
+        if op.actor == local_actor {
+            foreign_claims += 1;
+            continue;
+        }
         // Already on disk, or a duplicate earlier in this same batch.
         if !present.insert((op.actor, op.ts)) {
             continue;
@@ -228,13 +276,44 @@ fn write_deduped_batch(
         applied += 1;
     }
 
+    if foreign_claims > 0 {
+        // Loud, not silent: either a peer is misbehaving or a sync path has a
+        // bug, and both are things an operator needs to see. The refusal is
+        // per-op (the rest of the batch still lands) because a peer that
+        // mislabels one op must not be able to stall convergence for everyone.
+        warn!(
+            refused = foreign_claims,
+            actor = %local_actor,
+            "refused {foreign_claims} received op(s) claiming THIS device's actor id — a peer may not write our own op log"
+        );
+    }
+
     for (actor_id, lines) in per_actor {
         let path = ops_dir.join(format!("ops-{actor_id}.jsonl"));
         let mut file = std::fs::OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(&path)
             .with_context(|| format!("open ops file {}", path.display()))?;
+        // Torn-tail self-heal, mirroring `outl_core`'s appender. A previous
+        // append cut off mid-line (crash, power loss, iOS jetsam) leaves a
+        // fragment with no terminator; appending straight after glues our
+        // first op onto it (`{"ts":…partial{"ts":…ours}`) and the reader's
+        // glued-line recovery cannot split a TORN prefix from a good op, so
+        // BOTH are lost. One newline turns that into one unparseable line
+        // (the fragment, already lost) plus our op, parseable.
+        //
+        // `O_APPEND` sends every write to EOF regardless of the read cursor,
+        // so seeking back to probe the last byte cannot disturb where the ops
+        // land. Both append locks are held, so nothing writes between the
+        // probe and the write.
+        if needs_tail_separator(&mut file)
+            .with_context(|| format!("probe tail of {}", path.display()))?
+        {
+            file.write_all(b"\n")
+                .with_context(|| format!("heal torn tail of {}", path.display()))?;
+        }
         file.write_all(&lines)
             .with_context(|| format!("append ops to {}", path.display()))?;
         file.flush()
@@ -290,12 +369,16 @@ pub(crate) async fn ingest_received_ops(
         }
     };
 
-    // HLC sanity gate (pure, no I/O): skip ops more than 24h in the future.
+    // HLC sanity gate (pure, no I/O): skip ops too far in the future.
+    // The window has one owner — `outl_core::hlc::MAX_CLOCK_SKEW_MS` — because
+    // `Workspace::seed_clock` clamps the boot seed to the same number. Two
+    // copies of it means the gate and the clamp can disagree about what
+    // "too far ahead" is, and the seed is the side that persists.
     let mut candidates: Vec<LogOp> = Vec::with_capacity(received.len());
     for op in received {
         let op_ms = op.ts.physical_ms;
         if let Some(now_ms) = now_ms {
-            if op_ms > now_ms + 86_400_000 {
+            if op_ms > now_ms + outl_core::hlc::MAX_CLOCK_SKEW_MS {
                 // Log the op's HLC + actor (its identity) so a dropped op is
                 // traceable, not just "something 25h ahead vanished".
                 warn!(

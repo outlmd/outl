@@ -1136,7 +1136,7 @@ async fn assets_transfer_from_peer() {
         .await
         .expect("bind host endpoint");
     let host_addr = ep_host.addr();
-    let _router_host = test_support::spawn_asset_responder(ep_host, dir_host.path().to_path_buf());
+    let _rh = test_support::spawn_asset_responder(ep_host, dir_host.path(), &[id_joiner.node_id()]);
 
     let ep_joiner = test_support::bind_sync_endpoint(&id_joiner)
         .await
@@ -1187,7 +1187,7 @@ async fn asset_pull_from_peer_without_assets_is_harmless() {
         .await
         .expect("bind host endpoint");
     let host_addr = ep_host.addr();
-    let _router_host = test_support::spawn_asset_responder(ep_host, dir_host.path().to_path_buf());
+    let _rh = test_support::spawn_asset_responder(ep_host, dir_host.path(), &[id_joiner.node_id()]);
 
     let ep_joiner = test_support::bind_sync_endpoint(&id_joiner)
         .await

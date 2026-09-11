@@ -42,6 +42,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod authz;
 mod bind;
 // Only iOS constructs the lookup (`bind::attach_mdns`), but the module compiles
 // everywhere so its tests do: the address parsing and the advertise guard are

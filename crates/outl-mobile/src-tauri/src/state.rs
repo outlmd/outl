@@ -14,6 +14,7 @@ use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
 use outl_sync_iroh::IrohSyncTransport;
+use outl_tauri_shared::workspace_open::WorkspaceGuards;
 use outl_tauri_shared::{AppHost, ProjectionWriter};
 use parking_lot::Mutex;
 
@@ -36,6 +37,15 @@ pub(crate) struct AppState {
     pub(crate) workspace: Arc<Mutex<Option<Workspace>>>,
     pub(crate) hlc: HlcGenerator,
     pub(crate) storage_root: PathBuf,
+    /// Cross-process locks held for the open workspace: the shared
+    /// `<root>/.outl/.lock` and the exclusive `<root>/ops/.lock-<actor>`.
+    /// Written only by
+    /// `outl_tauri_shared::workspace_open::open_workspace_at`; never
+    /// acquire or drop a lock from this crate, `outl-core` owns the
+    /// protocol. Held for the process lifetime here, because mobile
+    /// reopens by relaunching rather than swapping roots in place.
+    #[allow(dead_code)] // Held for its `Drop`, never read.
+    pub(crate) workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
     /// Code-block runtimes built once at startup. Shared between
     /// every `run_code_block` invocation. Kept behind `Arc` so future
     /// `spawn_blocking` callers can clone-and-move without holding

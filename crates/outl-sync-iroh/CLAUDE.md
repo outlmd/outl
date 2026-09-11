@@ -26,6 +26,13 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   The label is **not** `EndpointId`'s `Display`: that is 64 hex chars, one over RFC 6763's 63-byte cap on a DNS label, so publishing it fails outright — and `from_str` accepts both encodings, so the breakage is one-directional and silent.
   `Advertise::No` is for a **transient** endpoint (the `outl peer status` probe): all endpoints share the device node id, so a short-lived one that publishes leaves a dead address for this device on every LAN peer, and multipath stalls on it — a diagnostic that degrades everyone's next dial.
   iOS never needs `com.apple.developer.networking.multicast` and **must not declare it** (a profile without it fails code signing); a fixed, declared Bonjour service type is exempt. What a user can hit there is declining the local-network prompt, which iOS reports to nobody; [`docs/sync.md`](../../docs/sync.md) says where to look.
+- `authz` — the **single owner** of "is this dialer an approved device for this workspace?".
+  One fail-closed `peers.json` read, called by every protocol that touches workspace content: `SYNC_ALPN`, `SNAPSHOT_ALPN`, `ASSET_ALPN`, and the gossip supervisor before it *dials* an announcer.
+  It used to be inline in `SYNC_ALPN`'s handler.
+  That is precisely why the other two shipped the whole materialized graph and every uploaded file to anyone who spoke the ALPN.
+  It is also why an announce from a revoked device still got ops *in*: the authorization existed, and two of three protocols plus the outbound direction never called it.
+  **Never write a second one.**
+  A new protocol on this endpoint calls `authorize_or_close` before its first disk read; the module header says why, and `tests/revocation.rs` fails if one stops.
 - `IrohSyncTransport` — implements `SyncTransport` trait, including the
   gossip-backed `announce_local_ops` hook (sync side → tokio task via an
   `mpsc` channel set up in `start()`) and the `peer_health()` reachability
@@ -58,7 +65,8 @@ Devices live at different paths (desktop `~/outl-p2p`, mobile `…/app.outl.mobi
 - **Gossip topic.**
   `workspace_topic_id` = `blake3(workspace_id)`, so two devices on the same workspace land on the same topic regardless of path.
 - **Sync request.**
-  `SyncRequest.workspace_id` carries the id; `SyncProtocolHandler::serve` **validates it against the local id** (`workspace-mismatch` close) **and checks `remote_id()` is in `peers.json`** (read fresh per connection; `unknown-peer` close).
+  `SyncRequest.workspace_id` carries the id; `SyncProtocolHandler::serve` **validates it against the local id** (`workspace-mismatch` close) **and calls `authz::authorize_or_close`** (`peers.json` read fresh per connection; `unknown-peer` close).
+The gossip supervisor applies the same verdict to the peer it is about to **dial**, since a sync is bidirectional and the initiator ingests the responder's ops.
   Issue #158: the id only proves the peer *thinks* it belongs; a removed device still knows it.
   **The check alone was not a revocation** — the add-only membership merge re-added the peer within one 5s tick and the check then passed honestly.
   `PeersStore::remove` leaves a tombstone (`peers.json` → `revoked`) and `merge_membership` honours it, so removal holds **on this device**; it is never gossiped, so other devices keep syncing with the peer until they remove it too.
@@ -84,78 +92,15 @@ Devices live at different paths (desktop `~/outl-p2p`, mobile `…/app.outl.mobi
 
 ## One endpoint per identity, elected not assigned (load-bearing invariant)
 
-**A device binds at most ONE iroh endpoint at a time, and which process gets it is decided by a lease, not by what kind of client it is.**
+A device binds **one** iroh endpoint, and which process gets it is decided by a **lease**, not by being the GUI.
 
-**Why the route is single:** a second endpoint registering the same secret key *replaces* the active client in the relay's `DashMap<EndpointId, ClientState>`.
-All inbound datagrams then route to the newcomer and the original silently stops receiving (`endpoint.rs::same_endpoint_id_relay` asserts this).
-The demoted endpoint's *outbound* catch-up stalls too for any relay-only peer, because that peer's QUIC return traffic is addressed to the node id and lands on whoever is ACTIVE.
-So a second endpoint breaks the first's sync in **both** directions.
-This is not the "stable, benign hijack" an earlier version of this document claimed; believing it is what let `outl mcp serve` silently kill the desktop's sync to an off-LAN iPhone.
-If the newcomer doesn't accept `SYNC_ALPN` at all, the dialer additionally gets `quinn` `CONNECTION_REFUSED` — the older "connection refused, nothing syncs" bug (a transient status-probe or the GUI's old pairing endpoint stealing the route).
+"Only the GUI binds" was the old policy. It fixed a real collision and assumed a GUI exists, so a headless `outl mcp serve` box synced with nobody, silently ([issue #220](https://github.com/outlmd/outl/issues/220)).
+Replacing it with a lease was right; what the change nearly missed was everyone leaning on "the GUI always wins" — desktop pairing read the transport out of app state, and `outl peer status` was documented as exempt on the grounds that the CLI has no running transport to conflict with, which stopped being true the moment the MCP server could hold the endpoint.
+That is root `CLAUDE.md` invariant 10 in one paragraph: when you change who decides, enumerate who was standing on the old decision.
 
-**The lease (`lease::EndpointLease`).**
-An advisory `flock` on `endpoint.lock`, a **sibling of the identity key**, so the arbitration scope follows the node id automatically (desktop / TUI / CLI / MCP share `~/.outl/`; mobile's sandbox identity never contends).
-`build_transport` (`device.rs`) is the one place that takes it, so no client has to remember to.
-Released by the kernel when the holder exits: no TTL, no stale lease, no daemon.
+The lease lives on the **endpoint thread**, not on the transport. Too late strands the endpoint forever, too early admits a second owner, and both fail silently.
 
-**The endpoint thread owns the lease, and the two ways of getting that wrong are opposite.**
-`start()` moves it into the `outl-iroh-sync` thread, where it is bound first and therefore dropped last, so the claim ends exactly when `run_iroh` returns.
-Leave it on the struct instead and a failed `.bind()` kills the thread while the transport keeps the claim, locking every other process on the device out of an endpoint forever — issue #220 again, this time with a padlock.
-Drop it any earlier and you reopen the reverse.
-`shutdown()` only sends a oneshot.
-A client that drops the transport right after (the desktop, on a workspace swap) would free the lease while `run_iroh` is still closing the endpoint, and a second endpoint could bind onto the same node id in that window.
-A transport that was built but never started still holds it, which is what `outl sync` needs when it exits early.
-
-Two failure modes at acquire time, deliberately opposite (`lease.rs`).
-The lease file failing to **open** (permission, read-only mount) is **fail-closed**: there is no arbiter and no way to know whether someone is already bound, so granting would grant to everyone.
-The file opening but refusing to **lock** (`ENOLCK`, a mount with no locking) is **fail-open** with a warning.
-The file is ours, only the locking is missing, and refusing everyone leaves the device with no endpoint at all, which is the failure the lease exists to remove.
-
-**A refusal says which one it is.**
-`try_acquire` returns `Result<EndpointLease, LeaseDenied>`, and `LeaseDenied` is `HeldByAnotherProcess` or `LeaseFileUnusable { path, error }`; `TransportOutcome::EndpointBusy` and `PeerProbe::EndpointBusy` carry it through to the client.
-The degradation is identical either way (file transport, stay off the wire), so a caller that only degrades ignores the payload.
-Every caller that words this for a **human** must read it.
-"Another outl process holds the endpoint" sends a user whose `~/.outl` is read-only hunting for an `outl mcp serve` that is not running, and no process exiting will ever free a lease nobody took.
-
-**Why a lease and not a policy.**
-The rule used to be "only the GUI binds; the MCP server and the CLI are passive writers".
-That kept two endpoints apart, but it assumed a GUI exists.
-On a headless machine (an agent driving `outl mcp serve`) *nobody* bound an endpoint, so the device's ops never left and no peer's ops ever arrived — silently, with `outl peer status` on the other device just showing "offline" (issue #220).
-The constraint was never "only the GUI"; it is "one live endpoint per identity", and that is a question about **who got here first**, which only a lock can answer.
-Losing the election is a working state, not a failure: the loser runs `outl_actions::FileSyncTransport` and converges through the shared `ops/` dir, which the holder pushes out on its `MAINTENANCE_RESYNC` pass.
-
-**Known limitation: the lease is per device, so it is also per *workspace holder*.**
-The lock is a sibling of `identity.key`, not of the workspace, because the thing being arbitrated is the node id and there is exactly one of those per device.
-A process holding the endpoint for workspace A therefore keeps a process on workspace B off the wire.
-B's ops only leave the machine when a process that *does* hold the endpoint opens B — the shared `ops/` fallback converges B across local processes, not across devices.
-Scoping the lease per workspace would not fix this; it would let two endpoints bind the same node id, which is the exact failure this section exists to prevent.
-The real fix is one endpoint multiplexing every open workspace (the sync protocol already carries `WorkspaceId` per request), and that is a redesign of `engine::run_iroh`, not a change to the lease.
-Until then, a user running two workspaces at once P2P-syncs the one whose process got there first.
-
-Pinned by `tests/endpoint_lease.rs` (`one_process_binds_the_device_endpoint_and_the_next_one_is_told_to_stay_off_the_wire`) plus the unit tests in `lease.rs`.
-
-**Non-sync endpoints are the sharper case, and they take the lease too.**
-An endpoint that does NOT serve `SYNC_ALPN` is worse than a competing one: a dialer routed to it gets `CONNECTION_REFUSED` instead of a working peer.
-The status probe (`status::probe_peers`) is the only one left, and it now asks for the lease like everything else, returning `PeerProbe::EndpointBusy` instead of binding when it loses.
-It used to be exempt on the grounds that "the CLI has no running transport to conflict with".
-That stopped being true the moment `outl mcp serve` could hold the endpoint, and `outl peer status` is precisely the command a user runs to diagnose sync, so it must not be the thing that breaks it.
-
-**Three call sites, three rules:**
-
-1. **Sync endpoint (`engine::run_iroh`)** — the one allowed long-lived endpoint.
-   Router accepts `SYNC_ALPN` + gossip ALPN **+ `PAIRING_ALPN`** (rule 3) **+ `SNAPSHOT_ALPN`** (see "Phase-2 blob transfer"), all advertised in its `.alpns()`.
-   All catch-up / boot / gossip / pairing dials go out through *this* endpoint (the one bound in `run_iroh`); no helper spins up a second.
-2. **Status (`status::probe_peers`)** — binds a transient endpoint, and **only if it wins the lease**.
-   It returns `PeerProbe::EndpointBusy` rather than binding when it loses, so it can never demote the transport it was run to inspect.
-   A client that has its own running transport reads `peer_health()` instead and never calls this at all.
-3. **Pairing** — the split is about **holding an endpoint**, not about being a GUI:
-   - **Transport running** → `IrohSyncTransport::pair_host` / `pair_join` reuse the **live sync endpoint**.
-     The host (accept) side is the `PAIRING_ALPN` router handler (`engine_pairing::PairingProtocolHandler`), armed by `pair_host` via a shared `PairingHub`; the join side dials out on the same endpoint.
-     After a successful pair the new peer is persisted to `peers.json` and an **immediate** `delta_sync` is fired against it (`engine_pairing::drain_pair_completions`) — no app restart, no 8s catch-up wait.
-   - **No transport of our own** (the ephemeral CLI, or a GUI that lost the lease) → `pairing::host_pairing` / `join_pairing` bind a one-shot endpoint and **close it** (`endpoint.close().await`) before returning.
-     This is the **one** sanctioned exception to the lease.
-     It does take the route from the holder for the length of the handshake, and it is worth it because pairing is rare, explicit and short, while the alternative is a user who cannot add a device.
-     Nothing else may bind around the lease.
+**Full mechanism, every failure mode, and what the lease refuses: [`docs/iroh-internals.md`](../../docs/iroh-internals.md#one-endpoint-per-identity-elected-not-assigned).**
 
 ## Status from the transport (`peer_health`)
 
@@ -184,6 +129,17 @@ Rules:
 
 - `delta_sync` (initiator) and `SyncProtocolHandler::serve` (responder) both take/carry the **same** `AppendLock` clone and pass it to `ingest_received_ops`.
   Never add a new writer that appends to `ops-*.jsonl` without taking this lock.
+- **A peer may not write OUR actor's file.**
+  `write_deduped_batch` buckets on the untrusted `op.actor`, and had no guard.
+  `outl_core`'s appender refuses a batch carrying a *foreign* actor's op.
+  The ingest needs the mirror rule (anything but our own) and has to state it itself: that guard is `pub(super)`, reachable only through `Storage::append_ops`, which writes solely to `own_ops_path()`.
+  Two things ride on it.
+  `ops-<local>.jsonl` is serialized by `outl-core`'s `ops/.lock-<actor>`, a **different** lock from the one this path holds.
+  And the dedup key is `(actor, ts)` and content-blind, so a forged op pre-claims an HLC slot and the user's real op is then dropped as a duplicate, silently.
+  Refused per-op (the rest of the batch still lands) and logged.
+- **Torn-tail heal.**
+  A kill mid-`write_all` leaves a fragment with no terminator, and appending straight after glues the next op onto it — the glued-line recovery cannot split a torn prefix from a good op, so BOTH are lost.
+  `outl-core`'s appender heals this; the ingest, a second writer to the same files, did not until `needs_tail_separator`.
 - **Cross-process flock (`ops/.append.lock`).**
   The tokio mutex is per-process, but a device runs several transports at once (GUI + MCP server + `outl sync`), and their interleaved batches produced the timestamp retrocessions behind the watermark-gap bug.
   `write_deduped_batch` therefore also takes a blocking advisory flock on `ops/.append.lock` (same mechanism as `outl-core`'s `ops/.lock-<actor>`), acquired AFTER the in-process lock and held across the whole batch, on a `spawn_blocking` thread.
@@ -193,6 +149,7 @@ Rules:
   A shared `InFlightPeers` set (`try_acquire_in_flight` → RAII `InFlightGuard`) stops boot + catch-up + gossip from launching a second `delta_sync` for a peer that already has one running.
   This cuts redundant relay traffic and the pile-up of writers behind the lock.
   The catch-up loop's per-session `synced` `HashSet` is a separate, complementary dedup (it skips peers already fully reconciled this session).
+- Coverage: `tests/oplog_guards.rs` owns all three (the flock had **none** before — deleting its `acquire` failed nothing).
 - Read-side safety net: `outl-core`'s `JsonlStorage::reload` recovers glued lines that already exist on disk (see `docs/storage.md`).
   That recovers historic corruption; the lock prevents new corruption.
   Both are needed.
@@ -262,38 +219,56 @@ It lives in the same `if !bootstrap_ids.is_empty()` block as the announce drain,
 On receipt, `merge_membership` merges **unknown** peers into `peers.json` through `PeersStore::merge_unknown` (dedup by node_id, ADD-only — an existing entry's locally-captured addr, e.g. from direct pairing, is never clobbered).
 The catch-up loop reloads `peers.json` each tick and dials the freshly-merged peer — **no new dialing machinery**; the append lock / in-flight guard / health map are reused as-is.
 
-**Trust model (load-bearing assumption).**
-Every device subscribed to the workspace gossip topic is **already inside the trust domain**: the topic id is `blake3(workspace_id)` (`workspace_topic_id`), so only devices paired into this mesh by *someone* ever subscribe.
-Membership gossip therefore only ever ADDS reachability for peers **already in the mesh** — it never invites a stranger (a non-member can't reach the topic to inject a peer, and a merged peer was already trusted by the member that gossiped it).
-Conservative guards on the merge:
+**Trust model — the assumption is FALSE, and the hole is open.**
+The argument was: every device on the workspace gossip topic is already inside the trust domain, because the topic id is `blake3(workspace_id)` (`workspace_topic_id`), so only devices paired in by *someone* ever subscribe.
+The workspace id is not a secret.
+It is disclosed to every device that ever paired and sits in plaintext at `.outl/workspace-id`, so a **revoked** device still knows it, can still subscribe, and a gossip message carries no proof of authorship anyone checks.
+
+That makes this merge a way to **manufacture** authorization, not just to discover reachability.
+The tombstone stops a revoked device re-adding *itself*.
+It does nothing about that device generating a fresh key pair and gossiping *that* node id, which has no tombstone, is merged, and is then honestly approved by `authz` for `SYNC_ALPN`, `SNAPSHOT_ALPN` and `ASSET_ALPN` alike.
+Revocation is defeated by one `SecretKey::generate`.
+
+**Pinned, not closed**, by `gossip_can_manufacture_an_authorized_peer` (`tests/membership_trust.rs`, `#[ignore]`d).
+Every candidate fix is a protocol decision, not a local one.
+Filtering on `Message::delivered_from` is partial (gossip relays, so that is the neighbour, not the author) and can starve discovery.
+Signing membership entries needs a wire version and a key-distribution story.
+Splitting "discovered, dialable" from "approved, authorized" changes the `peers.json` schema, `outl peer list` and revocation semantics.
+The module header in `engine_membership.rs` is the long form.
+**Do not close it by guessing** — and do not quietly delete the ignored test.
+
+Conservative guards that ARE in place on the merge:
 
 - **Never add self** (drop our own node_id from any incoming list).
 - **Never add an unreachable peer** (skip an entry whose `PeerEntry::iroh_endpoint_addr` won't resolve — we don't store a peer we can't dial).
 - **ADD-only dedup** (a known node_id keeps its current entry).
-
-If membership ever needs to *gate* who can join (beyond "is on the topic"), that's a new trust surface — stop and design it; do not loosen these guards silently.
+- **Never re-add a peer this device revoked** (the tombstone).
+- **Refuse an oversized list whole** (`MAX_MEMBERSHIP_ENTRIES`, 256).
+  This bounds what one unauthenticated message re-broadcast every 5s can write; it does not decide who may be merged.
 
 ## Phase-2 blob transfer (snapshot + asset)
 
-Two ALPNs ship binary blobs that are NOT ops.
-Both mount on the one sync endpoint's router, hold no workspace lock, never write the op log, and are best-effort (failure = logged no-op).
+Snapshot and asset bytes move over their own ALPNs, separate from the op-log exchange, and both are **authorized per request** — not per connection, which is what let a revoked peer keep draining `assets/` until it chose to hang up.
 
-**Snapshot** — `SNAPSHOT_ALPN` `outl-snapshot/1`, `engine_snapshot.rs`.
-A freshly-paired device pulls a peer's `snap-<actor>.bin` and boots from settled state, not the full op log (`pull_snapshot_from_peer`).
-Responder `SnapshotProtocolHandler` sends one length-prefixed frame (empty when absent); the puller writes `snap-<peer-actor>.bin` under `.outl/snapshots/` and fires `peer_ready_tx`.
-
-**Asset** — `ASSET_ALPN` `outl-asset/1`, `engine_assets.rs`.
-Uploaded files live at `<root>/assets/<hash>.<ext>` (content-addressed by SHA-256); their bytes NEVER enter the op log (`outl_actions::asset`).
-Since a device holds N assets, the protocol negotiates a manifest: responder `AssetProtocolHandler` sends its `assets/` basenames (`protocol::encode_asset_manifest`).
-The initiator pulls each file it lacks as a blob frame (atomic tmp+rename).
-`is_safe_asset_name` (both sides, anti-traversal) blocks any non-basename; the initiator re-hashes each file (`outl_md::asset::hash_bytes`) and drops a name mismatch.
-Fires after the post-pair snapshot pull and every catch-up `delta_sync` (`run_catch_up`'s `pull_assets`).
+Protocol shape, framing, and the authorization boundary: [`docs/iroh-internals.md`](../../docs/iroh-internals.md#phase-2-blob-transfer-snapshot--asset).
 
 ## Test catalog (regression + chaos)
 
 Every bug hand-found during the sync saga has a NAMED, permanent test — the name IS the bug, so a failure is self-explanatory.
 Both catalogs (named guards + the chaos battery) live in [`docs/iroh-internals.md`](../../docs/iroh-internals.md#regression-suite-pilar-2).
 **Do NOT delete a named guard without deleting the bug it guards**, and add the row when you add the test.
+
+Three suites are organised by question rather than by bug:
+
+- `tests/revocation.rs` — *may this dialer be served?*
+  Every protocol on the endpoint, in both directions, and — for `ASSET_ALPN`, the one that serves many payloads over a single connection — mid-stream as well as at connect time.
+- `tests/membership_trust.rs` — *how does a node id get INTO the `peers.json` those checks read?*
+  The bounded merge, and the one `#[ignore]`d test pinning the open gossip hole (`gossip_can_manufacture_an_authorized_peer`).
+- `tests/oplog_guards.rs` — *what may an already-authorized peer's bytes do to our `ops/` dir?*
+  Bucketing, torn-tail heal, and the cross-process flock.
+
+In all three, **deny cases outnumber allow cases on purpose**, and the allows are load-bearing: a check that refuses everything passes every deny test ever written.
+`test_support::ingest_ops` exists so a test can hand the ingest what no honest peer would send, without writing a malicious responder.
 
 ## Sync invariants
 

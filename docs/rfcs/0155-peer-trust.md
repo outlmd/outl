@@ -8,7 +8,7 @@
 | **Date** | 2026-08-06 |
 | **Reference doc** | [sync.md](../sync.md), [privacy.md](../privacy.md) |
 | **Invariant** | root `CLAUDE.md` invariant 7 (`peers.json` is deliberately outside the op log — see The opposite direction) and invariant 8's general rule (a fix in one direction, undone in the other); `outl-sync-iroh/CLAUDE.md` → Sync request, Membership merge |
-| **Guarded by** | `frame_body_length_is_capped` (`crates/outl-sync-iroh/src/engine_sync.rs`), `concurrent_saves_never_lose_an_entry_or_tear_the_file` (`crates/outl-sync-iroh/src/peers_lock.rs`) |
+| **Guarded by** | `frame_body_length_is_capped` (`crates/outl-sync-iroh/src/engine_sync.rs`), `concurrent_saves_never_lose_an_entry_or_tear_the_file` (`crates/outl-sync-iroh/src/peers_lock.rs`), and the whole of `crates/outl-sync-iroh/tests/revocation.rs` — which is what closes the **read** side of #158. `outl peer remove` revoked the op exchange and nothing else: `SNAPSHOT_ALPN` and `ASSET_ALPN` served any dialer, so a revoked device kept pulling the graph and every asset. Eleven wire tests over real QUIC, deny cases outnumbering allow, including `a_peer_revoked_mid_connection_gets_no_further_assets` — authorization is per **request**, not per connection, or revocation waits for the peer to hang up |
 
 ## Why
 

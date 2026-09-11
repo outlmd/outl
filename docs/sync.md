@@ -493,10 +493,33 @@ The host persists the joiner to *its* `peers.json` and keeps its own id.
 
 **It cuts the device off from the machine you ran it on, and nothing else.**
 
-On this device the removal is real and it sticks: the entry is deleted, a tombstone stops membership gossip from re-adding it, and the next sync connection from that device is refused.
-Before the tombstone it did *not* stick — gossip put the peer back within about five seconds and sync resumed, so a user could watch a denial and reasonably conclude they were protected ([#158](https://github.com/outlmd/outl/issues/158)).
+On this device the removal is real and it sticks.
+The entry is deleted, a tombstone stops membership gossip from re-adding it, and the removed device is refused on **every** protocol this device serves:
 
-**Your other paired devices still sync with it.** Each keeps its own peer list, so locking out a lost or stolen laptop means running `outl peer remove` on every device you still have.
+| Protocol | What it carries | Refused since |
+|---|---|---|
+| `SYNC_ALPN` | op-log delta (read **and** write) | [#158](https://github.com/outlmd/outl/issues/158) |
+| `SNAPSHOT_ALPN` | `snap-<actor>.bin` — the whole materialized workspace | this release |
+| `ASSET_ALPN` | the `assets/` manifest, then every uploaded file | this release |
+| outbound sync | ops we *pull* from a peer that announced over gossip | this release |
+
+That table is the correction.
+For two releases "revoked" meant only the first row, which is the write path.
+So a removed device lost the ability to **push** edits and kept a complete, current **read** of the graph and of every uploaded file, one ALPN over.
+It also kept a route in, because the check was serve-side only: an announce on the gossip topic made an honest device dial the announcer and ingest its ops.
+The authorization existed the whole time; two of three protocols and the outbound direction never called it.
+
+Before the tombstone the removal did not stick at all.
+Gossip put the peer back within about five seconds and sync resumed, so a user could watch a denial and reasonably conclude they were protected ([#158](https://github.com/outlmd/outl/issues/158)).
+
+**Still open: gossip can still mint a peer.**
+The gossip topic id is derived from the workspace id, which is not a secret — a removed device knows it and can still join the topic.
+Membership messages carry no proof of authorship, so a removed device can generate a *fresh* key pair, gossip that node id, and have it merged into your `peers.json`.
+The tombstone covers the key you removed, not a new one.
+Until membership entries are authenticated, treat `peer remove` as retiring a device you still control, and use `peer revoke-all` for one you do not.
+
+**Your other paired devices still sync with it.**
+Each keeps its own peer list, so locking out a lost or stolen laptop means running `outl peer remove` on every device you still have.
 
 And even then, the removed device keeps the copy of the graph it already had.
 Revocation stops it receiving *new* edits; it cannot take back history that has already synced.
@@ -700,16 +723,28 @@ Both clients (TUI and mobile) use `outl_actions::SyncEngine` for the reload-work
 
 ```rust
 let engine = SyncEngine::new(workspace_root, actor);
-let fresh = engine.reload_workspace()?;          // merge every peer jsonl
+let fresh = engine.reload_workspace(&hlc)?;      // merge every peer jsonl, raise the clock
 engine.reproject_page(&fresh, focused_page_id)?; // rewrite the focused .md + sidecar
 ```
 
 | Method | What it does |
 |--------|--------------|
-| `reload_workspace()` | Reopens the workspace from disk, merging every `ops-<actor>.jsonl` by HLC and replaying through the move-op algorithm. |
+| `reload_workspace(hlc)` | Reopens the workspace from disk, merging every `ops-<actor>.jsonl` by HLC and replaying through the move-op algorithm, then raises `hlc` above everything the merged log holds (`Workspace::seed_clock`). |
 | `reproject_page(ws, page_id)` | Re-emits the page's `.md` + sidecar from the materialised tree, through the **guarded** writer (invariant 8). Can return `Err(PageMarkdownAheadOfLog)` — the merge already landed in the tree either way, only this page's on-disk projection was withheld. Callers treat that as one page's problem, never a reason to abort the reload. Other pages get re-projected lazily when the user navigates to them. |
-| `refresh_page(page_id)` | Convenience: reload + reproject in one call. The typical "peer fired, pull the new state in" entry point. |
+| `refresh_page(hlc, page_id)` | Convenience: reload + reproject in one call. The typical "peer fired, pull the new state in" entry point. |
 | `snapshot()` | Lists every `ops-*.jsonl` in the workspace with size + mtime. Used by polling detectors (TUI) to decide whether to fire a reload. |
+
+#### Why the reload takes the clock
+
+`HlcGenerator` is monotonic only against its own in-memory state, rebuilt from nothing on every boot.
+Boot seeding (`Workspace::seed_clock`) covers the ops on disk *at boot*; a peer whose clock runs ahead of ours lands its ops afterwards, and the reload is the only place this process learns about them.
+Without the raise, the next local edit is stamped **below** the peer's op.
+
+That is a **cost**, not a correctness problem: `apply_op` reorders and every replica still converges on the same tree.
+What it costs is the paper's undo/redo window over every newer log entry — measured at ~74 ms for one late op on a 217k-op log, paid synchronously on a foreground keystroke, and recurring on every sync tick that the peer stays ahead.
+
+The seeding lives in `reload_workspace` rather than at its four call sites (`outl serve`, both Tauri clients, the TUI poller) so no client can silently lack it — the failure shape root `CLAUDE.md` invariant 12 describes.
+It **propagates** its error: `seed_clock` reads the index the reopen just built, so a failure there means storage stopped being readable mid-call, and every caller already handles a failed reload by keeping the workspace it has and retrying on the next signal.
 | `snapshot_peers()` | Like `snapshot()` but **filters out the local actor's file**. Reacting to your own writes closes a destructive save-reload-race loop; only peer files should trigger reloads. |
 | `scan_for_orphans()` | Walks `journals/` and `pages/` for `.md` files whose sidecar is missing or whose `last_synced_hash` no longer matches the file's current hash. Both conditions mean the op log doesn't reflect this content yet (fresh import, peer-shipped projection without sidecar, vim edits). Each path feeds `outl_md::reconcile::reconcile_md`. |
 
