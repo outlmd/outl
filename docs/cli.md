@@ -278,6 +278,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl doctor [--json] [--repair] [--force]`  | `outl_workspace_doctor` |
 | `outl reconcile [--ahead-of-log] [--allow-bulk-delete]` | —             |
 | `outl recover [--apply] [--min-lines=N]`     | —                       |
+| `outl compact [--apply] [--no-horizon] [--force]` | —                  |
 | `outl mcp serve [--workspace=…]`             | —                       |
 | `outl peer pair\|qr\|list\|remove\|status\|revoke-all` | —                 |
 | `outl plugin init\|search\|list\|install\|run\|config\|secret\|enable\|disable\|remove` | — |
@@ -285,84 +286,10 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
 | `outl import roam\|logseq\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
 
-`init`, `serve`, `reconcile`, `recover`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
+`init`, `serve`, `reconcile`, `recover`, `compact`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
 
 
-`outl import` runs the adapter-based pipeline in the `outl-import` crate for every source (`roam` = JSON backup file, `logseq` = graph directory, `obsidian` = vault directory; `auto` detects from the source's shape).
-`((uid))` block refs and `{{embed}}`s resolve to real `((blk-XXXXXX))` handles, not page-link fallbacks.
-Folded blocks (Roam `open: false`, Logseq `collapsed:: true`) land as `Op::SetCollapsed`.
-Each dialect is translated on the way in.
-Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences.
-Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
-`LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
-A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
-Obsidian: frontmatter → `key:: value` properties, wiki-link variants collapse to `[[Note]]`.
-Referenced files are pulled into the workspace's `assets/` dir, content-addressed.
-A local attachment (`![](../assets/pic.png)`) is copied and a remote image (Roam's firebase URLs) is downloaded; either way the link is rewritten to `[name](assets/<hash>.<ext>)`.
-A file that can't be pulled (missing, download failed, over `[assets] max_bytes`) keeps its original link and is counted in `assets missing` — never fatal.
-`--no-assets` skips all of that, keeping every original relative/remote link verbatim.
-A real (non-dry) import paints a live progress line on stderr — phase, page counter, percentage, current page, elapsed — TTY-only, so piped output stays clean.
-`--dry-run` parses and reports without writing a byte — run it against a real backup to measure fidelity before migrating.
-`--json` prints the full report (per-feature counts, warnings with location) as JSON.
-`--preserve-timestamps` keeps source create/edit times as `created::`/`edited::` block properties (dropped and counted by default).
-
-**Importing twice is destructive, so it's opt-in.**
-An import overwrites every `.md` it emits and reconciles the result through the op log, so a second run against a workspace you've been using erases whatever you wrote there since the first import — there is no undo.
-`outl import` therefore refuses a destination that already holds content, naming what it found and pointing at the escape hatch.
-Pass `--force` when overwriting is exactly what you want; import into a fresh directory otherwise.
-`--dry-run` writes nothing and is never blocked.
-
-What counts as "already holds content" is read from the **op log's materialized tree**, not from the `.md` files on disk.
-A device paired over iroh receives every op through sync, but only projects a page's `.md` when that page is opened.
-A freshly-paired laptop therefore holds your whole graph with an empty `pages/` directory, and a file-counting guard would wave the import straight into it.
-Two extra signals round it out: markdown dropped into `pages/` by hand (no sidecar beside it, so the tree cannot see it) also blocks, and so does any `.md` in a destination that isn't an outl workspace at all.
-
-The output of `outl init` is **not** content.
-`init` seeds a journal-template page and today's (empty) journal, so `outl init ./notes && outl import roam backup.json ./notes` — the documented migration flow — runs with no flags.
-A page only counts once it holds a block with real text.
-That distinction matters: `--force` is the flag that destroys, and a guard that fires on the normal flow just teaches you to type it by reflex.
-
-**`outl init --bare` writes no ops at all** — no journal-template page, no journal for today.
-It exists for the one case where seeding is wrong: a workspace created only to become a replica of an existing graph, which then joins it with `outl peer pair --ticket`.
-Pairing adopts the *host's* workspace id but keeps the *joiner's* ops, so a seeded replica pushes its own `templates/journal` page into the host's graph — two page nodes with one slug, both projecting to `pages/templates/journal.md`.
-It is what the [self-hosted server image](self-hosting.md) runs.
-Don't use it for a workspace you'll write notes in directly; the journal template won't be there.
-
-**A failed import is resumable, without `--force`.**
-The pipeline writes page by page, so a failure at page 40k of 66k leaves the destination half-populated.
-For the duration of a real import, `outl import` keeps a marker at `<workspace>/.outl/import-in-progress.json` (adapter, source path, start time) and deletes it on success.
-If a run dies, the marker survives and the error message says exactly how to recover.
-Re-running the same command then imports again **without** `--force`: everything in that destination came from the run that never finished, so there is nothing of yours to protect.
-Delete the destination instead if you'd rather start clean.
-A marker that is missing or unparseable is treated as "no unfinished import", so a corrupt file is never a free pass.
-
-**Reconciliation: what the source held vs. what landed.**
-The per-feature counts only describe what the pipeline knows it produced — a block lost in the parse would show up in neither the numerator nor the denominator.
-So the report also carries a `reconciliation` block (Roam today; other adapters as they start reporting source counts) whose denominators are counted straight off the parsed source:
-
-```text
-  reconciliation:
-    pages:             3/4 emitted (1 merged, 0 skipped)
-    blocks:            12/15 emitted (2 lifted to page props, 1 in skipped pages)
-    in the op log:     12/12 emitted blocks confirmed on disk after reconcile
-```
-
-Every legitimate reducer is subtracted by name — pages merged onto the same journal date, pages skipped (each listed under `skipped:` with the blocks that went down with it), and blocks promoted into page properties (`blocks_lifted_to_props`).
-Whatever is left over is unexplained loss, and the human output says so in a block you can't miss (`UNACCOUNTED CONTENT — the import does not add up`), with the same numbers available under `reconciliation` in `--json`.
-
-The `in the op log` line closes the other half of the contract.
-Every other counter in the report is incremented in memory during rendering, before a byte reaches disk — they prove the parser and the renderer agree about your graph, not that your graph is in a workspace.
-A page that fails to write, fails to reconcile, or loses blocks in the matcher is invisible to all of them.
-So a real import also sums the block entries in each page's sidecar (written by `reconcile_md` straight off the materialized tree) and reports that as `landed_blocks`.
-A gap prints as `CONTENT NEVER REACHED THE OP LOG` and makes `balanced` false.
-`--dry-run` writes nothing, so it reports the landing as *not measured* rather than as zero-loss: there, `balanced: true` means only that parse and render agree.
-
-Warnings are listed in full under `--json`.
-The human output prints the first 20 and states how many it hid.
-
-One counted loss worth knowing about on Roam graphs: a `{{[[TODO]]}}` / `{{[[DONE]]}}` marker in the *middle* of a block keeps its literal `TODO`/`DONE` word but not its task state.
-outl models one task per block, driven by the marker at the block's head, so such a block won't answer `outl query --kind=task`.
-It's reported as `mid-block tasks` plus a single aggregate warning — one per import, not one per marker.
+Importing a graph has its own page: [**Importing a graph**](import.md) — sources and dialect translations, what `--force` does and why re-importing is opt-in, the resumable-without-`--force` rule, and the reconciliation table that accounts for every block the source held.
 
 `outl plugin` manages the workspace's JS plugins (under `<workspace>/.outl/plugins/`), wrapping `outl-plugins`.
 `init <NAME> [--id <ID>] [--dir <PATH>]` scaffolds a buildable starter project (manifest + `package.json` + `tsconfig` + `src/index.ts` + README); run `bun install && bun run build` inside it for an installable bundle.
@@ -412,6 +339,18 @@ Two halves, both on by default:
 `--once` reconciles every `.md` and exits; it implies neither half and conflicts with both flags.
 Turning both halves off is a usage error rather than a process that runs and does nothing.
 
+**A third job, and it runs in the other direction.**
+The watcher carries `.md → tree`; nothing carried `tree → .md` in bulk, so when ops arrived by sync a page's `.md` stayed wrong until somebody opened it — **704 stale pages** on a real 2,574-page workspace.
+
+So `serve` sweeps: after its initial scan (which makes `--once` the batch projection pass for free) and after each peer-ops reload, with a 30s floor.
+It writes **only** pages whose re-projection removes nothing from disk; a page that would remove content lines is withheld for `outl doctor --repair`, which backs every file up and applies volume ceilings.
+That gate also makes a **torn op log** safe without the sweep knowing anything about op-log health — a truncated replay renders *less* than disk holds, so every page it touches is withheld.
+Measured: 710 pages re-projected in 30s, `outl doctor` from 745 warnings to 9, zero content lines lost across 2,848 files.
+It reports the **change**, not the state — named on first sight, again when the set differs, once when it empties.
+Full reasoning: [RFC 0260](rfcs/0260-tree-to-md-executor.md).
+
+`--no-watch` does **not** sweep: its contract is holding the endpoint and nothing else, and it exists to sit beside a GUI that already projects the page it opens.
+
 **The sync half defers.**
 One endpoint per device identity, elected not assigned — so the supervisor asks for the lease every 30s and treats a refusal as a normal state.
 A desktop or TUI that already holds the endpoint keeps it, and the daemon takes over when that process exits.
@@ -457,6 +396,50 @@ Exit code is `1` when the report carries any error, so it drops straight into a 
 
 Full check list, what `--repair` is allowed to touch, and the ceilings that make it stand down: **[doctor.md](doctor.md)**.
 
+**Snapshots.**
+`--repair` reclaims the boot cache the [snapshot GC](storage.md#snapshot-strategy) judges droppable, not only the undecodable ones — `outl_core::snapshot::gc` owns that verdict and `doctor` only phrases it.
+A **superseded** snapshot (it decodes, but another outranks it) is reported as `info`, not a warning: nothing is wrong, there is just disk to reclaim.
+An **unusable** one is a warning.
+One that could not be *judged* — unreadable, or written by a newer build — is reported and **never** deleted: a file we could not read is not a file we read and proved bad.
+Measured: 54MB in 4 files down to 13MB in 1.
+`--repair` also collects abandoned `snap-*.bin.tmp` (kind `prune_snapshot_tmp`, not backed up — a half-published write never became a record).
+Reasoning: [RFC 0258](rfcs/0258-snapshot-cache-lifecycle.md).
+
+### `outl reconcile`
+
+The `.md` → op log direction, in three modes.
+
+```
+outl reconcile [<path>] [--ahead-of-log] [--allow-bulk-delete]
+```
+
+- **No flags** — a read-only listing of `.outl/orphans.log`, the blocks a past reconcile could not match to anything in the log.
+  Writes nothing.
+- **`--ahead-of-log`** — reconcile the pages whose `.md` holds content that exists in no op, bypassing the sidecar hash gate (it clears `last_synced_hash` so `reconcile_md` stops short-circuiting).
+  Such a page is hash-faithful, so the ordinary reconcile reads it as in-sync and never looks at it.
+  Opt-in, because it writes ops for content the log has never seen — a deliberate write, not a repair.
+- **`--allow-bulk-delete`** — apply a deletion the orphan-volume guard refused (more than 500 blocks of a page, or more than 75% of one).
+  It reaches **both** modes: the plain pass, which is where a refused page actually lives, and `--ahead-of-log`.
+  Check what the `.md` holds before reaching for it — the guard fires on exactly the case where the file is the thing that is wrong.
+
+**Pages it could not judge are counted and named.**
+There are three states, not two: a page can be reconciled, read and found clean, or never read at all.
+An `.md` that exists and will not open, a sidecar that will not parse, and a sidecar that records no block text are all the third.
+Each used to be dropped without a line of output, so a workspace where *every* page was skipped printed `no page holds content outside the op log` and exited `0` — a refusal that never reached the user, on the command you run precisely because a silent refusal already cost you content ([invariant 8](../CLAUDE.md)).
+Both writing modes now end with the list:
+
+```
+2 page(s) could NOT be judged and were not reconciled:
+  alpha — its `.md` could not be read
+  gamma — its sidecar will not parse
+None of these is clean — each was skipped before its content was read.
+```
+
+Two things are deliberately **not** on that list, because they are answerable rather than unreadable.
+A page with no `.md` at all: there is no file, so nothing on disk can be outside the log, and that is the normal state of every page on a freshly paired device.
+And an empty page whose sidecar records no text — `outl init` leaves two of those behind, and every page created for a `[[link]]` that was never filled is the same shape.
+A skip list that fires on the happy path is one users learn to skim.
+
 ### `outl recover`
 
 Recovers block text an `Op::Edit` truncated — the mirror of `outl reconcile --ahead-of-log`, reading a different source.
@@ -497,6 +480,43 @@ Recover-first restored the same content as 4 blocks / 77 lines but parked two pa
 
 Cost is one op-log read per node in the workspace, since there is no cheaper prefilter that wouldn't itself be a second opinion about which blocks deserve a look.
 Measured at ~4.7s over 67,213 nodes / 214k ops on the workspace that surfaced issue #210.
+
+### `outl compact`
+
+Drops provably-inert ops from the op log ([issue #110](https://github.com/outlmd/outl/issues/110)).
+The log is append-only, replays on every boot and ships whole to every newly paired device, so its size is the ceiling on both — a real 2,574-page workspace carried **262MB of `ops/` for 28MB of markdown**.
+
+It removes **one shape and only that shape**: a `Move` that restates the placement its own `Create` made immediately before it.
+Every other op is copied through byte for byte.
+
+```
+outl compact [<path>] [--apply] [--no-horizon] [--force]
+```
+
+**Read-only by default.** A plain `outl compact` reports and writes nothing.
+
+**The predicate is six conditions, not one, and [RFC 0256](rfcs/0256-op-log-compaction.md) is where the argument lives.**
+The short reason: `Op::Create` is idempotent, so an adjacent `Create` + `Move` pair reads two ways that are indistinguishable in the file.
+When the `Create` really created the node the `Move` is inert; when the node already existed the `Create` is the inert one and **the `Move` is doing the work** — which is what a trashed-then-restored block looks like, since deletion is `Move(node, TRASH_ROOT)`.
+On that workspace the naive rule matched 99.9% of `Move` ops and the sound predicate matches **94.7%**; the 2,074 it declines are exactly the trashed-and-restored ones.
+
+- `--apply` — rewrite the log.
+  Refuses while any other outl process holds the workspace (exclusive `flock` on `.outl/.lock` plus a write lock on *every* actor), backs every file up to `.outl/compact-backup/<timestamp>/` and fsyncs **before** touching anything, then replaces via temp + `rename`.
+  Deletes the index sidecars rather than rebuilding them — compaction invalidates every byte offset, and deleting has no failure mode where a rebuild writes a wrong one.
+  Refuses outright on an unparseable record, on a directory it cannot read, and on the `PerPage` layout — and refuses **before any file is rewritten**, because "a damaged log is never rewritten" has to mean no file, not this file.
+  Rewrites **only this device's `ops-<actor>.jsonl`**; every other actor file is reported and left alone.
+  A peer's file is that device's own append-only log, and every file transport (iCloud, Syncthing, a shared filesystem) reconciles per path, last-write-wins.
+  A shortened copy therefore wins the merge and takes with it every op that device had not yet shipped.
+  Run the command on each device.
+- `--no-horizon` — also compact history newer than the 30-day settling horizon.
+  The horizon is not about the ops, which are inert the moment they are written; it is about **peers that have not delivered theirs yet**.
+  It is measured against `min(newest op, now)`: anchoring it on the log alone would let one peer's wrong clock silently turn every run into `--no-horizon`.
+  Drop it only on a workspace with no other device.
+- `--force` — also rewrite other devices' op logs.
+  Safe only when no file transport carries this workspace (a `transport = "iroh"` workspace inside a Dropbox folder is exactly the trap, which is why the config is not what decides).
+  Also the only route to an `ops-<ephemeral>.jsonl` this device wrote in a past session: those are ours in fact, but an ephemeral actor leaves no binding behind, so they are not ours provably.
+
+Measured: **62,209 of 217,811 ops dropped (28.6%)**, `ops/` 262MB → 195MB, materialized tree, properties and collapsed flags **byte-identical**, `outl doctor` reporting `integrity OK`.
 
 ### `outl page history` / `outl block history`
 
