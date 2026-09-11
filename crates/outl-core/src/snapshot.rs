@@ -49,6 +49,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+pub mod gc;
+
 /// Current snapshot wire format. Bump it on any breaking change to
 /// [`SnapshotBody`] **or to the encoder**; `decode` rejects every other
 /// version instead of guessing at backward compatibility.
@@ -335,56 +337,40 @@ pub fn read_from_disk(
 /// Selection is deterministic: own snapshot first; otherwise the peer
 /// snapshot whose per-actor cutoff reaches the highest HLC (the most
 /// up-to-date, smallest delta), with the actor id as a tie-break.
+///
+/// The directory scan is [`gc::survey`], so the ranking the selector
+/// applies and the verdict the GC records come from one decode pass and
+/// one comparison. It **reads only**: opening a workspace is something
+/// `outl doctor` does in its documented read-only mode, so the bulk
+/// sweep belongs to [`gc::sweep`] on the writer's worker thread, not
+/// here. The single deletion on this path is
+/// `gc::drop_own_if_unusable` — one file, read end to end and refused
+/// by the decoder, in the slot this selector consults on every boot.
 pub fn read_best_from_disk(
     snapshots_dir: &Path,
     prefer_actor: ActorId,
 ) -> Result<Option<SnapshotBody>, SnapshotError> {
     // This device's own snapshot has the tightest cutoff for its local
     // ops, so prefer it and skip the directory scan entirely.
-    if let Some(body) = read_from_disk(snapshots_dir, prefer_actor)? {
-        return Ok(Some(body));
-    }
-
-    let entries = match std::fs::read_dir(snapshots_dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    match read_from_disk(snapshots_dir, prefer_actor) {
+        Ok(Some(body)) => return Ok(Some(body)),
+        Ok(None) => {}
         Err(e) => {
-            return Err(SnapshotError::Io(format!(
-                "read dir {}: {e}",
-                snapshots_dir.display()
-            )))
-        }
-    };
-
-    // Adopt the most up-to-date peer snapshot. Key on (max cutoff HLC,
-    // filename) so two boots pick the same one; a snapshot that fails to
-    // decode (corrupt, future schema) is skipped, never fatal.
-    let mut best: Option<(Hlc, String, SnapshotBody)> = None;
-    for entry in entries.flatten() {
-        let fname = entry.file_name().to_string_lossy().into_owned();
-        if !fname.starts_with("snap-") || !fname.ends_with(".bin") {
-            continue;
-        }
-        let bytes = match std::fs::read(entry.path()) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let body = match SnapshotBody::decode(&bytes) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let Some(max_hlc) = body.cutoff.values().copied().max() else {
-            continue; // an empty-cutoff snapshot buys us nothing
-        };
-        let better = match &best {
-            None => true,
-            Some((best_hlc, best_name, _)) => (max_hlc, &fname) > (*best_hlc, best_name),
-        };
-        if better {
-            best = Some((max_hlc, fname, body));
+            // Read end to end and refused by the decoder: a cache entry
+            // that can never be read again, sitting in the one slot this
+            // selector consults on *every* boot. Drop it, then report the
+            // failure exactly as before — this boot still full-replays,
+            // the next one does not have to.
+            gc::drop_own_if_unusable(snapshots_dir, prefer_actor, &e);
+            return Err(e);
         }
     }
-    Ok(best.map(|(_, _, body)| body))
+
+    // Adopt the most up-to-date peer snapshot; `survey` ranks on (max
+    // cutoff HLC, filename) so two boots pick the same one, and a
+    // snapshot that fails to decode is skipped, never fatal. No prune
+    // here: see the doc comment.
+    Ok(gc::survey(snapshots_dir, prefer_actor)?.into_best())
 }
 
 #[cfg(test)]
