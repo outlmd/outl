@@ -288,7 +288,14 @@ fn collect_internal(
     //    the only place a corrupt record is nameable.
     let scans = oplog::check_jsonl_lines(&mut b, &paths.ops, &mut health);
     oplog::check_offset_indexes(&mut b, &paths.ops, &scans);
-    plan.corrupt_snapshots = oplog::check_snapshots(&mut b, &paths.root);
+    let snapshots = oplog::check_snapshots(&mut b, &paths.root, actor);
+    plan.drop_snapshots = snapshots.drops;
+    plan.prune_snapshot_tmp = snapshots.stale_tmp;
+    // Dead `ops/` index caches. Surveyed HERE, before the storage open
+    // below rebuilds the live sidecars — a survey taken afterwards would
+    // be judging files this command itself created.
+    plan.prune_index_sidecars = repair::collect_dead(&mut b, &paths.ops);
+    repair::report_actor_locks(&mut b, &paths.ops);
     // Housekeeping over `--repair`'s own output. Collected here, not
     // inside `repair::run`, so it is announced in `repairable[]` and so
     // a workspace with nothing else wrong still gets its old backup
@@ -317,7 +324,11 @@ fn collect_internal(
     //    guard photographs `ops/` here and restores it at the end of the
     //    run, in BOTH modes, so `doctor` (repairing or not) leaves that
     //    directory byte-identical. See `ops_guard`.
-    let ops_guard = ops_guard::OpsDirGuard::capture(&paths.ops);
+    // The dead caches above are the one thing in `ops/` this command may
+    // remove, so the guard is told about them rather than restoring them
+    // from a photograph it would otherwise have to hold 134 MB of.
+    let announced = repair::announced_paths(&plan.prune_index_sidecars);
+    let ops_guard = ops_guard::OpsDirGuard::capture(&paths.ops, &announced);
     let mut storage_for_ws: Option<Box<dyn Storage>> = None;
     let known_node_ids: HashSet<outl_core::id::NodeId> =
         match JsonlStorage::open(paths.ops.clone(), actor) {
@@ -589,14 +600,16 @@ fn collect_internal(
     let repairable = plan.describe();
     let repair_report = match (do_repair, plan.is_empty(), &workspace) {
         (false, _, _) | (true, true, _) => None,
-        (true, false, Some(ws)) => Some(repair::run(ws, &paths.root, &plan, store)),
+        (true, false, Some(ws)) => Some(repair::run(ws, &paths.root, actor, &plan, store)),
         // No replayed tree, so page re-projection is off the table, but
         // dropping a corrupt snapshot, pruning stale backups and dropping
         // a dead device-store binding still are not — none needs a tree,
         // and the binding prune does not even read this workspace.
         (true, false, None) => {
             let treeless = Plan {
-                corrupt_snapshots: std::mem::take(&mut plan.corrupt_snapshots),
+                drop_snapshots: std::mem::take(&mut plan.drop_snapshots),
+                prune_snapshot_tmp: std::mem::take(&mut plan.prune_snapshot_tmp),
+                prune_index_sidecars: std::mem::take(&mut plan.prune_index_sidecars),
                 prune_backups: std::mem::take(&mut plan.prune_backups),
                 prune_bindings: std::mem::take(&mut plan.prune_bindings),
                 prune_scratch: std::mem::take(&mut plan.prune_scratch),
@@ -607,7 +620,7 @@ fn collect_internal(
             } else {
                 Workspace::open_in_memory(actor)
                     .ok()
-                    .map(|ws| repair::run(&ws, &paths.root, &treeless, store))
+                    .map(|ws| repair::run(&ws, &paths.root, actor, &treeless, store))
             }
         }
     };
