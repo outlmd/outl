@@ -19,8 +19,10 @@
 //!    *created*, whose ops never entered the merged log inertness was
 //!    decided against.
 //! 4. Copy every file to be rewritten into
-//!    `<root>/.outl/compact-backup/<timestamp>/`, fsynced, *before* a
-//!    byte of `ops/` changes. Restoring is a plain `cp` back.
+//!    `<root>/.outl/compact-backup/<timestamp>-<ulid>/`, fsynced, *before*
+//!    a byte of `ops/` changes. Restoring is a plain `cp` back. The
+//!    directory is fresh per run — never reused — so a second `--apply`
+//!    cannot overwrite the rollback point the first one left.
 //! 5. Rewrite via sibling temp + `rename`, so a reader in another
 //!    process (one that ignored step 1) sees either the whole old file
 //!    or the whole new one, never a torn middle.
@@ -290,9 +292,21 @@ pub fn apply_compaction(root: &Path, plan: &CompactPlan) -> Result<CompactReport
         .map(|actor| Ok((actor, read_one(actor, ops_path(&ops_dir, actor))?)))
         .collect::<Result<_, CompactError>>()?;
 
+    // The timestamp is for the human reading the directory; the ULID is
+    // what makes the name unique. Second resolution alone is not a name:
+    // two `--apply` runs inside one second would share a directory and
+    // `copy_durable` would overwrite the first run's files — the only
+    // recovery route for a rewrite that already deleted lines. `create_dir`
+    // rather than `create_dir_all` for the leaf, so an existing directory
+    // is refused instead of reused.
     let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
-    let backup_dir = root.join(".outl").join("compact-backup").join(&stamp);
-    std::fs::create_dir_all(&backup_dir).map_err(|e| CompactError::Io {
+    let backups = root.join(".outl").join("compact-backup");
+    std::fs::create_dir_all(&backups).map_err(|e| CompactError::Io {
+        path: backups.clone(),
+        source: e,
+    })?;
+    let backup_dir = backups.join(format!("{stamp}-{}", ulid::Ulid::new()));
+    std::fs::create_dir(&backup_dir).map_err(|e| CompactError::Io {
         path: backup_dir.clone(),
         source: e,
     })?;
