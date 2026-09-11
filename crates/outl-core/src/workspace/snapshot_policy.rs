@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::id::ActorId;
 use crate::snapshot::{self, SnapshotBody};
@@ -105,11 +105,23 @@ impl SnapshotPolicy {
         true
     }
 
-    /// Hand `body` to a worker thread that writes it.
+    /// Hand `body` to a worker thread that writes it, then collects the
+    /// siblings that write made unreachable.
     ///
     /// Failure inside the worker is logged and discarded: a snapshot is
     /// a boot cache, never source of truth, so a failed write costs the
     /// next boot some replay time and nothing else.
+    ///
+    /// The GC runs **here** rather than on boot because this is the
+    /// moment the directory gains a file, and because this thread has
+    /// already serialized and fsynced a multi-MB body — reading the
+    /// remaining candidates to judge them is the same order of magnitude
+    /// as the work it just did, off the hot path, once per threshold.
+    /// A boot-time sweep would pay that on every launch to reclaim disk
+    /// that is not costing anything yet (root `CLAUDE.md` invariant 11:
+    /// attribute the cost before letting it decide). The sweep runs even
+    /// when the write failed — the directory's existing garbage does not
+    /// stop being garbage.
     pub(crate) fn spawn_write(&mut self, actor: ActorId, body: SnapshotBody) {
         let Some(dir) = self.dir.clone() else {
             return;
@@ -119,6 +131,16 @@ impl SnapshotPolicy {
             .spawn(move || {
                 if let Err(e) = snapshot::write_to_disk(&dir, &body) {
                     warn!("background snapshot write failed (non-fatal): {e}");
+                }
+                match snapshot::gc::sweep(&dir, actor) {
+                    Ok(removed) if !removed.is_empty() => {
+                        debug!(
+                            "snapshot gc: collected {} unreachable file(s)",
+                            removed.len()
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => warn!("snapshot gc skipped (non-fatal): {e}"),
                 }
             })
             .expect("spawn snapshot worker");
@@ -142,6 +164,58 @@ impl SnapshotPolicy {
 #[cfg(test)]
 mod tests {
     use super::SnapshotPolicy;
+    use crate::hlc::Hlc;
+    use crate::id::ActorId;
+    use crate::snapshot::{write_to_disk, SnapshotBody};
+    use std::collections::{BTreeMap, BTreeSet};
+    use tempfile::TempDir;
+
+    fn body_at(actor: ActorId, high: u64) -> SnapshotBody {
+        let mut cutoff = BTreeMap::new();
+        cutoff.insert(actor, Hlc::new(high, 0, actor));
+        SnapshotBody::from_parts(
+            actor,
+            cutoff,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .expect("test body encodes")
+    }
+
+    /// Publishing a snapshot is the moment the directory *gains* a file,
+    /// and the worker thread that just serialized and fsynced a multi-MB
+    /// body is the cheapest place to notice that an older sibling has
+    /// stopped being reachable. A boot-time sweep would read the whole
+    /// directory to reclaim disk that is not costing anything yet.
+    #[test]
+    fn publishing_a_snapshot_collects_the_siblings_it_made_unreachable() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".outl").join("snapshots");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let me = ActorId::new();
+        let behind = ActorId::new();
+        let ahead = ActorId::new();
+        write_to_disk(&dir, &body_at(behind, 100)).unwrap();
+        write_to_disk(&dir, &body_at(ahead, 900)).unwrap();
+
+        let mut p = SnapshotPolicy::new(Some(dir.clone()));
+        p.spawn_write(me, body_at(me, 1_000));
+        p.wait();
+
+        assert!(dir.join(format!("snap-{me}.bin")).exists(), "own written");
+        assert!(
+            !dir.join(format!("snap-{behind}.bin")).exists(),
+            "the candidate the boot selector can never choose again is collected"
+        );
+        assert!(
+            dir.join(format!("snap-{ahead}.bin")).exists(),
+            "the one a boot after an actor rotation would adopt survives"
+        );
+    }
 
     fn armed(threshold: u32) -> SnapshotPolicy {
         let mut p = SnapshotPolicy::new(Some("/tmp/nowhere".into()));
