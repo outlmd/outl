@@ -82,6 +82,9 @@ enum Op {
         node: NodeId,
         parent: NodeId,
         position: Fractional,
+        // No `old_*` field. `Create` is idempotent, so its undo record is
+        // "did this op insert the node?" — kept in `Tree::created_by`
+        // rather than on the wire. See RFC 0263.
     },
     SetCollapsed {
         node: NodeId,
@@ -113,7 +116,7 @@ The sidecar carries only structural matching metadata; sync state belongs on the
 
 ## HLC timestamps
 
-We use **Hybrid Logical Clocks** via the `uhlc` crate.
+We use **Hybrid Logical Clocks**, hand-rolled in `crates/outl-core/src/hlc.rs`.
 
 ```
 HLC = (physical_ms: u64, logical_counter: u32, actor: ActorId)
@@ -124,6 +127,49 @@ This gives a **total order** without coordination.
 
 **Why actor is tiebreak, not random**: when two replicas pick the same `(physical, logical)` (clock skew, very busy moment), the actor ID — a ULID fixed per device — breaks the tie deterministically.
 Both replicas agree on the same winner without talking to each other.
+
+### What the generator does and does not promise
+
+This page said "via the `uhlc` crate" for a long time.
+It is not true and was never true: `uhlc` appears in no manifest in the repo.
+The substitution was not a decision anyone made — the docs simply described a dependency that was never added — so the properties `uhlc` would have brought have to be checked against the code rather than assumed.
+
+What holds:
+
+- The total order above.
+  `(physical_ms, logical, actor)` compared lexicographically, actor last, is exactly what convergence needs and it is what `Hlc`'s `Ord` does.
+- `HlcGenerator::next` is monotonic **against its own in-memory state**.
+  A wall clock that jumps backwards does not produce a duplicate or a rewind: `physical_ms` stays put and `logical` increments.
+- `observe(remote)` folds a remote timestamp in correctly, so a local op issued after observing a peer sorts after it.
+  It has exactly one caller in the whole repo (in `outl-plugins`), so most ops never go through it.
+
+What does **not** hold, and the difference matters when reading the rest of this page:
+
+- **There is no drift clamp on the ops themselves.**
+  `uhlc` bounds how far a physical component may run ahead of local time and rejects a remote timestamp beyond that; nothing here does.
+  A device with a badly wrong clock stamps ops with its wrong time and every peer accepts them.
+  `outl-sync-iroh` drops an incoming op more than `MAX_CLOCK_SKEW_MS` (24h) ahead on ingest, but the file transports never pass through that gate.
+
+What changed, and is now true:
+
+- **The generator is seeded from the op log at boot.**
+  `Workspace::seed_clock` raises it to the maximum HLC across every actor, so a backwards wall-clock jump no longer produces a locally-minted op that sorts below the log's tail.
+  This was a cost, not a convergence bug: `apply_op` exists to absorb an op arriving below the tail, so a low-stamped op was reordered into place and every replica still landed on the same tree.
+  What it cost was the `debug_assert` in `OpLog::append` and the paper's undo/redo window over every newer entry, roughly 74 ms for one late op on a 217k-op log, paid on a foreground keystroke.
+  A real workspace carried 11 such rollback events, the widest 2.7 days.
+
+- **The seed has a ceiling, and the ceiling is `now + 24h`.**
+  Seeding folds *every* actor's maximum into this device's generator, and the seeded value is then stamped onto this device's own ops and appended to `ops-<own>.jsonl`, where the next boot reads it back.
+  Without a ceiling, one corrupt or hostile far-future `physical_ms` is absorbed on the first boot that sees it and pins the local clock in the future permanently, irreversibly for that workspace.
+  `outl_core::hlc::MAX_CLOCK_SKEW_MS` is the single owner of that window, the same 24h `outl-sync-iroh` uses on ingest, declared in `outl-core` because the transport depends on the kernel and not the reverse.
+  Clamping only *lowers* how far the clock is raised, and both `seed` and `next` are monotone against the generator's own state, so it can never rewind a clock or issue a duplicate.
+  The worst it can do is leave one workspace in the pre-seeding world, which is a reorder cost and never a divergence.
+
+- **The logical counter carries, it does not saturate.**
+  While `logical` could only grow inside a single wall-clock millisecond, `u32::MAX` was unreachable and a saturating bump was harmless.
+  Seeding made it reachable, because the counter is now raised from a `u32` read off disk.
+  Pinned at the ceiling with `physical_ms` at or ahead of the wall clock, `next()` would return the same `Hlc` forever, and `Workspace::apply` would dedup every subsequent local op by `ts` and return `Ok(())` without persisting: silent, total write loss reported as success.
+  `(p, u32::MAX)` now carries to `(p + 1, 0)`, which sorts strictly after it.
 
 ---
 
@@ -179,12 +225,15 @@ do_op(op):
             // arrive after a Move already parented something under `node`, so
             // `parent` may already be a descendant of `node`. Creating the edge
             // would close a loop, so it's a NO-OP on the tree (LogOp still gets
-            // appended). Undo is safe: a node only ever comes into existence
-            // through its own Create (Move never inserts a new entry), so a
-            // cycle-skipped Create leaves `node` absent and `undo_op`'s remove
-            // is a no-op.
-            if !tree.contains(node) and not creates_cycle(node, parent):
+            // appended).
+            //
+            // Record whether THIS op is the one that materialized the node —
+            // the paper's `oldp` (see undo_op below). Computed before the
+            // branch that may skip, so a replay cannot read a stale value.
+            created_here = not tree.contains(node)
+            if created_here and not creates_cycle(node, parent):
                 tree.create(node, parent, position)
+                tree.created_by[node] = log_op.ts
 ```
 
 The materializing effect of `do_op` is **observable**.
@@ -233,11 +282,41 @@ undo_op(log_op):
             tree.set_property(node, key, old_value)
 
         Create { node, .. }:
-            tree.remove(node)
+            // Only if THIS Create is the one that materialized the node.
+            // `do_op(Create)` is idempotent, so a Create that found the node
+            // already there changed nothing and its inverse is the identity.
+            // Removing unconditionally deletes a node somebody else's Create
+            // made — and duplicate Creates are routine, because page roots
+            // are addressed by the deterministic `NodeId::from_slug`.
+            if tree.created_by[node] == log_op.ts:
+                tree.remove(node)
 ```
 
 Undo precondition: the op was previously applied via `do_op`.
 Calling `undo_op` on something that was never `do_op`'d is undefined — but `apply_op` is responsible for only undoing things that were applied.
+
+### `undo_op` must be the exact inverse of `do_op` — for *every* op
+
+Including the ones `do_op` turned into no-ops.
+This is not a style rule; it is the hinge of the correctness argument.
+In the authors' Isabelle development it is the lemma `do_undo_op_inv` (`proof/Move.thy`), whose **only** hypothesis is that the tree is well-formed — there is no case split on whether the op had an effect — and it is invoked inside the commutativity proof that discharges `theorem apply_ops_commutes` (paper §4.2), which is what plugs the algorithm into Gomes et al.'s SEC framework.
+
+Every variant therefore records what `do_op` found, not what it did:
+
+| variant | where the record lives |
+|---|---|
+| `Move` | `old_parent` / `old_position` fields, plus the `parent == new_parent` guard in `undo_op` |
+| `SetProp` | `old_value` field |
+| `SetCollapsed` | `old_value` field |
+| `SnoozeRemind` | `old_until_ms` field |
+| `Create` | `Tree::created_by`, a `node → Hlc` side table — *not* a field |
+| `Edit` | nothing: a tree-level no-op on both sides, symmetric by construction |
+
+`Create` is the odd one out because it has no field for it, and adding one would put undo-only local derivation on the sync surface for the most frequent op in the log — the mistake `Op::Move::old_parent` already made.
+In the paper that record is not on the transmitted operation either: `Move t p m c` carries four fields and `oldp` lives on the local `LogMove` log record (§3.2).
+`created_by` keeps `Create`'s answer on the side the paper keeps it.
+
+This asymmetry was a real, convergence-breaking bug: [RFC 0263](rfcs/0263-create-is-invertible.md).
 
 ---
 
@@ -267,6 +346,21 @@ apply_op(new_op):
 
 Idempotency check is implicit: if `new_op.ts` already exists in the log with the same actor, the function is a no-op (or we check explicitly to skip).
 Implementation note: keeping the log sorted by `(ts, actor)` makes the lookup `O(log n)` via binary search.
+
+### How often the undo/replay window is non-empty, measured
+
+Almost never, locally.
+On a real 217,811-op log the window is **0 for 217,663 of 217,663 ops**: every local path feeds `apply_op` already sorted, so a full replay undoes nothing at all.
+Tree depth on the same workspace is p50=3, max=8.
+
+Two consequences, and they pull in opposite directions:
+
+- **There is no reorder-performance problem to solve.**
+  The loop looks expensive and is not entered.
+  An optimization aimed at shrinking the window has nothing to shrink — this was proposed and refuted by the measurement above.
+- **`undo_op`'s correctness is not made less important by that number.**
+  The window is non-empty exactly when an op arrives from *another device* below the local tail, which is the whole point of the algorithm and the case a single-device replay can never exercise.
+  A defect in `undo_op` is therefore invisible to every local test that replays an ordered log, and shows up only once a workspace has two devices — which is how [RFC 0263](rfcs/0263-create-is-invertible.md) survived undetected.
 
 ---
 
@@ -434,6 +528,10 @@ Mandatory tests in `crates/outl-core/tests/`:
 | `fractional_index.rs` | Concurrent inserts at same gap converge |
 | `large_log.rs` | 10k ops stress, asserts < 1s materialization |
 | `property_based.rs` | proptest, generates random op sequences |
+| `convergence_property.rs` | the five convergence properties (below), over the generator in `convergence_gen/` |
+| `create_tree_invariants.rs` | deterministic `Op::Create` regressions: the cycle guard, the phantom parent |
+| `create_undo_symmetry.rs` | `undo_op` is the exact inverse of `do_op`, for every variant ([RFC 0263](rfcs/0263-create-is-invertible.md)) |
+| `create_undo_after_snapshot_boot.rs` | `Create`'s undo record is rebuilt correctly when boot came from a snapshot |
 
 Coverage target:
 
@@ -479,12 +577,18 @@ Be honest about the limits:
 
 Moved here from `crates/outl-core/CLAUDE.md` (issue #216). The suite is what proves the paper's convergence claim holds in this implementation, so it belongs next to the algorithm it verifies rather than in a file loaded on every edit to the crate.
 
+It is three files, not one: the original reached 838 lines against a 900-line hard stop, so it was split before it got there.
+`convergence_gen/` owns the generator and the comparison helpers (**single owner** — a second `lower()` would let the callers disagree about what a generated program is);
+`convergence_property.rs` holds the five properties, and keeps the `.proptest-regressions` seeds that name them;
+`create_tree_invariants.rs` holds the two deterministic `Op::Create` regressions the suite surfaced.
+No test was renamed in the split.
+
 The definitive guard for the SEC claim.
 It generates bounded random op programs across up to 4 actors with globally-unique, monotonic-per-actor HLCs.
-The op mix is `Create` / `Move` / delete=`Move`→trash / `SetProp` / `SetCollapsed`.
+The op mix is `Create` / `Move` / delete=`Move`→trash / `SetProp` / `SetCollapsed` / `SnoozeRemind`, and it includes **duplicate `Create`s for one node** — see the regression note below.
 It delivers them to multiple replicas under random permutations and random duplication.
 Every op carries a unique HLC so the idempotency dedup never silently drops two distinct ops.
-The comparison is a `BTree`-keyed snapshot of the **full** materialized state: node parent+position, every property binding, and the collapsed set.
+The comparison is a `BTree`-keyed snapshot of the **full** materialized state: node parent+position, every property binding (via `Tree::iter_properties`, so a binding left on a node no longer in the tree is visible too), the collapsed set and the snooze table.
 That is stronger than `common::assert_trees_equal`, which compares nodes only.
 It is deterministic (no wall clock; permutations driven by seeded xorshift) and shrinks to a minimal counterexample on failure.
 
@@ -497,6 +601,38 @@ Properties and the invariants (above) they guard:
 4. `hlc_actor_tiebreak_is_deterministic` — equal physical+logical, different actor resolves to the same winner on every replica.
 5. `late_op_undo_redo_round_trips` — the `undo_op`→`do_op` reorder path is a faithful round-trip (a late op forces a full undo/redo of the log).
 
+### The second generator, and the measurement that justifies it
+
+`program_strategy()` above is deliberately broad, and that breadth has a measured cost: **it almost never fires the cycle guard.**
+
+The measurement replays each generated program in HLC order, asking `Tree::creates_cycle` *before* each apply.
+That separates a genuine rejection from a `Move` merely superseded by a later one — a distinction the first attempt at this measurement missed, reporting a meaningless 55%.
+The corrected figure is **1.45% of structural ops rejected, and only 53 of 400 programs containing any rejection at all.**
+So roughly 87% of the broad suite's cases never exercise invariant 4's "no-op on the tree, still in the log" clause.
+Delete a cycle-rejected op from the log and most generated cases would not notice.
+
+The cause is structural, not a weight to tune: a cycle needs `node` to be an **ancestor** of `new_parent`, and these programs materialize a mean of 2.39 live nodes at mean depth 1.33.
+There is almost no ancestry to collide with.
+
+So `cycle_dense_program_strategy()` is a **second** generator rather than a reshaping of the first — a deterministic 5-node chain prelude (so `i < j` implies ancestor) plus a body whose moves target `(n + offset) % 5`.
+It reaches **22.41% of structural ops rejected, in 95.5% of programs**, at mean depth 2.35.
+Crucially the rejections are *transitive* — an ancestor moved under its own descendant several levels down — so the full `creates_cycle` walk runs rather than only the immediate-parent case.
+
+Reshaping the shared generator instead was rejected for a reason worth recording.
+`convergence_property.proptest-regressions` holds seeds that replay through the *current* strategy, so changing its composition makes saved seeds decode to different programs.
+That trades coverage of known past failures for coverage of a new path.
+Both generators share one `lower()`, keeping the single-owner rule.
+
+Four further properties run on it:
+
+6. `convergence_holds_when_the_cycle_guard_rejects_often` — property 1, over dense programs.
+7. `a_move_the_guard_rejected_is_redone_faithfully_after_a_late_op` — property 5 with a late op that is itself likely a cycle.
+   This is the one that actually pins invariant 4's second clause, because `undo_op(Move)` reverts only when `parent(node) == new_parent` — which is exactly how it tells a move that took effect from one the guard rejected.
+8. `duplicating_a_rejected_move_leaves_the_tree_and_the_log_alone` — property 2 over dense programs.
+   A dedup keyed on *effect* ("this op did nothing, drop it") passes property 2 and fails this one.
+9. `the_cycle_dense_generator_rejects_far_more_moves_than_the_shared_one` — the coverage claim itself, made fail-able.
+   Absolute floors (≥15% of structural ops, ≥90% of programs) plus a ≥5× ratio, because the shared rate samples at 2.4–3.4% and a bare ratio would flip on noise.
+
 ### Regression: `Op::Create` honors the cycle guard
 
 `Op::Create` runs `creates_cycle` before inserting, exactly like `Op::Move`.
@@ -505,5 +641,22 @@ The `Op::Create` branch used to do a bare `entry().or_insert((parent, pos))` wit
 So a `Create(node, parent)` whose `parent` was already a descendant of `node` inserted `node → parent` and closed a loop (a prior `Move` re-parents something under `node` under reordering).
 That violates invariant #4 and then panics `creates_cycle` on the malformed tree.
 A cycle-forming `Create` is now a no-op on the materialized tree (the op still goes into the log).
-Undo is safe because a node only ever comes into existence through its own `Create` (`Move` never inserts a new entry), so a cycle-skipped `Create` leaves `node` absent and `undo_op`'s `remove(node)` is a no-op.
+A cycle-skipped `Create` leaves `node` absent, and `undo_op` removes nothing for it — `Create`'s undo record (`Tree::created_by`) only names the op that actually inserted.
 The deterministic regression is `create_respects_cycle_guard` (asserts no cycle, C stays unmaterialized, all ops logged, across every delivery order); the full-surface `convergence_under_reordering` property exercises it under random programs.
+
+### Regression: the generator emits duplicate `Create`s, and varies positions
+
+Two restrictions in `lower()` hid a convergence bug for as long as they stood ([RFC 0263](rfcs/0263-create-is-invertible.md)).
+
+**A second `Create` for a node used to be lowered to a `Move`**, on the reasoning that a duplicate `Create` "is NOT a well-formed CRDT input" because "the surviving placement would depend on which Create arrived first".
+Both halves are wrong.
+Which `Create` arrives first is exactly what must *not* matter — the lowest-HLC one wins, and that is a property of the op *set*, not of delivery order.
+And the shape is not exotic: page and journal roots are addressed by the deterministic `NodeId::from_slug`, so two devices opening the same journal offline each emit a `Create` for one node id.
+Excluding it did not make it well-formed; it made it untested.
+
+**Every op used to lower to the same position, `Fractional::parse("m")`.**
+That made sibling position unobservable: a replica could place a node at the wrong op's position and still compare equal.
+It is the class of divergence a broken `undo_op` produces — the node survives, at the placement of the wrong op — so the constant blinded the suite to the very thing it was meant to catch.
+Positions now vary per step (`a..z`).
+
+Reverting the one-line guard in `undo_op(Create)` fails three of the five properties, shrinking to a two-op `Create, Create` program.

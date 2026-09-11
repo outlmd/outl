@@ -40,6 +40,24 @@ impl Tree {
                 }
             }
             steps += 1;
+            // Defensive only, and **unreachable while the tree is acyclic** —
+            // which `theorem apply_ops_acyclic` (Kleppmann et al. 2022 §4.1)
+            // guarantees for any tree built by `apply_op`. The bound is not
+            // part of the algorithm: the paper's `ancestor` is an inductive
+            // least fixed point over a tree already proved acyclic, and needs
+            // no bailout. Do not "optimize" `max_steps` into something that
+            // varies for another reason — under a malformed tree the answer
+            // already depends on `nodes.len()`, and two replicas that
+            // disagree about malformation would then diverge with no op
+            // behind it. `true` (refuse the move) is the conservative
+            // direction to fail in.
+            //
+            // The `return true` below is therefore **dead in any debug
+            // build**: the assert one line up fires first, so `cargo test`
+            // (and `cargo llvm-cov`, which builds in debug) can never reach
+            // it. That is the one line keeping `creates_cycle` off the 100 %
+            // target in `crates/outl-core/CLAUDE.md`, and it is a property of
+            // this pair of statements, not a missing test.
             debug_assert!(
                 steps <= max_steps,
                 "creates_cycle: malformed tree (loop without sentinel)"
