@@ -238,7 +238,7 @@ The full mapping (CLI ↔ MCP tool) is documented in [`docs/cli.md`](../../docs/
   Every tool is a thin router that delegates to the same handler the CLI subcommand calls — there is no second business-logic path.
 
 **The response is projected for an LLM consumer, not a script — this is the one place the MCP surface diverges from the CLI, and the handler is untouched.**
-`mcp/tools/payload.rs` owns the wrapping; [`docs/cli.md`](../../docs/cli.md#commands-by-domain) owns the wire shape itself.
+`mcp/tools/payload.rs` owns the wrapping; [`docs/cli.md`](../../docs/cli.md#commands-by-domain) owns the wire shape itself; [RFC 0276](../../docs/rfcs/0276-mcp-content-only-replies.md) owns why (content-only success, enveloped error, no `outputSchema`) and what was rejected.
 What belongs here is the part a reader of that doc cannot see: **why a field is safe to drop**, and the two ways that judgement has already been got wrong.
 
 **A field is only droppable if the caller can still get it.**

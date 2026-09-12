@@ -482,3 +482,24 @@ pub fn list() -> Vec<Value> {
         ),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::list;
+
+    /// No tool declares an `outputSchema`. Under the MCP spec a tool
+    /// with one must return a conforming `structuredContent` on every
+    /// success, which is exactly the duplicate RFC 0276 removed from
+    /// the success path. Adding a schema here means superseding that
+    /// RFC, not deleting this assertion.
+    #[test]
+    fn no_tool_declares_an_output_schema() {
+        for tool in list() {
+            assert!(
+                tool.get("outputSchema").is_none(),
+                "{} declares an outputSchema; see docs/rfcs/0276-mcp-content-only-replies.md",
+                tool["name"]
+            );
+        }
+    }
+}
