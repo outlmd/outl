@@ -3,6 +3,10 @@
 //! Turns a handler's `serde_json::Value` (or an [`ApiError`]) into the
 //! `tools/call` result shape, projected for an LLM consumer. The shared
 //! `cmd/*` handler is untouched; only this wire copy is trimmed.
+//!
+//! The contract (content-only success, enveloped error, no
+//! `outputSchema` anywhere) and what was rejected to get here are in
+//! `docs/rfcs/0276-mcp-content-only-replies.md`.
 
 use serde_json::{json, Value};
 

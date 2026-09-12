@@ -97,3 +97,4 @@
   * [0263 — `Op::Create` records whether it created anything](rfcs/0263-create-is-invertible.md)
   * [0265 — Index sidecar lifecycle: one owner, and a GC](rfcs/0265-index-sidecar-lifecycle.md)
   * [0266 — The most dangerous stale fact is one that was true](rfcs/0266-measure-before-you-believe.md)
+  * [0276 — An MCP reply carries its payload once, and an error is the exception](rfcs/0276-mcp-content-only-replies.md)

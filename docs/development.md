@@ -522,10 +522,14 @@ The rule from the root `CLAUDE.md` is: any operation more than one client needs 
 
 ### Add an MCP tool
 
-1. Mirror an existing tool in `crates/outl-cli/src/mcp/` — they all use the same envelope.
+1. Add the handler in `crates/outl-cli/src/cmd/*.rs` returning `Result<Value, ApiError>`, then register it in `mcp/tools/registry.rs` (schema) and `mcp/tools/dispatch.rs` (dispatch) — mirror an existing tool.
 2. Tool name: `outl_<verb>_<noun>` (e.g. `outl_block_append`, `outl_page_create`).
 3. Wire the underlying logic through `outl-actions` if it mutates state; through `outl-md` indices if it's a read.
-4. Update `docs/mcp.md` with the tool's purpose, params, and an example invocation.
+4. **Return the handler's `Value` and let `mcp/tools/payload.rs` wrap it.**
+   MCP does not use the CLI's `{ ok, data, error }` envelope: a success reply is content-only (compact JSON in `content[].text`, no `structuredContent`), and only an error keeps the envelope in `structuredContent` ([RFC 0276](rfcs/0276-mcp-content-only-replies.md)).
+   Do not build the result shape in the dispatcher, and do not add an `outputSchema` to the tool def — declaring one obliges the server to send `structuredContent` on success.
+   Only add a tool to `payload.rs`'s `markdown_field` if the caller already holds every field the flattening drops; `crates/outl-cli/CLAUDE.md` → MCP has the test and the two ways it was got wrong.
+5. Update `docs/mcp.md` with the tool's purpose, params, and an example invocation.
 
 ### Add a theme
 

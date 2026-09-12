@@ -159,6 +159,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   **Two things are deliberately *not* trimmed, and both are load-bearing.** The journal reads (`outl_daily_today`, `outl_daily_get`) are not flattened to their `.md` despite being markdown-shaped: `outline` is the only place a block's id appears — ids live in the sidecar, never in rendered markdown — and `outl_block_update` / `_move` / `_delete` / `_toggle_todo` all require one, so flattening them would break "read today's journal, tick a task" in a way nothing would report. And pruning keys on an outline node's `id` as well as its `text` + `children`: `outl_md::ast::OutlineNode` has the same `text` + `children` shape with no `id`, `outl_export_json` returns those nodes, and its `properties` has no `#[serde(default)]` — so a looser guard stopped the export deserializing back into the type that produced it, silently, on every block without a property.
 
+  Reasoning, rejected alternatives and the `outputSchema` decision: [RFC 0276](docs/rfcs/0276-mcp-content-only-replies.md).
   Thanks to [@waldnzwrld](https://github.com/waldnzwrld) ([#273](https://github.com/outlmd/outl/pull/273)).
 
 - **`g p` in the TUI now opens the property editor.**
