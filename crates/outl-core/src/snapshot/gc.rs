@@ -133,7 +133,7 @@ use crate::id::ActorId;
 /// a day is several orders of magnitude of headroom.
 ///
 /// This collector carries more weight than it used to. The scratch name
-/// is per-write ([`crate::snapshot::scratch_path`]), which is what stops
+/// is per-write (`crate::snapshot::scratch_path`), which is what stops
 /// two writers for one actor sharing an inode — and it also means a
 /// killed writer's leftovers are no longer recycled by the next write
 /// the way one shared name was. `write_to_disk` unlinks its own scratch

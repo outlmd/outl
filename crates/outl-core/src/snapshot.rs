@@ -249,7 +249,7 @@ fn compute_hash(body: &SnapshotBody) -> Result<[u8; 32], SnapshotError> {
 /// Write `body` to `snapshots_dir/snap-<actor>.bin` atomically.
 ///
 /// Encodes the body to postcard, writes to a **unique** sibling scratch
-/// file ([`scratch_path`]), `fsync`s, and renames into place. A crash at
+/// file (`scratch_path`), `fsync`s, and renames into place. A crash at
 /// any point leaves either nothing (scratch never created) or an
 /// abandoned scratch (rename didn't happen) — never a half-written
 /// `snap-*.bin` that `load` could mistake for a valid snapshot.
