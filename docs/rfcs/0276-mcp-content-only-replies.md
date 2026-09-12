@@ -13,7 +13,10 @@
 ## Why
 
 Every successful MCP `tools/call` sent its payload twice.
-`content[0].text` held the handler's `data` as pretty-printed JSON, and `structuredContent` held the same data again inside the CLI's `{ ok, data, error }` envelope.
+`structuredContent` held the handler's `data` inside the CLI's `{ ok, data, error }` envelope, and `content[0].text` held the same data again as pretty-printed JSON.
+Four tools were a partial exception, and it is worth stating precisely because the change means something different for them.
+`preferred_text_for` already flattened `outl_page_render`, `outl_export_md`, `outl_daily_today` and `outl_daily_get` to their `md` field, so their text was raw markdown rather than a second JSON copy.
+The `structuredContent` duplicate was there for all 41 regardless, which is why those four still show a saving below.
 On top of that, every outline node carried `tokens`, a pre-tokenized inline AST that exists so the Tauri renderers do not need their own inline tokenizer, and which restates the `text` the model already has.
 
 The consumer of this surface is a language model with a context window, so the cost is paid on every call, in tokens, before the model has read a word of the answer.
@@ -39,6 +42,8 @@ Three decisions, in the order a reader hits them on the wire:
 1. **No `structuredContent` on success.**
    `content[0].text` carries the payload as compact JSON (`serde_json::to_string`, not `to_string_pretty`).
    For the two markdown-first tools, `outl_page_render` and `outl_export_md`, it carries the raw `.md` string instead, because their payload is `{slug, md}` and the caller supplied the slug.
+   Those two kept the behaviour `preferred_text_for` already gave them; what they lost is the `structuredContent` beside it.
+   **`outl_daily_today` and `outl_daily_get` went the other way**, from raw markdown to JSON, and that is the one text change a caller can see rather than just a smaller one (see The opposite direction).
    `tool_success_payload` is the function.
 2. **GUI-only outline fields are pruned.**
    On any object that carries `id` **and** `text` **and** `children` — the signature of `outl_actions::outline::OutlineNode` — `tokens` always goes, and `collapsed: false` / `todo: null` / empty `properties` go as default noise.
@@ -91,6 +96,12 @@ There are two `OutlineNode` types in this workspace: `outl_actions`' has an `id`
 Any client that did is now reading `undefined` on every success.
 Nothing in the repo does; nothing outside it is known to.
 The `CHANGELOG.md` entry names the break, and the PR template now asks about wire contracts so the next one is named before merge rather than after.
+
+**The journal reads changed the kind of their text content, not just its size.**
+`outl_daily_today` and `outl_daily_get` put raw markdown in `content[0].text` before this and put JSON there now.
+Every other tool's text either stayed JSON or stayed markdown, so these two are the only place a caller reading `content[0].text` gets a different *type* of thing back.
+That is the price of decision 1: their `outline` carries the block ids and used to reach callers through `structuredContent`, so once the envelope goes, the text is the only channel left and it has to carry the whole payload.
+A host that fed that text straight to a model as markdown now feeds it JSON with the markdown inside, under `md`.
 
 **Success and error now have different shapes, and a caller has to branch on `isError`.**
 Before, `structuredContent.ok` was one field that answered both.
