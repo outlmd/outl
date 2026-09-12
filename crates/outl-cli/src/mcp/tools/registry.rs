@@ -251,7 +251,7 @@ pub fn list() -> Vec<Value> {
         // Asset
         tool_def(
             "outl_asset_add",
-            "Import a file into `assets/` and append its markdown link as a new block. `path` is a filesystem path on this machine (stdio — pass a path, not bytes). Appends to today's journal by default; pass `page` (a slug) to target a page instead. `daily` is just that default and never needs setting.",
+            "Import a file into `assets/` and append its markdown link as a new block. `path` is a filesystem path on this machine (stdio — pass a path, not bytes). Appends to today's journal by default; pass `page` (a slug) to target a page instead. `daily` is just that default and never needs setting — sending it together with `page` is rejected as `INVALID_ARG`.",
             json!({
                 "type": "object",
                 "properties": {

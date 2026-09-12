@@ -29,6 +29,12 @@ Updated docs: `docs/...`
   Is it documented in the per-crate CLAUDE.md?
 - Any change to keymaps in `outl-tui`?
   Updated `docs/tui.md` and the in-app help popup?
+- Any change to a wire contract?
+  The MCP `tools/call` result shape, the CLI `--json` envelope, a sidecar field, the op log format.
+  These are visible to clients you cannot see, so say what breaks and add a `CHANGELOG.md` entry.
+- Does this need an RFC?
+  Yes if it touches an invariant, a data format, the CRDT, sync, or a projection path, or if it has a trade-off someone could reasonably want to reverse.
+  Rule of thumb from [`docs/rfcs/README.md`](../docs/rfcs/README.md): if you are writing a paragraph here explaining *why this way*, that paragraph is an RFC.
 
 ## Out of scope for this PR
 

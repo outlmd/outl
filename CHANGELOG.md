@@ -150,6 +150,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Changed
 
+- **MCP tool replies are projected for an LLM, cutting a call's payload by roughly half to four fifths.**
+  Every successful `tools/call` used to send its payload **twice**: pretty-printed JSON in `content[0].text`, then the same data again as a `{ ok, data, error }` envelope in `structuredContent`. On top of that, every outline node carried `tokens`, a pre-tokenized inline AST that exists so the Tauri renderers do not need their own inline tokenizer, and which restates `text` an LLM already has.
+
+  A success reply is now content-only and compact, with `tokens` and default-valued `collapsed` / `todo` / empty `properties` dropped. Measured against a 2,862-page workspace: `outl_daily_today` fell from ~12.2k to ~5.9k characters, `outl_page_get` on a journal from ~22k to ~5.9k, `outl_page_list` from ~726k to ~303k. `outl_page_render` and `outl_export_md` return the raw `.md` instead of JSON, because their payload is `{slug, md}` and the caller supplied the slug.
+
+  **This is a wire-format change for any MCP client that read `structuredContent` on success** — `docs/cli.md` used to tell clients to do exactly that. Errors are unchanged and deliberately still carry `structuredContent: { ok: false, error }`, since their text is only a `code: message` summary and it is the sole machine-readable copy of `error.data` (RFC 0255). No tool declares an `outputSchema`, so omitting `structuredContent` on success stays within the MCP spec. The CLI's own `--json` output is untouched, as are the shared `cmd/*` handlers.
+
+  **Two things are deliberately *not* trimmed, and both are load-bearing.** The journal reads (`outl_daily_today`, `outl_daily_get`) are not flattened to their `.md` despite being markdown-shaped: `outline` is the only place a block's id appears — ids live in the sidecar, never in rendered markdown — and `outl_block_update` / `_move` / `_delete` / `_toggle_todo` all require one, so flattening them would break "read today's journal, tick a task" in a way nothing would report. And pruning keys on an outline node's `id` as well as its `text` + `children`: `outl_md::ast::OutlineNode` has the same `text` + `children` shape with no `id`, `outl_export_json` returns those nodes, and its `properties` has no `#[serde(default)]` — so a looser guard stopped the export deserializing back into the type that produced it, silently, on every block without a property.
+
+  Thanks to [@waldnzwrld](https://github.com/waldnzwrld) ([#273](https://github.com/outlmd/outl/pull/273)).
+
 - **`g p` in the TUI now opens the property editor.**
   The `pinned::` toggle moved to **`g P`**; `/pin` is unchanged.
   Pinning is a once-per-page act with a second door already, editing properties is a daily one, and `pinned::` is itself one of the page properties `g p` now edits.
