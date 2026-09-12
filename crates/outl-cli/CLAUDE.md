@@ -238,13 +238,26 @@ The full mapping (CLI ↔ MCP tool) is documented in [`docs/cli.md`](../../docs/
   Every tool is a thin router that delegates to the same handler the CLI subcommand calls — there is no second business-logic path.
 
 **The response is projected for an LLM consumer, not a script — this is the one place the MCP surface diverges from the CLI, and the handler is untouched.**
-`mcp/tools/payload.rs` owns the wrapping.
-A **success** reply is content-only: the handler's `data` as compact JSON in `content[0].text`, or the raw `.md` for markdown-first tools (`export_md`, `page_render`, `daily_*`).
-No `structuredContent` — the text already holds the full payload, so an envelope around it is a duplicate.
-It also drops fields only a GUI renderer reads — an outline node's `tokens` (a pre-tokenized inline AST that restates `text`), and default-valued `collapsed` / `todo` / empty `properties` — because the shared `project_outline` shape serves the Tauri clients too and an LLM already has `text`.
-The CLI's own `--json` keeps every field.
-An **error** reply is the deliberate exception: its text is only a `code: message` summary, so it sets `isError: true` and keeps `structuredContent: { ok: false, error }` — the sole machine-readable copy of `error.data` (RFC 0255's `PAGE_MARKDOWN_AHEAD_OF_LOG` carries `path` / `lines` / `sample` / `recovery_command`).
-Pruning keys off the outline-node signature (`text` + `children`) so a same-named field on another payload (`page_prop_list`'s `properties`) is never touched; pinned by `mcp/tools/payload.rs`'s tests.
+`mcp/tools/payload.rs` owns the wrapping; [`docs/cli.md`](../../docs/cli.md#commands-by-domain) owns the wire shape itself.
+What belongs here is the part a reader of that doc cannot see: **why a field is safe to drop**, and the two ways that judgement has already been got wrong.
+
+**A field is only droppable if the caller can still get it.**
+The GUI-only fields qualify: an outline node's `tokens` is a pre-tokenized inline AST that restates `text` for the Tauri renderers, and `collapsed: false` / `todo: null` / empty `properties` are defaults.
+Flattening a whole payload to one field is the same question asked harder, and `outl_daily_today` / `outl_daily_get` **fail** it — which is why they are not markdown-first despite being journal reads.
+Their `outline` is the only carrier of block ids (a rendered `.md` has none; ids live in the sidecar), and every block-targeting write tool requires one, so flattening them breaks "read today's journal, tick a task".
+`outl_page_render` / `outl_export_md` pass, because `{slug, md}` minus `md` is a slug the caller just sent.
+
+**Pruning keys on `id` + `text` + `children`, and the `id` is load-bearing.**
+There are *two* `OutlineNode` types in this workspace: `outl_actions`' (with `id`) and `outl_md::ast`' (`{text, properties, children}`, no `id`).
+`outl_export_json` returns the second, and its `properties` has no `#[serde(default)]`.
+So a `text` + `children` guard dropped empty `properties` there and stopped the export deserializing back into the type that produced it.
+That broke the one tool whose whole job is being an interchange format, silently, because the JSON still looks fine to a reader.
+Both mistakes are pinned twice over.
+`journal_reads_keep_their_ids_and_date` and `pruning_leaves_the_parser_ast_alone` cover the projection in `payload.rs`.
+`daily_today_over_mcp_returns_ids_a_write_tool_can_use` and `export_json_over_mcp_round_trips_into_the_parser_ast` drive the real server in `tests/mcp_smoke.rs`.
+
+The general rule, and the reason this paragraph exists: **a projection is a place to drop what the reader can re-derive, never a place to drop the only copy.**
+When adding a tool to `markdown_field` or widening the prune guard, name what the caller loses and where else they can get it.
 
 ## P2P sync: the MCP takes the endpoint when nobody else has it
 
@@ -287,12 +300,16 @@ What that means for the surfaces in this crate:
   **Only the watcher half takes the per-actor write lock.** The transport buckets writes by `op.actor` and goes through `OpsDirAppendLock`, never the `JsonlStorage::append` path that `ActorWriteLock` guards, so `--no-watch` takes no write lock at all — which is what makes it safe to run permanently beside a GUI, instead of minting that GUI a fresh ephemeral actor and `ops-<ulid>.jsonl` on every launch.
 - **`outl peer pair`/`status`** use a transient endpoint they close before returning (CLI-only, no long-lived client should be mid-pair at the same time).
 
-## JSON envelope (CLI + MCP)
+## JSON envelope (CLI)
 
 ```json
 { "ok": true,  "data": { … }, "error": null }
 { "ok": false, "data": null,  "error": { "code": "X", "message": "…" } }
 ```
+
+This is the **CLI** `--json` shape.
+MCP shares the handlers, not the wire format: a successful `tools/call` is content-only, and an error keeps the envelope in `structuredContent`.
+[`docs/cli.md`](../../docs/cli.md#commands-by-domain) owns that fact; the [MCP](#mcp) section below says why the projection exists.
 
 Stable error codes live in `output::codes` (`NO_WORKSPACE`, `PAGE_NOT_FOUND`, `BLOCK_NOT_FOUND`, `INVALID_BLOCK_ID`, `INVALID_DATE`, `CONFIRM_REQUIRED`, `CYCLE_REJECTED`, `SLUG_CONFLICT`, `PROP_NOT_FOUND`, `INTERNAL`, `INVALID_ARG`).
 Add new codes by appending — never renumber existing ones (LLMs cache them).

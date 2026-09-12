@@ -61,7 +61,9 @@ Every CLI subcommand documented in [`docs/cli.md`](cli.md#commands-by-domain) is
 Names are `outl_<command>_<verb>` (e.g.
 `outl_page_get`, `outl_block_append`, `outl_daily_today`, `outl_search`, `outl_query`).
 Input schema mirrors the CLI flags.
-A success response is content-only — the handler's `data` as compact JSON (or raw `.md` for markdown-first tools) in `content[].text`, with GUI-only outline fields dropped.
+A success response is content-only — the handler's `data` as compact JSON in `content[].text`, with GUI-only outline fields dropped.
+`outl_page_render` and `outl_export_md` send raw `.md` instead, since their payload is `{slug, md}` and you passed the slug in.
+The journal reads do not: `outl_daily_today` / `outl_daily_get` keep their JSON because `outline` is where the block ids are, and you need one to write to a block.
 An error keeps the `{ ok: false, error }` envelope in `structuredContent` for `error.data`.
 Full shape in [`docs/cli.md`](cli.md#commands-by-domain).
 

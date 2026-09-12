@@ -251,6 +251,137 @@ fn page_create_then_get_via_mcp() {
     assert_eq!(data["meta"]["title"], "Ideas");
 }
 
+/// The whole point of reading a journal over MCP is being able to act on
+/// what you read. That needs a block id, and a rendered `.md` has none —
+/// ids live in the sidecar, never in the markdown.
+///
+/// This drives the real server, so it fails if `outl_daily_today` is ever
+/// flattened to its `md` field again. The unit test in
+/// `mcp/tools/payload.rs` pins the projection; this one pins that the
+/// resulting id actually works as a write target.
+#[test]
+fn daily_today_over_mcp_returns_ids_a_write_tool_can_use() {
+    let ws = init_workspace();
+    let mut client = McpClient::spawn(ws.path());
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "protocolVersion": "2024-11-05", "capabilities": {} }
+    }));
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_daily_append",
+            "arguments": { "text": "TODO ship the token diet" }
+        }
+    }));
+
+    let today = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": { "name": "outl_daily_today", "arguments": {} }
+    }));
+    let data = success_data(&today["result"]);
+
+    assert!(
+        data["date"].is_string(),
+        "outl_daily_today takes no argument, so its reply is the only \
+         thing naming the journal it opened: {data}"
+    );
+    assert!(
+        data["md"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ship the token diet"),
+        "the markdown must still be there: {data}"
+    );
+
+    let block_id = data["outline"][0]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the journal outline must carry block ids: {data}"))
+        .to_string();
+
+    // The id is only worth returning if it is a usable write target.
+    let toggled = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_block_toggle_todo",
+            "arguments": { "id": block_id }
+        }
+    }));
+    assert_eq!(
+        toggled["result"]["isError"], false,
+        "the id read back from the journal must work as a write target: {toggled}"
+    );
+}
+
+/// `outl_export_json` exists to be an interchange format, so its payload
+/// has to deserialize back into the type that produced it.
+///
+/// Its `blocks` are `outl_md::OutlineNode`s, whose `properties` field has
+/// no `#[serde(default)]`. Any projection that drops an empty
+/// `properties` breaks this on every block without one — silently, since
+/// the JSON still looks fine to a reader.
+#[test]
+fn export_json_over_mcp_round_trips_into_the_parser_ast() {
+    let ws = init_workspace();
+    let mut client = McpClient::spawn(ws.path());
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "protocolVersion": "2024-11-05", "capabilities": {} }
+    }));
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_page_create",
+            "arguments": { "slug": "export-me", "title": "Export me" }
+        }
+    }));
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_block_append",
+            "arguments": { "page": "export-me", "text": "a block with no properties" }
+        }
+    }));
+
+    let export = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_export_json",
+            "arguments": { "slug": "export-me" }
+        }
+    }));
+    let data = success_data(&export["result"]);
+
+    let blocks: Vec<outl_md::OutlineNode> = serde_json::from_value(data["blocks"].clone())
+        .unwrap_or_else(|e| {
+            panic!("export_json must deserialize back into the parser AST ({e}): {data}")
+        });
+    assert!(
+        blocks.iter().any(|b| b.text.contains("no properties")),
+        "the exported block must survive the projection: {data}"
+    );
+}
+
 /// RFC 0255 Part 1: a page that stopped syncing must come back as a
 /// distinct, structured refusal, not a generic `INTERNAL` failure —
 /// the caller needs to be able to tell "this page stopped syncing"

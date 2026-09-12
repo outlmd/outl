@@ -11,9 +11,28 @@ use crate::output::{ApiError, Envelope};
 /// The payload field whose raw string is the natural text content for a
 /// markdown-first tool — leaner than any JSON form. `None` for tools
 /// whose result is structured.
+///
+/// **A tool only belongs here when the rest of its payload is
+/// recoverable by the caller.** Flattening to one field discards every
+/// sibling, so the test is not "is markdown the useful part" but "does
+/// the caller already have what I am about to drop".
+///
+/// `outl_page_render` and `outl_export_md` pass: their payload is
+/// `{slug, md}` and the caller sent that slug in.
+///
+/// `outl_daily_today` / `outl_daily_get` do **not**, which is why they
+/// are absent despite being journal reads. Their payload is
+/// `{date, meta, outline, md}` (`cmd/daily.rs`), and `outline` is the
+/// only place a block's id appears — a rendered `.md` carries no ids,
+/// they live in the sidecar. Every write tool that targets a block
+/// (`outl_block_update`, `_move`, `_delete`, `_toggle_todo`) requires
+/// that id, so flattening these two breaks "read today's journal, tick
+/// a task" in the one place it is most used. `date` matters too:
+/// `outl_daily_today` takes no argument, so its reply is the only thing
+/// telling the caller which journal was opened.
 fn markdown_field(tool_name: &str) -> Option<&'static str> {
     match tool_name {
-        "outl_export_md" | "outl_page_render" | "outl_daily_today" | "outl_daily_get" => Some("md"),
+        "outl_export_md" | "outl_page_render" => Some("md"),
         _ => None,
     }
 }
@@ -64,18 +83,29 @@ pub(crate) fn tool_success_payload(tool_name: &str, mut payload: Value) -> Value
 
 /// Drop GUI-only fields from a payload, in place.
 ///
-/// `tokens` (an outline node's pre-tokenized inline AST, a verbose
-/// restatement of `text`) is dropped wherever it appears — the key is
-/// unique to that type. `collapsed: false`, `todo: null` and an empty
-/// `properties` are default noise, dropped only on an outline node
-/// (identified by `text` + `children`) so a same-named field elsewhere
-/// (e.g. `page_prop_list`'s `properties`, `block_get`'s `todo`) is left
-/// intact.
+/// Pruning is keyed on the signature of [`outl_actions::outline::OutlineNode`]
+/// — `id` **and** `text` **and** `children` — and applies to nothing else.
+/// On a node that matches: `tokens` (a pre-tokenized inline AST that
+/// restates `text` for the Tauri renderers) always goes, and
+/// `collapsed: false` / `todo: null` / empty `properties` go as default
+/// noise.
+///
+/// **`id` is in the guard to tell the two `OutlineNode` types apart, and
+/// it is load-bearing.** `outl_md::ast::OutlineNode` is
+/// `{text, properties, children}` — the same `text` + `children` shape,
+/// with **no** `id`. `outl_export_json` serializes those nodes as its
+/// `blocks` (`cmd/export_v2.rs`), and the field has no
+/// `#[serde(default)]`, so dropping an empty `properties` there makes
+/// the payload fail to deserialize back into the type it came from
+/// (`missing field 'properties'`) on every block that has no property.
+/// A `text` + `children` guard silently broke the one tool whose whole
+/// job is being an interchange format; pinned by
+/// `pruning_leaves_the_parser_ast_alone`.
 fn prune_gui_fields(v: &mut Value) {
     match v {
         Value::Object(map) => {
-            map.remove("tokens");
-            if map.contains_key("text") && map.contains_key("children") {
+            if map.contains_key("id") && map.contains_key("text") && map.contains_key("children") {
+                map.remove("tokens");
                 if map.get("collapsed") == Some(&Value::Bool(false)) {
                     map.remove("collapsed");
                 }
@@ -110,7 +140,9 @@ mod tests {
             !text.contains('\n'),
             "content text must be compact JSON: {text}"
         );
-        serde_json::from_str(&text).unwrap()
+        serde_json::from_str(&text).unwrap_or_else(|e| {
+            panic!("{tool} did not return JSON ({e}) — is it wrongly markdown-first? text: {text}")
+        })
     }
 
     /// A structured tool's success payload round-trips through the compact
@@ -126,6 +158,84 @@ mod tests {
     fn markdown_first_tool_returns_raw_md() {
         let out = tool_success_payload("outl_page_render", json!({ "slug": "x", "md": "- hi" }));
         assert_eq!(out["content"][0]["text"], "- hi");
+    }
+
+    /// The journal reads are **not** markdown-first: flattening them to
+    /// `md` would drop `outline`, the only carrier of the block ids that
+    /// every block-targeting write tool requires, plus the `date` that
+    /// argument-less `outl_daily_today` has no other way to report.
+    ///
+    /// Do not add them back to [`markdown_field`] — a rendered `.md` has
+    /// no ids in it, so "read the journal, tick a task" stops closing in
+    /// one round-trip the moment this test is deleted.
+    #[test]
+    fn journal_reads_keep_their_ids_and_date() {
+        for tool in ["outl_daily_today", "outl_daily_get"] {
+            let payload = json!({
+                "date": "2026-09-12",
+                "meta": { "slug": "2026-09-12", "kind": "journal" },
+                "md": "- ship it",
+                "outline": [ {
+                    "id": "01ABC",
+                    "text": "ship it",
+                    "todo": null,
+                    "collapsed": false,
+                    "properties": [],
+                    "tokens": [ { "type": "plain", "text": "ship it" } ],
+                    "children": []
+                } ],
+            });
+            let out = success_json(tool, payload);
+
+            assert_eq!(
+                out["date"], "2026-09-12",
+                "{tool} must report the journal it opened"
+            );
+            assert_eq!(
+                out["outline"][0]["id"], "01ABC",
+                "{tool} must keep the block id a write tool needs"
+            );
+            assert_eq!(
+                out["md"], "- ship it",
+                "{tool} must still carry the markdown"
+            );
+            assert!(
+                out["outline"][0].get("tokens").is_none(),
+                "{tool} still prunes the GUI-only AST"
+            );
+        }
+    }
+
+    /// `outl_export_json` returns `outl_md::ast::OutlineNode`s, which are
+    /// `{text, properties, children}` with no `id` and no
+    /// `#[serde(default)]` on `properties`. Pruning an empty
+    /// `properties` there would make the export fail to deserialize back
+    /// into the type it came from — on every block without a property,
+    /// which is most of them.
+    ///
+    /// This is why [`prune_gui_fields`] keys on `id` too. Widening that
+    /// guard back to `text` + `children` breaks the one tool whose
+    /// purpose is being an interchange format.
+    #[test]
+    fn pruning_leaves_the_parser_ast_alone() {
+        let blocks = json!([
+            { "text": "no props", "properties": [], "children": [
+                { "text": "nested", "properties": [], "children": [] }
+            ] }
+        ]);
+        let out = success_json(
+            "outl_export_json",
+            json!({ "meta": { "slug": "x" }, "properties": [], "blocks": blocks.clone() }),
+        );
+        assert_eq!(
+            out["blocks"], blocks,
+            "the parser AST must round-trip byte for byte"
+        );
+        assert_eq!(
+            out["properties"],
+            json!([]),
+            "page properties are not outline noise"
+        );
     }
 
     /// GUI-only outline fields are stripped; meaningful values and a
