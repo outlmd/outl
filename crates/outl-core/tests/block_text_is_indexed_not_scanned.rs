@@ -23,16 +23,42 @@
 //!
 //! Because the outputs are identical, the *only* observable difference
 //! is cost, so this measures cost — which normally means a flaky test.
-//! Two things make it safe here:
+//! What keeps it honest is that it asserts a **ratio across log sizes**
+//! rather than an absolute duration, so it does not care how fast the
+//! machine is. A test that merely asserted "this is fast" would fail on
+//! a loaded CI box and teach everyone to ignore it.
 //!
-//! - It asserts a **ratio across log sizes**, not an absolute duration,
-//!   so it does not care how fast the machine is.
-//! - The margin is enormous. With the index the ratio is ~1; with a scan
-//!   it is ~`LOG_GROWTH` (20). The bound is 5.
+//! # The numbers, measured rather than assumed
 //!
-//! A test that merely asserted "this is fast" would fail on a loaded CI
-//! box and teach everyone to ignore it. If this ever does go flaky,
-//! raise `MAX_RATIO` — do not delete it, or the bug comes back a fourth
+//! This file used to claim the indexed ratio was ~1 against ~`LOG_GROWTH`
+//! for a scan, and called that margin "enormous". Neither half held, and
+//! the bound they justified went red on CI at 5.5x with the index in
+//! place and nothing wrong.
+//!
+//! Measured on an idle macOS laptop, by injecting the scan into
+//! `Workspace::block_text` — the path this test actually times:
+//!
+//! | `LOG_GROWTH` | indexed   | scanned     |
+//! |--------------|-----------|-------------|
+//! | 20 (old)     | 2.2–4.2x  | 6.5–6.7x    |
+//! | 50 (now)     | 2.3–4.0x  | 13.1–25.6x  |
+//!
+//! The indexed ratio is not ~1 because only the *replayed work* is
+//! constant. The read also pays a lookup in `text`, in `pending` and in
+//! `edits_by_node`, and all three grow with the log — at the ~16µs the
+//! fast case takes, those cache misses dominate three `Edit` replays.
+//! That floor is real, so the ratio can only be pushed apart from above:
+//! growing `LOG_GROWTH` costs a scan proportionally and the index almost
+//! nothing, which is what the table shows.
+//!
+//! At `LOG_GROWTH` 20 the two bands nearly touch (4.2 vs 6.5) and a bound
+//! between them is a coin flip on a loaded runner — that is the 5.5x
+//! failure. At 50 they are a factor of three apart, and `MAX_RATIO` sits
+//! at 8: twice the worst honest run, comfortably under the cheapest
+//! scan.
+//!
+//! If this goes flaky again, re-measure both columns the same way and
+//! move the bound — do not delete it, or the bug comes back a fourth
 //! time.
 
 use outl_core::fractional::Fractional;
@@ -46,13 +72,15 @@ use std::time::{Duration, Instant};
 /// Ops in the small workspace.
 const SMALL_LOG: usize = 1_000;
 /// How much bigger the large workspace is. A scan costs this much more;
-/// the index costs the same.
-const LOG_GROWTH: usize = 20;
+/// the index costs the same. 50 rather than 20 so the two bands stay a
+/// factor of three apart — see the table in the module docs.
+const LOG_GROWTH: usize = 50;
 /// Edits on the node under test. Identical in both workspaces, so the
 /// indexed work is identical and only the *surrounding* log grows.
 const EDITS_ON_TARGET: usize = 3;
-/// Generous — see the module docs. Index ≈ 1, scan ≈ 20.
-const MAX_RATIO: f64 = 5.0;
+/// Halfway between the measured bands, on a log scale: indexed runs
+/// reach 4.0x, the cheapest scan costs 13.1x. See the module docs.
+const MAX_RATIO: f64 = 8.0;
 /// Best-of-N, to shrug off a scheduler hiccup.
 const REPS: usize = 5;
 
