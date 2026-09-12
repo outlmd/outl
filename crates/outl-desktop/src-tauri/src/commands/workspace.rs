@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-use outl_actions::open_today;
 use tauri::{Emitter, State};
 use tracing::warn;
 
@@ -11,6 +10,7 @@ use crate::helpers::storage_root_or_err;
 use crate::settings::{self, Settings};
 use crate::state::{AppState, WorkspaceSummary};
 use crate::workspace_open::{open_workspace_at, spawn_background_reconcile};
+use outl_tauri_shared::workspace_reload::reload_workspace_into;
 
 /// Pick a directory as the active workspace.
 ///
@@ -167,70 +167,18 @@ pub(crate) fn update_settings(
 /// Reload the workspace from disk after a peer change. Called by the
 /// frontend whenever the `peer-ops-changed` Tauri event fires.
 ///
-/// The reconcile step (scanning `.md` files for ones ahead of the op
-/// log) is now deferred to a background thread so the reload itself
-/// stays cheap. `app` is passed in only so the background thread can
-/// emit `workspace-reconciled` on completion.
+/// The replay itself, and the rule for when its result may be published,
+/// live in `outl_tauri_shared::workspace_reload` — mobile runs the same
+/// two. What stays here is the desktop's own tail: the `.md` reconcile
+/// pass (`app` is passed in only so that background thread can emit
+/// `workspace-reconciled` on completion).
 #[tauri::command]
 pub(crate) async fn reload_workspace(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let root = storage_root_or_err(state.inner())?;
-    // The full op-log replay (`SyncEngine::reload_workspace`) is O(all ops)
-    // and CPU-bound — seconds on a large / freshly-synced workspace. A
-    // synchronous command runs it on the Tauri IPC thread and freezes the
-    // window through the whole rebuild (on iOS the same shape trips the
-    // scene-update watchdog and SIGKILLs the app). Offload the replay to a
-    // blocking pool thread so the UI keeps painting; the cheap tail
-    // (history invalidation + swap) runs back here where it needs the live
-    // `AppState` guards.
-    let replay_root = root.clone();
-    let replay_hlc = state.hlc.clone();
-    let fresh = tauri::async_runtime::spawn_blocking(
-        move || -> Result<outl_core::workspace::Workspace, String> {
-            let engine = outl_actions::SyncEngine::new(replay_root, replay_hlc.actor());
-            let mut fresh = engine
-                .reload_workspace(&replay_hlc)
-                .map_err(|e| format!("reload workspace: {e}"))?;
-            let today_id = open_today(&mut fresh, &replay_hlc).map_err(|e| e.to_string())?;
-            // Guarded (root `CLAUDE.md` invariant 8) — can refuse when
-            // today's `.md` holds content the merge never saw. Not
-            // propagated with `?`: that would abort the reload before
-            // `fresh` (which already holds every peer's merged ops) gets
-            // swapped in below, turning one page's refusal into every
-            // page failing to converge. The frontend's `refreshActivePage`
-            // always re-opens the current page right after this command
-            // returns, and that open independently re-runs the equivalent
-            // guarded check and sets `PageView.md_ahead_of_log` — so the
-            // refusal still reaches the banner, just one round-trip later
-            // rather than from this call directly.
-            if let Err(e) = engine.reproject_page(&fresh, today_id) {
-                warn!("reload_workspace: today's page stopped syncing: {e}");
-            }
-            Ok(fresh)
-        },
-    )
-    .await
-    .map_err(|e| format!("reload task join: {e}"))??;
-    // Surgical undo invalidation: only pages whose projection actually
-    // changed across the reload lose their stacks. Restoring a
-    // snapshot of a page the peer DID change would silently revert the
-    // peer's edits — those stacks go. But a blanket `clear()` here
-    // capped `Cmd+Z` at one step whenever the TUI was open on the same
-    // workspace: every TUI write fires `peer-ops-changed` → reload,
-    // and the only snapshot surviving was the one recorded after the
-    // last reload. The rule lives in `helpers::invalidate_changed_history`
-    // so it stays unit-testable without a Tauri `AppHandle`.
-    {
-        let old_guard = state.workspace.lock();
-        let mut history = state.history.lock();
-        crate::helpers::invalidate_changed_history(old_guard.as_ref(), &fresh, &mut history);
-    }
-    *state.workspace.lock() = Some(fresh);
-    // Peer ops replaced the workspace, so the cached backlinks index is
-    // stale — drop it; the next `page_backlinks` rebuilds it off-thread.
-    outl_tauri_shared::helpers::invalidate_backlink_index(state.inner());
+    reload_workspace_into(state.inner()).await?;
     // Same split as `set_workspace` and the boot opener — reconcile
     // legacy / peer-pushed `.md` files in the background so the
     // frontend doesn't wait.

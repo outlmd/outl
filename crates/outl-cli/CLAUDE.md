@@ -162,7 +162,7 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   Full behaviour: [`docs/cli.md`](../../docs/cli.md#outl-recover).
 - `outl compact [<path>] [--apply] [--no-horizon]` — drop provably-inert ops.
   The **only** thing in this binary that rewrites `ops/`, and the exception that proves invariant 1: it removes lines, never edits one.
-  Read-only by default; `--apply` backs every file up to `.outl/compact-backup/<ts>/` first, takes an exclusive `.outl/.lock` plus every actor's write lock, and deletes the `.idx` sidecars rather than rebuilding them.
+  Read-only by default; `--apply` backs every file up to a per-run `.outl/compact-backup/<ts>-<ulid>/` first (a second-resolution name lets two valid runs share one generation, and the second copies over the first's only rollback point), takes an exclusive `.outl/.lock` plus every actor's write lock, and deletes the `.idx` sidecars rather than rebuilding them.
   The predicate is six conditions because `Op::Create` is idempotent: an adjacent `Create`+`Move` pair reads as "the `Move` is inert" *or* as trashed-then-restored, where the `Move` is the op doing the work, and the file cannot tell you which.
   Full behaviour: [`docs/cli.md`](../../docs/cli.md#outl-compact), predicate and soundness: [RFC 0256](../../docs/rfcs/0256-op-log-compaction.md).
 - `outl migrate-to-shared [<path>]` — copy local sqlite log into shared `ops/` JSONL for cross-device sync.

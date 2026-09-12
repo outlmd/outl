@@ -142,6 +142,12 @@ Prunable is `Superseded` or `Unusable`; `Own`, `Selected` and anything we failed
 It runs on the background writer's worker, never as a bulk sweep on a read (`doctor` opens read-only).
 Rules and rejected dedup: [RFC 0258](../../docs/rfcs/0258-snapshot-cache-lifecycle.md).
 
+`write_to_disk` composes in a **per-write** scratch (`snap-<actor>.bin.tmp.<ulid>`, `snapshot::scratch_path`).
+Two writers for one actor are routine — a threshold crossing spawning a worker while the last is still fsyncing 13MB, a reload's second `Workspace` calling `save_snapshot` — and one shared scratch name means one shared inode, so the loser of the `rename` wrote on through a path that already pointed at the published snapshot.
+A slow boot, never a lost note (invariant #1 does the work), which is why nothing reported it for so long.
+`storage::sidecar::tmp_path_for` took the same failure in production.
+The cost moved to the collector: an abandoned scratch is no longer recycled by the next write, so `gc::stale_tmp` is what bounds it past the in-process unlink.
+
 ### Block text is two-tier, not one live `Doc` per block
 
 > Why RSS had to become constant before boot did, with the measurements: [RFC 0137](../../docs/rfcs/0137-storage-scale.md).

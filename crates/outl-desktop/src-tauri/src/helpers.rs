@@ -9,6 +9,9 @@
 //!
 //! `invalidate_changed_history` moved to the shared crate in RFC 0254
 //! phase 1, when mobile's `reload_workspace` gained the same undo
-//! stacks to protect against a stale-snapshot revert.
+//! stacks to protect against a stale-snapshot revert; its only caller
+//! here then moved too, into
+//! `outl_tauri_shared::workspace_reload::publish_replayed`, which runs
+//! it in the same critical section as the swap it protects.
 
-pub(crate) use outl_tauri_shared::helpers::{invalidate_changed_history, storage_root_or_err};
+pub(crate) use outl_tauri_shared::helpers::storage_root_or_err;

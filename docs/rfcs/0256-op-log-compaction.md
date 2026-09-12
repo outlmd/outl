@@ -8,7 +8,7 @@
 | **Date** | 2026-09-11 |
 | **Reference doc** | `docs/storage.md` → op-log compaction; `docs/cli.md` → `outl compact` |
 | **Invariant** | root `CLAUDE.md` invariant 1 (op log is source of truth), invariant 5 (no silent loss), invariant 11 (attribute the cost) |
-| **Guarded by** | `keeps_the_move_that_lifts_a_block_back_out_of_the_trash`, `keeps_a_pair_whose_node_is_created_twice_anywhere_in_the_log`, `keeps_a_page_root_pair`, `keeps_a_pair_a_concurrent_move_of_the_same_node_interleaved_with`, `any_op_at_all_between_the_create_and_the_move_blocks_the_drop` (`crates/outl-core/tests/compaction.rs`); `compaction_preserves_the_materialized_tree`, `the_compacted_log_matches_the_original_under_any_delivery_order`, `every_dropped_op_is_a_move_that_restates_its_own_create` (`crates/outl-core/tests/compaction_property.rs`); `a_damaged_record_refuses_the_whole_pass`, `a_per_page_layout_refuses_rather_than_compacting_half_a_log` (`crates/outl-core/src/storage/compact/tests.rs`) |
+| **Guarded by** | `keeps_the_move_that_lifts_a_block_back_out_of_the_trash`, `keeps_a_pair_whose_node_is_created_twice_anywhere_in_the_log`, `keeps_a_page_root_pair`, `keeps_a_pair_a_concurrent_move_of_the_same_node_interleaved_with`, `any_op_at_all_between_the_create_and_the_move_blocks_the_drop` (`crates/outl-core/tests/compaction.rs`); `compaction_preserves_the_materialized_tree`, `the_compacted_log_matches_the_original_under_any_delivery_order`, `every_dropped_op_is_a_move_that_restates_its_own_create` (`crates/outl-core/tests/compaction_property.rs`); `a_damaged_record_refuses_the_whole_pass`, `a_per_page_layout_refuses_rather_than_compacting_half_a_log`, `a_second_apply_in_the_same_second_keeps_the_first_backup`, `two_generations_stamped_the_same_second_are_still_two_directories` (`crates/outl-core/src/storage/compact/tests.rs`) |
 
 ## Why
 
@@ -157,7 +157,7 @@ That is the correct trade: running the command on each device reclaims the same 
 - **Another device's `ops-<actor>.jsonl`**, unless `--force`. See "Why it only rewrites this device's file" above.
 - **Reading a live log at all.** `plan_compaction` takes the same exclusive lock before it reads, because an append caught mid-`write(2)` parses as a torn record and would be reported as `DamagedLog` on a healthy log.
 
-Every rewritten file is copied to `.outl/compact-backup/<timestamp>/` and fsynced **before** a byte of `ops/` changes; the rewrite itself is temp + `rename`; kept lines are copied byte for byte, never re-serialized.
+Every rewritten file is copied to `.outl/compact-backup/<timestamp>-<ulid>/` and fsynced **before** a byte of `ops/` changes; the rewrite itself is temp + `rename`; kept lines are copied byte for byte, never re-serialized.
 The `.ops-<actor>.idx` / `.nodes.idx` sidecars are **deleted**, because every offset in them points into the file just renumbered.
 
 ### Undo
@@ -254,6 +254,9 @@ Its per-actor cutoff is compared with `>`, so it never needs the op at the cutof
    - `an_actor_file_that_appeared_since_the_plan_is_refused` and `an_actor_file_that_vanished_since_the_plan_is_refused_as_stale` — the plan's actor set, re-checked under the lock.
    - `a_rewrite_that_fails_still_names_the_backup_it_took` — the recovery path is printed in the one case that needs it.
    - `planning_refuses_while_the_workspace_is_open` and `planning_succeeds_once_nothing_holds_the_workspace` — the read-side lock, and that it is not a wall.
+   - `a_second_apply_in_the_same_second_keeps_the_first_backup` — the backup generation is per run, not per second.
+     The sequence is the one the dry run's own output recommends (`--apply`, then `--no-horizon`), both runs are legitimate, and a second-resolution directory name made the second copy the already-compacted file over the first's only rollback point.
+     `two_generations_stamped_the_same_second_are_still_two_directories` pins the same fact without the wall clock, and pins that the stamp still leads so generations sort chronologically.
 
 ## Scope
 
@@ -266,7 +269,12 @@ Not covered here:
   Rejected above as a different RFC, not a bigger version of this one; see also `docs/sync.md` → Per-page op log shards.
 - **The `PerPage` op-log layout** (RFC 0137 Phase B).
   `plan_compaction` refuses it rather than compacting half a log.
-- **Pruning `.outl/compact-backup/`.** `repair-backup` has two guards (age *and* generation count); this has none yet.
+- **Pruning `.outl/compact-backup/`.** `repair-backup` has two guards (age *and* generation count); this has neither.
+  The cost is not small and it runs the wrong way: the backup is a *whole* copy of every file the run rewrites, and the run removes 22.6% of those same bytes, so a pass leaves the workspace roughly 77% of the rewritten log **larger** until the generation is deleted — on a command whose headline is reclaiming disk.
+  Every later run adds another generation — the directory name carries a ULID precisely so a run can never reuse one — so re-running is what grows it.
+  Naming it here rather than fixing it is deliberate: the policy already exists, in `outl doctor --repair`'s `prunable_backups` (`BACKUP_KEEP` **and** `BACKUP_MIN_AGE_DAYS`, an entry must fail both), and a second copy of it is the drift this repo keeps paying for.
+  The fix is to lift that policy to a shared owner and point both backup roots at it, which is its own change.
+  Until then `outl compact --apply` prints that the generation is a full copy and is the user's to delete, so the growth is stated rather than silent.
 - **A defect this work surfaced and does not fix:** a node with two `Create` ops does **not** converge under reordering.
   `undo_op(Op::Create)` removes the node outright, so a `Move` replayed after that undo finds nothing to move and the redone `Create` reinserts the node at *its* position.
   Three ops reproduce it — `Create(n,P,"a")@1`, `Move(n,P,"t")@2`, `Create(n,P,"u")@3` — materializing `"t"` in HLC order and `"u"` delivered `[3,1,2]`.

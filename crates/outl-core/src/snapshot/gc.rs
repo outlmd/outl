@@ -124,13 +124,21 @@ use crate::id::ActorId;
 /// How long a leftover `snap-*.bin.tmp` is kept before it counts as
 /// debris.
 ///
-/// [`crate::snapshot::write_to_disk`] composes every snapshot in that
+/// [`crate::snapshot::write_to_disk`] composes every snapshot in such a
 /// scratch file and publishes it with `rename`, so a process killed in
 /// between leaves one behind and nothing has ever removed it — the same
 /// "what cleans it up?" the device store's scratch files had.
 ///
 /// A real write lives for as long as it takes to fsync a ~13 MB body, so
 /// a day is several orders of magnitude of headroom.
+///
+/// This collector carries more weight than it used to. The scratch name
+/// is per-write ([`crate::snapshot::scratch_path`]), which is what stops
+/// two writers for one actor sharing an inode — and it also means a
+/// killed writer's leftovers are no longer recycled by the next write
+/// the way one shared name was. `write_to_disk` unlinks its own scratch
+/// on every in-process failure, so what reaches this sweep is a kill
+/// between `create` and `rename`: ~13 MB each, and every publish sweeps.
 pub const STALE_TMP_TTL: Duration = Duration::from_secs(60 * 60 * 24);
 
 /// What the GC concluded about one `snap-*.bin`.
@@ -480,10 +488,19 @@ fn remove(path: &Path) -> Result<bool, SnapshotError> {
 
 /// Whether `path` is one of [`crate::snapshot::write_to_disk`]'s in-flight
 /// scratch files rather than a published snapshot.
+///
+/// Two spellings, both live. `snap-<actor>.bin.tmp.<ulid>` is what
+/// `write_to_disk` composes in today — one name per write, so two
+/// writers for the same actor cannot share an inode. The bare
+/// `snap-<actor>.bin.tmp` is what every build before that used, and a
+/// workspace can hold one a killed writer left behind years ago; a
+/// collector that stopped recognising it would strand exactly the files
+/// this module was written to collect.
 fn is_scratch(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with("snap-") && n.ends_with(".bin.tmp"))
+        .and_then(|n| n.strip_prefix("snap-"))
+        .is_some_and(|rest| rest.ends_with(".bin.tmp") || rest.contains(".bin.tmp."))
 }
 
 fn older_than(path: &Path, now: SystemTime, ttl: Duration) -> bool {

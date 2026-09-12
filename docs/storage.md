@@ -388,6 +388,15 @@ Per-actor, each op is compared against its own actor's mark, and because an acto
 Writing is driven by `Workspace::set_snapshot_policy(enabled, op_threshold)` (in-band background writer, off the calling thread) and `Workspace::save_snapshot` (synchronous, on graceful shutdown).
 Snapshots are optional: a workspace with none replays the full log.
 
+Both writers compose the body in a **per-write** scratch file — `snap-<actor>.bin.tmp.<ulid>` — and publish it with one `rename`.
+The ULID is not decoration.
+Two writers for one actor are routine: a threshold crossing can spawn a worker while the previous one is still fsyncing a ~13MB body, and a reload builds a second `Workspace` for the same actor whose `save_snapshot` runs alongside it.
+Sharing one scratch name means sharing an *inode*, so the loser of the `rename` goes on writing through a path that now points at the published snapshot — a boot then reads a torn body, and the loser's own `rename` fails `ENOENT`.
+That costs a slow boot and never a note (the op log is the source of truth and an undecodable snapshot falls back to a full replay), which is exactly why nothing reported it.
+`storage::sidecar`'s index writer took the identical failure in production and was fixed the same way.
+
+The price is that an abandoned scratch is no longer recycled by the next write the way one shared name was, so `gc::stale_tmp` has more to collect: `write_to_disk` unlinks its own scratch on every in-process failure, and what reaches the 24h sweep is a process killed between `create` and `rename`.
+
 Nothing deleted a snapshot until [RFC 0258](rfcs/0258-snapshot-cache-lifecycle.md).
 `.outl/snapshots/` gained one `snap-<actor>.bin` per actor that ever wrote one on the device and lost none, so a real workspace reached **54MB in four files** — one of them a schema-3 bincode body no build since #207 can read.
 
@@ -472,7 +481,7 @@ Two consequences worth stating plainly:
 Measured on the workspace above: **62,209 of 217,811 ops dropped (28.6%)**, `.jsonl` down 22.6%, `ops/` 262MB → 195MB, materialized tree, properties and collapsed flags byte-identical, `outl doctor` reporting `integrity OK`.
 The naive "adjacent pair" rule would have matched 99.9% of all `Move` ops against the sound predicate's 94.7%; the 2,074 pairs it declines are the trashed-and-restored ones.
 
-`apply_compaction` takes an exclusive `flock` on `.outl/.lock` plus a write lock on **every** actor, copies and fsyncs each file into `.outl/compact-backup/<timestamp>/` before any write, and replaces via temp + `rename`.
+`apply_compaction` takes an exclusive `flock` on `.outl/.lock` plus a write lock on **every** actor, copies and fsyncs each file into `.outl/compact-backup/<timestamp>-<ulid>/` before any write, and replaces via temp + `rename`.
 It **deletes** every index sidecar for each actor it rewrote rather than rebuilding them: compaction invalidates every byte offset they hold, and deleting has no failure mode in which a rebuild writes a wrong one (#129).
 The set comes from `sidecar::remove_all`, not from two names spelled out at the call site, so it covers the dead generations as well — an undotted `ops-<actor>.idx` and an abandoned `*.idx.tmp.<ulid>` hold offsets into the same renumbered file.
 It refuses on an unparseable record and on the `PerPage` layout.

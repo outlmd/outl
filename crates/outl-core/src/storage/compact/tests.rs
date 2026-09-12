@@ -1,6 +1,7 @@
 //! Unit coverage for the parts of compaction that the behavioural
 //! battery in `tests/compaction.rs` reaches only indirectly.
 
+use super::rewrite::backup_generation;
 use super::*;
 use crate::fractional::Fractional;
 use crate::hlc::Hlc;
@@ -486,4 +487,83 @@ fn a_dropped_blank_line_is_counted_in_the_bytes_it_reclaims() {
         "the plan must declare every byte the rewrite removes, blank line included"
     );
     assert_eq!(done.bytes_dropped, declared);
+}
+
+// ------------------------------------------------ the backup generation
+
+/// Two legitimate `--apply` runs a moment apart must not share a backup
+/// generation, because the second one *copies over* the first.
+///
+/// The sequence is the one the dry run itself recommends: a default run,
+/// then the `--no-horizon` re-run its own output suggests. Both are
+/// valid, both drop something, and both back up the same
+/// `ops-<actor>.jsonl`. With a second-resolution directory name they land
+/// in the same generation, and the pre-compaction log — the only route
+/// back, named by RFC 0256 and by the CLI — is replaced by the
+/// already-compacted one. Overwriting a backup looks exactly like taking
+/// one, so nothing tells the user.
+#[test]
+fn a_second_apply_in_the_same_second_keeps_the_first_backup() {
+    let a = ActorId::new();
+    let mut log = compactable_log_at(a, now_ms() - 200 * DAY_MS);
+    log.extend(compactable_log_at(a, now_ms() - DAY_MS));
+    let tmp = workspace(&[(a, log)]);
+    let root = tmp.path();
+    let name = format!("ops-{a}.jsonl");
+    let original = std::fs::read_to_string(root.join("ops").join(&name)).expect("read");
+
+    let plan = plan_compaction(root, &CompactOptions::default()).expect("plan");
+    assert_eq!(plan.report().ops_dropped, 1, "only the settled pair");
+    let first = apply_compaction_as(root, &plan, a)
+        .expect("apply")
+        .backup_dir
+        .expect("the first run took a backup");
+
+    let plan = plan_compaction(root, &no_horizon()).expect("plan");
+    assert_eq!(plan.report().ops_dropped, 1, "and now the recent pair");
+    let second = apply_compaction_as(root, &plan, a)
+        .expect("apply")
+        .backup_dir
+        .expect("the second run took a backup");
+
+    let kept = std::fs::read_to_string(first.join(&name)).expect("read");
+    assert_eq!(
+        kept.lines().count(),
+        original.lines().count(),
+        "the first generation must still hold the log as it was before any \
+         compaction — it is the only way back to the op the first run dropped"
+    );
+    assert_eq!(
+        kept, original,
+        "and byte for byte, not merely line for line"
+    );
+    assert_ne!(
+        first, second,
+        "a second run must get its own generation, not reuse the first's"
+    );
+}
+
+/// The same fact without the wall clock, so the regression net does not
+/// depend on two compactions happening to land in the same second.
+#[test]
+fn two_generations_stamped_the_same_second_are_still_two_directories() {
+    let root = Path::new("/nonexistent");
+    let stamp = "20260911T120000";
+    let first = backup_generation(root, stamp);
+    let second = backup_generation(root, stamp);
+
+    assert_ne!(
+        first, second,
+        "a shared generation means the second run copies over the first's backup"
+    );
+    for dir in [&first, &second] {
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a generation name");
+        assert!(
+            name.starts_with(stamp),
+            "the stamp must lead, so generations still sort chronologically: {name}"
+        );
+    }
 }

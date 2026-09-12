@@ -36,6 +36,7 @@ fi
 # print PASS for a check it never performed.
 if [ ! -d "$rfc_dir" ]; then
   printf 'check-docs-index: %s is not a directory\n' "$rfc_dir" >&2
+  printf 'refusing to pass with nothing to check.\n' >&2
   exit 1
 fi
 

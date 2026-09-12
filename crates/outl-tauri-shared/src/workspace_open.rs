@@ -72,7 +72,9 @@ use tracing::{info, warn};
 /// The guards live in the client's `workspace_guards` slot next to its
 /// `Option<Workspace>`; [`open_workspace_at`] is the single writer of
 /// that slot, installing the new set only after the open succeeds (which
-/// drops the previous workspace's set). The flocks are released by
+/// drops the previous workspace's set). Re-opening the root already held
+/// writes nothing at all — see `acquire_guards` on why a re-pick
+/// retains rather than releases-and-retakes. The flocks are released by
 /// `Drop`, and by the OS if the process dies — there is no stale-lock
 /// state to clean up.
 #[must_use = "the locks are released when the guards are dropped; keep them alive with the workspace"]
@@ -120,60 +122,63 @@ fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// What [`acquire_guards`] handed back, and where it came from.
-struct Acquired {
-    guards: WorkspaceGuards,
-    /// The guards were lifted out of `held` rather than newly taken: the
-    /// slot already covered this root and actor. The workspace they
-    /// protect is still published until the caller replaces it, so a
-    /// failed open has to put them **back**, not drop them.
-    lifted_from_slot: bool,
+/// What `acquire_guards` did, and therefore what a successful open owes
+/// the guard slot afterwards.
+enum GuardClaim {
+    /// Locks taken for a root this process was not already holding.
+    /// Installing them at the end of the open is what releases the
+    /// previous workspace's; dropping them is what a failed open does.
+    Fresh(WorkspaceGuards),
+    /// The slot already held exactly these locks — same canonical root,
+    /// same actor. Nothing was released and nothing was retaken, so the
+    /// slot needs no write at all.
+    Retained,
 }
 
-/// Take both locks for `path`, or reuse the ones this process already
-/// holds **for that same root**.
+/// Claim both locks for `path`.
 ///
-/// The reuse is not a race workaround. A POSIX `flock` is owned by an
-/// open file description, so a second `open` + `LOCK_EX|LOCK_NB` of
-/// `ops/.lock-<actor>` fails *even inside the process that already holds
-/// it*. Re-picking the workspace that is already open (the folder dialog
-/// pointed at the current root) would therefore refuse itself. The
-/// guards in the slot are for exactly this root and actor, so they are
-/// the guards this open would take; lifting them out and handing them
-/// on keeps both flocks held continuously. Releasing and retaking would
-/// open a window in which the live workspace is unguarded, and a reopen
-/// that then failed would leave it that way — with `outl compact` free
-/// to rewrite files it still holds byte offsets into.
+/// Re-picking the workspace that is already open (the folder dialog
+/// pointed at the current root) gets [`GuardClaim::Retained`]: this
+/// process already holds exactly those two flocks, so there is nothing
+/// to acquire.
 ///
-/// Any other `AlreadyHeld` is a genuinely different process on this
-/// actor and is surfaced, never worked around — see the module docs on
-/// why the ephemeral-actor fallback is not available to a GUI.
+/// **Why it is not "release, then retake".** That is what this used to
+/// do, because a POSIX `flock` is owned by an open file description — a
+/// second `open` + `LOCK_EX|LOCK_NB` of `ops/.lock-<actor>` fails *even
+/// inside the process that already holds it*, so the re-pick refused
+/// itself unless the old guards were dropped first. But dropping them
+/// before the replacement is known to succeed is unsound: every step of
+/// [`open_workspace_at`] after this one can fail, and on failure the
+/// caller keeps the **old** `Workspace` published (`set_workspace`
+/// returns early) while its locks are already gone. `outl compact
+/// --apply` would then take `.outl/.lock` exclusively and rewrite
+/// `ops-<actor>.jsonl` under a live client still holding byte offsets
+/// into the old layout — the exact corruption these guards exist to
+/// prevent. Retaining removes the window rather than narrowing it: there
+/// is no moment at which the workspace is unguarded.
+///
+/// Any `AlreadyHeld` from here is therefore a genuinely different
+/// process on this actor, and is surfaced, never worked around — see the
+/// module docs on why the ephemeral-actor fallback is not available to a
+/// GUI.
 fn acquire_guards(
     held: &Mutex<Option<WorkspaceGuards>>,
     path: &Path,
     actor: ActorId,
-) -> Result<Acquired, LockError> {
+) -> Result<GuardClaim, LockError> {
     let canonical = canonical(path);
-    match WorkspaceGuards::acquire(path, &canonical, actor) {
-        Ok(guards) => Ok(Acquired {
-            guards,
-            lifted_from_slot: false,
-        }),
-        Err(LockError::AlreadyHeld(path_held)) => {
-            let mut slot = held.lock();
-            let ours = slot
-                .as_ref()
-                .is_some_and(|g| g.root == canonical && g.actor == actor);
-            let Some(guards) = (if ours { slot.take() } else { None }) else {
-                return Err(LockError::AlreadyHeld(path_held));
-            };
-            Ok(Acquired {
-                guards,
-                lifted_from_slot: true,
-            })
-        }
-        Err(e) => Err(e),
+    // Read the slot in its own statement, never in a match guard:
+    // `parking_lot::Mutex` is not reentrant, so a guard temporary still
+    // alive over an arm body would deadlock this thread against itself.
+    let ours = {
+        let slot = held.lock();
+        slot.as_ref()
+            .is_some_and(|g| g.root == canonical && g.actor == actor)
+    };
+    if ours {
+        return Ok(GuardClaim::Retained);
     }
+    WorkspaceGuards::acquire(path, &canonical, actor).map(GuardClaim::Fresh)
 }
 
 /// Open (or create) the workspace rooted at `path`.
@@ -195,11 +200,13 @@ fn acquire_guards(
 /// `held` is the client's [`WorkspaceGuards`] slot. This function is its
 /// **single writer**: the new guards are installed only once the open has
 /// succeeded, which is also what releases the previous workspace's. A
-/// re-pick of the root already open reuses the guards in the slot rather
-/// than retaking them, and a failed open puts them back, so the live
-/// workspace is never left unguarded. A client never acquires or drops a
-/// lock itself — a second opinion about who holds the workspace is the
-/// defect this replaces.
+/// failed open therefore never leaves the slot holding locks for a
+/// workspace nobody has open — and never leaves the *caller's* still-open
+/// workspace without them either, because re-opening a root this process
+/// already holds retains those locks instead of releasing them up front
+/// (`acquire_guards`). A client never acquires or drops a lock itself —
+/// a second opinion about who holds the workspace is the defect this
+/// replaces.
 ///
 /// # Errors
 ///
@@ -219,35 +226,35 @@ pub fn open_workspace_at(
     std::fs::create_dir_all(path.join("pages"))?;
 
     // Before a byte is read: announce this process to every other `outl`
-    // on the machine. Held in `guards` until the open succeeds, so a
-    // failed open leaves no lock behind — unless the guards came out of
-    // the slot (a re-pick of the root already open), in which case the
-    // workspace they protect is still live and they go back where they
-    // were.
-    let Acquired {
-        guards,
-        lifted_from_slot,
-    } = acquire_guards(held, path, actor)?;
+    // on the machine. A fresh claim is held in `claim` until the open
+    // succeeds, so a failed open leaves no lock behind; a re-pick of the
+    // workspace already open retains the locks it already has, so a
+    // failed open leaves none *missing* either.
+    let claim = acquire_guards(held, path, actor)?;
 
-    let workspace = match boot(actor, hlc, path, lru_cap) {
-        Ok(workspace) => workspace,
-        Err(e) => {
-            if lifted_from_slot {
-                *held.lock() = Some(guards);
-            }
-            return Err(e);
+    // A failed open drops a `Fresh` claim, so no lock is parked on a
+    // workspace nobody has open (compaction would then refuse forever
+    // with nothing running). A `Retained` claim owns nothing to drop:
+    // the slot still holds the locks it always held, still covering the
+    // workspace that is still published.
+    let workspace = boot(actor, hlc, path, lru_cap)?;
+
+    // The open succeeded, so publish a fresh claim — which is what
+    // releases the previous workspace's locks. `Retained` needs no write:
+    // the slot already holds exactly these two flocks.
+    match claim {
+        GuardClaim::Fresh(guards) => {
+            info!(
+                "workspace locks held for {} (actor {actor})",
+                guards.root().display()
+            );
+            *held.lock() = Some(guards);
         }
-    };
-
-    // The open succeeded, so publish the guards — which is what releases
-    // the previous workspace's. Doing it here rather than at acquisition
-    // means a failed open never parks a lock on a workspace nobody has
-    // open (compaction would then refuse forever with nothing running).
-    info!(
-        "workspace locks held for {} (actor {actor})",
-        guards.root().display()
-    );
-    *held.lock() = Some(guards);
+        GuardClaim::Retained => info!(
+            "workspace locks already held for {} (actor {actor})",
+            path.display()
+        ),
+    }
 
     Ok(workspace)
 }

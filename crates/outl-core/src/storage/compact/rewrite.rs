@@ -300,12 +300,13 @@ pub fn apply_compaction(root: &Path, plan: &CompactPlan) -> Result<CompactReport
     // rather than `create_dir_all` for the leaf, so an existing directory
     // is refused instead of reused.
     let stamp = chrono::Local::now().format("%Y%m%dT%H%M%S").to_string();
-    let backups = root.join(".outl").join("compact-backup");
-    std::fs::create_dir_all(&backups).map_err(|e| CompactError::Io {
-        path: backups.clone(),
-        source: e,
-    })?;
-    let backup_dir = backups.join(format!("{stamp}-{}", ulid::Ulid::new()));
+    let backup_dir = backup_generation(root, &stamp);
+    if let Some(parent) = backup_dir.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| CompactError::Io {
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
+    }
     std::fs::create_dir(&backup_dir).map_err(|e| CompactError::Io {
         path: backup_dir.clone(),
         source: e,
@@ -458,6 +459,35 @@ fn lock_every_actor(
         }
     }
     Ok(held)
+}
+
+/// A backup generation directory no earlier run can already be using.
+///
+/// `stamp` is second-resolution, and a second resolution is not enough on
+/// its own: two valid `--apply` runs land in the same second easily —
+/// `--apply` then the `--no-horizon` re-run the dry run's own output
+/// recommends, a script, a user re-reading the output and trying again.
+/// Sharing a directory means [`copy_durable`] writes the *already
+/// compacted* file over the pre-compaction one, and this module deletes
+/// op-log lines: that copy is the only route back, named by
+/// [RFC 0256](../../../../docs/rfcs/0256-op-log-compaction.md) and by
+/// `outl compact`'s own output. Overwriting a backup looks exactly like
+/// taking one, so nothing would tell the user.
+///
+/// The ULID is the repo's existing answer to "this filename must not
+/// collide" (`sidecar::write_atomic`'s temps, and `rewrite_one` below).
+/// It goes **after** the stamp so the directory still sorts
+/// chronologically by name — the property `repair-backup`'s generational
+/// prune leans on, and the one a prune here would need too.
+///
+/// Refusing a reused directory instead would be a guard whose only
+/// escape hatch is a stopwatch: the colliding run is *legitimate*, so
+/// there is nothing for the user to fix and nothing to force (root
+/// `CLAUDE.md` invariant 9).
+pub(super) fn backup_generation(root: &Path, stamp: &str) -> PathBuf {
+    root.join(".outl")
+        .join("compact-backup")
+        .join(format!("{stamp}-{}", ulid::Ulid::new()))
 }
 
 fn copy_durable(from: &Path, to: &Path) -> Result<(), CompactError> {

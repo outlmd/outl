@@ -151,7 +151,7 @@ pub(crate) enum Command {
         ///
         /// Refuses while any other outl process holds the workspace, and
         /// copies every file it rewrites to
-        /// `.outl/compact-backup/<timestamp>/` before touching it.
+        /// `.outl/compact-backup/<timestamp>-<id>/` before touching it.
         #[arg(long)]
         apply: bool,
         /// Also compact history newer than the 30-day settling horizon.

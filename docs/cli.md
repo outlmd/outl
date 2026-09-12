@@ -402,7 +402,7 @@ A **superseded** snapshot (it decodes, but another outranks it) is reported as `
 An **unusable** one is a warning.
 One that could not be *judged* — unreadable, or written by a newer build — is reported and **never** deleted: a file we could not read is not a file we read and proved bad.
 Measured: 54MB in 4 files down to 13MB in 1.
-`--repair` also collects abandoned `snap-*.bin.tmp` (kind `prune_snapshot_tmp`, not backed up — a half-published write never became a record).
+`--repair` also collects abandoned snapshot scratch files — `snap-*.bin.tmp.<ulid>`, and the shared `snap-*.bin.tmp` older builds left behind (kind `prune_snapshot_tmp`, not backed up — a half-published write never became a record).
 Reasoning: [RFC 0258](rfcs/0258-snapshot-cache-lifecycle.md).
 
 ### `outl reconcile`
@@ -501,7 +501,7 @@ When the `Create` really created the node the `Move` is inert; when the node alr
 On that workspace the naive rule matched 99.9% of `Move` ops and the sound predicate matches **94.7%**; the 2,074 it declines are exactly the trashed-and-restored ones.
 
 - `--apply` — rewrite the log.
-  Refuses while any other outl process holds the workspace (exclusive `flock` on `.outl/.lock` plus a write lock on *every* actor), backs every file up to `.outl/compact-backup/<timestamp>/` and fsyncs **before** touching anything, then replaces via temp + `rename`.
+  Refuses while any other outl process holds the workspace (exclusive `flock` on `.outl/.lock` plus a write lock on *every* actor), backs every file up to `.outl/compact-backup/<timestamp>-<ulid>/` and fsyncs **before** touching anything, then replaces via temp + `rename`.
   Deletes the index sidecars rather than rebuilding them — compaction invalidates every byte offset, and deleting has no failure mode where a rebuild writes a wrong one.
   Refuses outright on an unparseable record, on a directory it cannot read, and on the `PerPage` layout — and refuses **before any file is rewritten**, because "a damaged log is never rewritten" has to mean no file, not this file.
   Rewrites **only this device's `ops-<actor>.jsonl`**; every other actor file is reported and left alone.

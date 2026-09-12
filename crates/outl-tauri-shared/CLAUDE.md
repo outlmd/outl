@@ -17,6 +17,7 @@ Before this crate existed, both clients kept near-identical copies of the same n
 | `commands/shortcuts.rs` | `list_shortcut_bindings()` / `list_action_support()` + the `SupportDto` / `ActionSupportDto` wire shapes — the `(chord, action)` catalog and the per-client support matrix (root `CLAUDE.md` invariant 12). Moved here from `outl-desktop` so mobile registers the same two commands: a client can only tell the user *where* an action exists if it can read the matrix on the device asking. Pure functions over `outl_shortcuts`, no workspace access |
 | `commands/timeline.rs` | `page_timeline` + the `PageTimelineDto` / `TimelineEventDto` wire shapes — a page's history, read out of the op log (issue #241). **Read-only**; there is no restore counterpart, on purpose (see `outl_actions::timeline`). `TimelineEventDto` is deliberately **flat** with `change` as a string tag saying which optional fields are meaningful. It is not a discriminated union and nothing narrows on it, but a reader switches on one field instead of unwrapping a nested enum, and `@outl/shared` renders it directly. `total` is the count **before** the limit, never `events.len()` — a capped list that reports its own length as the total reads as the whole history. `limit: Some(0)` is read as the default rather than as "no events", so a client that forgets the field gets a usable panel instead of an empty one. Registered by **both** clients now (`timeline_commands!`); mobile has the command and no timeline UI yet, which is why `Capability::PageHistory`'s mobile column stays `Missing` — see "One command surface, not two". |
 | `workspace_open.rs` | `open_workspace_at` / `reconcile_orphan_md` primitives, plus **`WorkspaceGuards`** (the shared `<root>/.outl/.lock` + exclusive `<root>/ops/.lock-<actor>` flocks, held for as long as the workspace is open — see "Workspace locks" below) and **`load_or_create_actor(local_dir)`** — a thin wrapper over `outl_core::DeviceStore::device_actor`. Both GUI clients keep a **device-wide** actor (`<local_dir>/actor`: `~/.config/outl` on desktop, the app sandbox's data dir on mobile) rather than the per-workspace one the CLI / TUI resolve, because the `HlcGenerator` is bound at app start, before a workspace is picked. That is safe precisely because `local_dir` is outside every workspace — it never rides the file-sync surface, so the cross-device actor collision described in `outl-core/CLAUDE.md` → "Actor id is device-local" cannot reach it. **Never move this file into the workspace.** |
+| `workspace_reload.rs` | `reload_workspace_into` — the reload **both** clients run (`replay_from_disk` off a blocking pool thread, then publish only a tree that is not missing a local op), plus `publish_replayed` (the retry/compare/swap core, split out so a test can supply a replay that lands an edit inside the window) and `RELOAD_ATTEMPTS`. See "A reload publishes only what it cannot have dropped" below |
 | `iroh_sync.rs` | `start_with_reload_bridge` — bridges a started transport's two signals to Tauri events. Building one belongs to `outl_sync_iroh::build_transport` (config gate, identity, peers, relay, **and the device endpoint lease** — one endpoint per device, first process in wins); each client calls it with its own identity path and handles `EndpointBusy` / `Disabled` by staying on its watcher. |
 | `plugin_service.rs` + `plugin_thread.rs` | `PluginService` — the dedicated plugin thread (Boa `Context` is `!Send`), parametrized by client id + capability set + `StorageRootProvider` |
 | `plugin_dto.rs` | Plugin wire shapes (`PluginCommandDto`, `ToolbarButtonDto`, …) |
@@ -43,8 +44,9 @@ The Tauri clients used to take **neither** workspace lock, which made a running 
 Making the fallback available means making the client's `HlcGenerator` swappable at workspace-open time (a plain field on both `AppState`s today, read from ~56 call sites); that is client-side work, tracked separately.
 
 Re-picking the workspace already open is handled inside `acquire_guards`, not by the caller: a POSIX `flock` belongs to an open file description, so a second `open` + `LOCK_EX|LOCK_NB` of `ops/.lock-<actor>` fails *inside the process that already holds it*.
-The guards already in the slot are lifted out and reused, never released and retaken, and a reopen that fails puts them back.
-Dropping them first would leave the still-published workspace unguarded for the whole reopen, and permanently if the reopen failed.
+It answers that case with `GuardClaim::Retained` — the locks this process already holds *are* the locks the re-pick needs, so nothing is released and nothing is retaken.
+**Not** release-then-retake, which is what it used to do: every step after the claim can fail, and on failure the caller keeps the old `Workspace` published (`set_workspace` returns early) with its locks already gone — compaction then passes its gate and rewrites `ops-<actor>.jsonl` under a live client holding byte offsets into the old layout, which is the corruption the guards exist to prevent.
+Pinned by `a_failed_re_pick_keeps_the_locks_it_could_not_replace`.
 
 **The regression net** is `tests/workspace_locks.rs` — compaction refuses while a GUI is open and runs once it closes, a contended actor refuses rather than sharing the file, a refused open strands no lock, a re-pick does not refuse itself, a switch releases the old root, and a running GUI does **not** lock the TUI or MCP server out (the workspace lock is shared on purpose).
 
@@ -76,6 +78,22 @@ Either way, the undo snapshot (`HistoryStacks`) still renders the pre/post `.md`
 A client that wires `AppHost::projection_writer()` to `Some` **must** spawn the `ProjectionWriter` at boot with the same `Arc<Mutex<Option<Workspace>>>` every command locks, or the queued writes race a different workspace instance.
 `tests/projection_view.rs` asserts the tree-built view and the `.md`-built view agree — if you change either path, keep both in sync.
 The shared page lock serializes cooperating outl writers around each `.md` + sidecar transaction. Because external editors do not honour advisory locks and pathnames have no portable atomic compare-and-swap, guarded writers also re-read the `.md` immediately before replacement and refuse if its bytes changed after authorization; the remaining read-to-rename interval is an unavoidable filesystem limitation, not something the lock is claimed to close.
+
+## A reload publishes only what it cannot have dropped
+
+The replay runs on a blocking pool thread — a synchronous one holds the Tauri IPC thread through an O(all ops) rebuild and, on iOS, trips the scene-update watchdog.
+It therefore runs **outside** the workspace mutex, and that is a window: a local edit can be applied (and appended to `ops-<actor>.jsonl`) after `JsonlStorage::open` scanned the log and before the fresh workspace is swapped in.
+The op survives on disk and disappears from the published tree — and the next projection renders that tree over the page's `.md`.
+Invariant 8's guard does not catch it: the sidecar still lists the block, so every line on disk reads as "known to the log".
+A dropped op becomes deleted text.
+
+The fix is the *publish*, not a longer lock (holding the mutex across the replay reinstates the stall the offload exists to remove).
+`publish_replayed` reads `workspace.log().len()` under the lock before the replay and compares it under the lock at swap time, **in the same critical section as the swap** — splitting the two, which is what both clients did, reopens the window on a smaller scale.
+The marker is exact for the question: `Workspace::apply` appends to the resident log exactly when it also persists, the log is never pruned (`apply_lru_cap` bounds the op *cache*), and a `WorkspaceBatch` cannot outlive the critical section that reads it.
+Peer ops are deliberately not covered — sync ingest never touches the live workspace, so a replay that misses one is no worse than the tree already on screen.
+
+A lost race retries (`RELOAD_ATTEMPTS`, bounded so a continuously-typing user cannot hold a reload in a loop); exhausting it **refuses** and leaves the workspace untouched rather than publishing a lossy tree.
+Both clients call `reload_workspace_into`; `tests/reload_race.rs` pins the behaviour and pins that neither client replays on its own.
 
 ## A page that stopped syncing
 

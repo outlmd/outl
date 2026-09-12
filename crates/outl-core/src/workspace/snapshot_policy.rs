@@ -183,6 +183,8 @@ mod tests {
     use crate::id::ActorId;
     use crate::snapshot::{read_from_disk, write_to_disk, SnapshotBody};
     use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn body_at(actor: ActorId, high: u64) -> SnapshotBody {
@@ -196,6 +198,31 @@ mod tests {
             BTreeSet::new(),
             BTreeMap::new(),
             BTreeMap::new(),
+        )
+        .expect("test body encodes")
+    }
+
+    /// Same shape as [`body_at`] but multi-MB, so two workers' write +
+    /// fsync windows overlap instead of finishing before the next one
+    /// starts. A real workspace snapshot is ~13 MB.
+    fn fat_body(actor: ActorId, round: u64) -> SnapshotBody {
+        let mut cutoff = BTreeMap::new();
+        cutoff.insert(actor, Hlc::new(1_000 + round, 0, actor));
+        let mut text = BTreeMap::new();
+        for i in 0..3_000 {
+            text.insert(
+                crate::id::NodeId::new(),
+                format!("{round}-{i}-{}", "x".repeat(1_000)),
+            );
+        }
+        SnapshotBody::from_parts(
+            actor,
+            cutoff,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+            text,
         )
         .expect("test body encodes")
     }
@@ -328,5 +355,59 @@ mod tests {
         p.seed_from_log_len(4);
         assert!(!p.record(5), "4 + 5 is still short of 10");
         assert!(p.record(1));
+    }
+
+    /// The reported race: [`SnapshotPolicy::record`] crossing the
+    /// threshold again while an earlier worker is still writing spawns a
+    /// second one, and every worker used to compose in the same
+    /// `snap-<actor>.bin.tmp`. The loser of the `rename` keeps writing
+    /// into the inode the winner already published, so a reader can find
+    /// a torn body in the slot that is supposed to only ever change by
+    /// an atomic rename.
+    ///
+    /// A torn snapshot costs a slow boot, never notes — the op log is
+    /// the source of truth and a body that fails to decode falls back to
+    /// a full replay. Nothing else in the system reports it, which is
+    /// why it is pinned here.
+    #[test]
+    fn a_published_snapshot_is_never_torn_by_an_overlapping_worker() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".outl").join("snapshots");
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = ActorId::new();
+        let published = dir.join(format!("snap-{me}.bin"));
+
+        // A boot reading the published slot while the workers run. It
+        // only ever sees whole bodies: the slot changes by `rename`, and
+        // nothing else may write through it.
+        let done = Arc::new(AtomicBool::new(false));
+        let watcher = {
+            let (done, published) = (Arc::clone(&done), published.clone());
+            std::thread::spawn(move || {
+                while !done.load(Ordering::Relaxed) {
+                    if let Ok(bytes) = std::fs::read(&published) {
+                        SnapshotBody::decode(&bytes)
+                            .expect("a published snapshot is always a whole body");
+                    }
+                    std::thread::yield_now();
+                }
+            })
+        };
+
+        // Build every body first: `spawn_write` is only a handoff, so
+        // spawning them back to back is what puts several workers inside
+        // one another's write + fsync window — a client applying a burst
+        // of ops across several threshold crossings.
+        let bodies: Vec<SnapshotBody> = (0..10).map(|round| fat_body(me, round)).collect();
+        let mut p = SnapshotPolicy::new(Some(dir.clone()));
+        for body in bodies {
+            p.spawn_write(me, body);
+        }
+        p.wait();
+        done.store(true, Ordering::Relaxed);
+        watcher.join().expect("the published slot stayed whole");
+
+        let bytes = std::fs::read(&published).expect("published");
+        SnapshotBody::decode(&bytes).expect("and the last publish is whole too");
     }
 }

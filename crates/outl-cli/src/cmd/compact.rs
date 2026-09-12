@@ -47,7 +47,15 @@
 //! - It refuses while any other `outl` process holds the workspace: a
 //!   live client caches byte offsets into the files this renumbers.
 //! - It copies every file it will rewrite into
-//!   `.outl/compact-backup/<timestamp>/` first. Restoring is `cp` back.
+//!   `.outl/compact-backup/<timestamp>-<id>/` first. Restoring is `cp`
+//!   back. The generation is per *run*, not per second: two valid runs
+//!   inside one second (`--apply` then the `--no-horizon` re-run the dry
+//!   run recommends) would otherwise share a directory, and the second
+//!   would copy the already-compacted file over the only way back.
+//! - Nothing prunes those generations. `.outl/repair-backup/` has two
+//!   guards (age *and* count) and this has neither, so the run reports
+//!   the directory and says it is the user's to delete — a command that
+//!   advertises reclaiming disk must not grow `.outl/` in silence.
 //! - It replaces each file via temp + `rename`, so a reader sees the
 //!   whole old file or the whole new one.
 //! - It deletes every index sidecar it invalidated, so the next boot
@@ -100,7 +108,7 @@ pub fn run(path: &Path, apply: bool, no_horizon: bool, force: bool) -> Result<()
         println!();
         println!("Nothing was written. Re-run with `--apply` to rewrite the op log.");
         println!(
-            "Every rewritten file is copied to `.outl/compact-backup/<timestamp>/` first, \
+            "Every rewritten file is copied to `.outl/compact-backup/<timestamp>-<id>/` first, \
              and `--apply` refuses while any other outl process has this workspace open."
         );
         println!(
@@ -156,6 +164,15 @@ pub fn run(path: &Path, apply: bool, no_horizon: bool, force: bool) -> Result<()
     );
     if let Some(dir) = &done.backup_dir {
         println!("Pre-compaction op log copied to {}", dir.display());
+        // That copy is a whole file, and this run removed a fraction of
+        // one — so the pass costs more disk than it reclaims until the
+        // generation goes, and nothing here ever removes it. Saying so
+        // is the honest answer to invariant 9's fourth question while
+        // the prune does not exist (RFC 0256 -> Scope).
+        println!(
+            "That generation is a full copy of the files this run rewrote, and nothing \
+             prunes it — delete it once you are satisfied with the result."
+        );
     }
     println!(
         "Every index sidecar for the rewritten actors was deleted — including the dead \

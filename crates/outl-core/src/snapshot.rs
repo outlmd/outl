@@ -47,7 +47,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod gc;
 
@@ -248,11 +248,11 @@ fn compute_hash(body: &SnapshotBody) -> Result<[u8; 32], SnapshotError> {
 
 /// Write `body` to `snapshots_dir/snap-<actor>.bin` atomically.
 ///
-/// Encodes the body to postcard, writes to a sibling `.tmp`, `fsync`s,
-/// and renames into place. A crash at any point leaves either nothing
-/// (`.tmp` never created) or a stale `.tmp` (rename didn't happen) —
-/// never a half-written `snap-*.bin` that `load` could mistake for a
-/// valid snapshot.
+/// Encodes the body to postcard, writes to a **unique** sibling scratch
+/// file ([`scratch_path`]), `fsync`s, and renames into place. A crash at
+/// any point leaves either nothing (scratch never created) or an
+/// abandoned scratch (rename didn't happen) — never a half-written
+/// `snap-*.bin` that `load` could mistake for a valid snapshot.
 ///
 /// This is a standalone function (not on `Storage`) on purpose: the
 /// background-snapshot path in `Workspace::apply` calls it from a
@@ -264,30 +264,87 @@ pub fn write_to_disk(snapshots_dir: &Path, body: &SnapshotBody) -> Result<(), Sn
     let actor = body.actor;
     let bytes = body.encode()?;
     let final_path = snapshots_dir.join(format!("snap-{actor}.bin"));
-    let tmp_path = final_path.with_extension("bin.tmp");
+    let tmp_path = scratch_path(&final_path);
 
     std::fs::create_dir_all(snapshots_dir)
         .map_err(|e| SnapshotError::Io(format!("create {}: {e}", snapshots_dir.display())))?;
-    let mut file = File::create(&tmp_path)
-        .map_err(|e| SnapshotError::Io(format!("create {}: {e}", tmp_path.display())))?;
-    file.write_all(&bytes)
-        .map_err(|e| SnapshotError::Io(format!("write {}: {e}", tmp_path.display())))?;
-    file.sync_all()
-        .map_err(|e| SnapshotError::Io(format!("fsync {}: {e}", tmp_path.display())))?;
-    drop(file);
-    std::fs::rename(&tmp_path, &final_path).map_err(|e| {
-        SnapshotError::Io(format!(
-            "rename {} -> {}: {e}",
-            tmp_path.display(),
-            final_path.display()
-        ))
-    })?;
+    if let Err(e) = compose_and_publish(&tmp_path, &final_path, &bytes) {
+        // The scratch name is ours alone, so nothing else will ever
+        // reuse it — an in-process failure that left it behind would
+        // leave it until `gc::stale_tmp`'s 24h sweep. Unlink it here, so
+        // what reaches that sweep is only a process killed between the
+        // `create` and the `rename`.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
     tracing::debug!(
         "snapshot written to {} ({} bytes)",
         final_path.display(),
         bytes.len()
     );
     Ok(())
+}
+
+/// Compose `bytes` in `tmp_path` and publish them at `final_path`.
+///
+/// Split out so [`write_to_disk`] has one place to unlink the scratch
+/// file on any failure between the `create` and the `rename`.
+fn compose_and_publish(
+    tmp_path: &Path,
+    final_path: &Path,
+    bytes: &[u8],
+) -> Result<(), SnapshotError> {
+    let mut file = File::create(tmp_path)
+        .map_err(|e| SnapshotError::Io(format!("create {}: {e}", tmp_path.display())))?;
+    file.write_all(bytes)
+        .map_err(|e| SnapshotError::Io(format!("write {}: {e}", tmp_path.display())))?;
+    file.sync_all()
+        .map_err(|e| SnapshotError::Io(format!("fsync {}: {e}", tmp_path.display())))?;
+    drop(file);
+    std::fs::rename(tmp_path, final_path).map_err(|e| {
+        SnapshotError::Io(format!(
+            "rename {} -> {}: {e}",
+            tmp_path.display(),
+            final_path.display()
+        ))
+    })
+}
+
+/// Scratch path for one in-flight write of `final_path`: the published
+/// name plus `.tmp.<ulid>`.
+///
+/// **The ULID is the whole point.** Two writers for one actor are
+/// routine — [`crate::workspace::Workspace`]'s threshold worker can be
+/// spawned again while the previous one is still fsyncing a ~13 MB body,
+/// and a reload builds a second `Workspace` for the same actor whose
+/// `save_snapshot` runs alongside it. With one shared scratch name they
+/// share an *inode*: the loser of the `rename` goes on writing through a
+/// path that now points at the published snapshot, so a boot reads a
+/// torn body, and the loser's own `rename` fails `ENOENT`.
+///
+/// That costs a slow boot and nothing else — the op log is the source of
+/// truth and an undecodable snapshot falls back to a full replay — but
+/// nothing reports it, so it is silent replay forever on the affected
+/// device. A per-write name removes the sharing outright: each writer
+/// composes in private and publishes with one atomic rename, so the
+/// published slot only ever holds a whole body and the newest rename
+/// wins (a stale-but-whole body is just a slightly larger boot delta).
+///
+/// Same fix, same reason, as `storage::sidecar`'s `tmp_path_for`, which
+/// took the identical `rename …idx.tmp -> …idx: No such file or
+/// directory` in production.
+///
+/// The name keeps the `snap-` prefix and the `.bin.tmp` marker so
+/// [`gc::stale_tmp`] still recognises what a killed writer abandoned —
+/// and it has more to recognise now, because a unique name is never
+/// recycled by the next write the way the shared one was.
+pub(crate) fn scratch_path(final_path: &Path) -> PathBuf {
+    let mut name = final_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    name.push_str(&format!(".tmp.{}", ulid::Ulid::new()));
+    final_path.with_file_name(name)
 }
 
 /// Read and decode `snapshots_dir/snap-<actor>.bin`, if present.
@@ -376,6 +433,8 @@ pub fn read_best_from_disk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::NodeId;
+    use tempfile::TempDir;
 
     /// See `crates/outl-core/fixtures/README.md`.
     const LEGACY_BINCODE_SCHEMA_3: &[u8] =
@@ -461,5 +520,68 @@ mod tests {
             matches!(err, SnapshotError::SchemaMismatch { found, .. } if found == SCHEMA_VERSION - 1),
             "got {err:?}"
         );
+    }
+
+    /// A multi-MB body, so a writer's `create` → `write` → `fsync`
+    /// window is wide enough for a second writer to land inside it. A
+    /// real snapshot of the maintainer's workspace is ~13 MB; this is
+    /// the same shape, two orders of magnitude smaller.
+    fn big_body(actor: ActorId, tag: usize, round: usize) -> SnapshotBody {
+        let mut cutoff = BTreeMap::new();
+        cutoff.insert(actor, Hlc::new(1_000 + tag as u64, round as u32, actor));
+        let mut text = BTreeMap::new();
+        for i in 0..3_000 {
+            text.insert(
+                NodeId::new(),
+                format!("{tag}-{round}-{i}-{}", "x".repeat(1_000)),
+            );
+        }
+        SnapshotBody::from_parts(
+            actor,
+            cutoff,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+            text,
+        )
+        .expect("test body encodes")
+    }
+
+    /// Every writer for one actor used to compose in the same
+    /// `snap-<actor>.bin.tmp`. Two of them overlap and the loser is
+    /// still writing into the inode the winner already renamed into
+    /// place, so the *published* snapshot is torn — and the loser's own
+    /// `rename` finds nothing left to publish.
+    ///
+    /// The cost is a slow boot, never lost notes: the op log is the
+    /// source of truth and a snapshot that fails to decode falls back to
+    /// a full replay. That is exactly why it has to be pinned — nothing
+    /// else in the system complains.
+    #[test]
+    fn concurrent_writers_for_one_actor_never_publish_a_torn_snapshot() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".outl").join("snapshots");
+        let actor = ActorId::new();
+        let published = dir.join(format!("snap-{actor}.bin"));
+
+        let handles: Vec<_> = (0..4)
+            .map(|tag| {
+                let dir = dir.clone();
+                let published = published.clone();
+                std::thread::spawn(move || {
+                    for round in 0..4 {
+                        write_to_disk(&dir, &big_body(actor, tag, round))
+                            .expect("a concurrent publish must not fail");
+                        let bytes = std::fs::read(&published).expect("published snapshot readable");
+                        SnapshotBody::decode(&bytes)
+                            .expect("a published snapshot is always a whole body");
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("writer thread");
+        }
     }
 }

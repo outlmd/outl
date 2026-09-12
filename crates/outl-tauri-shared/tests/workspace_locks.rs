@@ -313,3 +313,55 @@ fn switching_workspaces_releases_the_previous_root() {
     let report = compact_now(old).expect("the abandoned workspace is compactable again");
     assert!(report.ops_dropped > 0);
 }
+
+/// A re-pick that **fails** must leave the workspace guarded.
+///
+/// This is the sharp edge of the case above. Releasing the guards before
+/// the replacement is known to succeed leaves the client holding its old
+/// live `Workspace` — `set_workspace` returns early on the error, so the
+/// old one stays published — with no locks on it at all. Compaction then
+/// passes its gate and renames a rewritten `ops-<actor>.jsonl` under a
+/// process still holding byte offsets into the old layout, which is the
+/// corruption the guards exist to prevent.
+///
+/// The failure is injected where a real one lives: `JsonlStorage::open`
+/// reads `ops/`, and `reload_global` propagates a `read_dir` error. Every
+/// step between claiming the locks and installing them can fail this way
+/// (storage open, boot replay, clock seeding); this is just the cheapest
+/// one to stage.
+#[cfg(unix)]
+#[test]
+fn a_failed_re_pick_keeps_the_locks_it_could_not_replace() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    let actor = ActorId::new();
+    seed_compactable_log(root);
+
+    let held: Guards = Mutex::new(None);
+    // The live workspace the client keeps published when the re-pick fails.
+    let _live = open(root, actor, &held).expect("first open");
+
+    // `ops/` unreadable but still searchable: `read_dir` fails (no `r`),
+    // while the already-created `ops/.lock-<actor>` can still be opened
+    // (`x` is enough to traverse). So the lock step would succeed and the
+    // storage open right after it fails — the window under test.
+    let ops = root.join("ops");
+    std::fs::set_permissions(&ops, std::fs::Permissions::from_mode(0o111)).expect("chmod");
+    let failed = open(root, actor, &held);
+    std::fs::set_permissions(&ops, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
+
+    assert!(
+        failed.is_err(),
+        "the fixture must make the re-pick fail, or this pins nothing"
+    );
+    assert!(
+        held.lock().is_some(),
+        "a failed re-pick dropped the guards of the workspace that is still open"
+    );
+    assert!(
+        matches!(compact_now(root), Err(CompactError::Busy(_))),
+        "compaction was let through while a live workspace was still published"
+    );
+}

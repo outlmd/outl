@@ -8,7 +8,7 @@
 | **Date** | 2026-09-11 |
 | **Reference doc** | [`crates/outl-core/CLAUDE.md`](../../crates/outl-core/CLAUDE.md) → "The snapshot cache has a GC, and its rule is about the reader", [`storage.md`](../storage.md) |
 | **Invariant** | root `CLAUDE.md` invariants 9, 10, 11 |
-| **Guarded by** | `a_snapshot_this_binary_can_never_decode_is_dropped`, `the_devices_own_undecodable_snapshot_is_dropped_on_boot`, `a_candidate_the_boot_selector_would_never_choose_is_dropped`, `a_candidate_with_nothing_to_offer_is_dropped`, `a_scratch_file_a_killed_writer_abandoned_is_debris`, `the_devices_own_snapshot_is_never_dropped_for_being_behind`, `a_snapshot_from_a_newer_build_is_kept`, `a_snapshot_that_could_not_be_read_is_kept`, `a_file_replaced_since_the_survey_is_not_pruned`, `nothing_outside_the_snapshots_directory_is_touched`, `a_scratch_file_that_may_still_be_in_flight_is_kept`, `the_only_usable_candidate_is_never_dropped`, `an_empty_or_absent_directory_is_not_an_error`, `a_file_that_is_not_a_snapshot_is_left_alone`, `the_boot_selector_reclaims_nothing_on_a_read_only_open` (`crates/outl-core/src/snapshot/gc/tests.rs`), `publishing_a_snapshot_collects_the_siblings_it_made_unreachable` (`crates/outl-core/src/workspace/snapshot_policy.rs`) |
+| **Guarded by** | `a_snapshot_this_binary_can_never_decode_is_dropped`, `the_devices_own_undecodable_snapshot_is_dropped_on_boot`, `a_candidate_the_boot_selector_would_never_choose_is_dropped`, `a_candidate_with_nothing_to_offer_is_dropped`, `a_scratch_file_a_killed_writer_abandoned_is_debris`, `the_scratch_name_older_builds_left_behind_is_still_debris`, `the_devices_own_snapshot_is_never_dropped_for_being_behind`, `a_snapshot_from_a_newer_build_is_kept`, `a_snapshot_that_could_not_be_read_is_kept`, `a_file_replaced_since_the_survey_is_not_pruned`, `nothing_outside_the_snapshots_directory_is_touched`, `a_scratch_file_that_may_still_be_in_flight_is_kept`, `the_only_usable_candidate_is_never_dropped`, `an_empty_or_absent_directory_is_not_an_error`, `a_file_that_is_not_a_snapshot_is_left_alone`, `the_boot_selector_reclaims_nothing_on_a_read_only_open` (`crates/outl-core/src/snapshot/gc/tests.rs`), `publishing_a_snapshot_collects_the_siblings_it_made_unreachable`, `a_published_snapshot_is_never_torn_by_an_overlapping_worker` (`crates/outl-core/src/workspace/snapshot_policy.rs`), `concurrent_writers_for_one_actor_never_publish_a_torn_snapshot` (`crates/outl-core/src/snapshot.rs`) |
 
 ## Why
 
@@ -135,7 +135,9 @@ The synchronous shutdown writer (`Workspace::save_snapshot`) deliberately does n
 
 ### Abandoned scratch files
 
-`write_to_disk` composes in `snap-<actor>.bin.tmp` and publishes with `rename`, so a killed process leaves one behind and nothing ever removed it.
+`write_to_disk` composes in `snap-<actor>.bin.tmp.<ulid>` and publishes with `rename`, so a killed process leaves one behind and nothing ever removed it.
+The name is unique per write because the shared one it replaced let two writers for the same actor share an inode — the loser of the `rename` wrote on through a path that now pointed at the published snapshot, so a boot read a torn body (a slow boot, never a lost note).
+That also means an abandoned scratch is no longer overwritten by the next write, which is what this collector now carries.
 `gc::stale_tmp` / `gc::prune_tmp` collect them past `STALE_TMP_TTL` (24h), the same shape and the same reasoning as `device/gc.rs`'s `STALE_SCRATCH_TTL`.
 They stay out of the snapshot listing on purpose: a scratch file is a write that never became a snapshot, so reporting one as "a snapshot whose reader is gone" invents a cache entry that never existed.
 

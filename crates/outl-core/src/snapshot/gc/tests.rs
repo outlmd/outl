@@ -149,11 +149,34 @@ fn a_candidate_with_nothing_to_offer_is_dropped() {
     assert_eq!(removed, vec![snap_path(&dir, empty)]);
 }
 
-/// `write_to_disk` composes in `snap-<actor>.bin.tmp` and publishes with
-/// `rename`. A process killed in between leaves the scratch behind and
-/// nothing has ever removed one.
+/// `write_to_disk` composes in a scratch file and publishes with
+/// `rename`. A process killed in between leaves it behind and nothing
+/// has ever removed one.
+///
+/// The name comes from the real producer, not a literal: `write_to_disk`
+/// names its scratch per write so two writers for one actor cannot share
+/// an inode, and a collector that only knew the old shared name would
+/// stop seeing the very files that change made more numerous.
 #[test]
 fn a_scratch_file_a_killed_writer_abandoned_is_debris() {
+    let tmp = TempDir::new().unwrap();
+    let dir = dir_in(&tmp);
+    let orphan = crate::snapshot::scratch_path(&dir.join("snap-01ABC.bin"));
+    std::fs::write(&orphan, b"half a snapshot").unwrap();
+
+    assert_eq!(
+        stale_tmp(&dir, Duration::ZERO).expect("list"),
+        vec![orphan.clone()]
+    );
+    assert!(prune_tmp(&orphan, Duration::ZERO).expect("prune"));
+    assert!(!orphan.exists());
+}
+
+/// The scratch name every build before the per-write one used. A
+/// workspace can still be carrying one, and it is debris for the same
+/// reason — a write that never became a snapshot.
+#[test]
+fn the_scratch_name_older_builds_left_behind_is_still_debris() {
     let tmp = TempDir::new().unwrap();
     let dir = dir_in(&tmp);
     let orphan = dir.join("snap-01ABC.bin.tmp");
