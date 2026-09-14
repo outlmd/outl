@@ -38,10 +38,11 @@
 //! Measured on an idle macOS laptop, by injecting the scan into
 //! `Workspace::block_text` — the path this test actually times:
 //!
-//! | `LOG_GROWTH` | indexed   | scanned     |
-//! |--------------|-----------|-------------|
-//! | 20 (old)     | 2.2–4.2x  | 6.5–6.7x    |
-//! | 50 (now)     | 2.3–4.0x  | 13.1–25.6x  |
+//! | `LOG_GROWTH` | indexed   | scanned  |
+//! |--------------|-----------|----------|
+//! | 20           | 2.2–4.2x  | 5.4x     |
+//! | 50           | 3.2–3.7x  | 19.3x    |
+//! | 100 (now)    | 3.5–4.5x  | 41.6x    |
 //!
 //! The indexed ratio is not ~1 because only the *replayed work* is
 //! constant. The read also pays a lookup in `text`, in `pending` and in
@@ -51,11 +52,22 @@
 //! growing `LOG_GROWTH` costs a scan proportionally and the index almost
 //! nothing, which is what the table shows.
 //!
-//! At `LOG_GROWTH` 20 the two bands nearly touch (4.2 vs 6.5) and a bound
+//! At `LOG_GROWTH` 20 the two bands nearly touch (4.2 vs 5.4) and a bound
 //! between them is a coin flip on a loaded runner — that is the 5.5x
-//! failure. At 50 they are a factor of three apart, and `MAX_RATIO` sits
-//! at 8: twice the worst honest run, comfortably under the cheapest
-//! scan.
+//! failure. 50 separated them 5x and still went red on CI at **11.5x**
+//! with the index in place: the small case measured normally (20.7µs,
+//! in line with a local run) and only the large one took the hit, which
+//! is a scheduler artefact rather than a cost. 100 puts the bands 9x
+//! apart, and `MAX_RATIO` sits at 20 — 4.4x over the worst honest local
+//! run, 2.1x under the cheapest scan, which absorbs the CI noise that
+//! produced the 11.5x without letting a real scan through.
+//!
+//! **Measure the `block_text` path, not `doc_from_log`.** `block_text`
+//! calls `log.edit_updates` itself; `content::doc_from_log` is a
+//! different caller of the same index and injecting a scan there moves
+//! nothing this test times. Doing that produces indexed-looking numbers
+//! for both columns and reads as "the index buys nothing", which is
+//! wrong twice over.
 //!
 //! If this goes flaky again, re-measure both columns the same way and
 //! move the bound — do not delete it, or the bug comes back a fourth
@@ -72,17 +84,21 @@ use std::time::{Duration, Instant};
 /// Ops in the small workspace.
 const SMALL_LOG: usize = 1_000;
 /// How much bigger the large workspace is. A scan costs this much more;
-/// the index costs the same. 50 rather than 20 so the two bands stay a
-/// factor of three apart — see the table in the module docs.
-const LOG_GROWTH: usize = 50;
+/// the index costs almost nothing extra (it still pays lookups that
+/// grow with the log, so its ratio creeps up too — just far slower).
+/// 100 rather than 50 so the two bands stay 9x apart instead of 5x,
+/// which is what the CI noise needed. See the table in the module docs.
+const LOG_GROWTH: usize = 100;
 /// Edits on the node under test. Identical in both workspaces, so the
 /// indexed work is identical and only the *surrounding* log grows.
 const EDITS_ON_TARGET: usize = 3;
-/// Halfway between the measured bands, on a log scale: indexed runs
-/// reach 4.0x, the cheapest scan costs 13.1x. See the module docs.
-const MAX_RATIO: f64 = 8.0;
-/// Best-of-N, to shrug off a scheduler hiccup.
-const REPS: usize = 5;
+/// Between the measured bands: honest indexed runs reach 4.5x locally
+/// and 11.5x on a loaded CI runner, the cheapest scan costs 41.6x. See
+/// the module docs.
+const MAX_RATIO: f64 = 20.0;
+/// Best-of-N, to shrug off a scheduler hiccup. 7 rather than 5 because
+/// the CI failure took the hit on every one of 5.
+const REPS: usize = 7;
 
 fn target() -> NodeId {
     NodeId::from_seed(b"scan-guard:", "target")
@@ -229,8 +245,8 @@ fn rebuilding_one_blocks_text_does_not_scale_with_the_rest_of_the_log() {
         ratio < MAX_RATIO,
         "rebuilding one block's text scaled {ratio:.1}x when the surrounding log grew {LOG_GROWTH}x \
          ({small:?} -> {large:?}). That is the signature of a whole-log scan. \
-         `content::doc_from_log` must go through `OpLog::edit_updates`, which is indexed by node; \
-         `log.iter().filter_map(..)` returns identical bytes in O(total ops) and is how this \
-         regressed twice before. See this file's module docs."
+         `Workspace::block_text` must resolve through `OpLog::edit_updates`, which is indexed \
+         by node; `log.iter().filter_map(..)` returns identical bytes in O(total ops) and is how \
+         this regressed twice before. See this file's module docs."
     );
 }
