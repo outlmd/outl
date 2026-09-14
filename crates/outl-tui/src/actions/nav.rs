@@ -99,21 +99,15 @@ impl App {
     }
 
     /// Kick off a whole-workspace backlink-index build on a worker
-    /// thread, mirroring [`Self::spawn_index_rebuild`].
-    ///
-    /// The build reads every page's `.md` off disk
+    /// thread, mirroring [`Self::spawn_index_rebuild`]. Reads every `.md`
     /// (`build_backlink_index_from_disk`) — `Send`, no `Workspace`, no
-    /// lock. Doing it inline froze the open on a large vault (reading
-    /// 2800+ `.md` on the event-loop thread); a worker keeps the journal
-    /// paintable and fills the panel in a beat later. Replaces any
-    /// in-flight build (the previous thread's result is dropped on
-    /// arrival). The **old** index stays live until the new one lands,
-    /// so the panel doesn't blank during a rebuild.
+    /// lock. Inline it froze the open on a large vault (2800+ `.md` on
+    /// the event-loop thread); a worker keeps the journal paintable and
+    /// fills the panel a beat later. Replaces any in-flight build (the
+    /// previous thread's result is dropped on arrival); the **old** index
+    /// stays live until the new one lands, so the panel doesn't blank.
+    /// Also drops the nested-pages memo: it goes stale at the same moments.
     pub(crate) fn spawn_backlink_index_rebuild(&mut self) {
-        // Every caller here is a whole-workspace change (peer reload,
-        // orphan reconcile, plugin sweep, page delete, cross-page save),
-        // and the nested-pages rows depend on the page list, so they go
-        // stale at exactly the same moments the backlink index does.
         self.invalidate_namespace_children();
         let metas = outl_actions::list_pages(&self.workspace);
         let root = self.workspace_root.clone();
@@ -164,16 +158,12 @@ impl App {
     /// The commit path (`save`) calls this instead of dropping the whole
     /// index: editing one page only changes that page's referencing
     /// blocks, so re-reading its one `.md` (`O(one page)`) is enough. The
-    /// old `invalidate` forced the next render to rebuild the index from
-    /// EVERY `.md` in the workspace, inline on the event loop — that full
-    /// rescan on every keystroke-commit was the "Esc is slow in the TUI"
-    /// bug. A no-op when the index isn't built yet (`None`): the first
-    /// backlinks read builds it fresh. The page's `.md`/`.outl` must be
-    /// projected first (the caller writes them before calling).
+    /// old `invalidate` rebuilt the index from EVERY `.md` inline on the
+    /// event loop — the "Esc is slow in the TUI" bug. A no-op when the
+    /// index isn't built yet (`None`). The page's `.md`/`.outl` must be
+    /// projected first. The nested-pages memo is dropped unconditionally:
+    /// a commit can rewrite this page's `title::`.
     pub(crate) fn reindex_backlinks_for_slug(&self, slug: &str) {
-        // A local commit can rewrite this page's `title::`, which is
-        // where its namespace lives; the rows are cheap to re-derive
-        // once per commit, so drop them here too.
         self.invalidate_namespace_children();
         let mut guard = self.backlink_index.borrow_mut();
         let Some(index) = guard.as_mut() else {

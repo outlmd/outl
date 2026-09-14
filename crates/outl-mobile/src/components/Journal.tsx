@@ -90,6 +90,7 @@ import {
   withCreateNewPersonCandidate,
 } from "@outl/shared/autocomplete";
 import { PageAheadOfLogBanner, ParseWarningsBanner } from "@outl/shared/warnings";
+import { createBacklinksKey } from "@outl/shared/namespace";
 import { parkCaret, spliceText } from "../lib/textarea";
 import { withTimeout } from "../lib/async";
 import {
@@ -175,26 +176,11 @@ function detectAndroid(): boolean {
 export function Journal() {
   const isAndroid = detectAndroid();
   const [view, setView] = createSignal<PageView | null>(null);
-  // Backlinks are fetched lazily, off the page-open path — `view().backlinks`
-  // is always empty now (the O(blocks-in-workspace) scan blocked the first
-  // journal paint). The resource re-fires on every slug change, so every
-  // navigation path is covered without touching `applyView`.
-  //
-  // The title is part of the key too: the reply's `namespace_children`
-  // hang off `title::`, so a page-property edit that renames the page
-  // (`os-linux` → `os/linux`) changes which pages nest under it while the
-  // slug stays put. The memo compares by value, so an ordinary block edit
-  // — a new `view()` with the same slug and title — does not refetch.
-  const backlinksKey = createMemo(
-    () => {
-      const page = view()?.page;
-      return page ? { slug: page.slug, title: page.title } : undefined;
-    },
-    undefined,
-    { equals: (a, b) => a?.slug === b?.slug && a?.title === b?.title },
-  );
+  // Fetched lazily, off the page-open path (`view().backlinks` is always empty:
+  // the O(blocks-in-workspace) scan blocked the first paint). The key refires
+  // on a slug or `title::` change, so navigation and namespace renames refetch.
   const [backlinks, { mutate: mutateBacklinks }] = createResource(
-    backlinksKey,
+    createBacklinksKey(() => view()?.page),
     (key) => pageBacklinks(key.slug),
   );
   const [loaded, setLoaded] = createSignal(false);

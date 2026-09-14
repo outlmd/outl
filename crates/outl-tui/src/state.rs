@@ -675,8 +675,7 @@ pub(crate) struct App {
     /// [`App::poll_backlink_index_updates`].
     pub(crate) backlink_index: std::cell::RefCell<Option<outl_actions::BacklinkIndex>>,
     /// Nested-pages rows, memoised and keyed by slug so navigating
-    /// invalidates it for free; every workspace change (local commit,
-    /// peer reload, orphan reconcile, delete) drops it explicitly via
+    /// invalidates it for free; every workspace change drops it via
     /// `App::invalidate_namespace_children`. Deriving them costs two
     /// full-workspace scans and the render path runs every frame — see
     /// `App::namespace_children_for_current` for the cost.

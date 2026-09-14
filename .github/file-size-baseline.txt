@@ -74,7 +74,7 @@
 1210 crates/outl-sync-iroh/tests/regression.rs
 681 crates/outl-theme/src/presets.rs
 738 crates/outl-tui/src/actions/autocomplete.rs
-798 crates/outl-tui/src/actions/nav.rs
+797 crates/outl-tui/src/actions/nav.rs
 924 crates/outl-tui/src/actions/overlay.rs
 985 crates/outl-tui/src/actions/plugins.rs
 620 crates/outl-tui/src/actions/properties.rs
