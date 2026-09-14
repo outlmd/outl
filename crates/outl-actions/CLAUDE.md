@@ -134,6 +134,31 @@ The survey routes the same call into `PageProjectionState::MarkdownNotHereYet`, 
 `lines_removed` is measured by asking `content_lines_missing_from` about the **new render** ("will this line survive the write"), which is a different question from the guard's ("does the op log know this line", asked of the *sidecar*).
 Both are correct and they are not interchangeable — see the `lines_removed_by` doc comment.
 
+## Page namespaces
+
+A page named `os/linux/debian` is nested under `os/linux`, which is nested under `os` (issue #275).
+`namespace.rs` owns that, and the rule it owns is one sentence: **the hierarchy comes from the page `title`, never from the slug.**
+
+`page::is_valid_slug` rejects `/` because a slug is joined into `pages/<slug>.md` as a single path component, so `outl_md::slug::slugify` folds `/` to `-` and `os/linux` lands on disk as `pages/os-linux.md`.
+The `/` the user typed survives in exactly one place — the `title::` property — which is why every namespace question is asked of titles.
+
+Two consequences worth knowing before touching it:
+
+- **Comparison is per slugified segment, not per string prefix.**
+  `OS/Linux` and `os/linux` are the same namespace (they resolve to the same page); `oscar/wilde` is not under `os`, which a `starts_with("os")` would have said it was.
+- **`ancestors` is a *proper* prefix list.**
+  `backlinks_keys::mentions_of` indexes a namespaced mention under `TargetKey::Namespace` for each ancestor, so `#os/linux` and `[[os/linux/debian]]` both reach the `os` page.
+  Including the name itself would make every namespaced page its own backlink.
+
+**The listing half depends on `title::` existing, and on an imported graph it usually does not.**
+`page_repair_namespaces::repair_namespaced_titles` is the recovery: the namespaced names are still spelled out in the mentions, and `slugify` maps them onto the slug the ingested page already carries, so it joins them back rather than guessing.
+Both GUI clients run it on their background reconcile pass, beside `repair_doubled_journal_titles`.
+On a real 2,575-page workspace it took the nested-pages count from 1 to 100.
+It refuses a page that already has a title, and reports a slug two spellings claim instead of flipping a coin into the op log.
+
+`descendants` returns rows with `depth` and `label` already computed, so the TUI's `view/namespace.rs` and the desktop / mobile `<NestedPages />` render the same list without three copies of the split rule.
+Per-client coverage is recorded as `Capability::NestedPages` (the TUI lists them but has no cursor in the list).
+
 ## Page model
 
 Pages are **regular nodes** directly under [`NodeId::root`] tagged with a `page-slug` property.

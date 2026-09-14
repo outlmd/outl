@@ -45,6 +45,19 @@ mod why {
          `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date \
          (YYYY-MM-DD) to jump straight there.";
 
+    /// The TUI paints the nested-pages list below the backlinks
+    /// (`view/namespace.rs`) but `j` / `k` stop at the backlinks
+    /// section — `Focus` has exactly two variants (`Outline`,
+    /// `Backlink`) and adding a third touches 36 call sites across
+    /// 12 files, each one a decision about what `d`, `x` and `i`
+    /// mean over a page row. So the *list* half of this capability
+    /// is present and the *open it from the list* half is not,
+    /// which is what `Partial` means (same shape as
+    /// `TUI_CALENDAR_IS_READ_ONLY`).
+    pub const TUI_NESTED_PAGES_ARE_READ_ONLY: &str =
+        "The TUI lists nested pages but can't open one from that list — press Ctrl+P and type \
+         the page name (`os/linux`) to jump there.";
+
     /// The TUI has no pairing flow (no ticket display, no scanner) —
     /// pairing a device against a TUI-run workspace goes through the
     /// CLI's `outl peer pair` / `outl peer qr`, run from a separate
@@ -201,6 +214,16 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Missing(why::NO_BANNER_ACTIONS),
             mobile: Full,
         },
+        // Desktop `OutlineView.tsx` and mobile `Journal.tsx` both
+        // render `<NestedPages />` from `@outl/shared/namespace` —
+        // same component, same rows, and a tap opens the page. The
+        // TUI paints the same list without a cursor in it; see
+        // `why::TUI_NESTED_PAGES_ARE_READ_ONLY`.
+        Capability::NestedPages => ClientSupport {
+            tui: Partial(why::TUI_NESTED_PAGES_ARE_READ_ONLY),
+            desktop: Full,
+            mobile: Full,
+        },
         // Mobile: the header gear opens `SettingsSheet.tsx` — "Lock
         // button order" freezes the row, "Reset button order" drops
         // the MFU counts. The other two clients have no soft-keyboard
@@ -255,7 +278,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 8, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 9, "Capability::ALL changed size");
     }
 
     #[test]

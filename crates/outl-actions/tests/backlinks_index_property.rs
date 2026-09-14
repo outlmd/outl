@@ -96,7 +96,7 @@ fn generate(root: &Path, rng: &mut Lcg) -> (Workspace, Vec<PageMeta>) {
                 // test is for: the index returning a backlink twice, or
                 // dropping one of two identical-looking blocks.
                 let tag = format!("{slug}-b{b}");
-                let text = match rng.below(4) {
+                let text = match rng.below(5) {
                     0 => {
                         let target = &slugs[rng.below(slugs.len())];
                         format!("{tag} mentions [[{target}]]")
@@ -106,6 +106,16 @@ fn generate(root: &Path, rng: &mut Lcg) -> (Workspace, Vec<PageMeta>) {
                         let a = &slugs[rng.below(slugs.len())];
                         let c = &slugs[rng.below(slugs.len())];
                         format!("{tag} mentions [[{a}]] and again [[{c}]]")
+                    }
+                    // A namespaced mention: the page `{target}/sub-N`
+                    // need not exist — what matters is that the index
+                    // credits its proper ancestor `{target}`, which
+                    // does. Without this shape no `/` ever reaches
+                    // `mentions_of` and the whole `TargetKey::Namespace`
+                    // channel rests on hand-picked cases.
+                    3 => {
+                        let target = &slugs[rng.below(slugs.len())];
+                        format!("{tag} mentions [[{target}/sub-{}]]", rng.below(5))
                     }
                     _ => format!("{tag} has nothing to find"),
                 };
@@ -136,6 +146,24 @@ fn generate(root: &Path, rng: &mut Lcg) -> (Workspace, Vec<PageMeta>) {
 /// Compares **block text** rather than ids: the ids are exactly what the index
 /// is responsible for resolving, so using them on this side would import the
 /// thing under test into the reference.
+/// Does the ref `r` credit `slug` — either by naming it outright, or by
+/// naming something nested under it?
+///
+/// **Deliberately not `outl_actions::namespace::ancestors`.** This is the
+/// reference implementation the index is checked against; calling the
+/// production helper here would make the comparison circular and any
+/// shared bug invisible. The generated slugs are ASCII-lowercase
+/// already, so no `slugify` step is needed to compare them.
+fn mentions_slug_or_its_namespace(r: &str, slug: &str) -> bool {
+    if r == slug {
+        return true;
+    }
+    let segs: Vec<&str> = r.split('/').filter(|s| !s.trim().is_empty()).collect();
+    // Proper ancestors only — a ref never credits itself twice, and a
+    // page is not nested under itself.
+    (1..segs.len()).any(|n| segs[..n].join("/") == slug)
+}
+
 fn naive_backlink_texts(root: &Path, slug: &str) -> BTreeSet<String> {
     let mut hits = BTreeSet::new();
     let pages_dir = root.join("pages");
@@ -155,7 +183,10 @@ fn naive_backlink_texts(root: &Path, slug: &str) -> BTreeSet<String> {
             if body.is_empty() {
                 continue;
             }
-            if extract_refs(body).iter().any(|r| r == slug) {
+            if extract_refs(body)
+                .iter()
+                .any(|r| mentions_slug_or_its_namespace(r, slug))
+            {
                 hits.insert(body.to_string());
             }
         }

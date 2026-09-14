@@ -65,7 +65,8 @@ use outl_tauri_shared::state::{
 };
 
 use wire_fixtures::{
-    backlink, backlink_crumb, md_ahead_of_log, outline_node, page_meta, page_view, parse_warning,
+    backlink, backlink_crumb, md_ahead_of_log, namespace_child, outline_node, page_meta, page_view,
+    parse_warning,
 };
 use wire_pin::assert_wire_shape;
 
@@ -333,6 +334,15 @@ fn backlinks_reply_matches_page_backlinks() {
     let dto = BacklinksReply {
         backlinks: vec![backlink()],
         backlinks_order: outl_config::BacklinksOrder::Oldest,
+        namespace_backlinks: vec![backlink()],
+        namespace_backlinks_total: 3221,
+        namespace_children: vec![namespace_child()],
     };
     assert_wire_shape(&dto, "PageBacklinks", &[]);
+}
+
+/// One nested-page row inside a backlinks reply (issue #275).
+#[test]
+fn namespace_child_matches_its_interface() {
+    assert_wire_shape(&namespace_child(), "NamespaceChild", &[]);
 }

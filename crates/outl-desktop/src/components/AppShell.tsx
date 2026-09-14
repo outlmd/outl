@@ -10,7 +10,12 @@ import {
 import type { PageView } from "@outl/shared/api/types";
 import { flattenAll } from "@outl/shared/outline";
 
-import { appState, setAppState, setOutline } from "../lib/store";
+import {
+  appState,
+  backlinksState,
+  setAppState,
+  setOutline,
+} from "../lib/store";
 import { takePendingDeepLink, workspaceStats } from "../lib/api";
 import {
   onDeepLinkNavigate,
@@ -130,12 +135,7 @@ export function AppShell() {
       // backlinks effect won't refire — but a peer's edit CAN change this
       // page's backlinks. Refetch them here explicitly.
       pageBacklinks(page.slug)
-        .then((r) =>
-          setAppState({
-            backlinks: r.backlinks,
-            backlinksOrder: r.backlinks_order,
-          }),
-        )
+        .then((r) => setAppState(backlinksState(r)))
         .catch(() => {});
     } catch {
       await loadToday();

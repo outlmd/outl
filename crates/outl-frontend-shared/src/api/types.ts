@@ -404,6 +404,39 @@ export interface ProjectionWriteFailed {
 export interface PageBacklinks {
   backlinks: Backlink[];
   backlinks_order: BacklinksOrder;
+  /**
+   * Blocks that reached this page only through a descendant —
+   * `#os/linux` arriving at `os` (issue #275). **Capped** server-side;
+   * `namespace_backlinks_total` is the real count, so a client can say
+   * "showing 50 of 3,221" instead of implying the list is complete.
+   *
+   * Its own field rather than mixed into `backlinks` because the set
+   * has no natural size: on a real workspace `buser` names 448 sources
+   * and collects 3,221 more this way. Render it as a collapsed section.
+   */
+  namespace_backlinks: Backlink[];
+  /** Blocks reaching this page through a descendant, before the cap. */
+  namespace_backlinks_total: number;
+  /**
+   * Pages nested under this one's namespace — `os` gets `os/linux` and
+   * `os/linux/debian` (issue #275). Title-sorted, every level, each row
+   * carrying its `depth` so no client splits a title on `/` itself.
+   */
+  namespace_children: NamespaceChild[];
+}
+
+/**
+ * One page nested under another's namespace. The hierarchy is derived
+ * from the page **title**, never the slug (`os/linux` slugifies to the
+ * single path component `os-linux`, since a slug is joined into
+ * `pages/<slug>.md`). Mirrors the Rust `outl_actions::NamespaceChild`.
+ */
+export interface NamespaceChild {
+  page: PageMeta;
+  /** Levels below the namespace root. A direct child is `1`. */
+  depth: number;
+  /** Trailing segment — the row label (`debian`, not `os/linux/debian`). */
+  label: string;
 }
 
 /**

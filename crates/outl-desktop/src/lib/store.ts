@@ -15,6 +15,8 @@ import type {
   BacklinksOrder,
   BlockNode,
   MdAheadOfLog,
+  NamespaceChild,
+  PageBacklinks,
   ParseWarning,
   PageMeta,
   ResolvedBlock,
@@ -37,6 +39,13 @@ export interface AppStateShape {
   outline: BlockNode[];
   /** Backlinks targeting the current page. */
   backlinks: Backlink[];
+  /** Pages nested under the current page's namespace (issue #275). */
+  namespaceChildren: NamespaceChild[];
+  /** Blocks reaching this page only through a descendant, capped
+   *  server-side; `namespaceMentionsTotal` carries the real count. */
+  namespaceMentions: Backlink[];
+  /** Count before the cap, so a truncated list can say so. */
+  namespaceMentionsTotal: number;
   /**
    * Parser recovery records emitted while reading the current page's
    * `.md`. Drives the `<ParseWarningsBanner />` above the outline so
@@ -263,6 +272,9 @@ const [state, setState] = createStore<AppStateShape>({
   page: null,
   outline: [],
   backlinks: [],
+  namespaceChildren: [],
+  namespaceMentions: [],
+  namespaceMentionsTotal: 0,
   parseWarnings: [],
   mdAheadOfLog: undefined,
   pageProperties: [],
@@ -309,4 +321,35 @@ export { state as appState, setState as setAppState };
  */
 export function setOutline(outline: BlockNode[]): void {
   setState("outline", reconcile(outline, { key: "id" }));
+}
+
+/**
+ * Every backlinks-derived slice, emptied together.
+ *
+ * Navigation must clear all of them: the fetch's `.catch` swallows a
+ * failure, and leaving page A's rows under page B is worse than an
+ * empty section — the nested-page rows are navigation buttons.
+ * `backlinksOrder` is a display preference, not page data, so it is
+ * carried over rather than reset.
+ */
+export function emptyBacklinks() {
+  return {
+    backlinks: [] as Backlink[],
+    backlinksOrder: state.backlinksOrder,
+    namespaceChildren: [] as NamespaceChild[],
+    namespaceMentions: [] as Backlink[],
+    namespaceMentionsTotal: 0,
+  };
+}
+
+/** The same slices, filled from a reply. One owner, so a new field
+ *  cannot be wired into one call site and forgotten in the other. */
+export function backlinksState(r: PageBacklinks) {
+  return {
+    backlinks: r.backlinks,
+    backlinksOrder: r.backlinks_order,
+    namespaceChildren: r.namespace_children,
+    namespaceMentions: r.namespace_backlinks,
+    namespaceMentionsTotal: r.namespace_backlinks_total,
+  };
 }

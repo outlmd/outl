@@ -146,6 +146,10 @@ The slug rule:
 The original name is preserved in `title::`.
 The autocomplete on `[[` searches by title (not slug), so users type the way they think and outl figures out the filename.
 
+That last point is what makes **namespaces** work: `[[os/linux]]` folds to `pages/os-linux.md` (a slug is one path component — no directory), but the `/` survives in `title::`, and every namespace question is asked of the title.
+So `os` can list its nested pages and collect their mentions without the filesystem knowing anything about it.
+See [markdown-format.md → Nested tags and page namespaces](markdown-format.md#nested-tags-and-page-namespaces).
+
 ## What's NOT in a workspace
 
 - **Trash isn't a directory.** Deleted blocks are moved to a `TRASH_ROOT` node in the op log, not deleted from any file.

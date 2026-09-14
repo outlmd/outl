@@ -52,6 +52,7 @@
 pub mod asset;
 pub mod backlinks;
 pub mod backlinks_index;
+mod backlinks_keys;
 pub mod backlinks_sort;
 pub mod backup;
 pub mod block;
@@ -68,9 +69,11 @@ pub mod history;
 pub mod index;
 pub mod journal;
 pub mod mentions;
+pub mod namespace;
 pub mod outline;
 pub mod page;
 pub mod page_merge;
+pub mod page_repair_namespaces;
 pub mod page_repair_titles;
 pub mod paste;
 pub mod person;
@@ -92,7 +95,9 @@ pub use asset::{assets_dir, import_asset, import_asset_bytes, resolve_asset_path
 pub use backlinks::{
     backlinks_for_page, backlinks_for_target, extract_refs, Backlink, BacklinkCrumb,
 };
-pub use backlinks_index::{build_backlink_index, build_backlink_index_from_disk, BacklinkIndex};
+pub use backlinks_index::{
+    build_backlink_index, build_backlink_index_from_disk, BacklinkIndex, SplitBacklinks,
+};
 pub use backlinks_sort::sort_backlinks;
 pub use block::{
     append_block, append_forest, append_tree, create_after, create_after_or_append, create_before,
@@ -121,6 +126,7 @@ pub use journal::{
     remove_page_projection, render_block_md, render_page_md, sidecar_can_answer, write_md_atomic,
     ProjectionFailure, ProjectionSweep,
 };
+pub use namespace::{descendants as namespace_descendants, NamespaceChild};
 pub use outl_md::parse::{ParseWarning, ParseWarningKind};
 pub use outline::{
     flat_index_for_block, flatten_subtree_paths, project_outline, project_outline_node,
@@ -133,6 +139,7 @@ pub use page::{
     open_or_create as open_or_create_page, open_today, page_meta, read_text_prop, set_property,
     today, PageKind, PageMeta,
 };
+pub use page_repair_namespaces::{repair_namespaced_titles, NamespaceTitleRepair};
 pub use page_repair_titles::repair_doubled_journal_titles;
 pub use paste::{
     looks_like_outline, normalize_external_syntax, paste_markdown, paste_plain, PasteAnchor,

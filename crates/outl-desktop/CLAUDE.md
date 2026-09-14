@@ -83,6 +83,10 @@ The `g d` chord (Normal mode, "go delete") routes through the `DeletePage` case 
 The backend `delete_page` Tauri command is the shared `outl_tauri_shared::commands::page::delete_page` body — no desktop-specific logic.
 
 `InlineBacklinks.tsx`'s header direction button (`setBacklinksOrder`) flips newest/oldest; `appState.backlinksOrder` hydrates at boot.
+
+`components/PageSections.tsx` is what `OutlineView` actually mounts below the outline: `<InlineBacklinks />` then `<NestedPages />` (`@outl/shared/namespace`, issue #275).
+The two look alike and answer different questions — backlinks are blocks that point *at* this page, nested pages live *under* its namespace — which is why the second is **not** gated on `backlinksOpen`.
+Folding the toggles together would hide one when the user muted the other.
 `OutlineView.tsx` refetches backlinks via `createEffect(on(slug, …))` — per navigation, not per commit (the "Esc is slow" fix; rationale in the code comment).
 
 ### Toggling a task from a backlink row (issue #144)

@@ -29,6 +29,16 @@ pub fn page_meta() -> PageMeta {
     }
 }
 
+/// One namespace child row (issue #275) — the `os/linux` page seen
+/// from the `os` page.
+pub fn namespace_child() -> outl_actions::NamespaceChild {
+    outl_actions::NamespaceChild {
+        page: page_meta(),
+        depth: 1,
+        label: "linux".into(),
+    }
+}
+
 pub fn outline_node() -> OutlineNode {
     OutlineNode {
         id: "01JQ0000000000000000000001".into(),

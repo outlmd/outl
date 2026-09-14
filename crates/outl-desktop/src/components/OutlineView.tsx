@@ -53,9 +53,15 @@ import {
 } from "@outl/shared/drag-drop";
 import { setPageProperty } from "../lib/api";
 import { spliceTextAtCaret } from "../lib/markdown-wrap";
-import { appState, setAppState, setOutline } from "../lib/store";
+import {
+  appState,
+  backlinksState,
+  emptyBacklinks,
+  setAppState,
+  setOutline,
+} from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
-import { InlineBacklinks } from "./InlineBacklinks";
+import { PageSections } from "./PageSections";
 import { PropertyEditor } from "./PropertyEditor";
 
 /**
@@ -186,13 +192,11 @@ export function OutlineView() {
       () => appState.page?.slug,
       (slug) => {
         if (!slug) return;
+        // Clear first: the `.catch` below swallows a failed fetch, and
+        // the nested-page rows are navigation buttons.
+        setAppState(emptyBacklinks());
         pageBacklinks(slug)
-          .then((r) =>
-            setAppState({
-              backlinks: r.backlinks,
-              backlinksOrder: r.backlinks_order,
-            }),
-          )
+          .then((r) => setAppState(backlinksState(r)))
           .catch(() => {});
       },
     ),
@@ -950,13 +954,9 @@ export function OutlineView() {
             </For>
           </Show>
 
-          {/*
-           * Backlinks render inline below the outline (TUI parity),
-           * separated by a soft full-width rule. Hidden when the
-           * section is toggled off (Cmd+Shift+B) or when the current
-           * page has no incoming refs.
-           */}
-          <InlineBacklinks />
+          {/* Backlinks, nested pages, namespace mentions — in that
+              order, below the outline (TUI parity). */}
+          <PageSections onOpenPage={(slug) => void handleRefClick(slug)} />
         </div>
       </div>
       {/* The error surface is the top-right `<ErrorToast />` (mounted in

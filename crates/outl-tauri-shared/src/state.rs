@@ -270,6 +270,31 @@ pub struct BacklinksReply {
     pub backlinks: Vec<Backlink>,
     /// Direction the list was sorted in (`[display] backlinks_order`).
     pub backlinks_order: outl_config::BacklinksOrder,
+    /// Blocks that reached this page only through a descendant —
+    /// `#os/linux` arriving at `os` (issue #275). **Capped** at
+    /// `commands::page_backlinks::NAMESPACE_BACKLINK_CAP`;
+    /// `namespace_backlinks_total` is the
+    /// real count.
+    ///
+    /// Separate from `backlinks` because this set has no natural size:
+    /// on a real workspace `buser` names 448 sources and collects 3,221
+    /// more this way. Shipping them in one list put ~292 KB of block
+    /// text on the IPC per page open and made the panel unreadable.
+    pub namespace_backlinks: Vec<Backlink>,
+    /// How many blocks reached this page through a descendant, before
+    /// the cap. Clients show it so a truncated list says so.
+    pub namespace_backlinks_total: usize,
+    /// Pages nested under this one's namespace (`os` → `os/linux`,
+    /// `os/linux/debian`), title-sorted, each carrying its depth —
+    /// issue #275.
+    ///
+    /// Rides the backlinks reply rather than a command of its own
+    /// because it answers the same question at the same moment ("what
+    /// else points here"), is derived from the page list this call
+    /// already holds, and would otherwise cost a second command, a
+    /// second wrapper in `wrappers/catalog.rs`, and a second round trip
+    /// per page open on all three clients.
+    pub namespace_children: Vec<outl_actions::NamespaceChild>,
 }
 
 /// One hit from `search_blocks` — the `((…))` block-ref autocomplete.

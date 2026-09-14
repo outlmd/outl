@@ -295,6 +295,7 @@ Full syntax, defaults, quiet hours, and which clients deliver: [Reminders](remin
 | `[[2026-05-24]]` | Reference to journal "2026-05-24" (rendered as date) |
 | `[[@name]]` | Mention — reference to the person page `name` (page-level `type:: person`); the `@` is the link affordance, not part of the page identity |
 | `#name` | Tag (page reference with classification semantics) |
+| `#a/b/c`, `[[a/b/c]]` | Nested tag / page — `a/b/c` lives in the `a/b` namespace, which lives in `a`. Any depth. See [Nested tags and page namespaces](#nested-tags-and-page-namespaces) |
 | `((blk-XXXXXX))` | Block reference — renders as the source block's text, links to it |
 | `!((blk-XXXXXX))` | Block embed — renders the source block expanded with its subtree |
 | `![alt](url)` | Image / embedded asset — renders inline (`<img>` on desktop/mobile, a `🖼`/`📄` placeholder in the TUI); `url` is a workspace-relative `assets/<hash>.<ext>` path or a remote URL. See [Asset links](#asset-links-nameassetshashext) |
@@ -321,6 +322,24 @@ Use `*italic*` if you need emphasis inside or adjacent to a word-like token.
 `_italic_` in isolation (word-boundary underscores) still works.
 
 This follows the CommonMark spec and is enforced by `try_italic_under` / `try_bold_under` in `outl-md::inline` via the `closing_underscore` helper.
+
+#### Nested tags and page namespaces
+
+A `/` inside a tag or a page reference nests it, at any depth:
+
+```
+- installed on #os/linux/debian today
+- see [[programming-language/rust]] for the borrow checker notes
+```
+
+**On disk this changes nothing.**
+`os/linux` is one flat file, `pages/os-linux.md` — a slug is a single filesystem path component, so `/` folds to `-` ([concepts.md → Slugs](concepts.md#slugs)).
+The namespace lives in the page's `title::`, which keeps what you typed, verbatim.
+Two consequences: `[[os/linux]]` and a page named `os linux` are the same page, and renaming `os` does **not** rename its children.
+
+What the nesting buys you is on the parent page — it lists its descendants and collects their mentions.
+`#os` and `#os/linux` stay *different tags* either way.
+See [clients.md → Nested pages](clients.md#nested-pages-issue-275).
 
 #### Block refs and embeds
 

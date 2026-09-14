@@ -17,6 +17,7 @@
 mod backlinks;
 mod chrome;
 mod inline;
+mod namespace;
 mod outline;
 pub(crate) mod overlays;
 mod properties;
@@ -152,6 +153,11 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
     let (bl_lines, sel_bl) = backlinks::render_backlinks_inline(app, inner_width);
     let bl_offset = all_lines.len();
     all_lines.extend(bl_lines);
+    // Nested pages sit below the backlinks and carry no selection —
+    // `j`/`k` stop at the backlinks section (recorded as
+    // `Capability::NestedPages` → `Partial` for the TUI), so nothing
+    // here shifts `sel_bl`'s offset.
+    all_lines.extend(namespace::render_nested_pages(app, inner_width));
 
     let title = match &app.view {
         View::Journal(_) | View::Page(_) => "Outline",

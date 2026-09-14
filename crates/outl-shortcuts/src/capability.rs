@@ -57,6 +57,16 @@ pub enum Capability {
     /// client without it can still buzz you, but you have to open
     /// the app and find the block by hand.
     ReminderNotificationActions,
+    /// Browsing the pages nested under the open page's namespace —
+    /// `os` listing `os/linux` and `os/linux/debian` — and opening
+    /// one from that list (issue #275).
+    ///
+    /// Distinct from the backlinks section, which every client has in
+    /// full: backlinks are blocks that *point here*, this is pages
+    /// that *live under here*. The two are derived from different
+    /// sources (referencing blocks vs. page titles) and a client can
+    /// ship one without the other.
+    NestedPages,
     /// Pinning the on-screen keyboard toolbar's button order so it
     /// stops rearranging itself by usage, plus resetting that usage
     /// back to the shipped layout.
@@ -85,6 +95,7 @@ impl Capability {
         Capability::Assets,
         Capability::PeerPairing,
         Capability::ReminderNotificationActions,
+        Capability::NestedPages,
         Capability::ToolbarOrderLock,
     ];
 }
@@ -97,7 +108,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_8: usize = 8;
+    const EXPECTED_9: usize = 9;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -108,6 +119,7 @@ mod tests {
             Capability::Assets => "Assets",
             Capability::PeerPairing => "PeerPairing",
             Capability::ReminderNotificationActions => "ReminderNotificationActions",
+            Capability::NestedPages => "NestedPages",
             Capability::ToolbarOrderLock => "ToolbarOrderLock",
         }
     }
@@ -125,9 +137,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_8,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_8} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_8)",
+            EXPECTED_9,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_9} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_9)",
             names.len(),
         );
     }

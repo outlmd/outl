@@ -146,7 +146,7 @@ import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
 import { editableProperties } from "../lib/properties";
 import { haptic } from "../lib/haptics";
-import { BacklinksSection } from "./BacklinksSection";
+import { PageSections } from "./PageSections";
 import { BlockContextMenu } from "./BlockContextMenu";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { TemplateSheet } from "./TemplateSheet";
@@ -2239,44 +2239,32 @@ export function Journal() {
           </Show>
         </section>
 
-        {/* Always render the section for non-journal pages so the
-            bidirectional-linking concept is discoverable; journals
-            stay hidden when empty (the daily flow is already busy
-            enough without an empty box every day). */}
-        <Show
-          when={
-            view()?.page.kind === "page" ||
-            (backlinks()?.backlinks.length ?? 0) > 0
-          }
-        >
-          <BacklinksSection
-            backlinks={backlinks()?.backlinks ?? []}
-            order={backlinks()?.backlinks_order ?? "newest"}
-            onToggleOrder={async () => {
-              const v = view();
-              if (!v) return;
-              haptic("light");
-              const next =
-                (backlinks()?.backlinks_order ?? "newest") === "newest"
-                  ? "oldest"
-                  : "newest";
-              const r = await withError(() =>
-                setBacklinksOrder(next, v.page.slug),
-              );
-              if (r) mutateBacklinks(r);
-            }}
-            onJump={async (link) => {
-              if (!link.source_page) return;
-              haptic("light");
-              const sp = link.source_page;
-              const next =
-                sp.kind === "journal"
-                  ? await withError(() => openJournalFor(sp.slug))
-                  : await withError(() => openPageBySlug(sp.slug));
-              if (next) applyView(next);
-            }}
-          />
-        </Show>
+        <PageSections
+          backlinks={backlinks()}
+          pageKind={view()?.page.kind}
+          onToggleOrder={async () => {
+            const v = view();
+            if (!v) return;
+            haptic("light");
+            const next =
+              (backlinks()?.backlinks_order ?? "newest") === "newest"
+                ? "oldest"
+                : "newest";
+            const r = await withError(() =>
+              setBacklinksOrder(next, v.page.slug),
+            );
+            if (r) mutateBacklinks(r);
+          }}
+          onOpenPage={async (slug, kind) => {
+            haptic("light");
+            const next =
+              kind === "journal"
+                ? await withError(() => openJournalFor(slug))
+                : await withError(() => openPageBySlug(slug));
+            if (next) applyView(next);
+          }}
+        />
+
         </div>
         </PullToRefresh>
 

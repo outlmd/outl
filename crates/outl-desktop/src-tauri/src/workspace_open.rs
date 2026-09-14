@@ -132,6 +132,35 @@ pub(crate) fn spawn_background_reconcile(
             }
         }
 
+        // Give an ingested page back the namespaced `title::` it never
+        // got (issue 275). `outl_actions::namespace` reads a page's
+        // hierarchy off its title, and a page that arrived as a `.md`
+        // has none — so the nested-pages section rendered empty for
+        // every namespace on an imported graph. The names are still in
+        // the mentions; this joins them back. Same shape as the repair
+        // above: idempotent, off the boot path, a no-op when clean.
+        {
+            let mut slot = workspace_slot.lock();
+            let Some(ws) = slot.as_mut() else {
+                return;
+            };
+            match outl_actions::repair_namespaced_titles(ws, &hlc) {
+                Ok(report) if report.is_clean() => {}
+                Ok(report) => {
+                    if !report.repaired.is_empty() {
+                        info!("recovered {} namespaced title(s)", report.repaired.len());
+                        changed = true;
+                    }
+                    // Reported, never guessed: two spellings of one slug
+                    // would make the choice a coin flip in the op log.
+                    for (slug, names) in &report.ambiguous {
+                        warn!("namespace title for `{slug}` is ambiguous: {names:?}");
+                    }
+                }
+                Err(e) => warn!("namespaced-title repair: {e}"),
+            }
+        }
+
         if changed {
             if let Err(e) = app.emit("workspace-reconciled", ()) {
                 warn!("emit workspace-reconciled: {e}");

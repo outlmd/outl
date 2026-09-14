@@ -97,6 +97,23 @@ if [ "${1:-}" = "--update" ]; then
 # here should only ever go down. Adding a row is not a normal part
 # of landing a change — it means a new file crossed the line, and
 # the split should happen instead.
+#
+# Two rows have been raised on purpose. They are named in the script
+# that writes this header, not in the file, because --update rewrites
+# the file from scratch and would drop a note added by hand:
+#
+#   frontend-shared/src/api/types.ts  717 -> 750  (issue 275)
+#     The hand-written Rust<->TS wire mirror. It grows when the wire
+#     grows; splitting it to save 20 lines would refactor every
+#     client's type contract. The pins in outl-tauri-shared/tests/
+#     are what keep it honest, not its length.
+#
+#   outl-tui/src/state.rs  976 -> 983  (issue 275)
+#     One memo field. The nested-pages rows cost two full-workspace
+#     node scans and the TUI render path runs every frame, so
+#     uncached that was a per-frame cost on a 64k-node workspace.
+#
+# Neither argument generalises. A third raise makes its own case.
 HEADER
     printf '%s\n' "$scanned" | oversized
   } > "$tmp"

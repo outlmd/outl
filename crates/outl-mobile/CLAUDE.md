@@ -63,7 +63,7 @@ The storage trait stays generic; the transport gets handled outside it.
 `Journal.tsx` is the mobile app's one large component and the single biggest file in the repo.
 It reached 3,212 lines because the frontend sat outside `file-size-guard.sh`, which only read `.rs` until 2026-09 — so nothing ever warned.
 
-Four pieces are now siblings, and new code of any of those shapes belongs there rather than back in the parent:
+Five pieces are now siblings, and new code of any of those shapes belongs there rather than back in the parent:
 
 - **`JournalHeader.tsx`** — `JournalHeader`, `PageHeader`, `ChevronLeft`, `ChevronRight`.
   Pure render: props in, markup out, no state and no commands.
@@ -79,7 +79,11 @@ Four pieces are now siblings, and new code of any of those shapes belongs there 
   The **wording** is what made the pair worth extracting together — pluralising a count, warning about children, "can't be undone" — since two copies of that drift into saying different things about the same action.
   The markup is one `<ConfirmDialog />` each and would not have earned a file on its own.
 
-What is left is still ~2,490 lines, almost all of it one `Journal()` function.
+- **`PageSections.tsx`** — everything below the outline, in order: the backlinks card (`<BacklinksSection />`) and the nested-pages list (`<NestedPages />` from `@outl/shared/namespace`, issue #275).
+  The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
+  `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
+
+What is left is still ~2,480 lines, almost all of it one `Journal()` function.
 That is real debt, not a finished job: the remaining split is a state/effects question (edit lifecycle, selection, sync signals, keyboard accessory), not a "move these functions" question, and it wants its own plan.
 `.github/file-size-baseline.txt` holds the current number, and the CI ratchet means it can go down but not up.
 

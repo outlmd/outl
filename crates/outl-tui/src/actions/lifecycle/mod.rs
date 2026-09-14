@@ -80,6 +80,7 @@ impl App {
             index: WorkspaceIndex::default(),
             index_rx: None,
             backlink_index: std::cell::RefCell::new(None),
+            namespace_children: std::cell::RefCell::new(None),
             backlink_index_rx: None,
             shared_workspace,
             jsonl_rx: None,

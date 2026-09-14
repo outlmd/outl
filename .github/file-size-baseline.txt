@@ -6,7 +6,23 @@
 # here should only ever go down. Adding a row is not a normal part
 # of landing a change — it means a new file crossed the line, and
 # the split should happen instead.
-613 crates/outl-actions/src/backlinks_index.rs
+#
+# Two rows have been raised on purpose. They are named in the script
+# that writes this header, not in the file, because --update rewrites
+# the file from scratch and would drop a note added by hand:
+#
+#   frontend-shared/src/api/types.ts  717 -> 750  (issue 275)
+#     The hand-written Rust<->TS wire mirror. It grows when the wire
+#     grows; splitting it to save 20 lines would refactor every
+#     client's type contract. The pins in outl-tauri-shared/tests/
+#     are what keep it honest, not its length.
+#
+#   outl-tui/src/state.rs  976 -> 983  (issue 275)
+#     One memo field. The nested-pages rows cost two full-workspace
+#     node scans and the TUI render path runs every frame, so
+#     uncached that was a per-frame cost on a 64k-node workspace.
+#
+# Neither argument generalises. A third raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
 761 crates/outl-actions/src/block/create.rs
 763 crates/outl-actions/src/journal/apply.rs
@@ -33,7 +49,7 @@
 1048 crates/outl-desktop/src/lib/action-handlers.ts
 732 crates/outl-exec/src/runtimes/query.rs
 1262 crates/outl-frontend-shared/src/api/commands.ts
-717 crates/outl-frontend-shared/src/api/types.ts
+750 crates/outl-frontend-shared/src/api/types.ts
 617 crates/outl-md/src/block_index.rs
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
@@ -42,7 +58,7 @@
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 833 crates/outl-mobile/src/components/BlockRow.tsx
-2489 crates/outl-mobile/src/components/Journal.tsx
+2477 crates/outl-mobile/src/components/Journal.tsx
 796 crates/outl-plugins/src/engine.rs
 862 crates/outl-plugins/src/host_tests.rs
 830 crates/outl-plugins/src/host.rs
@@ -56,7 +72,6 @@
 821 crates/outl-sync-iroh/tests/chaos.rs
 956 crates/outl-sync-iroh/tests/integration.rs
 1210 crates/outl-sync-iroh/tests/regression.rs
-715 crates/outl-tauri-shared/src/commands/page.rs
 681 crates/outl-theme/src/presets.rs
 738 crates/outl-tui/src/actions/autocomplete.rs
 798 crates/outl-tui/src/actions/nav.rs
@@ -66,6 +81,6 @@
 661 crates/outl-tui/src/input/normal.rs
 646 crates/outl-tui/src/input/overlay.rs
 688 crates/outl-tui/src/runtime.rs
-976 crates/outl-tui/src/state.rs
+983 crates/outl-tui/src/state.rs
 741 crates/outl-tui/src/view/outline.rs
 1179 crates/outl-tui/src/view/overlays.rs

@@ -11,6 +11,8 @@ That's the spec; don't change it.
 - Quick switcher (`Ctrl+P`) for fuzzy page/journal jumping.
 - Outline panel for current page with inline visible cursor.
 - Inline backlinks rendered below the outline (`B` toggles, `j/k` crosses the separator, `Ctrl+O` flips the sort direction).
+- Nested pages listed below the backlinks (`os` shows `os/linux`, `os/linux/debian`) — **read-only**: `j`/`k` stop at the backlinks section, so opening one goes through the picker (`Ctrl+P`).
+  Recorded as `Capability::NestedPages` → `Partial` in `outl_shortcuts::capability_support`, and the section header says so rather than leaving the user guessing.
 - Block references and embeds: `((blk-XXXXXX))` resolves to the source block's text + page icon.
   `!((blk-XXXXXX))` (when the block contains a single embed token) expands the source block **and its children** read-only below the carrying block.
   `Enter` on either form opens the source page and lands the cursor on the referenced block.
@@ -324,7 +326,8 @@ src/
 │   ├── overlays.rs      # every modal popup
 │   ├── properties.rs    # the `g p` property editor popup
 │   ├── warnings_banner.rs # yellow banner above the outline when the current page has ParseWarnings
-│   └── backlinks.rs     # inline backlinks section (below outline, ─ rule)
+│   ├── backlinks.rs     # inline backlinks section (below outline, ─ rule)
+│   └── namespace.rs     # nested-pages section (below backlinks, ─ rule); read-only, no cursor
 ├── outline_ops.rs       # one-line re-export shim — helpers moved to outl_md::outline_ops so the mobile client can share them
 ├── edit_buffer.rs       # cursor + chars; isolated, well-tested
 ├── editor.rs            # placeholder for block-level editor widgets (not yet built)

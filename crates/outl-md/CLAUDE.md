@@ -123,6 +123,11 @@ Treat matching with the same paranoia as the CRDT.
   `pages_by_type(t)` filters pages by their `type::` property (case-insensitive), powering the `@` mention autocomplete that lists `type:: person` pages.
 - **Slugify** (`slug.rs`) — `[[Avelino]]` → `pages/avelino.md`.
   The user-facing name is preserved verbatim in the page's `title::` property.
+  **The `/` fold is load-bearing, not a limitation.**
+  `[[os/linux]]` becomes `pages/os-linux.md` because a slug is a single path component (`outl_actions::page::is_valid_slug` rejects `/`), and the `/` survives in `title::`.
+  That is exactly where page namespaces are read from (`outl_actions::namespace`, issue #275).
+  So **do not teach this function to preserve `/`** to "support nested tags": the hierarchy already works, and the change would cost a directory layout, a sidecar path change and a migration for nothing.
+  `reference.rs`'s `try_tag` already accepts `/` inside a tag name at any depth, which is the other half of the same design.
 - **`derive_ref_handle(NodeId) -> String`** (`sidecar.rs`) — deterministic: `blk-` + last 6 chars of the ULID's Crockford base32, lowercased.
   Same input always yields the same handle so two devices agree on what `((blk-XXXXXX))` means.
   On a collision inside a single workspace, the **second** block to land gets its handle lazily expanded one character at a time (drawing from the same ULID tail) until unique — both the winner and the loser stay independently resolvable.

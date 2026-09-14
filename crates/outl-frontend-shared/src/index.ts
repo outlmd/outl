@@ -2,6 +2,7 @@ export * from "./api/types";
 export * from "./api/commands";
 export * from "./journal";
 export * from "./markdown";
+export * from "./namespace";
 export * from "./onboarding";
 export * from "./outline";
 export * from "./paste";

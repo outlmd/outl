@@ -479,6 +479,33 @@ Consecutive references from the same branch collapse: the trail renders once, an
 
 Mobile's `BacklinksSection` groups references by source page and renders the breadcrumb the same way desktop and TUI do — it no longer shows a flat list of blocks.
 
+## Nested pages (issue #275)
+
+A page whose title carries a `/` — `os/linux`, `programming-language/rust` — is nested under the namespace to its left.
+Two things follow from that, and they are separate features that happen to share a source:
+
+1. **The parent lists its descendants.**
+   Every client renders a "Nested pages" section below the backlinks, showing every page under the open one (all levels, not just direct children), title-sorted and indented by depth.
+2. **The parent collects its descendants' mentions.**
+   A block tagged `#os/linux` is a backlink of `os` as well as of `os/linux`, through the backlink index's `TargetKey::Namespace` channel.
+   Exact-tag matching is unchanged: `#os` and `#os/linux` are still different tags.
+
+**The hierarchy is derived from the page `title`, never from the slug**, and `outl_actions::namespace` is its single owner.
+A slug is one filesystem path component (`pages/os-linux.md`), so `slugify` folds `/` to `-`; the `/` the user typed survives only in `title::`.
+Comparison is per **slugified segment**, so `OS/Linux` and `os/linux` are one namespace and `oscar/wilde` is not under `os`.
+
+`descendants` hands each client rows that already carry `depth` and `label`, so nothing splits a title on `/` client-side — the desktop and mobile share one `<NestedPages />` from `@outl/shared/namespace`.
+
+| Client | Section | Open a row |
+|---|---|---|
+| TUI | `view/namespace.rs`, below the backlinks | **No** — `j`/`k` stop at the backlinks section; open one with the picker (`Ctrl+P`) |
+| Desktop | `<NestedPages />` in `OutlineView` | Click |
+| Mobile | `<NestedPages />` in `Journal` | Tap |
+
+The TUI gap is recorded as `Capability::NestedPages` → `Partial` in `outl_shortcuts::capability_support` (see [client-parity.md](client-parity.md)), and the section header carries the nudge so the user is not left wondering whether the keys are broken.
+
+The rows ride the `page_backlinks` reply (`PageBacklinks.namespace_children`) rather than a command of their own: they answer the same question at the same moment, off the page list that call already read.
+
 ## Backlinks index (performance)
 
 > **One definition of a mention, one index, four clients:** [RFC 0169](rfcs/0169-backlinks.md).

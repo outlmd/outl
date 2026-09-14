@@ -674,6 +674,13 @@ pub(crate) struct App {
     /// `&self`; the worker's result is swapped in from
     /// [`App::poll_backlink_index_updates`].
     pub(crate) backlink_index: std::cell::RefCell<Option<outl_actions::BacklinkIndex>>,
+    /// Nested-pages rows, memoised per navigation and keyed by slug so
+    /// navigating invalidates it for free. Deriving them costs two
+    /// full-workspace scans and the render path runs every frame — see
+    /// `App::namespace_children_for_current` for the cost and the
+    /// staleness this trades for it.
+    pub(crate) namespace_children:
+        std::cell::RefCell<Option<(String, Vec<outl_actions::NamespaceChild>)>>,
     /// Receiver for an in-flight background backlink-index build (see
     /// [`App::spawn_backlink_index_rebuild`]). `Some` while a worker is
     /// running; drained by [`App::poll_backlink_index_updates`].

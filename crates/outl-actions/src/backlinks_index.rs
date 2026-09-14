@@ -12,7 +12,8 @@
 //! **One owner for "what does this block mention".** The rule that
 //! decides whether a block references a page (`mentions_of`) and the
 //! rule that decides which keys a page looks itself up under
-//! (`keys_for_page`) live *here only*.
+//! (`keys_for_page`) live in `crate::backlinks_keys`, and nowhere
+//! else — this module stores and traverses, it does not decide.
 //! [`crate::backlinks::backlinks_for_page`] /
 //! [`crate::backlinks::backlinks_for_target`] are thin lookups on top of
 //! a freshly built index, so the "what counts as a mention" logic can
@@ -34,30 +35,25 @@ use outl_core::workspace::Workspace;
 use tracing::warn;
 
 use crate::backlinks::{Backlink, BacklinkCrumb};
+use crate::backlinks_keys::{keys_for_page, mentions_of, TargetKey};
 use crate::journal::page_md_path;
-use crate::mentions::extract_refs_and_tags;
 use crate::outline::{project_outline_node_shallow, read_page_outline, ChildrenIndex, OutlineNode};
 use crate::page::{page_meta, PageMeta};
 use crate::todo::split_todo;
 
-/// A key a block can be indexed under, mirroring the four channels the
-/// old `TargetMatcher` matched on.
+/// [`BacklinkIndex::for_page_split`]'s two sets.
 ///
-/// `Ref` is a literal `[[X]]` target (matched verbatim, like the old
-/// `needle`); `Tag` is a `#tag` reduced to its slug form (so `#Avelino`
-/// and page `avelino` meet); `Call` / `Provenance` are the two
-/// template channels (a ` ```call:<name> ` fence and a
-/// `from-template:: <slug>` property).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum TargetKey {
-    /// Literal `[[X]]` target.
-    Ref(String),
-    /// `#tag` reduced via `slugify`.
-    Tag(String),
-    /// ` ```call:<name> ` fence invocation name.
-    Call(String),
-    /// `from-template:: <slug>` provenance slug.
-    Provenance(String),
+/// `direct` is what the page was already showing. `namespaced` is
+/// everything that reached it through a descendant and nothing else —
+/// unbounded in principle, so treat it as a feed to cap, not a list to
+/// render whole.
+#[derive(Debug, Clone, Default)]
+pub struct SplitBacklinks {
+    /// Blocks naming this page outright (`[[os]]`, `#os`, a template
+    /// channel).
+    pub direct: Vec<Backlink>,
+    /// Blocks that only mention something nested under it.
+    pub namespaced: Vec<Backlink>,
 }
 
 /// One indexed referencing block: the backlink itself plus the keys it
@@ -93,6 +89,36 @@ impl BacklinkIndex {
     /// is still the caller's job via [`crate::sort_backlinks`].
     pub fn for_page(&self, workspace: &Workspace, meta: &PageMeta) -> Vec<Backlink> {
         self.collect_by_keys(&keys_for_page(workspace, meta))
+    }
+
+    /// Backlinks split by **how they reached this page**: the ones that
+    /// name it, and the ones that only mention something nested under
+    /// it (`#os/linux` arriving at `os`, issue 275).
+    ///
+    /// The split exists because the second set has no natural size. On
+    /// a real workspace the page `buser` names 448 sources and collects
+    /// **3,221** more through its namespace — mixing them turns a
+    /// readable panel into an unreadable one and puts ~292 KB of block
+    /// text (before the DTO envelope) on the IPC for every page open.
+    /// Both are correct backlinks; only one is something a reader was
+    /// asking for. Clients render the namespace set as its own
+    /// collapsed section, and cap what they ship.
+    ///
+    /// A block that does both — names the page *and* mentions a
+    /// descendant — belongs to `direct`, which is the stronger claim.
+    pub fn for_page_split(&self, workspace: &Workspace, meta: &PageMeta) -> SplitBacklinks {
+        let all = keys_for_page(workspace, meta);
+        let (namespace_keys, direct_keys): (Vec<TargetKey>, Vec<TargetKey>) = all
+            .into_iter()
+            .partition(|k| matches!(k, TargetKey::Namespace(_)));
+        let direct = self.collect_by_keys(&direct_keys);
+        let seen: HashSet<&String> = direct.iter().map(|b| &b.block_id).collect();
+        let namespaced: Vec<Backlink> = self
+            .collect_by_keys(&namespace_keys)
+            .into_iter()
+            .filter(|b| !seen.contains(&b.block_id))
+            .collect();
+        SplitBacklinks { direct, namespaced }
     }
 
     /// Backlinks for a raw target string (a page's slug or title),
@@ -356,76 +382,6 @@ fn shallow_parsed(node: &OutlineNode) -> OutlineNode {
         tokens: node.tokens.clone(),
         children: Vec::new(),
     }
-}
-
-/// Every key a block mentions — the single source of truth for "does
-/// this block reference something".
-///
-/// `[[X]]` targets and `#tag`s both come out of **one** walk over the
-/// inline token tree ([`extract_refs_and_tags`]), so a code span is
-/// inert for both and `#avelino-foo` doesn't reduce to `avelino`; they
-/// used to be read by two different rules, and one `` `code` `` span
-/// then produced two opposite verdicts inside a single block. The
-/// callable channel reads the fence invocation name from the text.
-/// The `from-template::` provenance value is passed in by the caller —
-/// the workspace build reads it off the tree, the from-disk build reads
-/// it off the parsed `.md` block properties — so this one function stays
-/// the sole owner of "what counts as a mention" regardless of source.
-fn mentions_of(text: &str, from_template: Option<&str>) -> Vec<TargetKey> {
-    let mut keys: Vec<TargetKey> = Vec::new();
-    let (refs, tags) = extract_refs_and_tags(text);
-    for r in refs {
-        keys.push(TargetKey::Ref(r));
-    }
-    for t in tags {
-        keys.push(TargetKey::Tag(outl_md::slug::slugify(&t)));
-    }
-    if let Some(name) = crate::template::call_target_name(text) {
-        keys.push(TargetKey::Call(name));
-    }
-    if let Some(slug) = from_template {
-        keys.push(TargetKey::Provenance(slug.to_string()));
-    }
-    keys
-}
-
-/// The keys a page looks itself up under — the lookup-side mirror of
-/// [`mentions_of`], matching what `backlinks_for_page` used to scan for.
-///
-/// For each target string (slug, title, and the `@`-alias forms for a
-/// person page) the page is found under both the literal `Ref` and the
-/// `Tag` slug, exactly like the old `TargetMatcher::refs`. A template
-/// page additionally looks itself up under its callable name and its
-/// own slug (provenance).
-fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<TargetKey> {
-    let mut keys: Vec<TargetKey> = Vec::new();
-    let mut add_target = |t: &str| {
-        keys.push(TargetKey::Ref(t.to_string()));
-        keys.push(TargetKey::Tag(outl_md::slug::slugify(t)));
-    };
-    add_target(&meta.slug);
-    if meta.title != meta.slug {
-        add_target(&meta.title);
-    }
-    if meta.page_type.as_deref() == Some(crate::person::PERSON_TYPE) {
-        add_target(&format!("@{}", meta.slug));
-        if meta.title != meta.slug {
-            add_target(&format!("@{}", meta.title));
-        }
-    }
-    if let Some(name) = template_name_of(workspace, meta) {
-        keys.push(TargetKey::Call(name));
-        keys.push(TargetKey::Provenance(meta.slug.clone()));
-    }
-    keys
-}
-
-/// The template invocation name of `meta`'s page, when it is a template
-/// (has a non-empty `template::` property).
-fn template_name_of(workspace: &Workspace, meta: &PageMeta) -> Option<String> {
-    let id = crate::page::find_by_slug(workspace, &meta.slug)?;
-    let name = crate::page::read_text_prop(workspace, id, crate::template::TEMPLATE_KEY)?;
-    (!name.trim().is_empty()).then_some(name)
 }
 
 /// DFS a page's blocks, adding every mentioning block to `index` under

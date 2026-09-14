@@ -36,6 +36,7 @@ pub mod block;
 pub mod exec;
 pub mod history;
 pub mod page;
+mod page_backlinks;
 pub mod peers;
 pub mod plugin;
 pub mod property;

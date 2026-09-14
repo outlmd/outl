@@ -16,6 +16,8 @@
 //! - `overlay` — quick switcher, workspace search, command palette
 //! - `autocomplete` — Insert-mode inline `[[`/`#`/`((`/`/`/`@` popup
 //! - `properties` — the `g p` property editor overlay
+//! - `namespace` — which pages live under the open one (read-only;
+//!   `view::namespace` draws what it returns)
 //!
 //! Anything cross-cutting (constructors, `pub(crate)` free helpers
 //! consumed by `input` / `view`) is re-exported from this file.
@@ -27,6 +29,7 @@ pub(crate) mod exec;
 pub(crate) mod history;
 pub(crate) mod lifecycle;
 pub(crate) mod mouse;
+pub(crate) mod namespace;
 pub(crate) mod nav;
 pub(crate) mod overlay;
 pub(crate) mod paste;
