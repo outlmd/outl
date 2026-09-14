@@ -110,6 +110,11 @@ impl App {
     /// arrival). The **old** index stays live until the new one lands,
     /// so the panel doesn't blank during a rebuild.
     pub(crate) fn spawn_backlink_index_rebuild(&mut self) {
+        // Every caller here is a whole-workspace change (peer reload,
+        // orphan reconcile, plugin sweep, page delete, cross-page save),
+        // and the nested-pages rows depend on the page list, so they go
+        // stale at exactly the same moments the backlink index does.
+        self.invalidate_namespace_children();
         let metas = outl_actions::list_pages(&self.workspace);
         let root = self.workspace_root.clone();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -166,6 +171,10 @@ impl App {
     /// backlinks read builds it fresh. The page's `.md`/`.outl` must be
     /// projected first (the caller writes them before calling).
     pub(crate) fn reindex_backlinks_for_slug(&self, slug: &str) {
+        // A local commit can rewrite this page's `title::`, which is
+        // where its namespace lives; the rows are cheap to re-derive
+        // once per commit, so drop them here too.
+        self.invalidate_namespace_children();
         let mut guard = self.backlink_index.borrow_mut();
         let Some(index) = guard.as_mut() else {
             return;

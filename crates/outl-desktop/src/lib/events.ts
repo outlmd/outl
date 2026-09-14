@@ -10,6 +10,12 @@
  *   external editor touches a `.md` under the workspace. Debounced
  *   to ~100ms by the backend, so the listener can call
  *   `reload_workspace` straight through without extra throttling.
+ * - `workspace-reconciled` — emitted once by `workspace_open.rs`'s
+ *   background reconcile pass when it changed the in-memory tree
+ *   (orphan `.md` files materialised, doubled journal titles or
+ *   namespaced `title::` values repaired). The tree is already
+ *   current, so the listener re-reads the active page rather than
+ *   replaying the op log.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ProjectionWriteFailed } from "@outl/shared/api/types";
@@ -28,6 +34,16 @@ export function onWorkspaceReady(handler: () => void): Promise<UnlistenFn> {
  */
 export function onPeerOpsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("peer-ops-changed", () => handler());
+}
+
+/**
+ * Register a handler for the `workspace-reconciled` event. Returns an
+ * unlisten function — call it on component cleanup to avoid leaks.
+ */
+export function onWorkspaceReconciled(
+  handler: () => void,
+): Promise<UnlistenFn> {
+  return listen("workspace-reconciled", () => handler());
 }
 
 /** Report a projection failure without turning its committed mutation into an error. */

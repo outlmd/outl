@@ -22,6 +22,7 @@ import {
   onPeerOpsChanged,
   onProjectionWriteFailed,
   onWorkspaceReady,
+  onWorkspaceReconciled,
 } from "../lib/events";
 import type { DeepLinkNavigate } from "../lib/events";
 import { installShortcuts, type ActionHandlers } from "../lib/shortcuts";
@@ -172,6 +173,23 @@ export function AppShell() {
     }
   }
 
+  // The background reconcile pass (orphan `.md` materialised, journal or
+  // namespaced `title::` repaired) already mutated the in-memory tree, so
+  // no `reloadWorkspace` — a full op-log replay — is owed here. What is
+  // stale is what the screen loaded before the pass: the active page's
+  // properties and its lazy backlinks reply (nested pages hang off
+  // `title::`). Re-read those. Mid-edit, fold it into the deferred peer
+  // reload instead of resetting the textarea; the drain below re-reads
+  // the page once the user leaves edit mode.
+  async function onReconciled() {
+    if (appState.editingBlockId !== null || peerChangeInFlight) {
+      peerChangePending = true;
+      return;
+    }
+    await refreshActivePage();
+    await refreshStats();
+  }
+
   // Drain a peer reload that was deferred because the user was editing, the
   // moment they leave edit mode. Guarded so it only fires on the edit→idle
   // transition, and only when a reload is actually pending.
@@ -236,6 +254,11 @@ export function AppShell() {
       void onPeerChange();
     });
     onCleanup(() => unlisten());
+
+    const unlistenReconciled = await onWorkspaceReconciled(() => {
+      void onReconciled();
+    });
+    onCleanup(() => unlistenReconciled());
 
     const unlistenProjection = await onProjectionWriteFailed((failure) => {
       if (failure.md_ahead_of_log && appState.page?.id === failure.page_id) {

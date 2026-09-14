@@ -95,12 +95,16 @@ pub fn repair_namespaced_titles(
         let Some(spellings) = candidates.get(&meta.slug) else {
             continue;
         };
-        // A page whose title is already something other than its slug
-        // has been named by a human or by in-app creation. `page_meta`
-        // resolves `title::` first and the root text second, and it
-        // falls back to the slug only when both are empty — so this one
-        // comparison covers both cases without re-reading the tree.
-        if meta.title != meta.slug {
+        let Some(id) = crate::page::find_by_slug(workspace, &meta.slug) else {
+            continue;
+        };
+        // Somebody already said what this page is called: a `title::`
+        // (in-app creation, or a hand-written one) or root text (the
+        // legacy in-app shape). Both are read directly, because
+        // `meta.title` cannot tell them apart from the slug fallback —
+        // an explicit `title:: os-linux` resolves to the same string
+        // the slug does, and overwriting it is not a repair.
+        if has_own_title(workspace, id) {
             continue;
         }
         let mut names: Vec<&String> = spellings.iter().collect();
@@ -113,9 +117,6 @@ pub fn repair_namespaced_titles(
             continue;
         }
         let title = names[0].clone();
-        let Some(id) = crate::page::find_by_slug(workspace, &meta.slug) else {
-            continue;
-        };
         crate::page::set_property(
             workspace,
             hlc,
@@ -126,6 +127,22 @@ pub fn repair_namespaced_titles(
         out.repaired.push((meta.slug, title));
     }
     Ok(out)
+}
+
+/// `true` when the page root carries a name of its own — a non-empty
+/// `title::` property or non-empty root text — as opposed to the slug
+/// fallback [`crate::page::page_meta`] substitutes when both are
+/// missing. Mirrors that function's first two rungs exactly, so the
+/// two cannot disagree about which pages are titleless.
+fn has_own_title(workspace: &Workspace, id: NodeId) -> bool {
+    if let Some(PropValue::Text(s)) = workspace.tree().property(id, TITLE_KEY) {
+        if !s.trim().is_empty() {
+            return true;
+        }
+    }
+    workspace
+        .block_text(id)
+        .is_some_and(|t| !t.trim().is_empty())
 }
 
 /// Every namespaced name mentioned anywhere in the workspace, indexed
@@ -233,6 +250,51 @@ mod tests {
         assert!(repair_namespaced_titles(&mut w, &hlc).unwrap().is_clean());
         let titles: Vec<String> = list_all(&w).into_iter().map(|p| p.title).collect();
         assert!(titles.contains(&"os/Linux Desktop".to_string()));
+    }
+
+    #[test]
+    fn an_explicit_title_spelled_like_the_slug_is_still_a_title() {
+        // `title:: os-linux` resolves to the same string `page_meta`
+        // would fall back to, so a title-vs-slug comparison reads it
+        // as titleless. It is not: a human wrote it, and `[[os/linux]]`
+        // in a block must not overwrite it.
+        let (mut w, hlc) = ws();
+        ingested_page(&mut w, &hlc, "os-linux");
+        let id = crate::page::find_by_slug(&w, "os-linux").unwrap();
+        crate::page::set_property(
+            &mut w,
+            &hlc,
+            id,
+            TITLE_KEY,
+            Some(PropValue::Text("os-linux".to_string())),
+        )
+        .unwrap();
+        let notes = open_or_create(&mut w, &hlc, "notes", "notes", PageKind::Page).unwrap();
+        append_block(&mut w, &hlc, Some(notes), Some("see [[os/linux]]")).unwrap();
+
+        assert!(repair_namespaced_titles(&mut w, &hlc).unwrap().is_clean());
+        assert_eq!(
+            w.tree().property(id, TITLE_KEY),
+            Some(&PropValue::Text("os-linux".to_string()))
+        );
+    }
+
+    #[test]
+    fn legacy_root_text_spelled_like_the_slug_is_still_a_title() {
+        // Before `title::` existed, in-app creation wrote the typed name
+        // into the root's text. A page whose root text equals its slug
+        // is named — by the same comparison trap as above, it must stay
+        // untouched.
+        let (mut w, hlc) = ws();
+        ingested_page(&mut w, &hlc, "os-linux");
+        let id = crate::page::find_by_slug(&w, "os-linux").unwrap();
+        crate::block::edit_text(&mut w, &hlc, id, "os-linux").unwrap();
+        let notes = open_or_create(&mut w, &hlc, "notes", "notes", PageKind::Page).unwrap();
+        append_block(&mut w, &hlc, Some(notes), Some("see [[os/linux]]")).unwrap();
+
+        assert!(repair_namespaced_titles(&mut w, &hlc).unwrap().is_clean());
+        assert_eq!(w.tree().property(id, TITLE_KEY), None);
+        assert!(descendants(&list_all(&w), "os").is_empty());
     }
 
     #[test]

@@ -41,10 +41,13 @@ pub(crate) use outl_tauri_shared::workspace_open::{
 /// materialised become visible to the next read, no full reload
 /// required.
 ///
-/// Emits `workspace-reconciled` when the batch completes so a client
-/// that wants to refresh the current view can do so explicitly. The
-/// event fires only on completion of the batch, not per-page —
-/// keystroke-grained refreshes would be noisier than they help.
+/// Emits `workspace-reconciled` when the pass changed the tree, and
+/// `AppShell.tsx` (`onReconciled`) re-reads the active page and its lazy
+/// backlinks reply on it — the repaired `title::` values and the
+/// nested-pages rows would otherwise stay stale on the open screen until
+/// the next navigation. The event fires only on completion of the
+/// batch, not per-page — keystroke-grained refreshes would be noisier
+/// than they help.
 pub(crate) fn spawn_background_reconcile(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
     storage_root: PathBuf,
