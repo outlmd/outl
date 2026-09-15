@@ -252,8 +252,10 @@ The duplication that used to live in `outl-desktop/src-tauri/src/commands/exec.r
 
 The runtime catalog is selected per-binary via `outl-exec` features:
 
-- `outl-cli`, `outl-tui`, `outl-desktop` — default features (Lisp + JS + Python + Lua + Rust via wasmtime).
+- `outl-cli`, `outl-tui`, `outl-desktop`: default features (JS + Python + Lua + Rust via wasmtime).
 - `outl-mobile` — opts out of `lang-rust` (wasmtime is heavy and trips iOS code-signing restrictions on dynamic code generation).
+- `lang-lisp` (Steel) is in no default set: Steel exposes no allowlist to build a host boundary from, so a `lisp` fence can reach a shell however carefully the runtime shadows names.
+  A build that only runs the user's own code can turn it on; see the comment in `crates/outl-exec/Cargo.toml`.
 - `outl-actions` — `default-features = false` so it never drags `wasmtime` into the mobile IPA via the back door.
 
 ## Structural templates

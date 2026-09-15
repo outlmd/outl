@@ -51,8 +51,11 @@ Sync between your devices happens through Apple iCloud Drive. Your data flows th
 
 ## Code execution feature
 
-outl can execute fenced code blocks (JavaScript, Python, Lua, Lisp) using interpreters embedded in the app.
-Execution is bounded by a hard timeout per block — 2 seconds on iOS, 5 on desktop and in the terminal — runs entirely on your device, and the result is written back as a markdown subblock in the same file.
+outl can execute fenced code blocks (JavaScript, Python, Lua) using interpreters embedded in the app.
+Execution runs entirely on your device, and the result is written back as a markdown subblock in the same file.
+Every block has a deadline (2 seconds on iOS, 5 on desktop and in the terminal) after which the app stops waiting and reports a timeout.
+What happens to the block itself depends on the language: a Lua block (and, on desktop, a Rust block) is stopped at the deadline, while a Python or JavaScript block that ignores it keeps running in the background, using one CPU core, until the app exits.
+After a few such blocks the app refuses to start another until it is restarted, so a runaway block cannot quietly consume the whole machine.
 No code is downloaded from the internet, no remote code is executed, and the feature does not send your code anywhere.
 
 A block runs only when you ask — pressing `gx`, or setting `auto-run::` on it yourself.

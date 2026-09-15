@@ -473,10 +473,12 @@ Any other link opens in the system browser, and only `http` / `https` / `mailto`
 Following a `[[page]]` / `#tag` / `((block ref))` is still `Enter`, unchanged.
 
 ```
-- ```lisp
-  (map (lambda (x) (* x x)) (list 1 2 3 4))
+- ```lua
+  local s = 0
+  for i = 1, 4 do s = s + i * i end
+  print(s)
   ```
-  - > **result:** `(1 4 9 16)`
+  - > **result:** `30`
 ```
 
 Built-in languages (each behind a Cargo feature, so you can strip
@@ -484,14 +486,14 @@ what you don't need):
 
 | Tag | Engine | Notes |
 |-----|--------|-------|
-| ` ```lisp ` | [Steel](https://github.com/mattwparas/steel) | Scheme R5RS-ish |
+| ` ```lisp ` | [Steel](https://github.com/mattwparas/steel) | Scheme R5RS-ish. **Opt-in** (`lang-lisp`, off by default): Steel cannot be sandboxed from outside, so a `lisp` fence is as trusted as a shell |
 | ` ```js ` | [Boa](https://boajs.dev) | ES2015+, `console.log` captured |
 | ` ```python ` | [RustPython](https://rustpython.github.io) | Py3 subset, no native ext |
 | ` ```lua ` | [mlua](https://github.com/mlua-rs/mlua) | Lua 5.4 vendored |
 | ` ```echo ` | builtin | Returns source verbatim — debug only |
 
 Adding another language is one file under `crates/outl-exec/src/runtimes/` plus a feature flag.
-See [`docs/exec.md`](exec.md) (forthcoming) for the contract and `outl-exec/src/runtimes/lisp.rs` as the canonical template.
+See [`docs/exec.md`](exec.md) (forthcoming) for the contract and `outl-exec/src/runtimes/lua.rs` as the canonical template (an allowlisted host surface plus a real cancellation point).
 
 ## Theming
 

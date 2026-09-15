@@ -109,7 +109,7 @@ The two storage keys are pinned on both sides — `ToolbarStoreTests` in Swift, 
 Long-press a `` ```lang …``` `` block → "Run `<lang>`" fires `runCodeBlock`.
 Mobile's `src-tauri/src/exec.rs` is a **thin adapter** over `outl_actions::exec::run_code_block` (shared with desktop), wrapping the outcome with a refreshed `PageView`.
 The action only shows when `detectFence` matches; the backend re-validates in `run_block_at_index`, so a false-positive is a toast, not damage.
-Runtimes on iOS: **Lisp, JS, Python, Lua** — `lang-rust` is off in `Cargo.toml`.
+Runtimes on iOS: **JS, Python, Lua**. `lang-rust` is off in `Cargo.toml`, and `lang-lisp` is off everywhere by default (see [`docs/clients.md`](clients.md#running-code-blocks)).
 Flow + runtime-catalog rationale: [`docs/clients.md` → Running code blocks](clients.md#running-code-blocks).
 
 ## Insert template (structural templates)

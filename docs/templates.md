@@ -180,7 +180,7 @@ offered: 18000
 
 The parser resolves the template, extracts its code block, injects
 `params` from the YAML body, and executes via `outl-exec` (same
-runtimes: Python, JS, Lisp, Lua, Rust).
+runtimes: Python, JS, Lua, Rust).
 The result lands as a `> **result:**` subtree under the call block,
 and re-running replaces it rather than accumulating.
 
@@ -215,7 +215,7 @@ Returns the language, source code, and declared params.
 |---|---|---|
 | `template <name> not found` | No page has `template:: <name>` (typo, or the page's `template::` value differs from what you typed) | Check the exact value of the `template::` property on the template page — it's the invocation name, not the slug |
 | `template <name> has no code block` | You invoked a callable path (`call:<name>` fence, or `/template <name> key=value`) on a template that has no fenced code block | Add a code fence to the template, or invoke it structurally (`/template <name>` with no params) to deep-copy the subtree instead |
-| `no runtime for <lang>` | The template's code block uses a language this build doesn't link a runtime for | Use a supported language (Python, JS, Lisp, Lua, Rust), or build with the matching `outl-exec` runtime feature enabled |
+| `no runtime for <lang>` | The template's code block uses a language this build doesn't link a runtime for | Use a supported language (Python, JS, Lua, Rust), or build with the matching `outl-exec` runtime feature enabled (`lang-lisp` is opt-in) |
 | Two pages resolve to the wrong body | Two template pages share the same `template:: <name>` | Resolution picks the first in tree order and logs a warning; `list_templates` flags the collision (`duplicate`). Rename one of the templates |
 
 Callable vs structural is decided by whether the template **has a
