@@ -99,7 +99,7 @@ jobs:
     env:
       RUSTFLAGS: "-C debuginfo=0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -116,7 +116,7 @@ jobs:
       # redirected to the colocated cache, so this restores at
       # ~400MB/s.
       - name: Cache bun install cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -215,7 +215,7 @@ jobs:
           # is all `x86_64-pc-windows-msvc` needs to link.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

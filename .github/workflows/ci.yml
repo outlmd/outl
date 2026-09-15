@@ -56,7 +56,7 @@ jobs:
     name: rustfmt
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain (rustfmt)
         run: rustup show
       - name: cargo fmt --check
@@ -71,7 +71,7 @@ jobs:
     name: clippy
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain (clippy)
         run: rustup show
       - name: Cache cargo registry & target
@@ -108,7 +108,7 @@ jobs:
           - os: blacksmith-6vcpu-macos-15
             label: macos
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain
         run: rustup show
       - name: Cache cargo registry & target
@@ -127,7 +127,7 @@ jobs:
     name: cargo doc
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain
         run: rustup show
       # `cargo doc --workspace` compiles every dependency exactly like
@@ -175,7 +175,7 @@ jobs:
       # chasing a rare flake; lower only with a recorded reason.
       PROPTEST_CASES: 1024
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain
         run: rustup show
       - name: Cache cargo registry & target
@@ -213,14 +213,14 @@ jobs:
     name: frontend
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       # `setup-bun` caches the bun binary, not the packages it installs.
       - name: Cache bun install cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}

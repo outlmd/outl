@@ -31,7 +31,7 @@ jobs:
     name: hygiene
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Ratchet, not a cliff: the 66 files already past the threshold are
       # frozen in `.github/file-size-baseline.txt`. This fails only when a
       # new file crosses it or a recorded one grows, so existing large

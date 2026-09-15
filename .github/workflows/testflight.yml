@@ -90,7 +90,7 @@ jobs:
       # Needed for `.github/scripts/testflight_set_whatsnew.py`
       # invoked later. The script is small and the checkout is cheap
       # (a few MB), so we always do it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Resolve Mobile run ID
         id: src
@@ -127,7 +127,7 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Download IPA artifact from Mobile run
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: outl-ios-release
           path: ipa-bundle
@@ -232,7 +232,7 @@ jobs:
 
       - name: Re-upload IPA as workflow artifact (audit trail)
         if: always() && steps.ipa.outputs.path != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: outl-ios-testflight-${{ steps.meta.outputs.short_version }}-${{ steps.meta.outputs.build_number }}
           path: ${{ steps.ipa.outputs.path }}

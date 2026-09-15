@@ -56,7 +56,7 @@ jobs:
       prerelease: ${{ steps.compute.outputs.prerelease }}
       create_tag: ${{ steps.compute.outputs.create_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - id: compute
         shell: bash
@@ -95,7 +95,7 @@ jobs:
     if: needs.prepare.outputs.create_tag == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -126,7 +126,7 @@ jobs:
       # origin, and the same fetch also missed beta.174 and beta.175 from
       # runs seven hours earlier. `github.sha` is what the `tag` job tagged,
       # so it names the same tree and is already in the mirror.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -199,7 +199,7 @@ jobs:
             artifact: outl-windows-x64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
 
@@ -226,7 +226,7 @@ jobs:
           grep -n "version" Cargo.toml | head -10
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -331,7 +331,7 @@ jobs:
     #   * The dmg is ~2× bigger (carries both archs), which for
     #     outl-desktop's ~20MB binaries means ~40MB. Fine.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
 
@@ -364,7 +364,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (desktop universal)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -432,7 +432,7 @@ jobs:
     # (24.04) would raise the glibc floor and break older distros.
     runs-on: blacksmith-8vcpu-ubuntu-2204
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
 
@@ -473,7 +473,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (desktop linux)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -548,7 +548,7 @@ jobs:
     # A failure here never blocks the release: `publish_release` waits for
     # this job but does not require its success (see its `if`).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
 
@@ -559,13 +559,13 @@ jobs:
           rustup target list --installed
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android NDK
         shell: bash
@@ -598,7 +598,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (android)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -688,7 +688,7 @@ jobs:
       needs.build_desktop_linux.result == 'success'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Flip draft to published
         env:
@@ -711,7 +711,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
 
@@ -800,13 +800,13 @@ jobs:
     # `NPM_TOKEN` lives in the `release` environment.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The build commit itself — not the tag, which the parallel `tag`
           # job may not have pushed yet on a main-push run.
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           # Writes the `.npmrc` that reads NODE_AUTH_TOKEN below.
@@ -870,7 +870,7 @@ jobs:
     # `CARGO_REGISTRY_TOKEN` lives in the `release` environment.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The build commit itself — not the tag, which the parallel `tag`
           # job may not have pushed yet on a main-push run.
