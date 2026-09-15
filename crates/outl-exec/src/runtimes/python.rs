@@ -19,6 +19,7 @@ use std::time::Instant;
 use rustpython_vm::{compiler, scope::Scope, Interpreter, PyObjectRef, Settings, VirtualMachine};
 
 use crate::runtime::{ExecContext, ExecError, ExecOutput, ExitStatus, OutputFormat, Runtime};
+use crate::sandbox::with_timeout;
 
 /// RustPython-backed runtime.
 pub struct PythonRuntime;
@@ -34,68 +35,80 @@ impl Runtime for PythonRuntime {
         "python"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
-        let start = Instant::now();
-        let interpreter = Interpreter::without_stdlib(Settings::default());
+    /// Runs on a worker thread because RustPython 0.5 exposes no
+    /// cancellation point: `eval_breaker_tripped` is `pub(crate)` and
+    /// the opcode trace hook is gated behind a frame's
+    /// `f_trace_opcodes`, set from Python. So the caller is released on
+    /// time and the interpreter is not stopped — see `sandbox` for why
+    /// that trade is still the right one, and which runtimes do not
+    /// need it.
+    fn execute(&self, source: &str, ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
+        let owned = source.to_string();
+        with_timeout(ctx.timeout, move || run_isolated(&owned))
+    }
+}
 
-        let outcome = interpreter.enter(|vm| -> Result<String, PyErrString> {
-            let scope = vm.new_scope_with_builtins();
+fn run_isolated(source: &str) -> Result<ExecOutput, ExecError> {
+    let start = Instant::now();
+    let interpreter = Interpreter::without_stdlib(Settings::default());
 
-            run_code(vm, &scope, PRELUDE, "<prelude>")?;
-            run_code(vm, &scope, source, "<block>")?;
+    let outcome = interpreter.enter(|vm| -> Result<String, PyErrString> {
+        let scope = vm.new_scope_with_builtins();
 
-            // Pull `__outl_out` out of the scope and join.
-            let key = vm.ctx.new_str("__outl_out");
-            let captured: PyObjectRef = scope
-                .globals
-                .get_item(&*key, vm)
+        run_code(vm, &scope, PRELUDE, "<prelude>")?;
+        run_code(vm, &scope, source, "<block>")?;
+
+        // Pull `__outl_out` out of the scope and join.
+        let key = vm.ctx.new_str("__outl_out");
+        let captured: PyObjectRef = scope
+            .globals
+            .get_item(&*key, vm)
+            .map_err(|e| pyerr_string(vm, e))?;
+
+        // It's a list of strings — len + getitem.
+        let len = vm
+            .call_method(&captured, "__len__", ())
+            .and_then(|v| v.try_int(vm).map(|i| i.as_bigint().clone()));
+        let len = match len {
+            Ok(n) => n.to_string().parse::<usize>().unwrap_or(0),
+            Err(_) => 0,
+        };
+
+        let mut buf = String::new();
+        for i in 0..len {
+            let idx: PyObjectRef = vm.ctx.new_int(i).into();
+            let item = vm
+                .call_method(&captured, "__getitem__", (idx,))
                 .map_err(|e| pyerr_string(vm, e))?;
-
-            // It's a list of strings — len + getitem.
-            let len = vm
-                .call_method(&captured, "__len__", ())
-                .and_then(|v| v.try_int(vm).map(|i| i.as_bigint().clone()));
-            let len = match len {
-                Ok(n) => n.to_string().parse::<usize>().unwrap_or(0),
-                Err(_) => 0,
-            };
-
-            let mut buf = String::new();
-            for i in 0..len {
-                let idx: PyObjectRef = vm.ctx.new_int(i).into();
-                let item = vm
-                    .call_method(&captured, "__getitem__", (idx,))
-                    .map_err(|e| pyerr_string(vm, e))?;
-                let s = item.str(vm).map_err(|e| pyerr_string(vm, e))?;
-                // Surface non-UTF-8 conversion failures instead of
-                // silently dropping bytes from stdout. Python 3 strs
-                // are notionally UTF-8, but a buggy/native extension
-                // could feed in something we can't decode — better to
-                // fail loudly than to ship truncated output.
-                let chunk = s
-                    .to_str()
-                    .ok_or_else(|| PyErrString("python stdout has non-UTF-8 bytes".into()))?;
-                buf.push_str(chunk);
-            }
-            Ok(buf)
-        });
-
-        match outcome {
-            Ok(stdout) => Ok(ExecOutput {
-                stdout,
-                stderr: String::new(),
-                duration: start.elapsed(),
-                exit: ExitStatus::Ok,
-                format: OutputFormat::Text,
-            }),
-            Err(stderr) => Ok(ExecOutput {
-                stdout: String::new(),
-                stderr: stderr.0,
-                duration: start.elapsed(),
-                exit: ExitStatus::Trap("python-error".into()),
-                format: OutputFormat::Text,
-            }),
+            let s = item.str(vm).map_err(|e| pyerr_string(vm, e))?;
+            // Surface non-UTF-8 conversion failures instead of
+            // silently dropping bytes from stdout. Python 3 strs
+            // are notionally UTF-8, but a buggy/native extension
+            // could feed in something we can't decode — better to
+            // fail loudly than to ship truncated output.
+            let chunk = s
+                .to_str()
+                .ok_or_else(|| PyErrString("python stdout has non-UTF-8 bytes".into()))?;
+            buf.push_str(chunk);
         }
+        Ok(buf)
+    });
+
+    match outcome {
+        Ok(stdout) => Ok(ExecOutput {
+            stdout,
+            stderr: String::new(),
+            duration: start.elapsed(),
+            exit: ExitStatus::Ok,
+            format: OutputFormat::Text,
+        }),
+        Err(stderr) => Ok(ExecOutput {
+            stdout: String::new(),
+            stderr: stderr.0,
+            duration: start.elapsed(),
+            exit: ExitStatus::Trap("python-error".into()),
+            format: OutputFormat::Text,
+        }),
     }
 }
 

@@ -23,7 +23,9 @@ The crate is intentionally tiny and modular:
 - **`runtime::ExecOutput`** — stdout, stderr, duration, exit status, and `format: OutputFormat`.
 - **`runtime::OutputFormat`** — `Text` (default: result subblock as `> **result:** …`) or `Embeds` (result subblock with one child bullet per stdout line, rendered as embeds).
 - **`registry::RuntimeRegistry`** — resolves a fence info-string to the concrete `Runtime`.
-- **`sandbox`** — cross-platform timeout helper.
+- **`sandbox`** — cross-platform termination helpers.
+  `Deadline` hands the interpreter a flag it polls, so it stops itself; `with_timeout` runs the work on a thread and releases the caller without stopping it.
+  They are not interchangeable — see [What a block may reach, and for how long](#what-a-block-may-reach-and-for-how-long).
 - **`result_block`** — pure functions that find / create the result subblock under a code block.
   Includes `upsert_result_child` (text), `upsert_result_embeds` (embed children), and hash-stamped variants for auto-run cache.
 - **`orchestrate::run_block_at_index`** — single entry point for every UI.
@@ -32,11 +34,56 @@ The crate is intentionally tiny and modular:
 - **`orchestrate::run_block_at_index_if_source_changed`** — cache-aware variant used by auto-run loop.
 
 
+## What a block may reach, and for how long
+
+Two questions every runtime has to answer, pinned together in `tests/sandbox.rs` rather than per runtime file — adding a language must not get to answer them differently by omission.
+
+**A fence body is not always written by the person running it.**
+It arrives over iroh from a paired device, through `outl import` from someone else's graph, or under an LLM agent driving `outl_template_run` over MCP.
+So the host surface an interpreter exposes is a security boundary, and it is an **allowlist**: a denylist fails open, because the next release of an interpreter crate adds a library nobody decided to grant.
+
+**`lisp` had the same hole and it was found reviewing the fix for `lua`.**
+`Engine::new()` registers `steel/filesystem`, `steel/process`, `steel/tcp` and `steel/http`, so a fence had `command` (a shell), `open-output-file` and `tcp-connect`.
+It now builds with `Engine::new_sandboxed()` **and** shadows the names that survive it (`HOST_BINDINGS` in `runtimes/lisp.rs`) — that second half is a denylist and fails open, which is a known weakness held shut by `lisp_cannot_reach_the_host` rather than by design.
+
+`lua` is the cautionary example (issue #278).
+It used `Lua::new()`, which loads `StdLib::ALL_SAFE` — and "safe" in mlua's vocabulary means *memory-safe*, not sandboxed.
+It excludes `debug` and `ffi` and **includes** `os` (which carries `execute`), `io` and `package`.
+`runtimes::lua::stdlib` now names the allowed set, and `LOADERS` strips the base-library loaders separately, because Lua's base library is not covered by any `StdLib` flag.
+
+**Execution is in-process and synchronous**, so a block that does not terminate does not hang "the block" — it hangs the TUI event loop, the desktop while it holds the workspace mutex, and `outl mcp serve` (issue #279).
+`Runtime::execute` must honour `ctx.timeout`, and there are two grades of doing so:
+
+| runtime | mechanism | stops the work? |
+|---|---|---|
+| `lua` | mlua `set_global_hook`, every 10k VM instructions | yes — the VM unwinds itself |
+| `rust` | wasmtime epoch interruption (`wasm::module`) | yes |
+| `python` | `sandbox::with_timeout` | no — caller released, thread leaks |
+| `lisp` | `sandbox::with_timeout` | no — caller released, thread leaks |
+| `js` | `sandbox::with_timeout` | no — caller released, thread leaks |
+| `query` | none — bounded by the workspace, not by a clock | n/a |
+| `echo` | none — returns its input | n/a |
+
+`set_global_hook`, not `set_hook`: the per-thread variant is not inherited by a coroutine the *script* creates, and mlua responds to a missing per-thread callback by disabling the hook — so `coroutine.wrap(function() while true do end end)()` ran unbounded.
+
+**A deadline does not bound memory.**
+It counts VM instructions, so it cannot fire inside one long C call — `string.rep('x', 2e9)` is a single instruction and two gigabytes.
+`ctx.mem_limit` is the other half, and `lua` is the only runtime that can honour it (`Lua::set_memory_limit`); it does, when a caller sets one.
+No caller does today — `orchestrate` passes `None` — so the field is inert rather than false.
+
+The weak form is a deliberate trade, not an oversight: the alternative to a leaked thread is a frozen client.
+Before choosing it for a new runtime, check the interpreter for a cancellation point and record what you found.
+`sandbox`'s module doc holds that survey for the three above — including the one that looks like a cancellation point and is not: `steel`'s `with_interrupted` stores a flag the VM never reads.
+Re-check each on a dependency bump.
+
 ## Adding a new language runtime
 
 1. Add a `lang-<name>` feature in `Cargo.toml`.
 2. Create `runtimes/<name>.rs` with one struct + one `impl Runtime`.
 3. Register it in `RuntimeRegistry::with_builtins` behind the feature.
+3.5. **Answer the two questions in [What a block may reach, and for how long](#what-a-block-may-reach-and-for-how-long)**: name the host surface explicitly (allowlist, never the interpreter crate's default constructor) and say what happens at `ctx.timeout`.
+   Add both to `tests/sandbox.rs`.
+   Both holes this section describes — `lua` in issue 278 and `lisp` found reviewing its fix — were an embedder default nobody re-read, so this step is the one that would have caught them.
 4. Add aliases to `KNOWN_ALIASES` in `crates/outl-md/src/lang.rs` **and** the TS mirror at `crates/outl-frontend-shared/src/highlight/aliases.ts`.
 5. If the runtime needs workspace access, override `needs_workspace_index()` to `true`, read `ctx.index` first, and only build one from `ctx.workspace_root` when it is `None`.
 6. If the runtime should auto-run on page load, override `auto_run()` to return `true`.

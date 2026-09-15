@@ -1,13 +1,45 @@
 //! Cross-platform sandbox helpers shared by every runtime.
 //!
-//! For now this is just a timeout primitive — `with_timeout` spawns the
-//! work on a worker thread and gives the caller back an `ExecError::Timeout`
-//! if the channel doesn't deliver in time. The worker thread is *not*
-//! joined: if it overruns, it keeps running until it finishes or the
-//! process exits. That's a known leak for runtimes without cooperative
-//! cancellation (the toy Lisp). The wasmtime backends coming in M2
-//! cancel cooperatively via [`wasmtime::Engine::increment_epoch`], so
-//! they'll route through the same helper without the leak.
+//! # Stopping a block, and the two grades of it
+//!
+//! The **strong** form is a cancellation point inside the interpreter:
+//! the VM notices the deadline and unwinds itself, so the work stops,
+//! the thread ends and nothing leaks. Two runtimes have one: `lua`,
+//! through mlua's instruction hook, and `rust`, through wasmtime epoch
+//! interruption (`crate::wasm::module`). Neither goes through this
+//! module — in both the check rides in-band with the interpreter rather
+//! than through a flag this module could own.
+//!
+//! [`with_timeout`] is the **weak** form, for a backend with no such
+//! point: the caller is released, the work is not. The worker thread is
+//! deliberately not joined, so an infinite loop keeps burning a core
+//! until the process exits.
+//!
+//! That leak is a real cost and still the right trade, because the
+//! alternative is not "no leak" — it is the TUI event loop frozen, or
+//! the desktop wedged while holding the workspace mutex, with Force
+//! Quit as the only way out (issue #279).
+//!
+//! Reach for the weak form only after checking the interpreter for a
+//! cancellation point, and record in the runtime what you found. As of
+//! the versions pinned in `Cargo.toml`:
+//!
+//! - **boa 0.22** (`js`) — `RuntimeLimits` caps loop iterations,
+//!   recursion depth and stack size; nothing per-instruction or
+//!   wall-clock, and `HostHooks` has no interrupt point.
+//! - **rustpython 0.5** (`python`) — `eval_breaker_tripped` is
+//!   `pub(crate)`, and the opcode trace hook only fires when a frame's
+//!   `f_trace_opcodes` is set from Python.
+//! - **steel 0.8.2** (`lisp`) — `Engine::with_interrupted` takes an
+//!   `Arc<AtomicBool>` and the VM **never reads it**: every occurrence
+//!   in the crate is a write. An API that looks like the strong form
+//!   and is not. Steel *does* have one behind a different door —
+//!   `get_thread_state_controller().interrupt()`, checked by
+//!   `VmCore::safepoint_or_interrupt` — so `lisp` can be upgraded; it
+//!   has not been yet.
+//!
+//! Each is worth re-checking on a dependency bump: any one of them
+//! gaining a real cancellation point moves that runtime up a grade.
 
 use std::sync::mpsc;
 use std::thread;

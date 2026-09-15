@@ -15,6 +15,7 @@ use steel::steel_vm::register_fn::RegisterFn;
 use steel::SteelVal;
 
 use crate::runtime::{ExecContext, ExecError, ExecOutput, ExitStatus, OutputFormat, Runtime};
+use crate::sandbox::with_timeout;
 
 /// Steel-backed Scheme runtime.
 pub struct LispRuntime;
@@ -24,43 +25,106 @@ impl Runtime for LispRuntime {
         "lisp"
     }
 
-    fn execute(&self, source: &str, _ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
-        let start = Instant::now();
+    /// Runs on a worker thread, so the caller is released on time and
+    /// the VM is not stopped.
+    ///
+    /// `Engine::with_interrupted` looks like the better answer and is
+    /// not: it takes an `Arc<AtomicBool>` that the VM **never reads** —
+    /// every occurrence of `interrupted` in the crate is a write.
+    ///
+    /// Steel does have a real cancellation point, through a different
+    /// door: `Engine::get_thread_state_controller()` hands back a
+    /// `ThreadStateController` whose `interrupt()` makes the VM stop at
+    /// the next instruction (`VmCore::safepoint_or_interrupt`). Moving
+    /// to it would upgrade `lisp` to a real abort, like `lua`. Not done
+    /// here because this change is already closing two holes, and
+    /// swapping the termination mechanism deserves its own test pass.
+    fn execute(&self, source: &str, ctx: &ExecContext<'_>) -> Result<ExecOutput, ExecError> {
+        let owned = source.to_string();
+        with_timeout(ctx.timeout, move || run_isolated(&owned))
+    }
+}
 
-        let sink: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-        let mut engine = Engine::new();
+fn run_isolated(source: &str) -> Result<ExecOutput, ExecError> {
+    let start = Instant::now();
 
-        // Override the printing builtins so output lands in our buffer
-        // instead of the host's real stdout. Steel still has the
-        // originals available under different names if user code asks,
-        // but `(display ...)` / `(displayln ...)` / `(print ...)` —
-        // the muscle-memory forms — go through us.
-        install_printers(&mut engine, sink.clone());
+    let sink: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    // `new_sandboxed`, not `new`: `Engine::new` calls
+    // `register_builtin_modules(sandbox = false)`, which registers
+    // `steel/filesystem`, `steel/process`, `steel/tcp` and `steel/http`
+    // — and `ALL_MODULES` requires filesystem, ports and process into
+    // the global scope. A ```lisp fence had `command` (a shell),
+    // `open-output-file` and `tcp-connect`: the same hole issue #278
+    // closed in `lua`, in the runtime next door.
+    let mut engine = Engine::new_sandboxed();
 
-        match engine.run(source.to_string()) {
-            Ok(values) => {
-                let mut stdout = sink.lock().unwrap().clone();
-                if stdout.is_empty() {
-                    if let Some(last) = values.last() {
-                        stdout.push_str(&steel_value_to_string(last));
-                    }
+    // Override the printing builtins so output lands in our buffer
+    // instead of the host's real stdout. Steel still has the
+    // originals available under different names if user code asks,
+    // but `(display ...)` / `(displayln ...)` / `(print ...)` —
+    // the muscle-memory forms — go through us.
+    install_printers(&mut engine, sink.clone());
+    revoke_host_bindings(&mut engine);
+
+    match engine.run(source.to_string()) {
+        Ok(values) => {
+            let mut stdout = sink.lock().unwrap().clone();
+            if stdout.is_empty() {
+                if let Some(last) = values.last() {
+                    stdout.push_str(&steel_value_to_string(last));
                 }
-                Ok(ExecOutput {
-                    stdout,
-                    stderr: String::new(),
-                    duration: start.elapsed(),
-                    exit: ExitStatus::Ok,
-                    format: OutputFormat::Text,
-                })
             }
-            Err(e) => Ok(ExecOutput {
-                stdout: sink.lock().unwrap().clone(),
-                stderr: format!("{e}"),
+            Ok(ExecOutput {
+                stdout,
+                stderr: String::new(),
                 duration: start.elapsed(),
-                exit: ExitStatus::Trap("steel-error".into()),
+                exit: ExitStatus::Ok,
                 format: OutputFormat::Text,
-            }),
+            })
         }
+        Err(e) => Ok(ExecOutput {
+            stdout: sink.lock().unwrap().clone(),
+            stderr: format!("{e}"),
+            duration: start.elapsed(),
+            exit: ExitStatus::Trap("steel-error".into()),
+            format: OutputFormat::Text,
+        }),
+    }
+}
+
+/// Host bindings that survive `Engine::new_sandboxed()` and are shadowed
+/// by hand.
+///
+/// **This half is a denylist, and a denylist fails open** — the opposite
+/// of what `runtimes::lua::stdlib` does. It is here because Steel offers
+/// no allowlist to build from: `sandboxed_prelude()` exists in the crate
+/// and nothing calls it, and `new_sandboxed()` still leaves `command`
+/// resolvable. Shadowing the known names is strictly better than
+/// leaving them, and strictly worse than a real allowlist.
+///
+/// `lisp_cannot_reach_the_host` pins each name. That test is the only
+/// thing standing between this list and a Steel bump that adds a symbol
+/// nobody here thought of, which is why closing this properly —
+/// upstream allowlist, or dropping the runtime — has its own issue.
+const HOST_BINDINGS: &[&str] = &[
+    "command",
+    "spawn-process",
+    "wait",
+    "which",
+    "open-input-file",
+    "open-output-file",
+    "delete-file",
+    "create-directory!",
+    "read-dir",
+    "copy-directory-recursively!",
+    "tcp-connect",
+    "tcp-listen",
+    "with-env-var",
+];
+
+fn revoke_host_bindings(engine: &mut Engine) {
+    for name in HOST_BINDINGS {
+        engine.register_value(name, SteelVal::Void);
     }
 }
 
