@@ -4,9 +4,10 @@
 //!
 //! Each test drives the real `outl` binary in a tempdir so it exercises
 //! the same code path a user (or the MCP shim) would. The template uses
-//! a `lisp` code block — the Steel runtime is always in the default
-//! `outl-exec` feature set, so the assertion is deterministic regardless
-//! of which optional language runtimes the build unifies in.
+//! a `lua` code block; the mlua runtime is in the default `outl-exec`
+//! feature set (`lang-lisp` is not, see `outl-exec/Cargo.toml`), so the
+//! assertion is deterministic regardless of which optional language
+//! runtimes the build unifies in.
 
 use serde_json::Value;
 use std::process::Command;
@@ -68,18 +69,18 @@ fn set_prop(ws: &TempDir, page: &str, assignment: &str) {
 }
 
 /// Define a callable `echo` template (a page with `template:: echo` and a
-/// `lisp` code block) and run it against an anchor block on another page.
+/// `lua` code block) and run it against an anchor block on another page.
 #[test]
 fn template_run_writes_result_subtree() {
     let ws = init_workspace();
 
-    // Callable template page: `template:: echo` + a lisp code block.
+    // Callable template page: `template:: echo` + a lua code block.
     create_page(&ws, "tpl-echo");
     set_prop(&ws, "tpl-echo", "template=echo");
     append_block(
         &ws,
         "tpl-echo",
-        "```lisp\n(displayln \"hello from template\")\n```",
+        "```lua\nprint(\"hello from template\")\n```",
     );
 
     // Target page with an anchor block the result lands under.
@@ -125,7 +126,7 @@ fn template_run_rejects_block_on_other_page() {
 
     create_page(&ws, "tpl-echo");
     set_prop(&ws, "tpl-echo", "template=echo");
-    append_block(&ws, "tpl-echo", "```lisp\n(displayln \"hi\")\n```");
+    append_block(&ws, "tpl-echo", "```lua\nprint(\"hi\")\n```");
 
     create_page(&ws, "notes");
     create_page(&ws, "other");

@@ -26,7 +26,7 @@ outl-import = { workspace = true }
 # a new build cost.
 outl-theme = { workspace = true }
 # `outl template run` needs a `RuntimeRegistry` to execute a callable
-# template. Default features (matching the TUI) so `lang-lisp` et al. are
+# template. Default features (matching the TUI) so `lang-lua` et al. are
 # present — feature unification with `outl-tui` already pulls these in.
 outl-exec = { workspace = true, default-features = true }
 outl-plugins = { workspace = true, features = ["registry"] }

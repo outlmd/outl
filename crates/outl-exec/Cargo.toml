@@ -11,11 +11,22 @@ readme.workspace = true
 description = "Code-block execution engine for outl: trait Runtime + sandbox + idempotent result subblock."
 
 [features]
-default = ["lang-lisp", "lang-js", "lang-python", "lang-lua", "lang-rust", "lang-query"]
+default = ["lang-js", "lang-python", "lang-lua", "lang-rust", "lang-query"]
 
 # Each language is its own feature so binaries can opt out (mobile,
 # embedded, "lisp-only" distributions, ...). Adding a new language is
 # one feature plus one runtime file in src/runtimes/.
+#
+# `lang-lisp` is deliberately NOT a default. Steel offers no allowlist
+# to build a host boundary from: `Engine::new_sandboxed()` still
+# registers the full `steel/meta` module, so a fence can build an
+# unsandboxed `(Engine::new)` and `run!` a shell through it, `steel/process`
+# stays reachable through `#%prim.command` and `(require-builtin
+# steel/process)`, and a `defmacro` body runs in the kernel engine an
+# embedder cannot touch. A fence body is not always written by the
+# person running it (iroh, `outl import`, an agent over MCP), so the
+# runtime is opt-in for builds that only run their own code. See
+# `src/runtimes/lisp.rs`.
 lang-lisp = ["dep:steel-core"]
 lang-js = ["dep:boa_engine"]
 lang-python = ["dep:rustpython-vm"]

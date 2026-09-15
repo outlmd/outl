@@ -102,8 +102,7 @@ export function buildContextActions(
   const fenceLang = fence?.language.toLowerCase() ?? "";
   const canRun =
     fence &&
-    (fenceLang === "lisp" ||
-      fenceLang === "js" ||
+    (fenceLang === "js" ||
       fenceLang === "javascript" ||
       fenceLang === "node" ||
       fenceLang === "py" ||

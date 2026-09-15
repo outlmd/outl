@@ -11,6 +11,16 @@ use std::time::Duration;
 use outl_md::index::WorkspaceIndex;
 use thiserror::Error;
 
+/// Heap cap a block gets when the caller does not choose one.
+///
+/// A deadline counts VM instructions, so it cannot fire inside a single
+/// long C call: `string.rep('x', 2e9)` is one instruction and two
+/// gigabytes. `mem_limit` is the other half of bounding a block, and a
+/// default of `None` made it a promise the type kept and no caller did.
+/// 64 MiB is far above what a note-sized script allocates and far below
+/// what wedges a phone.
+pub const DEFAULT_MEM_LIMIT: usize = 64 * 1024 * 1024;
+
 /// A language backend.
 ///
 /// The contract is intentionally Unix-y: take a `source` string, return
@@ -76,7 +86,10 @@ pub struct ExecContext<'a> {
     /// Hard wall-clock limit. Past this we kill the run.
     pub timeout: Duration,
     /// Optional heap cap. Honoured only by runtimes that can enforce
-    /// it (wasmtime can; in-process toy interpreters can't yet).
+    /// it: `lua` does (`Lua::set_memory_limit`); `js`, `python` and
+    /// the wasm-hosted `rust` ignore it. Defaults to
+    /// [`DEFAULT_MEM_LIMIT`], never `None`, so a caller has to opt
+    /// *out* of the cap rather than remember to opt in.
     pub mem_limit: Option<usize>,
     /// A workspace index the caller already holds, if any.
     ///
@@ -105,7 +118,7 @@ impl Default for ExecContext<'_> {
             workspace_root: PathBuf::from("."),
             stdin: None,
             timeout: Duration::from_secs(5),
-            mem_limit: None,
+            mem_limit: Some(DEFAULT_MEM_LIMIT),
             index: None,
         }
     }

@@ -32,7 +32,7 @@ use crate::result_block::{
     render_result_body, result_source_hash, source_hash, upsert_result_child,
     upsert_result_child_with_hash, upsert_result_embeds, RESULT_MARKER,
 };
-use crate::runtime::{ExecContext, ExecError, ExecOutput, OutputFormat};
+use crate::runtime::{ExecContext, ExecError, ExecOutput, OutputFormat, DEFAULT_MEM_LIMIT};
 
 /// Default per-run timeout. UIs can override by building an
 /// [`ExecContext`] manually and going around this helper.
@@ -163,7 +163,7 @@ pub fn run_block_at_index(
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
         stdin: None,
         timeout: DEFAULT_TIMEOUT,
-        mem_limit: None,
+        mem_limit: Some(DEFAULT_MEM_LIMIT),
         index,
     };
     let result = runtime.execute(&body, &ctx);
@@ -249,7 +249,7 @@ pub fn run_block_at_index_if_source_changed(
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
         stdin: None,
         timeout: DEFAULT_TIMEOUT,
-        mem_limit: None,
+        mem_limit: Some(DEFAULT_MEM_LIMIT),
         index,
     };
     let result = runtime.execute(&body, &ctx);

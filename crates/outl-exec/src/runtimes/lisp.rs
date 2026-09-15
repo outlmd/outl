@@ -5,7 +5,39 @@
 //! funnel into our own buffer, run the source, and (if nothing was
 //! printed) auto-display the value of the last expression.
 //!
-//! Gated behind the `lang-lisp` feature.
+//! Gated behind the `lang-lisp` feature, which is **not** in the
+//! default set. See [What a block may reach](#what-a-block-may-reach)
+//! for why: this runtime cannot be given a host boundary from outside
+//! Steel, so it is for builds that only run code the user wrote.
+//!
+//! # What a block may reach
+//!
+//! Everything, given a line or two. `Engine::new_sandboxed()` skips
+//! `steel/filesystem`, `steel/process`, `steel/tcp` and `steel/http`
+//! from the prelude, and `HOST_BINDINGS` below shadows the names that
+//! survive that. Neither is a boundary, and it is worth being precise
+//! about why so nobody tightens the list and calls it closed:
+//!
+//! - `new_sandboxed()` still registers the full `steel/meta` module
+//!   (steel 0.8.3 has a `SANDBOXED_META_MODULE` and never uses it), so a
+//!   fence has `Engine::new`, `run!`, `eval`, `eval-string`, `env-var`
+//!   and `set-env-var!`. `(run! (Engine::new) "(command ...)")` builds
+//!   an unsandboxed engine and runs a shell in it.
+//! - `steel/process` is registered whether or not the engine is
+//!   sandboxed; only the prelude `require` is skipped. The primitive is
+//!   still reachable as `#%prim.command`, and `(require-builtin
+//!   steel/process)` re-binds `command` over whatever we shadowed.
+//! - A `defmacro` or `begin-for-syntax` body runs in the compiler's
+//!   kernel engine, a second `Engine` with the process module loaded.
+//!   `Compiler.kernel` and `Kernel.engine` are `pub(crate)`, so an
+//!   embedder cannot reach it to shadow anything.
+//!
+//! An allowlist would need Steel to expose one, and it does not:
+//! `Engine::new_raw_no_kernel()` drops the prelude bootstrap along with
+//! the kernel, and the module registry has no public "these and only
+//! these" constructor. Until upstream offers that, the honest position
+//! is the feature flag: off by default, and on only in a build whose
+//! operator accepts that a `lisp` fence is as trusted as a shell.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -95,17 +127,19 @@ fn run_isolated(source: &str) -> Result<ExecOutput, ExecError> {
 /// Host bindings that survive `Engine::new_sandboxed()` and are shadowed
 /// by hand.
 ///
-/// **This half is a denylist, and a denylist fails open** — the opposite
-/// of what `runtimes::lua::stdlib` does. It is here because Steel offers
-/// no allowlist to build from: `sandboxed_prelude()` exists in the crate
-/// and nothing calls it, and `new_sandboxed()` still leaves `command`
-/// resolvable. Shadowing the known names is strictly better than
-/// leaving them, and strictly worse than a real allowlist.
+/// **This is a denylist, it fails open, and it is not a security
+/// boundary.** It exists so the obvious spelling of each host call
+/// (`(command ...)`, `(open-output-file ...)`) traps instead of running,
+/// which is worth having in a trusted build: an honest mistake in your
+/// own fence should not delete a file. It does nothing against intent,
+/// because the same primitives stay reachable through `#%prim.command`,
+/// `(require-builtin steel/process)`, `(run! (Engine::new) ...)` and a
+/// `defmacro` body; the module doc lists each with the reason it cannot
+/// be closed from here. That is why `lang-lisp` is opt-in and not why
+/// this list is short.
 ///
-/// `lisp_cannot_reach_the_host` pins each name. That test is the only
-/// thing standing between this list and a Steel bump that adds a symbol
-/// nobody here thought of, which is why closing this properly —
-/// upstream allowlist, or dropping the runtime — has its own issue.
+/// `lisp_cannot_reach_the_host` pins each name so a Steel bump that
+/// renames one is noticed.
 const HOST_BINDINGS: &[&str] = &[
     "command",
     "spawn-process",

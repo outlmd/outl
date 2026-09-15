@@ -309,13 +309,40 @@ fn a_coroutine_inherits_the_deadline() {
     });
 }
 
-/// The same boundary as `lua`, for `lisp`.
+/// The instruction hook cannot fire inside one C call, and a C call
+/// need not allocate to be long: `string.find` with four lazy pieces
+/// against 2,000 characters backtracks on the order of n^4 steps in a
+/// single call, under the memory cap the whole way. The caller still
+/// has to be released, which is what wrapping `lua` in
+/// `sandbox::with_timeout` is for.
+///
+/// Like the `python` and `js` deadline tests, the worker outlives the
+/// test and is one of the abandoned workers counted against
+/// `MAX_RUNAWAY_WORKERS` for the rest of this binary. Three such tests
+/// fit under a budget of four; a fourth needs its own binary.
+#[cfg(feature = "lang-lua")]
+#[test]
+fn a_long_c_call_still_releases_the_caller() {
+    const SRC: &str = "return string.find(string.rep('a', 2000), '.-.-.-.-b')";
+    assert_times_out("lua", SRC, || {
+        outl_exec::runtimes::lua::LuaRuntime.execute(SRC, &ctx_with_deadline())
+    });
+}
+
+/// The obvious spellings of each host call trap in a `lisp` block.
 ///
 /// `Engine::new()` registers `steel/filesystem`, `steel/process`,
 /// `steel/tcp` and `steel/http`, and requires filesystem, ports and
 /// process into the global scope — so a fence had `command` (a shell),
 /// `open-output-file` and `tcp-connect`. Issue #278 in the runtime next
 /// door, found while reviewing the fix for the first one.
+///
+/// This is **not** a boundary test, and must not be read as one: the
+/// same primitives stay reachable through `#%prim.command`,
+/// `(require-builtin steel/process)` and `(run! (Engine::new) ...)`,
+/// which is why `lang-lisp` is opt-in rather than a default. What this
+/// pins is that the shadow list in `runtimes/lisp.rs` still matches the
+/// names Steel exports, so a rename upstream is noticed.
 #[cfg(feature = "lang-lisp")]
 #[test]
 fn lisp_cannot_reach_the_host() {
@@ -381,9 +408,9 @@ fn lisp_keeps_the_language_itself() {
 /// of bytes. `ctx.mem_limit` is the other half of bounding a block, and
 /// `lua` is the only runtime that can enforce it.
 ///
-/// No caller sets one today, which is exactly why this is pinned: the
-/// field is inert, and a test is what keeps "inert" from drifting into
-/// "ignored".
+/// `ExecContext::default()` and `orchestrate` both set
+/// `DEFAULT_MEM_LIMIT`; this pins that the runtime enforces whatever it
+/// is handed, at a cap small enough to make the test fast.
 #[cfg(feature = "lang-lua")]
 #[test]
 fn lua_honours_a_memory_limit() {

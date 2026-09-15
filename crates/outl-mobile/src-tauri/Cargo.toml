@@ -45,12 +45,14 @@ dirs = { workspace = true }
 rustls = { workspace = true }
 # Code-block runtime. `lang-rust` deliberately disabled: it pulls in
 # wasmtime + Cranelift JIT, which inflates the IPA and runs into iOS
-# code-signing restrictions on dynamic code generation. Lisp / JS /
-# Python / Lua are in-process pure-Rust interpreters and ship fine on
-# iOS. The workspace dep already ships defaults OFF; only the iOS-safe
+# code-signing restrictions on dynamic code generation. JS / Python /
+# Lua are in-process pure-Rust interpreters and ship fine on iOS.
+# `lang-lisp` is off for the same reason it is off by default in
+# `outl-exec`: Steel cannot be sandboxed from the outside, and a fence
+# that arrived over iroh must not get a shell (see outl-exec/Cargo.toml).
+# The workspace dep already ships defaults OFF; only the iOS-safe
 # runtimes are enabled here.
 outl-exec = { workspace = true, features = [
-    "lang-lisp",
     "lang-js",
     "lang-python",
     "lang-lua",
