@@ -12,7 +12,8 @@ use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
 use crate::quote::toggle_quote as toggle_quote_prefix;
-use crate::todo::cycle_todo;
+use crate::todo::{cycle_todo, set_todo};
+use crate::TodoState;
 
 use super::{ensure_live, wrap};
 
@@ -56,6 +57,41 @@ pub fn toggle_todo(
     ensure_live(workspace, node)?;
     let current = workspace.block_text(node).unwrap_or_default();
     let next = cycle_todo(&current);
+    let update = workspace.build_text_replace_update(node, &next);
+    if update.is_empty() {
+        return Ok(());
+    }
+    workspace.apply(wrap(
+        hlc,
+        Op::Edit {
+            node,
+            text_op: update,
+        },
+    ))?;
+    Ok(())
+}
+
+/// Mark the block's task state DONE outright, whatever it was: no
+/// marker, `TODO`, `DOING`, a CommonMark checkbox, or already `DONE`.
+///
+/// Unlike [`toggle_todo`] this is **idempotent** — running it on an
+/// already-`DONE` block is a genuine no-op (`build_text_replace_update`
+/// returns empty, so no op is even logged). It also skips straight
+/// past the intermediate states instead of walking one step at a time,
+/// which is exactly what a "finish this" gesture needs: pressing it
+/// should never leave the user three cycles short of done.
+///
+/// The prefix arithmetic itself lives in [`crate::todo::set_todo`],
+/// shared with `outl-tauri-shared`'s reminder-completion command
+/// rather than restated anywhere either client reads it from.
+pub fn mark_done(
+    workspace: &mut Workspace,
+    hlc: &HlcGenerator,
+    node: NodeId,
+) -> Result<(), ActionError> {
+    ensure_live(workspace, node)?;
+    let current = workspace.block_text(node).unwrap_or_default();
+    let next = set_todo(&current, Some(TodoState::Done));
     let update = workspace.build_text_replace_update(node, &next);
     if update.is_empty() {
         return Ok(());
@@ -165,6 +201,52 @@ mod tests {
         toggle_todo(&mut ws, &hlc, n).unwrap(); // → "DOING ship it"
         toggle_quote(&mut ws, &hlc, n).unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("DOING > ship it"));
+    }
+
+    #[test]
+    fn mark_done_lands_from_every_starting_state() {
+        // Unlike `toggle_cycles_through_states` above, this one must
+        // not depend on how far from DONE the block started — the
+        // whole point of a "finish this" gesture is that it never
+        // leaves the user cycling further.
+        for start in ["ship it", "TODO ship it", "DOING ship it"] {
+            let (mut ws, hlc) = new_workspace();
+            let n = append_block(&mut ws, &hlc, None, Some(start)).unwrap();
+            mark_done(&mut ws, &hlc, n).unwrap();
+            assert_eq!(
+                ws.block_text(n).as_deref(),
+                Some("DONE ship it"),
+                "starting from {start:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mark_done_on_an_already_done_block_is_a_true_no_op() {
+        // Idempotent twice over: the text stays put, AND nothing gets
+        // appended to the op log — `build_text_replace_update` comes
+        // back empty, so there is no `Op::Edit` to apply in the first
+        // place. Mattered for the reminders panel's re-tap case and
+        // matters just as much for any double-press of the new chord.
+        let (mut ws, hlc) = new_workspace();
+        let n = append_block(&mut ws, &hlc, None, Some("ship it")).unwrap();
+        mark_done(&mut ws, &hlc, n).unwrap();
+        let log_len = ws.log().len();
+
+        mark_done(&mut ws, &hlc, n).unwrap();
+        assert_eq!(ws.block_text(n).as_deref(), Some("DONE ship it"));
+        assert_eq!(ws.log().len(), log_len);
+    }
+
+    #[test]
+    fn mark_done_composes_with_a_quote_in_canonical_order() {
+        // Same ordering convention [`toggle_quote`] enforces with
+        // `toggle_todo`: task state before the quote marker, so
+        // `split_todo` keeps finding the state on the way to the DTO.
+        let (mut ws, hlc) = new_workspace();
+        let n = append_block(&mut ws, &hlc, None, Some("> ship it")).unwrap();
+        mark_done(&mut ws, &hlc, n).unwrap();
+        assert_eq!(ws.block_text(n).as_deref(), Some("DONE > ship it"));
     }
 
     #[test]

@@ -138,6 +138,13 @@ pub enum Action {
     ToggleCollapsed,
     /// Cycle task state (none → TODO → DOING → DONE → none).
     ToggleTodo,
+    /// Mark the current block DONE outright, rather than stepping one
+    /// state at a time like [`Action::ToggleTodo`]. Idempotent from any
+    /// starting state (plain, `TODO`, or already `DONE`). On a
+    /// query-result embed row it marks the **source** block done, never
+    /// prefixing the `!((blk-…))` token. The "finish this task" gesture
+    /// distinct from the cycle.
+    MarkDone,
     /// Copy the current block's `((blk-…))` ref handle to clipboard.
     CopyBlockRef,
 
@@ -350,6 +357,7 @@ impl Action {
         Action::DeleteBlock,
         Action::ToggleCollapsed,
         Action::ToggleTodo,
+        Action::MarkDone,
         Action::CopyBlockRef,
         Action::DeletePage,
         Action::InsertRemind,
@@ -448,6 +456,7 @@ mod all_tests {
             Action::DeleteBlock => "DeleteBlock",
             Action::ToggleCollapsed => "ToggleCollapsed",
             Action::ToggleTodo => "ToggleTodo",
+            Action::MarkDone => "MarkDone",
             Action::CopyBlockRef => "CopyBlockRef",
             Action::DeletePage => "DeletePage",
             Action::InsertRemind => "InsertRemind",
@@ -496,14 +505,14 @@ mod all_tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_82,
-            "Action::ALL has {} entries but the enum has {EXPECTED_82} variants \
-             — add the new variant to Action::ALL (and bump EXPECTED_82)",
+            EXPECTED_83,
+            "Action::ALL has {} entries but the enum has {EXPECTED_83} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_83)",
             names.len(),
         );
     }
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_82: usize = 82;
+    const EXPECTED_83: usize = 83;
 }

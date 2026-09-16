@@ -317,6 +317,7 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("g s", Mode::Normal, Action::SnoozeReminder),
     ("g p", Mode::Normal, Action::OpenProperties),
     ("g Shift+p", Mode::Normal, Action::TogglePin),
+    ("g Shift+d", Mode::Normal, Action::MarkDone),
     ("Ctrl+p", Mode::Normal, Action::OpenPicker),
     ("?", Mode::Normal, Action::ToggleHelp),
     (":", Mode::Normal, Action::OpenCommandPalette),

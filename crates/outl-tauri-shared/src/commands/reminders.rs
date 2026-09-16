@@ -14,8 +14,7 @@
 use outl_actions::reminders::{
     scan_reminders, snooze, snooze_until, FiredLog, Reminder, SnoozePreset, Urgency,
 };
-use outl_actions::todo::{set_todo, TodoState};
-use outl_actions::{clock, edit_text, set_property};
+use outl_actions::{clock, mark_done, set_property};
 use outl_core::property::PropValue;
 use serde::{Deserialize, Serialize};
 
@@ -276,6 +275,12 @@ pub fn set_page_property<S: AppHost>(
 /// advanced it to `TODO` and the nag kept going — the button did the
 /// opposite of its label. Setting the state outright is idempotent
 /// and says what it means.
+///
+/// This is now the same semantic the `Action::MarkDone` chord fires,
+/// so both reach for [`outl_actions::mark_done`] instead of each
+/// re-spelling the prefix arithmetic here. That crate owns "what does
+/// *done* mean", not this command's DTO plumbing or `finish_in_page`'s
+/// commit sequence.
 pub fn mark_block_done<S: AppHost>(
     state: &S,
     page_id: String,
@@ -284,11 +289,7 @@ pub fn mark_block_done<S: AppHost>(
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&block_id)?;
     let hlc = state.hlc().clone();
-    finish_in_page(state, page, |ws| {
-        let current = ws.block_text(node).unwrap_or_default();
-        let next = set_todo(&current, Some(TodoState::Done));
-        edit_text(ws, &hlc, node, &next)
-    })
+    finish_in_page(state, page, |ws| mark_done(ws, &hlc, node))
 }
 
 /// Set (or clear) a block's `remind::` rule. Thin alias over

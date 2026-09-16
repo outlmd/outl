@@ -23,6 +23,7 @@ import {
   deleteBlock,
   editBlock,
   indentBlock,
+  markBlockDone,
   moveBlockDown,
   moveBlockUp,
   outdentBlock,
@@ -217,6 +218,34 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
       // `await` (see the outl async-writes principle). A TODO toggle is an
       // op; a `ui-render` plugin emits HTML here (e.g. confetti on DONE).
       // Blocking the toggle on the plugin JS just delayed the checkbox.
+      void safeCall(pluginSyncHooks(pageId)).then((hooked) => {
+        if (hooked?.view) deps.applyView(hooked.view);
+        for (const err of hooked?.errors ?? []) deps.setError(err);
+        if (hooked) playPluginViews(hooked.views);
+      });
+    },
+
+    // ── block mark-done (`g D`) ──────────────────────────────────
+    //
+    // Sets DONE outright rather than cycling: unlike `Cmd+T`, `g D` is a
+    // completion gesture that lands on DONE from any state (unmarked /
+    // TODO / DOING), and it is what the query-result gesture fires. The
+    // chord is shifted so it can't be fat-fingered instead of `g d`
+    // (delete the page) — a near-miss between "finish this task" and
+    // "delete this whole page".
+    MarkDone: async () => {
+      const pageId = appState.page?.id;
+      if (!pageId) return;
+      const id = targetBlockId();
+      if (!id) {
+        deps.setError(
+          "Select or click a block first, then g D marks it done",
+        );
+        return;
+      }
+      await runOn(markBlockDone(pageId, id));
+      // Same fire-and-forget sweep as ToggleTodo: a `ui-render` plugin
+      // (confetti on DONE) must not delay the checkbox.
       void safeCall(pluginSyncHooks(pageId)).then((hooked) => {
         if (hooked?.view) deps.applyView(hooked.view);
         for (const err of hooked?.errors ?? []) deps.setError(err);

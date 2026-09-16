@@ -281,6 +281,7 @@ export type Action =
   | { kind: "DeletePage" }
   | { kind: "ToggleCollapsed" }
   | { kind: "ToggleTodo" }
+  | { kind: "MarkDone" }
   | { kind: "CopyBlockRef" }
   | { kind: "CutBlock" }
   | { kind: "CopyBlock" }
