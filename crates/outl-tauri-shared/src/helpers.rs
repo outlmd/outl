@@ -48,6 +48,31 @@ where
     }
 }
 
+/// Normalize a path the OS handed us into a plain filesystem path
+/// `std::fs` can open.
+///
+/// On desktop the Tauri dialog returns a bare path and this is a no-op. On
+/// iOS it returns a `file://` URL (often percent-encoded), so we strip the
+/// scheme and decode `%XX` before `import_asset` reads it. Android's
+/// `content://` URIs are not filesystem paths and can't be handled here —
+/// they're left as-is and fail loudly downstream (Android is not a target
+/// platform yet).
+///
+/// Shared by the file picker (`commands::asset`) and the OS "Open With"
+/// gesture (`commands::open_with`), which receive the same two shapes
+/// from different places — a second copy would be a second answer to
+/// "is this a `file://` URL".
+pub fn normalize_picker_path(raw: &str) -> String {
+    let Some(rest) = raw.strip_prefix("file://") else {
+        return raw.to_string();
+    };
+    // `file:///path` → `/path`; drop an empty authority if present.
+    let path = rest.strip_prefix("localhost").unwrap_or(rest);
+    percent_encoding::percent_decode_str(path)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
 /// Acquire a mutable handle to the workspace.
 pub fn with_ws_mut<S, F, T>(state: &S, f: F) -> Result<T, String>
 where

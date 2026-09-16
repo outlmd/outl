@@ -348,6 +348,29 @@ Desktop and mobile share the drop-handling code (`installFileDrop` + `importAsse
 See [`outl-frontend-shared/CLAUDE.md`](../crates/outl-frontend-shared/CLAUDE.md#todays-surface) for the pure helpers underneath.
 The TUI has no OS drag events over SSH/tmux, so it treats a lone pasted file path as a drop instead (`outl-tui/CLAUDE.md` → "Drag-and-drop file upload").
 
+## Opening a file from the OS ("Open With → outl")
+
+A file manager can hand outl a `.md` / `.markdown` / `.txt` / `.text` file that lives **outside** the workspace.
+outl is not a text editor and never writes back to that file: the gesture means *import a copy of this into my outline*, so what lands is an ordinary page whose content arrived through the op log like every other page.
+
+Where it lands: a page titled **`open-in/<file name>`**.
+The slash is a *title* namespace, not a slug — `page::is_valid_slug` rejects `/` because a slug is one path component — so the file projects to `pages/open-in-<name>.md` and `open-in` becomes a real parent page listing everything ever opened this way ([Nested pages](#nested-pages-issue-275)).
+
+**Re-opening the same file navigates; it does not import again.**
+The page records where it came from in a `source::` property.
+Importing twice into one page would duplicate every block, and overwriting would delete whatever the user wrote on the page after the import — so the second open returns the page the first one produced.
+That property is also what keeps two *different* files with the same name apart: `~/a/notes.md` and `~/b/notes.md` both want `open-in/notes`, and the second gets `open-in/notes 2` rather than being silently merged into the first.
+
+The content split follows the paste pipeline, not a second rule: a bulleted `.md` lands as an outline, a bullet-free payload lands as one block per non-blank line (see [Copy and paste](#copy-and-paste)).
+
+| Client | How a file reaches it |
+|---|---|
+| Desktop | `fileAssociations` in `tauri.conf.json` puts outl in the OS "Open With" list (`rank: Alternate`, so it never steals another app's default). macOS delivers an Apple Event (`RunEvent::Opened`), Linux / Windows deliver `argv`. Both buffer until the frontend announces it is listening, then emit `open-file://import` — "the process is running" is not the same as "the webview has mounted", and a slow workspace boot is exactly when a user opens a file. Both routes end at the `open_external_file` command |
+| Mobile | The command is registered and **nothing hands it a file** — no share-sheet / document-type association is declared yet, so iOS and Android never offer outl in "Open in". Recorded as `Capability::OpenExternalFile` = `Missing` |
+| TUI | Not applicable — a file manager has no terminal process to hand a file to |
+
+Policy (namespace, the `source::` rule, the extension / size / UTF-8 refusals) lives in `outl_actions::open_with` and nowhere else; each client only turns an OS gesture into one path string.
+
 ## Task state convention
 
 A block's task state is **a prefix on its text**, not a property:

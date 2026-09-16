@@ -96,6 +96,23 @@ mod why {
         "There's no on-screen toolbar to pin here — these actions have fixed keyboard \
          shortcuts, so they never move.";
 
+    /// The TUI is a process a user starts from a shell; no desktop
+    /// environment hands it a double-clicked file, and there is no
+    /// bundle for a file manager to offer. The equivalent is the
+    /// shell, which the user is already in.
+    pub const NO_TUI_FILE_HANDOFF: &str =
+        "A file manager has no terminal client to hand a file to — open the file in the \
+         desktop app, or paste its text into a block.";
+
+    /// The command is registered on mobile and nothing delivers a
+    /// path to it: neither `tauri.conf.json` declares a share-sheet
+    /// / document-type association, so iOS and Android never offer
+    /// outl in "Open in". The import itself would work the moment
+    /// one does.
+    pub const NO_MOBILE_SHARE_TARGET: &str =
+        "Opening a file into outl from another app isn't wired up on mobile yet — send it to a \
+         computer and open it there, or paste the text into a block.";
+
     pub const DESKTOP_HOSTS_ONLY: &str =
         "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
          to join an existing workspace from a desktop, run `outl peer pair` in a terminal.";
@@ -233,6 +250,21 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
             mobile: Full,
         },
+        // Desktop: `tauri.conf.json`'s `fileAssociations` puts outl in
+        // the OS "Open With" list for `.md` / `.markdown` / `.txt` /
+        // `.text`, and `src-tauri/src/open_with.rs` routes the macOS
+        // Apple Event and the Linux / Windows `argv` into
+        // `open_external_file`.
+        //
+        // Mobile registers the same command and no platform hands it
+        // a file — the gap is the manifest, not the import, which is
+        // exactly the distinction invariant 12 exists to record: a
+        // registered command is not a shipped capability.
+        Capability::OpenExternalFile => ClientSupport {
+            tui: NotApplicable(why::NO_TUI_FILE_HANDOFF),
+            desktop: Full,
+            mobile: Missing(why::NO_MOBILE_SHARE_TARGET),
+        },
     }
 }
 
@@ -278,7 +310,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 9, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 10, "Capability::ALL changed size");
     }
 
     #[test]

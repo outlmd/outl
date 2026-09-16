@@ -108,6 +108,22 @@ export function onDeepLinkNavigate(
   );
 }
 
+/**
+ * Register a handler for `open-file://import`. Fires when the OS hands
+ * outl a file while the app is already running — "Open With → outl" on
+ * a `.md` / `.txt`. The payload is the absolute path; feed it to
+ * `openExternalFile`.
+ *
+ * The cold-start counterpart is `takePendingOpenFile`: a file that
+ * *launched* the app arrives before any listener exists, so the backend
+ * buffers it (same shape as the deep-link path, issue #98).
+ */
+export function onOpenFileImport(
+  handler: (path: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("open-file://import", (e) => handler(e.payload));
+}
+
 // ---------------------------------------------------------------------------
 // Peer pairing (iroh sync transport)
 // ---------------------------------------------------------------------------

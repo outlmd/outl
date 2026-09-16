@@ -23,6 +23,17 @@ export function takePendingDeepLink(): Promise<DeepLinkNavigate | null> {
   return invoke<DeepLinkNavigate | null>("take_pending_deep_link");
 }
 
+/**
+ * Take (and clear) a file the OS asked us to open during cold start —
+ * "Open With → outl" on a `.md` / `.txt` that *launched* the app,
+ * before `AppShell` mounted its `open-file://import` listener. Returns
+ * `null` on a normal launch. Same contract as
+ * `takePendingDeepLink`; the warm path is the live event.
+ */
+export function takePendingOpenFile(): Promise<string | null> {
+  return invoke<string | null>("take_pending_open_file");
+}
+
 // ---------------------------------------------------------------------------
 // Workspace lifecycle (desktop-only)
 // ---------------------------------------------------------------------------

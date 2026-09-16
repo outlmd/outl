@@ -165,6 +165,29 @@ macro_rules! block_commands {
     };
 }
 
+/// The OS "Open With → outl" gesture — import an external `.md` /
+/// `.txt` as a page under the `open-in/` namespace.
+///
+/// Registered by every client even where no OS integration delivers a
+/// path yet: an unregistered command costs a feature, an unused one
+/// costs a symbol (see [`super`]). Which clients the OS actually hands
+/// a file to is recorded as `Capability::OpenExternalFile`.
+#[macro_export]
+macro_rules! open_with_commands {
+    ($state:ty) => {
+        $crate::tauri_commands! {
+            state = $state;
+
+            /// Import an external text file and return its page. A file
+            /// already imported under this path navigates instead of
+            /// importing a second copy.
+            fn open_external_file(source_path: String)
+                -> ::std::result::Result<$crate::state::PageView, String>
+                => $crate::commands::open_with::open_external_file;
+        }
+    };
+}
+
 /// Code-block execution (`run`, auto-run on open, embed resolution).
 #[macro_export]
 macro_rules! exec_commands {

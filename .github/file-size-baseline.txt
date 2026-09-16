@@ -48,7 +48,7 @@
 967 crates/outl-desktop/src/components/OutlineView.tsx
 1048 crates/outl-desktop/src/lib/action-handlers.ts
 732 crates/outl-exec/src/runtimes/query.rs
-1262 crates/outl-frontend-shared/src/api/commands.ts
+872 crates/outl-frontend-shared/src/api/commands.ts
 750 crates/outl-frontend-shared/src/api/types.ts
 617 crates/outl-md/src/block_index.rs
 621 crates/outl-md/src/diff.rs

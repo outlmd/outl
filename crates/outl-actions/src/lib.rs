@@ -70,6 +70,7 @@ pub mod index;
 pub mod journal;
 pub mod mentions;
 pub mod namespace;
+pub mod open_with;
 pub mod outline;
 pub mod page;
 pub mod page_merge;

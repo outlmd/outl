@@ -198,4 +198,35 @@ pub enum ActionError {
     /// diagnostics, not bugs.
     #[error("exec: {0}")]
     Exec(String),
+
+    /// An OS "Open With → outl" gesture handed us a file whose
+    /// extension is not one [`crate::open_with::SUPPORTED_EXTENSIONS`]
+    /// accepts. Refused before the file is read: outl imports text
+    /// into an outline, and a `.pdf` turned into a page of mojibake is
+    /// worse than a named refusal.
+    #[error("`{0}` isn't a text file outl can open — it reads .md, .markdown, .txt and .text")]
+    UnsupportedExternalFile(String),
+
+    /// An externally opened file is over
+    /// [`crate::open_with::MAX_IMPORT_BYTES`]. The import parses the
+    /// whole file synchronously into one block per non-blank line, so an
+    /// unbounded file is a hang, not a slow load.
+    #[error("`{path}` is over the {limit}-byte limit for opening a file into outl")]
+    ExternalFileTooLarge {
+        /// The file that was refused.
+        path: String,
+        /// The cap it exceeded, in bytes.
+        limit: u64,
+    },
+
+    /// An externally opened file has a text extension but is not valid
+    /// UTF-8.
+    #[error("`{0}` isn't valid UTF-8 text, so there's nothing to import")]
+    ExternalFileNotText(String),
+
+    /// A hundred pages already sit under this file's name, every one
+    /// of them imported from a *different* path. Refusing beats
+    /// merging into one of them (see `open_with`'s module docs).
+    #[error("too many different files already opened as `{0}` — rename one and try again")]
+    ExternalFileNameExhausted(String),
 }

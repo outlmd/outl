@@ -25,21 +25,8 @@ import type {
   PageMeta,
   PageView,
   Palette,
-  PeerDto,
-  PeerStatusDto,
-  PluginCommand,
-  PluginRunReply,
-  PluginSettingsField,
-  PluginSyncHooksReply,
-  PluginToolbarButton,
-  PluginTransformer,
-  PluginTransformResult,
   PageTimeline,
   PropertyKey,
-  RegistryItem,
-  Reminder,
-  ReminderSettings,
-  SnoozePreset,
   ResolvedBlock,
   RunCodeBlockReply,
   TemplateDto,
@@ -154,6 +141,19 @@ export function openPageBySlug(slug: string): Promise<PageView> {
  */
 export function openRef(target: string): Promise<PageView> {
   return invoke<PageView>("open_ref", { target });
+}
+
+/**
+ * Import an external `.md` / `.txt` the OS handed us ("Open With →
+ * outl") and return the page to show.
+ *
+ * Lands under the `open-in/` namespace. A file already imported from
+ * this path is **not** imported twice — the reply is the page it
+ * produced the first time, so re-opening navigates instead of
+ * duplicating every block. Policy lives in `outl_actions::open_with`.
+ */
+export function openExternalFile(sourcePath: string): Promise<PageView> {
+  return invoke<PageView>("open_external_file", { sourcePath });
 }
 
 export function previousDay(slug: string): Promise<string> {
@@ -701,104 +701,16 @@ export function importAssetFile(sourcePath: string): Promise<ImportedAsset> {
 // Peer / device pairing (iroh sync transport)
 // ---------------------------------------------------------------------------
 //
-// These wrap the `outl_peer_*` Tauri commands both clients register in
-// `src-tauri/src/commands/peers.rs`. They touch the iroh `peers.json`,
-// not the workspace lock — peer pairing is sync-transport state, not
-// workspace state. See `outl-mobile/CLAUDE.md` / `outl-desktop/CLAUDE.md`
-// § "Peers".
-
-/**
- * List every paired device. Mirrors `outl_peer_list`. Reads the iroh
- * `peers.json` (empty list when the file is absent).
- */
-export function peerList(): Promise<PeerDto[]> {
-  return invoke<PeerDto[]>("outl_peer_list");
-}
-
-/**
- * Remove paired peers whose `node_id` starts with `id` (prefix match).
- * Resolves `true` when at least one peer matched and was removed.
- * Mirrors `outl_peer_remove`.
- */
-export function peerRemove(id: string): Promise<boolean> {
-  return invoke<boolean>("outl_peer_remove", { id });
-}
-
-/**
- * Live reachability + RTT for each paired peer. Mirrors
- * `outl_peer_status`. Reads the running iroh transport's own dial
- * outcomes (`peer_health()`) — no fresh probe endpoint — and merges
- * them onto the full `peers.json` list, so a peer the transport hasn't
- * dialed yet (or the file-transport case) comes back `online: false`.
- * Returns one {@link PeerStatusDto} per paired peer.
- */
-export function peerStatus(): Promise<PeerStatusDto[]> {
-  return invoke<PeerStatusDto[]>("outl_peer_status");
-}
-
-/**
- * Force an immediate P2P (iroh) sync pass against every paired peer.
- * Mirrors `outl_sync_now`.
- *
- * Backs the GUI's pull-to-refresh / "sync now" affordance: instead of
- * waiting for the iroh transport's ~8s catch-up tick, this dials every
- * peer right now to pull the freshest state. Callers typically chain it
- * with {@link reloadWorkspace} (sync, then re-render):
- *
- * ```ts
- * await syncNow();
- * await reloadWorkspace();
- * ```
- *
- * Resolves with no value. A no-op on the backend when no iroh transport
- * is wired (the iCloud file transport has no peer to dial) or its runtime
- * is down — it never rejects for "nothing to sync", so a missing peer
- * mesh is silent rather than an error.
- */
-export function syncNow(): Promise<void> {
-  return invoke<void>("outl_sync_now");
-}
-
-/**
- * Host a pairing session and resolve with the **ticket string** the
- * other device scans / types to join. Mirrors `outl_peer_pair_host`.
- *
- * The ticket comes back as soon as the iroh endpoint is bound — long
- * before a peer actually connects — so the caller can render it (e.g.
- * via {@link import("../peers").PairingQR}) while the handshake runs in
- * the background. The completed pairing surfaces through the backend's
- * `peer-paired` Tauri event (payload: {@link PeerDto}); listen for it
- * to refresh the device list. `peer-pair-failed` (payload: error
- * string) fires if the handshake times out or errors.
- *
- * `alias` is this device's own human label. We advertise it to the joining
- * device, which stores it under *our* node id in its `peers.json`. Defaults
- * to the platform name ("desktop" / "mobile") when omitted.
- *
- * Backend note: the desktop's `outl_peer_pair_host` currently resolves
- * with the paired peer object instead of the ticket and emits the
- * ticket early via a `peer-pairing-ticket` event; the mobile command
- * resolves with the ticket directly. This wrapper follows the mobile
- * contract (ticket string) — the desktop Rust command is being aligned
- * to it so both clients share this surface.
- */
-export function peerPairHost(alias?: string | null): Promise<string> {
-  return invoke<string>("outl_peer_pair_host", { alias: alias ?? null });
-}
-
-/**
- * Join a pairing session from a `ticket` produced by a host's
- * {@link peerPairHost}. Connects, completes the handshake, persists the
- * host to `peers.json`, and resolves with the newly paired
- * {@link PeerDto}. Mirrors `outl_peer_pair_join`.
- *
- * `alias` is this device's own human label, advertised to and stored by
- * the host (it persists under *our* node id in the host's `peers.json`).
- * The returned {@link PeerDto} carries the *host's* alias, not this one.
- */
-export function peerPairJoin(ticket: string, alias?: string | null): Promise<PeerDto> {
-  return invoke<PeerDto>("outl_peer_pair_join", { ticket, alias: alias ?? null });
-}
+// Moved to `commands-peers.ts` under the file-size ratchet; re-exported
+// here so `@outl/shared/api/commands` stays the one import path.
+export {
+  peerList,
+  peerPairHost,
+  peerPairJoin,
+  peerRemove,
+  peerStatus,
+  syncNow,
+} from "./commands-peers";
 
 // ---------------------------------------------------------------------------
 // External links
@@ -818,349 +730,47 @@ function describeHref(href: string): string {
   return cleaned.length > 100 ? `${cleaned.slice(0, 100)}…` : cleaned;
 }
 
-// ── Plugin host ─────────────────────────────────────────────────────
-// Both GUI clients register identical `plugin_list` / `plugin_run` /
-// `plugin_sync_hooks` / `plugin_toolbar` / `plugin_transformers` /
-// `plugin_transform` commands (thin shims over `PluginService` — the
-// Boa host is `!Send`, so it runs on a dedicated thread), so the
-// wrappers live here once. The desktop-only `plugin_keybindings`
-// stays in `outl-desktop/src/lib/api.ts` (mobile has no chord surface).
-
-/**
- * List every command contributed by a loaded plugin. Empty until the
- * workspace opens and plugins load (best-effort — never throws on an
- * empty or failed host).
- */
-export function pluginList(): Promise<PluginCommand[]> {
-  return invoke<PluginCommand[]>("plugin_list");
-}
-
-/**
- * Run a plugin command. Pass the currently-open page id so the reply
- * carries its refreshed `PageView` — the plugin thread re-projects
- * every page's `.md` before returning (a plugin can move blocks across
- * pages).
- */
-export function pluginRun(
-  pluginId: string,
-  commandId: string,
-  pageId: string | null,
-): Promise<PluginRunReply> {
-  return invoke<PluginRunReply>("plugin_run", {
-    pluginId,
-    commandId,
-    pageId,
-  });
-}
-
-/**
- * Fire the plugins' `onOp` hook sweep after a user mutation. The
- * reply's `view` is the refreshed `PageView` of `pageId` **only** when
- * a hook actually mutated the workspace (absent otherwise, so the
- * caller skips a needless render); `views` carries any `ui-render`
- * HTML the hooks emitted (the confetti path — present even when
- * nothing was re-rendered). Best-effort — a host with no op-hook
- * plugins is a cheap no-op.
- */
-export function pluginSyncHooks(
-  pageId: string | null,
-): Promise<PluginSyncHooksReply> {
-  return invoke<PluginSyncHooksReply>("plugin_sync_hooks", { pageId });
-}
-
-/**
- * List every toolbar button a loaded plugin contributes to the client
- * chrome — one button per entry (glyph = `icon`, tooltip = `title`,
- * click / tap = {@link pluginRun}). Empty until plugins load
- * (best-effort — never throws).
- */
-export function pluginToolbar(): Promise<PluginToolbarButton[]> {
-  return invoke<PluginToolbarButton[]>("plugin_toolbar");
-}
-
-/**
- * List every content transformer a loaded plugin declared. Load once
- * per workspace open and match each code fence's language against the
- * result. Empty until plugins load (best-effort — never throws).
- */
-export function pluginTransformers(): Promise<PluginTransformer[]> {
-  return invoke<PluginTransformer[]>("plugin_transformers");
-}
-
-/**
- * Run a content transformer for `lang` against a fence `input` (its
- * body). Read-only: never mutates the workspace. Resolves to `null`
- * when the transformer declined or no plugin owns `lang`, otherwise
- * the `{ kind, content }` descriptor. Cache the result by
- * `(blockId, body)` — re-run only when the body changes (see
- * `@outl/shared/plugins/transformer-registry`).
- */
-export function pluginTransform(
-  pluginId: string,
-  lang: string,
-  input: string,
-): Promise<PluginTransformResult | null> {
-  return invoke<PluginTransformResult | null>("plugin_transform", {
-    pluginId,
-    lang,
-    input,
-  });
-}
-
-// ── Plugin marketplace ──────────────────────────────────────────────
-// Both GUI clients register identical `plugin_registry_list` /
-// `plugin_install_official` / `plugin_set_enabled` / `plugin_uninstall`
-// commands on their src-tauri side, so the wrappers live here once.
-
-/** Fetch the marketplace: the official registry crossed with the lockfile. */
-export function pluginRegistryList(): Promise<RegistryItem[]> {
-  return invoke<RegistryItem[]>("plugin_registry_list");
-}
-
-/** Tap-to-install an official plugin by id; resolves to its display name. */
-export function pluginInstallOfficial(id: string): Promise<string> {
-  return invoke<string>("plugin_install_official", { id });
-}
-
-/** Enable / disable an installed plugin. */
-export function pluginSetEnabled(id: string, enabled: boolean): Promise<void> {
-  return invoke<void>("plugin_set_enabled", { id, enabled });
-}
-
-/** Uninstall a plugin; resolves `true` if anything was removed. */
-export function pluginUninstall(id: string): Promise<boolean> {
-  return invoke<boolean>("plugin_uninstall", { id });
-}
-
-/**
- * Describe a plugin's settings form: every config/secret field with its type,
- * current value, and — for secrets — whether it is set (never the value).
- * Empty when the plugin declares no config schema.
- */
-export function pluginSettingsDescribe(
-  pluginId: string,
-): Promise<PluginSettingsField[]> {
-  return invoke<PluginSettingsField[]>("plugin_settings_describe", { pluginId });
-}
-
-/**
- * Set a plaintext config field. The host coerces the string to the field's
- * schema type and reloads the plugin so the change is live. Rejects secret
- * fields — use {@link pluginSecretSet}.
- */
-export function pluginConfigSet(
-  pluginId: string,
-  key: string,
-  value: string,
-): Promise<void> {
-  return invoke<void>("plugin_config_set", { pluginId, key, value });
-}
-
-/** Store a secret field's value in the OS keychain (never on disk). */
-export function pluginSecretSet(
-  pluginId: string,
-  key: string,
-  value: string,
-): Promise<void> {
-  return invoke<void>("plugin_secret_set", { pluginId, key, value });
-}
-
-/** Delete a secret field's value from the keychain (idempotent). */
-export function pluginSecretRemove(pluginId: string, key: string): Promise<void> {
-  return invoke<void>("plugin_secret_remove", { pluginId, key });
-}
-
-/**
- * Filter marketplace rows by a query (case-insensitive substring over id,
- * name, description, and capabilities). Empty query returns every item.
- * Pure — both the desktop modal and the mobile sheet derive their list from
- * it, so the match rule stays in one place.
- */
-export function filterRegistryItems(
-  items: readonly RegistryItem[],
-  query: string,
-): RegistryItem[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [...items];
-  return items.filter(
-    (i) =>
-      i.id.toLowerCase().includes(q) ||
-      i.name.toLowerCase().includes(q) ||
-      i.description.toLowerCase().includes(q) ||
-      i.capabilities.some((c) => c.toLowerCase().includes(q)),
-  );
-}
+// ── Plugins ─────────────────────────────────────────────────────────
+//
+// Host + marketplace both moved to `commands-plugins.ts` under the
+// file-size ratchet; re-exported here so the import path is unchanged.
+export {
+  filterRegistryItems,
+  pluginConfigSet,
+  pluginInstallOfficial,
+  pluginList,
+  pluginRegistryList,
+  pluginRun,
+  pluginSecretRemove,
+  pluginSecretSet,
+  pluginSetEnabled,
+  pluginSettingsDescribe,
+  pluginSyncHooks,
+  pluginToolbar,
+  pluginTransform,
+  pluginTransformers,
+  pluginUninstall,
+} from "./commands-plugins";
 
 // ── Reminders (`remind::`) ──────────────────────────────────────────
 //
-// The schedule itself is decided in Rust (`outl_actions::reminders`),
-// once, for every client. These wrappers only move the answer across
-// the bridge — never re-derive "when does this fire" in TS.
-
-/** Every reminder in the workspace, soonest first; finished ones last. */
-export function listReminders(): Promise<Reminder[]> {
-  return invoke<Reminder[]>("list_reminders");
-}
-
-/** This device's reminder delivery preferences. */
-export function reminderSettings(): Promise<ReminderSettings> {
-  return invoke<ReminderSettings>("reminder_settings");
-}
-
-/**
- * Silence a block's reminder for `minutes` from now.
- *
- * Writes `Op::SnoozeRemind`, so the same block goes quiet on every
- * paired device — snoozing on the phone must not leave the laptop
- * buzzing.
- */
-export function snoozeReminder(blockId: string, preset: string): Promise<void> {
-  return invoke<void>("snooze_reminder", { blockId, preset });
-}
-
-/**
- * The snooze options, in render order.
- *
- * Fetched rather than hardcoded because two of the three aren't fixed
- * offsets — "tomorrow 9am" is a wall time — so a client doing its own
- * arithmetic gets them wrong. Render `label`, send back `id`.
- */
-export function snoozePresets(): Promise<SnoozePreset[]> {
-  return invoke<SnoozePreset[]>("snooze_presets");
-}
-
-/** Clear a snooze so the block resumes its normal schedule. */
-export function clearReminderSnooze(blockId: string): Promise<void> {
-  return invoke<void>("clear_reminder_snooze", { blockId });
-}
-
-/**
- * Set — or clear, with an empty `rule` — a block's `remind::` property.
- * Returns the refreshed page. Editing the rule reschedules from
- * scratch, which falls out for free: the schedule is derived on every
- * scan, never cached.
- */
-export function setBlockRemind(
-  pageId: string,
-  blockId: string,
-  rule: string,
-): Promise<PageView> {
-  return invoke<PageView>("set_block_remind", { pageId, blockId, rule });
-}
-
-/**
- * Mark a block DONE, cancelling every pending fire of its rule.
- *
- * Not `toggleTodo`. A rule can sit on a block with no TODO marker at
- * all, and toggling that advances it to `TODO` — so the reminders
- * list's "mark done" button used to arm the nag instead of cancelling
- * it. Setting the state outright is also idempotent, which matters
- * for a button that can be double-tapped.
- */
-export function markBlockDone(
-  pageId: string,
-  blockId: string,
-): Promise<PageView> {
-  return invoke<PageView>("mark_block_done", { pageId, blockId });
-}
-
-/**
- * Deliver every reminder that came due as an OS notification, and
- * return what was delivered so an open Reminders panel can refresh
- * without a second round trip.
- *
- * Safe to call on a plain interval: it short-circuits when the device
- * has reminders switched off, and the Rust side keeps the device-local
- * "already fired" log so polling twice never double-buzzes.
- */
-export function deliverDueReminders(): Promise<Reminder[]> {
-  return invoke<Reminder[]>("deliver_due_reminders");
-}
-
-/**
- * How long until `iso` (a local ISO datetime from {@link Reminder}),
- * as a short human label: `"now"`, `"in 20min"`, `"in 3h"`,
- * `"tomorrow 09:00"`, `"Dec 15, 10:00"`.
- *
- * Shared because both the desktop panel and the mobile list show the
- * same column, and two implementations of "in 3h" drift on the edge
- * cases (exactly 60 minutes, midnight rollover) before anyone notices.
- */
-export function formatNextFire(iso: string | null, now: Date = new Date()): string {
-  if (!iso) return "—";
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "—";
-  const minutes = Math.round((at.getTime() - now.getTime()) / 60000);
-  if (minutes <= 0) return "now";
-  if (minutes < 60) return `in ${minutes}min`;
-  const hhmm = `${String(at.getHours()).padStart(2, "0")}:${String(
-    at.getMinutes(),
-  ).padStart(2, "0")}`;
-  // Same calendar day → the relative form reads better than a clock time.
-  if (at.toDateString() === now.toDateString()) {
-    return `in ${Math.round(minutes / 60)}h`;
-  }
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (at.toDateString() === tomorrow.toDateString()) return `tomorrow ${hhmm}`;
-  return `${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${hhmm}`;
-}
-
-/**
- * Bucket a reminder list into the groups every client renders:
- * Today / Tomorrow / This week / Later / Done. Order is stable and
- * empty buckets are dropped, so a client can map straight over it.
- */
-export function groupReminders(
-  reminders: readonly Reminder[],
-  now: Date = new Date(),
-): { label: string; items: Reminder[] }[] {
-  const buckets: Record<string, Reminder[]> = {
-    Today: [],
-    Tomorrow: [],
-    "This week": [],
-    Later: [],
-    Done: [],
-  };
-  const startOfDay = (d: Date) =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const today = startOfDay(now);
-  const day = 86_400_000;
-
-  for (const r of reminders) {
-    if (!r.next_fire) {
-      buckets.Done.push(r);
-      continue;
-    }
-    const at = new Date(r.next_fire);
-    const delta = startOfDay(at) - today;
-    if (delta <= 0) buckets.Today.push(r);
-    else if (delta === day) buckets.Tomorrow.push(r);
-    else if (delta < 7 * day) buckets["This week"].push(r);
-    else buckets.Later.push(r);
-  }
-  return Object.entries(buckets)
-    .filter(([, items]) => items.length > 0)
-    .map(([label, items]) => ({ label, items }));
-}
-
-/**
- * Write this device's reminder settings.
- *
- * Mobile has no settings screen, so the Reminders sheet is the only
- * place that can turn delivery on. Without this the sheet could say
- * "notifications are off on this device" and leave the user with no
- * way to change it, since `config.toml` sits inside the iOS sandbox.
- */
-export function setReminderSettings(
-  enabled: boolean,
-  quietHours: string,
-): Promise<ReminderSettings> {
-  return invoke<ReminderSettings>("set_reminder_settings", {
-    enabled,
-    quietHours,
-  });
-}
+// Moved to `commands-reminders.ts` under the file-size ratchet, and
+// re-exported here so `@outl/shared/api/commands` stays the one import
+// path. The rule did not move with them: **when** a reminder fires is
+// decided in `outl_actions::reminders`, once, for every client.
+export {
+  clearReminderSnooze,
+  deliverDueReminders,
+  formatNextFire,
+  groupReminders,
+  listReminders,
+  markBlockDone,
+  reminderSettings,
+  setBlockRemind,
+  setReminderSettings,
+  snoozePresets,
+  snoozeReminder,
+} from "./commands-reminders";
 
 /**
  * Set — or clear, with an empty `value` — any `key:: value` property

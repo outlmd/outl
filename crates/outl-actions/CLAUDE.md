@@ -159,6 +159,22 @@ It refuses a page that already has a title, and reports a slug two spellings cla
 `descendants` returns rows with `depth` and `label` already computed, so the TUI's `view/namespace.rs` and the desktop / mobile `<NestedPages />` render the same list without three copies of the split rule.
 Per-client coverage is recorded as `Capability::NestedPages` (the TUI lists them but has no cursor in the list).
 
+## Opening an external file (`open_with`)
+
+`open_with.rs` owns the "Open With → outl" import: an OS gesture hands a client a `.md` / `.txt` that lives outside the workspace, and what lands is an ordinary page.
+User-facing contract: [`docs/clients.md` → Opening a file from the OS](../../docs/clients.md#opening-a-file-from-the-os-open-with--outl).
+
+Three decisions worth not re-litigating:
+
+- **The namespace is a title, never a slug.** `open-in/<stem>` goes through `resolve::open_or_create_by_name`, so `slugify` folds the `/` and the page projects to `pages/open-in-<stem>.md` while `open-in` becomes a real parent page (same mechanism as [Page namespaces](#page-namespaces)).
+- **Re-opening a file does not import again.** The page carries `source::` (the canonicalised absolute path), and `resolve_target` returns `OpenWithTarget::Existing` when it matches. A second import would duplicate every block; overwriting would delete whatever the user wrote after the first import. Neither is acceptable, so the client navigates instead.
+  The same property is what stops two *different* files named `notes.md` from being merged into one page — the second becomes `open-in/notes 2`.
+  **The value is carried on `OpenWithTarget::New`, never recomputed at import time.** It used to be derived twice — once to match against, once to write — and a file that moved between the two made `canonicalize` fail on the second, so the page recorded the uncanonicalised path while the match had used the canonical one. The next open then failed to recognise its own page and minted `open-in/notes 2`: the duplicate the property exists to prevent, produced by the property itself. Pinned by `the_recorded_source_survives_the_file_moving_mid_import`.
+- **`OpenWithTarget::page_id()` answers for a page that does not exist yet.** Page ids derive from the slug, which is what lets a client run the whole create + import inside one `commit_page`. `the_page_id_is_known_before_the_page_exists` pins it; if id derivation ever stops being deterministic, that commit would snapshot and project the wrong page.
+
+`read_source` owns the three refusals (extension, size, non-UTF-8) so the wording exists once rather than per client.
+Content goes in through `paste::paste_markdown`, deliberately — a bulleted file lands as an outline and a bullet-free one as one block per line, which is the behaviour a paste of the same text already has.
+
 ## Page model
 
 Pages are **regular nodes** directly under [`NodeId::root`] tagged with a `page-slug` property.

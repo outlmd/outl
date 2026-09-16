@@ -20,6 +20,9 @@
 //! - [`plugin`] — the run / sync-hooks replies that combine the
 //!   [`crate::PluginService`] with a refreshed page view.
 //! - [`exec`] — `run_code_block` over `outl_actions::exec`.
+//! - [`open_with`] — the OS "Open With → outl" gesture: import an
+//!   external `.md` / `.txt` as a page under `open-in/`. The policy is
+//!   `outl_actions::open_with`'s; this is the path + lock adapter.
 //! - [`history`] — undo / redo of committed block mutations, for any
 //!   client whose [`crate::AppHost::history`] returns `Some` (RFC 0254
 //!   phase 1: desktop and mobile both do).
@@ -35,6 +38,7 @@ pub mod asset;
 pub mod block;
 pub mod exec;
 pub mod history;
+pub mod open_with;
 pub mod page;
 mod page_backlinks;
 pub mod peers;

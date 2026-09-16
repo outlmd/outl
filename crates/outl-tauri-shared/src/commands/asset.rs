@@ -16,29 +16,9 @@ use outl_actions::{
     ImportedAsset,
 };
 
-use crate::helpers::{finish_in_page, parse_node_id, storage_root_or_err};
+use crate::helpers::{finish_in_page, normalize_picker_path, parse_node_id, storage_root_or_err};
 use crate::host::AppHost;
 use crate::state::PageView;
-
-/// Normalize a path the OS file picker handed back into a plain filesystem
-/// path `std::fs` can open.
-///
-/// On desktop the Tauri dialog returns a bare path and this is a no-op. On
-/// iOS it returns a `file://` URL (often percent-encoded), so we strip the
-/// scheme and decode `%XX` before `import_asset` reads it. Android's
-/// `content://` URIs are not filesystem paths and can't be handled here —
-/// they're left as-is and fail loudly downstream (Android is not a target
-/// platform yet).
-fn normalize_picker_path(raw: &str) -> String {
-    let Some(rest) = raw.strip_prefix("file://") else {
-        return raw.to_string();
-    };
-    // `file:///path` → `/path`; drop an empty authority if present.
-    let path = rest.strip_prefix("localhost").unwrap_or(rest);
-    percent_encoding::percent_decode_str(path)
-        .decode_utf8_lossy()
-        .into_owned()
-}
 
 /// Open an `assets/<hash>.<ext>` link in the OS default app.
 ///
@@ -215,7 +195,8 @@ mod tests {
     use parking_lot::Mutex;
     use tempfile::TempDir;
 
-    use super::{mime_from_ext, normalize_picker_path, read_asset_data_url, MAX_DATA_URL_BYTES};
+    use super::{mime_from_ext, read_asset_data_url, MAX_DATA_URL_BYTES};
+    use crate::helpers::normalize_picker_path;
     use crate::host::AppHost;
 
     /// Minimal [`AppHost`] for the read-only asset commands: they only touch

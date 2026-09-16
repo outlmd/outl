@@ -76,6 +76,15 @@ pub enum Capability {
     /// keyboard reaches the same actions through fixed chords, so
     /// there is no order to pin.
     ToolbarOrderLock,
+    /// Being handed a file by the operating system — "Open With →
+    /// outl" in a file manager, or a share sheet — and having it
+    /// arrive as a page under the `open-in/` namespace.
+    ///
+    /// This is about the **OS integration**, not the import: the
+    /// `open_external_file` command is registered on every Tauri
+    /// client, so any of them can import a path it is given. What
+    /// differs is whether the platform ever hands one over.
+    OpenExternalFile,
 }
 
 impl Capability {
@@ -97,6 +106,7 @@ impl Capability {
         Capability::ReminderNotificationActions,
         Capability::NestedPages,
         Capability::ToolbarOrderLock,
+        Capability::OpenExternalFile,
     ];
 }
 
@@ -108,7 +118,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_9: usize = 9;
+    const EXPECTED_10: usize = 10;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -121,6 +131,7 @@ mod tests {
             Capability::ReminderNotificationActions => "ReminderNotificationActions",
             Capability::NestedPages => "NestedPages",
             Capability::ToolbarOrderLock => "ToolbarOrderLock",
+            Capability::OpenExternalFile => "OpenExternalFile",
         }
     }
 
@@ -137,9 +148,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_9,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_9} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_9)",
+            EXPECTED_10,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_10} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_10)",
             names.len(),
         );
     }

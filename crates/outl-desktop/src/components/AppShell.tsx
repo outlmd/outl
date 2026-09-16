@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import {
+  openExternalFile,
   openJournalFor,
   openPageBySlug,
   openTodayJournal,
@@ -16,9 +17,14 @@ import {
   setAppState,
   setOutline,
 } from "../lib/store";
-import { takePendingDeepLink, workspaceStats } from "../lib/api";
+import {
+  takePendingDeepLink,
+  takePendingOpenFile,
+  workspaceStats,
+} from "../lib/api";
 import {
   onDeepLinkNavigate,
+  onOpenFileImport,
   onPeerOpsChanged,
   onProjectionWriteFailed,
   onWorkspaceReady,
@@ -224,13 +230,46 @@ export function AppShell() {
     }
   }
 
+  /**
+   * Import a file the OS handed us ("Open With → outl") and show its
+   * page. The backend refuses a second import of the same path, so
+   * re-opening a file navigates to the page it already produced — the
+   * user sees their page either way, which is why there is nothing to
+   * say on the happy path. A refusal (wrong type, not text, too big)
+   * is worded by `outl_actions::open_with` and lands on the status
+   * line.
+   */
+  async function handleOpenFile(path: string) {
+    try {
+      applyView(await openExternalFile(path));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   onMount(async () => {
-    // A cold-start deep link wins over today's journal: if an `outl://`
-    // URL launched the app, navigate there instead of loading the
-    // journal (which would otherwise race and overwrite the target).
+    // Subscribe BEFORE draining. `take_pending_open_file` is what tells
+    // the backend a listener exists — after that call it emits instead
+    // of buffering — so draining first opens a window where a file
+    // opened right then is emitted into nothing.
+    const unlistenOpenFile = await onOpenFileImport((path) => {
+      void handleOpenFile(path);
+    });
+    onCleanup(() => unlistenOpenFile());
+
+    // Two cold-start targets beat today's journal, and only one can
+    // win: an `outl://` URL that launched the app, or a file the user
+    // opened with outl. Loading the journal as well would race the
+    // target and overwrite it. A deep link is checked first because it
+    // is the more specific gesture — it names a page, where a file
+    // import creates one — but both buffers are drained either way, so
+    // an unread one cannot replay on the next plain launch.
     const pending = await takePendingDeepLink();
+    const pendingFile = await takePendingOpenFile();
     if (pending) {
       void handleDeepLink(pending);
+    } else if (pendingFile) {
+      void handleOpenFile(pendingFile);
     } else {
       void loadToday();
     }

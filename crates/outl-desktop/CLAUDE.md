@@ -456,6 +456,32 @@ On iOS the same shape trips the scene-update watchdog (>10s → SIGKILL) after a
 Only the cheap tail (history invalidation + `Mutex` swap + reconcile spawn) runs on the command thread.
 `syncNow()` + `peersOnline()` live in `@outl/shared` so desktop and mobile derive the dot + drive the refresh identically — see [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "Force-sync trigger (`sync_now`)".
 
+## "Open With → outl" (`.md` / `.txt` from the OS)
+
+`tauri.conf.json`'s `bundle.fileAssociations` puts outl in the OS "Open With" list for `.md` / `.markdown` / `.txt` / `.text`.
+`role: "Viewer"` and `rank: "Alternate"` are deliberate: outl **imports a copy** and never writes back to the file, and it must not take over another editor's default handler.
+
+`src-tauri/src/open_with.rs` is the platform plumbing, and it is the only thing this crate adds — the namespace, the re-open rule and the refusals all live in `outl_actions::open_with`.
+User-facing contract: [`docs/clients.md` → Opening a file from the OS](../../docs/clients.md#opening-a-file-from-the-os-open-with--outl).
+
+Three delivery paths, one destination:
+
+| Platform | Cold start | While running |
+|---|---|---|
+| macOS | `RunEvent::Opened` before the frontend mounts → buffered in `PendingOpenFile` | `RunEvent::Opened` → `open-file://import` |
+| Linux / Windows | `std::env::args()` read in `setup` → buffered | the second process's `argv`, via `tauri-plugin-single-instance` → `open-file://import` |
+
+Two things a contributor will trip on:
+
+- **`RunEvent::Opened` is also where `outl://` deep links arrive on macOS.** `file_path_from` keeps only `file://`; without that filter a deep link would be navigated twice — once by the `deep-link` plugin, once here.
+- **"Is the frontend listening" is a flag the frontend sets, never inferred.** `setup` creates the main window inside `build()`, before the event loop starts, so *every* `RunEvent::Opened` sees a window — an earlier version read that as "warm" and emitted every cold-start file into a webview that had not mounted, losing it. `take_pending_open_file` marks the flag, and `AppShell` subscribes before calling it. Both delivery paths go through `route`, warm ones included: a slow workspace boot keeps the loading screen up long after the process is "running".
+- **`run()` is `.build(…).run(|app, event| …)` now, not `.run(generate_context!())`.** The event callback is the only place `RunEvent::Opened` is reachable. Do not collapse it back.
+
+The cold-start buffer exists for the same reason the deep-link one does (issue #98): the frontend has no listener yet, so an emit is lost and the app silently opens today's journal instead of the file the user double-clicked.
+`AppShell`'s `onMount` drains both buffers and lets the deep link win when somehow both are set — but drains the other either way, so an unread target cannot replay on the next plain launch.
+
+**Testing on macOS needs a bundled, installed app**, same caveat as deep links: LaunchServices only reads `CFBundleDocumentTypes` from the built bundle, so `cargo tauri dev` never appears in "Open With".
+
 ## Deep links (`outl://`)
 
 The scheme contract, the shared `outl_actions::parse_deep_link` parser, and this client's warm / cold wiring live in [`docs/deep-links.md`](../../docs/deep-links.md#desktop-wiring-outl-desktop).

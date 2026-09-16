@@ -7,6 +7,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **"Open With → outl" on the desktop — a `.md` or `.txt` from anywhere becomes a page.**
+  Right-click a file in Finder / Explorer / a Linux file manager, pick outl, and the file lands as a page titled `open-in/<file name>`, built out of ordinary ops like everything else. `bundle.fileAssociations` registers the four extensions with `role: "Viewer"` and `rank: "Alternate"` — outl **imports a copy and never writes back to the file**, and it must not quietly become the system handler for every `.txt` on the machine.
+
+  **The namespace is a title, not a slug, and that is the whole reason it reads as a folder.** `page::is_valid_slug` rejects `/` because a slug is one path component of `pages/<slug>.md`, so `slugify` folds it and the page projects to `pages/open-in-notes.md` — flat. The `/` survives in `title::`, which is exactly what `namespace::descendants` reads, so `open-in` becomes a real parent page listing every file ever opened this way with no new op, no new on-disk field and no migration ([#275](https://github.com/outlmd/outl/issues/275)'s mechanism, reused rather than re-invented).
+
+  **Re-opening the same file navigates; it does not import again.** The page records the canonicalised path in a `source::` property. Importing twice into one page duplicates every block, and overwriting deletes whatever the user wrote on the page afterwards — so the second open returns the page the first one produced. The same property is what keeps two *different* files named `notes.md` apart: the second becomes `open-in/notes 2` instead of being merged into the first, silently.
+
+  Content goes in through `paste::paste_markdown`, deliberately: a bulleted file lands as an outline, a bullet-free one as one block per non-blank line. A second split rule here would mean the same text behaves one way pasted and another way opened.
+
+  **Three platforms, three deliveries, one destination.** macOS sends an Apple Event (`RunEvent::Opened`); Linux and Windows send `argv`, cold via `std::env::args()` and warm via `tauri-plugin-single-instance`. Two details that are easy to get wrong and are pinned by tests: `RunEvent::Opened` is *also* where `outl://` deep links arrive on macOS, so the router keeps only `file://` (otherwise a deep link navigates twice — once from the plugin, once from here); and a cold-start file arrives before the frontend has a listener, so it is buffered exactly like a cold-start deep link ([#98](https://github.com/outlmd/outl/issues/98)) rather than emitted into nothing.
+
+  **Mobile registers the command and has no way to be handed a file** — no share-sheet or document-type association is declared — and that gap is now a recorded fact rather than a discovery: `Capability::OpenExternalFile` in `outl_shortcuts::capability_support`, which is an exhaustive `match`, so the three clients had to declare a verdict before this compiled (root `CLAUDE.md` invariant 12). The TUI's verdict is `NotApplicable`: a file manager has no terminal process to hand a file to.
+
 - **`UX.md` — the behaviour half of the design specification.**
   `DESIGN.md` was carrying two documents. One of them answered *what it looks like* — roles, tokens, spacing, elevation — and the other, scattered through the Components, Do's-and-Don'ts, Platform-divergence and Accessibility sections, answered *what happens*: what a `Missing` verdict promises the user, why a nudge may not say "unimplemented", why a chord with no handler is worse than an error. The second document had no name, so nothing linked to it and every new interaction rule landed wherever it fit.
 
