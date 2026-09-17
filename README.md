@@ -5,6 +5,12 @@
 <h1 align="center">outl</h1>
 
 <p align="center">
+  <a href="https://discord.gg/dnfAbCYWv">
+    <img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" />
+  </a>
+</p>
+
+<p align="center">
   Local-first outliner. Markdown is the source of truth. Sync that
   doesn't corrupt your tree when two devices edit offline.
 </p>
