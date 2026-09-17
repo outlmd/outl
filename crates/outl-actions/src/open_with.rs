@@ -264,6 +264,27 @@ pub fn resolve_target(workspace: &Workspace, path: &Path) -> Result<OpenWithTarg
 ///
 /// Takes no path: the `source::` value rides on the target, so what is
 /// written is what [`resolve_target`] matched against.
+///
+/// # A `New` target is re-checked before anything is written
+///
+/// [`resolve_target`] runs under whatever lock the client reads with,
+/// and this function runs under the one it mutates with. Between the
+/// two, another import can land on the same slug — the OS delivering
+/// one file twice, or two same-named files opened at once. Pasting
+/// into the page that won would duplicate every block and add a second
+/// journal link, so a `New` target whose slug is no longer free is
+/// resolved again here, on the workspace this call is actually
+/// mutating:
+///
+/// - the page there carries **this** `source::` → the same file already
+///   landed; behaves exactly like an [`OpenWithTarget::Existing`]
+///   target (returns its page, writes nothing);
+/// - it carries a **different** one → [`ActionError::ExternalFileTargetTaken`].
+///   The caller re-runs [`resolve_target`] and gets `open-in/<stem> 2`.
+///   Re-resolving *here* is not an option: the caller already committed
+///   to [`OpenWithTarget::page_id`] for its undo snapshot and its
+///   projection, so a page created under a different slug would be
+///   snapshotted and projected as the wrong page.
 pub fn import_into(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -281,6 +302,19 @@ pub fn import_into(
             journal: None,
         });
     };
+    // The slug was free when `resolve_target` looked, under a lock this
+    // call does not hold any more. Ask again on the workspace being
+    // mutated; `open_or_create` would silently hand back a page another
+    // import just created, and everything below would land on top of it.
+    if let Some(page) = find_by_slug(workspace, slug) {
+        if read_text_prop(workspace, page, SOURCE_KEY).as_deref() == Some(source.as_str()) {
+            return Ok(ImportOutcome {
+                page,
+                journal: None,
+            });
+        }
+        return Err(ActionError::ExternalFileTargetTaken(slug.clone()));
+    }
     // The slug comes off the target, never re-derived from the title.
     // `resolve::open_or_create_by_name` would slugify again, which is how a
     // non-ASCII stem reached the namespace page (see `slug_for`), and

@@ -314,6 +314,73 @@ fn reopening_a_file_does_not_add_a_second_journal_entry() {
 }
 
 #[test]
+fn a_stale_target_for_the_same_file_lands_on_the_page_that_won() {
+    // A client resolves under a read lock and imports under a mutation
+    // lock. Two deliveries of one file can both resolve `New` for the
+    // same slug before either commits; the second must behave like an
+    // `Existing` target rather than paste on top of the first's page
+    // and link the journal twice.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let path = write(&dir, "notes.md", "- one\n");
+    let contents = read_source(&path).unwrap();
+
+    let first = resolve_target(&ws, &path).unwrap();
+    let second = resolve_target(&ws, &path).unwrap();
+    assert_eq!(first, second);
+    assert!(matches!(first, OpenWithTarget::New { .. }));
+
+    let page = import_into(&mut ws, &hlc, &first, &contents).unwrap().page;
+    let before = render_page_md(&ws, page);
+    let after_first = journal_lines(&ws);
+
+    let outcome = import_into(&mut ws, &hlc, &second, &contents).unwrap();
+    assert_eq!(outcome.page, page);
+    assert_eq!(
+        outcome.journal, None,
+        "a stale same-file target writes nothing"
+    );
+    assert_eq!(render_page_md(&ws, page), before);
+    assert_eq!(journal_lines(&ws), after_first);
+}
+
+#[test]
+fn a_stale_target_for_a_different_file_is_refused_not_merged() {
+    // Same race, two *different* files named alike. The slug the second
+    // resolved against now belongs to the first's page, and importing
+    // there would merge the two files. `import_into` cannot pick the
+    // next free slug itself (the caller already committed to this
+    // target's page id), so it refuses and the caller resolves again.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let a = write(&dir, "a/notes.md", "- from a\n");
+    let b = write(&dir, "b/notes.md", "- from b\n");
+
+    let target_a = resolve_target(&ws, &a).unwrap();
+    let target_b = resolve_target(&ws, &b).unwrap();
+    assert_eq!(target_a.slug(), target_b.slug());
+
+    let page_a = import_into(&mut ws, &hlc, &target_a, &read_source(&a).unwrap())
+        .unwrap()
+        .page;
+    let before = render_page_md(&ws, page_a);
+    let after_first = journal_lines(&ws);
+
+    let refused = import_into(&mut ws, &hlc, &target_b, &read_source(&b).unwrap());
+    assert!(
+        matches!(refused, Err(ActionError::ExternalFileTargetTaken(ref slug)) if slug == target_b.slug()),
+        "{refused:?}"
+    );
+    assert_eq!(render_page_md(&ws, page_a), before);
+    assert_eq!(journal_lines(&ws), after_first);
+
+    // Resolving again lands where a sequential second open would.
+    let retried = resolve_target(&ws, &b).unwrap();
+    assert_eq!(retried.title(), "open-in/notes 2");
+    assert!(matches!(retried, OpenWithTarget::New { .. }));
+}
+
+#[test]
 fn two_imports_on_one_day_both_show_up() {
     let (mut ws, hlc) = ws();
     let dir = TempDir::new().unwrap();

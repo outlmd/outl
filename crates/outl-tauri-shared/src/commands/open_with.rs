@@ -13,10 +13,23 @@
 //! derived from the slug — [`OpenWithTarget::page_id`] answers for a
 //! page that does not exist. `the_page_id_is_known_before_the_page_exists`
 //! in `outl-actions` pins it.
+//!
+//! Resolving the target and committing the import take the workspace
+//! lock twice, and the slug that was free under the first can be taken
+//! under the second: the OS delivering one file twice, or two files
+//! named alike opened at once. `import_into` re-checks the slug on the
+//! workspace it is mutating, so nothing is pasted onto a page another
+//! import just created. A same-file race resolves to that page; a
+//! different-file race comes back as
+//! [`ActionError::ExternalFileTargetTaken`] and this command resolves
+//! again, landing on `open-in/<stem> 2` the way a sequential second
+//! open would.
 
 use std::path::Path;
 
-use outl_actions::open_with::{import_into, read_source, resolve_target, OpenWithTarget};
+use outl_actions::open_with::{
+    import_into, read_source, resolve_target, ImportOutcome, OpenWithTarget,
+};
 use outl_actions::{apply_page_md_with_sidecar_guarded, ActionError};
 use outl_core::id::NodeId;
 
@@ -24,6 +37,15 @@ use crate::commands::page::open_page_by_slug;
 use crate::helpers::{finish_in_page_with, normalize_picker_path, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::PageView;
+
+/// How many times a stale [`OpenWithTarget::New`] is resolved again
+/// before the command gives up.
+///
+/// Every pass loses only to *another* same-named different-path import
+/// landing in the gap between two lock acquisitions, so this is a
+/// bound against a pathological burst, not a budget the ordinary race
+/// spends.
+const RESOLVE_ATTEMPTS: usize = 3;
 
 /// Import `source_path` into the workspace and return the page to show.
 ///
@@ -36,33 +58,62 @@ pub fn open_external_file<S: AppHost>(state: &S, source_path: String) -> Result<
     let normalized = normalize_picker_path(&source_path);
     let path = Path::new(&normalized);
 
-    let target = with_ws(state, |ws| {
-        resolve_target(ws, path).map_err(|e| e.to_string())
-    })?;
+    // Read lazily, and once: only a `New` target needs the bytes, and a
+    // retry does not need them a second time.
+    let mut contents: Option<String> = None;
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let target = with_ws(state, |ws| {
+            resolve_target(ws, path).map_err(|e| e.to_string())
+        })?;
 
-    // Already imported from this exact path: hand off to the ordinary
-    // page-open command rather than re-deriving its body here. Opening
-    // an existing page is one job with one owner — the ahead-of-log
-    // re-projection it runs first is the part a local copy silently
-    // drops, and that is the banner telling the user a page stopped
-    // syncing.
-    //
-    // This returns before the file is read, deliberately. Navigating
-    // to an existing page does not need the bytes, so a file that has
-    // since grown past the cap or stopped being UTF-8 must not stop
-    // the user reaching the page it already produced.
-    if matches!(target, OpenWithTarget::Existing { .. }) {
-        return open_page_by_slug(state, target.slug().to_string());
+        // Already imported from this exact path: hand off to the ordinary
+        // page-open command rather than re-deriving its body here. Opening
+        // an existing page is one job with one owner — the ahead-of-log
+        // re-projection it runs first is the part a local copy silently
+        // drops, and that is the banner telling the user a page stopped
+        // syncing.
+        //
+        // This returns before the file is read, deliberately. Navigating
+        // to an existing page does not need the bytes, so a file that has
+        // since grown past the cap or stopped being UTF-8 must not stop
+        // the user reaching the page it already produced.
+        if matches!(target, OpenWithTarget::Existing { .. }) {
+            return open_page_by_slug(state, target.slug().to_string());
+        }
+
+        // Read outside the lock: the file lives outside the workspace and
+        // its bytes are never workspace state, so there is no reason to
+        // hold every other command out while the disk answers.
+        if contents.is_none() {
+            contents = Some(read_source(path).map_err(|e| e.to_string())?);
+        }
+        let contents = contents.as_deref().unwrap_or_default();
+
+        // `finish_in_page_with` flattens the error to a string, so the
+        // one variant this loop acts on is caught where it is still typed.
+        let mut target_taken = false;
+        let committed = finish_in_page_with(state, target.page_id(), |ws| {
+            import_into(ws, state.hlc(), &target, contents).map_err(|e| {
+                target_taken = matches!(e, ActionError::ExternalFileTargetTaken(_));
+                e
+            })
+        });
+        match committed {
+            Ok((outcome, view)) => return finish_import(state, outcome, view),
+            Err(_) if target_taken && attempts < RESOLVE_ATTEMPTS => continue,
+            Err(e) => return Err(e),
+        }
     }
+}
 
-    // Read outside the lock: the file lives outside the workspace and
-    // its bytes are never workspace state, so there is no reason to
-    // hold every other command out while the disk answers.
-    let contents = read_source(path).map_err(|e| e.to_string())?;
-    let (outcome, view) = finish_in_page_with(state, target.page_id(), |ws| {
-        import_into(ws, state.hlc(), &target, &contents)
-    })?;
-
+/// Project the second page an import dirtied, then hand back the view.
+fn finish_import<S: AppHost>(
+    state: &S,
+    outcome: ImportOutcome,
+    view: PageView,
+) -> Result<PageView, String> {
     // An import dirties two pages: the one it created and today's
     // journal, which gained the `[[ref]]`. `commit_page` is scoped to
     // one (issue #264), so the journal is projected here, the same

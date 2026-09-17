@@ -229,4 +229,12 @@ pub enum ActionError {
     /// merging into one of them (see `open_with`'s module docs).
     #[error("too many different files already opened as `{0}` — rename one and try again")]
     ExternalFileNameExhausted(String),
+
+    /// An [`crate::open_with::OpenWithTarget::New`] was resolved against a
+    /// workspace that has since gained a page at that slug, imported
+    /// from a *different* path. The target is stale: importing into it
+    /// would merge two files into one page. The caller re-resolves under
+    /// the lock it holds and gets `open-in/<stem> 2`.
+    #[error("`{0}` was taken by another file while it was being opened — try again")]
+    ExternalFileTargetTaken(String),
 }
