@@ -16,8 +16,14 @@ use crate::page::{KIND_KEY, SLUG_KEY};
 /// own ops; surfacing them in a rendered `.md` would rewrite the slug on
 /// every reconcile, and surfacing them in the index would show the user
 /// a property they never typed.
+///
+/// `page-source` ([`crate::open_with::SOURCE_KEY`]) joins them for a
+/// second reason: its value is a local absolute path, so rendering it
+/// would put the user's directory structure into a file that is often
+/// in git and that `outl export hugo` copies wholesale into published
+/// front matter.
 pub fn is_page_model_key(key: &str) -> bool {
-    key == SLUG_KEY || key == KIND_KEY
+    key == SLUG_KEY || key == KIND_KEY || key == crate::open_with::SOURCE_KEY
 }
 
 /// A property value as the `.md` dialect renders it, or `None` when it

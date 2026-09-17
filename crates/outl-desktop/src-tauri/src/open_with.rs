@@ -53,6 +53,12 @@ pub struct PendingOpenFile {
     path: Mutex<Option<String>>,
     /// Whether the frontend has drained the buffer at least once, which
     /// it does immediately after registering its listener.
+    ///
+    /// Cleared again when the webview starts a new page load: a reload
+    /// (`Cmd+R` in dev, a crash recovery) tears the listener down while
+    /// the process keeps running, and a latch that only ever goes up
+    /// would keep claiming somebody is listening. That is the same lie
+    /// "does a window exist" told, one layer in.
     listening: AtomicBool,
 }
 
@@ -68,6 +74,14 @@ impl PendingOpenFile {
     /// Whether an emit would reach a listener.
     pub fn is_listening(&self) -> bool {
         self.listening.load(Ordering::Acquire)
+    }
+
+    /// Forget the listener, because the page carrying it is going away.
+    ///
+    /// The next file buffers instead of being emitted into a webview
+    /// that is still loading, and the remount drains it.
+    pub fn listener_gone(&self) {
+        self.listening.store(false, Ordering::Release);
     }
 
     /// Take the buffered file and record that the frontend is up.
@@ -219,6 +233,22 @@ mod tests {
         pending.offer("/a.md".into());
         pending.offer("/b.md".into());
         assert_eq!(pending.take().as_deref(), Some("/a.md"));
+    }
+
+    #[test]
+    fn a_page_reload_puts_the_buffer_back_in_charge() {
+        // The listener dies with the page. Leaving the latch up would
+        // emit the next "Open With" into a webview that has not
+        // remounted, which is the cold-start loss with extra steps.
+        let pending = PendingOpenFile::empty();
+        pending.take();
+        assert!(pending.is_listening());
+
+        pending.listener_gone();
+        assert!(!pending.is_listening());
+        pending.offer("/after-reload.md".into());
+        assert_eq!(pending.take().as_deref(), Some("/after-reload.md"));
+        assert!(pending.is_listening(), "the remount drains and re-arms");
     }
 
     #[test]

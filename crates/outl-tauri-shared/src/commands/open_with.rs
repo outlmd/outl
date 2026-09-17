@@ -17,9 +17,11 @@
 use std::path::Path;
 
 use outl_actions::open_with::{import_into, read_source, resolve_target, OpenWithTarget};
+use outl_actions::{apply_page_md_with_sidecar_guarded, ActionError};
+use outl_core::id::NodeId;
 
 use crate::commands::page::open_page_by_slug;
-use crate::helpers::{finish_in_page, normalize_picker_path, with_ws};
+use crate::helpers::{finish_in_page_with, normalize_picker_path, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::PageView;
 
@@ -57,7 +59,57 @@ pub fn open_external_file<S: AppHost>(state: &S, source_path: String) -> Result<
     // its bytes are never workspace state, so there is no reason to
     // hold every other command out while the disk answers.
     let contents = read_source(path).map_err(|e| e.to_string())?;
-    finish_in_page(state, target.page_id(), |ws| {
-        import_into(ws, state.hlc(), &target, &contents).map(|_| ())
+    let (outcome, view) = finish_in_page_with(state, target.page_id(), |ws| {
+        import_into(ws, state.hlc(), &target, &contents)
+    })?;
+
+    // An import dirties two pages: the one it created and today's
+    // journal, which gained the `[[ref]]`. `commit_page` is scoped to
+    // one (issue #264), so the journal is projected here, the same
+    // shape `move_block_after` uses for a cross-page move.
+    if let Some(journal) = outcome.journal {
+        // The journal gained a block outside its own `commit_page`, so
+        // any undo snapshot it holds predates that block. Restoring one
+        // would reconcile the link away: the user undoes what they
+        // typed and silently loses the entry too. Same rule
+        // `invalidate_changed_history` applies after a peer reload
+        // changes a page from outside.
+        if let Some(history) = state.history() {
+            history.lock().remove(&journal);
+        }
+        project_journal(state, journal);
+    }
+    Ok(view)
+}
+
+/// Write the journal's `.md` + sidecar after an import linked into it.
+///
+/// Best-effort on purpose. The link is already in the op log, which is
+/// the source of truth, so a refused projection leaves the journal's
+/// `.md` briefly behind rather than losing the entry — and the guard
+/// exists precisely so this write cannot delete content the log never
+/// saw (invariant 8).
+///
+/// With a `ProjectionWriter` (both GUI clients) the worker reports a
+/// refusal on the event bridge itself, which is what reaches the user;
+/// the reply renders the *imported* page, so the journal could not
+/// carry its own notice anyway. A host without one leaves it in a log
+/// line, the same asymmetry `move_block_after` already has for the page
+/// a block left behind.
+fn project_journal<S: AppHost>(state: &S, journal: NodeId) {
+    if let Some(writer) = state.projection_writer() {
+        writer.queue(journal);
+        return;
+    }
+    let Ok(root) = state.storage_root() else {
+        return;
+    };
+    let failed: Option<ActionError> = with_ws_mut(state, |ws| {
+        Ok(apply_page_md_with_sidecar_guarded(ws, &root, journal).err())
     })
+    .ok()
+    .flatten();
+    if let Some(e) = failed {
+        tracing::warn!("open with: journal md+sidecar sync skipped: {e}");
+    }
 }

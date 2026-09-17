@@ -128,6 +128,24 @@ pub(crate) fn resolve_or_create_by_name(
             return Ok(id);
         }
     }
+    // The slugified lookup runs **before** the exact-title match, and
+    // swapping them is a trap worth naming because it looks like the
+    // more correct order: an exact title is more specific than a
+    // derived slug, and a page whose title no longer derives its slug
+    // (`outl_actions::open_with::slug_for`'s fallback) is reached by
+    // the wrong page here.
+    //
+    // It is still the wrong trade. The title match below costs a
+    // `list_all`, which is `page_meta` per page and therefore
+    // `block_text` per page — the `O(blocks)` walk that materializes a
+    // lazy-boot vault in full (the issue #179 freeze). Today it only
+    // runs when the page is about to be created, a cold path. Moving
+    // it up puts it on every `[[São Paulo]]` / `[[Q4 plan]]` click,
+    // which is the hot one.
+    //
+    // The caller that has a title/slug mismatch links by slug instead
+    // (see `open_with::import_into`). Fixing it here needs a cheap
+    // title index first, not a reordering.
     let lower = name.to_lowercase();
     if let Some(existing) = list_all(workspace)
         .into_iter()

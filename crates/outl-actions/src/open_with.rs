@@ -24,6 +24,18 @@
 //! again** — [`resolve_target`] returns [`OpenWithTarget::Existing`]
 //! and the client just navigates there.
 //!
+//! # The journal entry
+//!
+//! An imported page is linked from today's journal, because outl is
+//! journal-first and a page reachable only by search is a page the user
+//! forgets they have. The link is an ordinary `[[ref]]` block, so it
+//! shows up in the page's own backlinks and answers "when did this get
+//! here" without a new field.
+//!
+//! Only a **new** import writes it. Re-opening a file resolves to
+//! [`OpenWithTarget::Existing`], which imports nothing, so re-opening
+//! the same file five times does not leave five entries in the journal.
+//!
 //! That property is also what keeps two *different* files with the
 //! same name apart: `~/a/notes.md` and `~/b/notes.md` both want
 //! `open-in/notes`, and the second one gets `open-in/notes 2` rather
@@ -38,9 +50,10 @@ use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
 
+use crate::block::append_block;
 use crate::error::ActionError;
 use crate::page::open_or_create;
-use crate::page::{find_by_slug, page_id_from_slug, read_text_prop, PageKind};
+use crate::page::{find_by_slug, open_today, page_id_from_slug, read_text_prop, PageKind};
 use crate::paste::{paste_markdown, PasteAnchor};
 
 /// Namespace every externally opened file lands under.
@@ -51,7 +64,23 @@ pub const OPEN_WITH_NAMESPACE: &str = "open-in";
 /// Page property recording the absolute path the page was imported
 /// from. Read back by [`resolve_target`] to tell "the user re-opened
 /// the same file" from "two different files share a name".
-pub const SOURCE_KEY: &str = "source";
+///
+/// **Internal book-keeping, never rendered into the `.md`** — it is in
+/// [`crate::tree::is_page_model_key`] for that reason. The value is a
+/// local absolute path (`/Users/me/clients/acme/proposal.md`), which
+/// means the user's directory structure. A `.md` is frequently in git,
+/// and `outl export hugo` copies every property outside its deny-list
+/// straight into the published front matter, so leaving this one
+/// visible put private paths on a public site.
+///
+/// Hiding it costs nothing: [`resolve_target`] reads the property off
+/// the op log via `read_text_prop`, not off the `.md`, and
+/// `outl_md::diff` only emits `SetProp` for properties the `.md`
+/// *has*, so a reconcile never clears what it cannot see.
+///
+/// Named in the `page-*` family so a user writing their own `source::`
+/// on some other page cannot collide with it.
+pub const SOURCE_KEY: &str = "page-source";
 
 /// File extensions the import accepts.
 ///
@@ -133,6 +162,21 @@ impl OpenWithTarget {
             Self::Existing { title, .. } | Self::New { title, .. } => title,
         }
     }
+}
+
+/// What an import touched, so the caller can project both pages.
+///
+/// An import dirties **two** pages: the one it created and today's
+/// journal, which gains the link. `commit_page` is scoped to a single
+/// page (issue #264), so the caller projects the second one itself
+/// rather than this crate guessing which write path the client has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportOutcome {
+    /// The imported page's root node.
+    pub page: NodeId,
+    /// Today's journal, when this import wrote a link into it. `None`
+    /// when the target was already imported and nothing was written.
+    pub journal: Option<NodeId>,
 }
 
 /// Whether `path`'s extension is one this import accepts.
@@ -225,14 +269,17 @@ pub fn import_into(
     hlc: &HlcGenerator,
     target: &OpenWithTarget,
     contents: &str,
-) -> Result<NodeId, ActionError> {
+) -> Result<ImportOutcome, ActionError> {
     let OpenWithTarget::New {
         slug,
         title,
         source,
     } = target
     else {
-        return Ok(target.page_id());
+        return Ok(ImportOutcome {
+            page: target.page_id(),
+            journal: None,
+        });
     };
     // The slug comes off the target, never re-derived from the title.
     // `resolve::open_or_create_by_name` would slugify again, which is how a
@@ -250,7 +297,29 @@ pub fn import_into(
     if !contents.trim().is_empty() {
         paste_markdown(workspace, hlc, PasteAnchor::AsLastChildOf(page), contents)?;
     }
-    Ok(page)
+    // A ref, not plain text, so the imported page picks the entry up as
+    // a backlink: "where did this come from" is then answerable from the
+    // page itself, not only by whoever remembers which day to scroll.
+    //
+    // **Linked by whichever of title / slug actually resolves.**
+    // `resolve_or_create_by_name` tries `slugify(name)` *before* an
+    // exact title match, so a page whose title no longer derives its
+    // slug — exactly what `slug_for`'s fallback produces — is reached
+    // by the slugified title instead, which for these pages is the
+    // namespace page. `[[open-in/会議メモ]]` would open `open-in`.
+    // The ASCII case keeps the readable title, because there the two
+    // agree.
+    let link = if outl_md::slug::slugify(title) == *slug {
+        title
+    } else {
+        slug
+    };
+    let journal = open_today(workspace, hlc)?;
+    append_block(workspace, hlc, Some(journal), Some(&format!("[[{link}]]")))?;
+    Ok(ImportOutcome {
+        page,
+        journal: Some(journal),
+    })
 }
 
 /// The slug `title` projects to, refusing to land on the namespace's

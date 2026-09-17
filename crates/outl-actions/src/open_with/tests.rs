@@ -28,7 +28,23 @@ fn write(dir: &TempDir, name: &str, body: &str) -> PathBuf {
 fn import(ws: &mut Workspace, hlc: &HlcGenerator, path: &std::path::Path) -> NodeId {
     let contents = read_source(path).unwrap();
     let target = resolve_target(ws, path).unwrap();
-    import_into(ws, hlc, &target, &contents).unwrap()
+    import_into(ws, hlc, &target, &contents).unwrap().page
+}
+
+/// Today's journal as a list of block texts.
+fn root() -> &'static std::path::Path {
+    std::path::Path::new("/tmp/outl-open-with-test")
+}
+
+fn journal_lines(ws: &Workspace) -> Vec<String> {
+    let slug = crate::dates::journal_slug(crate::page::today());
+    match find_by_slug(ws, &slug) {
+        None => Vec::new(),
+        Some(journal) => project_outline(ws, journal)
+            .iter()
+            .map(|b| b.text.clone())
+            .collect(),
+    }
 }
 
 #[test]
@@ -120,7 +136,7 @@ fn reopening_the_same_file_navigates_instead_of_importing_again() {
     // `import_into` on an Existing target is a no-op, not a second import.
     let contents = read_source(&path).unwrap();
     assert_eq!(
-        import_into(&mut ws, &hlc, &again, &contents).unwrap(),
+        import_into(&mut ws, &hlc, &again, &contents).unwrap().page,
         first
     );
     assert_eq!(render_page_md(&ws, first), before);
@@ -205,7 +221,7 @@ fn the_recorded_source_survives_the_file_moving_mid_import() {
     let canonical = std::fs::canonicalize(&path).unwrap();
     std::fs::remove_file(&path).unwrap();
 
-    let page = import_into(&mut ws, &hlc, &target, &contents).unwrap();
+    let page = import_into(&mut ws, &hlc, &target, &contents).unwrap().page;
     assert_eq!(
         read_text_prop(&ws, page, SOURCE_KEY).as_deref(),
         canonical.to_str(),
@@ -213,6 +229,133 @@ fn the_recorded_source_survives_the_file_moving_mid_import() {
 
     // And the page still recognises itself once the file is back.
     std::fs::write(&path, "- one\n").unwrap();
+    assert!(matches!(
+        resolve_target(&ws, &path).unwrap(),
+        OpenWithTarget::Existing { page: found, .. } if found == page
+    ));
+}
+
+#[test]
+fn an_imported_page_is_linked_from_todays_journal() {
+    // outl is journal-first. A page reachable only by search is a page
+    // the user forgets they have, so the import leaves a trail on the
+    // day it happened.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let path = write(&dir, "notes.md", "- one\n");
+
+    assert!(journal_lines(&ws).is_empty(), "nothing before the import");
+    let page = import(&mut ws, &hlc, &path);
+    assert_eq!(journal_lines(&ws), vec!["[[open-in/notes]]".to_string()]);
+
+    // It is a ref, not plain text, so the page can answer where it came
+    // from without anyone remembering which day's journal to scroll.
+    let meta = crate::page::page_meta(&ws, page).unwrap();
+    let links = crate::backlinks::backlinks_for_page(&ws, root(), &meta);
+    assert_eq!(links.len(), 1, "the journal entry is a backlink");
+    assert_eq!(
+        links[0].source_page.as_ref().map(|p| p.slug.as_str()),
+        Some(crate::dates::journal_slug(crate::page::today()).as_str()),
+    );
+}
+
+#[test]
+fn the_journal_link_opens_the_page_it_names() {
+    // The link is only worth writing if it lands somewhere. For a stem
+    // that survives slugify this is trivially true; for one that does
+    // not, `slug_for` gave the page a slug the title no longer derives,
+    // and `resolve_or_create_by_name` tries `slugify(name)` before an
+    // exact title match, so `[[open-in/会議メモ]]` resolved to the
+    // namespace page `open-in` once that page existed.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let ascii = write(&dir, "notes.md", "- one\n");
+    let other = write(&dir, "会議メモ.md", "- 議題\n");
+
+    let ascii_page = import(&mut ws, &hlc, &ascii);
+    let other_page = import(&mut ws, &hlc, &other);
+
+    // The namespace index page exists the moment anyone opens it, which
+    // is the whole point of the namespace.
+    crate::resolve::open_or_create_by_name(
+        &mut ws,
+        &hlc,
+        OPEN_WITH_NAMESPACE,
+        crate::page::PageKind::Page,
+    )
+    .unwrap();
+
+    for (line, expected) in journal_lines(&ws).iter().zip([ascii_page, other_page]) {
+        let target = line.trim_start_matches("[[").trim_end_matches("]]");
+        let landed = crate::resolve::open_or_create_by_ref(&mut ws, &hlc, target).unwrap();
+        assert_eq!(landed, expected, "`{line}` opened the wrong page");
+    }
+}
+
+#[test]
+fn reopening_a_file_does_not_add_a_second_journal_entry() {
+    // Re-opening resolves to `Existing` and imports nothing, so the
+    // journal must not collect one line per time the user opened the
+    // same file.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let path = write(&dir, "notes.md", "- one\n");
+
+    import(&mut ws, &hlc, &path);
+    let after_first = journal_lines(&ws);
+
+    let contents = read_source(&path).unwrap();
+    for _ in 0..3 {
+        let again = resolve_target(&ws, &path).unwrap();
+        let outcome = import_into(&mut ws, &hlc, &again, &contents).unwrap();
+        assert_eq!(outcome.journal, None, "an existing target writes nothing");
+    }
+    assert_eq!(journal_lines(&ws), after_first);
+}
+
+#[test]
+fn two_imports_on_one_day_both_show_up() {
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let a = write(&dir, "notes.md", "- one\n");
+    let b = write(&dir, "plan.txt", "two\n");
+
+    import(&mut ws, &hlc, &a);
+    import(&mut ws, &hlc, &b);
+    assert_eq!(
+        journal_lines(&ws),
+        vec![
+            "[[open-in/notes]]".to_string(),
+            "[[open-in/plan]]".to_string()
+        ],
+    );
+}
+
+#[test]
+fn the_source_path_never_reaches_the_markdown() {
+    // The value is the user's directory structure. A `.md` is often in
+    // git, and `outl export hugo` copies every property outside its
+    // deny-list into published front matter, so a visible `source::`
+    // put private paths on a public site.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let path = write(&dir, "notes.md", "- one\n");
+
+    let page = import(&mut ws, &hlc, &path);
+    let md = render_page_md(&ws, page);
+    let canonical = std::fs::canonicalize(&path).unwrap();
+    assert!(
+        !md.contains(canonical.to_str().unwrap()),
+        "the absolute path is in the .md:\n{md}",
+    );
+    assert!(!md.contains(SOURCE_KEY), "the key is in the .md:\n{md}");
+
+    // Hidden, not lost: the op log still has it, which is what the
+    // re-open check reads.
+    assert_eq!(
+        read_text_prop(&ws, page, SOURCE_KEY).as_deref(),
+        canonical.to_str(),
+    );
     assert!(matches!(
         resolve_target(&ws, &path).unwrap(),
         OpenWithTarget::Existing { page: found, .. } if found == page

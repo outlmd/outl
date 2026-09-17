@@ -218,6 +218,21 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        // A page load tears the frontend's `open-file://import` listener
+        // down with it. Clear the flag so a file opened mid-reload is
+        // buffered for the remount instead of emitted into nothing —
+        // the cold-start loss this buffer exists to prevent, arriving
+        // through a different door.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started
+                && webview.label() == "main"
+            {
+                webview
+                    .app_handle()
+                    .state::<open_with::PendingOpenFile>()
+                    .listener_gone();
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())

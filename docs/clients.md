@@ -357,11 +357,17 @@ Where it lands: a page titled **`open-in/<file name>`**.
 The slash is a *title* namespace, not a slug — `page::is_valid_slug` rejects `/` because a slug is one path component — so the file projects to `pages/open-in-<name>.md` and `open-in` becomes a real parent page listing everything ever opened this way ([Nested pages](#nested-pages-issue-275)).
 
 **Re-opening the same file navigates; it does not import again.**
-The page records where it came from in a `source::` property.
+The page records where it came from in a `page-source::` property, which is **internal and never rendered into the `.md`**: its value is a local absolute path, a `.md` is often in git, and `outl export hugo` copies every property outside its deny-list into published front matter.
 Importing twice into one page would duplicate every block, and overwriting would delete whatever the user wrote on the page after the import — so the second open returns the page the first one produced.
 That property is also what keeps two *different* files with the same name apart: `~/a/notes.md` and `~/b/notes.md` both want `open-in/notes`, and the second gets `open-in/notes 2` rather than being silently merged into the first.
 
 The content split follows the paste pipeline, not a second rule: a bulleted `.md` lands as an outline, a bullet-free payload lands as one block per non-blank line (see [Copy and paste](#copy-and-paste)).
+
+**The imported page is linked from today's journal.**
+A `[[open-in/<name>]]` block lands in the journal for the day the import happened, so the page has a trail: outl is journal-first, and a page reachable only by search is a page you forget you have.
+It is a ref, not plain text, so the page itself lists that entry under its backlinks.
+The ref names whichever of title or slug actually resolves: a ref is matched by slugified name before an exact title, so a page whose title no longer derives its slug (the non-ASCII fallback above) is linked by slug, or the link would open the `open-in` index instead.
+Re-opening a file imports nothing and therefore writes no second entry, however many times you open it.
 
 | Client | How a file reaches it |
 |---|---|
