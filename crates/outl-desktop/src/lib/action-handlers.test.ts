@@ -405,16 +405,23 @@ describe("multi-select batch ops (#23)", () => {
   });
 
   it("DeleteRange erases every selected line bottom-up and leaves Visual", async () => {
-    vi.mocked(deleteBlock).mockResolvedValue({
+    const after: PageView = {
       page: { id: "pg-1", slug: "today", title: "Today", kind: "journal" },
-      outline: [block("blk-a", "a"), block("blk-d", "d")],
+      outline: [block("blk-a", "a"), block("blk-b", "b")],
       backlinks: [],
       backlinks_order: "newest",
+    };
+    vi.mocked(deleteBlock).mockResolvedValue(after);
+    // The real `applyView` replaces the outline, so the deleted ids are
+    // gone by the time the selection is chosen; a mock that leaves the
+    // store alone would let a post-delete `indexOf` lookup pass.
+    applyView.mockImplementationOnce((view: PageView) => {
+      setAppState("outline", view.outline);
     });
     setAppState({
       mode: "vim-visual",
-      visualAnchorId: "blk-b",
-      selectedBlockId: "blk-c",
+      visualAnchorId: "blk-c",
+      selectedBlockId: "blk-d",
     });
 
     const handlers = buildHandlers({ applyView, setError });
@@ -422,13 +429,14 @@ describe("multi-select batch ops (#23)", () => {
 
     // Bottom-up so a parent's move-to-trash can't strand a targeted child.
     expect(vi.mocked(deleteBlock).mock.calls).toEqual([
+      ["pg-1", "blk-d"],
       ["pg-1", "blk-c"],
-      ["pg-1", "blk-b"],
     ]);
-    // Selection lands above the erased range and Visual is cleared.
+    // Selection lands on the block directly above the erased range (not
+    // the first block of the page) and Visual is cleared.
     expect(appState.mode).toBe("vim-normal");
     expect(appState.visualAnchorId).toBeNull();
-    expect(appState.selectedBlockId).toBe("blk-a");
+    expect(appState.selectedBlockId).toBe("blk-b");
   });
 
   it("MoveVisualRangeDown moves every block in the range bottom-up", async () => {
