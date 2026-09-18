@@ -532,8 +532,8 @@ pub(crate) struct AutocompleteState {
     pub(crate) selected: usize,
 }
 
-/// Application state.
 pub(crate) struct App {
+    pub(crate) icons: crate::icons::IconSet,
     pub(crate) workspace_root: PathBuf,
     pub(crate) workspace: Workspace,
     pub(crate) hlc: HlcGenerator,

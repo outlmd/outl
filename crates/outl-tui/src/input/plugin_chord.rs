@@ -274,7 +274,7 @@ mod tests {
     fn app_with(root: &TempDir) -> App {
         let actor = ActorId::new();
         let ws = Workspace::open_in_memory(actor).unwrap();
-        App::new(
+        App::new_for_tests(
             root.path().to_path_buf(),
             ws,
             actor,

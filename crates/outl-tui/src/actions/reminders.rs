@@ -123,7 +123,11 @@ impl App {
                 r.plain_text.clone()
             };
             emit_osc9(&format!("outl · {body}"));
-            self.toast_for(ToastKind::Warning, format!("⏰ {body}"), REMINDER_TOAST_MS);
+            self.toast_for(
+                ToastKind::Warning,
+                format!("{} {body}", self.icons.bell),
+                REMINDER_TOAST_MS,
+            );
         }
     }
 

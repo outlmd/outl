@@ -7,6 +7,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Monochrome Nerd Font icons in the TUI, opt-in via `[tui] icons = "nerd-font"`.**
+  Every TUI icon — footer chips, fold markers, sidebar glyphs, palette/property/command glyphs — used to render as a colour emoji, with no way to turn that off.
+  Some terminals (alacritty without `font-emoji`, kitty in some configs, most tmux setups) either render them as broken boxes, double them with the surrounding text, or pick a fallback that disagrees with the rest of the UI's typography.
+  There was no supported way to get a compact monochrome outline.
+
+  `[tui] icons` now selects between two sets shipped from one `IconSet` in `outl-tui::icons`:
+  `"emoji"` (the default, byte-for-byte what the TUI rendered before) and `"nerd-font"` (Font Awesome 4 + Material Design codepoints from any patched font).
+  The selection is read once at boot in `runtime::run`, propagated to `App::icons`, and threaded through every view module that renders a glyph.
+  `property_glyph`, `category_glyph`, `command_glyph` and `fold_span` are now methods on `IconSet`, so a per-view "which glyph does this role take" question can no longer be answered twice.
+
+  **Emoji mode is pinned to upstream's literals by an exhaustive test** (`emoji_preserves_the_pre_iconset_glyphs`) that asserts every field value AND every `property_glyph` / `category_glyph` / `command_glyph` arm returns the byte sequence the pre-IconSet code returned.
+  The `📅`/`📆` and `🕐`/`🕒` pairs are split into `calendar`/`week` and `clock`/`stamp` fields for exactly that reason — the Emoji set must keep them distinct (the upstream `/week*` and `/stamp` commands render different glyphs from `/date*` and `/time*`), even though Nerd Font collapses each pair to one codepoint.
+  The mirror test (`nerd_font_uses_only_pua_glyphs`) walks every nerd field and refuses anything outside the three Unicode PUA planes, so a future contributor cannot quietly drop a colour emoji back into the Nerd Font set.
+  The same exhaustive `match` shape on a new Tauri command or wire DTO is what makes those safe; this is the same discipline applied to glyphs.
+
+  The desktop settings modal had a sibling defect on the way out — saving it stomped the `[tui]` block out of the global config because `TuiCfg` was not part of its round-trip.
+  The same hole existed for `[snapshot]` and `[storage]`, neither of which the modal models either: a save silently reset a hand-set boot-cache policy or op-log LRU cap to the defaults.
+  All three are now restored from disk on save, pinned by the extended `save_restores_the_sections_the_desktop_never_models` test.
 - **"Open With → outl" on the desktop — a `.md` or `.txt` from anywhere becomes a page.**
   Right-click a file in Finder / Explorer / a Linux file manager, pick outl, and the file lands as a page titled `open-in/<file name>`, built out of ordinary ops like everything else. `bundle.fileAssociations` registers the four extensions with `role: "Viewer"` and `rank: "Alternate"` — outl **imports a copy and never writes back to the file**, and it must not quietly become the system handler for every `.txt` on the machine.
 

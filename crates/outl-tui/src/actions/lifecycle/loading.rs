@@ -128,9 +128,9 @@ impl App {
         // Untouched — slot has a non-chip status (save error etc.):
         //   the user reads that first, the banner above the outline
         //   stays as the persistent warning signal.
-        const CHIP_MARKER: &str = "⚠ ";
+        let chip_marker = format!("{} ", self.icons.warning);
         let chip_is_ours =
-            self.status.starts_with(CHIP_MARKER) && self.status.contains("outside outl dialect");
+            self.status.starts_with(&chip_marker) && self.status.contains("outside outl dialect");
         if self.parse_warnings.is_empty() {
             if chip_is_ours {
                 self.status.clear();
@@ -138,7 +138,7 @@ impl App {
         } else if self.status.is_empty() || chip_is_ours {
             self.status = format!(
                 "{}{} line(s) outside outl dialect — preserved (open :warnings to see)",
-                CHIP_MARKER,
+                chip_marker,
                 self.parse_warnings.len()
             );
         }
@@ -203,5 +203,63 @@ impl App {
         self.recent_paths.retain(|p| p != path);
         self.recent_paths.insert(0, path.to_path_buf());
         self.recent_paths.truncate(RECENT_MAX);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::App;
+    use outl_core::{ActorId, Workspace};
+    use tempfile::TempDir;
+
+    fn today_journal_path(dir: &std::path::Path) -> std::path::PathBuf {
+        dir.join("journals").join(format!(
+            "{}.md",
+            outl_actions::clock::today().format("%Y-%m-%d")
+        ))
+    }
+
+    /// Regression for the icon-style boot race: the parse-warning
+    /// status chip is stamped with `icons.warning` inside the first
+    /// `load_current` (from `App::new`), and the clear/refresh path
+    /// only recognises a chip carrying *its own* marker. When the
+    /// runtime assigned the configured `IconSet` only *after*
+    /// `App::new` returned, a nerd-font launch booted with an emoji
+    /// `⚠` chip that no later reload could clear.
+    #[test]
+    fn boot_stamps_the_warning_chip_with_the_configured_icon_set() {
+        let dir = TempDir::new().unwrap();
+        let path = today_journal_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "a line outside the outline dialect\n").unwrap();
+
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let mut app = App::new(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+            outl_config::TuiIconStyle::NerdFont,
+        )
+        .unwrap();
+
+        assert!(!app.parse_warnings.is_empty(), "fixture must warn");
+        assert_eq!(app.icons.warning, "\u{f071}");
+        let nerd_chip = format!("{} ", app.icons.warning);
+        assert!(
+            app.status.starts_with(&nerd_chip),
+            "the boot chip must carry the configured icon set, got {:?}",
+            app.status
+        );
+
+        // The clear path only trusts a chip stamped with its own
+        // marker, so the fix is only real if the second load can
+        // actually retire the first one.
+        std::fs::write(&path, "- back inside the dialect\n").unwrap();
+        app.load_current();
+        assert!(app.parse_warnings.is_empty());
+        assert_eq!(app.status, "", "the chip must clear on the next load");
     }
 }

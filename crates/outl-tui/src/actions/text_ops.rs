@@ -249,7 +249,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let actor = ActorId::new();
         let ws = Workspace::open_in_memory(actor).unwrap();
-        let app = App::new(
+        let app = App::new_for_tests(
             dir.path().to_path_buf(),
             ws,
             actor,

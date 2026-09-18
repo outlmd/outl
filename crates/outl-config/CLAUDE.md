@@ -68,6 +68,7 @@ transport = "iroh"                # "iroh" (P2P, default) | "file" (iCloud/fs op
 relay_url = ""                    # optional; empty = outl's default relay (use1-1.relay.avelino.outl.iroh.link)
 
 [tui]
+icons = "emoji"                  # "emoji" (default) | "nerd-font"
 mouse_capture = false             # opt-in: enables mouse wheel + click + drag-to-copy in the TUI
 
 [display]
@@ -94,6 +95,7 @@ It exists for environments where the OS clock lies about the zone — containers
 `SyncConfig::transport` is a [`SyncTransportKind`] enum (`File` | `Iroh`, serde `lowercase`); missing `[sync]` falls back to `Iroh` (P2P is outl's primary sync), and `transport = "file"` is the explicit iCloud/filesystem opt-out.
 `SyncConfig::relay_url()` treats an empty string as `None`, which the iroh transport resolves to outl's default relay (`use1-1.relay.avelino.outl.iroh.link`; see [`docs/relay.md`](../../docs/relay.md)).
 `TuiCfg::mouse_capture` (default `false`) is read by the TUI at boot in `runtime.rs` to decide whether to call `EnableMouseCapture` and listen for `Event::Mouse`; the desktop ignores this section entirely.
+`TuiCfg::icons` (default `emoji`) is read by the TUI at boot in `runtime.rs`; `nerd-font` is an explicit opt-in for terminals with a Nerd Font installed.
 `DisplayCfg::backlinks_order` is a [`BacklinksOrder`] enum (`Newest` | `Oldest`, serde `lowercase`, default `Newest`) — a pure display preference, same "never converges between devices" policy as `theme.preset` (root `CLAUDE.md` invariant #7).
 `ThemeCfg` (RFC 0022) models a light/dark preset *pair*, not a single preset.
 `preset` is the light side, `preset_dark: Option<String>` is the dark side, and `mode` is a [`ThemeMode`] enum (`Light` | `Dark` | `Auto`, serde `lowercase`, default `Auto`).
@@ -146,6 +148,7 @@ If the field **must converge between devices**, it doesn't belong in TOML at all
 | `editor.font_size` | Desktop only | `crates/outl-desktop/src-tauri/src/settings.rs` |
 | `calendar.timezone` | Every client at boot, via `outl_actions::clock::init` (resolves the IANA name once into the process-wide clock) | `crates/outl-tui/src/runtime.rs`, `crates/outl-cli/src/main.rs`, `crates/outl-desktop/src-tauri/src/lib.rs`, `crates/outl-mobile/src-tauri/src/lib.rs` |
 | `sync.transport` / `sync.relay_url` | TUI peer-sync wiring | `crates/outl-tui/src/actions/lifecycle/peer_sync.rs::wire_sync_transport` (config-driven; replaces the `OUTL_IROH=1` env gate) |
+| `tui.icons` | TUI chrome icon set | `crates/outl-tui/src/runtime.rs` |
 | `tui.mouse_capture` | TUI only | `crates/outl-tui/src/runtime.rs` (conditionally emits `EnableMouseCapture` and arms the `Event::Mouse` branch) |
 | `display.backlinks_order` | TUI at boot (`runtime.rs`, applied post-construction); GUI clients on every `build_page_view` call | `crates/outl-tui/src/runtime.rs`, `crates/outl-tauri-shared/src/helpers.rs::build_page_view` (desktop + mobile share this reader) |
 | `assets.max_bytes` | Every file-import path: CLI `outl asset add`, MCP `outl_asset_add`, desktop/mobile "Attach file" + drag-drop, TUI `/upload` + paste-a-path | `crates/outl-cli/src/cmd/asset.rs`, `crates/outl-tauri-shared/src/commands/asset.rs`, `crates/outl-tui/src/commands/builtins/asset.rs` + `crates/outl-tui/src/actions/paste.rs` (all route through `outl_actions::asset::import_asset(root, source, max_bytes)`) |

@@ -200,6 +200,7 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         theme,
         shared_workspace,
         backlinks_newest_first,
+        global_cfg.tui.icons,
     );
 
     if enhanced_keys {
@@ -415,8 +416,16 @@ fn event_loop(
     theme: Theme,
     shared_workspace: bool,
     backlinks_newest_first: bool,
+    icon_style: outl_config::TuiIconStyle,
 ) -> Result<()> {
-    let mut app = App::new(workspace_root, workspace, actor, theme, shared_workspace)?;
+    let mut app = App::new(
+        workspace_root,
+        workspace,
+        actor,
+        theme,
+        shared_workspace,
+        icon_style,
+    )?;
     // Apply the persisted backlinks direction (issue #142); the field
     // only feeds the render path, so setting it post-construction is
     // enough and keeps it out of `App::new`'s already-long signature.

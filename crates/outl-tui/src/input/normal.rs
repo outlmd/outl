@@ -384,8 +384,8 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char('d') => app.pending_chord = Some('d'),
         KeyCode::Char('y') => app.pending_chord = Some('y'),
-        // Fold / unfold the selected block. The renderer's triangle
-        // marker (▶/▼) is the visual confirmation. No-op when the
+        // Fold / unfold the selected block. The renderer's fold
+        // marker (from `IconSet`) is the visual confirmation. No-op when the
         // block has no sidecar entry yet (see
         // `App::toggle_collapse_selected`).
         KeyCode::Char('c') => app.toggle_collapse_selected(),

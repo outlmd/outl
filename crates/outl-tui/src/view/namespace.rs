@@ -54,7 +54,7 @@ pub(crate) fn render_nested_pages(app: &App, inner_width: u16) -> Vec<Line<'stat
         // tree. `depth` is 1-based (a direct child is 1), matching what
         // every other client indents by.
         let indent = " ".repeat(1 + (child.depth - 1) * 2);
-        let icon = child.page.icon.as_deref().unwrap_or("📄");
+        let icon = child.page.icon.as_deref().unwrap_or(app.icons.file);
         out.push(Line::from(vec![
             Span::styled(format!("{indent}{icon}  "), app.theme.dim),
             Span::styled(child.label.clone(), app.theme.foreground),

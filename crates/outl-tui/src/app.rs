@@ -41,7 +41,12 @@ mod tests {
 
     #[test]
     fn pretty_render_strips_bold_markers() {
-        let spans = render_markdown_inline("a **brave** soul", &t(), &idx());
+        let spans = render_markdown_inline(
+            "a **brave** soul",
+            &t(),
+            &idx(),
+            &crate::icons::IconSet::default(),
+        );
         // The literal `**` must not appear in any span; the inner
         // word must.
         for s in &spans {
@@ -52,7 +57,12 @@ mod tests {
 
     #[test]
     fn pretty_render_strips_page_ref_brackets() {
-        let spans = render_markdown_inline("see [[Avelino]] today", &t(), &idx());
+        let spans = render_markdown_inline(
+            "see [[Avelino]] today",
+            &t(),
+            &idx(),
+            &crate::icons::IconSet::default(),
+        );
         // `[[` / `]]` are gone; the bare name is present.
         for s in &spans {
             assert!(!s.content.contains("[["));
@@ -75,7 +85,12 @@ mod tests {
         // Regression for the "está" crash: the `á` is 2 bytes.
         let _ = highlight_inline("isso parece que está", &t());
         let _ = highlight_inline("veja [[orçamento]] e #ação", &t());
-        let _ = render_markdown_inline("isso parece que está", &t(), &idx());
+        let _ = render_markdown_inline(
+            "isso parece que está",
+            &t(),
+            &idx(),
+            &crate::icons::IconSet::default(),
+        );
     }
 
     #[test]

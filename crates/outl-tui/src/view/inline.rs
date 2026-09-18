@@ -5,6 +5,7 @@
 //! markdown source visible with dim delimiters (cursor-bearing blocks
 //! so column-to-byte alignment stays 1:1).
 
+use crate::icons::IconSet;
 use crate::theme::Theme;
 use outl_actions::TodoState;
 use outl_md::inline::{inline_to_source, tokenize, InlineTok};
@@ -71,8 +72,9 @@ pub(crate) fn render_pretty_block_text(
     text: &str,
     theme: &Theme,
     index: &outl_md::index::WorkspaceIndex,
+    icons: &IconSet,
 ) -> Vec<Span<'static>> {
-    render_pretty_block_text_impl(text, theme, index, true)
+    render_pretty_block_text_impl(text, theme, index, icons, true)
 }
 
 /// Internal variant that controls whether `InlineTok::Embed` tokens
@@ -84,6 +86,7 @@ fn render_pretty_block_text_impl(
     text: &str,
     theme: &Theme,
     index: &outl_md::index::WorkspaceIndex,
+    icons: &IconSet,
     expand_embed: bool,
 ) -> Vec<Span<'static>> {
     // Strip TODO/DONE and quote markers in either order so the user
@@ -117,12 +120,13 @@ fn render_pretty_block_text_impl(
                 body,
                 theme,
                 index,
+                icons,
                 expand_embed,
             ));
         }
         Some(TodoState::Done) => {
             out.push(Span::styled("☑ ", theme.todo_done));
-            for sp in render_markdown_inline_impl(body, theme, index, expand_embed) {
+            for sp in render_markdown_inline_impl(body, theme, index, icons, expand_embed) {
                 out.push(Span::styled(
                     sp.content.into_owned(),
                     sp.style.patch(theme.todo_done_body),
@@ -133,6 +137,7 @@ fn render_pretty_block_text_impl(
             body,
             theme,
             index,
+            icons,
             expand_embed,
         )),
     }
@@ -155,8 +160,9 @@ pub(crate) fn render_markdown_inline(
     text: &str,
     theme: &Theme,
     index: &outl_md::index::WorkspaceIndex,
+    icons: &IconSet,
 ) -> Vec<Span<'static>> {
-    render_markdown_inline_impl(text, theme, index, true)
+    render_markdown_inline_impl(text, theme, index, icons, true)
 }
 
 /// Internal variant: when `expand_embed = false`, `InlineTok::Embed`
@@ -168,6 +174,7 @@ fn render_markdown_inline_impl(
     text: &str,
     theme: &Theme,
     index: &outl_md::index::WorkspaceIndex,
+    icons: &IconSet,
     expand_embed: bool,
 ) -> Vec<Span<'static>> {
     let mut out = Vec::new();
@@ -208,9 +215,9 @@ fn render_markdown_inline_impl(
                 // `outl_md::wikilink::is_image_target` so the extension
                 // list stays owned by one place.
                 let glyph = if outl_md::wikilink::is_image_target(url) {
-                    "🖼"
+                    icons.image
                 } else {
-                    "📄"
+                    icons.file
                 };
                 let label = if alt.is_empty() {
                     url.rsplit('/').next().unwrap_or(url)
@@ -289,6 +296,7 @@ fn render_markdown_inline_impl(
                             &entry.text,
                             theme,
                             index,
+                            icons,
                             false,
                         ));
                     }
@@ -434,7 +442,7 @@ mod tests {
     fn pretty_render_emits_quote_bar_first() {
         let theme = default_theme();
         let idx = empty_index();
-        let spans = render_pretty_block_text("> hello", &theme, &idx);
+        let spans = render_pretty_block_text("> hello", &theme, &idx, &IconSet::default());
         assert!(
             spans
                 .first()
@@ -448,7 +456,7 @@ mod tests {
     fn pretty_render_composes_quote_and_todo() {
         let theme = default_theme();
         let idx = empty_index();
-        let spans = render_pretty_block_text("> TODO ship it", &theme, &idx);
+        let spans = render_pretty_block_text("> TODO ship it", &theme, &idx, &IconSet::default());
         // First span: quote bar. Second: TODO checkbox.
         assert!(spans
             .first()
@@ -468,7 +476,7 @@ mod tests {
     fn pretty_render_accepts_todo_before_quote() {
         let theme = default_theme();
         let idx = empty_index();
-        let spans = render_pretty_block_text("TODO > ship it", &theme, &idx);
+        let spans = render_pretty_block_text("TODO > ship it", &theme, &idx, &IconSet::default());
         assert!(spans
             .first()
             .map(|s| s.content.starts_with('│'))
@@ -516,14 +524,16 @@ mod tests {
         let idx = empty_index();
 
         // Image extension → 🖼 placeholder in the pretty render.
-        let pretty = render_pretty_block_text("![cover](assets/x.png)", &theme, &idx);
+        let pretty =
+            render_pretty_block_text("![cover](assets/x.png)", &theme, &idx, &IconSet::default());
         assert!(
             pretty.iter().any(|s| s.content.contains('🖼')),
             "expected 🖼 placeholder for an image asset, got {pretty:#?}",
         );
 
         // Non-image extension → 📄 generic-file placeholder.
-        let pretty_doc = render_pretty_block_text("![doc](assets/x.pdf)", &theme, &idx);
+        let pretty_doc =
+            render_pretty_block_text("![doc](assets/x.pdf)", &theme, &idx, &IconSet::default());
         assert!(
             pretty_doc.iter().any(|s| s.content.contains('📄')),
             "expected 📄 placeholder for a non-image asset, got {pretty_doc:#?}",
@@ -544,7 +554,7 @@ mod tests {
     fn pretty_render_skips_bar_for_plain_text() {
         let theme = default_theme();
         let idx = empty_index();
-        let spans = render_pretty_block_text("plain body", &theme, &idx);
+        let spans = render_pretty_block_text("plain body", &theme, &idx, &IconSet::default());
         assert!(
             !spans
                 .first()

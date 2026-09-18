@@ -48,7 +48,7 @@ fn workspace_logged_at(actor: ActorId, ms: u64, seed: &str) -> Workspace {
 
 fn app_over(ws: Workspace, actor: ActorId) -> (App, TempDir) {
     let dir = TempDir::new().expect("tempdir");
-    let app = App::new(
+    let app = App::new_for_tests(
         dir.path().to_path_buf(),
         ws,
         actor,

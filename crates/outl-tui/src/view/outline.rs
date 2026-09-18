@@ -168,8 +168,8 @@ pub(crate) fn render_block(
     };
 
     // Fold indicator for the bullet row.
-    //   - `▼ ` when the block has children and is expanded
-    //   - `▶ ` when it has children and is collapsed
+    //   - `IconSet.fold_open` when the block has children and is expanded
+    //   - `IconSet.fold_closed` when it has children and is collapsed
     //   - `  ` (two spaces) when it has no children — keeps column
     //     alignment with the other two cases so the bullet column
     //     never jitters across blocks on the same indent.
@@ -201,7 +201,7 @@ pub(crate) fn render_block(
             prop_spans.push(Span::styled("│ ", app.theme.dim));
         }
         prop_spans.push(Span::raw("  ".to_string()));
-        if let Some(glyph) = property_glyph(k) {
+        if let Some(glyph) = app.icons.property_glyph(k) {
             prop_spans.push(Span::raw(format!("{glyph} ")));
         }
         prop_spans.push(Span::styled(format!("{k}:: "), app.theme.property_key));
@@ -320,7 +320,7 @@ fn emit_embedded_children(
             guides.push(Span::raw("  "));
         }
         let head = vec![Span::styled("↳ ", app.theme.dim)];
-        let content = render_pretty_block_text(&child.text, &app.theme, &app.index);
+        let content = render_pretty_block_text(&child.text, &app.theme, &app.index, &app.icons);
         push_wrapped(guides, head, content, text_width, out);
         emit_embedded_children(
             &child.children,
@@ -342,9 +342,9 @@ fn emit_embedded_children(
 pub(crate) enum FoldMarker {
     /// Block has no children — no marker, gap only.
     None,
-    /// Block has children and they're visible. `▼ ` prefix.
+    /// Block has children and they're visible. `fold_open` prefix.
     Expanded,
-    /// Block has children but they're folded away. `▶ ` prefix.
+    /// Block has children but they're folded away. `fold_closed` prefix.
     Collapsed,
 }
 
@@ -429,16 +429,12 @@ pub(crate) fn emit_block_lines(
                 // the marker is visible or not. Keeps the bullet `-`
                 // column stable across siblings (leaf next to a
                 // parent must line up).
-                match fold {
-                    FoldMarker::None => head.push(Span::raw("  ")),
-                    FoldMarker::Expanded => head.push(Span::styled("▼ ", app.theme.dim)),
-                    FoldMarker::Collapsed => head.push(Span::styled("▶ ", app.theme.hint)),
-                }
+                head.push(app.icons.fold_span(fold, &app.theme));
                 // Blocks with `auto-run::` get a ⚡ before the bullet
                 // so the user can see at a glance which cells re-run
                 // themselves on page open.
                 if has_auto_run {
-                    head.push(Span::styled("⚡", app.theme.hint));
+                    head.push(Span::styled(app.icons.bolt, app.theme.hint));
                 }
                 head.push(Span::styled("- ", bullet_style));
             }
@@ -488,9 +484,13 @@ pub(crate) fn emit_block_lines(
                     // function the embed expansion uses, so the
                     // chrome stays in lockstep between bullet and
                     // embed root.
-                    content.extend(render_pretty_block_text(row.text, &app.theme, &app.index));
+                    content.extend(render_pretty_block_text(
+                        row.text, &app.theme, &app.index, &app.icons,
+                    ));
                 }
-                _ => content.extend(render_markdown_inline(row.text, &app.theme, &app.index)),
+                _ => content.extend(render_markdown_inline(
+                    row.text, &app.theme, &app.index, &app.icons,
+                )),
             }
         }
 
@@ -551,22 +551,6 @@ enum CursorStyle {
     Block,
 }
 
-/// Leading glyph for a property key outl gives a meaning to.
-///
-/// Mirrors `KNOWN_PROPERTIES` in
-/// `@outl/shared/markdown/properties` — a const can't cross the
-/// Rust/TS boundary any more than a DTO field can, so the two tables
-/// are edited together. A user's own key (`priority::`) gets no glyph;
-/// interpreting it isn't ours to do.
-fn property_glyph(key: &str) -> Option<&'static str> {
-    match key.to_ascii_lowercase().as_str() {
-        outl_md::remind::REMIND_KEY => Some("⏰"),
-        "auto-run" => Some("▶"),
-        "template" => Some("📋"),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,7 +562,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let actor = ActorId::new();
         let ws = Workspace::open_in_memory(actor).unwrap();
-        let app = App::new(
+        let app = App::new_for_tests(
             dir.path().to_path_buf(),
             ws,
             actor,

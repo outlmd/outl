@@ -43,7 +43,8 @@ pub(crate) fn render_banner(f: &mut ratatui::Frame<'_>, area: Rect, app: &App) {
         format!("line {}: {} (+{} more)", first.line, preview, extra)
     };
     let title = format!(
-        " ⚠ {} line(s) outside outl dialect — preserved as blocks ",
+        " {} {} line(s) outside outl dialect — preserved as blocks ",
+        app.icons.warning,
         app.parse_warnings.len()
     );
     let line = Line::from(vec![Span::styled(

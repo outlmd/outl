@@ -93,7 +93,7 @@ pub(crate) fn render_backlinks_inline(
             }
             let header = match source_icon {
                 Some(icon) => format!("{icon}  {source_title}"),
-                None => format!("📄  {source_title}"),
+                None => format!("{}  {source_title}", app.icons.file),
             };
             out.push(Line::from(Span::styled(header, app.theme.heading)));
             prev_source = Some(source_slug.to_string());

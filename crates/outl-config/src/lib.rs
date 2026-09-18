@@ -36,6 +36,9 @@
 //! transport = "iroh"   # "iroh" (P2P, default) | "file" (iCloud/fs opt-out)
 //! relay_url = ""        # optional; empty = outl's default relay (use1-1.relay.avelino.outl.iroh.link)
 //!
+//! [tui]
+//! icons = "emoji"        # "emoji" (default) | "nerd-font"
+//!
 //! [snapshot]
 //! enabled = true        # default; long-lived clients write a snapshot periodically
 //! op_threshold = 10000  # write after this many applied ops
@@ -61,13 +64,14 @@
 
 mod paths;
 mod schema;
+mod tui;
 
 pub use paths::{config_dir, config_path};
 pub use schema::{
     AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DisplayCfg, EditorCfg, RemindersCfg,
-    SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode, TuiCfg,
-    WorkspaceCfg,
+    SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode, WorkspaceCfg,
 };
+pub use tui::{TuiCfg, TuiIconStyle};
 
 use std::fs;
 use std::path::{Path, PathBuf};

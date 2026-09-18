@@ -482,7 +482,7 @@ mod tests {
         let ws =
             Workspace::open_with_storage(actor, Box::new(storage), Some(dir.path().to_path_buf()))
                 .unwrap();
-        let app = crate::state::App::new(
+        let app = crate::state::App::new_for_tests(
             dir.path().to_path_buf(),
             ws,
             actor,

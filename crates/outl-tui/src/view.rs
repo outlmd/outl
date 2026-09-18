@@ -18,7 +18,7 @@ mod backlinks;
 mod chrome;
 mod inline;
 mod namespace;
-mod outline;
+pub(crate) mod outline;
 pub(crate) mod overlays;
 mod properties;
 mod sidebar;

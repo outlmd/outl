@@ -163,6 +163,7 @@ See [theming.md](theming.md) for the look of each.
 
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
+| `icons` | `"emoji"` \| `"nerd-font"` | `"emoji"` | TUI only | Selects the TUI chrome icon set. `emoji` works with ordinary terminal fonts; `nerd-font` opts into compact Font Awesome / Material Design Nerd Font glyphs. |
 | `mouse_capture` | bool | `false` | TUI only | When `true`, the TUI captures mouse events: the scroll wheel moves the outline selection, a click selects the block under the pointer, and dragging selects a range that is copied as clean outl markdown to the OS clipboard on release. Default is `false` because capturing the mouse disables the terminal's own text-selection (Shift-drag). The keyboard yank (`yy` / `Y` / Visual `y`) always writes to the clipboard regardless of this flag. |
 
 #### `[display]`

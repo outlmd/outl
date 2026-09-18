@@ -5,6 +5,7 @@
 //! The stack draws *over* everything else (after main, overlays,
 //! help) so a save toast still pops up even when a modal is open.
 
+use crate::icons::IconSet;
 use crate::state::{App, ToastKind};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -46,7 +47,7 @@ pub(crate) fn render_toasts(f: &mut ratatui::Frame<'_>, full: Rect, app: &App) {
         };
         f.render_widget(Clear, area);
 
-        let (icon, accent) = icon_and_color(toast.kind);
+        let (icon, accent) = icon_and_color(toast.kind, &app.icons);
         let body = Line::from(vec![
             Span::styled(
                 format!(" {icon} "),
@@ -75,12 +76,12 @@ pub(crate) fn render_toasts(f: &mut ratatui::Frame<'_>, full: Rect, app: &App) {
     }
 }
 
-fn icon_and_color(kind: ToastKind) -> (&'static str, Color) {
+fn icon_and_color(kind: ToastKind, icons: &IconSet) -> (&'static str, Color) {
     match kind {
-        ToastKind::Success => ("✓", Color::LightGreen),
-        ToastKind::Info => ("ℹ", Color::LightCyan),
-        ToastKind::Warning => ("⚠", Color::LightYellow),
-        ToastKind::Error => ("✕", Color::LightRed),
+        ToastKind::Success => (icons.success, Color::LightGreen),
+        ToastKind::Info => (icons.info, Color::LightCyan),
+        ToastKind::Warning => (icons.warning, Color::LightYellow),
+        ToastKind::Error => (icons.error, Color::LightRed),
     }
 }
 
