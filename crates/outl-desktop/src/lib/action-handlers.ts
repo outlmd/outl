@@ -833,11 +833,8 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       // children, the children go first so the parent's move-to-trash
       // doesn't pull a still-targeted descendant from under us.
       const targets = [...rangeIds].reverse();
-      // Land selection on the block above the deleted range, or the
-      // first block if the range was at the top. Resolved against the
-      // pre-delete visible ids: once the view lands, `rangeIds[0]` is
-      // gone from the outline and `indexOf` would say `-1`, which
-      // selects the first block even for a range in the middle.
+      // Selection lands above the deleted range (first block if at top),
+      // read from the PRE-delete ids: after applyView `rangeIds[0]` is gone.
       const ids = flattenVisible(appState.outline);
       const prev = ids[Math.max(ids.indexOf(rangeIds[0]) - 1, 0)];
       let lastView: PageView | undefined;
