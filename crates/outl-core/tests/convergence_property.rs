@@ -527,20 +527,25 @@ proptest! {
 /// generator's rate, and every property above would keep passing while
 /// covering nothing.
 ///
-/// So the density is asserted rather than assumed. It is stated as two
-/// absolute floors plus one comparison, because the comparison alone is a
-/// ratio of two sampled rates and the broad generator's rate is small enough
-/// (2.4-2.9% across runs) to move the ratio by a third on noise alone.
+/// So the density is asserted rather than assumed — as **three absolute
+/// bounds, and deliberately not as a ratio**.
 ///
-/// Measured at the time of writing, over 200 sampled programs each:
+/// Measured over 40 independent samples of 200 programs each: the broad
+/// generator rejects 1.8-5.1% of its structural ops, the dense one 21.7-24.3%
+/// and hits 179-191 of 200 programs. The dense rate is stable to within ±5%
+/// of itself; the broad rate swings almost 3x, so a ratio between them
+/// inherits the denominator's noise whole.
 ///
-/// | generator                        | rejected / consulted | programs hit |
-/// |----------------------------------|----------------------|--------------|
-/// | `program_strategy`               | ~2.5%                | ~10%         |
-/// | `cycle_dense_program_strategy`   | ~22.7%               | 100%         |
+/// That is not hypothetical. The previous version asserted
+/// `dense_rate >= 5.0 * broad_rate` — observed minimum **5.05** — and failed
+/// about one run in twelve; its hit floor asked for 180/200 against a
+/// measured minimum of 179. Its own doc comment had named the hazard and then
+/// added floors *beside* the ratio instead of replacing it, so the ratio kept
+/// its vote ([#317](https://github.com/outlmd/outl/issues/317)).
 ///
-/// The floors sit well below those, so this pins the claim without becoming a
-/// re-measurement that fails on sampling noise.
+/// Each bound below is therefore absolute and clear of the measured band. The
+/// third states what the ratio was really claiming — *the broad generator has
+/// not caught up* — against a fixed ceiling rather than a noisy sample.
 #[test]
 fn the_cycle_dense_generator_rejects_far_more_moves_than_the_shared_one() {
     use proptest::strategy::{Strategy, ValueTree};
@@ -578,16 +583,17 @@ fn the_cycle_dense_generator_rejects_far_more_moves_than_the_shared_one() {
         dense_rate * 100.0
     );
     assert!(
-        dense_hit * 10 >= SAMPLES * 9,
-        "only {dense_hit}/{SAMPLES} dense programs reject an op (was all of \
-         them); the broad generator manages {broad_hit}/{SAMPLES}, so this one \
-         is buying nothing"
+        dense_hit * 20 >= SAMPLES * 17,
+        "only {dense_hit}/{SAMPLES} dense programs reject an op (the floor is \
+         85%, and 179-191 is the measured band); the broad generator manages \
+         {broad_hit}/{SAMPLES}, so this one is buying nothing"
     );
     assert!(
-        dense_rate >= 5.0 * broad_rate,
-        "the dense generator is no longer denser than the shared one it exists \
-         to complement: {:.1}% vs {:.1}%",
-        dense_rate * 100.0,
-        broad_rate * 100.0
+        broad_rate <= 0.10,
+        "the broad generator now rejects {:.1}% of its structural ops, which is \
+         the dense generator's own territory ({:.1}% here) — the dense one has \
+         stopped buying coverage the shared one doesn't already have",
+        broad_rate * 100.0,
+        dense_rate * 100.0
     );
 }

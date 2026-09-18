@@ -46,7 +46,7 @@
 712 crates/outl-core/tests/tree_unit.rs
 1608 crates/outl-desktop/src/components/BlockRow.tsx
 967 crates/outl-desktop/src/components/OutlineView.tsx
-1048 crates/outl-desktop/src/lib/action-handlers.ts
+1038 crates/outl-desktop/src/lib/action-handlers.ts
 732 crates/outl-exec/src/runtimes/query.rs
 872 crates/outl-frontend-shared/src/api/commands.ts
 750 crates/outl-frontend-shared/src/api/types.ts
@@ -58,7 +58,7 @@
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 833 crates/outl-mobile/src/components/BlockRow.tsx
-2477 crates/outl-mobile/src/components/Journal.tsx
+2071 crates/outl-mobile/src/components/Journal.tsx
 796 crates/outl-plugins/src/engine.rs
 862 crates/outl-plugins/src/host_tests.rs
 830 crates/outl-plugins/src/host.rs

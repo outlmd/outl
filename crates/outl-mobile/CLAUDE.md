@@ -5,8 +5,9 @@ Solid.js + Tailwind frontend, Rust backend that **must stay thin** — every wor
 
 ## `Journal.tsx` is being broken up
 
-2,489 lines in one component, over 4x the `file-size-guard.sh` ceiling.
-The chrome came out first (`JournalChrome.tsx`), then the delete prompts (`JournalDeleteDialogs.tsx`) and the toolbar dispatch (`Journal.toolbar-dispatch.ts`); the remaining seams are in [issue 265](https://github.com/outlmd/outl/issues/265), and the props rule an extraction must not break is in `outl-frontend-shared/CLAUDE.md`.
+2,071 lines in one component, still over 3x the `file-size-guard.sh` ceiling.
+The chrome came out first (`JournalChrome.tsx`), then the delete prompts (`JournalDeleteDialogs.tsx`) and the toolbar dispatch (`Journal.toolbar-dispatch.ts`); [issue 265](https://github.com/outlmd/outl/issues/265) phases 1-3 took the block ops, the selection state machine and the platform listeners out.
+The remaining seams are in that issue, and the props rule an extraction must not break is in `outl-frontend-shared/CLAUDE.md`.
 
 ## Layering
 
@@ -63,7 +64,7 @@ The storage trait stays generic; the transport gets handled outside it.
 `Journal.tsx` is the mobile app's one large component and the single biggest file in the repo.
 It reached 3,212 lines because the frontend sat outside `file-size-guard.sh`, which only read `.rs` until 2026-09 — so nothing ever warned.
 
-Five pieces are now siblings, and new code of any of those shapes belongs there rather than back in the parent:
+Eight pieces are now siblings, and new code of any of those shapes belongs there rather than back in the parent:
 
 - **`JournalHeader.tsx`** — `JournalHeader`, `PageHeader`, `ChevronLeft`, `ChevronRight`.
   Pure render: props in, markup out, no state and no commands.
@@ -74,6 +75,22 @@ Five pieces are now siblings, and new code of any of those shapes belongs there 
 - **`Journal.toolbar-dispatch.ts`** — `dispatchToolbarAction(action, handlers)`, the switch both keyboard bars fire through, plus the tap counting that feeds MFU and the settings sheet.
   Same shape as `Journal.context-actions.ts`: a pure function from (action, handlers) to effects, no Solid import, so it is `.ts` and `Journal.toolbar-dispatch.test.ts` drives it directly.
   It counts the tap **before** routing it, so a button pressed with nothing focused still registers — the user pressed it, which is what MFU measures.
+- **`Journal.block-ops.ts`** — `createBlockOps(deps)`, every operation on **one** block: toggle TODO, delete (and its prompt), copy / paste / cut / copy-ref, indent, outdent, move.
+  Each structural op is the same four-step shape (page id → one command through `withError` → fold the `PageView` back in → haptic), which is why they belong together and why the shape is the module's contract. The clipboard ops are the exception: `copyBlock` and `copyBlockRef` resolve no page id and buzz for nothing, because neither mutates the workspace.
+  Handed accessors, never values: `Journal` passes `pageId` / `view` / `editingId` as functions, because a destructured prop (or dep) freezes at first render in Solid.
+  **No handler reads `this`**, which is what lets `Journal` hand every one of them to `<BlockRow />` as a prop: they are always called detached from the object, and a `this.` would break there silently. Most are method shorthand on the returned literal, which is fine for exactly that reason; `performDelete` is a named function because `requestDelete` calls it internally. `Journal.block-ops.test.ts` pins the detached case rather than the spelling.
+
+- **`Journal.selection-ops.ts`** — `createSelectionOps(deps)`, the touch-native range selection (RFC 0254 phase 3) and every op over N blocks.
+  Extends `JournalBlockDeps` because a range op is N single-block commands plus a range.
+  Split from `Journal.block-ops.ts` on the **question** ("what is selected, and what happens to N blocks" vs "what happens to one"), not the line count — the standard `backlinks_index.rs` → `backlinks_keys.rs` set.
+  The walk order is the subtle part and is pinned by test, not comment: indent / move-up walk top-down, **move-down and delete walk bottom-up** (a move-down has to clear the block below the range first; a delete has to take children before parents or the parent trashes the subtree and the follow-up fails).
+  *What* the range contains is not decided here at all — `visibleRangeSlice` in `@outl/shared/outline` owns it, so this client and the desktop cannot disagree about it. The first version of this module carried a comment claiming it "mirrors the desktop's `applyVisualBlockOp` exactly", which is a parity invariant nothing could fail.
+
+- **`Journal.listeners.ts`** — the three listeners the journal installs, over four backend events (`deep-link://navigate`, the webview file drop, and `projection-write-failed` + `workspace-ready` together), plus `navigateDeepLink` which the cold-start path calls directly.
+  They must still be **called from inside the component body**: `onCleanup` needs a Solid owner, and there is deliberately no `runWithOwner` wrapper hiding that.
+  The ordering rule they exist to hold in one place — arm `onCleanup` **synchronously**, before the dynamic `import()` resolves, then dispose a late-arriving handle — has exactly one implementation, `armCleanup()`. Registering cleanup inside the `.then()` instead leaks the listener on a fast unmount, invisibly; `Journal.listeners.test.ts` holds the import open, unmounts, and releases it, so that window is covered rather than described.
+  Its `listen` mock **keeps the callback**, which is what makes the listener bodies testable: the deep-link mid-edit guard, the `workspace-ready` branch and the on-page / off-page routing of a refusal are each pinned by a test that fails when the branch is inverted. A mock that drops the callback leaves all three deletable with a green suite.
+
 - **`JournalDeleteDialogs.tsx`** — both delete confirmations (single block, and range) plus the copy that goes in them.
   `Journal` keeps the pending-delete signals and the `performDelete*` calls; this only renders and reports back.
   The **wording** is what made the pair worth extracting together — pluralising a count, warning about children, "can't be undone" — since two copies of that drift into saying different things about the same action.
@@ -83,8 +100,8 @@ Five pieces are now siblings, and new code of any of those shapes belongs there 
   The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
   `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
 
-What is left is still ~2,480 lines, almost all of it one `Journal()` function.
-That is real debt, not a finished job: the remaining split is a state/effects question (edit lifecycle, selection, sync signals, keyboard accessory), not a "move these functions" question, and it wants its own plan.
+What is left is ~2,070 lines, almost all of it one `Journal()` function.
+That is real debt, not a finished job: what is left is a state/effects question (edit lifecycle, sync signals, the native bridges, the sheet stack), not a "move these functions" question — phases 1-3 were the movable half — and it wants its own plan.
 `.github/file-size-baseline.txt` holds the current number, and the CI ratchet means it can go down but not up.
 
 ## Storage is a chosen folder, not forced iCloud (Fase 2)

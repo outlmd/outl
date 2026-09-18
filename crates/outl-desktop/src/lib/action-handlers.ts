@@ -52,6 +52,7 @@ import {
   focusSubtree,
   nextVisibleId,
   previousVisibleId,
+  visibleRangeSlice,
   visualRangeIds,
 } from "@outl/shared/outline";
 
@@ -178,17 +179,13 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
   ) {
     const pageId = appState.page?.id;
     if (!pageId) return;
-    const range = visualRangeIds(
+    const slice = visibleRangeSlice(
       appState.visualAnchorId,
       appState.selectedBlockId,
       appState.outline,
     );
-    if (!range) return;
-    const ids = flattenVisible(appState.outline);
-    const loIdx = ids.indexOf(range.lo);
-    const hiIdx = ids.indexOf(range.hi);
-    const targets = ids.slice(loIdx, hiIdx + 1);
-    if (reverse) targets.reverse();
+    if (!slice) return;
+    const targets = reverse ? [...slice].reverse() : slice;
     let lastView: PageView | undefined;
     for (const id of targets) {
       const view = await safeCall(op(pageId, id));
@@ -795,16 +792,12 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       setAppState("mode", "vim-visual");
     },
     YankRange: () => {
-      const range = visualRangeIds(
+      const rangeIds = visibleRangeSlice(
         appState.visualAnchorId,
         appState.selectedBlockId,
         appState.outline,
       );
-      if (!range) return;
-      const ids = flattenVisible(appState.outline);
-      const loIdx = ids.indexOf(range.lo);
-      const hiIdx = ids.indexOf(range.hi);
-      const rangeIds = ids.slice(loIdx, hiIdx + 1);
+      if (!rangeIds) return;
       const texts: string[] = [];
       for (const id of rangeIds) {
         const block = lookupBlock(id);
@@ -820,12 +813,12 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     DeleteRange: async () => {
       const pageId = appState.page?.id;
       if (!pageId) return;
-      const range = visualRangeIds(
+      const rangeIds = visibleRangeSlice(
         appState.visualAnchorId,
         appState.selectedBlockId,
         appState.outline,
       );
-      if (!range) return;
+      if (!rangeIds) return;
       // Snapshot the range as ids (NOT indices) up front. NodeIds are
       // stable across the CRDT — `deleteBlock` is `Move(node, TRASH)`,
       // not a re-keying — so we don't have to re-resolve them after
@@ -836,14 +829,10 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       // (or a peer's concurrent delete won the race). `safeCall`
       // captures the error in the status line; we keep iterating so
       // a single bad id doesn't strand the rest of the range.
-      const ids = flattenVisible(appState.outline);
-      const loIdx = ids.indexOf(range.lo);
-      const hiIdx = ids.indexOf(range.hi);
-      const targets: string[] = [];
       // Bottom-up: when the range covers both a parent and its
       // children, the children go first so the parent's move-to-trash
       // doesn't pull a still-targeted descendant from under us.
-      for (let i = hiIdx; i >= loIdx; i--) targets.push(ids[i]);
+      const targets = [...rangeIds].reverse();
       let lastView: PageView | undefined;
       for (const id of targets) {
         const view = await safeCall(deleteBlock(pageId, id));
@@ -852,7 +841,8 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       if (lastView) deps.applyView(lastView);
       // Land selection on the block above the deleted range, or the
       // first block if the range was at the top.
-      const prev = ids[Math.max(loIdx - 1, 0)];
+      const ids = flattenVisible(appState.outline);
+      const prev = ids[Math.max(ids.indexOf(rangeIds[0]) - 1, 0)];
       exitVisual();
       setAppState("selectedBlockId", prev ?? null);
     },

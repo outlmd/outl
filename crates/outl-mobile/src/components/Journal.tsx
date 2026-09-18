@@ -14,25 +14,17 @@ import type {
   MdAheadOfLog,
   PageView,
   PluginToolbarButton,
-  ProjectionWriteFailed,
 } from "@outl/shared/api/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   attachAsset,
   type BlockHit,
-  copyBlockMarkdown,
-  copyBlockRef,
   copyMarkdown,
   createBlock,
-  cutBlock,
-  deleteBlock,
   editBlock,
   deliverDueReminders,
   importAssetFile,
-  indentBlock,
   listReminders,
-  moveBlockDown,
-  moveBlockUp,
   nextDay,
   openAsset,
   openJournalFor,
@@ -40,9 +32,7 @@ import {
   openExternalUrl,
   openRef,
   openTodayJournal,
-  outdentBlock,
   pageBacklinks,
-  pasteBlockAfter,
   pasteMarkdown,
   peerStatus,
   pluginRun,
@@ -62,24 +52,19 @@ import {
   splitBlock,
   syncNow,
   todaySlug,
-  toggleTodo,
   undoPage,
   workspaceStats,
 } from "@outl/shared/api/commands";
 import { utf16OffsetToCharOffset } from "@outl/shared/paste";
 import { isAssetLink } from "@outl/shared/links";
-import { installFileDrop } from "@outl/shared/drag-drop";
 import { peersOnline } from "@outl/shared/peers";
 import { setupReminderNotifications } from "../lib/reminder-notifications";
 import {
-  countDescendants,
   findBlock,
   flattenAll,
   flattenParents,
-  flattenVisible,
   focusSubtree,
   rawTextWithTodo,
-  visualRangeIds,
   visualRangeSet,
 } from "@outl/shared/outline";
 import {
@@ -95,21 +80,8 @@ import { parkCaret, spliceText } from "../lib/textarea";
 import { withTimeout } from "../lib/async";
 import {
   type BlockSelection,
-  extendSelectionTo,
-  growSelectionDown,
-  growSelectionUp,
   selectionIsLive,
-  startSelection,
 } from "../lib/block-selection";
-
-/**
- * Payload shapes emitted by the backend's `deep-link://navigate` event
- * (and buffered for cold start via `take_pending_deep_link`) — issue #98.
- */
-type DeepLinkNavigate =
-  | { kind: "today" }
-  | { kind: "daily"; date: string }
-  | { kind: "page"; slug: string };
 
 /** Maximum time we wait for a single Tauri command to settle before
  *  surfacing a timeout error. Keeps the UI from getting stuck in
@@ -147,6 +119,16 @@ import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
 import { editableProperties } from "../lib/properties";
 import { haptic } from "../lib/haptics";
+import { createBlockOps, type JournalBlockDeps } from "./Journal.block-ops";
+import { createSelectionOps } from "./Journal.selection-ops";
+import {
+  type DeepLinkNavigate,
+  type JournalListenerDeps,
+  listenForDeepLink,
+  listenForFileDrop,
+  listenForWorkspaceReady,
+  navigateDeepLink,
+} from "./Journal.listeners";
 import { PageSections } from "./PageSections";
 import { BlockContextMenu } from "./BlockContextMenu";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -242,7 +224,7 @@ export function Journal() {
   // Block clipboard (RFC 0254 phase 2, cut added phase 4b) — "Copy
   // block" arms this with the copied subtree's markdown; "Cut block"
   // arms it with the same shape (the backend deletes the source in
-  // the same round-trip, see `handleCutBlock`). "Paste block" (shown
+  // the same round-trip, see `blockOps.cutBlock`). "Paste block" (shown
   // only while armed) duplicates it after the long-pressed block via
   // `paste_block_after`, minting fresh ids either way — unlike the
   // desktop's `appState.blockClipboard`, which tags a cut with
@@ -594,9 +576,9 @@ export function Journal() {
     // capped + silent (no boot toast): it never blocks the boot or first paint,
     // and the ops it pulls arrive via `workspace-ready` / the next reload.
     void withTimeout(syncNow(), SYNC_TIMEOUT_MS, "sync timed out").catch(() => {});
-    listenForWorkspaceReady();
-    listenForDeepLink();
-    listenForFileDrop();
+    listenForWorkspaceReady(listenerDeps);
+    listenForDeepLink(listenerDeps);
+    listenForFileDrop(listenerDeps);
     await loadTodayWithRetry();
     // Cold-start deep link: a URL that *launched* the app was buffered
     // by the backend before the listener above existed. Drain it now
@@ -607,7 +589,7 @@ export function Journal() {
       const pending = await invoke<DeepLinkNavigate | null>(
         "take_pending_deep_link",
       );
-      if (pending) await navigateDeepLink(pending);
+      if (pending) await navigateDeepLink(listenerDeps, pending);
     } catch {
       // best-effort — a failed drain just leaves the journal showing
     }
@@ -755,85 +737,24 @@ export function Journal() {
     });
   }
 
-  /**
-   * Navigate in response to an `outl://` deep link (issue #98). The Rust
-   * backend parsed + validated the URL through the shared
-   * `outl_actions::parse_deep_link`; map each shape onto the same
-   * `open*` command the ref-tap path uses. Shared by the warm listener
-   * and the cold-start drain so the two can't diverge.
-   */
-  async function navigateDeepLink(p: DeepLinkNavigate) {
-    try {
-      const next =
-        p.kind === "today"
-          ? await openTodayJournal()
-          : p.kind === "daily"
-            ? await openJournalFor(p.date)
-            : await openPageBySlug(p.slug);
-      applyView(next);
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
+  // ── Platform listeners (issue #265 phase 3) ─────────────────────
+  //
+  // Bodies live in `Journal.listeners.ts`; this is only the dependency
+  // wiring. They must be *called* from here — `onCleanup` needs the
+  // component owner.
+  const listenerDeps: JournalListenerDeps = {
+    view,
+    editingId,
+    applyView,
+    setError,
+    setAheadOfLog,
+    loadTodayWithRetry,
+    pullAndReload,
+    onFileDrop: (paths, blockId) => handleFileDrop(paths, blockId),
+  };
 
-  function listenForDeepLink() {
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-    // Register cleanup synchronously (inside the component owner, before
-    // the dynamic import resolves) so the listener is torn down if
-    // Journal ever unmounts — matching the desktop's `onCleanup`. Journal
-    // is the mobile root today (singleton), so this is defensive, but it
-    // keeps the two clients consistent. If we unmount before `listen()`
-    // resolves, dispose the late-arriving handle right away.
-    onCleanup(() => {
-      disposed = true;
-      unlisten?.();
-    });
-    import("@tauri-apps/api/event")
-      .then(({ listen }) =>
-        listen<DeepLinkNavigate>("deep-link://navigate", async (e) => {
-          // Skip while editing so a warm-path navigation never yanks the
-          // textarea out from under the user mid-keystroke.
-          if (editingId()) return;
-          await navigateDeepLink(e.payload);
-        }),
-      )
-      .then((un) => {
-        if (disposed) un();
-        else unlisten = un;
-      });
-  }
 
-  /**
-   * Wire the Tauri webview drag-and-drop event (iPad: drag a file from the
-   * Files app or split-view onto a block). Registered like the deep-link
-   * listener above — cleanup armed synchronously inside the component owner,
-   * the dynamic import resolves the real handle afterwards. Best-effort: on
-   * iPhone the OS rarely delivers a webview drop, and a registration failure
-   * just leaves the long-press "Attach file" action as the import path.
-   */
-  function listenForFileDrop() {
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-    onCleanup(() => {
-      disposed = true;
-      unlisten?.();
-    });
-    // Shared `installFileDrop` resolves the block under the drop point
-    // (physical→CSS pixels, `data-block-id` hit-test) identically to the
-    // desktop, so the two clients can't drift on the geometry.
-    installFileDrop({
-      onDrop: (paths, blockId) => handleFileDrop(paths, blockId),
-    })
-      .then((un) => {
-        if (disposed) un();
-        else unlisten = un;
-      })
-      .catch((e) => {
-        console.warn("failed to register drag-drop listener", e);
-      });
-  }
+
 
   async function loadTodayWithRetry() {
     // Show a generic "Loading…" first, then upgrade the message to
@@ -867,57 +788,6 @@ export function Journal() {
     setLoaded(true);
   }
 
-  function listenForWorkspaceReady() {
-    // Best-effort: refresh the current view once the background
-    // opener finishes, so anything the user did during the brief
-    // "loading" window converges on the freshly opened workspace.
-    let disposed = false;
-    const unlisteners: Array<() => void> = [];
-    onCleanup(() => {
-      disposed = true;
-      for (const unlisten of unlisteners) unlisten();
-    });
-    import("@tauri-apps/api/event").then(async ({ listen }) => {
-      const projectionUnlisten = await listen<ProjectionWriteFailed>(
-        "projection-write-failed",
-        (event) => {
-          const failure = event.payload;
-          if (failure.md_ahead_of_log && view()?.page.id === failure.page_id) {
-            setAheadOfLog({ slug: view()!.page.slug, info: failure.md_ahead_of_log });
-          } else {
-            // An off-screen refusal still froze a page. It cannot use the
-            // current page's sticky banner, but it must reach the user.
-            setError(failure.error);
-          }
-        },
-      );
-      if (disposed) projectionUnlisten();
-      else unlisteners.push(projectionUnlisten);
-
-      const readyUnlisten = await listen("workspace-ready", async () => {
-        // Mid-edit is handled inside `pullAndReload` (pull now, re-render when
-        // the field closes), so returning early here only threw the signal
-        // away. "The next idle workspace-ready picks them up" was the flaw:
-        // this event fires when peer ops LAND, so once they have landed there
-        // may not be another one, and the view then waits for the poll — or
-        // for the user to press Sync.
-        if (!view()) {
-          await loadTodayWithRetry();
-          return;
-        }
-        // Route through the guarded reload path (re-materialize the op log +
-        // change / empty / generation guards) instead of applying a raw
-        // `openJournalFor` on the possibly-stale in-memory workspace. That
-        // unguarded apply — firing on every peer-ops write — is what flipped
-        // the page back to an older op-log state (the flicker).
-        await pullAndReload({ background: true });
-      });
-      if (disposed) readyUnlisten();
-      else unlisteners.push(readyUnlisten);
-    }).catch((error) => {
-      console.warn("failed to register workspace listeners", error);
-    });
-  }
 
   /**
    * Bridge between the native UIKit keyboard accessory view (defined
@@ -929,14 +799,14 @@ export function Journal() {
   function dispatchToolbarAction(action: string) {
     dispatch(action, {
       editingId,
-      indent: handleIndent,
-      outdent: handleOutdent,
-      moveUp: handleMoveUp,
-      moveDown: handleMoveDown,
+      indent: blockOps.indent,
+      outdent: blockOps.outdent,
+      moveUp: blockOps.moveUp,
+      moveDown: blockOps.moveDown,
       undo: () => void handleUndo(),
       redo: () => void handleRedo(),
-      toggleTodo: handleToggleTodo,
-      delete: handleDelete,
+      toggleTodo: blockOps.toggleTodo,
+      delete: blockOps.requestDelete,
       createAfter: handleCreateAfter,
       appendBlock: handleAppendBlock,
       wrapSelection,
@@ -1109,129 +979,44 @@ export function Journal() {
     if (next) applyView(next);
   }
 
-  async function handleToggleTodo(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    haptic("medium");
-    const wasEditing = editingId() === id;
-    if (wasEditing) {
-      // Commit current draft text into the workspace so the cycle
-      // operates on what the user typed, without dropping out of
-      // edit mode (we want the keyboard to stay up).
-      const text = draft();
-      const committed = await withError(() => editBlock(pid, id, text));
-      if (committed) setView(committed);
-    }
-    const next = await withError(() => toggleTodo(pid, id));
-    if (!next) return;
-    applyView(next);
-    if (wasEditing) {
-      // Keep edit mode on the same block; refresh draft to the
-      // backend's view, **with** the TODO/DONE prefix reattached so
-      // the editor stays consistent with what the user just toggled.
-      const block = findBlock(next.outline, id);
-      if (block) setDraft(rawTextWithTodo(block));
-    }
-  }
+  // ── Block + range operations (issue #265 phases 1-2) ────────────
+  //
+  // The single-block handlers live in `Journal.block-ops.ts` and the
+  // selection state machine plus its range ops in
+  // `Journal.selection-ops.ts`. Both are handed accessors, never
+  // values: a destructured prop freezes at first render in Solid, and
+  // the same rule governs a dependency object.
+  const blockDeps: JournalBlockDeps = {
+    pageId,
+    view,
+    withError,
+    applyView,
+    setView,
+    editingId,
+    setEditingId,
+    draft,
+    setDraft,
+    blockClipboard,
+    setBlockClipboard,
+    setPendingDelete,
+  };
+  const blockOps = createBlockOps(blockDeps);
+  const selectionOps = createSelectionOps({
+    ...blockDeps,
+    selection,
+    setSelection,
+    lastSelection,
+    setLastSelection,
+    setPendingRangeDelete,
+    commitEdit,
+  });
 
-  /**
-   * Delete a block. When the block has descendants we *always*
-   * prompt — deleting a parent destroys the whole subtree, and while
-   * the keyboard toolbar's Undo button (RFC 0254 phase 1) can revert
-   * it, that is a second, less immediate tap than the confirm dialog
-   * already in front of the user. Leaf blocks delete immediately (no
-   * prompt) to keep the swipe gesture fast.
-   */
-  function handleDelete(id: string) {
-    const cur = view();
-    if (!cur) return;
-    const block = findBlock(cur.outline, id);
-    const descendants = block ? countDescendants(block) : 0;
-    if (descendants > 0) {
-      haptic("warning");
-      setPendingDelete({ id, descendants });
-      return;
-    }
-    haptic("heavy");
-    void performDelete(id);
-  }
 
-  async function performDelete(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    if (editingId() === id) setEditingId(null);
-    const next = await withError(() => deleteBlock(pid, id));
-    if (next) applyView(next);
-  }
 
-  /**
-   * "Copy block" (long-press menu, RFC 0254 phase 2) — arm the
-   * in-app block clipboard with `id`'s subtree as clean outl
-   * markdown, ready for "Paste block" on another row. Distinct from
-   * the existing "Copy text" action: that one writes straight to the
-   * OS clipboard for pasting outside outl (desktop's `Y` /
-   * `YankCurrentBlock`); this one never touches the OS clipboard —
-   * it's the desktop's `Cmd/Ctrl+C` (`CopyBlock`) view-mode gesture,
-   * just reached by long-press instead of a chord. `copyBlockMarkdown`
-   * is read-only, so arming never mutates the workspace.
-   */
-  async function handleCopyBlock(id: string) {
-    const markdown = await withError(() => copyBlockMarkdown(id));
-    if (markdown !== undefined) setBlockClipboard(markdown);
-  }
 
-  /**
-   * "Paste block" (long-press menu) — duplicate the armed clipboard's
-   * subtree as a sibling right after `id`, minting fresh ids
-   * (`paste_block_after`, same backend the desktop's `Cmd/Ctrl+V`
-   * calls for a `kind: "copy"` clipboard). The clipboard persists
-   * after a successful paste so it can be pasted again, mirroring the
-   * desktop's non-cut branch. Only reachable when `blockClipboard()`
-   * is armed — the context menu hides the action otherwise.
-   */
-  async function handlePasteBlock(id: string) {
-    const pid = pageId();
-    const markdown = blockClipboard();
-    if (!pid || markdown === null) return;
-    const next = await withError(() => pasteBlockAfter(pid, id, markdown));
-    if (next) applyView(next);
-  }
 
-  /**
-   * "Cut block" (long-press menu, RFC 0254 phase 4b) — render `id`'s
-   * subtree to markdown and delete it in one backend round-trip
-   * (`cutBlock`), then arm the same `blockClipboard` "Paste block"
-   * reads. Deliberately **not** identity-preserving (the paste mints
-   * fresh ids, per `cutBlock`'s doc comment) — the alternative is the
-   * desktop's move-based cut, which needs a `{kind, nodeId}` tagged
-   * clipboard this client doesn't have and doesn't need for a
-   * long-press gesture.
-   */
-  async function handleCutBlock(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    const reply = await withError(() => cutBlock(pid, id));
-    if (!reply) return;
-    if (editingId() === id) setEditingId(null);
-    setBlockClipboard(reply.markdown);
-    applyView(reply.view);
-  }
 
-  /**
-   * "Copy block ref" (long-press menu, issue #18) — resolve `id`'s
-   * `((blk-XXXXXX))` handle and put it on the OS clipboard, same
-   * best-effort posture as "Copy text" above (some webviews refuse
-   * `navigator.clipboard` outside a user-gesture chain).
-   */
-  async function handleCopyBlockRef(id: string) {
-    const ref = await withError(() => copyBlockRef(id));
-    if (ref === undefined) return;
-    try {
-      await navigator.clipboard?.writeText(ref);
-    } catch {
-      // Best-effort, same as "Copy text" / "Copy block" above.
-    }
-  }
+
 
   // ── Touch-native block range selection (RFC 0254 phase 3) ────────
   //
@@ -1245,179 +1030,16 @@ export function Journal() {
   // fires the same range ops the desktop's `>` / `<` / `⌘⇧↑↓` / `y` /
   // `d` chords do.
 
-  /** "Select blocks" (long-press menu) — start a selection anchored at
-   *  `id`. Commits any in-flight edit first: entering selection mid-
-   *  edit would leave a textarea open underneath a row now behaving as
-   *  a tap target for range extension instead of text input. */
-  async function handleSelectBlocks(id: string) {
-    if (editingId()) await commitEdit();
-    haptic("medium");
-    setSelection(startSelection(id));
-  }
 
-  /** A tap on any row while a selection is active — grows or shrinks
-   *  the range to meet it. Reachable only through `<BlockRow />`'s
-   *  `onSelectTap`, which mobile only wires while `selection()` is
-   *  non-null, but this stays defensive (no-op) if that ever changes. */
-  function handleSelectTap(id: string) {
-    const sel = selection();
-    if (!sel) return;
-    setSelection(extendSelectionTo(sel, id));
-  }
 
-  /** Toolbar `▲`/`▼` — grow the range by exactly one visible row, the
-   *  discrete equivalent of the desktop's `Shift+↑`/`Shift+↓`
-   *  (`SelectRangeUp` / `SelectRangeDown`) for a row that isn't
-   *  directly reachable by tap without scrolling. */
-  function handleGrowUp() {
-    const sel = selection();
-    const cur = view();
-    if (!sel || !cur) return;
-    setSelection(growSelectionUp(sel, cur.outline));
-  }
-  function handleGrowDown() {
-    const sel = selection();
-    const cur = view();
-    if (!sel || !cur) return;
-    setSelection(growSelectionDown(sel, cur.outline));
-  }
 
-  /** Leave selection mode. Captures the range as `lastSelection`
-   *  first — every exit does (the toolbar's Done, a yank, a delete —
-   *  vim's `gv` convention: `y`/`d` also drop out of Visual but leave
-   *  the range reselectable). */
-  function exitSelection() {
-    const sel = selection();
-    if (sel) setLastSelection(sel);
-    setSelection(null);
-  }
 
-  /** Context-menu "Reselect last selection" — vim `gv`. Only offered
-   *  (see `buildContextActions`'s `canReselect`) when `lastSelection`
-   *  still resolves against the live outline; a peer edit or a fold
-   *  can strand an endpoint between sessions. */
-  function handleReselectLast() {
-    const sel = lastSelection();
-    const cur = view();
-    if (!sel || !cur || !selectionIsLive(sel, cur.outline)) return;
-    haptic("medium");
-    setSelection(sel);
-  }
 
-  /** Every block id the active selection covers, in DFS visible
-   *  order (top of the range first) — the ordering every range op
-   *  below needs, in one place so indent/move/yank/delete can't
-   *  disagree about it. `null` when there's no selection or an
-   *  endpoint has left the outline. */
-  function currentRangeIds(): string[] | null {
-    const sel = selection();
-    const cur = view();
-    if (!sel || !cur) return null;
-    const range = visualRangeIds(sel.anchorId, sel.cursorId, cur.outline);
-    if (!range) return null;
-    const ids = flattenVisible(cur.outline);
-    const lo = ids.indexOf(range.lo);
-    const hi = ids.indexOf(range.hi);
-    if (lo === -1 || hi === -1) return null;
-    return ids.slice(lo, hi + 1);
-  }
 
-  /** Walk every block in the range and fire `op` for each — the
-   *  shared body behind Indent/Outdent/Move-range. `reverse` walks
-   *  bottom-up: mirrors the desktop's `applyVisualBlockOp` exactly
-   *  (a move-down has to clear the block *below* the range before its
-   *  neighbours slide into place, or an ascending walk drags each
-   *  block over its own not-yet-moved neighbour). The range stays
-   *  selected afterward (vim convention — the user can repeat the
-   *  op), matching the desktop's Indent/Outdent/Move handlers. */
-  async function applyRangeOp(
-    op: (pid: string, id: string) => Promise<PageView>,
-    reverse = false,
-  ) {
-    const pid = pageId();
-    const ids = currentRangeIds();
-    if (!pid || !ids || ids.length === 0) return;
-    const targets = reverse ? [...ids].reverse() : ids;
-    let lastView: PageView | undefined;
-    for (const id of targets) {
-      const v = await withError(() => op(pid, id));
-      if (v) lastView = v;
-    }
-    if (lastView) applyView(lastView);
-  }
 
-  async function handleIndentRange() {
-    haptic("light");
-    await applyRangeOp((pid, id) => indentBlock(pid, id));
-  }
-  async function handleOutdentRange() {
-    haptic("light");
-    await applyRangeOp((pid, id) => outdentBlock(pid, id));
-  }
-  async function handleMoveRangeUp() {
-    haptic("light");
-    await applyRangeOp((pid, id) => moveBlockUp(pid, id));
-  }
-  /** Bottom-up walk (see `applyRangeOp`'s doc) — the last block in the
-   *  range has to clear the block below the range first. */
-  async function handleMoveRangeDown() {
-    haptic("light");
-    await applyRangeOp((pid, id) => moveBlockDown(pid, id), true);
-  }
 
-  /**
-   * Toolbar "Copy" — serialize the whole range as clean outl markdown
-   * to the OS clipboard (the backend drops a block whose ancestor is
-   * also in the range, so a parent+child selection doesn't duplicate
-   * the child — same guarantee the desktop's `YankRange` documents).
-   * Exits selection afterward, matching vim's `y` — the desktop's
-   * `YankRange` does the same via `exitVisual()`.
-   */
-  async function handleYankRange() {
-    const ids = currentRangeIds();
-    if (!ids || ids.length === 0) return;
-    haptic("light");
-    try {
-      const md = await copyMarkdown(ids);
-      await navigator.clipboard?.writeText(md);
-    } catch {
-      // Best-effort — same posture as the single-block "Copy text"
-      // action; some webviews refuse `navigator.clipboard` outside a
-      // user gesture chain.
-    }
-    exitSelection();
-  }
 
-  /** Toolbar "Delete" — always confirms (`<JournalDeleteDialogs>` via
-   *  `pendingRangeDelete`), unlike the single-block swipe delete
-   *  (which only prompts when that one block has descendants): a
-   *  range is N blocks, any of which may carry children the user
-   *  can't see from the toolbar. */
-  function handleDeleteRangeRequest() {
-    const ids = currentRangeIds();
-    if (!ids || ids.length === 0) return;
-    haptic("warning");
-    setPendingRangeDelete(ids);
-  }
 
-  /** Bottom-up delete (children before parents) — mirrors the
-   *  desktop's `DeleteRange`: when the range covers a parent and its
-   *  descendants, deleting the parent first moves the whole subtree to
-   *  trash and the follow-up delete on a descendant then fails
-   *  ("already in trash"). `withError` records that per-id instead of
-   *  aborting, so one bad id can't strand the rest of the range. */
-  async function performDeleteRange(ids: string[]) {
-    const pid = pageId();
-    if (!pid) return;
-    if (editingId() && ids.includes(editingId()!)) setEditingId(null);
-    let lastView: PageView | undefined;
-    for (let i = ids.length - 1; i >= 0; i--) {
-      const v = await withError(() => deleteBlock(pid, ids[i]));
-      if (v) lastView = v;
-    }
-    if (lastView) applyView(lastView);
-    exitSelection();
-  }
 
   /**
    * Revert the last committed block mutation on this page
@@ -1531,37 +1153,9 @@ export function Journal() {
     }
   }
 
-  async function handleIndent(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    haptic("light");
-    const next = await withError(() => indentBlock(pid, id));
-    if (next) applyView(next);
-  }
 
-  async function handleOutdent(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    haptic("light");
-    const next = await withError(() => outdentBlock(pid, id));
-    if (next) applyView(next);
-  }
 
-  async function handleMoveUp(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    haptic("light");
-    const next = await withError(() => moveBlockUp(pid, id));
-    if (next) applyView(next);
-  }
 
-  async function handleMoveDown(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    haptic("light");
-    const next = await withError(() => moveBlockDown(pid, id));
-    if (next) applyView(next);
-  }
 
   /**
    * Import a file (PDF, image, …) via the system document picker and
@@ -2205,10 +1799,10 @@ export function Journal() {
                   onStartEdit={startEdit}
                   onDraftChange={setDraft}
                   onCommitEdit={commitEdit}
-                  onToggleTodo={handleToggleTodo}
-                  onDelete={handleDelete}
-                  onIndent={handleIndent}
-                  onOutdent={handleOutdent}
+                  onToggleTodo={blockOps.toggleTodo}
+                  onDelete={blockOps.requestDelete}
+                  onIndent={blockOps.indent}
+                  onOutdent={blockOps.outdent}
                   onCreateAfter={handleCreateAfter}
                   onToggleCollapse={handleToggleCollapse}
                   onFocusBlock={handleFocusBlock}
@@ -2232,7 +1826,7 @@ export function Journal() {
                   }}
                   selectionMode={selection() !== null}
                   selectionSet={selectionSet()}
-                  onSelectTap={handleSelectTap}
+                  onSelectTap={selectionOps.selectTap}
                 />
               )}
             </For>
@@ -2376,9 +1970,9 @@ export function Journal() {
         pendingBlock={pendingDelete()}
         pendingRange={pendingRangeDelete()}
         onCancelBlock={() => setPendingDelete(null)}
-        onConfirmBlock={(id) => void performDelete(id)}
+        onConfirmBlock={(id) => void blockOps.performDelete(id)}
         onCancelRange={() => setPendingRangeDelete(null)}
-        onConfirmRange={(ids) => void performDeleteRange(ids)}
+        onConfirmRange={(ids) => void selectionOps.performDeleteRange(ids)}
       />
 
       <BlockContextMenu
@@ -2388,12 +1982,12 @@ export function Journal() {
           contextMenuBlockId(),
           view(),
           {
-            indent: handleIndent,
-            outdent: handleOutdent,
-            moveUp: handleMoveUp,
-            moveDown: handleMoveDown,
-            toggleTodo: handleToggleTodo,
-            delete: handleDelete,
+            indent: blockOps.indent,
+            outdent: blockOps.outdent,
+            moveUp: blockOps.moveUp,
+            moveDown: blockOps.moveDown,
+            toggleTodo: blockOps.toggleTodo,
+            delete: blockOps.requestDelete,
             runCode: handleRunCodeBlock,
             insertTemplate: (id) => setTemplateBlockId(id),
             properties: (id) =>
@@ -2413,13 +2007,13 @@ export function Journal() {
                 // user gesture chain; failing silently is acceptable.
               }
             },
-            copyBlock: (id) => void handleCopyBlock(id),
-            pasteBlock: (id) => void handlePasteBlock(id),
-            cutBlock: (id) => void handleCutBlock(id),
-            copyBlockRef: (id) => void handleCopyBlockRef(id),
+            copyBlock: (id) => void blockOps.copyBlock(id),
+            pasteBlock: (id) => void blockOps.pasteBlock(id),
+            cutBlock: (id) => void blockOps.cutBlock(id),
+            copyBlockRef: (id) => void blockOps.copyBlockRef(id),
             newBlockAbove: (id) => void handleCreateBefore(id),
-            selectBlocks: (id) => void handleSelectBlocks(id),
-            reselectSelection: () => handleReselectLast(),
+            selectBlocks: (id) => void selectionOps.selectBlocks(id),
+            reselectSelection: () => selectionOps.reselectLast(),
           },
           // Reading the signal here (not inside a handler) is what
           // makes this reactive: `actions=` is a Solid prop getter, so
@@ -2443,16 +2037,16 @@ export function Journal() {
 
       <SelectionToolbar
         open={selection() !== null}
-        count={currentRangeIds()?.length ?? 0}
-        onGrowUp={handleGrowUp}
-        onGrowDown={handleGrowDown}
-        onIndent={() => void handleIndentRange()}
-        onOutdent={() => void handleOutdentRange()}
-        onMoveUp={() => void handleMoveRangeUp()}
-        onMoveDown={() => void handleMoveRangeDown()}
-        onCopy={() => void handleYankRange()}
-        onDelete={handleDeleteRangeRequest}
-        onDone={exitSelection}
+        count={selectionOps.currentRangeIds()?.length ?? 0}
+        onGrowUp={selectionOps.growUp}
+        onGrowDown={selectionOps.growDown}
+        onIndent={() => void selectionOps.indentRange()}
+        onOutdent={() => void selectionOps.outdentRange()}
+        onMoveUp={() => void selectionOps.moveRangeUp()}
+        onMoveDown={() => void selectionOps.moveRangeDown()}
+        onCopy={() => void selectionOps.yankRange()}
+        onDelete={selectionOps.requestDeleteRange}
+        onDone={selectionOps.exit}
       />
 
       <TemplateSheet

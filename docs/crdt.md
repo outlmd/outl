@@ -615,7 +615,7 @@ The cause is structural, not a weight to tune: a cycle needs `node` to be an **a
 There is almost no ancestry to collide with.
 
 So `cycle_dense_program_strategy()` is a **second** generator rather than a reshaping of the first — a deterministic 5-node chain prelude (so `i < j` implies ancestor) plus a body whose moves target `(n + offset) % 5`.
-It reaches **22.41% of structural ops rejected, in 95.5% of programs**, at mean depth 2.35.
+It reaches **21.7-24.3% of structural ops rejected, in 179-191 of every 200 programs** (40 samples of 200), at mean depth 2.35.
 Crucially the rejections are *transitive* — an ancestor moved under its own descendant several levels down — so the full `creates_cycle` walk runs rather than only the immediate-parent case.
 
 Reshaping the shared generator instead was rejected for a reason worth recording.
@@ -631,7 +631,9 @@ Four further properties run on it:
 8. `duplicating_a_rejected_move_leaves_the_tree_and_the_log_alone` — property 2 over dense programs.
    A dedup keyed on *effect* ("this op did nothing, drop it") passes property 2 and fails this one.
 9. `the_cycle_dense_generator_rejects_far_more_moves_than_the_shared_one` — the coverage claim itself, made fail-able.
-   Absolute floors (≥15% of structural ops, ≥90% of programs) plus a ≥5× ratio, because the shared rate samples at 2.4–3.4% and a bare ratio would flip on noise.
+   Three **absolute** bounds — dense ≥15% of structural ops, ≥85% of programs hit, broad ≤10% — and deliberately no ratio.
+   Measured over 40 samples of 200 programs: broad 1.8–5.1%, dense 21.7–24.3%, dense hits 179–191/200.
+   The dense rate is stable to ±5% of itself while the broad rate swings almost 3×, so a ratio between them inherits the denominator's noise: the earlier `≥5×` bound had an observed minimum of 5.05 and failed about one run in twelve ([#317](https://github.com/outlmd/outl/issues/317)).
 
 ### Regression: `Op::Create` honors the cycle guard
 

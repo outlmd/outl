@@ -329,6 +329,43 @@ export function visualRangeIds(
 }
 
 /**
+ * Every block id a Visual range covers, in DFS visible order, top of the
+ * range first.
+ *
+ * This is what a range *operation* wants, and it is one function rather
+ * than four because it was four: the desktop spelled it inline in
+ * `applyVisualBlockOp`, `YankRange` and `DeleteRange`, and mobile had a
+ * fourth copy in `Journal.selection-ops.ts`. Every range op (indent,
+ * outdent, move, yank, delete, on either client) has to agree about
+ * which blocks are in the range and in what order, and a comment saying
+ * the copies match is not something that can fail.
+ *
+ * Returns `null` when there is no range: either endpoint unset, or
+ * either endpoint no longer visible (a collapsed subtree or a peer edit
+ * shifted the outline between Visual entry and this read). **That guard
+ * is load-bearing** — `indexOf` returns `-1` for a missing endpoint, and
+ * `ids.slice(-1, hi + 1)` is not empty, it is the last block of the
+ * page. Three of the four original copies omitted it, so a stale anchor
+ * turned a range op into a silent one-block op on whatever happened to
+ * be last.
+ *
+ * One `flattenVisible` walk, where {@link visualRangeIds} plus a caller
+ * re-flattening cost two.
+ */
+export function visibleRangeSlice(
+  anchor: string | null,
+  cursor: string | null,
+  blocks: BlockNode[],
+): string[] | null {
+  if (!anchor || !cursor) return null;
+  const ids = flattenVisible(blocks);
+  const a = ids.indexOf(anchor);
+  const c = ids.indexOf(cursor);
+  if (a === -1 || c === -1) return null;
+  return ids.slice(Math.min(a, c), Math.max(a, c) + 1);
+}
+
+/**
  * Build the **set of block ids inside the Visual range** in one DFS
  * walk. The parent component (`<OutlineView />`) memoises the result
  * inside a `createMemo`; every `<BlockRow />` then answers membership
