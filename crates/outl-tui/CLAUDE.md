@@ -169,7 +169,14 @@ TUI-specific contracts worth remembering:
 ## Visual conventions
 
 - Selected block is highlighted with a colored bullet.
-- In Insert mode, a `▏` caret marks cursor position inside the block.
+- In Insert mode the caret **underlines the character it sits before** rather than printing a glyph of its own.
+  A `▏` spliced between two characters costs a terminal column, so the whole tail of the line shifted one cell right for as long as the cursor sat there, and jittered back and forth as it moved ([#320](https://github.com/outlmd/outl/issues/320)).
+  Past the end of the line there is no character to mark, so the `▏` stays — appended after the last cell it has nothing to its right to shift.
+  The underline is what makes the caret readable on a space, where `cursor_caret_fg` alone paints nothing — and in the four presets whose `cursor_caret_fg` *is* `fg`, it is the whole cursor.
+  `Theme::cursor_caret_on_char` is the single owner of that style, and it lives in `theme.rs` on purpose: that file declares itself the owner of the modifier formula, so a modifier decided in a view module would be a second owner of it.
+  **A space the cursor sits on is not a separator.** `view::wrap` absorbs and trims spaces at a wrap boundary, which was safe while the caret was its own glyph and stopped being safe the moment the caret became the cell; `push_wrapped` takes the cursor's style so it can tell the two apart.
+  Recorded gap: the caret styles one `char`, not a grapheme cluster, so on a zero-width continuation code point (combining accent, ZWJ) it paints nothing. Needs segmentation, which this workspace does not depend on.
+  The overlay and property-row inputs keep their trailing `▏` for the same reason the end-of-line case does: they are append-only (no `cursor_col` in `PropertyEdit`), so the caret is always past the last character.
 - In Normal mode on the selected block, a block cursor (white bg) sits on the character under `cursor_col`.
 - Other (non-focused) blocks render markdown prettily: `**bold**` shows as bold without asterisks,
   `*italic*` as italic,
@@ -210,7 +217,7 @@ TUI-specific contracts worth remembering:
   Terminals don't reflow, and `Paragraph::wrap` can't be used because it expands lines *after* layout and would desync the `selected_line` scroll index.
   So `view::wrap::push_wrapped` emits the wrapped `Line`s up front: the first visual row keeps the bullet/fold `head`, continuations re-indent under the text column, and the `│ ` indent rails repeat on every row.
   Wrapping runs on the already-styled `Span`s (post-tokenization), so a break never splits a `**bold**` token back into literal asterisks.
-  **Cursor rows (Insert / Normal-selected) wrap too** — `emit_row_with_cursor` bakes the caret / block cursor into the row's `Span`s *before* `push_wrapped` runs.
+  **Cursor rows (Insert / Normal-selected) wrap too** — `emit_row_with_cursor` bakes the caret / block cursor into the row's `Span`s *before* `push_wrapped` runs, and returns the style it used so the wrapper can protect that cell (see the caret bullet under Visual conventions).
   Reflowing just carries the cursor onto its wrapped visual row: the char offset was already consumed turning it into a span, so there's nothing left to desync.
   The earlier "cursor rows pass width `0`" workaround was the actual #99 regression: the selected block stayed on one overflowing line and only wrapped once the cursor left it (`viewing mode won't wrap until I navigate away`).
   `text_width == 0` is still the "don't wrap" sentinel, but only headless renders pass it now.

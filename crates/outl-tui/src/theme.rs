@@ -37,7 +37,10 @@ fn hex_to_color(s: &str) -> Color {
 /// `italic`, `CROSSED_OUT` on `strike`) are consistent across every
 /// preset — only the hues vary — so the formula is hard-coded here.
 /// A new field in the palette = a new field in `Theme` + a line
-/// below.
+/// below. The one modifier applied outside this function is
+/// [`Theme::cursor_caret_on_char`], and it lives in this file for the
+/// same reason: a modifier decided in a view module is a second owner
+/// of the formula.
 fn theme_from_palette(name: &'static str, p: &Palette) -> Theme {
     Theme {
         name,
@@ -144,7 +147,9 @@ pub struct Theme {
     pub selected_bullet: Style,
     /// Single-char block cursor (vim style) in Normal mode.
     pub cursor_block: Style,
-    /// Thin caret used at end-of-line and in Insert mode.
+    /// Insert-mode caret past the end of the line, drawn as a `▏`.
+    /// On a character the caret uses
+    /// [`Theme::cursor_caret_on_char`] instead.
     pub cursor_caret: Style,
 
     // --- inline tokens (consumed by render_markdown_inline / highlight_inline) ---
@@ -205,6 +210,32 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The Insert-mode caret when it sits *on* a character.
+    ///
+    /// The caret marks the cell it precedes instead of printing a `▏`
+    /// of its own: a glyph spliced between two characters costs a
+    /// terminal column, and the whole tail of the line shifts one cell
+    /// right for as long as the cursor sits there
+    /// ([#320](https://github.com/outlmd/outl/issues/320)).
+    ///
+    /// The underline is load-bearing, not decoration. `cursor_caret`
+    /// is a foreground colour, and a foreground colour paints nothing
+    /// on a space — which is where a caret in prose spends much of its
+    /// time. It also paints nothing in the four presets whose
+    /// `cursor_caret_fg` *is* `fg` (`light`, `dracula`, `nord`,
+    /// `monokai`) and in the two ANSI themes over a terminal already
+    /// using that foreground. There the underline is the whole cursor.
+    ///
+    /// Known gap, recorded rather than fixed: the caret styles a
+    /// single `char`, not a grapheme cluster. Parked on a zero-width
+    /// continuation code point (a combining accent, a ZWJ inside an
+    /// emoji sequence) it paints a zero-width cell and disappears.
+    /// Closing it properly needs grapheme segmentation, which is not
+    /// a dependency of this workspace today.
+    pub fn cursor_caret_on_char(&self) -> Style {
+        self.cursor_caret.add_modifier(Modifier::UNDERLINED)
+    }
+
     /// Base style for elevated surfaces (popups, toasts): `popup_bg`
     /// background plus the theme's base text color. Every overlay
     /// paints this before its content so unstyled spans inherit a

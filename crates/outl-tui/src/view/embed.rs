@@ -94,7 +94,7 @@ pub(crate) fn emit_embedded_children(
         }
         let head = vec![Span::styled("↳ ", app.theme.dim)];
         let content = render_pretty_block_text(&child.text, &app.theme, &app.index);
-        push_wrapped(guides, head, content, text_width, out);
+        push_wrapped(guides, head, content, text_width, None, out);
         emit_embedded_children(
             &child.children,
             outer_indent,

@@ -106,7 +106,7 @@ If you add a new field to `Theme`, **every preset must set it** — the compiler
 | `bullet` | The `- ` glyph on a regular block |
 | `selected_bullet` | The `- ` glyph on the focused block |
 | `cursor_block` | Vim-style block cursor (char under cursor in Normal) |
-| `cursor_caret` | Thin caret (`▏`) at end-of-line or in Insert |
+| `cursor_caret` | Insert-mode caret: underlines the character it precedes, drawn as a thin `▏` past end-of-line |
 | `property_key` / `property_value` | `key:: value` lines |
 | `heading` | Page title in the header |
 
@@ -171,6 +171,8 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 - **Backgrounds**: the RGB presets (`outl`, `outl-light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`) paint `bg` across the whole TUI canvas and use `fg` as the base text color, so a light theme stays readable on a dark terminal (and vice versa).
   Only the two ANSI presets (`default-dark`, `light`) keep `Color::Reset` and inherit the terminal's own background/foreground — that's their point.
 - **Underline on `ref_link` and `tag_link` is intentional.** They're the only "clickable" things in pretty-render mode, and the underline is the visual affordance.
+  The Insert-mode caret underlines too (it marks the character it precedes rather than printing a glyph — [#320](https://github.com/outlmd/outl/issues/320)), and on a link character it also swaps the hue to `cursor_caret_fg` and adds `BOLD`, so the two never read as the same thing.
+- **Pick a `cursor_caret_fg` that differs from `fg`.** Four shipped presets (`light`, `dracula`, `nord`, `monokai`) set them equal, which leaves the underline carrying the caret on its own. That is legible, but a distinct hue is what makes the caret findable at a glance in a wall of text.
 - **Contrast matters more than tone.** Test your theme against a workspace with lots of refs, tags, code, and TODOs.
 
 ## How each client consumes the palette

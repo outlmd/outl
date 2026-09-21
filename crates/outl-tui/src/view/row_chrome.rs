@@ -69,7 +69,7 @@ pub(crate) fn push_property_row(
         Span::styled(format!("{key}:: "), app.theme.property_key),
         Span::styled(value.to_string(), app.theme.property_value),
     ];
-    push_wrapped(guides, head, content, text_width, out);
+    push_wrapped(guides, head, content, text_width, None, out);
 }
 
 /// Fold indicator drawn before the bullet on the bullet row.

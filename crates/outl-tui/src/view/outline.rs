@@ -237,7 +237,7 @@ pub(crate) fn render_block(
 /// lives in [`outl_md::view`]; this enum carries the *TUI-flavored*
 /// detail of "caret vs block cursor".
 pub(crate) enum RenderMode {
-    /// Insert mode — show the live buffer with a thin caret at
+    /// Insert mode — show the live buffer with the caret on
     /// `cursor_char`. Markdown is rendered raw so columns match bytes.
     Editing { text: String, cursor_char: usize },
     /// Normal mode on the selected block — show a vim-style block
@@ -337,8 +337,15 @@ pub(crate) fn emit_block_lines(
         // If the cursor is on this row we always go raw — we want
         // bytes to line up with what the user typed, regardless of
         // fence state.
+        let mut cursor_cell: Option<Style> = None;
         if let (Some(col), Some(style)) = (row.cursor_col, cursor_style) {
-            emit_row_with_cursor(row.text, col, style, &app.theme, &mut content);
+            cursor_cell = Some(emit_row_with_cursor(
+                row.text,
+                col,
+                style,
+                &app.theme,
+                &mut content,
+            ));
         } else {
             // A bullet row whose text opens a code fence (`` ```lisp ``)
             // is *both* a bullet and a fence marker — style the text
@@ -377,50 +384,54 @@ pub(crate) fn emit_block_lines(
         // turning it into a span, there's nothing left to desync. A
         // `text_width` of 0 (headless render) is still the "don't wrap"
         // sentinel for every row, cursor or not.
-        push_wrapped(guides, head, content, text_width, out);
+        push_wrapped(guides, head, content, text_width, cursor_cell, out);
     }
 }
 
 /// Draw one row with the cursor highlighted at `col` (a char index
 /// into `text`). Splits the row in three: left of cursor, the char
-/// under the cursor (or a thin caret if past-end), right of cursor.
+/// the cursor lands on (or a `▏` if past-end), right of cursor.
+///
+/// Returns the [`Style`] it painted the cursor cell with, which
+/// [`push_wrapped`] needs to tell that cell apart from a discardable
+/// separator when the row wraps on a space (#320).
 fn emit_row_with_cursor(
     text: &str,
     col: usize,
     style: CursorStyle,
     theme: &Theme,
     spans: &mut Vec<Span<'static>>,
-) {
+) -> Style {
     let byte = byte_index_for_char(text, col);
     let (left, right) = text.split_at(byte);
     spans.extend(highlight_inline(left, theme));
+    // Neither cursor adds a cell: each paints the character it lands
+    // on. Past the end there is no character to paint, so both fall
+    // back to a `▏` — appended after the last cell it has nothing to
+    // its right to shift.
+    let (on_char, past_end) = match style {
+        CursorStyle::Caret => (theme.cursor_caret_on_char(), theme.cursor_caret),
+        CursorStyle::Block => (theme.cursor_block, theme.cursor_block),
+    };
     let mut right_chars = right.chars();
-    match (right_chars.next(), style) {
-        (Some(ch), CursorStyle::Caret) => {
-            // Thin caret BEFORE the next char.
-            spans.push(Span::styled("▏", theme.cursor_caret));
-            spans.push(Span::raw(ch.to_string()));
+    match right_chars.next() {
+        Some(ch) => {
+            spans.push(Span::styled(ch.to_string(), on_char));
             let rest: String = right_chars.collect();
             spans.extend(highlight_inline(&rest, theme));
         }
-        (Some(ch), CursorStyle::Block) => {
-            // Inverted-color block cursor on the char under it.
-            spans.push(Span::styled(ch.to_string(), theme.cursor_block));
-            let rest: String = right_chars.collect();
-            spans.extend(highlight_inline(&rest, theme));
-        }
-        (None, CursorStyle::Caret) => {
-            spans.push(Span::styled("▏", theme.cursor_caret));
-        }
-        (None, CursorStyle::Block) => {
-            spans.push(Span::styled("▏", theme.cursor_block));
+        None => {
+            spans.push(Span::styled("▏", past_end));
+            return past_end;
         }
     }
+    on_char
 }
 
-/// Cursor visual style. `Caret` is the thin `▏` (Insert mode);
-/// `Block` is the inverted single-char box (Normal mode on the
-/// selected block).
+/// Cursor visual style: `Caret` is Insert mode (see
+/// `Theme::cursor_caret_on_char`),
+/// `Block` the inverted single-char box on the selected block in
+/// Normal mode.
 #[derive(Debug, Clone, Copy)]
 enum CursorStyle {
     Caret,
@@ -428,202 +439,4 @@ enum CursorStyle {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use outl_core::id::ActorId;
-    use outl_core::workspace::Workspace;
-    use tempfile::TempDir;
-    use unicode_width::UnicodeWidthStr;
-
-    fn test_app() -> (App, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let actor = ActorId::new();
-        let ws = Workspace::open_in_memory(actor).unwrap();
-        let app = App::new(
-            dir.path().to_path_buf(),
-            ws,
-            actor,
-            crate::theme::default_theme(),
-            false,
-        )
-        .unwrap();
-        (app, dir)
-    }
-
-    /// Concatenate a rendered line's spans into one `String`.
-    fn line_text(line: &Line<'_>) -> String {
-        line.spans.iter().map(|s| s.content.as_ref()).collect()
-    }
-
-    /// Render one block at indent 0 with a leaf bullet and no auto-run,
-    /// the shape every wrap regression test needs. Keeps each test to
-    /// its `mode` + `width` instead of repeating the eight-arg call.
-    fn render_block_lines(app: &App, mode: RenderMode, width: u16) -> Vec<Line<'static>> {
-        let mut out = Vec::new();
-        emit_block_lines(
-            0,
-            app.theme.bullet,
-            &mode,
-            false,
-            FoldMarker::None,
-            app,
-            &mut out,
-            width,
-        );
-        out
-    }
-
-    // The text used by the wrap regression tests: 43 cells of prose
-    // that cannot fit in a 16-cell pane, so a correct renderer must
-    // emit more than one visual row.
-    const LONG: &str = "the quick brown fox jumps over the lazy dog";
-
-    /// #99: the selected block in Normal mode used to render on a single
-    /// overflowing line and only wrap once the cursor moved off it. It
-    /// must wrap while the cursor sits on it.
-    #[test]
-    fn normal_cursor_block_wraps_to_pane_width() {
-        let (app, _dir) = test_app();
-        let mode = RenderMode::NormalCursor {
-            text: LONG.into(),
-            cursor_char: 0,
-        };
-        let out = render_block_lines(&app, mode, 16);
-        assert!(out.len() > 1, "expected wrap, got {} line(s)", out.len());
-    }
-
-    /// #99: the same must hold in Insert mode, and the thin caret has to
-    /// survive the reflow (it's baked into the spans before wrapping).
-    #[test]
-    fn editing_block_wraps_and_keeps_the_caret() {
-        let (app, _dir) = test_app();
-        let mode = RenderMode::Editing {
-            text: LONG.into(),
-            cursor_char: 0,
-        };
-        let out = render_block_lines(&app, mode, 16);
-        assert!(out.len() > 1, "expected wrap, got {} line(s)", out.len());
-        let has_caret = out.iter().any(|l| line_text(l).contains('▏'));
-        assert!(has_caret, "caret lost after wrap");
-    }
-
-    /// The block cursor travels with its character across a wrap break:
-    /// a cursor on a word that lands on a continuation row still paints
-    /// exactly one inverted cell.
-    #[test]
-    fn block_cursor_survives_the_wrap_break() {
-        let (app, _dir) = test_app();
-        // Cursor on the "d" of the trailing "dog", past the first
-        // 16-cell row, so it can only be drawn on a continuation row.
-        let cursor_char = LONG.len() - 3;
-        let mode = RenderMode::NormalCursor {
-            text: LONG.into(),
-            cursor_char,
-        };
-        let out = render_block_lines(&app, mode, 16);
-        assert!(out.len() > 1, "expected wrap, got {} line(s)", out.len());
-        let cursor_cells = out
-            .iter()
-            .flat_map(|l| &l.spans)
-            .filter(|s| s.style == app.theme.cursor_block)
-            .count();
-        assert_eq!(cursor_cells, 1, "block cursor must appear exactly once");
-    }
-
-    /// A short block under the cursor still renders as a single line:
-    /// wrapping only kicks in past the pane width, cursor or not.
-    #[test]
-    fn short_cursor_block_stays_one_line() {
-        let (app, _dir) = test_app();
-        let mode = RenderMode::NormalCursor {
-            text: "short".into(),
-            cursor_char: 0,
-        };
-        let out = render_block_lines(&app, mode, 80);
-        assert_eq!(out.len(), 1);
-    }
-
-    /// End-to-end of the #99 scenario: a page with one long block,
-    /// selected in Normal mode, rendered through the real
-    /// `render_outline` entry point into a narrow pane. The selected
-    /// block must occupy more than one visual line and the continuation
-    /// must re-indent under the bullet text.
-    #[test]
-    fn selected_block_wraps_through_render_outline() {
-        let (mut app, _dir) = test_app();
-        app.page = outl_md::parse::parse(&format!("- {LONG}"));
-        app.selected = 0;
-        app.cursor_col = 0;
-        app.mode = Mode::Normal;
-
-        let (lines, sel, _starts) = render_outline(&app.page, &app, 20);
-        assert_eq!(sel, Some(0), "selected block starts at line 0");
-        assert!(
-            lines.len() > 1,
-            "selected block must wrap, got {} line(s):\n{}",
-            lines.len(),
-            lines.iter().map(line_text).collect::<Vec<_>>().join("\n"),
-        );
-        // The continuation re-indents to the text column. Asserted as
-        // the exact pad: `starts_with("  ")` holds for any pad two
-        // cells or wider, so it kept passing right through #319.
-        assert!(line_text(&lines[0]).contains("- "));
-        let row = line_text(&lines[1]);
-        let pad = row.len() - row.trim_start_matches(' ').len();
-        assert_eq!(pad, 4, "continuation pad off the bullet column: {row:?}");
-    }
-
-    /// #319: every row a block owns starts in the block's *text*
-    /// column. A property row used to pad two cells and land under the
-    /// fold marker instead, four cells off on an `auto-run::` block.
-    ///
-    /// Rendered at indent 1 so the `│ ` guides are in the comparison
-    /// too: both rows build them, in two separate loops.
-    #[test]
-    fn a_property_row_starts_in_its_blocks_text_column() {
-        let (app, _dir) = test_app();
-        let block = |key: &str, children: Vec<OutlineNode>| OutlineNode {
-            text: "Define the scope".into(),
-            properties: vec![(key.into(), "x".into())],
-            children,
-        };
-        let child = block("priority", Vec::new());
-        // (shape, block, the property row's first token after the pad —
-        // `auto-run` carries a `property_glyph`, the others don't)
-        let cases = [
-            ("leaf", block("priority", Vec::new()), "priority:: "),
-            ("parent ▼", block("priority", vec![child]), "priority:: "),
-            (
-                "auto-run ⚡",
-                block("auto-run", Vec::new()),
-                "▶ auto-run:: ",
-            ),
-        ];
-
-        for (shape, node, token) in cases {
-            let mut out = Vec::new();
-            render_block(
-                &node,
-                1,
-                &mut 0,
-                &app,
-                &mut out,
-                &mut None,
-                &mut Vec::new(),
-                0,
-            );
-            let column_of = |line: &Line<'_>, token: &str| {
-                let text = line_text(line);
-                let at = text
-                    .find(token)
-                    .unwrap_or_else(|| panic!("{shape}: no {token:?} in {text:?}"));
-                text[..at].width()
-            };
-            assert_eq!(
-                column_of(&out[1], token),
-                column_of(&out[0], "Define the scope"),
-                "{shape}: the property row is not in the block's text column"
-            );
-        }
-    }
-}
+mod tests;

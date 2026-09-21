@@ -201,8 +201,14 @@ The TUI skips the CSS half entirely: `theme_from_palette` (`crates/outl-tui/src/
 `#rrggbb` into `ratatui::Color::Rgb(r, g, b)` and re-applies a **fixed** modifier formula — hard-coded once,
 never per-preset, so only the hues vary between themes:
 
-- `UNDERLINED` on exactly the three link roles (`ref_link`, `tag_link`, `md_link`). They are the only
-  "clickable" things in pretty-render mode, and the underline is the affordance.
+- `UNDERLINED` on the three link roles (`ref_link`, `tag_link`, `md_link`) — the only "clickable" things
+  in pretty-render mode, and the underline is the affordance — plus the Insert-mode caret, which reaches
+  it through `Theme::cursor_caret_on_char` rather than a palette field. The caret is the one modifier
+  applied outside `theme_from_palette`, and it still lives in `theme.rs` so the formula keeps one owner.
+  It underlines because it paints the character it sits *before* instead of printing a glyph of its own
+  ([#320](https://github.com/outlmd/outl/issues/320)), and a foreground colour paints nothing on a space.
+  The two roles never collide on the same cell: a caret on a link char also swaps the hue to
+  `cursor_caret_fg` and adds `BOLD`.
 - `CROSSED_OUT` on `strike` **and** `todo_done_body`.
 - `ITALIC` on `italic` alone.
 - `BOLD` on emphasis, cursors and every reverse-video chip: `bold`, `selected_bullet`, `cursor_block`,
