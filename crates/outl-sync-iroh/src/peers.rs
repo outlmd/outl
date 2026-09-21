@@ -164,6 +164,29 @@ pub struct PeerEntry {
     pub added_at: String,
 }
 
+impl PeerEntry {
+    /// User-facing label: the alias when set, else a short hex prefix.
+    pub fn display_label(&self) -> String {
+        self.alias.clone().unwrap_or_else(|| self.short_hex())
+    }
+
+    /// Log-facing label: `"macbook-pro (a1b2c3d4)"` or just `"a1b2c3d4"`.
+    ///
+    /// Always carries the hex prefix so a line can be grep-correlated back to
+    /// `peers.json` or `outl peer list` without losing the human name.
+    pub fn log_label(&self) -> String {
+        let hex = self.short_hex();
+        match &self.alias {
+            Some(name) => format!("{name} ({hex})"),
+            None => hex,
+        }
+    }
+
+    fn short_hex(&self) -> String {
+        self.node_id[..self.node_id.len().min(8)].to_string()
+    }
+}
+
 /// Base64-encode an [`iroh::EndpointAddr`] (as JSON) for storage in a
 /// [`PeerEntry`] or a pairing ticket.
 pub fn encode_endpoint_addr(addr: &iroh::EndpointAddr) -> Result<String> {
@@ -445,6 +468,29 @@ impl PeersStore {
     /// List all trusted peers.
     pub fn list(&self) -> &[PeerEntry] {
         &self.inner.peers
+    }
+
+    /// Resolve a node id to its log-facing label (`"alias (hex)"` or bare hex).
+    ///
+    /// Falls back to the truncated hex prefix when the id is unknown to this
+    /// store (an unpaired or revoked peer on the inbound path).
+    pub fn log_label_for(&self, node_id: &str) -> String {
+        self.inner
+            .peers
+            .iter()
+            .find(|p| p.node_id == node_id)
+            .map(|p| p.log_label())
+            .unwrap_or_else(|| node_id[..node_id.len().min(8)].to_string())
+    }
+
+    /// Resolve a node id to its user-facing label (alias or short hex).
+    pub fn display_label_for(&self, node_id: &str) -> String {
+        self.inner
+            .peers
+            .iter()
+            .find(|p| p.node_id == node_id)
+            .map(|p| p.display_label())
+            .unwrap_or_else(|| node_id[..node_id.len().min(8)].to_string())
     }
 
     /// Path this store reads from / writes to

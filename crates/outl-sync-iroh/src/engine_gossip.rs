@@ -112,9 +112,12 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
                     incoming,
                 ) {
                     Ok(added) if added > 0 => {
+                        let label = crate::peers::PeersStore::load_or_default(&ctx.peers_path)
+                            .map(|s| s.log_label_for(&msg.delivered_from.to_string()))
+                            .unwrap_or_else(|_| msg.delivered_from.fmt_short().to_string());
                         info!(
                             "membership gossip: discovered {added} new peer(s) from {}",
-                            msg.delivered_from.fmt_short()
+                            label
                         );
                     }
                     Ok(_) => {}
@@ -155,12 +158,19 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
     // page slug in that field — so gating on it would silently drop a
     // mixed-version mesh to catch-up latency in exchange for no security at all.
     if let Err(refusal) = crate::authz::authorize_blocking(&ctx.peers_path, peer_node_id) {
+        let label = PeersStore::load_or_default(&ctx.peers_path)
+            .map(|s| s.log_label_for(&peer_node_id.to_string()))
+            .unwrap_or_else(|_| peer_node_id.fmt_short().to_string());
         debug!(
             "gossip: ignoring an announce from {} ({refusal:?})",
-            peer_node_id.fmt_short()
+            label
         );
         return;
     }
+
+    let label = PeersStore::load_or_default(&ctx.peers_path)
+        .map(|s| s.log_label_for(&peer_node_id.to_string()))
+        .unwrap_or_else(|_| peer_node_id.fmt_short().to_string());
 
     let conns = ctx.conns.clone();
     let wr = ctx.workspace_root.clone();
@@ -175,7 +185,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         let Some(_in_flight) = try_acquire_in_flight(&in_flight, peer_node_id) else {
             debug!(
                 "gossip: sync from {} already in flight, skipping",
-                peer_node_id.fmt_short()
+                label
             );
             return;
         };
@@ -197,7 +207,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
             Err(e) => {
                 warn!(
                     "gossip-triggered sync from {} failed: {e}",
-                    peer_node_id.fmt_short()
+                    label
                 );
                 health.record_failure(peer_node_id);
             }

@@ -506,10 +506,24 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
     let health = transport.peer_health();
     transport.shutdown();
 
+    let store = outl_sync_iroh::PeersStore::load_or_default(
+        &outl_sync_iroh::workspace_peers_path(path),
+    )
+    .ok();
+
     let online = health.iter().filter(|h| h.reachable).count();
-    println!(
-        "Sync pass complete — {online}/{} peer(s) reachable.",
-        health.len()
-    );
+    if health.is_empty() {
+        println!("Sync pass complete — no peers.");
+    } else {
+        println!("Sync pass complete — {online}/{} peer(s) reachable:", health.len());
+        for h in &health {
+            let label = store
+                .as_ref()
+                .map(|s| s.display_label_for(&h.node_id))
+                .unwrap_or_else(|| h.node_id[..h.node_id.len().min(8)].to_string());
+            let status = if h.reachable { "✓" } else { "✗" };
+            println!("  {status} {label}");
+        }
+    }
     Ok(output::EXIT_OK)
 }

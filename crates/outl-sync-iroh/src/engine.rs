@@ -716,16 +716,17 @@ async fn run_iroh(
         let prog = progress.clone();
         let nid = addr.id;
         let has_direct = !addr.is_empty();
+        let label = peer.log_label();
         tokio::spawn(async move {
             let Some(_in_flight) = try_acquire_in_flight(&in_flight, nid) else {
                 debug!(
                     "boot: sync to {} already in flight, skipping",
-                    nid.fmt_short()
+                    label
                 );
                 return;
             };
             info!(
-                peer = %nid.fmt_short(),
+                peer = %label,
                 has_direct_addrs = has_direct,
                 "boot: connecting to peer for initial sync"
             );
@@ -733,11 +734,11 @@ async fn run_iroh(
             let wid_snapshot = wid.read().expect("workspace id rwlock poisoned").clone();
             match delta_sync(&conns, addr, &wr, &wid_snapshot, actor, tx, &lock, &prog).await {
                 Ok(()) => {
-                    info!("boot: initial sync to {} ok", nid.fmt_short());
+                    info!("boot: initial sync to {} ok", label);
                     health.record_success(nid, started);
                 }
                 Err(e) => {
-                    warn!("boot: initial sync to {} failed: {e}", nid.fmt_short());
+                    warn!("boot: initial sync to {} failed: {e}", label);
                     health.record_failure(nid);
                 }
             }
