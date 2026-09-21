@@ -169,14 +169,15 @@ TUI-specific contracts worth remembering:
 ## Visual conventions
 
 - Selected block is highlighted with a colored bullet.
-- In Insert mode the caret **underlines the character it sits before** rather than printing a glyph of its own.
-  A `▏` spliced between two characters costs a terminal column, so the whole tail of the line shifted one cell right for as long as the cursor sat there, and jittered back and forth as it moved ([#320](https://github.com/outlmd/outl/issues/320)).
-  Past the end of the line there is no character to mark, so the `▏` stays — appended after the last cell it has nothing to its right to shift.
-  The underline is what makes the caret readable on a space, where `cursor_caret_fg` alone paints nothing — and in the four presets whose `cursor_caret_fg` *is* `fg`, it is the whole cursor.
-  `Theme::cursor_caret_on_char` is the single owner of that style, and it lives in `theme.rs` on purpose: that file declares itself the owner of the modifier formula, so a modifier decided in a view module would be a second owner of it.
-  **A space the cursor sits on is not a separator.** `view::wrap` absorbs and trims spaces at a wrap boundary, which was safe while the caret was its own glyph and stopped being safe the moment the caret became the cell; `push_wrapped` takes the cursor's style so it can tell the two apart.
-  Recorded gap: the caret styles one `char`, not a grapheme cluster, so on a zero-width continuation code point (combining accent, ZWJ) it paints nothing. Needs segmentation, which this workspace does not depend on.
-  The overlay and property-row inputs keep their trailing `▏` for the same reason the end-of-line case does: they are append-only (no `cursor_col` in `PropertyEdit`), so the caret is always past the last character.
+- In Insert mode the caret **marks the character it sits before** instead of splicing a `▏` into the text, which cost a column and shifted the tail of the line ([#320](https://github.com/outlmd/outl/issues/320)).
+  How it looks (underline, `cursor_caret_fg`, the `▏` past end-of-line) and how to theme it live in [`docs/theming.md`](../../docs/theming.md#tips) — don't duplicate them here.
+  The contracts this crate has to hold up:
+  `Theme::cursor_caret_on_char` is the single owner of the caret style, and it lives in `theme.rs` on purpose, because that file declares itself the owner of the modifier formula and a modifier decided in a view module would be a second owner of it.
+  **A space the cursor sits on is not a separator.**
+  `view::wrap` absorbs and trims spaces at a wrap boundary, which was safe while the caret was its own glyph and stopped being safe the moment the caret became the cell; `push_wrapped` takes the cursor's style so it can tell the two apart.
+  The overlay and property-row inputs keep their trailing `▏` because they are append-only (no `cursor_col` in `PropertyEdit`), so their caret is always past the last character.
+  Recorded gap: the caret styles one `char`, not a grapheme cluster, so on a zero-width continuation code point (combining accent, ZWJ) it paints nothing.
+  Closing that needs grapheme segmentation, which this workspace does not depend on.
 - In Normal mode on the selected block, a block cursor (white bg) sits on the character under `cursor_col`.
 - Other (non-focused) blocks render markdown prettily: `**bold**` shows as bold without asterisks,
   `*italic*` as italic,

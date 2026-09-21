@@ -164,21 +164,38 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ### Fixed
 
 - **The Insert-mode caret pushed every character to its right one column over in the TUI ([#320](https://github.com/outlmd/outl/issues/320)).**
-  `emit_row_with_cursor` drew the caret as a literal `▏` span spliced *between* two characters of the block's text. A terminal is a cell grid and a glyph costs a cell, so the tail of the line sat one column right of where it really was, and walked back and forth by one as the cursor moved through the text. The row was also one cell wider than the text, so a block near the pane edge wrapped a character earlier while it was being edited than it did the moment Esc was pressed.
+  `emit_row_with_cursor` drew the caret as a literal `▏` span spliced *between* two characters of the block's text.
+  A terminal is a cell grid and a glyph costs a cell, so the tail of the line sat one column right of where it really was, and walked back and forth by one as the cursor moved through the text.
+  The row was also one cell wider than the text, so a block near the pane edge wrapped a character earlier while it was being edited than it did the moment Esc was pressed.
 
-  The caret marks the character it sits before now — `cursor_caret_fg` plus an underline, on the cell that is already there. Nothing is inserted, so nothing moves. The underline is doing real work rather than decorating: `cursor_caret_fg` is a foreground colour, and a foreground colour paints nothing on a space, which is exactly where a caret in prose spends much of its time.
+  The caret marks the character it sits before now — `cursor_caret_fg` plus an underline, on the cell that is already there.
+  Nothing is inserted, so nothing moves.
+  The underline is doing real work rather than decorating: `cursor_caret_fg` is a foreground colour, and a foreground colour paints nothing on a space, which is exactly where a caret in prose spends much of its time.
 
-  Past the end of the line there is no character to mark, so the `▏` stays there. It has nothing to its right to shift, which is also why the overlay inputs (command palette, search, `key:: value` rows) keep theirs: `PropertyEdit` has no cursor column at all, so those carets are always past the last character.
+  Past the end of the line there is no character to mark, so the `▏` stays there.
+  It has nothing to its right to shift, which is also why the overlay inputs (command palette, search, `key:: value` rows) keep theirs: `PropertyEdit` has no cursor column at all, so those carets are always past the last character.
 
   The Normal-mode block cursor never had the bug — it inverts the character under it rather than adding one — which is why the report is specific to Insert.
 
-  **Making the caret a text cell handed it a second set of rules, and the first version of this fix broke against them.** `view::wrap` treats a space as a separator it may discard: absorbed at a wrap boundary so the next row doesn't lead with a blank, and trimmed off the end of a row that just pushed a word down. That was sound while the caret was its own glyph. The moment the caret *became* the cell, a caret parked on a space near a wrap boundary was thrown away and the user saw no cursor at all — columns 9 and 19 of a 43-cell block in a 16-cell pane, found by walking every column rather than picking one. `push_wrapped` now takes the style the cursor cell was painted with, so it can tell a load-bearing space from a separator. A blanket "a styled space is never a separator" rule was the wrong shape: it would also catch the spaces inside `**bold**`, `` `code` `` and `[[a page ref]]`, which really are separators. The same protection fixes the Normal-mode block cursor, which had the bug quietly before this change since it too paints a space in place.
+  **Making the caret a text cell handed it a second set of rules, and the first version of this fix broke against them.**
+  `view::wrap` treats a space as a separator it may discard: absorbed at a wrap boundary so the next row doesn't lead with a blank, and trimmed off the end of a row that just pushed a word down.
+  That was sound while the caret was its own glyph.
+  The moment the caret *became* the cell, a caret parked on a space near a wrap boundary was thrown away and the user saw no cursor at all — columns 9 and 19 of a 43-cell block in a 16-cell pane, found by walking every column rather than picking one.
+  `push_wrapped` now takes the style the cursor cell was painted with, so it can tell a load-bearing space from a separator.
+  A blanket "a styled space is never a separator" rule was the wrong shape: it would also catch the spaces inside `**bold**`, `` `code` `` and `[[a page ref]]`, which really are separators.
+  The same protection fixes the Normal-mode block cursor, which had the bug quietly before this change since it too paints a space in place.
 
   Two things deliberately not fixed, named so they are recorded rather than discovered:
 
-  The caret styles a single `char`, not a grapheme cluster. Parked on a zero-width continuation code point — a combining accent, a ZWJ inside an emoji sequence — it paints a zero-width cell and disappears. Arrow keys step per `char`, so the position is reachable. The old `▏` was visible there, at the price of splitting the cluster it was drawn inside. Closing this properly needs grapheme segmentation, which is not a dependency of this workspace.
+  The caret styles a single `char`, not a grapheme cluster.
+  Parked on a zero-width continuation code point — a combining accent, a ZWJ inside an emoji sequence — it paints a zero-width cell and disappears.
+  Arrow keys step per `char`, so the position is reachable.
+  The old `▏` was visible there, at the price of splitting the cluster it was drawn inside.
+  Closing this properly needs grapheme segmentation, which is not a dependency of this workspace.
 
-  And the caret is still painted by outl into the cell grid rather than handed to the terminal via its real cursor. A native cursor would blink and take the shape the user configured. Getting there means locating the caret's screen coordinates *after* wrapping and scrolling, and arbitrating the one terminal cursor between the outline and every overlay that draws its own.
+  And the caret is still painted by outl into the cell grid rather than handed to the terminal via its real cursor.
+  A native cursor would blink and take the shape the user configured.
+  Getting there means locating the caret's screen coordinates *after* wrapping and scrolling, and arbitrating the one terminal cursor between the outline and every overlay that draws its own.
 
 - **Block properties sat two columns to the left of the block they belong to in the TUI ([#319](https://github.com/outlmd/outl/issues/319)).**
   A bullet row spends four cells between the indent guides and the text: two for the fold slot (`▼ ` / `▶ ` / blank) and two for the `- ` bullet. Continuation rows mirrored that; property rows padded two, so a `priority:: high` landed under the fold marker instead of under the block's own text.

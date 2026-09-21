@@ -172,7 +172,10 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
   Only the two ANSI presets (`default-dark`, `light`) keep `Color::Reset` and inherit the terminal's own background/foreground — that's their point.
 - **Underline on `ref_link` and `tag_link` is intentional.** They're the only "clickable" things in pretty-render mode, and the underline is the visual affordance.
   The Insert-mode caret underlines too (it marks the character it precedes rather than printing a glyph — [#320](https://github.com/outlmd/outl/issues/320)), and on a link character it also swaps the hue to `cursor_caret_fg` and adds `BOLD`, so the two never read as the same thing.
-- **Pick a `cursor_caret_fg` that differs from `fg`.** Four shipped presets (`light`, `dracula`, `nord`, `monokai`) set them equal, which leaves the underline carrying the caret on its own. That is legible, but a distinct hue is what makes the caret findable at a glance in a wall of text.
+  The underline is what keeps the caret visible on a space, where a foreground colour alone paints nothing; past the end of the line there is no character to mark, so a thin `▏` is drawn there instead.
+- **Pick a `cursor_caret_fg` that differs from `fg`.**
+  Four shipped presets (`light`, `dracula`, `nord`, `monokai`) set them equal, which leaves the underline carrying the caret on its own.
+  That is legible, but a distinct hue is what makes the caret findable at a glance in a wall of text.
 - **Contrast matters more than tone.** Test your theme against a workspace with lots of refs, tags, code, and TODOs.
 
 ## How each client consumes the palette
