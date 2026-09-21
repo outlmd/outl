@@ -163,6 +163,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Block properties sat two columns to the left of the block they belong to in the TUI ([#319](https://github.com/outlmd/outl/issues/319)).**
+  A bullet row spends four cells between the indent guides and the text: two for the fold slot (`▼ ` / `▶ ` / blank) and two for the `- ` bullet. Continuation rows mirrored that; property rows padded two, so a `priority:: high` landed under the fold marker instead of under the block's own text.
+
+  There were three copies of that measurement and they had drifted in three directions, so the fix is one module rather than one patched line. `view::row_chrome` owns the fold slot, the `auto-run::` marker, the pad, and the whole `key:: value` row; the outline and the backlinks mini-outline both call into it.
+
+  **Two more bugs fell out of writing the test for the first one.** `⚡` measures two cells and the pad reserved one, so every continuation row of an `auto-run::` block was a column short — the glyph is a named constant now and a test pins the pad to its measured width. And the backlinks copy never drew the `property_glyph` at all, so the same `remind::` showed a `⏰` in the outline and nothing in the backlinks pane, with no test that could notice.
+
+  **A property row wraps now.** It was pushed as a bare `Line`, and the outline's `Paragraph` has no `.wrap()` (deliberately — wrapping after layout desyncs the scroll index), so a long `template::` was clipped at the right edge with nothing to indicate it. It goes through the same `push_wrapped` every block row uses, with the glyph in the `head` so a wrapped value re-indents under the key.
+
+  Still open, and deliberately: the glyph sits inline before the key, so a block carrying both `remind::` and `priority::` has its two keys in different columns. Moving the glyph into the fold slot would need one width for `▶ ` (two cells) and another for `⏰ ` (three), and reserving the slot for everyone would cost three dead cells on every property row of every block.
+
 - **A `lua` code block could run arbitrary shell, and no interpreter honoured its timeout ([#278](https://github.com/outlmd/outl/issues/278), [#279](https://github.com/outlmd/outl/issues/279)).**
   `runtimes/lua.rs` built its interpreter with `Lua::new()`, which loads mlua's `StdLib::ALL_SAFE` — and "safe" there means *memory-safe*, not sandboxed. It excludes `debug` and `ffi` and **includes** `os` (which carries `execute`), `io` and `package`. So a fenced ` ```lua ` block had a shell, arbitrary file read and write, and `getenv`, in 7ms:
 

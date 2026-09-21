@@ -5,27 +5,16 @@
 use crate::outline_ops::path_for_index;
 use crate::state::{App, Focus, Mode};
 use crate::theme::Theme;
+use crate::view::embed::{embed_only_handle, emit_embedded_children};
 use crate::view::inline::{highlight_inline, render_markdown_inline, render_pretty_block_text};
 use crate::view::wrap::push_wrapped;
-use outl_md::inline::{byte_index_for_char, tokenize, InlineTok};
+use outl_md::inline::byte_index_for_char;
 use outl_md::parse::{OutlineNode, ParsedPage};
 use outl_md::view::{block_to_rows, BlockRowKind};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-/// Maximum AST nesting depth we'll render inside a single embed
-/// expansion. Caps the size of the visual block we draw under one
-/// `!((blk-XXXXXX))` — a deeply nested source subtree gets truncated
-/// instead of flooding the outline.
-///
-/// **Not a cycle protector.** Embed-of-embed (a source block whose
-/// own text is another `!((blk-Y))`) is rendered inline with the `↳ `
-/// marker by `render_pretty_block_text`; it is *not* recursively
-/// expanded here. So an `A → B → A` cycle never enters this recursion
-/// and the cap doesn't need to defend against it. If recursive embed
-/// expansion ever lands, add a `visited: &HashSet<&str>` argument and
-/// short-circuit when the current handle is already in the set.
-const EMBED_MAX_DEPTH: u32 = 4;
+use crate::view::row_chrome::{push_body_indent, push_property_row, FoldMarker, AUTO_RUN_GLYPH};
 
 /// Render the outline into a flat list of `Line`s for ratatui, and
 /// report the visual line index where the *selected* block's bullet
@@ -196,17 +185,7 @@ pub(crate) fn render_block(
     );
 
     for (k, v) in &b.properties {
-        let mut prop_spans: Vec<Span<'_>> = Vec::new();
-        for _ in 0..indent {
-            prop_spans.push(Span::styled("│ ", app.theme.dim));
-        }
-        prop_spans.push(Span::raw("  ".to_string()));
-        if let Some(glyph) = property_glyph(k) {
-            prop_spans.push(Span::raw(format!("{glyph} ")));
-        }
-        prop_spans.push(Span::styled(format!("{k}:: "), app.theme.property_key));
-        prop_spans.push(Span::styled(v.clone(), app.theme.property_value));
-        out.push(Line::from(prop_spans));
+        push_property_row(indent, k, v, has_auto_run, app, out, text_width);
     }
 
     // Expand `!((blk-XXXXXX))` embeds as a read-only subtree under
@@ -251,101 +230,6 @@ pub(crate) fn render_block(
             );
         }
     }
-}
-
-/// Return the handle if `text` is a single `!((blk-XXXXXX))` token
-/// surrounded only by whitespace; `None` otherwise.
-///
-/// Mixed content (`prelude !((blk-X)) postlude`) keeps the inline
-/// `↳ <text>` render — we only expand when the user clearly meant
-/// the whole block to *be* the embed.
-fn embed_only_handle(text: &str) -> Option<&str> {
-    let mut handle: Option<&str> = None;
-    for tok in tokenize(text.trim()) {
-        match tok {
-            InlineTok::Plain(s) if s.trim().is_empty() => continue,
-            InlineTok::Embed { handle: h } if handle.is_none() => handle = Some(h),
-            _ => return None,
-        }
-    }
-    handle
-}
-
-/// Emit a source block's subtree underneath the embedding block.
-///
-/// Each row gets the same `↳ ` prefix the embed's first row carries
-/// so the whole expansion reads as one cohesive block visually. Two
-/// indent layers are stacked per row:
-///
-/// 1. `│ ` per ancestor indent of the carrying block (matches the
-///    outline's own indent guides so the embed sits under the right
-///    parent at a glance);
-/// 2. two spaces per embed-subtree depth, so a child of the embed's
-///    root lands visually under the root's `↳ ` instead of next to
-///    it (otherwise the reader can't tell whether the row is a
-///    sibling of the carrying block or a child of the source).
-///
-/// Depth-capped at [`EMBED_MAX_DEPTH`] so an embed cycle can't run
-/// forever.
-fn emit_embedded_children(
-    children: &[OutlineNode],
-    outer_indent: u32,
-    depth: u32,
-    app: &App,
-    out: &mut Vec<Line<'static>>,
-    text_width: u16,
-) {
-    if depth > EMBED_MAX_DEPTH {
-        return;
-    }
-    for child in children {
-        // `guides` repeat on every wrapped row; the `↳ ` marker lives in
-        // `head` so it only appears once and continuations re-indent
-        // under the embedded text (same split `emit_block_lines` uses).
-        let mut guides: Vec<Span<'static>> = Vec::new();
-        // 1. Outline indent guides (mirrors what `emit_block_lines`
-        //    draws for a regular block at the same depth in the doc).
-        for _ in 0..outer_indent {
-            guides.push(Span::styled("│ ", app.theme.dim));
-        }
-        // 2. Embed-internal indent so children land **below the source
-        //    root's text**, not alongside its `↳ `. The carrying
-        //    block's first row reads `- ↳ <root-text>`: bullet + space
-        //    + `↳` + space = four cells before the root text starts.
-        //    A child needs to clear those four cells plus one more
-        //    embed-indent step (two cells) before its own `↳ `, then
-        //    another two per nested level. `(depth + 1) * 2` spaces
-        //    keeps the geometry: depth 1 → 4 spaces, depth 2 → 6, etc.
-        for _ in 0..(depth + 1) {
-            guides.push(Span::raw("  "));
-        }
-        let head = vec![Span::styled("↳ ", app.theme.dim)];
-        let content = render_pretty_block_text(&child.text, &app.theme, &app.index);
-        push_wrapped(guides, head, content, text_width, out);
-        emit_embedded_children(
-            &child.children,
-            outer_indent,
-            depth + 1,
-            app,
-            out,
-            text_width,
-        );
-    }
-}
-
-/// Fold indicator drawn before the bullet on the bullet row.
-///
-/// `None` keeps a two-cell gap so leaf rows align with their parent
-/// at the same indent — without it, a leaf's `-` would slide left
-/// the moment a sibling grew children.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FoldMarker {
-    /// Block has no children — no marker, gap only.
-    None,
-    /// Block has children and they're visible. `▼ ` prefix.
-    Expanded,
-    /// Block has children but they're folded away. `▶ ` prefix.
-    Collapsed,
 }
 
 /// Where the cursor sits on a block being rendered, and what style
@@ -438,22 +322,14 @@ pub(crate) fn emit_block_lines(
                 // so the user can see at a glance which cells re-run
                 // themselves on page open.
                 if has_auto_run {
-                    head.push(Span::styled("⚡", app.theme.hint));
+                    head.push(Span::styled(AUTO_RUN_GLYPH, app.theme.hint));
                 }
                 head.push(Span::styled("- ", bullet_style));
             }
             BlockRowKind::Continuation
             | BlockRowKind::CodeFenceMarker
             | BlockRowKind::CodeFenceBody => {
-                // Mirror the bullet-row's pre-bullet padding so
-                // continuation rows stay aligned with the bullet
-                // column above them (two cells for the fold slot,
-                // one extra cell when `⚡` is present).
-                head.push(Span::raw("  "));
-                if has_auto_run {
-                    head.push(Span::raw(" "));
-                }
-                head.push(Span::raw("  "));
+                push_body_indent(&mut head, has_auto_run);
             }
         }
 
@@ -551,28 +427,13 @@ enum CursorStyle {
     Block,
 }
 
-/// Leading glyph for a property key outl gives a meaning to.
-///
-/// Mirrors `KNOWN_PROPERTIES` in
-/// `@outl/shared/markdown/properties` — a const can't cross the
-/// Rust/TS boundary any more than a DTO field can, so the two tables
-/// are edited together. A user's own key (`priority::`) gets no glyph;
-/// interpreting it isn't ours to do.
-fn property_glyph(key: &str) -> Option<&'static str> {
-    match key.to_ascii_lowercase().as_str() {
-        outl_md::remind::REMIND_KEY => Some("⏰"),
-        "auto-run" => Some("▶"),
-        "template" => Some("📋"),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use outl_core::id::ActorId;
     use outl_core::workspace::Workspace;
     use tempfile::TempDir;
+    use unicode_width::UnicodeWidthStr;
 
     fn test_app() -> (App, TempDir) {
         let dir = TempDir::new().unwrap();
@@ -703,39 +564,66 @@ mod tests {
             lines.len(),
             lines.iter().map(line_text).collect::<Vec<_>>().join("\n"),
         );
-        // First row carries the bullet; the next is a continuation that
-        // re-indents under the text column (two leading spaces).
+        // The continuation re-indents to the text column. Asserted as
+        // the exact pad: `starts_with("  ")` holds for any pad two
+        // cells or wider, so it kept passing right through #319.
         assert!(line_text(&lines[0]).contains("- "));
-        assert!(line_text(&lines[1]).starts_with("  "));
+        let row = line_text(&lines[1]);
+        let pad = row.len() - row.trim_start_matches(' ').len();
+        assert_eq!(pad, 4, "continuation pad off the bullet column: {row:?}");
     }
 
+    /// #319: every row a block owns starts in the block's *text*
+    /// column. A property row used to pad two cells and land under the
+    /// fold marker instead, four cells off on an `auto-run::` block.
+    ///
+    /// Rendered at indent 1 so the `│ ` guides are in the comparison
+    /// too: both rows build them, in two separate loops.
     #[test]
-    fn embed_only_handle_detects_bare_token() {
-        assert_eq!(embed_only_handle("!((blk-r6s4a1))"), Some("blk-r6s4a1"));
-    }
+    fn a_property_row_starts_in_its_blocks_text_column() {
+        let (app, _dir) = test_app();
+        let block = |key: &str, children: Vec<OutlineNode>| OutlineNode {
+            text: "Define the scope".into(),
+            properties: vec![(key.into(), "x".into())],
+            children,
+        };
+        let child = block("priority", Vec::new());
+        // (shape, block, the property row's first token after the pad —
+        // `auto-run` carries a `property_glyph`, the others don't)
+        let cases = [
+            ("leaf", block("priority", Vec::new()), "priority:: "),
+            ("parent ▼", block("priority", vec![child]), "priority:: "),
+            (
+                "auto-run ⚡",
+                block("auto-run", Vec::new()),
+                "▶ auto-run:: ",
+            ),
+        ];
 
-    #[test]
-    fn embed_only_handle_ignores_surrounding_whitespace() {
-        assert_eq!(embed_only_handle("  !((blk-r6s4a1))  "), Some("blk-r6s4a1"));
-    }
-
-    #[test]
-    fn embed_only_handle_rejects_mixed_text() {
-        assert_eq!(embed_only_handle("see !((blk-r6s4a1)) context"), None);
-    }
-
-    #[test]
-    fn embed_only_handle_rejects_inline_ref() {
-        // `((blk-X))` (no leading `!`) is a ref, not an embed —
-        // must not trigger expansion.
-        assert_eq!(embed_only_handle("((blk-r6s4a1))"), None);
-    }
-
-    #[test]
-    fn embed_only_handle_rejects_two_embeds_on_one_block() {
-        // Two embeds in the same block is ambiguous (which one expands
-        // first?) — for now keeps the rule strict: exactly one token,
-        // surrounded by whitespace.
-        assert_eq!(embed_only_handle("!((blk-aaaaaa)) !((blk-bbbbbb))"), None);
+        for (shape, node, token) in cases {
+            let mut out = Vec::new();
+            render_block(
+                &node,
+                1,
+                &mut 0,
+                &app,
+                &mut out,
+                &mut None,
+                &mut Vec::new(),
+                0,
+            );
+            let column_of = |line: &Line<'_>, token: &str| {
+                let text = line_text(line);
+                let at = text
+                    .find(token)
+                    .unwrap_or_else(|| panic!("{shape}: no {token:?} in {text:?}"));
+                text[..at].width()
+            };
+            assert_eq!(
+                column_of(&out[1], token),
+                column_of(&out[0], "Define the scope"),
+                "{shape}: the property row is not in the block's text column"
+            );
+        }
     }
 }

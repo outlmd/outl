@@ -199,6 +199,11 @@ TUI-specific contracts worth remembering:
   DOING shares `theme.todo_open`'s colour rather than claiming a third palette entry — it is unfinished work and the glyph already says which kind.
   Only DONE dims and strikes the body.
   `Ctrl+T` walks `none → TODO → DOING → DONE → none`; in Insert mode `cycle_todo_inline` shifts the caret by the **difference between the two prefixes** (`DOING ` is one wider than its neighbours), never by a constant.
+- **Every row a block owns starts in the block's text column**, and `view::row_chrome` is the only module that decides where that is.
+  `push_body_indent` owns the pad between the `│ ` indent guides and the text (two cells of fold slot, two of `- ` bullet, plus `AUTO_RUN_PAD` when the block carries `auto-run::`); `push_property_row` owns the whole `key:: value` row and calls it.
+  The outline and the backlinks mini-outline both go through those two — they are one measurement, and three separate copies of it is what [#319](https://github.com/outlmd/outl/issues/319) was.
+  Property rows landed under the fold marker, the auto-run pad was one space while `⚡` measures two, and backlinks never drew the `property_glyph` at all, so a `remind::` read differently depending on which pane you saw it in.
+  Property rows wrap through `push_wrapped` like any block row; a long `template::` used to be clipped at the right edge with nothing to say it had been.
 - IDs are **never** shown.
 - Mode tag (`NORMAL`/`INSERT`) appears in the header.
 - **Block text word-wraps to the pane width** (issue #99).
@@ -321,7 +326,9 @@ src/
 ├── view.rs              # render_app orchestrator; thin
 ├── view/
 │   ├── inline.rs        # span-level markdown (highlight + pretty)
-│   ├── outline.rs       # outline rendering (render_outline, render_block, …)
+│   ├── outline.rs       # outline rendering (render_outline, render_block, emit_block_lines)
+│   ├── row_chrome.rs    # what a block draws around its text: fold slot, ⚡, the body pad, `key:: value` rows
+│   ├── embed.rs         # `!((blk-X))` expansion: the read-only subtree a block draws below itself
 │   ├── wrap.rs          # width-aware word wrap of styled spans (push_wrapped)
 │   ├── overlays.rs      # every modal popup
 │   ├── properties.rs    # the `g p` property editor popup

@@ -82,5 +82,5 @@
 646 crates/outl-tui/src/input/overlay.rs
 688 crates/outl-tui/src/runtime.rs
 983 crates/outl-tui/src/state.rs
-741 crates/outl-tui/src/view/outline.rs
+629 crates/outl-tui/src/view/outline.rs
 1179 crates/outl-tui/src/view/overlays.rs

@@ -6,7 +6,7 @@ import { MarkdownInline, type EmbedMap } from "./MarkdownInline";
 /**
  * Read-only render of an embedded block's subtree — the children of a
  * block pulled in by a `!((blk-XXXXXX))` embed. Mirrors the TUI's
- * `emit_embedded_children` (`outl-tui/src/view/outline.rs`): every row
+ * `emit_embedded_children` (`outl-tui/src/view/embed.rs`): every row
  * carries a `↳ ` prefix, nesting indents per depth, and recursion is
  * capped at depth 4 so an embed cycle can't render forever.
  *

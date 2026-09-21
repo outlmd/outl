@@ -13,6 +13,7 @@
 
 use crate::state::{App, EditTarget, Focus, Mode};
 use crate::view::outline::{emit_block_lines, RenderMode};
+use crate::view::row_chrome::{push_property_row, FoldMarker};
 use outl_actions::{Backlink, BacklinkCrumb, OutlineNode};
 use ratatui::text::{Line, Span};
 
@@ -233,21 +234,14 @@ fn render_backlink_node(
         bullet_style,
         &mode,
         has_auto_run,
-        crate::view::outline::FoldMarker::None,
+        FoldMarker::None,
         app,
         out,
         text_width,
     );
 
     for (k, v) in &node.properties {
-        let mut spans: Vec<Span<'_>> = Vec::new();
-        for _ in 0..indent {
-            spans.push(Span::styled("│ ", app.theme.dim));
-        }
-        spans.push(Span::raw("  ".to_string()));
-        spans.push(Span::styled(format!("{k}:: "), app.theme.property_key));
-        spans.push(Span::styled(v.clone(), app.theme.property_value));
-        out.push(Line::from(spans));
+        push_property_row(indent, k, v, has_auto_run, app, out, text_width);
     }
 
     for (i, child) in node.children.iter().enumerate() {
@@ -264,5 +258,162 @@ fn render_backlink_node(
             text_width,
         );
         current_path.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use outl_core::id::ActorId;
+    use outl_core::workspace::Workspace;
+    use tempfile::TempDir;
+    use unicode_width::UnicodeWidthStr;
+
+    fn test_app() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let app = App::new(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    fn row_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    fn node(text: &str, properties: Vec<(String, String)>) -> OutlineNode {
+        OutlineNode {
+            id: "blk-test01".into(),
+            text: text.into(),
+            todo: None,
+            collapsed: false,
+            properties,
+            tokens: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+
+    fn backlink(source_block: OutlineNode) -> Backlink {
+        Backlink {
+            block_id: source_block.id.clone(),
+            block_text: source_block.text.clone(),
+            todo: None,
+            source_page: None,
+            source_block,
+            source_block_path: Vec::new(),
+            ancestors: Vec::new(),
+            source_path: None,
+        }
+    }
+
+    /// #319, third caller. `render_block` has the same rule and its own
+    /// test; this loop is a separate copy of the geometry, and it is the
+    /// copy that had already drifted (it never drew `property_glyph`).
+    /// A regression here would be invisible to the outline's test.
+    #[test]
+    fn a_backlink_property_row_starts_in_its_blocks_text_column() {
+        let (app, _dir) = test_app();
+        let bl = backlink(node(
+            "cites the page",
+            vec![("priority".into(), "high".into())],
+        ));
+
+        let mut out = Vec::new();
+        render_backlink_node(
+            &bl,
+            &bl.source_block,
+            1,
+            &mut Vec::new(),
+            None,
+            &app,
+            &mut out,
+            &mut None,
+            0,
+        );
+
+        let column_of = |line: &Line<'_>, token: &str| {
+            let text = row_text(line);
+            let at = text
+                .find(token)
+                .unwrap_or_else(|| panic!("no {token:?} in {text:?}"));
+            text[..at].width()
+        };
+        assert_eq!(
+            column_of(&out[1], "priority:: "),
+            column_of(&out[0], "cites the page"),
+            "the backlink property row is not in the block's text column"
+        );
+    }
+
+    /// The outline and this mini-outline are one render now
+    /// (`push_property_row`), so a `remind::` reads the same in both
+    /// panes. It did not before: this loop never drew the glyph, and
+    /// nothing failed when the two disagreed.
+    #[test]
+    fn a_backlink_property_row_draws_the_same_glyph_the_outline_does() {
+        let (app, _dir) = test_app();
+        let bl = backlink(node(
+            "cites the page",
+            vec![("remind".into(), "9am".into())],
+        ));
+
+        let mut out = Vec::new();
+        render_backlink_node(
+            &bl,
+            &bl.source_block,
+            0,
+            &mut Vec::new(),
+            None,
+            &app,
+            &mut out,
+            &mut None,
+            0,
+        );
+
+        let mut expected = Vec::new();
+        push_property_row(0, "remind", "9am", false, &app, &mut expected, 0);
+        assert_eq!(row_text(&out[1]), row_text(&expected[0]));
+        assert!(row_text(&out[1]).contains('⏰'), "{:?}", row_text(&out[1]));
+    }
+
+    /// A property value too wide for the pane wraps instead of being
+    /// clipped at the right edge with nothing to say it was.
+    #[test]
+    fn a_long_property_value_wraps_instead_of_being_cut() {
+        let (app, _dir) = test_app();
+        let bl = backlink(node(
+            "cites the page",
+            vec![(
+                "template".into(),
+                "the quick brown fox jumps over the lazy dog".into(),
+            )],
+        ));
+
+        let mut out = Vec::new();
+        render_backlink_node(
+            &bl,
+            &bl.source_block,
+            0,
+            &mut Vec::new(),
+            None,
+            &app,
+            &mut out,
+            &mut None,
+            24,
+        );
+
+        let rows: Vec<String> = out[1..].iter().map(row_text).collect();
+        assert!(rows.len() > 1, "expected a wrap, got {rows:?}");
+        assert!(
+            rows.concat().contains("lazy dog"),
+            "the tail of the value was dropped: {rows:?}"
+        );
     }
 }

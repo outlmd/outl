@@ -16,11 +16,13 @@
 
 mod backlinks;
 mod chrome;
+mod embed;
 mod inline;
 mod namespace;
 mod outline;
 pub(crate) mod overlays;
 mod properties;
+mod row_chrome;
 mod sidebar;
 mod toasts;
 mod warnings_banner;

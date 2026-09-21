@@ -37,7 +37,7 @@ export function rawTextWithTodo(block: BlockNode): string {
  * subtree expansion (`<EmbeddedSubtree />`); mixed prose keeps the
  * inline `↳ text` render, so `null` is returned for it.
  *
- * Mirror of `outl-tui`'s `embed_only_handle` (view/outline.rs): there
+ * Mirror of `outl-tui`'s `embed_only_handle` (view/embed.rs): there
  * it tokenizes the trimmed text and accepts a lone `Embed`, skipping
  * whitespace-only `Plain` runs; a `blockref` (`((…))` without the `!`),
  * a second embed, or any other token disqualifies the block.
