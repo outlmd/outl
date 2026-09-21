@@ -1054,7 +1054,6 @@ export function BlockRow(props: {
                                 >
                                   <MarkdownInline
                                     tokens={renderedTokens}
-                                    variant="inline"
                                     onRefClick={props.cb.onRefClick}
                                     onTagClick={props.cb.onTagClick}
                                     onLinkClick={props.cb.onLinkClick}

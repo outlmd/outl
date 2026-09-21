@@ -292,3 +292,23 @@ describe("BlockRow commit — the ghost-block policy (#213)", () => {
     expect(cb.onCommit).toHaveBeenCalledWith("blk-edit", "after");
   });
 });
+
+describe("BlockRow image rendering — #322", () => {
+  it("renders an inline image as an <img> rather than a file chip", () => {
+    const block: BlockNode = {
+      ...makeBlock("blk-img", "![diagram](https://example.com/diagram.png)"),
+      tokens: [
+        {
+          kind: "image",
+          alt: "diagram",
+          href: "https://example.com/diagram.png",
+        },
+      ],
+    };
+    const host = mountView(block, makeCb());
+    const img = host.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe("https://example.com/diagram.png");
+    expect(img?.getAttribute("alt")).toBe("diagram");
+  });
+});
