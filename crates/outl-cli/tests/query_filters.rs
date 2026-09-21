@@ -239,6 +239,27 @@ fn query_every_filter_and_its_negation_return_nothing() {
 }
 
 #[test]
+fn query_rejects_a_kind_no_page_can_have() {
+    // `--not-kind pag` is true for every page, so the typo would
+    // silently disable the exclusion and return the journals it was
+    // written to hide. The positive is checked by the same rule.
+    let ws = query_fixture();
+    for args in [["--kind", "pag"], ["--not-kind", "pag"], ["--not-kind", ""]] {
+        let out = outl()
+            .args(["--workspace"])
+            .arg(ws.path())
+            .arg("query")
+            .args(args)
+            .arg("--json")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{args:?} must be rejected");
+        let env: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(env["error"]["code"], "INVALID_ARG");
+    }
+}
+
+#[test]
 fn query_not_kind_excludes_only_that_kind() {
     let ws = query_fixture();
     let pages = query_slugs(&ws, &["--not-kind", "journal"]);

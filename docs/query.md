@@ -84,7 +84,8 @@ The `.md` spelling is accepted too, so `prop: status:: done` works.
 The same rule covers tags. `not-tag:` with no name is rejected, and so is a name outside the tokenizer's alphabet (letters, digits, `-`, `_`, `/`) — the DSL has no trailing comments, so `not-tag: research # parked stuff` would otherwise build a filter that can never equal a tag and quietly exclude nothing.
 A leading `#` is fine: `not-tag: #research` and `not-tag: research` are the same filter.
 
-Keys and values are matched **case-insensitively**, like every other directive here.
+`tag:`, `prop:` and `text:` match their values **case-insensitively**: `prop: Status: Done` and `prop: status: done` are the same filter.
+Directive keys and the fixed vocabularies (`status: todo|doing|done|open`, `kind: page|journal`, `sort: page|status|text`) are literal and lowercase; `STATUS: TODO` is a parse error, not a match.
 
 ## Examples
 

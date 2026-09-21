@@ -104,6 +104,7 @@ pub fn handler(ctx: &WsCtx, args: &QueryArgs) -> Result<Value, ApiError> {
     }
 
     check_tag_filters(args)?;
+    check_kind_filters(args)?;
     let cutoff = args.since.as_deref().map(parse_since).transpose()?;
     let not_cutoff = args.not_since.as_deref().map(parse_since).transpose()?;
     let parsed_props = parse_prop_filters(&args.props, args.priority.as_deref())?;
@@ -230,6 +231,28 @@ fn check_tag_filters(args: &QueryArgs) -> Result<(), ApiError> {
             codes::INVALID_ARG,
             "tag filter is empty — pass a tag name, e.g. `--not-tag someday`".to_string(),
         ));
+    }
+    Ok(())
+}
+
+/// Reject a kind filter naming a kind no page can have.
+///
+/// `--not-kind=pag` is true for every page, so the typo silently
+/// disables the exclusion and hands back the journals it was written
+/// to hide. Both sides are checked together so the positive cannot
+/// accept a value the negative rejects.
+fn check_kind_filters(args: &QueryArgs) -> Result<(), ApiError> {
+    const KINDS: [outl_actions::PageKind; 2] = [
+        outl_actions::PageKind::Page,
+        outl_actions::PageKind::Journal,
+    ];
+    for kind in args.kind.iter().chain(args.not_kind.iter()) {
+        if !KINDS.iter().any(|k| k.as_str() == kind) {
+            return Err(ApiError::new(
+                codes::INVALID_ARG,
+                format!("kind must be `page` or `journal`, got `{kind}`"),
+            ));
+        }
     }
     Ok(())
 }

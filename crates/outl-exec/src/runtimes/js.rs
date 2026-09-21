@@ -211,19 +211,17 @@ fn js_value_to_query_params(
     {
         params.text = Some(v.to_std_string_escaped());
     }
+    // A negative that silently vanishes on a bad type runs the
+    // unfiltered query and hands back exactly the rows the caller
+    // asked to hide, so a present non-string value is an error here,
+    // the way `string_list` already treats one in a list.
     for (key, slot) in [
         ("notStatus", &mut params.not_status),
         ("notKind", &mut params.not_kind),
         ("notSince", &mut params.not_since),
         ("notText", &mut params.not_text),
     ] {
-        if let Some(v) = obj
-            .get(js_string!(key), ctx)
-            .map_err(|e| e.to_string())?
-            .as_string()
-        {
-            *slot = Some(v.to_std_string_escaped());
-        }
+        *slot = optional_string(&obj, key, ctx)?;
     }
     params.not_tag = string_list(&obj, "notTag", ctx)?;
     params.prop = string_list(&obj, "prop", ctx)?;
@@ -250,6 +248,25 @@ fn js_value_to_query_params(
         }
     }
     Ok(params)
+}
+
+/// Read an optional scalar string field.
+///
+/// Absent (`undefined` / `null`) is `None`; present with any other
+/// non-string type is an error rather than a silent skip.
+#[cfg(feature = "lang-query")]
+fn optional_string(
+    obj: &boa_engine::JsObject,
+    key: &'static str,
+    ctx: &mut Context,
+) -> Result<Option<String>, String> {
+    let val = obj.get(js_string!(key), ctx).map_err(|e| e.to_string())?;
+    if val.is_undefined() || val.is_null() {
+        return Ok(None);
+    }
+    val.as_string()
+        .map(|s| Some(s.to_std_string_escaped()))
+        .ok_or_else(|| format!("outl.query: `{key}` must be a string"))
 }
 
 /// Read a field that accepts either one string or an array of them.
@@ -407,6 +424,24 @@ mod tests {
         assert!(err.contains("must be a string"), "got {err:?}");
         let err = params_from("({ notTag: 7 })").unwrap_err();
         assert!(err.contains("must be a string"), "got {err:?}");
+    }
+
+    #[cfg(feature = "lang-query")]
+    #[test]
+    fn a_non_string_scalar_negative_is_an_error_not_an_unfiltered_query() {
+        // `notStatus: 7` used to fall through `.as_string()` and run
+        // with no exclusion at all, returning the rows it was meant
+        // to hide.
+        for key in ["notStatus", "notKind", "notSince", "notText"] {
+            let err = params_from(&format!("({{ {key}: 7 }})")).unwrap_err();
+            assert!(
+                err.contains(key) && err.contains("must be a string"),
+                "got {err:?}"
+            );
+        }
+        // Absent and null still mean "no filter".
+        let p = params_from("({ notStatus: null })").unwrap();
+        assert!(p.not_status.is_none());
     }
 
     #[test]
