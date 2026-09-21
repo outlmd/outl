@@ -36,7 +36,7 @@ pub struct BlockEntry {
     /// when a `((blk-XXXXXX))` is rendered.
     pub text: String,
     /// Lowercased copy of `text`. Cached so
-    /// [`BlockIndex::search_text`] doesn't reallocate per block on
+    /// [`BlockIndex::search_text`](super::BlockIndex::search_text) doesn't reallocate per block on
     /// every autocomplete keystroke.
     pub text_fold: String,
     /// Block properties (`key:: value`), in document order.
@@ -67,7 +67,8 @@ pub(super) fn fold_properties(props: &[(String, String)]) -> Vec<(String, String
 /// to the sidecar for.
 ///
 /// This is the input type of the tree-side population path
-/// ([`BlockIndex::collect_page_blocks_from_tree`]). It exists because
+/// ([`BlockIndex::collect_page_blocks_from_tree`](super::BlockIndex::collect_page_blocks_from_tree)).
+/// It exists because
 /// [`OutlineNode`] deliberately carries no id — it is the shape of a
 /// *parsed `.md`*, where ids live in the sidecar and nowhere else
 /// (root `CLAUDE.md` invariant 2). A projection of the tree has the

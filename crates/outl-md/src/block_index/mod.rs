@@ -61,7 +61,7 @@
 //! ## Where things live
 //!
 //! The stored shapes ([`BlockEntry`], [`IdentifiedNode`],
-//! [`BlockReference`]) are in [`types`]; this file owns [`BlockIndex`]
+//! [`BlockReference`]) are in `types`; this file owns [`BlockIndex`]
 //! itself — the maps, the lookups and the two population paths.
 
 mod types;
