@@ -112,11 +112,11 @@ UI-agnostic; both TUI and mobile consume them.
 | Intent | Use this | File |
 |---|---|---|
 | Build / query the workspace-wide index (slug → page, backlinks, block lookups) | `outl_md::WorkspaceIndex::build` / `by_slug` / `by_title` / `pages` / `pages_by_title_prefix` / `pages_by_type` | `crates/outl-md/src/index.rs` |
-| Populate that index from the **op-log tree** instead of from disk (id-carrying nodes, no sidecar, cannot drop a block on a stale hash) | `outl_md::IdentifiedNode` + `WorkspaceIndex::insert_page` / `collect_page_blocks_from_tree` (per page) / `collect_refs_from_indexed` (once, after every page is in) | `crates/outl-md/src/index.rs`, `block_index.rs` |
+| Populate that index from the **op-log tree** instead of from disk (id-carrying nodes, no sidecar, cannot drop a block on a stale hash) | `outl_md::IdentifiedNode` + `WorkspaceIndex::insert_page` / `collect_page_blocks_from_tree` (per page) / `collect_refs_from_indexed` (once, after every page is in) | `crates/outl-md/src/index.rs`, `block_index/` |
 | Patch / remove a page in an existing index | `WorkspaceIndex::patch_page` / `remove_page` | `crates/outl-md/src/index.rs` |
 | Resolve `((blk-XXXXXX))` to a block / look a block up by id or location | `WorkspaceIndex::resolve_block_ref` / `block_by_id` / `block_at_location` | `crates/outl-md/src/index.rs` |
 | Reverse refs to a block / iterate / search | `WorkspaceIndex::block_refs_to` / `iter_blocks` / `search_block_text` / `block_count` / `block_index` (borrow the inner `BlockIndex`) | `crates/outl-md/src/index.rs` |
-| Stand-alone block-level index (when you don't need the page facade) | `outl_md::BlockIndex` + `BlockEntry` + `BlockReference` | `crates/outl-md/src/block_index.rs` |
+| Stand-alone block-level index (when you don't need the page facade) | `outl_md::BlockIndex` + `BlockEntry` + `BlockReference` | `crates/outl-md/src/block_index/` |
 | `PageEntry` DTO returned by `WorkspaceIndex` lookups | `outl_md::PageEntry` | `crates/outl-md/src/index.rs` |
 
 ---
@@ -132,7 +132,8 @@ UI-agnostic; both TUI and mobile consume them.
 | Reconstruct the source markdown from a `Vec<InlineTok>` (Bold / Italic / Strike now carry recursively-tokenized inners; use this when a surface wants the whole inner span as one styled string instead of dispatching per-variant) | `outl_md::inline::inline_to_source` | `crates/outl-md/src/inline.rs` |
 | Resolve the ref under a caret position (`Page` / `Journal` / `Tag` / `Block`) | `outl_md::inline::ref_at_cursor` → `RefTarget` | `crates/outl-md/src/cursor.rs` |
 | Resolve the markdown link `[text](url)` under a caret position (anchor OR url) — the URL a client opens externally (TUI `gx`) | `outl_md::inline::link_at_cursor` → `Option<&str>` | `crates/outl-md/src/cursor.rs` |
-| Does a text mention `#tag` as a whole tag token? Boundary-correct via the tokenizer (`#tag-longer` / `#tagged` never match `tag`; `#tag` inside a code span is not a tag) — never use `text.contains("#tag")` | `outl_md::tag::text_contains_tag` | `crates/outl-md/src/tag.rs` |
+| Does a text mention `#tag` as a whole tag token? Boundary-correct via the tokenizer (`#tag-longer` / `#tagged` / `#tag/sub` never match `tag`; `#tag` inside a code span is not a tag) — never use `text.contains("#tag")` | `outl_md::tag::text_contains_tag` | `crates/outl-md/src/tag.rs` |
+| Same question, case-insensitive and answering for namespace children (`#ops/deploy` matches `ops`, `#opsec` does not). The ` ```query ` DSL's `tag:` / `not-tag:` | `outl_md::tag::text_contains_tag_or_child` | `crates/outl-md/src/tag.rs` |
 | Validate a `((blk-XXXXXX))` handle string | `outl_md::inline::is_valid_block_handle` | `crates/outl-md/src/reference.rs` |
 | Flatten a block's inline markup to the prose a human reads (notification bodies, a11y labels, plain-text export) — refs / tags keep their name, emphasis drops its markers, `((blk-…))` resolves to nothing | `outl_md::plain_text` (also `outl_md::inline::plain_text`) | `crates/outl-md/src/plain.rs` |
 | Byte offset for a char index (UTF-8 safe) | `outl_md::inline::byte_index_for_char` | `crates/outl-md/src/cursor.rs` |

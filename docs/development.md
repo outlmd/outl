@@ -565,7 +565,7 @@ Always re-read `crates/outl-mobile/CLAUDE.md` § "Peer-file materialisation" bef
 
 1. Add a `lang-<name>` feature in `crates/outl-exec/Cargo.toml`.
 2. Create `crates/outl-exec/src/runtimes/<name>.rs` — one struct + `impl Runtime`.
-   Use `echo.rs` as the simplest template, or `query.rs` for the full pattern (workspace access + embed output + auto-run).
+   Use `echo.rs` as the simplest template, or `runtimes/query/` for the full pattern (workspace access + embed output + auto-run).
 3. Register in `RuntimeRegistry::with_builtins` behind the feature.
 4. Add aliases to `KNOWN_ALIASES` in `crates/outl-md/src/lang.rs` **and** the TS mirror `crates/outl-frontend-shared/src/highlight/aliases.ts` (same commit — the `doc-sync-guard` hook checks this).
 5. If the runtime returns `OutputFormat::Embeds`, the orchestrator already handles it — no UI change needed.

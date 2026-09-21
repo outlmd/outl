@@ -140,10 +140,10 @@ The query engine also exposes a **structured API** for plugins and code that run
 
 | Intent | Use this | File |
 |---|---|---|
-| Structured query from a `QueryParams` object (plugin-facing) | `outl_exec::run_query_structured` | `crates/outl-exec/src/runtimes/query.rs` |
-| DSL query from a string (user-facing) | `outl_exec::run_query_dsl` | `crates/outl-exec/src/runtimes/query.rs` |
-| Query parameters struct (status, tag, kind, since, text, sort, limit) | `outl_exec::QueryParams` | `crates/outl-exec/src/runtimes/query.rs` |
-| Query result hit (handle, text, status, page) | `outl_exec::QueryHit` | `crates/outl-exec/src/runtimes/query.rs` |
+| Structured query from a `QueryParams` object (plugin-facing) | `outl_exec::run_query_structured` | `crates/outl-exec/src/runtimes/query/mod.rs` |
+| DSL query from a string (user-facing) | `outl_exec::run_query_dsl` | `crates/outl-exec/src/runtimes/query/mod.rs` |
+| Query parameters struct (status, tag, not_tag, prop, not_prop, kind, since, text, sort, limit) | `outl_exec::QueryParams` | `crates/outl-exec/src/runtimes/query/mod.rs` |
+| Query result hit (handle, text, status, page) | `outl_exec::QueryHit` | `crates/outl-exec/src/runtimes/query/mod.rs` |
 
 In JS code blocks, the same API is available as `outl.query({ status: "todo", … })`.
 

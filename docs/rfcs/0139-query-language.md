@@ -8,7 +8,7 @@
 | **Date** | 2026-08-06 |
 | **Reference doc** | [query.md](../query.md) |
 | **Invariant** | none |
-| **Guarded by** | `parses_status_todo`, `parses_multiple_filters`, `ignores_comments`, `parses_sort`, `parses_since`, `rejects_unknown_key` (the `dsl` tests in `crates/outl-exec/src/runtimes/query.rs`), `split_todo_open`, `split_todo_done`, `split_todo_none` (the `engine` tests in the same file) |
+| **Guarded by** | `parses_status_todo`, `parses_multiple_filters`, `ignores_comments`, `parses_sort`, `parses_since`, `rejects_unknown_key`, `an_empty_tag_is_rejected_rather_than_matching_everything`, `a_dangling_colon_on_prop_is_an_error_not_a_wildcard` (`crates/outl-exec/src/runtimes/query/dsl.rs`), `split_todo_open`, `split_todo_done`, `split_todo_none`, `tag_and_not_tag_on_the_same_name_can_never_both_match`, `prop_and_not_prop_on_the_same_target_can_never_both_match` (`crates/outl-exec/src/runtimes/query/engine.rs`), `crates/outl-exec/tests/query_negative_filters.rs` (the whole file) |
 
 ## Why
 
@@ -22,14 +22,15 @@ A query syntax is a **format**, so it joins the op log, the sidecar and the mark
 ## What we chose
 
 A ` ```query ` fence holding one `key: value` directive per line, implicitly ANDed.
-Directives shipped today: `status`, `tag`, `kind`, `since`, `text`, `sort`, `limit`.
+Directives shipped today: the filters `status`, `tag`, `prop`, `kind`, `since`, `text` — each also spelled `not-<key>` — plus the controls `sort` and `limit`.
 Blank lines and `#` comments are ignored.
+The `not-` family landed after this RFC — see [Amended by issue 323](#amended-by-issue-323) below.
 
 Results render as **live embeds** (`!((blk-XXXXXX))`), not copies, so toggling a TODO on the original is reflected everywhere it surfaces.
 Query fences carry `auto_run() == true` and run on every page load, because the result depends on workspace state and not on the fence body — which makes source-hash caching wrong by construction.
 
-Single owner: `crates/outl-exec/src/runtimes/query.rs`.
-Its `dsl` module parses, its `engine` module filters and sorts against a `WorkspaceIndex`, and `QueryRuntime` returns `OutputFormat::Embeds` for the orchestrator to render.
+Single owner: `crates/outl-exec/src/runtimes/query/` (split into `mod.rs` / `dsl.rs` / `engine.rs` when the file outgrew the size ratchet; it was one `query.rs` when this RFC was written).
+`dsl.rs` parses, `engine.rs` filters and sorts against a `WorkspaceIndex`, and `QueryRuntime` in `mod.rs` returns `OutputFormat::Embeds` for the orchestrator to render.
 The **same** engine is reachable structurally as `outl_exec::run_query_structured` and as `outl.query({…})` from JS, so the DSL is a surface over one engine, not a second implementation of filtering.
 
 ## Why not the alternatives
@@ -54,8 +55,11 @@ The name survives as a language alias: `tasks` and `query` resolve to the same r
 ## The opposite direction
 
 **What this makes worse: the implicit AND is a ceiling, and it is silent.**
-"Open tasks *not* tagged `#someday`" is unexpressible today, and the user gets no error saying so — an unknown *key* is rejected with a line number, but a missing *capability* just reads as a query returning too much.
-That is the failure mode this DSL trades for a syntax nobody has to learn.
+"Open tasks *not* tagged `#someday`" was unexpressible, and the user got no error saying so — an unknown *key* is rejected with a line number, but a missing *capability* just reads as a query returning too much.
+That is the failure mode this DSL traded for a syntax nobody has to learn.
+
+That specific example is closed; the ceiling is not.
+See [Amended by issue 323](#amended-by-issue-323).
 
 **Cost of the live-view choice.**
 Because fences auto-run, a page with five query blocks pays five full `WorkspaceIndex` builds from disk on every open; there is no incremental index.
@@ -81,7 +85,33 @@ A query narrowing from 300 hits to 3 shrinks that page again, and only the fence
 `prop`, `page` and `group` are named as planned in [`docs/query.md` → Extensibility](../query.md#extensibility), and `prop` additionally needs the block index to expose properties.
 Nothing on that list has an issue yet.
 
+> `not` and `prop` shipped later — `not` as a single wrapper over any filter rather than as grammar, per [Amended by issue 323](#amended-by-issue-323).
+> `or`, `between`, `page` and `group` remain uncovered.
+
 **Not covered — inline `{{query: …}}`.**
 If ever wanted it is a new parser token, never a reuse of this runtime.
 
 **Not covered — an incremental workspace index**, owned by the sharding plan in [`docs/sync.md`](../sync.md#per-page-op-log-shards-for-10k-pages) and [RFC 0137](0137-storage-scale.md).
+
+## Amended by issue 323
+
+[Issue 323](https://github.com/outlmd/outl/issues/323) shipped a negative for **every** filter — `not-status`, `not-tag`, `not-prop`, `not-kind`, `not-since`, `not-text` — plus the `prop:` that `not-prop` is the complement of.
+The parts of this RFC that predate it are corrected above; what the amendment does **not** change is the decision recorded under "Why not the alternatives".
+
+**Negation landed as one wrapper, not as a grammar and not as one variant per filter.**
+`not-<key>` is parsed by parsing `<key>` and wrapping the result in `Filter::Not`, whose only engine arm is a `!`.
+That is a smaller change than this RFC's growth path anticipated: a new directive is negatable the moment its own variant exists, with no second arm to write and none to forget.
+There is still no `or`, no parens and no precedence, so the "boolean grammar" rejection stands on its own terms rather than having been quietly reversed.
+The remaining half of the ceiling — "tagged `#meeting` **or** `#code-review`" — is still unexpressible and still silent about it, which is issue 323's own open question 3.
+
+**A negative filter is `!` over the positive's matcher, never a second matcher.**
+The first cut of this work hand-wrote `NotTag` and `NotProp`: two of six filters negatable, each carrying its own copy of the predicate.
+The wrapper replaced both, and the constraint is now structural rather than remembered — root `CLAUDE.md` invariant 14 records it, and `no_filter_and_its_negation_can_both_match` iterates the whole `Filter` set so a new variant with a broken negation fails there.
+It is also why `prop:` had to land in the same change: a negation with no positive counterpart is a filter whose complement cannot be written.
+
+**`tag:` narrowed to a boundary match in the same change.**
+It matched by substring, so `tag: ops` also hit `#opsec`. Over-inclusive is harmless for a positive filter and is *silent over-exclusion* once negated, so the substring form could not survive `not-tag:`.
+`outl_md::tag::text_contains_tag_or_child` is the single owner of the predicate.
+
+**The block index now exposes block properties**, which is the prerequisite this RFC named for `prop` and the reason it was listed as not covered.
+`BlockEntry::properties` carries them, lowercased once at index time.

@@ -55,7 +55,7 @@ use crate::output::ApiError;
 
 use super::payload::{tool_error_payload, tool_success_payload};
 
-use super::{opt_params, opt_str, require_str};
+use super::{opt_params, opt_str, opt_str_strict, require_str, str_array};
 
 /// Tool names that mutate the workspace. After a successful call we
 /// invalidate the cached `WorkspaceIndex` so subsequent read-only
@@ -301,19 +301,16 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         }
         "outl_query" => {
             let q = query_cmd::QueryArgs {
-                tag: opt_str(args, "tag").map(str::to_string),
-                priority: opt_str(args, "priority").map(str::to_string),
-                props: args
-                    .get("props")
-                    .and_then(Value::as_array)
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                since: opt_str(args, "since").map(str::to_string),
-                kind: opt_str(args, "kind").map(str::to_string),
+                tag: opt_str_strict(args, "tag")?.map(str::to_string),
+                not_tags: str_array(args, "not_tags")?,
+                priority: opt_str_strict(args, "priority")?.map(str::to_string),
+                not_priority: opt_str_strict(args, "not_priority")?.map(str::to_string),
+                props: str_array(args, "props")?,
+                not_props: str_array(args, "not_props")?,
+                since: opt_str_strict(args, "since")?.map(str::to_string),
+                not_since: opt_str_strict(args, "not_since")?.map(str::to_string),
+                kind: opt_str_strict(args, "kind")?.map(str::to_string),
+                not_kind: opt_str_strict(args, "not_kind")?.map(str::to_string),
                 raw: opt_str(args, "raw").map(str::to_string),
                 json: true,
             };

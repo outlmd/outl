@@ -100,11 +100,11 @@ Re-check each on a dependency bump.
 5. If the runtime needs workspace access, override `needs_workspace_index()` to `true`, read `ctx.index` first, and only build one from `ctx.workspace_root` when it is `None`.
 6. If the runtime should auto-run on page load, override `auto_run()` to return `true`.
 
-See `runtimes/query.rs` for the most advanced example (workspace access, embed output, auto-run).
+See `runtimes/query/` for the most advanced example (workspace access, embed output, auto-run).
 
 ## The `query` runtime
 
-The `query` runtime (`runtimes/query.rs`) is a special case:
+The `query` runtime (`runtimes/query/`, split `mod.rs` / `dsl.rs` / `engine.rs`) is a special case:
 
 - **Returns `OutputFormat::Embeds`**: each stdout line becomes an embed child (`!((blk-XXXXXX))`) under the result header.
   This makes query results **live references** to the original blocks, not copies.
@@ -112,9 +112,23 @@ The `query` runtime (`runtimes/query.rs`) is a special case:
 - **Overrides `needs_workspace_index()` to `true`** — the only runtime that does, pinned by `tests/query_uses_injected_index.rs`.
 - **Uses `ctx.index` when the caller supplied one**, and builds a `WorkspaceIndex` from `ctx.workspace_root` otherwise — the fallback keeps every existing caller working but re-reads the whole workspace per fence.
   `run_query_dsl_with_index` is the injected-index entry point.
-- **DSL parser** (`runtimes/query::dsl`): line-by-line `key: value` directives, implicitly ANDed.
-  Filters: `status`, `tag`, `kind`, `since`, `text`.
-  Controls: `sort`, `limit`.
+- **DSL parser** (`runtimes/query/dsl.rs`): line-by-line `key: value` directives, implicitly ANDed.
+  Filters: `status`, `tag`, `prop`, `kind`, `since`, `text` — each also spelled `not-<key>`.
+  Controls: `sort`, `limit` (not negatable).
+- **Negation is one variant, not one per filter** (root `CLAUDE.md` invariant 14).
+  `not-<key>` is parsed by parsing `<key>` and wrapping the result in `Filter::Not(Box<Filter>)`; the engine's only negative arm is `Filter::Not(inner) => !matches(inner, …)`.
+  So `tag: x` together with `not-tag: x` cannot return anything, and **a new directive is negatable the moment its variant and match arm exist** — there is no negative-filter work to remember.
+  A hand-written `NotFoo` variant is the thing to refuse in review: it is a second opinion about what `foo` means, and the half that drifts is the one that silently removes results.
+  `sort` and `limit` are not filters, so a `not-` prefix on either is an unknown key rather than a reversed ordering.
+  Pinned by `no_filter_and_its_negation_can_both_match`, which iterates the whole `Filter` set.
+- **A value that can only match nothing is a parse error**, on both halves.
+  An empty tag, an empty `text:` needle, a dangling `prop: k:`, a tag name outside the tokenizer's alphabet (`not-tag: research # parked` — this DSL has no trailing comments, so the tail is the name).
+  Harmless on the positive side ("no results"); on the negative side it excludes nothing and hands back exactly the blocks the user asked to hide.
+- **`tag:` routes through `outl_md::text_contains_tag_or_child`, not `text_fold.contains("#x")`.**
+  The substring form also matches `#xyz`, which costs `tag:` an extra hit and costs `not-tag:` a *dropped* one.
+  The cached fold is still the first gate (a boundary match is a subset of a substring match), so almost no block reaches the tokenizer.
+- **`prop:` / `not-prop:` read `BlockEntry::properties`**, which the index folds to lowercase once on the way in; `PropFilter` folds at parse time so the comparison allocates nothing per block.
+  A dangling colon (`not-prop: status:`) is a parse error rather than a wildcard.
 - **`engine::Status` mirrors `outl_actions::TodoState`** (`Todo` / `Doing` / `Done`) instead of importing it: `outl-actions` depends on **this** crate for `run_code_block`, so the arrow only points one way.
   A state added there has to be added here in the same change — nothing in the compiler enforces the pair.
   `status: open` means "is a task", DONE included; it kept that meaning when `doing` landed so existing queries don't change under the user.
@@ -144,13 +158,16 @@ Both converge on the same engine pipeline.
 
 ### Public types (re-exported from `outl_exec`)
 
-- `QueryParams` — `{ status, tag, kind, since, text, sort, limit }`, all optional.
+- `QueryParams` — one field per filter plus one `not_*` per filter (`status`/`not_status`, `tag`/`not_tag`, `prop`/`not_prop`, `kind`/`not_kind`, `since`/`not_since`, `text`/`not_text`), plus `sort` and `limit`. All optional.
+  `build_query_from_params` pairs each positive with its negative in one table and runs both through the **same builder**, differing only in the `Filter::Not` wrap — the struct-side version of the DSL's rule.
+  The `Vec<String>` fields take the **same spelling the DSL takes** (`"key: value"`), not a second shape for the same fact.
 - `QueryHit` — `{ handle, text, status, page }`, the result shape.
 
 ### JS binding
 
 The JS runtime registers a global `outl` object with a `query` method.
 It converts the JS argument to `QueryParams`, calls `run_query_structured`, and returns a JS array of `{ handle, text, status, page }` objects.
+`notTag` / `prop` / `notProp` accept a string or an array of strings (`string_list`), and a non-string entry is an error rather than a silent drop — quietly ignoring `notTag: [null]` would widen the result set behind the caller's back.
 
 Full API docs: `docs/query.md` § Plugin SDK API.
 

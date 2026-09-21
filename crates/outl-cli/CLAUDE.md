@@ -216,7 +216,7 @@ Each handler returns a `serde_json::Value` so the same code path serves both the
   Glue only: copy + hash + link live in `outl_actions::import_asset`; the block append routes through `outl-actions` like every other mutation.
   CLI + MCP (`outl_asset_add`) share the `cmd::asset::add_asset` handler so they can't drift.
 - `outl search "<query>" [--in=blocks|pages|all] [--limit=N]`
-- `outl query [--tag=…] [--priority=…] [--since=…d] [--kind=…] [--prop key=value …]`
+- `outl query [--tag=…] [--not-tag=… …] [--priority=…] [--since=…d] [--kind=…] [--prop key[=value] …] [--not-prop key[=value] …]`
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
 - `outl prop set|get|list`

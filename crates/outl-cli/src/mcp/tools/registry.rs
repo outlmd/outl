@@ -278,17 +278,63 @@ pub fn list() -> Vec<Value> {
         ),
         tool_def(
             "outl_query",
-            "Structured filter over pages (tag, property, date range, kind).",
+            "Structured filter over pages (tag, property, date range, kind). \
+             Every filter has a `not_` counterpart that excludes exactly what it would have matched.",
             json!({
                 "type": "object",
                 "properties": {
-                    "tag": { "type": "string" },
+                    "tag": {
+                        "description": "Page's subtree mentions `#<tag>`. Matched exactly and \
+                                        case-sensitively: `ops/deploy` is a different tag from `ops`.",
+                        "type": "string"
+                    },
+                    "not_tags": {
+                        "description": "Exclude pages whose subtree mentions any of these tags. \
+                                        Same exact, case-sensitive match as `tag`.",
+                        // A bare string is accepted as a one-element list, and the
+                        // schema has to say so or a validating client rejects the
+                        // shorthand the docs promise before the server ever sees it.
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "string" } }
+                        ]
+                    },
                     "priority": { "type": "string" },
+                    "not_priority": {
+                        "description": "Exclude pages whose `priority::` matches this value.",
+                        "type": "string"
+                    },
                     "since": { "type": "string" },
+                    "not_since": {
+                        "description": "Exclude what `since` would keep — dated pages on or after \
+                                        the cutoff, and undated pages with them. Read as `!since`.",
+                        "type": "string"
+                    },
                     "kind": { "type": "string", "enum": ["page", "journal"] },
+                    "not_kind": {
+                        "description": "Exclude this page kind.",
+                        "type": "string",
+                        "enum": ["page", "journal"]
+                    },
                     "props": {
-                        "type": "array",
-                        "items": { "type": "string" }
+                        "description": "Require each property: `key=value`, or `key` for any value. \
+                                        Reads the page's own property, case-sensitively.",
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "string" } }
+                        ]
+                    },
+                    "not_props": {
+                        "description": "Exclude pages matching any of these: `key=value`, or `key` \
+                                        for any value. Same page-level, case-sensitive match as `props`.",
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "string" } }
+                        ]
+                    },
+                    "raw": {
+                        "description": "Reserved for the query DSL; currently rejected with INVALID_ARG.",
+                        "type": "string"
                     }
                 }
             }),

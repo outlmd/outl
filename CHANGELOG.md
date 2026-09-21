@@ -7,6 +7,36 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Every ` ```query ` filter now has a negative: `not-status`, `not-tag`, `not-prop`, `not-kind`, `not-since`, `not-text`.**
+  The DSL could only say what a block *is*. A workspace with a `#someday` / `#backlog` parking lot mixed into live notes had no way to write "open work tasks, minus the parked ones" — every directive was a positive containment check, implicitly ANDed ([#323](https://github.com/outlmd/outl/issues/323)).
+
+  ````markdown
+  - ```query
+    status: todo
+    tag: work
+    not-tag: research
+    not-tag: someday
+    not-prop: status: parked
+    sort: page, status
+    ```
+  ````
+
+  **There is one negative filter, not six.** `not-<key>` is parsed by parsing `<key>` and wrapping the result in `Filter::Not`, which the engine answers with a single `!` over the positive's own arm. So a fence carrying `tag: x` and `not-tag: x` returns nothing — not because two implementations were kept in step, but because there is only one. Two implementations of "has tag x" drift, and the half that drifts is always the one that silently removes results: a user never sees a block that is missing.
+
+  The shape also means a **future** directive arrives negatable. Add the variant and its match arm and `not-<key>` is live; a hand-written `NotFoo` variant is the thing to refuse in review. `sort` and `limit` are not filters, so `not-sort` is rejected as an unknown key. Pinned by `no_filter_and_its_negation_can_both_match`, which iterates the whole `Filter` set rather than the two that shipped first.
+
+  **`not-since:` is the one that reads oddly**, and deliberately so: `since: 7d` means "a journal dated within 7 days", so its exact complement includes every ordinary page. Read it as `!since`, not as "older than"; pair it with `kind: journal` for the latter.
+
+  **`prop:` shipped in the same change**, and `BlockEntry` now carries the block's `key:: value` pairs (both index population paths already had them; this is a copy, not a second parse). A negation with no positive counterpart is a filter whose complement cannot be written — you could *exclude* every block carrying a `status::` and not *select* one.
+
+  **`prop: key` matches any value; `prop: key: value` narrows.** A dangling colon (`not-prop: status:`) is a parse error, not a wildcard, and so is `not-tag:` with no name. Reading either as "match anything" turns one typo into a filter that drops the workspace, and prints no reason.
+
+  Wired through every surface, with the same one-negative-per-filter rule: the CLI (`--not-tag`, `--not-prop`, `--not-kind`, `--not-since`, `--not-priority`), the MCP tool (`not_tags`, `not_props`, `not_kind`, `not_since`, `not_priority`), the JS/plugin SDK (`outl.query({ notStatus, notTag, notProp, notKind, notSince, notText })`), and `QueryParams`.
+
+  **The CLI and MCP pair filters pages, not blocks, and they are a different matcher — deliberately.** `outl query --tag=ops` asks whether the page's subtree mentions `#ops` exactly and case-sensitively; the fence's `tag: ops` also answers for `#ops/deploy` and ignores case. A property filter is spelled `key=value` on the CLI and `key: value` in a fence. What holds on *both* is the law that matters: each negative is the exact complement of the positive **on its own surface**, so `--tag=x --not-tag=x` returns nothing and so does `tag: x` + `not-tag: x`.
+
+  **Every way of writing one of these filters that could not possibly match now fails loudly**, because the direction a negative filter fails silently is the one that hands back the rows you asked to hide. Rejected: an empty tag or an empty `text:` needle on any surface; a tag name outside the tokenizer's alphabet (`not-tag: research # parked` has no trailing comment in this DSL, so the whole tail was the name); a property filter with an empty value; the fence's `key: value` separator passed to the CLI's `key=value` flag; a non-string entry in an MCP `not_tags` / `not_props` array, and a non-string `tag`, both of which used to drop the filter and return the workspace. `--tag '#work'` and `not-tag: #work` are accepted — the hash is how the tag is spelled everywhere the user sees it.
+
 - **"Open With → outl" on the desktop — a `.md` or `.txt` from anywhere becomes a page.**
   Right-click a file in Finder / Explorer / a Linux file manager, pick outl, and the file lands as a page titled `open-in/<file name>`, built out of ordinary ops like everything else. `bundle.fileAssociations` registers the four extensions with `role: "Viewer"` and `rank: "Alternate"` — outl **imports a copy and never writes back to the file**, and it must not quietly become the system handler for every `.txt` on the machine.
 
@@ -293,7 +323,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   `apply` now stores what the tree recorded. The values already on disk stay wrong, because the log is append-only, so readers must keep deriving from the fields describing an op's own effect.
 
+### Fixed
+
+- **`since: 3м` in a ` ```query ` fence panicked instead of reporting an unknown unit.**
+  The parser split the value on its last *byte* (`v.len() - 1`), which is not a character boundary when the unit is multi-byte. `query` carries `auto_run() == true`, so the panic fired on every load of the page holding the fence, inside the TUI event loop or `outl mcp serve` — not on a path anything could catch. It now splits on the last character and reports `since: unknown unit 'м'`.
+
 ### Changed
+
+- **`tag:` in the ` ```query ` DSL now stops at the tag boundary.**
+  It matched by substring on the block's folded text, so `tag: ops` also hit `#opsec` and `#ops-team`. That was over-inclusive and harmless on its own — an extra row in a result list — but `not-tag:` is the same predicate with a `!` in front, and over-inclusive negated is **silent over-exclusion**: `not-tag: work` would have deleted every `#workflow` block from the answer with nothing on screen to notice. Fixing one side and not the other was not an option; fixing the negative alone would have broken the complement law.
+
+  The new behaviour is what `docs/query.md` always documented: `#ops/deploy` matches `tag: ops`, `#opsec` does not. It is case-insensitive like the rest of the DSL. `outl_md::tag::text_contains_tag_or_child` is the single owner — a sibling of `text_contains_tag`, which stays exact and case-sensitive for backlinks and tag counting. The cached `text_fold` is still the first gate (a boundary match is a subset of a substring match), so a filter that auto-runs on every page load almost never reaches the tokenizer.
+
+  **A query relying on the old substring behaviour narrows.** `tag: op` no longer answers for `#ops`; spell the tag, or its parent namespace, in full.
+
+- `outl query --prop` accepts a bare `key` (matching any value) alongside `key=value`, so `--not-prop key` has a positive counterpart. `key=` with an empty value is now rejected with `INVALID_ARG` instead of comparing against the empty string.
+
+- `outl query --tag` / `outl page list --filter tag:` accept a leading `#`. `--tag '#work'` used to match nothing, silently.
 
 - **MCP tool replies are projected for an LLM, cutting a call's payload by roughly half to four fifths.**
   Every successful `tools/call` used to send its payload **twice**: once as a `{ ok, data, error }` envelope in `structuredContent`, and again in `content[0].text`. For 37 of the 41 tools that second copy was pretty-printed JSON. The four markdown-shaped ones (`outl_page_render`, `outl_export_md`, `outl_daily_today`, `outl_daily_get`) already flattened their text to the `md` field, so they paid for the envelope rather than for a second JSON blob. On top of all of it, every outline node carried `tokens`, a pre-tokenized inline AST that exists so the Tauri renderers do not need their own inline tokenizer, and which restates `text` an LLM already has.

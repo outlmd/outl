@@ -1,4 +1,4 @@
-//! End-to-end tests for `BlockIndex`. Moved out of `src/block_index.rs`
+//! End-to-end tests for `BlockIndex`. Moved out of `src/block_index/`
 //! to keep that module under the file-size-guard. Every test here
 //! exercises only the public API surface — same contract any UI
 //! surface (TUI today, Tauri / mobile later) consumes.

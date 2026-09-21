@@ -154,7 +154,7 @@ Nothing tracks this today.
 Clause 5 secures "two devices agree what a handle means".
 The mirror is "two blocks claim one handle", and it happens: six lowercase base32 characters is roughly 30 bits, about 5×10⁻⁶ birthday probability at 100k blocks.
 Expansion resolves it: the losing block's handle grows one character at a time from its own ULID tail until unique.
-The choice of loser is by ULID order, so it is the same on every device regardless of traversal order (`crates/outl-md/src/block_index.rs`).
+The choice of loser is by ULID order, so it is the same on every device regardless of traversal order (`crates/outl-md/src/block_index/mod.rs`).
 Both blocks stay independently resolvable.
 The honest cost: the sidecar still records the deterministic 6-character form, so the expansion lives in memory until a later reconcile persists it.
 A `.md` citing an expanded 7-character handle therefore resolves only on a device whose index has already seen *both* colliding blocks.

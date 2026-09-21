@@ -493,3 +493,95 @@ fn frozen_page_update_returns_structured_refusal_not_a_generic_error() {
         "a refused write must never delete the unlogged content: {after:?}"
     );
 }
+
+#[test]
+fn query_negative_filters_reach_the_handler_over_mcp() {
+    // The MCP tool and the CLI subcommand share one handler, so what
+    // is actually at risk here is the *wiring*: a schema key nobody
+    // reads makes `not_tags` look supported and silently filter
+    // nothing, which is worse than rejecting it.
+    let ws = init_workspace();
+    let mut client = McpClient::spawn(ws.path());
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "protocolVersion": "2024-11-05", "capabilities": {} }
+    }));
+
+    let mut id = 1;
+    let mut call = |client: &mut McpClient, name: &str, args: Value| {
+        id += 1;
+        let resp = client.call(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": args }
+        }));
+        success_data(&resp["result"])
+    };
+
+    for (slug, text) in [
+        ("live", "TODO ship the parser #work"),
+        ("parked", "TODO revisit this #work #someday"),
+    ] {
+        call(
+            &mut client,
+            "outl_page_create",
+            serde_json::json!({ "slug": slug }),
+        );
+        call(
+            &mut client,
+            "outl_block_append",
+            serde_json::json!({ "page": slug, "text": text }),
+        );
+    }
+
+    let data = call(
+        &mut client,
+        "outl_query",
+        serde_json::json!({ "tag": "work", "not_tags": ["someday"] }),
+    );
+    let slugs: Vec<&str> = data["results"]
+        .as_array()
+        .expect("results is an array")
+        .iter()
+        .map(|r| r["slug"].as_str().unwrap())
+        .collect();
+    assert_eq!(slugs, vec!["live"], "not_tags must exclude #someday");
+
+    // A bare string where an array is expected is the shape a model
+    // reaches for first; accept it rather than silently filtering
+    // nothing.
+    let data = call(
+        &mut client,
+        "outl_query",
+        serde_json::json!({ "tag": "work", "not_tags": "someday" }),
+    );
+    assert_eq!(data["count"], 1, "a bare string must work like a 1-array");
+
+    // A malformed exclusion list must be an error, not a silent drop.
+    // This surface is driven by a model, so the shape most likely to
+    // arrive wrong is the one whose failure hands back exactly the
+    // rows the caller asked to hide.
+    for bad in [
+        serde_json::json!({ "not_tags": [null, "someday"] }),
+        serde_json::json!({ "not_tags": 5 }),
+        serde_json::json!({ "not_props": [{ "key": "status" }] }),
+        // `tag` is a scalar; an array used to drop the filter and
+        // return the whole workspace as a match.
+        serde_json::json!({ "tag": ["work", "ops"] }),
+    ] {
+        let resp = client.call(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": { "name": "outl_query", "arguments": bad }
+        }));
+        assert_eq!(
+            resp["result"]["isError"], true,
+            "outl_query must refuse {bad}, got {resp}"
+        );
+    }
+}

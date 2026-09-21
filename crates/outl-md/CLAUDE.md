@@ -100,10 +100,12 @@ Treat matching with the same paranoia as the CRDT.
 - **External wiki-link rewriting** (`wikilink.rs`) — `rewrite_wikilinks` / `clean_wikilink_target` collapse `[[Note|alias]]` / `[[Note#heading]]` / `[[Note^block-id]]` / `[[folder/Note]]` to canonical `[[Note]]`;
   `convert_image_links` / `is_image_target` turn image wiki-links and embeds (`![[img.png]]`, `[[a/b.jpeg|cap]]`) into standard CommonMark links with the folder path preserved.
   Pure text → text; no vault layout or routing policy.
-- **Tag predicate** (`tag.rs`) — `text_contains_tag(text, tag)`: boundary-correct "does this text mention `#tag`?" built on the tokenizer.
+- **Tag predicates** (`tag.rs`) — boundary-correct "does this text mention `#tag`?", built on the tokenizer.
   `#tag-longer` / `#tagged` never match `tag`; a `#tag` inside a `` `code` `` span is not a tag.
-  Consumers must use this instead of `text.contains("#tag")` (the substring form is the false-positive bug this module deleted from the CLI).
-- **Block index** (`block_index.rs`) — `NodeId → BlockEntry`, `ref_handle → NodeId`, `NodeId → [BlockReference]` (reverse refs), `(slug, dfs_path) → NodeId` for location lookup.
+  Consumers must use these instead of `text.contains("#tag")` (the substring form is the false-positive bug this module deleted from the CLI, and then from the ` ```query ` DSL).
+  Two of them, because two callers ask different questions: `text_contains_tag` is exact and case-sensitive (`#tag/sub` is a *different* tag), used by backlinks and tag counting; `text_contains_tag_or_child` is case-insensitive and answers for namespace children (`#ops/deploy` matches `ops`, `#opsec` does not), used by the query DSL's `tag:` / `not-tag:`.
+  The boundary is what lets a **negative** filter be trusted — `not-tag: work` must not swallow `#workflow`.
+- **Block index** (`block_index/`) — `NodeId → BlockEntry`, `ref_handle → NodeId`, `NodeId → [BlockReference]` (reverse refs), `(slug, dfs_path) → NodeId` for location lookup.
   Population is two-pass (`collect_page_blocks` then `collect_page_refs`) so reverse edges survive arbitrary page-load order during the initial build.
   Lookups are O(1).
   **Two population paths, one shape.**
@@ -306,10 +308,10 @@ src/
 ├── wikilink.rs     # rewrite_wikilinks, clean_wikilink_target, convert_image_links, is_image_target
 ├── lang.rs         # canonical(fence) — alias table shared by outl-exec + frontend syntax highlighter
 ├── index.rs        # WorkspaceIndex — page-level + block-level facade
-├── block_index.rs  # BlockEntry, BlockReference, BlockIndex (id ↔ handle ↔ reverse refs)
+├── block_index/    # BlockIndex (id ↔ handle ↔ reverse refs) in mod.rs; stored shapes in types.rs
 ├── reconcile.rs    # high-level reconcile_md (parse → match → diff → apply)
 ├── slug.rs         # slugify page names
-├── tag.rs          # text_contains_tag — boundary-correct #tag predicate over the tokenizer
+├── tag.rs          # text_contains_tag{,_or_child} — boundary-correct #tag predicates over the tokenizer
 ├── view.rs         # render helpers consumed by UIs
 ├── asset.rs        # ASSETS_DIR, hash_bytes, asset_rel_path, is_asset_link (pure; no filesystem)
 └── atomic.rs       # crash-safe write_atomic + its read counterpart read_for_rewrite

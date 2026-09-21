@@ -187,10 +187,23 @@ Only the link enters the op log; the asset's bytes are a plain blob replicated a
 | CLI                                                              | MCP tool          |
 |------------------------------------------------------------------|-------------------|
 | `outl search "<query>" [--in=blocks\|pages] [--json]`            | `outl_search`     |
-| `outl query --tag=foo [--priority=p1] [--since=7d] [--json]`     | `outl_query`      |
+| `outl query [--tag=foo] [--not-tag=bar]… [--priority=p1] [--not-priority=p2] [--prop=k[=v]]… [--not-prop=k[=v]]… [--since=7d] [--not-since=7d] [--kind=page\|journal] [--not-kind=…] [--json]` | `outl_query` |
 
 `search` is full-text and lives today as the TUI's workspace search.
 `query` is the structured filter (tag, property, date range, kind).
+
+**Every filter has a negative**, and each is the exact complement of its positive, so `--tag=x --not-tag=x` returns nothing (pinned by `query_every_filter_and_its_negation_return_nothing`).
+`--not-tag` and `--not-prop` are repeatable; all of them AND against everything else.
+`--not-since` is the one that reads oddly and is honest about it: `--since=7d` keeps dated pages on or after the cutoff *and* every undated page, so its complement drops both. Read it as `!--since`, not as "older than".
+A property filter takes `key=value` or a bare `key` for "carries this property at all"; `key=` with nothing after it is rejected rather than read as a wildcard, because `--not-prop status=` meaning "drop every page with a status" is not what anyone typed it for.
+The MCP tool spells the two as the arrays `not_tags` / `not_props` (a bare string works as a one-element list).
+
+**`outl query` filters pages; the ` ```query ` fence filters blocks** ([`query.md`](query.md)).
+They share a name and not a matcher, in three ways worth knowing before you trust a negative:
+
+- `--tag=ops` matches `#ops` **exactly and case-sensitively** — `#ops/deploy` and `#Ops` are different tags. The fence's `tag: ops` matches both. A leading `#` is accepted on either (`--tag '#ops'`).
+- A property filter reads the page's **own** `key::` property, not properties on blocks inside it, and compares key and value case-sensitively. The fence's `prop:` reads block properties and folds case.
+- The separator is `key=value` here and `key: value` in a fence. Passing the fence spelling (`--not-prop "status: done"`) is rejected rather than read as a key nothing carries.
 
 `search` and `backlinks` answer from the **op log**, not by reading `pages/` and `journals/`.
 Practical consequence: a line that exists in a `.md` but in no op is not found.
@@ -583,7 +596,7 @@ outl-cli/
 └── src/
     ├── main.rs              # clap entry, dispatches to commands/
     ├── output.rs            # JSON envelope, --json flag, exit codes
-    ├── commands/
+    ├── cmd/
     │   ├── page.rs
     │   ├── block.rs
     │   ├── daily.rs
@@ -595,12 +608,12 @@ outl-cli/
     │   └── mcp.rs           # `outl mcp serve` shim
     └── mcp/
         ├── server.rs        # stdio transport
-        ├── tools.rs         # tool registry → handlers
+        ├── tools/           # registry.rs (schemas) + dispatch.rs (handlers)
         ├── resources.rs     # outl:// URIs
         └── prompts.rs       # /outl-* prompts
 ```
 
-`commands/*.rs` and `mcp/tools.rs` both reach into `outl-actions`.
+`cmd/*.rs` and `mcp/tools/` both reach into `outl-actions`.
 No business logic lives in either layer — they format input and output, that's it.
 
 ## Status
@@ -613,7 +626,7 @@ Shipping today:
 - `outl block get|append|append-tree|insert|update|move|delete|toggle-todo|tree`
 - `outl daily today|get|append|range`
 - `outl search "<query>" [--in=blocks|pages|all]`
-- `outl query [--tag] [--priority] [--since=Nd] [--kind] [--prop k=v]`
+- `outl query [--tag] [--not-tag] [--priority] [--not-priority] [--since=Nd] [--not-since] [--kind] [--not-kind] [--prop k[=v]] [--not-prop k[=v]]`
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
 - `outl page prop set|get|list`
