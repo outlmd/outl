@@ -719,10 +719,7 @@ async fn run_iroh(
         let label = peer.log_label();
         tokio::spawn(async move {
             let Some(_in_flight) = try_acquire_in_flight(&in_flight, nid) else {
-                debug!(
-                    "boot: sync to {} already in flight, skipping",
-                    label
-                );
+                debug!("boot: sync to {} already in flight, skipping", label);
                 return;
             };
             info!(

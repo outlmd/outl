@@ -181,10 +181,7 @@ pub(crate) async fn force_sync_all(
         // Coordinate with boot / catch-up / gossip dials: skip if one is
         // already running for this peer (its result lands anyway).
         let Some(_in_flight) = try_acquire_in_flight(&in_flight, nid) else {
-            debug!(
-                "sync-now: sync to {} already in flight, skipping",
-                label
-            );
+            debug!("sync-now: sync to {} already in flight, skipping", label);
             continue;
         };
         let started = Instant::now();

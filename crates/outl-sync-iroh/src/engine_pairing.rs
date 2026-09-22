@@ -496,10 +496,7 @@ pub(crate) async fn drain_pair_completions(
         {
             Ok(true) => info!("pairing: pulled snapshot from {}", label),
             Ok(false) => {}
-            Err(e) => warn!(
-                "pairing: snapshot pull from {} failed: {e}",
-                label
-            ),
+            Err(e) => warn!("pairing: snapshot pull from {} failed: {e}", label),
         }
 
         // Asset sync: pull the peer's binary assets (uploaded PDFs / images) that

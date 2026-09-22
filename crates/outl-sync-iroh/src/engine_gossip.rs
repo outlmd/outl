@@ -161,10 +161,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         let label = PeersStore::load_or_default(&ctx.peers_path)
             .map(|s| s.log_label_for(&peer_node_id.to_string()))
             .unwrap_or_else(|_| peer_node_id.fmt_short().to_string());
-        debug!(
-            "gossip: ignoring an announce from {} ({refusal:?})",
-            label
-        );
+        debug!("gossip: ignoring an announce from {} ({refusal:?})", label);
         return;
     }
 
@@ -183,10 +180,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
     let prog = ctx.progress.clone();
     tokio::spawn(async move {
         let Some(_in_flight) = try_acquire_in_flight(&in_flight, peer_node_id) else {
-            debug!(
-                "gossip: sync from {} already in flight, skipping",
-                label
-            );
+            debug!("gossip: sync from {} already in flight, skipping", label);
             return;
         };
         let started = Instant::now();
@@ -205,10 +199,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         {
             Ok(()) => health.record_success(peer_node_id, started),
             Err(e) => {
-                warn!(
-                    "gossip-triggered sync from {} failed: {e}",
-                    label
-                );
+                warn!("gossip-triggered sync from {} failed: {e}", label);
                 health.record_failure(peer_node_id);
             }
         }
