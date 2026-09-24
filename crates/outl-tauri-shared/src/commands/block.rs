@@ -250,7 +250,7 @@ pub fn move_block_after<S: AppHost>(
         // step 5 alone. No undo snapshot, no backlink-index
         // invalidation, no peer announce — and a cross-page move is
         // exactly the mutation most likely to change backlinks. Issue
-        // #264 tracks giving the pipeline a multi-page shape.
+        // #268 tracks giving the pipeline a multi-page shape.
         //
         // Guarded: a mutation must project, but projecting must not
         // delete content the op log never saw (invariant 8). The move

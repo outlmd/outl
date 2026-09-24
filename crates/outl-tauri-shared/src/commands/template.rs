@@ -81,7 +81,9 @@ pub fn instantiate_template_at<S: AppHost>(
         // undoable as one unit today, and the announce happens below
         // instead, outside the workspace lock, because the slug it needs
         // was already resolved. The backlink-index invalidation is a
-        // genuine gap — a template can carry `[[refs]]`. Issue #264.
+        // genuine gap — a template can carry `[[refs]]`. Not issue #268's
+        // multi-page shape either: this page is the only one dirtied, so
+        // the gap is this call site opting out, and it has no issue.
         //
         // Guarded — same reason as every other post-mutation projection:
         // the write is required, deleting unlogged bytes to achieve it is

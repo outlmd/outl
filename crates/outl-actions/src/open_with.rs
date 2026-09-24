@@ -168,7 +168,7 @@ impl OpenWithTarget {
 ///
 /// An import dirties **two** pages: the one it created and today's
 /// journal, which gains the link. `commit_page` is scoped to a single
-/// page (issue #264), so the caller projects the second one itself
+/// page (issue #268), so the caller projects the second one itself
 /// rather than this crate guessing which write path the client has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportOutcome {

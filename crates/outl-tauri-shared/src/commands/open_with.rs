@@ -116,7 +116,7 @@ fn finish_import<S: AppHost>(
 ) -> Result<PageView, String> {
     // An import dirties two pages: the one it created and today's
     // journal, which gained the `[[ref]]`. `commit_page` is scoped to
-    // one (issue #264), so the journal is projected here, the same
+    // one (issue #268), so the journal is projected here, the same
     // shape `move_block_after` uses for a cross-page move.
     if let Some(journal) = outcome.journal {
         // The journal gained a block outside its own `commit_page`, so
