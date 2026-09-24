@@ -14,7 +14,8 @@ name: Desktop
 #              tests, Vitest, tsc, and a debug-profile `tauri build`
 #              for Linux. Everything platform-agnostic happens here
 #              once instead of four times.
-#   `build`  → matrix of macOS arm64 / macOS x86_64 / Windows x86_64.
+#   `build`  → matrix of macOS arm64 / Windows x86_64 (macOS
+#              x86_64 is deliberately absent — see the matrix).
 #              Compiles the Tauri app on the dev profile. We don't
 #              repeat clippy/tests/vitest/tsc here because they don't
 #              care which OS they're on.
@@ -238,7 +239,11 @@ jobs:
       # `tauri build` compiles the Rust binary itself — no separate
       # `cargo build` step, which only duplicated the link. `--debug`
       # = dev profile (fast); `--no-bundle` skips the packagers.
-      # release.yml drops both flags and ships the signed dmg/msi.
+      # release.yml drops both flags and ships the dmg (macOS) and the
+      # NSIS installer (Windows). Nothing is code-signed yet, and the
+      # Windows leg is `--bundles nsis` rather than the conf's
+      # `"targets": "all"`: the WiX/msi path rejects a non-numeric
+      # pre-release identifier, which every beta version has.
       - name: Tauri build (debug, no bundle)
         working-directory: crates/outl-desktop
         run: bun run tauri build --debug --no-bundle

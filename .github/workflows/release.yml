@@ -532,6 +532,104 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
 
+  build_desktop_windows:
+    name: build desktop Windows (x86_64)
+    needs: [prepare, create_release]
+    if: needs.create_release.result == 'success'
+    runs-on: blacksmith-4vcpu-windows-2025
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
+        shell: bash
+        # Same sed pass as the other build jobs. `shell: bash` on the
+        # Windows runner is Git Bash, which ships GNU sed.
+        run: |
+          BASE='${{ needs.prepare.outputs.base }}'
+          VERSION='${{ needs.prepare.outputs.version }}'
+          sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
+          rm Cargo.toml.bak
+
+      - name: Cache cargo (desktop windows)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-x86_64-pc-windows-msvc-desktop-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Build NSIS installer
+        working-directory: crates/outl-desktop
+        # NSIS only — NOT the `"targets": "all"` the conf asks for, and
+        # not a preference. `tauri-bundler`'s WiX path runs every version
+        # through `convert_version`, which bails on a pre-release
+        # identifier that isn't numeric-only:
+        #
+        #   > optional pre-release identifier in app version must be
+        #   > numeric-only and cannot be greater than 65535 for msi target
+        #
+        # Every build here is a beta (`0.12.0-beta.201`), so `-beta.201`
+        # fails `pre.parse::<u64>()` and the msi leg would fail the job
+        # after the Rust build has already been paid for. NSIS has no
+        # such check: it warns and writes `X.Y.Z.0` into
+        # `VIProductVersion`, which is the Windows-facing field, and
+        # keeps the full string in the filename and the UI.
+        #
+        # NSIS is also the installer Tauri recommends on Windows — it
+        # carries the WebView2 bootstrapper, msi does not.
+        run: bun run tauri build --bundles nsis
+
+      - name: Stage installer + sha256
+        shell: pwsh
+        # Tauri's NSIS output name carries the version and arch
+        # (`outl_<version>_x64-setup.exe`). Rename to a stable,
+        # version-less asset name so the release URL doesn't churn
+        # between builds — same rule as the Linux bundles.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = 'target/release/bundle'
+          $installer = Get-ChildItem -Path "$bundle/nsis" -Filter '*-setup.exe' -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $installer) {
+            Write-Output "::error::no NSIS installer under $bundle/nsis (run produced:)"
+            if (Test-Path $bundle) {
+              Get-ChildItem -Path $bundle -Recurse -File | ForEach-Object { $_.FullName }
+            }
+            exit 1
+          }
+          $dst = 'outl-desktop-windows-x86_64-setup.exe'
+          Copy-Item $installer.FullName $dst
+          $hash = (Get-FileHash $dst -Algorithm SHA256).Hash.ToLower()
+          "$hash  $dst" | Out-File -Encoding ascii "$dst.sha256"
+
+      - name: Upload installer to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG='${{ needs.prepare.outputs.tag }}'
+          gh release upload "${TAG}" \
+            outl-desktop-windows-x86_64-setup.exe \
+            outl-desktop-windows-x86_64-setup.exe.sha256 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
   build_android:
     name: build Android (arm64 APK)
     needs: [prepare, create_release]
@@ -673,7 +771,7 @@ jobs:
 
   publish_release:
     name: Publish release
-    needs: [prepare, build, build_desktop, build_desktop_linux, build_android]
+    needs: [prepare, build, build_desktop, build_desktop_linux, build_desktop_windows, build_android]
     # Android is best-effort. GitHub auto-skips a job when a `needs` entry
     # fails UNLESS its `if` contains a status-check function; `!cancelled()`
     # is that function, so this job still evaluates when `build_android`
@@ -685,7 +783,8 @@ jobs:
       !cancelled() &&
       needs.build.result == 'success' &&
       needs.build_desktop.result == 'success' &&
-      needs.build_desktop_linux.result == 'success'
+      needs.build_desktop_linux.result == 'success' &&
+      needs.build_desktop_windows.result == 'success'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v5

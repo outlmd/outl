@@ -47,6 +47,25 @@ chmod +x outl-desktop-linux-x86_64.AppImage
 Every asset ships a matching `.sha256` sidecar.
 The CLI + TUI on Linux still install via Homebrew above.
 
+### Desktop app on Windows
+
+Homebrew doesn't run on Windows, so the desktop app ships as a direct download on every [GitHub release](https://github.com/outlmd/outl/releases).
+
+| Asset | Use it when |
+|-------|-------------|
+| `outl-desktop-windows-x86_64-setup.exe` | Windows 10 / 11 on `x86_64`. NSIS installer — it pulls the WebView2 runtime if the machine doesn't already have it. |
+
+```powershell
+# verify the download before running it
+Get-FileHash .\outl-desktop-windows-x86_64-setup.exe -Algorithm SHA256
+# compare against outl-desktop-windows-x86_64-setup.exe.sha256
+```
+
+The installer is unsigned today, so SmartScreen shows "Windows protected your PC" on first run — **More info → Run anyway**.
+There is no `.msi`: WiX rejects a pre-release version whose identifier isn't numeric-only (`0.12.0-beta.201`), and every build on this channel is a beta.
+
+The CLI + TUI on Windows are the separate `outl-windows-x64.zip` asset on the same release.
+
 ### From source
 
 ```bash
