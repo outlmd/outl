@@ -12,6 +12,9 @@
 //!
 //! ## Layout
 //!
+//! - `report` — the vocabulary every check writes into: severity,
+//!   finding, the accumulating `Builder`, the serialized
+//!   `DoctorReport`. No check lives there.
 //! - `oplog` — raw `.jsonl` line scan, snapshot decode, offset-index
 //!   coherence. Bytes on disk.
 //! - `files` — `.md` ↔ sidecar pairing, parse warnings, orphan block
@@ -21,158 +24,42 @@
 //! - `theme` — `[theme]` pair validation (light slot actually light,
 //!   dark slot actually dark). The global user config, not this
 //!   workspace's.
+//! - `device_store` — the actor bindings. The one subject that is not
+//!   in this workspace at all.
+//! - `gate` — what takes a planned page write back out of the plan: a
+//!   damaged op log, and a deletion past the ceilings.
 //! - `repair` — the `--repair` pass.
+//! - `print` — the human listing, the `--json` envelope, exit codes.
 
+mod device_store;
 mod files;
+mod gate;
 mod oplog;
 mod ops_guard;
+mod print;
 mod repair;
+mod report;
 #[cfg(test)]
 mod tests;
 mod theme;
 mod tree;
 
-use crate::output::{emit, ApiError};
+use crate::output::ApiError;
 use crate::workspace_layout::{read_config, Paths};
-use anyhow::{Context, Result};
-use outl_core::device::{ActorBinding, DeviceStore, STALE_BINDING_TTL, STALE_SCRATCH_TTL};
+use outl_core::device::DeviceStore;
 use outl_core::storage::{JsonlStorage, Storage};
 use outl_core::workspace::Workspace;
 use outl_md::index::WorkspaceIndex;
-use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
 
+pub use gate::RepairScope;
+pub use print::{run, run_json};
 use repair::Plan;
 pub use repair::{RepairReport, RepairVolume};
-
-/// How much authority a `--repair` run carries.
-///
-/// Re-projection removes content by design — a peer deleted a block, the
-/// log is right, the `.md` is behind. What it must not do is remove
-/// *thousands* of lines because something systemic is wrong, print a
-/// page count, and leave nothing to compare against afterwards. So the
-/// volume is measured first and a large one needs a second, deliberate
-/// act.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum RepairScope {
-    /// Default. Page writes stand down when the measured volume is past
-    /// [`RepairVolume::needs_confirmation`]; everything else still runs.
-    #[default]
-    Guarded,
-    /// `--force`: the user has read the count and authorised it.
-    ///
-    /// Reachable only from an explicit flag. Never a retry, never a
-    /// fallback — "attempted twice" is not consent.
-    Forced,
-}
-
-/// Severity of a single finding.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Severity {
-    /// Healthy state — no action needed.
-    Ok,
-    /// Informational, not a problem.
-    Info,
-    /// Possible problem, user should look.
-    Warn,
-    /// Definite problem, blocks "integrity OK".
-    Error,
-}
-
-/// One workspace check result.
-#[derive(Debug, Clone, Serialize)]
-pub struct Finding {
-    /// Severity bucket.
-    pub severity: Severity,
-    /// Human-readable description.
-    pub message: String,
-}
-
-/// Aggregate of every finding from a doctor run.
-#[derive(Debug, Clone, Serialize)]
-pub struct DoctorReport {
-    /// Workspace root path (display form).
-    pub workspace: String,
-    /// Actor id from `config.toml`.
-    pub actor: String,
-    /// Number of ops in the persisted log.
-    pub op_count: usize,
-    /// Every check emitted, in execution order.
-    pub findings: Vec<Finding>,
-    /// Convenience counts so callers don't have to count.
-    pub error_count: usize,
-    /// Number of warning findings.
-    pub warn_count: usize,
-    /// What `--repair` *would* do, in execution order. Filled on every
-    /// run, so a read-only report already tells the user what is
-    /// fixable and what is not.
-    pub repairable: Vec<String>,
-    /// What `--repair` actually did. `None` when the flag was off or
-    /// there was nothing to do.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repair: Option<RepairReport>,
-}
-
-struct Builder {
-    workspace: String,
-    actor: String,
-    op_count: usize,
-    findings: Vec<Finding>,
-    errors: usize,
-    warnings: usize,
-}
-
-impl Builder {
-    fn new(workspace: String, actor: String) -> Self {
-        Self {
-            workspace,
-            actor,
-            op_count: 0,
-            findings: Vec::new(),
-            errors: 0,
-            warnings: 0,
-        }
-    }
-    fn push(&mut self, severity: Severity, message: impl Into<String>) {
-        if matches!(severity, Severity::Error) {
-            self.errors += 1;
-        }
-        if matches!(severity, Severity::Warn) {
-            self.warnings += 1;
-        }
-        self.findings.push(Finding {
-            severity,
-            message: message.into(),
-        });
-    }
-    fn ok(&mut self, msg: impl Into<String>) {
-        self.push(Severity::Ok, msg);
-    }
-    fn info(&mut self, msg: impl Into<String>) {
-        self.push(Severity::Info, msg);
-    }
-    fn warn(&mut self, msg: impl Into<String>) {
-        self.push(Severity::Warn, msg);
-    }
-    fn err(&mut self, msg: impl Into<String>) {
-        self.push(Severity::Error, msg);
-    }
-    fn into_report(self, repairable: Vec<String>, repair: Option<RepairReport>) -> DoctorReport {
-        DoctorReport {
-            workspace: self.workspace,
-            actor: self.actor,
-            op_count: self.op_count,
-            findings: self.findings,
-            error_count: self.errors,
-            warn_count: self.warnings,
-            repairable,
-            repair,
-        }
-    }
-}
+use report::Builder;
+pub use report::{DoctorReport, Severity};
 
 /// Run every doctor check and return a structured report, optionally
 /// applying the safe repairs.
@@ -191,13 +78,15 @@ pub fn collect_scoped(
     do_repair: bool,
     scope: RepairScope,
 ) -> Result<DoctorReport, ApiError> {
+    let global = outl_config::load_result();
     collect_internal(
         path,
         true,
         do_repair,
         scope,
         &DeviceStore::open_default(),
-        &outl_config::load().theme,
+        &global.config.theme,
+        global.notice(),
     )
 }
 
@@ -213,13 +102,15 @@ pub fn collect_scoped(
 /// Never repairs: a tool call is not the place to start rewriting
 /// files on the user's disk. `--repair` is CLI-only and explicit.
 pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
+    let global = outl_config::load_result();
     collect_internal(
         path,
         false,
         false,
         RepairScope::Guarded,
         &DeviceStore::open_default(),
-        &outl_config::load().theme,
+        &global.config.theme,
+        global.notice(),
     )
 }
 
@@ -242,6 +133,7 @@ pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
 /// would make every test in the battery judge whatever theme pair
 /// happens to be on the machine running the suite, the exact bug the
 /// `store` parameter above exists to avoid for the device store.
+#[allow(clippy::too_many_arguments)]
 fn collect_internal(
     path: &Path,
     probe_lock: bool,
@@ -249,6 +141,7 @@ fn collect_internal(
     scope: RepairScope,
     store: &DeviceStore,
     theme: &outl_config::ThemeCfg,
+    config_notice: Option<String>,
 ) -> Result<DoctorReport, ApiError> {
     let paths = Paths::at(path.to_path_buf());
     let cfg = read_config(&paths).map_err(|e| {
@@ -276,9 +169,20 @@ fn collect_internal(
     let mut plan = Plan::default();
     let mut health = oplog::OpLogHealth::default();
 
-    // 0. `[theme]` pair validation. Global preference, not this
-    //    workspace's, and it needs neither the op log nor a booted
-    //    tree — check it before anything that does.
+    // 0. The global user config: can it be read, and is its `[theme]` pair
+    //    the right way round. Neither is this workspace's file, and neither
+    //    needs the op log or a booted tree — check them before anything
+    //    that does.
+    //
+    //    The unreadable notice comes first, and `doctor` only *phrases* it:
+    //    the sentence is `outl_config::Loaded::notice`, so this report and
+    //    the TUI's boot line cannot describe the same file differently
+    //    (issue #284). A warning, not an error — the workspace is intact,
+    //    and nothing overwrote the file. When it fires, `theme` below is a
+    //    default nobody chose, which is why it is announced first.
+    if let Some(notice) = config_notice {
+        b.warn(notice);
+    }
     theme::check_theme_pair(&mut b, theme);
 
     // 1. Raw op-log sweep, before any storage open. `JsonlStorage::open`
@@ -301,20 +205,9 @@ fn collect_internal(
     // a workspace with nothing else wrong still gets its old backup
     // generations reclaimed.
     plan.prune_backups = repair::collect_prunable(&paths.root);
-    // The one check whose subject is outside this workspace. The device
-    // store is machine-global and has never had a GC, so a workspace the
-    // user deleted keeps its actor binding forever (issue #211 item 3).
-    // Reported here because `doctor` is the surface a user already runs,
-    // and because the store's health is what decides whether the *next*
-    // open of any workspace forks an actor.
-    // An error here is an empty list, never a finding: the store is
-    // outside this workspace, so a permission problem there says nothing
-    // about this graph and must not fail an otherwise-clean run.
-    plan.prune_bindings = store
-        .stale_actor_bindings(STALE_BINDING_TTL)
-        .unwrap_or_default();
-    plan.prune_scratch = store.stale_scratch(STALE_SCRATCH_TTL).unwrap_or_default();
-    report_stale_bindings(&mut b, &plan.prune_bindings);
+    // The one check whose subject lives outside this workspace: the
+    // machine-global device store. See `device_store`.
+    device_store::check(&mut b, store, &mut plan);
 
     // 2. The op log as the storage layer sees it: how many ops survive
     //    the skip-on-malformed read, and which nodes they touch.
@@ -515,87 +408,12 @@ fn collect_internal(
         b.info("workspace lock probe skipped (running inside an outl session)");
     }
 
-    // 9. The gate. Every projection repair writes a `.md` rendered from
-    //    the materialized tree, and the tree is only ever as complete as
-    //    the op log it replayed. `JsonlStorage` skips unreadable records
-    //    by design, so a damaged log boots a **truncated** tree that
-    //    looks perfectly healthy from the inside — and a `.md` that is
-    //    still a faithful projection of the whole page then reads as
-    //    "stale", because the truncated tree renders less than it.
-    //
-    //    Repairing that overwrites the user's content with the render of
-    //    a log we just told them is broken. The op log is the source of
-    //    truth (root `CLAUDE.md` invariant 1); when it is damaged it has
-    //    no authority over the projection, and the correct move is to
-    //    stop and recover the log first.
-    //
-    //    Snapshot deletion stays allowed: it is a pure boot cache, and
-    //    dropping it only forces the full replay a damaged log wants
-    //    anyway.
-    let held_back = plan.reproject.len() + plan.rebuild_sidecar.len();
-    if health.is_compromised() && held_back > 0 {
-        plan.reproject.clear();
-        plan.rebuild_sidecar.clear();
-        b.warn(format!(
-            "{held_back} page repair(s) suppressed — the op log is damaged, so the tree replayed \
-             from it may be missing blocks, and re-projecting a page would overwrite a good \
-             `.md` with an incomplete render. Recover the op log first (restore `ops/` from a \
-             backup, or let a healthy peer sync it back), then re-run. Reasons: {}",
-            health.compromised_by.join("; ")
-        ));
-    }
-
-    // 10. The volume guard. Everything above decided *whether* a page
-    //     may be rewritten; this decides whether the total is small
-    //     enough to happen without being asked.
-    //
-    //     Re-projection removes content legitimately — a peer deleted a
-    //     block and this device is behind — so the gate cannot be "any
-    //     deletion". It is the scale: on a healthy workspace the total
-    //     is single digits, and the run that motivated this removed
-    //     1,426 lines from 233 pages while printing `708 fixed`
-    //     (RFC 0210). A destructive operation that scales silently turns
-    //     a small bug into an unrecoverable one.
-    //
-    //     Announced in **both** modes and suppressed only when actually
-    //     repairing, so the read-only listing keeps naming what it found
-    //     and states the condition attached to it — rather than offering
-    //     a repair `--repair` then silently refuses.
-    let volume = plan.volume();
-    if volume.is_destructive() {
-        let (max_pages, max_lines) = RepairVolume::ceilings();
-        if volume.needs_confirmation() {
-            let held_back = plan.reproject.len() + plan.rebuild_sidecar.len();
-            if do_repair && scope == RepairScope::Guarded {
-                plan.reproject.clear();
-                plan.rebuild_sidecar.clear();
-            }
-            let tail = match (do_repair, scope) {
-                (true, RepairScope::Guarded) => format!(
-                    "{held_back} page repair(s) suppressed — re-run with \
-                     `outl doctor --repair --force` once the list above reads right"
-                ),
-                (true, RepairScope::Forced) => "proceeding: `--force` was given".to_string(),
-                (false, _) => {
-                    "`outl doctor --repair` will refuse this without `--force`".to_string()
-                }
-            };
-            b.err(format!(
-                "`--repair` would remove {} content line(s) from {} page(s), past the \
-                 point this runs unattended (ceilings: {max_lines} line(s), {max_pages} \
-                 page(s)). Every write is backed up under `.outl/repair-backup/`, but a \
-                 deletion this size is a decision, not a repair. {tail}",
-                volume.lines_removed, volume.pages_losing_content,
-            ));
-        } else {
-            b.warn(format!(
-                "`--repair` would remove {} content line(s) from {} page(s) — under the \
-                 ceilings ({max_lines} line(s), {max_pages} page(s)), so it runs without \
-                 `--force`",
-                volume.lines_removed, volume.pages_losing_content,
-            ));
-        }
-    }
+    // 9. Two gates over the page writes planned above: a damaged op
+    //    log has no authority over its own projection, and a deletion
+    //    past the ceilings is a decision rather than a repair. Both
+    //    withhold, neither is silent. See `gate`.
+    gate::check_damaged_log(&mut b, &mut plan, &health);
+    gate::check_volume(&mut b, &mut plan, do_repair, scope);
 
     let repairable = plan.describe();
     let repair_report = match (do_repair, plan.is_empty(), &workspace) {
@@ -633,25 +451,6 @@ fn collect_internal(
     Ok(b.into_report(repairable, repair_report))
 }
 
-/// Say what the device store is carrying, in the read-only pass too.
-///
-/// **Info, never a warning.** A stale binding costs ~190 bytes and breaks
-/// nothing: the workspace it names is gone, so there is no sync to be
-/// wrong about. Ranking tidiness alongside a torn op log is how the loud
-/// lines in this report stop being read. The user learns the number, and
-/// `--repair` is where they act on it.
-fn report_stale_bindings(b: &mut Builder, stale: &[ActorBinding]) {
-    if stale.is_empty() {
-        return;
-    }
-    b.info(format!(
-        "device store: {} actor binding(s) name a workspace that no longer exists — \
-         `outl doctor --repair` drops them (a binding whose volume is merely unmounted \
-         is never counted here)",
-        stale.len()
-    ));
-}
-
 /// MCP entry point — returns the report as JSON `data` without the
 /// workspace-lock probe. The MCP shim already owns the lock for the
 /// session, so a fresh `acquire` would always report contention
@@ -659,79 +458,4 @@ fn report_stale_bindings(b: &mut Builder, stale: &[ActorBinding]) {
 pub fn collect_in_session_json(path: &Path) -> Result<Value, ApiError> {
     let report = collect_in_session(path)?;
     serde_json::to_value(&report).map_err(ApiError::internal)
-}
-
-/// CLI entry point with human output. Exits with status 1 when the
-/// report has errors so scripts can detect failure.
-pub fn run(path: &Path, do_repair: bool, scope: RepairScope) -> Result<()> {
-    let report = collect_scoped(path, do_repair, scope)
-        .with_context(|| format!("running doctor on {}", path.display()))?;
-    println!("workspace: {}", report.workspace);
-    println!("actor:     {}", report.actor);
-    println!();
-    for finding in &report.findings {
-        let tag = match finding.severity {
-            Severity::Ok => "ok:  ",
-            Severity::Info => "info:",
-            Severity::Warn => "warn:",
-            Severity::Error => "err: ",
-        };
-        println!("{tag} {}", finding.message);
-    }
-
-    if !report.repairable.is_empty() {
-        println!();
-        let suffix = if do_repair {
-            ""
-        } else {
-            " — run `outl doctor --repair`"
-        };
-        println!("{} repairable item(s){suffix}:", report.repairable.len());
-        for line in &report.repairable {
-            println!("  - {line}");
-        }
-    }
-    if let Some(rep) = &report.repair {
-        println!();
-        println!("repair: backups under {}", rep.backup_dir);
-        for action in &rep.actions {
-            let tag = if action.ok { "done" } else { "SKIP" };
-            println!(
-                "  {tag} {} {} ({})",
-                action.kind, action.path, action.detail
-            );
-        }
-        println!("repair: {} fixed, {} not fixed", rep.repaired, rep.failed);
-    }
-
-    println!();
-    match (report.error_count, report.warn_count) {
-        (0, 0) => println!("integrity OK"),
-        (0, w) => println!("integrity OK with {w} warning(s)"),
-        (e, w) => {
-            println!("{e} error(s), {w} warning(s) — see lines above");
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
-/// `outl doctor --json` shape — emits the envelope and exits 1 when
-/// the report has errors.
-pub fn run_json(path: &Path, do_repair: bool, scope: RepairScope) -> i32 {
-    let result = collect_scoped(path, do_repair, scope)
-        .and_then(|r| serde_json::to_value(&r).map_err(ApiError::internal));
-    let exit = emit(true, result.clone(), |_| {});
-    // `emit` already used the JSON branch; force an error exit when
-    // the report itself carried errors even though the call succeeded.
-    if exit == 0
-        && result
-            .ok()
-            .and_then(|v| v.get("error_count").and_then(|n| n.as_u64()))
-            .unwrap_or(0)
-            > 0
-    {
-        return 1;
-    }
-    exit
 }

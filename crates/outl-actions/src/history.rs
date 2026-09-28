@@ -170,7 +170,7 @@ pub fn restore_page_md(
 ) -> Result<(), ActionError> {
     let meta = page_meta(ws, page_id).ok_or_else(|| ActionError::NotInTree(page_id.to_string()))?;
     let path = page_md_path(root, &meta);
-    let _lock = crate::journal::apply::ProjectionLock::acquire(&path)?;
+    let _lock = crate::journal::write::ProjectionLock::acquire(&path)?;
     let current_disk = std::fs::read_to_string(&path)?;
     let expected_current = crate::journal::render_page_md(ws, page_id);
     if current_disk != expected_current {

@@ -8,7 +8,7 @@
 | **Date** | 2026-08-06 |
 | **Reference doc** | [concepts.md § Slugs](../concepts.md#slugs), [config.md](../config.md) |
 | **Invariant** | root `CLAUDE.md` invariant 1 (identity changes are `Op`s), invariant 7 (the title converges through the op log, not a shared file) |
-| **Guarded by** | `open_by_slug_uses_the_literal_stem` (`crates/outl-tui/src/actions/nav.rs`), `concurrent_create_does_not_double_a_regular_page_title` (`crates/outl-actions/src/page_repair_titles.rs`) |
+| **Guarded by** | `open_by_slug_uses_the_literal_stem` (`crates/outl-tui/src/actions/nav/open.rs`), `concurrent_create_does_not_double_a_regular_page_title` (`crates/outl-actions/src/page_repair_titles.rs`) |
 
 ## Why
 
@@ -137,7 +137,7 @@ Nothing surfaces the collision, and this is the sharpest unowned risk in this RF
 `open_page_by_slug` opens the literal stem and `open_page_by_name` slugifies, which means a page whose on-disk slug is not canonical now has **two** addresses that resolve to two different files.
 The quick switcher reaches the real one.
 Following a typed `[[ai-memory~abc]]` ref still slugifies and still lands on the canonical-slug file, which may be one of the empty duplicates #195 already created.
-Both tests in `crates/outl-tui/src/actions/nav.rs` pin this on purpose: `open_by_slug_uses_the_literal_stem` and `open_by_name_still_slugifies` assert the divergence rather than hide it.
+Both tests in `crates/outl-tui/src/actions/nav/open.rs` pin this on purpose: `open_by_slug_uses_the_literal_stem` and `open_by_name_still_slugifies` assert the divergence rather than hide it.
 The duplicates already on disk are not cleaned up either — see Scope.
 
 **#107's mirror is not fixed, and cannot be fixed here.**
@@ -175,7 +175,7 @@ That is visible churn in page lists and autocomplete, and it loses nothing.
    The same file records the matching JS trap: `new Date("YYYY-MM-DD")` is midnight UTC and renders the previous day in negative-offset zones.
 
 2. **Tests.**
-   Slug provenance: `open_by_slug_uses_the_literal_stem` and `open_by_name_still_slugifies` (`crates/outl-tui/src/actions/nav.rs`) pin both directions, and the first asserts that no slugified duplicate file appears.
+   Slug provenance: `open_by_slug_uses_the_literal_stem` and `open_by_name_still_slugifies` (`crates/outl-tui/src/actions/nav/open.rs`) pin both directions, and the first asserts that no slugified duplicate file appears.
    `slug_is_idempotent` (`crates/outl-md/src/slug.rs`) pins that `slugify` is stable on its own output, which is the narrow guarantee the split relies on.
    `rejects_path_traversal_slug` (`crates/outl-actions/src/deeplink.rs`) pins that the validator still refuses what it must.
    Human-typed names: `open_or_create_by_name_slugifies_filesystem_hostile_input` and `open_or_create_by_ref_resolves_existing_via_slugified_form` (`crates/outl-actions/src/resolve.rs`) pin the #50 fix.

@@ -361,34 +361,28 @@ pub(crate) async fn ingest_received_ops(
     // safety gate. Skip the gate for the batch instead: applying an op the
     // gate cannot judge is recoverable (HLC ordering absorbs it), silently
     // refusing all sync is not.
-    let now_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(d) => Some(d.as_millis() as u64),
-        Err(e) => {
-            warn!("local clock is before UNIX_EPOCH ({e}); skipping the future-HLC gate");
-            None
-        }
-    };
+    let now_ms = outl_core::hlc::wall_clock_ms_checked();
+    if now_ms.is_none() {
+        warn!("local clock is before UNIX_EPOCH; skipping the future-HLC gate");
+    }
 
     // HLC sanity gate (pure, no I/O): skip ops too far in the future.
-    // The window has one owner — `outl_core::hlc::MAX_CLOCK_SKEW_MS` — because
-    // `Workspace::seed_clock` clamps the boot seed to the same number. Two
-    // copies of it means the gate and the clamp can disagree about what
-    // "too far ahead" is, and the seed is the side that persists.
+    // The verdict has one owner — `outl_core::hlc::skew_ahead_ms` — because
+    // `Workspace::seed_clock` clamps the boot seed to the same window, and
+    // `outl-plugins`' `PluginHost::sync_pull` is a second ingestor of foreign
+    // ops. Three copies of "how far ahead is too far" means they can disagree,
+    // and the seed is the side that persists.
     let mut candidates: Vec<LogOp> = Vec::with_capacity(received.len());
     for op in received {
-        let op_ms = op.ts.physical_ms;
-        if let Some(now_ms) = now_ms {
-            if op_ms > now_ms + outl_core::hlc::MAX_CLOCK_SKEW_MS {
-                // Log the op's HLC + actor (its identity) so a dropped op is
-                // traceable, not just "something 25h ahead vanished".
-                warn!(
-                    ts = ?op.ts,
-                    actor = ?op.actor,
-                    "skipping op with future HLC ({}ms ahead)",
-                    op_ms - now_ms
-                );
-                continue;
-            }
+        if let Some(ahead) = outl_core::hlc::skew_ahead_ms(op.ts, now_ms) {
+            // Log the op's HLC + actor (its identity) so a dropped op is
+            // traceable, not just "something 25h ahead vanished".
+            warn!(
+                ts = ?op.ts,
+                actor = ?op.actor,
+                "skipping op with future HLC ({ahead}ms ahead)"
+            );
+            continue;
         }
         candidates.push(op.clone());
     }

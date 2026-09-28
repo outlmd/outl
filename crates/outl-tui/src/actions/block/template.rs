@@ -121,7 +121,7 @@ mod tests {
     /// `Workspace::root == None`), this test needs the real disk-root
     /// code path: `instantiate_template_at_cursor`'s reprojection guard
     /// is gated on `self.workspace.root.is_some()`, exactly like
-    /// production (`runtime.rs` always opens with `Some(root)`). A
+    /// production (`runtime/mod.rs` always opens with `Some(root)`). A
     /// `None` root would make the guarded write a silent no-op and the
     /// test would pass for the wrong reason.
     fn test_app_with_root() -> (crate::state::App, TempDir) {

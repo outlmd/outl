@@ -327,3 +327,80 @@ fn a_fresh_snapshot_scratch_file_is_left_alone() {
     collect(&root, true).expect("doctor --repair runs");
     assert!(tmp.exists(), "an in-flight write must survive repair");
 }
+
+// ----------------------------------------------------- decode, end to end
+
+// Everything above pins which snapshot `outl_core::snapshot::gc` says to
+// keep. These two pin the pass around it: an undecodable file reaches the
+// report as a warning and is copied to the backup before `--repair` drops
+// it, and a snapshot written by the real encoder is never mentioned.
+
+#[test]
+fn a_corrupt_snapshot_is_flagged_and_repair_moves_it_to_the_backup() {
+    let (_dir, root, paths) = fresh();
+    seed_page(&root, "notes", &["hello"]);
+    let cfg = crate::workspace_layout::read_config(&paths).unwrap();
+    let snap_dir = paths.dot_outl.join("snapshots");
+    std::fs::create_dir_all(&snap_dir).unwrap();
+    let snap = snap_dir.join(format!("snap-{}.bin", cfg.workspace.actor_id));
+    std::fs::write(&snap, b"this is not a postcard snapshot").unwrap();
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "snapshot unusable"),
+        "expected a corrupt-snapshot warning, got: {:#?}",
+        messages(&report)
+    );
+    assert!(
+        report
+            .repairable
+            .iter()
+            .any(|r| r.contains("delete boot snapshot") && r.contains("unusable")),
+        "an undecodable snapshot must be listed as repairable, and named as unusable \
+         rather than as something with notes in it: {:?}",
+        report.repairable
+    );
+
+    let repaired = collect(&root, true).expect("doctor --repair runs");
+    let rep = repaired.repair.expect("a repair report");
+    assert_eq!(rep.failed, 0, "repair actions: {:#?}", rep.actions);
+    assert!(!snap.exists(), "the corrupt snapshot must be gone");
+    let backup = Path::new(&rep.backup_dir);
+    assert!(
+        backup.exists(),
+        "the deleted snapshot must be recoverable from {}",
+        rep.backup_dir
+    );
+}
+
+/// A snapshot written by the real encoder must pass, or the check is
+/// just noise on every healthy workspace.
+#[test]
+fn a_valid_snapshot_passes() {
+    let (_dir, root, paths) = fresh();
+    seed_page(&root, "notes", &["hello"]);
+    let cfg = crate::workspace_layout::read_config(&paths).unwrap();
+    let actor = cfg.actor().unwrap();
+
+    let mut ws = crate::ws::open(&root).expect("open");
+    ws.workspace.save_snapshot().expect("write snapshot");
+    drop(ws);
+
+    let snap = paths
+        .dot_outl
+        .join("snapshots")
+        .join(format!("snap-{actor}.bin"));
+    assert!(snap.exists(), "save_snapshot should have written {snap:?}");
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "snapshot decodes, hash verified"),
+        "a real snapshot must verify, got: {:#?}",
+        messages(&report)
+    );
+    assert!(
+        report.repairable.is_empty(),
+        "a healthy workspace has nothing to repair: {:?}",
+        report.repairable
+    );
+}

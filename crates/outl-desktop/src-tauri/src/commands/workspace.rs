@@ -59,7 +59,12 @@ pub(crate) fn set_workspace(
     }
 
     // Persist the choice. Failure is logged but not fatal — the
-    // workspace is open in memory and the user can keep working.
+    // workspace is open in memory and the user can keep working. One
+    // failure is a refusal: `outl_config::save` will not write over a
+    // `config.toml` that failed to parse (issue #284), so the cost is the
+    // next launch opening the previous workspace instead of this one. The
+    // user-facing report of an unreadable config is `outl doctor`; this
+    // path only logs.
     {
         let mut s = state.settings.lock();
         s.last_workspace = Some(path.clone());

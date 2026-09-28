@@ -185,7 +185,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 |---|---|---|---|
 | Commit + exit Insert | `Esc` | `Esc` / blur | blur |
 | Newline inside the block (multi-line text) | `Shift+Enter` | `Shift+Enter` | `Enter` |
-| Split block at cursor into two (caret at end → empty sibling below; caret at start → empty block above; caret mid-text → head stays, tail becomes the new sibling, caret lands at its start) | `Enter` | `Enter` | `Enter` |
+| Split block at cursor into two (caret at end → empty sibling below; caret at start → empty block above; caret mid-text → head stays, tail becomes the new sibling, caret lands at its start) | `Enter` | `Enter` | `+` in the toolbar |
 | Commit + new block, caret-aware (caret at col 0 → *before* the block / vim `O`; past col 0 → *below*) | — | `Cmd/Ctrl+Shift+Enter` | — |
 | Indent (stay in Insert) | `Tab` | `Tab` | drag |
 | Outdent (stay in Insert) | `Shift+Tab` | `Shift+Tab` | drag |

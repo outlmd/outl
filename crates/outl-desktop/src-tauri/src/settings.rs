@@ -291,11 +291,21 @@ fn restore_unmodeled_sections(cfg: &mut Config, on_disk: &Config) {
 /// Save the flat wire shape as `config.toml`. Same path
 /// (`~/.config/outl/config.toml`) regardless of where the OS
 /// thinks the app's config directory is.
+///
+/// Errors when the file on disk failed to parse: `outl_config::save`
+/// refuses rather than writing this struct over a config nobody could
+/// read (issue #284). That refusal matters most *here*, because
+/// `restore_unmodeled_sections` copies the unmodelled sections out of
+/// `on_disk` — which, for an unparseable file, is `Config::default()`, so
+/// the preservation below faithfully preserves nothing. The `?` carries
+/// the reason (path + the TOML line) up to `update_settings`, which hands
+/// it to the frontend; the Settings modal shows it in the error toast and
+/// stays open.
 pub fn save(_app_config_dir: &std::path::Path, settings: &Settings) -> anyhow::Result<()> {
     let mut cfg: Config = settings.clone().into();
     let on_disk = outl_config::load();
     restore_unmodeled_sections(&mut cfg, &on_disk);
-    outl_config::save(&cfg)
+    Ok(outl_config::save(&cfg)?)
 }
 
 #[cfg(test)]

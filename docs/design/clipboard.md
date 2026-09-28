@@ -31,14 +31,14 @@ The inbound pipeline is complete and identical across clients:
 frontend onPaste / TUI bracketed paste
   → @outl/shared looksLikeOutline            (crates/outl-frontend-shared/src/.../paste)
   → paste_markdown_at (Tauri command)        (outl-{desktop,mobile}/src-tauri/.../block.rs)
-  → outl_actions::paste_markdown             (crates/outl-actions/src/paste/mod.rs:150)
+  → outl_actions::paste_markdown             (crates/outl-actions/src/paste/mod.rs:156)
   → normalize_external_syntax                (crates/outl-actions/src/paste/normalize.rs)
   → outl_md::parse::parse                    (crates/outl-md/src/parse.rs:97)
 ```
 
 `normalize_external_syntax` already converts Roam `{{[[TODO]]}}`, GitHub `- [ ]`, Roam embeds/queries,
 strips unknown `{{…}}`, drops Logseq `id::` lines, and reflows 4-space indent to 2-space.
-`looks_like_outline` (`paste/mod.rs:206`) is the canonical gate; the JS mirror is `looksLikeOutline` in `@outl/shared`.
+`looks_like_outline` (`paste/detect.rs:26`) is the canonical gate; the JS mirror is `looksLikeOutline` in `@outl/shared`.
 
 **Conclusion: the "paste converts to our markdown" requirement is met today.**
 The only follow-up here is consistency review, not new capability.
@@ -58,7 +58,7 @@ it skips the root node's own text and **drops block properties** (`build_outline
 ### Root cause of the issue #114 mess
 
 In the screenshot the reporter did **not** use an app shortcut.
-On Crostini the terminal's `Ctrl+C` quits (`runtime.rs:413`), so — as the report says —
+On Crostini the terminal's `Ctrl+C` quits (`runtime/event_loop.rs`), so — as the report says —
 they **select with the mouse and the terminal auto-copies**.
 A terminal mouse selection copies the *rendered cells*: the `│ ` guides, bullets, and fold markers.
 The app has no hook into that path — the emulator is copying the screen, not our data.

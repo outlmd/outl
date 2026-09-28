@@ -56,7 +56,7 @@ Every split below was forced by the file-size guard, but each one landed on a se
 | `coordination.rs` | The handles concurrent tasks meet on: `AppendLock`, `InFlightPeers` (+ `InFlightGuard`, `try_acquire_in_flight`), `InboundServes`, `SharedWorkspaceId`. | Four dial paths and the inbound `serve` all reach for these, and none of them care how `run_iroh` works. |
 | `oplog.rs` | What the wire reads from and writes to disk: `local_vector_clock`, `ops_missing_for`, `ingest_received_ops`, and the append-serialization invariant. | Those durability rules hold regardless of which wire version calls them, so they are not protocol code. |
 | `peer_conn.rs` | `PeerConnections` — one live QUIC connection per peer, reused across syncs, invalidated on failure. | Only possible once the durable-ingest ack moved off the close code (v3); before that a connection could not outlive one exchange. |
-| `protocol.rs` | What the bytes mean: ALPNs, encode/decode, the close codes, and `classify_close` / `CloseVerdict`. | A misclassified close is invisible at runtime (both non-success verdicts return the same error and re-push), so the decision table has to be a value a test can enumerate, not a `match` reachable only over real QUIC. |
+| `protocol/` | What the bytes mean, one file per conversation: `alpn` (which ALPNs this endpoint answers, at which version), `close` (the close codes plus `classify_close` / `CloseVerdict`), `frame` (the 4-byte length prefix, with no opinion on the body), `delta` (the `SYNC_ALPN` body: vector clocks, op batches, `ACK_DURABLE`), `asset` (the manifest). `mod.rs` re-exports all of it, so callers keep writing `crate::protocol::<item>` and no wire byte depends on where the code lives. | A misclassified close is invisible at runtime (both non-success verdicts return the same error and re-push), so the decision table has to be a value a test can enumerate, not a `match` reachable only over real QUIC. |
 
 `engine.rs` re-exports `delta_sync`, `SyncProtocolHandler` and the `coordination` types, so `crate::engine::delta_sync` and `crate::engine::AppendLock` keep resolving for `engine_catchup`, `engine_gossip`, `engine_pairing` and `test_support`.
 
@@ -71,7 +71,7 @@ Shared seed/read/wait helpers stay in `tests/common/mod.rs` (read-only); saga-sp
 | Saga bug | Guard test | Where |
 |----------|-----------|-------|
 | 1. Op-log corruption from concurrent appends (glued `…}}}{`) — append lock serializes inbound batches | `concurrent_appends_never_glue_ops_on_the_responder` (asserts no `}{` on disk + every op parses) | `tests/regression.rs` |
-| 1. (parser-recovery half) a hand-crafted glued `}}}{` line still loads both ops | `recovers_glued_ops_on_one_line` (pre-existing, core-side) | `outl-core` `storage/jsonl.rs` |
+| 1. (parser-recovery half) a hand-crafted glued `}}}{` line still loads both ops | `recovers_glued_ops_on_one_line` (pre-existing, core-side) | `outl-core` `storage/jsonl/tests.rs` |
 | 2. HLC far-future op skipped on ingest (±24h gate) | `far_future_hlc_op_is_skipped_on_ingest` (B sends a ~48h-ahead op + a valid op; only the valid one lands on A) | `tests/regression.rs` |
 | 3. Workspace identity = stable id, not path (topic) | `same_workspace_id_yields_same_topic_across_paths` (pre-existing) | `tests/integration.rs` |
 | 3. Workspace identity = stable id, not path (END-TO-END sync) | `different_paths_same_workspace_id_sync_as_one` (two devices at different paths, same id, converge) | `tests/regression.rs` |

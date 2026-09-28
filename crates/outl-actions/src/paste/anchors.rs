@@ -11,7 +11,7 @@ use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
 use outl_md::parse::OutlineNode as ParsedNode;
 
-use super::{collect_ids, push_ids, PasteAnchor, PasteOutcome};
+use super::{PasteAnchor, PasteOutcome};
 use crate::block::{
     append_forest, create_after, create_under, edit_text, BlockTreeOutcome, BlockTreeSpec,
 };
@@ -286,5 +286,22 @@ fn join_caret_left_with(left: &str, addition: &str) -> String {
         format!("{left}{addition}")
     } else {
         format!("{left} {addition}")
+    }
+}
+
+/// Flatten a `BlockTreeOutcome` forest into the ids it minted, in
+/// DFS / sibling order.
+fn collect_ids(outcomes: &[BlockTreeOutcome]) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    for o in outcomes {
+        push_ids(&mut out, o);
+    }
+    out
+}
+
+fn push_ids(out: &mut Vec<NodeId>, o: &BlockTreeOutcome) {
+    out.push(o.id);
+    for c in &o.children {
+        push_ids(out, c);
     }
 }

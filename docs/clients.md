@@ -168,6 +168,7 @@ A parser warning says "outl kept a line that doesn't match the dialect".
 This is a different, louder condition: **the page is no longer converging with your other devices.**
 
 It happens when a page's `.md` holds content that exists in no op.
+A [YAML frontmatter fence](markdown-frontmatter.md) the op log has never seen counts as such content, and reaches the user through this same refusal and the same recovery.
 outl refuses to overwrite such a file (root `CLAUDE.md` invariant 8, [RFC 0210](rfcs/0210-md-content-outside-op-log.md)), because that write deletes the content for good.
 The cost of refusing is that the page is frozen in both directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
 

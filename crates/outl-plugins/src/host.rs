@@ -12,32 +12,42 @@
 //! Anti-loop: the host tracks how far into the op log it has dispatched
 //! (`last_seen`). Ops a plugin itself produces advance `last_seen` too, so they
 //! never re-trigger hooks — no plugin → op → plugin cycle.
+//!
+//! # Where the rest of it lives
+//!
+//! This file keeps the plugin's *lifetime* — load it, hand it what it needs for
+//! a turn, run the turn, persist what it changed. Four jobs with their own
+//! rules moved out to siblings:
+//!
+//! - `project` — `&Workspace` → the read-only shapes the JS side sees.
+//! - `intents` — the only place the host mutates a workspace, permission-gated.
+//! - `contributions` — `manifest.contributes` → client chrome, capability-gated.
+//! - `sync` — the `sync-transport` trust boundary (non-negotiable 7).
+
+mod contributions;
+mod intents;
+mod project;
+mod sync;
 
 use std::rc::Rc;
-use std::str::FromStr;
 
 use serde_json::Value;
 
-use outl_actions::block;
-use outl_actions::page::{self, PageKind};
-use outl_actions::template as tpl_actions;
-use outl_actions::todo::{split_todo, TodoState};
 use outl_core::hlc::HlcGenerator;
-use outl_core::id::NodeId;
-use outl_core::op::{LogOp, Op};
 use outl_core::workspace::Workspace;
-use outl_shortcuts::{ChordSequence, Mode};
 
 use crate::capability::{self, Capability, CapabilityMatch, ClientCapabilities};
 use crate::error::{PluginError, Result};
 use crate::manifest::PluginManifest;
-use crate::model::{
-    BlockView, HostIntent, LogOpView, MoveTarget, PageView, ReadModel, TemplateView,
-    TransformResult,
-};
+use crate::model::{LogOpView, TransformResult};
 use crate::permission::{Permission, PermissionSet};
 use crate::runtime::PluginEngine;
 use crate::secrets::{plugin_service, KeyringStore, SecretStore};
+
+use self::intents::apply_intents;
+use self::project::{build_read_model, project_op};
+
+pub use self::contributions::{CommandEntry, PluginBinding, ToolbarButtonEntry, TransformerEntry};
 
 /// One loaded, activated plugin.
 struct LoadedPlugin {
@@ -52,58 +62,6 @@ impl LoadedPlugin {
     fn has(&self, cap: Capability) -> bool {
         self.caps.granted.contains(&cap)
     }
-}
-
-/// A command a plugin contributes, surfaced to the client's palette.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandEntry {
-    /// Owning plugin id.
-    pub plugin_id: String,
-    /// Command id (`contributes.commands[].id`).
-    pub command_id: String,
-    /// Human title.
-    pub title: String,
-}
-
-/// A plugin keybinding, parsed and ready for a client to merge into its chord
-/// dispatcher. The client runs `run_command(plugin_id, command_id)` when the
-/// chord fires.
-#[derive(Debug, Clone)]
-pub struct PluginBinding {
-    /// The parsed chord sequence.
-    pub chord: ChordSequence,
-    /// Mode the binding fires in (plugin chords are `Global`).
-    pub mode: Mode,
-    /// Owning plugin id.
-    pub plugin_id: String,
-    /// Command id to run.
-    pub command_id: String,
-    /// Human description (for the help overlay).
-    pub description: String,
-}
-
-/// A content transformer a plugin declares for a code-fence language.
-#[derive(Debug, Clone)]
-pub struct TransformerEntry {
-    /// Owning plugin id.
-    pub plugin_id: String,
-    /// Code-fence language this transformer handles.
-    pub lang: String,
-    /// `"text"` or `"rich"`.
-    pub kind: String,
-}
-
-/// A toolbar button a plugin contributes to a GUI client's chrome.
-#[derive(Debug, Clone)]
-pub struct ToolbarButtonEntry {
-    /// Owning plugin id.
-    pub plugin_id: String,
-    /// Command id to run on tap.
-    pub command_id: String,
-    /// Glyph/emoji to render.
-    pub icon: String,
-    /// Optional tooltip / accessible label.
-    pub title: Option<String>,
 }
 
 /// The result of running a command or a hook sweep.
@@ -239,7 +197,10 @@ impl PluginHost {
                 _ => None,
             })
             .collect();
-        engine.set_network(net_domains);
+        engine.set_network(crate::permission::NetGrant {
+            plugin_id: manifest.id.clone(),
+            domains: net_domains,
+        });
         engine
             .load(bundle)
             .map_err(|e| PluginError::Engine(e.to_string()))?;
@@ -261,114 +222,6 @@ impl PluginHost {
             .find(|p| p.manifest.id == plugin_id)
             .map(|p| p.caps.missing.iter().copied().collect())
             .unwrap_or_default()
-    }
-
-    /// Every command contributed by a loaded plugin whose `slash-command`
-    /// capability is granted on this client.
-    pub fn commands(&self) -> Vec<CommandEntry> {
-        let mut out = Vec::new();
-        for p in &self.plugins {
-            if !p.has(Capability::SlashCommand) {
-                continue;
-            }
-            for c in &p.manifest.contributes.commands {
-                out.push(CommandEntry {
-                    plugin_id: p.manifest.id.clone(),
-                    command_id: c.id.clone(),
-                    title: c.title.clone(),
-                });
-            }
-        }
-        out
-    }
-
-    /// Plugin keybindings for `client` (`"tui"` / `"desktop"` / `"mobile"`),
-    /// parsed and ready to merge into the client's chord dispatcher. Only
-    /// plugins granted the `keybinding` capability are included; a binding whose
-    /// `when` names a different client, or whose chord string doesn't parse, is
-    /// skipped.
-    pub fn keybindings(&self, client: &str) -> Vec<PluginBinding> {
-        let mut out = Vec::new();
-        for p in &self.plugins {
-            if !p.has(Capability::Keybinding) {
-                continue;
-            }
-            for kb in &p.manifest.contributes.keybindings {
-                if kb.when.as_deref().is_some_and(|w| w != client) {
-                    continue;
-                }
-                let Some(chord) = ChordSequence::parse(&kb.key) else {
-                    continue;
-                };
-                let description = p
-                    .manifest
-                    .contributes
-                    .commands
-                    .iter()
-                    .find(|c| c.id == kb.command)
-                    .map(|c| c.title.clone())
-                    .unwrap_or_else(|| kb.command.clone());
-                out.push(PluginBinding {
-                    chord,
-                    mode: Mode::Global,
-                    plugin_id: p.manifest.id.clone(),
-                    command_id: kb.command.clone(),
-                    description,
-                });
-            }
-        }
-        out
-    }
-
-    /// Toolbar buttons for `client` (`"desktop"` / `"mobile"`). Only plugins
-    /// granted the `toolbar-button` capability are included.
-    pub fn toolbar_buttons(&self, client: &str) -> Vec<ToolbarButtonEntry> {
-        let mut out = Vec::new();
-        for p in &self.plugins {
-            if !p.has(Capability::ToolbarButton) {
-                continue;
-            }
-            for tb in &p.manifest.contributes.toolbar {
-                if tb.when.as_deref().is_some_and(|w| w != client) {
-                    continue;
-                }
-                out.push(ToolbarButtonEntry {
-                    plugin_id: p.manifest.id.clone(),
-                    command_id: tb.command.clone(),
-                    icon: tb.icon.clone(),
-                    title: tb.title.clone(),
-                });
-            }
-        }
-        out
-    }
-
-    /// Content transformers granted on this client, keyed by code-fence
-    /// language. A client renders a fence by looking up its language here; if a
-    /// transformer matches, it calls [`PluginHost::transform_block`]. `text`
-    /// transformers need `content-transformer:text`, `rich` ones need
-    /// `content-transformer:rich` — a client lacking the capability never sees
-    /// the entry.
-    pub fn transformers(&self) -> Vec<TransformerEntry> {
-        let mut out = Vec::new();
-        for p in &self.plugins {
-            for t in &p.manifest.contributes.transformers {
-                let cap = if t.kind == "rich" {
-                    Capability::ContentTransformerRich
-                } else {
-                    Capability::ContentTransformerText
-                };
-                if !p.has(cap) {
-                    continue;
-                }
-                out.push(TransformerEntry {
-                    plugin_id: p.manifest.id.clone(),
-                    lang: t.lang.clone(),
-                    kind: t.kind.clone(),
-                });
-            }
-        }
-        out
     }
 
     /// Run a plugin's content transformer for `lang` against `input`, returning
@@ -514,303 +367,6 @@ impl PluginHost {
         self.dispatching = false;
         Ok(run)
     }
-
-    /// Index of the first plugin granted the `sync-transport` capability, if any.
-    fn sync_plugin(&self) -> Option<usize> {
-        self.plugins
-            .iter()
-            .position(|p| p.has(Capability::SyncTransport))
-    }
-
-    /// Hand the sync-transport plugin the JSONL of **locally-authored** ops
-    /// produced since the last push, so it can ship them to its backend.
-    /// Returns how many ops were shipped. Ops injected from peers (via
-    /// [`PluginHost::sync_pull`]) carry a foreign actor and are filtered out, so
-    /// they never echo back.
-    pub fn sync_push(&mut self, workspace: &Workspace) -> Result<usize> {
-        let Some(idx) = self.sync_plugin() else {
-            return Ok(0);
-        };
-        let local = workspace.actor;
-        let lines: Vec<String> = workspace
-            .log()
-            .iter()
-            .skip(self.last_pushed)
-            .filter(|lo| lo.actor == local)
-            .map(serde_json::to_string)
-            .collect::<std::result::Result<_, _>>()?;
-        self.last_pushed = workspace.log().len();
-        if lines.is_empty() {
-            return Ok(0);
-        }
-        let jsonl = lines.join("\n");
-        let count = lines.len();
-        self.prepare_secrets(idx);
-        let config = self.plugins[idx].config.clone();
-        self.plugins[idx]
-            .engine
-            .sync_push(&jsonl, &config)
-            .map_err(|e| PluginError::Engine(e.to_string()))?;
-        Ok(count)
-    }
-
-    /// Ask the sync-transport plugin for remote ops and apply each through
-    /// `Workspace::apply` (HLC-observed, idempotent). The plugin only transports
-    /// bytes — every op still goes through the CRDT, so a malformed line is
-    /// skipped, never trusted into the tree raw. Returns how many applied.
-    pub fn sync_pull(&mut self, workspace: &mut Workspace, hlc: &HlcGenerator) -> Result<usize> {
-        let Some(idx) = self.sync_plugin() else {
-            return Ok(0);
-        };
-        self.prepare_secrets(idx);
-        let config = self.plugins[idx].config.clone();
-        let Some(jsonl) = self.plugins[idx]
-            .engine
-            .sync_pull(&config)
-            .map_err(|e| PluginError::Engine(e.to_string()))?
-        else {
-            return Ok(0);
-        };
-
-        let mut applied = 0;
-        for line in jsonl.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let Ok(op) = serde_json::from_str::<LogOp>(line) else {
-                continue; // skip a malformed line, never panic
-            };
-            hlc.observe(op.ts); // advance the local clock so causality holds
-            if workspace.apply(op).is_ok() {
-                applied += 1;
-            }
-        }
-        // Injected ops advanced the log but are foreign-actor, so sync_push
-        // won't re-ship them; keep last_pushed in step so we don't rescan them.
-        self.last_pushed = workspace.log().len();
-        Ok(applied)
-    }
-}
-
-/// Apply a plugin's intents, gating each on the approved permission set.
-fn apply_intents(
-    workspace: &mut Workspace,
-    hlc: &HlcGenerator,
-    perms: &PermissionSet,
-    plugin_id: &str,
-    intents: &[HostIntent],
-    run: &mut PluginRun,
-) {
-    for intent in intents {
-        if !perms.check(&intent.required_permission()) {
-            run.errors.push(format!(
-                "{plugin_id}: denied `{}` for intent",
-                intent.required_permission()
-            ));
-            continue;
-        }
-        match apply_one(workspace, hlc, intent) {
-            Ok(()) => run.applied += 1,
-            Err(e) => run.errors.push(format!("{plugin_id}: {e}")),
-        }
-    }
-}
-
-fn apply_one(workspace: &mut Workspace, hlc: &HlcGenerator, intent: &HostIntent) -> Result<()> {
-    match intent {
-        HostIntent::EditText { node, text } => {
-            block::edit_text(workspace, hlc, parse_node(node)?, text).map_err(act)
-        }
-        HostIntent::CreateUnder { parent, text } => {
-            block::create_under(workspace, hlc, parse_node(parent)?, Some(text))
-                .map(|_| ())
-                .map_err(act)
-        }
-        HostIntent::CreateAfter { after, text } => {
-            block::create_after(workspace, hlc, parse_node(after)?, Some(text))
-                .map(|_| ())
-                .map_err(act)
-        }
-        HostIntent::ToggleTodo { node } => {
-            block::toggle_todo(workspace, hlc, parse_node(node)?).map_err(act)
-        }
-        HostIntent::Delete { node } => {
-            block::delete(workspace, hlc, parse_node(node)?).map_err(act)
-        }
-        HostIntent::EnsurePage { slug } => {
-            page::open_or_create(workspace, hlc, slug, slug, PageKind::Page)
-                .map(|_| ())
-                .map_err(act)
-        }
-        HostIntent::InstantiateTemplate { name, under } => {
-            let target = parse_node(under)?;
-            let slug = page_slug_of(workspace, target).unwrap_or_default();
-            // Derive the page date from the target slug so `{{date}}`
-            // resolves to the journal's own date on a daily note, matching
-            // the CLI/TUI path — passing `None` here made it always render
-            // today's date regardless of which page the block lives on.
-            let page_date = outl_actions::dates::date_from_slug(&slug);
-            tpl_actions::instantiate_template(workspace, hlc, name, target, &slug, page_date)
-                .map(|_| ())
-                .map_err(act)
-        }
-        HostIntent::Move { node, target } => {
-            let n = parse_node(node)?;
-            let parent = match target {
-                MoveTarget::ToParent { to_parent } => parse_node(to_parent)?,
-                MoveTarget::ToPage { to_page } => {
-                    page::open_or_create(workspace, hlc, to_page, to_page, PageKind::Page)
-                        .map_err(act)?
-                }
-            };
-            block::move_under(workspace, hlc, n, parent).map_err(act)
-        }
-        HostIntent::AppendTree { target, tree } => {
-            let parent = match target {
-                MoveTarget::ToParent { to_parent } => parse_node(to_parent)?,
-                // `toPage` is a slug, same as `Move`/`EnsurePage`. Pages are
-                // flat (`pages/<slug>.md`); the slug is also the page title, so
-                // the plugin reads the day back with `query({ page: slug })`.
-                MoveTarget::ToPage { to_page } => {
-                    page::open_or_create(workspace, hlc, to_page, to_page, PageKind::Page)
-                        .map_err(act)?
-                }
-            };
-            append_tree(workspace, hlc, parent, tree).map_err(act)
-        }
-    }
-}
-
-/// Recursively create `nodes` under `parent`, descending into children with the
-/// id the host gets back from each create. This is what lets `AppendTree`
-/// materialize a nested structure in one turn — the plugin never sees the ids,
-/// the host threads them through here.
-fn append_tree(
-    workspace: &mut Workspace,
-    hlc: &HlcGenerator,
-    parent: NodeId,
-    nodes: &[crate::model::TreeNode],
-) -> std::result::Result<(), outl_actions::error::ActionError> {
-    for node in nodes {
-        let id = block::create_under(workspace, hlc, parent, Some(&node.text))?;
-        if !node.children.is_empty() {
-            append_tree(workspace, hlc, id, &node.children)?;
-        }
-    }
-    Ok(())
-}
-
-fn act(e: outl_actions::error::ActionError) -> PluginError {
-    PluginError::Engine(e.to_string())
-}
-
-fn parse_node(s: &str) -> Result<NodeId> {
-    // `NodeId` is a `NodeId(pub Ulid)` newtype with no `FromStr`; parse the
-    // ULID and wrap it, same as the desktop's `helpers::parse_node_id`.
-    ulid::Ulid::from_str(s)
-        .map(NodeId)
-        .map_err(|_| PluginError::BadNodeId(s.to_string()))
-}
-
-/// Build the read-only snapshot the JS side queries this turn.
-fn build_read_model(workspace: &Workspace) -> ReadModel {
-    let pages: Vec<PageView> = page::list_all(workspace)
-        .into_iter()
-        .map(|m| PageView {
-            slug: m.slug,
-            title: m.title,
-            kind: m.kind.as_str().to_string(),
-        })
-        .collect();
-
-    let templates: Vec<TemplateView> = tpl_actions::list_templates(workspace)
-        .into_iter()
-        .map(|t| TemplateView {
-            name: t.name,
-            slug: t.slug,
-            params: t.params,
-        })
-        .collect();
-
-    let mut blocks = Vec::new();
-    for (node, parent, _pos) in workspace.tree().iter_nodes() {
-        if node == NodeId::root() || node == NodeId::trash() {
-            continue;
-        }
-        // Skip page nodes themselves — plugins operate on blocks, not pages.
-        if page::page_meta(workspace, node).is_some() {
-            continue;
-        }
-        let Some(raw) = workspace.block_text(node) else {
-            continue;
-        };
-        let (todo, body) = split_todo(&raw);
-        // A block whose parent is the page root (or root/trash) is top-level:
-        // report `null` so the plugin sees "no addressable parent block".
-        let parent_id = if parent == NodeId::root()
-            || parent == NodeId::trash()
-            || page::page_meta(workspace, parent).is_some()
-        {
-            None
-        } else {
-            Some(parent.to_string())
-        };
-        blocks.push(BlockView {
-            id: node.to_string(),
-            text: body.to_string(),
-            todo: todo.map(|t| t.as_str().to_string()),
-            parent: parent_id,
-            page: page_slug_of(workspace, node).unwrap_or_default(),
-        });
-    }
-    ReadModel {
-        blocks,
-        pages,
-        templates,
-        op: None,
-    }
-}
-
-/// Climb parents until one is a page; return its slug.
-fn page_slug_of(workspace: &Workspace, node: NodeId) -> Option<String> {
-    let mut cur = node;
-    loop {
-        let parent = workspace.tree().parent(cur)?;
-        if let Some(meta) = page::page_meta(workspace, parent) {
-            return Some(meta.slug);
-        }
-        if parent == NodeId::root() {
-            return None;
-        }
-        cur = parent;
-    }
-}
-
-/// Project an applied [`LogOp`] to the stable JS shape.
-fn project_op(workspace: &Workspace, lo: &LogOp) -> Option<LogOpView> {
-    let mk = |kind: &str, node: NodeId| LogOpView {
-        kind: kind.to_string(),
-        node: node.to_string(),
-        text: None,
-        todo: None,
-    };
-    Some(match &lo.op {
-        Op::Create { node, .. } => mk("Create", *node),
-        Op::Move { node, .. } => mk("Move", *node),
-        Op::SetProp { node, .. } => mk("SetProp", *node),
-        Op::SetCollapsed { node, .. } => mk("SetCollapsed", *node),
-        Op::SnoozeRemind { node, .. } => mk("SnoozeRemind", *node),
-        Op::Edit { node, .. } => {
-            let raw = workspace.block_text(*node).unwrap_or_default();
-            let (todo, body) = split_todo(&raw);
-            LogOpView {
-                kind: "Edit".to_string(),
-                node: node.to_string(),
-                text: Some(body.to_string()),
-                todo: todo.map(|t: TodoState| t.as_str().to_string()),
-            }
-        }
-    })
 }
 
 #[cfg(feature = "js")]

@@ -323,7 +323,7 @@ Until those land, ChronDB is the future, not the present.
 ### How the switch will happen
 
 When ChronDB is ready, the PR adds `outl-core/src/storage/chrondb.rs` implementing `Storage`, plus an `outl init --backend chrondb` flag in `outl-cli`.
-The `Storage` trait absorbs the new impl — no change in `outl-core/src/tree.rs`, no change in `outl-md`, no change in the TUI.
+The `Storage` trait absorbs the new impl — no change in `outl-core/src/tree/`, no change in `outl-md`, no change in the TUI.
 That's the whole point of the trait.
 
 Tracked: <https://github.com/outlmd/outl/issues/1>.

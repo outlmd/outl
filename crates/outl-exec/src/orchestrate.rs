@@ -307,6 +307,7 @@ mod tests {
 
     fn page_with_blocks(blocks: Vec<OutlineNode>) -> ParsedPage {
         ParsedPage {
+            frontmatter: None,
             properties: Vec::new(),
             blocks,
             warnings: Vec::new(),

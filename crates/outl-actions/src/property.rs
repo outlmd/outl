@@ -266,6 +266,85 @@ mod tests {
     }
 
     #[test]
+    fn a_pages_frontmatter_fence_is_not_one_of_its_properties() {
+        // The fence rides `Op::SetProp` on the page root (issue #281), so
+        // it lands in the same map as `icon::`. Surfacing it hands the
+        // user an editable chip holding a multi-line YAML blob the
+        // dialect writes with its own `---` delimiters.
+        let (mut ws, hlc) = workspace();
+        let page =
+            crate::page::open_or_create(&mut ws, &hlc, "fm", "fm", crate::page::PageKind::Page)
+                .unwrap();
+        set_property(
+            &mut ws,
+            &hlc,
+            page,
+            outl_md::PAGE_FRONTMATTER_KEY,
+            Some(PropValue::Text("title: My Note".into())),
+        )
+        .unwrap();
+
+        let keys: Vec<String> = page_properties(&ws, page)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert!(
+            !keys.contains(&outl_md::PAGE_FRONTMATTER_KEY.to_string()),
+            "the fence leaked into the property panel: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn the_frontmatter_key_cannot_be_written_as_a_property() {
+        // Sharper than the `page-slug` case: deleting the chip emits
+        // `SetProp(page-frontmatter, None)`, the next render carries no
+        // fence while the `.md` still does, and every projection after
+        // that is refused as `PageMarkdownAheadOfLog` — the page stops
+        // syncing in both directions until `outl reconcile
+        // --ahead-of-log` runs.
+        for typed in [
+            outl_md::PAGE_FRONTMATTER_KEY,
+            "page-frontmatter::",
+            "  page-frontmatter:: ",
+        ] {
+            let key = normalize_key(typed);
+            assert!(
+                key_rejection(&key).is_some(),
+                "{typed:?} normalised to {key:?} and slipped past the guard"
+            );
+        }
+    }
+
+    #[test]
+    fn the_frontmatter_key_is_never_suggested() {
+        // "Add a property" proposing `page-frontmatter` invites the user
+        // to hand-author a channel the parser owns.
+        let (mut ws, hlc) = workspace();
+        let page =
+            crate::page::open_or_create(&mut ws, &hlc, "fm", "fm", crate::page::PageKind::Page)
+                .unwrap();
+        set_property(
+            &mut ws,
+            &hlc,
+            page,
+            outl_md::PAGE_FRONTMATTER_KEY,
+            Some(PropValue::Text("title: My Note".into())),
+        )
+        .unwrap();
+        set_property(
+            &mut ws,
+            &hlc,
+            page,
+            "icon",
+            Some(PropValue::Text("\u{1f4cc}".into())),
+        )
+        .unwrap();
+
+        let keys: Vec<String> = known_keys(&ws).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, vec!["icon".to_string()], "got {keys:?}");
+    }
+
+    #[test]
     fn normalize_key_covers_what_a_user_actually_types() {
         assert_eq!(normalize_key("oura-date::"), "oura-date");
         assert_eq!(normalize_key("  related::  "), "related");

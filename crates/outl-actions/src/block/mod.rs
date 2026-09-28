@@ -18,7 +18,13 @@
 //! The surface is split by responsibility so no single file owns
 //! unrelated concerns:
 //!
-//! - `create` — mint new blocks and whole subtrees.
+//! - `create` — mint a block with no anchor: append it as a last
+//!   child, and the `Op::Create` primitive every other file here uses.
+//! - `siblings` — place a new block relative to an existing one
+//!   (`create_before` / `create_after`), including what happens when
+//!   the fractional index has no slot and when the anchor is stale.
+//! - `forest` — build a whole subtree, or a forest of them, in one
+//!   batched call.
 //! - `edit` — rewrite a block's text and toggle its TODO / quote
 //!   markers.
 //! - `moves` — re-parent (incl. the arbitrary cross-page
@@ -38,16 +44,17 @@ use crate::error::ActionError;
 
 mod create;
 mod edit;
+mod forest;
 mod moves;
+mod siblings;
 mod split;
 
 pub(crate) use create::create_with_explicit_id;
-pub use create::{
-    append_block, append_forest, append_tree, create_after, create_after_or_append, create_before,
-    create_before_or_append, create_under, BlockTreeOutcome, BlockTreeSpec,
-};
+pub use create::{append_block, create_under};
 pub use edit::{edit_text, toggle_quote, toggle_todo};
+pub use forest::{append_forest, append_tree, BlockTreeOutcome, BlockTreeSpec};
 pub use moves::{delete, indent, move_after, move_down, move_under, move_up, outdent};
+pub use siblings::{create_after, create_after_or_append, create_before, create_before_or_append};
 pub use split::split_block;
 
 /// Build a [`LogOp`] wrapping `op` with a fresh HLC.

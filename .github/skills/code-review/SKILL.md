@@ -25,7 +25,7 @@ Only the matching rows apply.
 | Changed path | Go to |
 |---|---|
 | `crates/outl-md/src/reconcile.rs`, `matching/`, `sidecar.rs`, `unlogged.rs` | [Reconcile and the sidecar](#reconcile-and-the-sidecar) |
-| `crates/outl-core/src/tree.rs`, `log.rs`, `op.rs` | [The CRDT](#the-crdt) |
+| `crates/outl-core/src/tree/`, `log.rs`, `op.rs` | [The CRDT](#the-crdt) |
 | Any new `pub fn` or helper under `crates/` | [New helpers](#new-helpers) |
 | `crates/outl-shortcuts/` | [Catalogs with a per-client verdict](#catalogs-with-a-per-client-verdict) |
 | `crates/outl-theme/`, any client stylesheet | [Theme tokens](#theme-tokens) |

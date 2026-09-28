@@ -15,7 +15,7 @@ use std::rc::Rc;
 use serde_json::Value;
 
 use crate::model::{LogOpView, ReadModel, TurnOutput};
-use crate::permission::NetworkDomain;
+use crate::permission::NetGrant;
 use crate::secrets::SecretStore;
 
 /// Anything that can go wrong evaluating plugin source.
@@ -61,7 +61,12 @@ pub trait PluginEngine {
     /// Grant the plugin the network domains it may `fetch` (derived from its
     /// approved `network:<domain>` permissions). Called once at load; a fetch
     /// to a host outside this set is refused inside the engine.
-    fn set_network(&mut self, domains: Vec<NetworkDomain>);
+    ///
+    /// The grant carries the plugin id too, so a refusal can name who
+    /// attempted it — the host log is the only witness a plugin cannot
+    /// `catch (e) {}` away, and "some plugin tried to exfiltrate" is not
+    /// actionable.
+    fn set_network(&mut self, grant: NetGrant);
 
     /// Load the plugin's local KV for this turn. `enabled` mirrors the
     /// `storage:local` permission — when false, `ctx.storage.*` throws.

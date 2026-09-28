@@ -79,6 +79,14 @@ The only thing a default run writes is its own stdout.
 
 **Global preferences (`~/.config/outl/config.toml`), not this workspace.**
 
+- **A `config.toml` that cannot be read.**
+  A TOML syntax error, a type mismatch, or a file outl cannot open at all.
+  Every preference is running on defaults, so the warning names the parse error with its line and says the file has *not* been overwritten — no client will write over a config it could not read, so your values are still in it.
+  Fix the file and the next run is quiet; until then, changing a setting from any client fails with the same reason instead of replacing the file with defaults ([issue #284](https://github.com/outlmd/outl/issues/284)).
+  The `outl-tui` status line carries the same sentence on its first frame after launch.
+  A warning, never an error: your workspace is intact, and preferences are not worth ranking beside a torn op log.
+  A *missing* file is never flagged — that is a first launch.
+
 - **A `[theme]` pair whose sides are not one light and one dark.**
   `preset` is meant to be the light side and `preset_dark` the dark side, but nothing enforces that when you set them, so a warning names whichever slot holds the wrong kind of palette.
   Checked regardless of `mode` — a pair only in the wrong slots is still wrong once you flip `mode`.

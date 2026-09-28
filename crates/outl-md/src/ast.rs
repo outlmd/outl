@@ -43,6 +43,25 @@ pub struct OutlineNode {
 /// keeps working in the meantime.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedPage {
+    /// Verbatim body of a leading YAML frontmatter fence, delimiters
+    /// stripped — `None` for a file that has none (the normal case).
+    ///
+    /// Outl does not model YAML, and does not read these keys: the fence
+    /// is **preserved**, not interpreted. It is split off by
+    /// [`crate::frontmatter::split_frontmatter_counted`], written back
+    /// byte-for-byte by [`crate::render::render`], and carried through the
+    /// op log under [`crate::frontmatter::PAGE_FRONTMATTER_KEY`] so a
+    /// projection from the tree re-emits it.
+    ///
+    /// Deliberately **not** a member of `properties`. The `key:: value`
+    /// dialect is single-line, user-visible and user-editable, and every
+    /// consumer of `properties` (the TUI's property overlay, the Hugo
+    /// export, the paste normalizer) assumes all three. A multi-line
+    /// opaque blob wearing that shape would have to be filtered out of
+    /// each of them by hand, and a hand-maintained exemption in three
+    /// places is the drift this field prevents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frontmatter: Option<String>,
     /// Page-level properties (the lines above the first outline item).
     pub properties: Vec<(String, String)>,
     /// Root-level outline blocks.

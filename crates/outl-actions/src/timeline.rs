@@ -54,6 +54,18 @@
 //! reason via [`crate::tree::is_page_model_key`] — they are book-keeping
 //! the user never typed.
 //!
+//! A page's YAML frontmatter fence (`page-frontmatter`) rides that same
+//! predicate, so editing it is not an event either. That one is a
+//! judgement call, and it went this way twice over: the fence belongs to
+//! another tool and outl never reads it, so it is not part of what the page
+//! *says*; and reporting it would need `block_events` to hold its own
+//! opinion about which properties are the user's, which is the split that
+//! let the fence reach the property panel as an editable chip in the first
+//! place. The reasoning and the pin
+//! (`a_frontmatter_edit_is_not_a_page_history_event`) both live next to the
+//! predicate, in [`crate::tree::is_page_model_key`], because the decision is
+//! the predicate's and this module only reads it.
+//!
 //! ## Read-only
 //!
 //! Nothing here writes. Restoring a past revision is

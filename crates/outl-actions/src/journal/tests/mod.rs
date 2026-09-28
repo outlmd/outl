@@ -38,6 +38,7 @@ fn restamp_sidecar_as_faithful(md_path: &PathBuf) {
     outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
 }
 
+mod frontmatter;
 mod guard;
 mod if_stale;
 mod render;

@@ -13,8 +13,8 @@ This crate ends that: TOML, XDG-style on every OS (including macOS), one schema,
 ## Hard rule
 
 **No client parses or writes `config.toml` by hand.**
-Every read goes through [`load`] / [`load_from`]; every write goes through [`save`] / [`save_to`].
-Bypassing this crate is how schema drift starts.
+Every read goes through [`load`] / [`load_from`] (or [`load_result`] / [`load_result_from`], which also say *where the config came from*); every write goes through [`save`] / [`save_to`].
+Bypassing this crate is how schema drift starts — and it is also how the guard below gets bypassed.
 
 The desktop's `settings.rs` is the canonical adapter pattern: a flat wire-format struct for the frontend, converted via `From` impls in and out of `outl_config::Config`.
 If a new client needs a different shape on the wire, do the same — adapt, don't fork the reader.
@@ -94,8 +94,8 @@ Nine sections, each modelled as its own struct ([`WorkspaceCfg`], [`ThemeCfg`], 
 It exists for environments where the OS clock lies about the zone — containers and Chrome OS **Crostini** run in UTC regardless of the user's real timezone (issue #107).
 `SyncConfig::transport` is a [`SyncTransportKind`] enum (`File` | `Iroh`, serde `lowercase`); missing `[sync]` falls back to `Iroh` (P2P is outl's primary sync), and `transport = "file"` is the explicit iCloud/filesystem opt-out.
 `SyncConfig::relay_url()` treats an empty string as `None`, which the iroh transport resolves to outl's default relay (`use1-1.relay.avelino.outl.iroh.link`; see [`docs/relay.md`](../../docs/relay.md)).
-`TuiCfg::mouse_capture` (default `false`) is read by the TUI at boot in `runtime.rs` to decide whether to call `EnableMouseCapture` and listen for `Event::Mouse`; the desktop ignores this section entirely.
-`TuiCfg::icons` (default `emoji`) is read by the TUI at boot in `runtime.rs`; `nerd-font` is an explicit opt-in for terminals with a Nerd Font installed.
+`TuiCfg::mouse_capture` (default `false`) is read by the TUI at boot in `runtime/mod.rs` to decide whether to call `EnableMouseCapture` and listen for `Event::Mouse`; the desktop ignores this section entirely.
+`TuiCfg::icons` (default `emoji`) is read by the TUI at boot in `runtime/mod.rs`; `nerd-font` is an explicit opt-in for terminals with a Nerd Font installed.
 `DisplayCfg::backlinks_order` is a [`BacklinksOrder`] enum (`Newest` | `Oldest`, serde `lowercase`, default `Newest`) — a pure display preference, same "never converges between devices" policy as `theme.preset` (root `CLAUDE.md` invariant #7).
 `ThemeCfg` (RFC 0022) models a light/dark preset *pair*, not a single preset.
 `preset` is the light side, `preset_dark: Option<String>` is the dark side, and `mode` is a [`ThemeMode`] enum (`Light` | `Dark` | `Auto`, serde `lowercase`, default `Auto`).
@@ -116,15 +116,65 @@ The engine is `outl_actions::backup`; this section only carries the preference.
 
 | Situation | What this crate does |
 |---|---|
-| File missing | Returns `Config::default()` silently. First launch is normal. |
-| File present, empty | Returns `Config::default()`. |
-| File present, malformed TOML | Returns `Config::default()` **+ `tracing::warn!`**. Never panics. |
+| File missing | Returns `Config::default()` silently, `ConfigSource::Missing`. First launch is normal. |
+| File present, empty | Returns `Config::default()`, `ConfigSource::Parsed` — every field has a serde default, so `""` is a valid config. **Deliberate, and the reason the write path is where zero-byte files are prevented** — see below. |
+| File present, malformed TOML | Returns `Config::default()` + `ConfigSource::Unreadable(detail)` **+ `tracing::warn!`**. Never panics. |
+| File present, unreadable (permissions, a directory in the way) | Same as malformed: `Unreadable`. We do not have these bytes; why is not the point. |
 | Unknown field | Ignored. Older binary survives a newer config. |
 | Partial section (e.g. only `[theme]` populated) | Other sections fall back to their per-section `Default`. |
-| `save()` | Atomic write (`config.toml.tmp` → rename). Creates `~/.config/outl/` if missing. A crash mid-write never leaves a truncated config. |
+| `save()` | Atomic write (`.config.toml.tmp.<ulid>` → rename). Creates `~/.config/outl/` if missing. A crash mid-write never leaves a truncated config, and concurrent saves never publish a zero-byte one. |
+| `save()` over an `Unreadable` file | **Refuses** with `SaveError::Unreadable`. Nothing is written; the file stays byte-for-byte. |
 
-The forgiving read path is **load-bearing for UX**: a user editing TOML by hand mid-typo doesn't lose every preference; they just see defaults until the next save fixes the file.
+The forgiving read path is **load-bearing for UX**: a user editing TOML by hand mid-typo doesn't lose every preference; they just see defaults until the file is fixed.
 Do not make load fail-fast — fail-fast belongs in the workspace itself, not in user preferences.
+
+### The write guard (issue #284)
+
+`load` returning defaults for a broken file is only safe if nothing writes those defaults back.
+Every caller does *load → mutate one field → save*, and `save` serializes the **whole** struct, so one bad character plus one UI toggle used to replace the user's theme, `vim_mode`, timezone and `[sync] transport` with defaults — the file they could have fixed was gone.
+
+So `save_to` re-reads the file and refuses when it is `Unreadable`.
+The check lives **in `save_to`, not in the callers**: a caller that loaded hours ago, or never loaded at all, cannot answer whether the file on disk parses, and a caller that forgets is exactly the bug.
+`read_at` is the single owner of the verdict, shared by the load and the guard, so the two cannot disagree.
+
+There is **no `force` variant**, deliberately: the escape hatch is the file, which is hand-editable by design (`docs/config.md`) and still intact.
+`SaveError::Unreadable`'s message names the path and the failing line, because that text is what reaches the user — the TUI status line, the desktop error toast, the mobile banner.
+
+Two sentences, one owner each, and they answer different questions:
+
+| Sentence | Owner | Answers |
+|---|---|---|
+| `settings not saved: <path> could not be read (line N: …). Fix that file, then try again` | `SaveError::Unreadable` | "why did my change not stick" |
+| `<path> could not be read (line N: …) — every preference is running on defaults, and settings will not save until it parses. Nothing has overwritten the file.` | `Loaded::notice()` | "why is nothing the way I left it" |
+
+`Loaded::notice()` is what the TUI prints on its first frame and what `outl doctor` warns with — **neither writes its own wording** (root `CLAUDE.md` invariant 12: the reason text belongs in the catalog, not the client).
+A client that needs a shorter version should shorten it here, for everyone.
+
+What is **not** covered yet: a boot-time notice in the desktop and mobile GUIs. The TUI names it on its first frame; the GUI clients only surface it when a write is attempted.
+
+Do not "simplify" the guard into a flag the caller passes, and do not drop it because `load_result` exists — a verdict a caller may ignore is not a guard.
+
+### The scratch name is per write, not per file
+
+Lives in `src/atomic.rs`, which owns one question — *given that the write is allowed, how does it land?* — while `lib.rs` owns the other half (read `config.toml`, classify it, refuse to write over one it could not read).
+`save_to` composes into `.config.toml.tmp.<ulid>` and publishes by rename.
+The ULID is not decoration: this file has several writers by design (the TUI and the desktop app share it), and one shared scratch name is one shared **inode**.
+Writer B's `File::create` truncates the body A already `fsync`ed, A's `rename` publishes those zero bytes, and B goes on writing through a descriptor that now points at the published `config.toml` while its own rename fails `ENOENT` — the user sees "could not write", and what is on disk is a zero-byte config.
+Same fix and same reason as `outl_core::snapshot::scratch_path` and `outl_core::storage::sidecar`'s `tmp_path_for`; do not invent a third shape.
+
+**A zero-byte `config.toml` is the worst possible landing spot for this crate, and that is why the fix is here and not in a fourth `ConfigSource` verdict.**
+Every field carries `#[serde(default)]`, so `""` deserializes into a whole `Config`: the file is `Parsed`, the #284 write guard finds nothing to refuse, and the next save writes defaults over the user's theme, `vim_mode` and `[sync] transport`.
+
+**And calling zero bytes `Unreadable` would not be that fix.**
+An empty `config.toml` is a legitimate config meaning "all defaults" — `touch ~/.config/outl/config.toml` is how a user starts one by hand, and the behaviour table above has said so since this crate existed.
+Refusing to save over it would lock that user out of every settings toggle with a message telling them to repair a file that is not broken: a guard turned into a wall (root `CLAUDE.md` invariant 11).
+So the length stays uninterpreted and the cause is removed instead.
+
+A unique name hands back one question in exchange (root `CLAUDE.md` invariant 9 — what cleans it up?): nothing recycles the name any more, so a process *killed* between the `create` and the `rename` leaves its scratch forever.
+`TempFile` covers every in-process exit path; `sweep_stale_scratch` covers the one it cannot, unlinking scratch siblings older than 24h on a later save.
+The age is a margin, not a deadline: unlinking a *live* writer's scratch would fail its rename with the very `ENOENT` this is here to stop producing.
+
+Pinned by `tests/concurrent_save.rs` (end to end) and `every_scratch_name_is_its_own` + `the_sweep_takes_only_scratch_files_nobody_is_writing` (unit).
 
 ## Adding a field
 
@@ -132,7 +182,7 @@ Do not make load fail-fast — fail-fast belongs in the workspace itself, not in
 2. Update the example in `src/lib.rs`'s module doc.
 3. Update `docs/config.md` — the user-facing schema table.
 4. Update `crates/outl-cli/CLAUDE.md` and/or `crates/outl-desktop/CLAUDE.md` and/or `crates/outl-tui/CLAUDE.md` if a new client now reads the field.
-5. Wire the reader in the consuming crate (`outl-tui/src/runtime.rs` for TUI, `outl-desktop/src-tauri/src/settings.rs` for desktop).
+5. Wire the reader in the consuming crate (`outl-tui/src/runtime/mod.rs` for TUI, `outl-desktop/src-tauri/src/settings.rs` for desktop).
 6. Add a `tests` case covering the partial-TOML path (only the new section populated) to confirm the default still applies.
 
 If the field is **per-workspace** (not global), it doesn't belong here — it belongs in `<workspace>/.outl/config.toml`, written by `outl-cli`'s `init` command.
@@ -143,14 +193,14 @@ If the field **must converge between devices**, it doesn't belong in TOML at all
 | Field | Reader | File |
 |---|---|---|
 | `workspace.last` | TUI/CLI fallback in `resolve_path`; desktop on boot | `crates/outl-cli/src/main.rs::resolve_path`, `crates/outl-desktop/src-tauri/src/lib.rs::run` |
-| `theme.preset` | TUI palette resolver; desktop settings | `crates/outl-tui/src/runtime.rs::resolve_theme`, `crates/outl-desktop/src-tauri/src/commands/theme.rs` |
+| `theme.preset` | TUI palette resolver; desktop settings | `crates/outl-tui/src/runtime/preset.rs::resolve_theme`, `crates/outl-desktop/src-tauri/src/commands/theme.rs` |
 | `editor.vim_mode` | Desktop only (TUI ignores) | `crates/outl-desktop/src-tauri/src/settings.rs` |
 | `editor.font_size` | Desktop only | `crates/outl-desktop/src-tauri/src/settings.rs` |
-| `calendar.timezone` | Every client at boot, via `outl_actions::clock::init` (resolves the IANA name once into the process-wide clock) | `crates/outl-tui/src/runtime.rs`, `crates/outl-cli/src/main.rs`, `crates/outl-desktop/src-tauri/src/lib.rs`, `crates/outl-mobile/src-tauri/src/lib.rs` |
+| `calendar.timezone` | Every client at boot, via `outl_actions::clock::init` (resolves the IANA name once into the process-wide clock) | `crates/outl-tui/src/runtime/mod.rs`, `crates/outl-cli/src/main.rs`, `crates/outl-desktop/src-tauri/src/lib.rs`, `crates/outl-mobile/src-tauri/src/lib.rs` |
 | `sync.transport` / `sync.relay_url` | TUI peer-sync wiring | `crates/outl-tui/src/actions/lifecycle/peer_sync.rs::wire_sync_transport` (config-driven; replaces the `OUTL_IROH=1` env gate) |
-| `tui.icons` | TUI chrome icon set | `crates/outl-tui/src/runtime.rs` |
-| `tui.mouse_capture` | TUI only | `crates/outl-tui/src/runtime.rs` (conditionally emits `EnableMouseCapture` and arms the `Event::Mouse` branch) |
-| `display.backlinks_order` | TUI at boot (`runtime.rs`, applied post-construction); GUI clients on every `build_page_view` call | `crates/outl-tui/src/runtime.rs`, `crates/outl-tauri-shared/src/helpers.rs::build_page_view` (desktop + mobile share this reader) |
+| `tui.icons` | TUI chrome icon set | `crates/outl-tui/src/runtime/mod.rs` |
+| `tui.mouse_capture` | TUI only | `crates/outl-tui/src/runtime/mod.rs` (conditionally emits `EnableMouseCapture` and arms the `Event::Mouse` branch) |
+| `display.backlinks_order` | TUI at boot (`runtime/mod.rs`, applied post-construction); GUI clients on every `build_page_view` call | `crates/outl-tui/src/runtime/mod.rs`, `crates/outl-tauri-shared/src/helpers.rs::build_page_view` (desktop + mobile share this reader) |
 | `assets.max_bytes` | Every file-import path: CLI `outl asset add`, MCP `outl_asset_add`, desktop/mobile "Attach file" + drag-drop, TUI `/upload` + paste-a-path | `crates/outl-cli/src/cmd/asset.rs`, `crates/outl-tauri-shared/src/commands/asset.rs`, `crates/outl-tui/src/commands/builtins/asset.rs` + `crates/outl-tui/src/actions/paste.rs` (all route through `outl_actions::asset::import_asset(root, source, max_bytes)`) |
 
 Update this table whenever a new reader appears.

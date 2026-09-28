@@ -6395,12 +6395,13 @@ dependencies = [
 name = "outl-config"
 version = "0.12.0"
 dependencies = [
- "anyhow",
  "dirs 7.0.0",
  "serde",
  "tempfile",
+ "thiserror 2.0.20",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
+ "ulid",
 ]
 
 [[package]]
@@ -6629,6 +6630,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "walkdir",
 ]
 
 [[package]]

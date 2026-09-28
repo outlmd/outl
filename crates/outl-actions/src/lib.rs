@@ -122,10 +122,9 @@ pub use history::{restore_page_md, HistoryStacks, DEFAULT_HISTORY_CAP};
 pub use journal::{
     apply_all_pages_md, apply_page_md, apply_page_md_with_sidecar,
     apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_absent,
-    apply_page_md_with_sidecar_if_stale, apply_page_md_with_sidecar_rendered,
-    content_lines_missing_from, journals_dir, mutate_page_md, page_md_path, pages_dir,
-    remove_page_projection, render_block_md, render_page_md, sidecar_can_answer, write_md_atomic,
-    ProjectionFailure, ProjectionSweep,
+    apply_page_md_with_sidecar_if_stale, content_lines_missing_from, journals_dir, mutate_page_md,
+    page_md_path, pages_dir, remove_page_projection, render_block_md, render_page_md,
+    sidecar_can_answer, write_md_atomic, ProjectionFailure, ProjectionSweep,
 };
 pub use namespace::{descendants as namespace_descendants, NamespaceChild};
 pub use outl_md::parse::{ParseWarning, ParseWarningKind};

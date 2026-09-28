@@ -12,7 +12,11 @@ Treat every change as production-bound.
 
 - `Op` enum and `LogOp` envelope
 - HLC timestamps (**hand-rolled**, not `uhlc`; see `docs/architecture.md`).
-  `hlc::MAX_CLOCK_SKEW_MS` is the **single owner** of the 24h future-timestamp window: `outl-sync-iroh` drops an incoming op beyond it, and `seed_clock` clamps the boot seed to it.
+  `hlc::MAX_CLOCK_SKEW_MS` is the **single owner** of the 24h future-timestamp window, and `hlc::skew_ahead_ms(ts, now_ms)` is the single owner of the *verdict* built on it: `outl-sync-iroh`'s `ingest_received_ops` and `outl-plugins`' `PluginHost::sync_pull` both call it to drop an incoming op beyond the window, and `seed_clock` clamps the boot seed to the same number.
+  Both ingestors call it **before** `observe`, because `observe` is monotonic — one op from the year 584 million raises this device's clock and keeps it there, every op it writes afterwards is past its peers' own gate, and the device keeps working locally while silently syncing nothing it writes.
+  The plugin path shipped without the gate for exactly the reason invariant 10 warns about: when the gate was written iroh was the only ingestor, so it lived in the transport crate, and the second ingestor inherited everything except the guard on the far side of a crate boundary ([issue #283](https://github.com/outlmd/outl/issues/283)).
+  A third ingestor is a third **caller**, never a third copy: a negative gate that drifts drops ops the user cannot see are missing.
+  `hlc::wall_clock_ms_checked()` is public for the same two callers — they read the clock once per batch and judge each op against it, and the `Option` is load-bearing (a `0` fallback would classify every op as 55 years ahead and turn the gate into a sync black hole).
   It lives here, not in the transport, because the transport depends on this crate and not the reverse.
   Two generator properties are load-bearing and easy to undo by "simplifying": the logical counter **carries** into `physical_ms` at `u32::MAX` rather than saturating (a pinned counter makes `Workspace::apply` dedup every later local write and return `Ok(())` without persisting, which is silent total write loss), and the boot seed is **clamped** (unclamped, one bad far-future line in any actor's log is absorbed into this device's own `ops-<own>.jsonl` on first boot and pins the clock forward permanently).
   Both became reachable only when seeding landed; neither was a bug before it
@@ -27,7 +31,21 @@ Treat every change as production-bound.
   See `outl-sync-iroh/CLAUDE.md` → "Workspace identity is a stable shared id, NOT the path".
 - `DeviceStore` / `MachineId` / `device_dir` (`device/`) — the **device-local** half of that pair: which `ActorId` this machine writes under.
   See "Actor id is device-local, and the workspace cannot hold it" below.
-- Fractional indexing
+- Fractional indexing (`fractional.rs`).
+  **A tie between two siblings is representable, and normal.**
+  `Fractional::between` is a pure function, so two devices that each create the first child of one parent while offline mint the *same* key; both ops are valid, both replay, and `outl_actions::tree::sort_siblings` breaks the tie by `NodeId` — a tiebreak that only exists because ties do.
+  A tie therefore has no interior, and neither does `("a", "aa")`: `a..=z` is dense enough for a midpoint and never for a slot under a key whose tail is a single `a`.
+  `between` used to `assert!(left < right)` on exactly those states, which killed the process the first time a user pressed `O` on a tied sibling — on **every** boot, because the tie lives in the op log and replays ([issue #282](https://github.com/outlmd/outl/issues/282)).
+  What it does now: **the lower bound wins.**
+  The result is always a valid position, always sorts after `left`, and sorts before `right` *iff* a key between the two exists; when the gap is empty `right` is dropped.
+  It never panics, and it is still a pure function of the bounds, so two devices converge.
+  A caller that needs the upper bound honoured checks it, and **every** caller that would *move* an existing node with the result must: `outl_actions::tree::position_before` returns `None`, and `create_before` then shifts the anchor up and takes its key — but only after asking the same question about the gap *above* it, because a tie there would send the anchor below a block the user never touched.
+  Where both gaps are empty the new block shares the anchor's key and the `NodeId` tiebreak decides the order, which is the honest answer: a tie is not separable without choosing a `NodeId`.
+  `Result` was the alternative and buys the same check at all eleven call sites, most of which pass no upper bound and so can never fail.
+  **`Deserialize` is a constructor and goes through `parse`.**
+  The derived impl took the `String` as-is, which made the one constructor fed untrusted bytes — a line of `ops-<actor>.jsonl` off iroh, off iCloud, or half-written after a crash — the one that skipped validation, so a remote peer chose when this process aborted.
+  `#[serde(try_from = "String")]` makes a malformed position one skipped record, named in the log, with every healthy op around it still replayed (invariant #5).
+  Pinned by `deserialize_rejects_what_parse_rejects`, `an_op_whose_position_skipped_validation_is_skipped_not_applied` and `between_honours_every_bound_that_can_be_honoured` (the proptest in `tests/fractional_index.rs`, which checks `between` against an independently written "does this gap hold a key" predicate — sharing one would let a single bug satisfy both sides).
 - The CRDT itself: `do_op`, `undo_op`, `apply_op`, `creates_cycle`
 - Append-only `OpLog`
 - `Storage` trait + `JsonlStorage` (one file per actor, syncable via iCloud / Syncthing / shared FS) + `MemoryStorage` (test double)

@@ -142,7 +142,7 @@ fn native_normal_chord(key: KeyEvent) -> bool {
             | Enter
         );
         // Ctrl+S / Ctrl+L / Ctrl+C are intercepted upstream in
-        // `runtime.rs` before Normal handling, so they never reach here;
+        // `runtime/event_loop.rs` before Normal handling, so they never reach here;
         // treating them as free below is harmless.
     }
     if alt {

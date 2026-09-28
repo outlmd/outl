@@ -60,7 +60,7 @@ trait Storage: Send + Sync {
 ```
 
 `outl-core` consumes `dyn Storage`.
-`JsonlStorage` (in `storage/jsonl.rs`) is the only persistent impl; `MemoryStorage` (in `storage/memory.rs`) is the test double.
+`JsonlStorage` (in `storage/jsonl/`) is the only persistent impl; `MemoryStorage` (in `storage/memory.rs`) is the test double.
 
 **Why:** swapping backends is a single-file change.
 Test doubles are trivial.

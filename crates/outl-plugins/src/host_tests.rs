@@ -1,6 +1,8 @@
 use super::*;
 use crate::permission::Permission;
-use outl_core::id::ActorId;
+use outl_actions::block;
+use outl_actions::page::{self, PageKind};
+use outl_core::id::{ActorId, NodeId};
 
 const PLUGIN: &str = r#"
         globalThis.__outl_register({
@@ -21,7 +23,9 @@ const PLUGIN: &str = r#"
         });
     "#;
 
-fn ws() -> (Workspace, HlcGenerator) {
+/// `pub(super)` so `host::intents` and `host::sync` can build a workspace in
+/// their own `mod tests` without a second copy of this three-liner drifting.
+pub(super) fn ws() -> (Workspace, HlcGenerator) {
     let actor = ActorId::new();
     let ws = Workspace::open_in_memory(actor).unwrap();
     (ws, HlcGenerator::new(actor))
@@ -316,82 +320,6 @@ fn real_confetti_bundle_emits_view_on_done() {
 }
 
 #[test]
-fn keybindings_and_toolbar_are_parsed_and_gated() {
-    use crate::capability::Capability;
-    let mut host = PluginHost::new(
-        [Capability::Keybinding, Capability::ToolbarButton]
-            .into_iter()
-            .collect(),
-    );
-    let manifest = PluginManifest::parse(
-        r#"{
-            "id": "run.x.kt", "name": "KT", "version": "1.0.0", "api": "^1.0", "main": "i.js",
-            "capabilities": ["keybinding", "toolbar-button"],
-            "contributes": {
-                "commands": [{ "id": "do-it", "title": "Do It" }],
-                "keybindings": [
-                    { "command": "do-it", "key": "Ctrl+Shift+D" },
-                    { "command": "do-it", "key": "Cmd+T S", "when": "desktop" },
-                    { "command": "do-it", "key": "Cmd+M", "when": "mobile" }
-                ],
-                "toolbar": [{ "command": "do-it", "icon": "📊", "title": "Stats" }]
-            }
-        }"#
-        .as_bytes(),
-    )
-    .unwrap();
-    host.load_plugin(
-        manifest,
-        "globalThis.__outl_register({activate(){}});",
-        PermissionSet::new(vec![]),
-        Value::Null,
-    )
-    .unwrap();
-
-    // Desktop sees the unscoped + desktop-scoped chord, not the mobile one.
-    let kb = host.keybindings("desktop");
-    assert_eq!(
-        kb.len(),
-        2,
-        "got: {:?}",
-        kb.iter().map(|b| &b.command_id).collect::<Vec<_>>()
-    );
-    assert!(kb
-        .iter()
-        .all(|b| b.command_id == "do-it" && b.plugin_id == "run.x.kt"));
-    // The 2-chord sequence parsed.
-    assert!(kb.iter().any(|b| b.chord.len() == 2));
-
-    // Toolbar button surfaces with its glyph.
-    let tb = host.toolbar_buttons("desktop");
-    assert_eq!(tb.len(), 1);
-    assert_eq!(tb[0].icon, "📊");
-    assert_eq!(tb[0].command_id, "do-it");
-}
-
-#[test]
-fn keybindings_dropped_without_capability() {
-    use crate::capability::Capability;
-    // Client without the keybinding capability granted → nothing surfaces.
-    let mut host = PluginHost::new([Capability::OpHook].into_iter().collect());
-    let manifest = PluginManifest::parse(
-        br#"{"id":"run.x.kt","name":"KT","version":"1.0.0","api":"^1.0","main":"i.js",
-             "capabilities":["keybinding"],
-             "contributes":{"commands":[{"id":"do-it","title":"Do It"}],
-                            "keybindings":[{"command":"do-it","key":"Ctrl+D"}]}}"#,
-    )
-    .unwrap();
-    host.load_plugin(
-        manifest,
-        "globalThis.__outl_register({activate(){}});",
-        PermissionSet::new(vec![]),
-        Value::Null,
-    )
-    .unwrap();
-    assert!(host.keybindings("desktop").is_empty());
-}
-
-#[test]
 fn content_transformer_runs_and_is_capability_gated() {
     use crate::capability::Capability;
     const BUNDLE: &str = r#"
@@ -483,52 +411,6 @@ fn net_fetch_refuses_unapproved_domain() {
         run.notifications[0].contains("denied"),
         "got: {:?}",
         run.notifications
-    );
-}
-
-#[test]
-fn sync_transport_carries_ops_between_workspaces() {
-    use crate::capability::Capability;
-    // A loopback transport: push stashes the JSONL in a global, pull returns it.
-    // Stands in for "ship to backend / fetch from backend" without a network.
-    const SYNC_PLUGIN: &str = r#"
-        globalThis.__buf = '';
-        globalThis.__outl_register({ activate(ctx) {
-            ctx.sync.register({
-                push: (jsonl) => { globalThis.__buf = jsonl; },
-                pull: () => globalThis.__buf,
-            });
-        }});
-    "#;
-    let manifest = PluginManifest::parse(
-        br#"{"id":"run.x.sync","name":"Sync","version":"1.0.0","api":"^1.0","main":"i.js",
-             "capabilities":["sync-transport"]}"#,
-    )
-    .unwrap();
-    let mut host = PluginHost::new([Capability::SyncTransport].into_iter().collect());
-    host.load_plugin(
-        manifest,
-        SYNC_PLUGIN,
-        PermissionSet::new(vec![]),
-        Value::Null,
-    )
-    .unwrap();
-
-    // Device 1 authors a page + block, then pushes its local ops to the transport.
-    let (mut ws1, hlc1) = ws();
-    let page = page::open_or_create(&mut ws1, &hlc1, "shared", "Shared", PageKind::Page).unwrap();
-    block::create_under(&mut ws1, &hlc1, page, Some("hello from device 1")).unwrap();
-    let pushed = host.sync_push(&ws1).unwrap();
-    assert!(pushed >= 2, "pushed page + block ops, got {pushed}");
-
-    // Device 2 starts empty; pulling applies device 1's ops through the CRDT.
-    let (mut ws2, hlc2) = ws();
-    assert!(page::find_by_slug(&ws2, "shared").is_none());
-    let applied = host.sync_pull(&mut ws2, &hlc2).unwrap();
-    assert!(applied >= 2, "applied the transported ops, got {applied}");
-    assert!(
-        page::find_by_slug(&ws2, "shared").is_some(),
-        "page converged onto device 2"
     );
 }
 
@@ -635,53 +517,6 @@ fn storage_persists_across_turns_and_is_gated() {
     .unwrap();
     let denied = bare.run_command(&mut ws, &hlc, id, "save");
     assert!(denied.is_err(), "storage without permission should error");
-}
-
-/// A plugin `InstantiateTemplate` intent on a journal page must resolve
-/// `{{date}}` to the journal's OWN date (derived from its slug), not to
-/// today — matching the CLI/TUI path. Regression for the footgun where
-/// the host passed `page_date: None` and every plugin instantiation
-/// rendered today's date regardless of which page the block lived on.
-#[test]
-fn instantiate_template_intent_uses_journal_page_date() {
-    use outl_core::property::PropValue;
-
-    let (mut ws, hlc) = ws();
-
-    // A template whose body echoes `{{date}}`.
-    let tpl =
-        page::open_or_create(&mut ws, &hlc, "template-daily", "daily", PageKind::Page).unwrap();
-    page::set_property(
-        &mut ws,
-        &hlc,
-        tpl,
-        tpl_actions::TEMPLATE_KEY,
-        Some(PropValue::Text("daily".into())),
-    )
-    .unwrap();
-    block::append_block(&mut ws, &hlc, Some(tpl), Some("day is {{date}}")).unwrap();
-
-    // A journal page dated well in the past, with a host block.
-    let journal =
-        page::open_or_create(&mut ws, &hlc, "2020-01-02", "2020-01-02", PageKind::Journal).unwrap();
-    let host_block = block::append_block(&mut ws, &hlc, Some(journal), Some("host")).unwrap();
-
-    let intent = HostIntent::InstantiateTemplate {
-        name: "daily".into(),
-        under: host_block.to_string(),
-    };
-    apply_one(&mut ws, &hlc, &intent).unwrap();
-
-    // The cloned block must carry the journal's date, never today's.
-    let clone_text = outl_actions::tree::children_of(&ws, host_block)
-        .into_iter()
-        .filter_map(|(id, _)| ws.block_text(id))
-        .find(|t| t.starts_with("day is"))
-        .expect("template block was cloned under the host");
-    assert!(
-        clone_text.contains("2020-01-02"),
-        "`{{{{date}}}}` should resolve to the journal's date, got: {clone_text}"
-    );
 }
 
 // --- ctx.secrets ------------------------------------------------------------
@@ -802,61 +637,4 @@ fn one_plugin_cannot_read_anothers_secret() {
     // The reader is namespaced to its own service, so the other plugin's secret
     // is invisible: it sees null.
     assert_eq!(run.notifications, vec!["none"]);
-}
-
-// --- AppendTree: seed a fresh page in one turn ------------------------------
-
-#[test]
-fn append_tree_seeds_a_fresh_page_in_one_turn() {
-    use std::str::FromStr;
-
-    let (mut ws, hlc) = ws();
-    // The page does not exist yet — this is exactly the case a plugin can't
-    // handle with `create` (no parent id to hand it mid-turn).
-    let intent = HostIntent::AppendTree {
-        target: MoveTarget::ToPage {
-            to_page: "ouraring-2025-11-29".into(),
-        },
-        tree: vec![crate::model::TreeNode {
-            text: "#ouraring anchor".into(),
-            children: vec![
-                crate::model::TreeNode {
-                    text: "Sleep — Score 85".into(),
-                    children: vec![],
-                },
-                crate::model::TreeNode {
-                    text: "Readiness — Score 78".into(),
-                    children: vec![],
-                },
-            ],
-        }],
-    };
-    apply_one(&mut ws, &hlc, &intent).unwrap();
-
-    // The page now exists — its title keeps the pretty `/`-name, its slug is
-    // the slugified filename-safe form.
-    let rm = build_read_model(&ws);
-    assert!(
-        rm.pages.iter().any(|p| p.slug == "ouraring-2025-11-29"),
-        "flat page created from the slug, got: {:?}",
-        rm.pages.iter().map(|p| &p.slug).collect::<Vec<_>>()
-    );
-    // …with the anchor as a top-level block on it.
-    let anchor = rm
-        .blocks
-        .iter()
-        .find(|b| b.text == "#ouraring anchor")
-        .expect("anchor block created on the fresh page");
-
-    // …and the two section lines nested under it (verified via the tree, not
-    // just page membership).
-    let anchor_id = NodeId(ulid::Ulid::from_str(&anchor.id).unwrap());
-    let kids = outl_actions::tree::children_of(&ws, anchor_id);
-    assert_eq!(kids.len(), 2, "anchor has its two children");
-    let texts: Vec<String> = kids
-        .into_iter()
-        .filter_map(|(id, _)| ws.block_text(id))
-        .collect();
-    assert!(texts.iter().any(|t| t.starts_with("Sleep")));
-    assert!(texts.iter().any(|t| t.starts_with("Readiness")));
 }

@@ -37,6 +37,7 @@ fn page_of(text: &str) -> ParsedPage {
             properties: Vec::new(),
             children: Vec::new(),
         }],
+        frontmatter: None,
         properties: Vec::new(),
         warnings: Vec::new(),
     }

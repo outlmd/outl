@@ -8,7 +8,7 @@
 | **Date** | 2026-08-06 |
 | **Reference doc** | [paste.md](../paste.md), [clients.md § Copy and paste](../clients.md#copy-and-paste) |
 | **Invariant** | root `CLAUDE.md` invariant 1 (every pasted block arrives as an `Op`), invariant 7 (block properties converge as `Op::SetProp`) |
-| **Guarded by** | `roundtrips_through_paste_with_properties`, `roundtrips_todo_done_and_quote_markers` (`crates/outl-actions/src/clipboard.rs`), `paste_user_prompt_fixture` (`crates/outl-actions/src/paste/mod.rs`) |
+| **Guarded by** | `roundtrips_through_paste_with_properties`, `roundtrips_todo_done_and_quote_markers` (`crates/outl-actions/src/clipboard.rs`), `paste_user_prompt_fixture` (`crates/outl-actions/src/paste/tests.rs`) |
 
 > **Supersedes [`docs/design/clipboard.md`](../design/clipboard.md).**
 > That file is this RFC, written in `docs/design/` before this process existed.
@@ -21,7 +21,7 @@ The clipboard was broken in both directions at once, and each direction hid the 
 
 **Out (#114).**
 The reporter, on Crostini, copied from the TUI and pasted into another app.
-The terminal's `Ctrl+C` quits (`crates/outl-tui/src/runtime.rs`), so the habit is to select with the mouse and let the emulator auto-copy.
+The terminal's `Ctrl+C` quits (`crates/outl-tui/src/runtime/event_loop.rs`), so the habit is to select with the mouse and let the emulator auto-copy.
 What the emulator copies is the *rendered cells*: the tree guides `│ `, the `- ` bullets, and the fold markers `▼`/`▶`.
 None of that means anything outside the screen it was drawn on, and the pasted result is unusable text the user has to clean by hand.
 
@@ -150,7 +150,7 @@ The in-memory register is filled either way, so internal `p`/`P` still works.
    The round-trip pair is the load-bearing one, and both halves are named in **Guarded by**.
    `roundtrips_through_paste_with_properties` and `roundtrips_todo_done_and_quote_markers` in `crates/outl-actions/src/clipboard.rs` assert that re-parsing the copy yields the same AST as parsing the source, properties and text prefixes included.
    Alongside them, `range_spanning_parent_and_child_does_not_duplicate` pins the ancestor de-duplication and `properties_are_alphabetically_sorted_and_stable` pins deterministic output.
-   On the inbound side, `crates/outl-actions/src/paste/mod.rs` holds `paste_user_prompt_fixture` (the literal example from #44), `paste_preserves_nested_children`, `paste_applies_block_properties`, and `plain_multi_line_pastes_one_block_each`.
+   On the inbound side, `crates/outl-actions/src/paste/tests.rs` holds `paste_user_prompt_fixture` (the literal example from #44), `paste_preserves_nested_children`, `paste_applies_block_properties`, and `plain_multi_line_pastes_one_block_each`.
    `paste_plain_never_splits_or_converts` sits next to them and fails if someone decides the without-formatting path can normalise "just a little".
    The conversion table itself is pinned per row in `crates/outl-actions/src/paste/normalize.rs`.
    That file holds `roam_todo_becomes_prefix`, `github_checkbox_becomes_todo`, `logseq_id_line_is_dropped`, `indent_4_normalizes_to_2`, `roam_long_date_becomes_iso`, and `unknown_tokens_are_stripped`.

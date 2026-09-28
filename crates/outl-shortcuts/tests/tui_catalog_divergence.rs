@@ -176,7 +176,7 @@ const KNOWN_DIVERGENCES: &[Divergence] = &[
         chord: "Ctrl+c",
         mode: Mode::Normal,
         catalog: Action::CopyBlock,
-        tui_does: "quits the TUI — `runtime.rs` intercepts `Ctrl+C` before \
+        tui_does: "quits the TUI — `runtime/event_loop.rs` intercepts `Ctrl+C` before \
               `handle_normal_key` ever runs",
         harm: Harm::Destructive,
         note: "The catalog binds this chord twice: `Global` → Quit and `Normal` → \
@@ -435,7 +435,7 @@ fn every_terminal_reachable_binding_has_a_verdict() {
 }
 
 /// The TUI half: arm-pattern snapshots scraped from
-/// `outl-tui/src/input/normal.rs` and `runtime.rs`, in their own
+/// `outl-tui/src/input/normal.rs` and `runtime/event_loop.rs`, in their own
 /// module so this file stays readable. Its `#[test]`s run as part of
 /// this target.
 mod tui_normal_arms;

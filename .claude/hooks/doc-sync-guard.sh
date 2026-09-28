@@ -208,8 +208,13 @@ case "$rel" in
     ;;
 esac
 case "$rel" in
-  crates/outl-md/src/sidecar.rs|crates/outl-md/src/parse.rs|crates/outl-md/src/render.rs|crates/outl-md/src/inline.rs)
+  crates/outl-md/src/sidecar.rs|crates/outl-md/src/sidecar/*.rs|crates/outl-md/src/parse.rs|crates/outl-md/src/render.rs|crates/outl-md/src/inline.rs)
     docs_to_check+=("docs/markdown-format.md")
+    ;;
+esac
+case "$rel" in
+  crates/outl-md/src/frontmatter.rs)
+    docs_to_check+=("docs/markdown-frontmatter.md")
     ;;
 esac
 case "$rel" in

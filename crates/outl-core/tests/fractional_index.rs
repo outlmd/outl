@@ -9,6 +9,7 @@ mod common;
 use common::{assert_trees_equal, create_op, move_op, op_at, pos, Replica};
 use outl_core::fractional::Fractional;
 use outl_core::id::{ActorId, NodeId};
+use proptest::prelude::*;
 
 #[test]
 fn concurrent_inserts_same_gap_converge() {
@@ -151,4 +152,109 @@ fn move_preserves_position_of_unaffected_siblings() {
     assert_eq!(r.tree.position(s1).cloned(), pos_s1);
     assert_eq!(r.tree.position(s3).cloned(), pos_s3);
     assert_eq!(r.tree.position(s2).map(|p| p.as_str()), Some("c"));
+}
+
+/// Is there **any** valid position strictly between these bounds?
+///
+/// `a..=z` non-empty strings are dense enough for a midpoint and not
+/// dense enough for a slot under a key whose tail is a single `a`:
+/// nothing sorts between `"a"` and `"aa"`, because every non-empty tail
+/// starts at `a` or above. Two more shapes have no interior — a tie
+/// (`right <= left`), and `left = None` with `right = "a"`, the
+/// fractional floor. Every other pair has room: append `"m"` to `left`,
+/// or take one byte off `right`.
+///
+/// Written out here rather than exported from the crate on purpose. It
+/// is the *independent* statement of the contract the property below
+/// checks `between` against; sharing an implementation would let one bug
+/// satisfy both sides.
+fn gap_is_empty(left: Option<&str>, right: Option<&str>) -> bool {
+    match (left, right) {
+        (_, None) => false,
+        (None, Some(r)) => r == "a",
+        (Some(l), Some(r)) => r <= l || r.strip_prefix(l) == Some("a"),
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// `between` over arbitrary bounds, including the ones it used to
+    /// `assert!` on (issue #282). The contract, in one property:
+    ///
+    /// - it never panics, and always returns a valid position;
+    /// - the result always sorts after `left`;
+    /// - it sorts before `right` **whenever a key between the bounds
+    ///   exists** — when the gap is empty the lower bound wins and the
+    ///   upper one is dropped;
+    /// - it is a pure function of the bounds, so two devices performing
+    ///   the same insert offline converge on the same key.
+    #[test]
+    fn between_honours_every_bound_that_can_be_honoured(
+        left in prop::option::of("[a-z]{1,6}"),
+        right in prop::option::of("[a-z]{1,6}"),
+        shape in 0u8..6,
+    ) {
+        // Two independent draws essentially never produce the two shapes
+        // whose gap is empty — an exact tie, and `left` plus a single
+        // `a` — so the "bound gets dropped" half of the contract would
+        // rest entirely on the hand-written unit tests while the
+        // property only ever exercised the other half. Bend a share of
+        // the cases onto `left` so both halves carry weight.
+        let right = match (shape, left.as_deref()) {
+            // Tied bounds: no interior at all.
+            (0, Some(l)) => Some(l.to_string()),
+            // One `a` of tail: still no interior.
+            (1, Some(l)) => Some(format!("{l}a")),
+            // Two: holds exactly one key, `l + "a"`, and the old
+            // bisection walked straight past it.
+            (2, Some(l)) => Some(format!("{l}aa")),
+            _ => right,
+        };
+        let l = left.as_deref().map(|s| Fractional::parse(s).unwrap());
+        let r = right.as_deref().map(|s| Fractional::parse(s).unwrap());
+
+        let got = Fractional::between(l.as_ref(), r.as_ref());
+
+        prop_assert!(
+            Fractional::parse(got.as_str()).is_ok(),
+            "{got} is not a valid position"
+        );
+        prop_assert_eq!(
+            got.clone(),
+            Fractional::between(l.as_ref(), r.as_ref()),
+            "two devices doing this insert must mint the same key"
+        );
+        if let Some(l) = &l {
+            prop_assert!(&got > l, "{got} must sort after left={l}");
+        }
+        // An empty gap drops the right bound by contract — the caller is
+        // the one that verifies and repositions
+        // (`outl_actions::tree::position_before`). Every other pair must
+        // honour both bounds.
+        let empty = gap_is_empty(left.as_deref(), right.as_deref());
+        if let Some(r) = r.as_ref().filter(|_| !empty) {
+            prop_assert!(
+                &got < r,
+                "the gap ({left:?}, {right:?}) holds a key, so {got} must be below {r}"
+            );
+        }
+    }
+
+    /// Repeated inserts against a *tied* pair still produce distinct,
+    /// ordered keys rather than one key forever — the tie is dropped as a
+    /// bound, not carried as one.
+    #[test]
+    fn inserting_repeatedly_against_a_tie_keeps_climbing(
+        key in "[a-z]{1,4}",
+        rounds in 1usize..12,
+    ) {
+        let tied = Fractional::parse(key).unwrap();
+        let mut last = tied.clone();
+        for _ in 0..rounds {
+            let next = Fractional::between(Some(&last), Some(&tied));
+            prop_assert!(next > last, "{next} must sort after {last}");
+            last = next;
+        }
+    }
 }

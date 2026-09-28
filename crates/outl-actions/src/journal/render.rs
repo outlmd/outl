@@ -153,10 +153,15 @@ fn project_subtree(
 /// **not** included in the body — clients can prepend it themselves
 /// if they want.
 ///
-/// Internal book-keeping keys (`page-slug` / `page-kind`) are skipped:
-/// the page-model layer (`outl_actions::page`) owns those through its
-/// own ops; surfacing them in the rendered `.md` would re-write the
-/// slug on every reconcile (a no-op via the CRDT, but noise on disk).
+/// The page model's book-keeping ([`crate::tree::is_page_model_key`]) is
+/// skipped: `outl_actions::page` owns those keys through its own ops, and
+/// surfacing them here would re-write the slug on every reconcile (a
+/// no-op via the CRDT, but noise on disk).
+///
+/// One of them, `page-frontmatter`, does belong in the file — as a `---`
+/// fence, not a `key:: value` line — so it is **lifted into
+/// `ParsedPage::frontmatter` before that filter runs**. See
+/// `render_page_md_with`.
 ///
 /// Sort order is alphabetical on the key — see `subtree_properties`.
 pub fn render_page_md(workspace: &Workspace, page_root: NodeId) -> String {
@@ -184,9 +189,23 @@ pub(crate) fn render_page_md_with(
     children: &ChildrenIndex,
 ) -> String {
     let (mut properties, blocks) = project_subtree(workspace, page_root, children);
+
+    // A page whose `.md` opened with a YAML frontmatter fence carries it in
+    // the op log under `PAGE_FRONTMATTER_KEY` (`outl_md::parse` refuses to
+    // read it as outline, issue #281). Lift it out of the property list and
+    // into the field the renderer writes the `---` delimiters from.
+    //
+    // **Before the `is_page_model_key` filter, which hides this key too.**
+    // Filtering first deletes the fence from every projection, which is the
+    // exact write the issue reported.
+    let frontmatter = properties
+        .iter()
+        .position(|(k, _)| k == outl_md::PAGE_FRONTMATTER_KEY)
+        .map(|at| properties.remove(at).1);
     properties.retain(|(k, _)| !is_page_model_key(k));
 
     let page = ParsedPage {
+        frontmatter,
         properties,
         blocks,
         warnings: Vec::new(),
@@ -212,6 +231,9 @@ pub fn render_block_md(workspace: &Workspace, node: NodeId) -> String {
         children,
     };
     let page = ParsedPage {
+        // A block projection is a fragment, not a file: frontmatter is a
+        // page-level fact and there is no page here to own one.
+        frontmatter: None,
         properties: Vec::new(),
         blocks: vec![block],
         warnings: Vec::new(),

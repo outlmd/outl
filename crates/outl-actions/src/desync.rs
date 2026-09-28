@@ -218,7 +218,17 @@ pub fn recover_desynced_projection(
     // Page-level properties that never reached the log. Only absent
     // keys are filled: an existing value came from a real op, and the
     // log wins over a stale projection.
-    for (key, value) in &ast.properties {
+    //
+    // A leading YAML frontmatter fence is one of those page-level facts —
+    // `outl_md::parse` keeps it out of the outline and `reconcile_md` puts
+    // it in the log under `PAGE_FRONTMATTER_KEY` (issue #281). Recovering
+    // everything *except* it would leave the fence on disk and nowhere
+    // else, which is the state that makes the next projection delete it.
+    let frontmatter_prop = ast
+        .frontmatter
+        .as_ref()
+        .map(|yaml| (outl_md::PAGE_FRONTMATTER_KEY.to_string(), yaml.clone()));
+    for (key, value) in ast.properties.iter().chain(frontmatter_prop.iter()) {
         if key == SLUG_KEY || key == KIND_KEY {
             continue;
         }

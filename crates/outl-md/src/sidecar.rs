@@ -2,356 +2,34 @@
 //!
 //! Holds the IDs and content hashes the clean `.md` cannot. See
 //! `docs/markdown-format.md` §sidecar for the format spec.
+//!
+//! This file owns **loading and storing** one sidecar. The three
+//! pieces it needs live next to it, each answering a different
+//! question, and every name below is re-exported here so
+//! `outl_md::sidecar::…` stays the single path callers use:
+//!
+//! - `payload` — what the file *is*: the serde shapes plus the two
+//!   version numbers that say what a reader may assume about a file it
+//!   did not write.
+//! - `paths` — where the file *lives*, including the migration off
+//!   the legacy dotted name.
+//! - `digest` — the values it stores that are *derived* rather than
+//!   observed: content hash, file hash, ref handle.
 
-use chrono::{DateTime, FixedOffset, Local};
-use outl_core::id::NodeId;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+mod digest;
+mod paths;
+mod payload;
 
-/// Current sidecar format version.
-///
-/// Version history:
-/// - **1** — initial format (page_id, last_synced_hash, blocks with id /
-///   line / indent / content_hash).
-/// - **2** — `ref_handle` on every block to power `((blk-XXXXXX))`
-///   inline references. Backward-compatible read: v1 sidecars load fine
-///   and their handles are derived on the fly from the block id.
-///   Later **additive** fields ride along at this same version:
-///   `pipeline_version` on the payload, [`SidecarBlock::text`] on every
-///   block. See the bump rule below for why they did not move the
-///   number.
-///
-/// # When to bump — and when not to
-///
-/// The version answers exactly one question for a reader that did not
-/// write the file: *can I still trust the fields I know?* Compatibility
-/// runs in **both** directions, and the two directions are not
-/// symmetric.
-///
-/// - **Backward** — this binary reading an older payload. Always
-///   supported, down to [`MIN_READABLE_SIDECAR_VERSION`]. A read path is
-///   never dropped when a newer one lands.
-/// - **Forward** — an *already shipped* binary reading a payload this
-///   one wrote. Every released binary rejects
-///   `version > its own SIDECAR_VERSION`, and that rejection cannot be
-///   patched retroactively. On the paths that consume a sidecar, an
-///   unreadable one used to look exactly like a missing one: no old
-///   blocks, so every block matched at level 3, got a fresh ULID, and
-///   the old id stayed in the tree — one boot of a stale device on a
-///   shared iCloud folder duplicated the whole workspace and broke
-///   every `((blk-…))` handle. The devices in one workspace never
-///   update at the same instant (TestFlight lag, a laptop closed for a
-///   week), so this is a real user, not a hypothetical one.
-///
-/// Hence the rule:
-///
-/// - **An additive field does NOT bump the version.** Give it
-///   `#[serde(default)]` and the format stays readable in both
-///   directions: an older reader ignores the unknown JSON key, a newer
-///   reader treats "missing" as "feature off for this entry".
-///   `pipeline_version` and [`SidecarBlock::text`] are both this shape.
-///   **Feature detection is per-field presence, never per version
-///   number** — an empty `text` disables level-2 matching for that
-///   block whatever the number on the file says, which is also the only
-///   correct answer once an old binary rewrites the sidecar and drops
-///   the field it never knew about.
-/// - **Bump only when an older reader would _misread_ the file** — an
-///   existing field changes meaning, changes encoding, or goes away.
-///   There the old binary's [`SidecarError::UnsupportedVersion`] is the
-///   *desired* outcome: a loud refusal beats silent corruption, and
-///   `reconcile_md` propagates that error instead of rebuilding the
-///   page from scratch.
-/// - A bump is a coordinated release, not a patch. It needs a migration
-///   note in `docs/markdown-format.md` and an `outl doctor` path,
-///   because every device that has not updated stops reconciling those
-///   pages until it does.
-///
-/// Note: the sidecar is intentionally **only structural metadata**
-/// (ids, position, content hashes, ref handles, last-synced text). Any
-/// state that needs to *converge between devices* — collapsed/folded
-/// blocks, future per-block flags — goes through the `Op` log in
-/// `outl-core`, not here. The sidecar is a projection cache for
-/// matching `.md` ↔ tree; it is not a sync surface. See the root
-/// `CLAUDE.md` invariants.
-pub const SIDECAR_VERSION: u32 = 2;
+pub use digest::{
+    content_hash, derive_ref_handle, file_hash, REF_HANDLE_PREFIX, REF_HANDLE_TAIL_LEN,
+};
+pub use paths::{resolve_sidecar_path, sidecar_path_for};
+pub use payload::{
+    Sidecar, SidecarBlock, SidecarError, CURRENT_PIPELINE_VERSION, MIN_READABLE_SIDECAR_VERSION,
+    SIDECAR_VERSION,
+};
 
-/// Lowest sidecar version this crate is willing to read.
-///
-/// Older versions return [`SidecarError::UnsupportedVersion`]. Keeping
-/// this explicit (rather than a magic number in `read`) so the contract
-/// is greppable when a future version ever needs to drop v1
-/// support.
-pub const MIN_READABLE_SIDECAR_VERSION: u32 = 1;
-
-/// Prefix every block ref handle carries in the `.md` file.
-///
-/// `((blk-r6s4a1))` is what users see. The prefix lets a reader (human
-/// or parser) tell a block ref apart from page refs / tags at a glance.
-pub const REF_HANDLE_PREFIX: &str = "blk-";
-
-/// Number of base32 (Crockford, lowercased) characters taken from the
-/// **tail** of the block's ULID to form its ref handle.
-///
-/// ULIDs are 26 chars total, split as 10 chars of timestamp + 16 chars
-/// of random tail. Pulling 6 chars from the tail gives ~30 bits of
-/// entropy (~1B values). Birthday-collision probability at 100k blocks
-/// is ~5e-6 — effectively zero. Lazy expansion to 7+ chars happens at
-/// index-build time if a collision is ever observed (see
-/// `WorkspaceIndex`); the sidecar itself always stores whatever handle
-/// resolved a given block at write time.
-pub const REF_HANDLE_TAIL_LEN: usize = 6;
-
-/// One block entry in the sidecar.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SidecarBlock {
-    /// Block id.
-    pub id: NodeId,
-    /// 1-indexed line number in the `.md` at last sync.
-    pub line: usize,
-    /// Indent level (0 for top-level outline items).
-    pub indent: u32,
-    /// SHA-256 of the block's textual content, formatted `sha256:<hex>`.
-    pub content_hash: String,
-    /// Short, stable, human-typeable handle for `((blk-XXXXXX))` inline
-    /// references and `!((blk-XXXXXX))` embeds.
-    ///
-    /// Default-derived from [`derive_ref_handle`] using the block id.
-    /// The handle is stable as long as the block keeps the same id —
-    /// editing the block's text does **not** change it. Persisted so
-    /// that a future change to the derivation scheme cannot invalidate
-    /// existing references already living in `.md` files.
-    ///
-    /// `#[serde(default)]` is what makes v1 sidecars load cleanly:
-    /// missing handles are backfilled by [`read`] from the id.
-    #[serde(default)]
-    pub ref_handle: String,
-    /// The block's text **as of the last sync** — the input level-2
-    /// matching diffs a freshly-parsed `.md` against.
-    ///
-    /// `content_hash` can only answer "identical or not"; recovering an
-    /// id after the user rewords a block needs the old string itself.
-    /// Without it, any save that both edits one block and adds/removes
-    /// another falls straight to level 3: fresh ULID, old id orphaned,
-    /// every `((blk-…))` pointing at it broken.
-    ///
-    /// Stored **verbatim and in full** (not truncated). A prefix would
-    /// make two blocks that share a long opening look identical, and a
-    /// level-2 false positive hands one block's id — and its ref handle
-    /// — to a different block. That is the exact corruption matching
-    /// exists to prevent, so the duplicated bytes are the cheaper side
-    /// of the trade.
-    ///
-    /// **Additive on purpose, at the same [`SIDECAR_VERSION`].**
-    /// `#[serde(default)]` is what lets a payload written before this
-    /// field existed load cleanly — and, just as importantly, what lets
-    /// a binary that predates the field keep reading (and rewriting)
-    /// the sidecar without the version number turning it away. A block
-    /// whose `text` is missing or empty simply doesn't participate in
-    /// level 2; matching degrades to hash + position, exactly what
-    /// shipped before, never worse. The next write by a binary that
-    /// knows the field records the text again.
-    #[serde(default)]
-    pub text: String,
-}
-
-impl SidecarBlock {
-    /// Build an entry for `text` at `line` / `indent`, deriving
-    /// `content_hash` and the default `ref_handle` from `id`.
-    ///
-    /// The one constructor every caller building a sidecar from a tree
-    /// or an AST should use: it keeps hash, handle, and stored text
-    /// derived from the same string, so a block can never end up with
-    /// a `content_hash` describing one revision and a `text` from
-    /// another. Callers preserving a *previous* handle (an expanded
-    /// one, post-collision) build the literal and overwrite
-    /// `ref_handle`.
-    pub fn from_text(id: NodeId, line: usize, indent: u32, text: impl Into<String>) -> Self {
-        let text = text.into();
-        Self {
-            id,
-            line,
-            indent,
-            content_hash: content_hash(&text),
-            ref_handle: derive_ref_handle(id),
-            text,
-        }
-    }
-}
-
-/// Full sidecar payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Sidecar {
-    /// Format version. Always present.
-    pub version: u32,
-    /// Page id (also the root block id).
-    pub page_id: NodeId,
-    /// SHA-256 of the full `.md` at last sync (`sha256:<hex>`).
-    pub last_synced_hash: String,
-    /// When the sidecar was last written. ISO 8601 with timezone.
-    pub last_synced_at: DateTime<FixedOffset>,
-    /// Block entries in tree (depth-first preorder) order.
-    pub blocks: Vec<SidecarBlock>,
-    /// Reconcile-pipeline version that produced the tree state this
-    /// sidecar describes.
-    ///
-    /// Bumped whenever the pipeline learns to emit a category of op
-    /// it didn't before — `diff_to_ops_with_page_props` propagating
-    /// page-level `Op::SetProp`s, `ensure_page_root_in_tree` emitting
-    /// `Op::Create` for the page root, etc. The orphan scanner
-    /// (`needs_reconcile`) re-runs `reconcile_md` when this value is
-    /// lower than [`CURRENT_PIPELINE_VERSION`], so a binary that gains
-    /// a new pipeline step automatically rematerialises every legacy
-    /// page on the next boot — no user intervention, idempotent on
-    /// the CRDT.
-    ///
-    /// Sidecars predating this field (including earlier intermediates
-    /// that used a boolean flag of a different name) deserialise as
-    /// `0` via `#[serde(default)]`, which forces a re-reconcile
-    /// against the current pipeline.
-    #[serde(default)]
-    pub pipeline_version: u32,
-}
-
-/// The pipeline version this binary writes to fresh sidecars and
-/// expects to find on disk before treating a page as fully
-/// reconciled.
-///
-/// Bump every time the reconcile pipeline acquires a new pass that
-/// could have produced a different op log for the same `.md`:
-///
-/// - `1` — `diff_to_ops_with_page_props` propagates page-level
-///   properties (`title::`, `type::`, `pinned::`, …) as
-///   `Op::SetProp` on the page root.
-/// - `2` — `ensure_page_root_in_tree` emits `Op::Create` for the page
-///   root when the node isn't in `self.nodes` yet. Without it,
-///   externally-authored `.md` files left the page as an unrooted
-///   ghost (`Op::Move` is a no-op on never-created nodes), so
-///   `children_of(root)` skipped them silently.
-/// - `3` — the parser stopped discarding prose that follows a block
-///   property. A `key:: value` line used to close continuation for the
-///   rest of the block, so every following text line was dropped with
-///   no AST entry and no warning — the same `.md` now parses to more
-///   text, which is precisely "a different op log for the same file".
-///   Without this bump those pages stay hash-faithful forever and the
-///   content never enters the log, because the short-circuit in
-///   `reconcile_md` only consults the hash. Measured on a real
-///   workspace: 233 pages, 1,426 lines. See issue #210 / RFC 0210.
-/// - `4` — the parser stopped losing content three further ways, all of
-///   them reachable from one ordinary shape (a block whose text carries
-///   a blank line): an over-indented line was recovered only at depth 0
-///   and skipped mutely below it; a blank line inside a block's text was
-///   read as a separator; and a continuation line's own indentation
-///   pushed it past the level that could claim it. Same file, more text,
-///   so the same reasoning as `3` applies — without the bump those pages
-///   stay hash-faithful and their content never enters the log.
-///   Measured against the same workspace: pages holding unlogged content
-///   went from 41 to 8, lines from 387 to 49.
-///
-///   This bump was **missed** in the first version of that change and
-///   caught in review. Worth naming, because the failure is invisible
-///   exactly where it matters: on the author's own machine the recovery
-///   commands get run by hand, so nothing looks wrong, while every other
-///   user keeps content outside the log with no symptom at all.
-pub const CURRENT_PIPELINE_VERSION: u32 = 4;
-
-impl Sidecar {
-    /// Build an empty sidecar for a new page.
-    pub fn new_for_page(page_id: NodeId, md_hash: &str) -> Self {
-        Self {
-            version: SIDECAR_VERSION,
-            page_id,
-            last_synced_hash: md_hash.to_string(),
-            last_synced_at: now_local(),
-            blocks: Vec::new(),
-            // Fresh sidecars stamp the current pipeline so the orphan
-            // scanner skips them next time.
-            pipeline_version: CURRENT_PIPELINE_VERSION,
-        }
-    }
-}
-
-/// Errors loading or storing a sidecar.
-#[derive(Debug, thiserror::Error)]
-pub enum SidecarError {
-    /// JSON parse failure.
-    #[error("invalid sidecar JSON: {0}")]
-    InvalidJson(#[from] serde_json::Error),
-    /// I/O failure reading/writing the sidecar file.
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    /// Unsupported sidecar version.
-    #[error("unsupported sidecar version: {0}")]
-    UnsupportedVersion(u32),
-}
-
-/// Compute the sidecar path for a given `.md` path.
-///
-/// `pages/foo.md` → `pages/foo.outl`. The `.md` is dropped on purpose —
-/// the sidecar always pairs with a markdown file, so encoding the
-/// extension twice (`.foo.md.outl`) is noise.
-///
-/// **The sidecar is not hidden.** Earlier releases stored it as
-/// `.foo.outl` to keep it out of casual `ls` output, but that confused
-/// iCloud Drive (it would still sync, but Files.app on iOS hides
-/// dotted entries entirely, leaving users unable to confirm a
-/// peer-side write had landed). Sitting next to its `.md` makes the
-/// relationship visible to the user and any other tool walking the
-/// directory.
-pub fn sidecar_path_for(md_path: &Path) -> PathBuf {
-    let parent = md_path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = md_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "untitled".to_string());
-    parent.join(format!("{stem}.outl"))
-}
-
-/// Legacy sidecar path (dotted) used by builds before v0. Kept so the
-/// reader can transparently pick up old sidecars and rename them to
-/// the modern un-hidden form on first read.
-fn legacy_sidecar_path_for(md_path: &Path) -> PathBuf {
-    let parent = md_path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = md_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "untitled".to_string());
-    parent.join(format!(".{stem}.outl"))
-}
-
-/// Find the path the caller should use right now to read or write the
-/// sidecar for `md_path`.
-///
-/// In the common case this is the canonical (non-dotted) `<stem>.outl`
-/// next to the `.md`. Two transitional cases also return the legacy
-/// dotted form so the caller still sees a sidecar where there is one:
-///
-/// - The modern path doesn't exist yet but a legacy `.<stem>.outl`
-///   does and the migration rename to the modern name succeeds — we
-///   return the modern path.
-/// - Same setup, but the rename fails (read-only filesystem, race with
-///   another writer) — we return the legacy dotted path so the caller
-///   can still read it. The next successful call moves it.
-///
-/// Returning the legacy path on rename failure is intentional: callers
-/// `read()` and `write()` against whatever we return. If we always
-/// returned the modern path while the file was still at the legacy one,
-/// `read()` would fail with `NotFound` and the sidecar would appear to
-/// be missing.
-pub fn resolve_sidecar_path(md_path: &Path) -> PathBuf {
-    let modern = sidecar_path_for(md_path);
-    if modern.exists() {
-        return modern;
-    }
-    let legacy = legacy_sidecar_path_for(md_path);
-    if legacy.exists() {
-        if std::fs::rename(&legacy, &modern).is_ok() {
-            return modern;
-        }
-        return legacy;
-    }
-    modern
-}
+use std::path::Path;
 
 /// Read and validate a sidecar from disk.
 ///
@@ -401,91 +79,11 @@ pub fn write(path: &Path, sidecar: &Sidecar) -> Result<(), SidecarError> {
     Ok(())
 }
 
-/// Derive the canonical ref handle for a given block id.
-///
-/// Format: `blk-` followed by the last [`REF_HANDLE_TAIL_LEN`] characters
-/// of the ULID's Crockford base32 representation, lowercased. ULID
-/// `Display` is always exactly 26 ASCII characters today; iterating
-/// by `chars()` keeps the function safe if a future id encoding ever
-/// becomes multi-byte UTF-8.
-///
-/// Determinism matters: the same block id must always yield the same
-/// handle so that two devices building the sidecar independently agree
-/// on what `((blk-XXXXXX))` means.
-pub fn derive_ref_handle(id: NodeId) -> String {
-    let s = id.to_string();
-    let total = s.chars().count();
-    let skip = total.saturating_sub(REF_HANDLE_TAIL_LEN);
-    let tail: String = s.chars().skip(skip).collect();
-    format!("{REF_HANDLE_PREFIX}{}", tail.to_lowercase())
-}
-
-/// Compute the canonical content hash of a block's text.
-///
-/// The text is whitespace-normalized (internal whitespace collapsed to a
-/// single space, leading/trailing trimmed) before hashing. The result is
-/// `sha256:<lowercase-hex>`. Same function used on read and write.
-pub fn content_hash(text: &str) -> String {
-    let normalized = normalize(text);
-    let mut h = Sha256::new();
-    h.update(normalized.as_bytes());
-    format!("sha256:{}", hex::encode(h.finalize()))
-}
-
-/// Compute the hash of the full `.md` file content.
-pub fn file_hash(md: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(md.as_bytes());
-    format!("sha256:{}", hex::encode(h.finalize()))
-}
-
-fn normalize(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn now_local() -> DateTime<FixedOffset> {
-    Local::now().fixed_offset()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use outl_core::id::NodeId;
     use tempfile::TempDir;
-
-    #[test]
-    fn sidecar_path_is_visible_next_to_md() {
-        let p = sidecar_path_for(Path::new("/notes/pages/foo.md"));
-        assert_eq!(p, PathBuf::from("/notes/pages/foo.outl"));
-    }
-
-    #[test]
-    fn sidecar_path_drops_md_extension() {
-        // Regression: we used to emit `foo.md.outl`. The `.md` is
-        // redundant (sidecars always pair with `.md`) and confusing.
-        let p = sidecar_path_for(Path::new("/notes/journals/2026-05-22.md"));
-        assert_eq!(
-            p,
-            PathBuf::from("/notes/journals/2026-05-22.outl"),
-            "sidecar must drop the .md extension"
-        );
-    }
-
-    #[test]
-    fn resolve_sidecar_migrates_dotted_legacy() {
-        let tmp = TempDir::new().unwrap();
-        let md = tmp.path().join("foo.md");
-        std::fs::write(&md, "- block\n").unwrap();
-        let legacy = tmp.path().join(".foo.outl");
-        std::fs::write(&legacy, "{\"version\":2}").unwrap();
-
-        let resolved = resolve_sidecar_path(&md);
-        assert_eq!(resolved, tmp.path().join("foo.outl"));
-        assert!(
-            resolved.exists(),
-            "modern sidecar must exist after migration"
-        );
-        assert!(!legacy.exists(), "legacy dotted sidecar must be gone");
-    }
 
     #[test]
     fn roundtrip_through_disk() {
@@ -623,38 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn derive_ref_handle_uses_last_six_chars_lowercased() {
-        // The derivation is "take the lowercased tail of the ULID's
-        // Display impl". We assert that property holds for an arbitrary
-        // id without depending on the `ulid` crate here (outl-md does
-        // not have it as a direct dependency).
-        let id = NodeId::new();
-        let display = id.to_string();
-        let expected_tail = display[display.len() - REF_HANDLE_TAIL_LEN..].to_lowercase();
-        assert_eq!(
-            derive_ref_handle(id),
-            format!("{REF_HANDLE_PREFIX}{expected_tail}")
-        );
-    }
-
-    #[test]
-    fn derive_ref_handle_is_deterministic() {
-        let id = NodeId::new();
-        assert_eq!(derive_ref_handle(id), derive_ref_handle(id));
-    }
-
-    #[test]
-    fn derive_ref_handle_format_is_blk_prefix_plus_six() {
-        let id = NodeId::new();
-        let h = derive_ref_handle(id);
-        assert!(h.starts_with(REF_HANDLE_PREFIX));
-        let tail = &h[REF_HANDLE_PREFIX.len()..];
-        assert_eq!(tail.len(), REF_HANDLE_TAIL_LEN);
-        assert!(tail.chars().all(|c| c.is_ascii_alphanumeric()));
-        assert_eq!(tail, tail.to_lowercase());
-    }
-
-    #[test]
     fn v1_sidecar_loads_and_backfills_ref_handle() {
         // Hand-written v1 payload (no `ref_handle` field on the block).
         // We deserialize through `read` and assert it:
@@ -713,19 +279,5 @@ mod tests {
             on_disk.contains("ref_handle"),
             "v2 sidecar must persist ref_handle on disk; got: {on_disk}"
         );
-    }
-
-    #[test]
-    fn content_hash_normalizes_whitespace() {
-        let a = content_hash("hello world");
-        let b = content_hash("  hello   world  ");
-        let c = content_hash("hello\tworld\n");
-        assert_eq!(a, b);
-        assert_eq!(a, c);
-    }
-
-    #[test]
-    fn content_hash_differs_on_real_content_changes() {
-        assert_ne!(content_hash("hello world"), content_hash("hello worlds"));
     }
 }

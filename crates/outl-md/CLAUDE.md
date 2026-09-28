@@ -12,6 +12,8 @@ Treat matching with the same paranoia as the CRDT.
 ## What this crate owns
 
 - Parse `.md` (clean, no IDs) → outline AST.
+  **A leading `---` YAML frontmatter fence is split off, never read as outline** (issue #281): verbatim in `ParsedPage.frontmatter`, byte-for-byte back out of `render`, and in the op log under `frontmatter::PAGE_FRONTMATTER_KEY` so a tree projection re-emits it.
+  Preserved, not interpreted; `parse_fragment` skips the step, and [`docs/markdown-frontmatter.md`](../../docs/markdown-frontmatter.md) owns the rules.
   Parser is **permissive at every depth, not just depth 0**:
   lines that don't match the outl dialect (e.g. a leading `# heading`, a stray paragraph, an HTML snippet) are preserved verbatim as a recovered block.
   A sibling when found at depth 0, a child of the block above it when found indented with no open continuation to absorb it.
@@ -91,12 +93,15 @@ Treat matching with the same paranoia as the CRDT.
   Enforced in `try_italic_under` / `try_bold_under` via the `closing_underscore` helper.
   `inline.rs` was split by responsibility to stay under the file-size guard, so new code has one obvious home.
   A token variant goes in `token.rs` (both forms, same change); a new matcher goes in the sibling module for its family, plus its slot in `match_one`; a caret-resolution helper goes in `cursor.rs`.
-- **External frontmatter** (`frontmatter.rs`) — metadata extraction for markdown authored by other tools.
-  `split_frontmatter` splits the leading `---` fence off a `.md` body (CRLF-safe, honours the `...` end marker; no closing fence → whole file stays body).
-  `parse_frontmatter(yaml, drop_keys) → Frontmatter { title, props, dropped }` flattens the YAML into `key:: value` properties: `title` lifted, `tags` normalized to `#name`, caller-supplied drop-list, values verbatim.
-  Date normalization is caller policy because the flexible date parser lives in `outl-actions`, which depends on this crate.
+- **Frontmatter** (`frontmatter.rs`) — the `---` fence, for two consumers with opposite jobs: the dialect parser **preserves** it (see Parse above), the importers **translate** it into `key:: value`.
+  One scan behind `split_frontmatter` / `split_frontmatter_counted` / `frontmatter_line_count`, so "where does the fence end" has one owner; `render_frontmatter` is its inverse.
+  **`strip_bom` lives here too, not in `parse`.**
+  The scan and the grammar have to agree on where the file's first real byte is, and while only the grammar stripped, `\u{feff}---` was frontmatter to `parse` and no fence at all to `frontmatter_line_count` — so `unlogged` skipped none of the fence's lines, reported them as content the log never saw, and froze every `.md` a Windows editor wrote.
+  Permanently: the write that drops the BOM is the same write being refused.
+  Two copies of "where the BOM ends" is the same class of divergence as two copies of "where the fence ends".
+  `parse_frontmatter(yaml, drop_keys) → Frontmatter { title, props, dropped }` is the importers' half: `title` lifted, `tags` → `#name`, drop-list applied, values verbatim.
+  Date normalization stays with the caller (the flexible date parser lives in `outl-actions`, which depends on this crate), as does source-specific key policy.
   `extract_leading_h1` lifts a leading `# H1` line into a title (first non-blank line only).
-  Consumed by the CLI importers (Obsidian today); source-specific key policy stays with the caller.
 - **External wiki-link rewriting** (`wikilink.rs`) — `rewrite_wikilinks` / `clean_wikilink_target` collapse `[[Note|alias]]` / `[[Note#heading]]` / `[[Note^block-id]]` / `[[folder/Note]]` to canonical `[[Note]]`;
   `convert_image_links` / `is_image_target` turn image wiki-links and embeds (`![[img.png]]`, `[[a/b.jpeg|cap]]`) into standard CommonMark links with the folder path preserved.
   Pure text → text; no vault layout or routing policy.
@@ -130,7 +135,7 @@ Treat matching with the same paranoia as the CRDT.
   That is exactly where page namespaces are read from (`outl_actions::namespace`, issue #275).
   So **do not teach this function to preserve `/`** to "support nested tags": the hierarchy already works, and the change would cost a directory layout, a sidecar path change and a migration for nothing.
   `reference.rs`'s `try_tag` already accepts `/` inside a tag name at any depth, which is the other half of the same design.
-- **`derive_ref_handle(NodeId) -> String`** (`sidecar.rs`) — deterministic: `blk-` + last 6 chars of the ULID's Crockford base32, lowercased.
+- **`derive_ref_handle(NodeId) -> String`** (`sidecar/digest.rs`) — deterministic: `blk-` + last 6 chars of the ULID's Crockford base32, lowercased.
   Same input always yields the same handle so two devices agree on what `((blk-XXXXXX))` means.
   On a collision inside a single workspace, the **second** block to land gets its handle lazily expanded one character at a time (drawing from the same ULID tail) until unique — both the winner and the loser stay independently resolvable.
   The sidecar still records the deterministic 6-char form; the expanded handle lives in `BlockEntry.ref_handle` in memory and in the workspace handle map.
@@ -281,19 +286,19 @@ tags:: #project
 ```
 src/
 ├── lib.rs
-├── parse.rs        # md → AST (no IDs): the grammar + the block-list reader
+├── parse.rs        # md → AST (no IDs): the grammar, the block-list reader, the frontmatter split
 ├── parse/
 │   └── tests.rs    # the grammar's unit tests (split out to keep parse.rs under the guard, never a seam inside the parser)
 ├── ast.rs          # OutlineNode, ParsedPage, ParseWarning(Kind) — re-exported by parse
 ├── property.rs     # `key:: value` line + the page-property header run (private mod)
 ├── fence.rs        # fenced code: literal capture while the outline grammar is suspended
 ├── render.rs       # AST → md (clean)
-├── sidecar.rs      # read/write .outl JSON, derive_ref_handle, content_hash
+├── sidecar.rs      # read/write .outl JSON; sidecar/{payload,paths,digest}.rs
 ├── matching.rs     # 3-level matching algorithm
 ├── matching/
 │   └── guard.rs    # match_blocks_guarded — volume guard over level-3 orphans (OrphanGuard, OrphanVolume)
 ├── similarity.rs   # level-2 scoring + global-confidence assignment (private to the crate)
-├── unlogged.rs     # content_lines_missing_from, sidecar_can_answer — "does the op log know this line"
+├── unlogged.rs     # content_lines_missing_from, sidecar_can_answer, frontmatter_lines_missing_from — "does the op log know this"
 ├── diff.rs         # AST diff → Op sequence (takes old_blocks to preserve ref_handle)
 ├── inline.rs       # the scan: tokenize / tokenize_owned, match_one precedence, inline_to_source
 ├── token.rs        # InlineTok (Plain/Bold/.../BlockRef/Embed/Emoji), owned InlineToken, RefTarget
@@ -304,12 +309,14 @@ src/
 ├── plain.rs        # plain_text — flatten tokens to the prose a human reads
 ├── cursor.rs       # ref_at_cursor, link_at_cursor, byte_index_for_char (re-exported via inline)
 ├── emoji.rs        # shortcode_to_unicode, search, is_valid_shortcode, EmojiHit
-├── frontmatter.rs  # split_frontmatter, parse_frontmatter, extract_leading_h1 (external md metadata)
+├── frontmatter.rs  # the `---` fence: split/render/count + strip_bom + PAGE_FRONTMATTER_KEY; parse_frontmatter for importers
+├── frontmatter/
+│   └── tests.rs    # the fence's unit tests (split out like parse/tests.rs; the scan stays one piece)
 ├── wikilink.rs     # rewrite_wikilinks, clean_wikilink_target, convert_image_links, is_image_target
 ├── lang.rs         # canonical(fence) — alias table shared by outl-exec + frontend syntax highlighter
 ├── index.rs        # WorkspaceIndex — page-level + block-level facade
 ├── block_index/    # BlockIndex (id ↔ handle ↔ reverse refs) in mod.rs; stored shapes in types.rs
-├── reconcile.rs    # high-level reconcile_md (parse → match → diff → apply)
+├── reconcile.rs    # the pass; reconcile/{outcome,page_root,text_sync,orphan_log}.rs
 ├── slug.rs         # slugify page names
 ├── tag.rs          # text_contains_tag{,_or_child} — boundary-correct #tag predicates over the tokenizer
 ├── view.rs         # render helpers consumed by UIs
@@ -400,6 +407,9 @@ Normalise either and the file still passes while pinning nothing.
    `unlogged.rs` lives here (not `outl-actions`) so the producer can ask the same question its consumers ask; `outl_actions::content_lines_missing_from` / `sidecar_can_answer` are re-exports.
    Pinned by `tests/multiline_block_roundtrip.rs` (`the_hash_is_still_advanced_for_every_shape_a_real_workspace_holds` and siblings).
    The bulk-delete half has the same shape: `reconcile_md_with_guard` refuses the whole pass (`ReconcileError::BulkDelete`) instead of trashing an oversized orphan list — see "Second hard rule" under the matching algorithm.
+
+   **A block list cannot answer for the frontmatter fence**: it rides `Op::SetProp`, so `content_lines_missing_from` skips the region and `frontmatter_lines_missing_from` asks the render instead.
+   Two channels, neither interchangeable; pinned by `tests/frontmatter_roundtrip.rs`.
 
 ## Things to never do here
 

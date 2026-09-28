@@ -97,7 +97,7 @@ Violating any one breaks user trust irreversibly.
    `if_stale_ignores_whitespace_only_differences_when_deciding`,
    `if_stale_declines_when_the_sidecar_cannot_answer` (an empty verdict from a reference that *cannot* answer is not permission to write — that is how a peer on an older binary re-arms the loss),
    `if_stale_still_projects_a_page_whose_sidecar_has_no_blocks` (the opposite case: nothing on disk to lose)
-   (`crates/outl-actions/src/journal/tests.rs`), plus
+   (`crates/outl-actions/src/journal/tests/if_stale.rs`), plus
    `recovery_does_not_reproject_over_text_the_log_never_saw`
    (`crates/outl-actions/tests/desync_recovery.rs`, the same defect reached through the desync recovery's re-projection), plus
    `a_torn_op_log_never_lets_repair_overwrite_a_good_md`
@@ -306,9 +306,12 @@ outl/
 └── crates/
     ├── outl-core/             # tree CRDT, op log, storage trait
     ├── outl-md/               # parser, sidecar, matching
+    ├── outl-ws/               # workspace bootstrap: lock/actor protocol, shard registration, slug repair
     ├── outl-actions/          # UI-agnostic workspace ops (shared by every client)
     ├── outl-shortcuts/        # canonical (chord, action) catalog + per-client support matrix
     ├── outl-exec/             # code-block runtime (desktop + mobile)
+    ├── outl-plugins/          # plugin runtime, manifest, permission gating, host API
+    ├── outl-sync-iroh/        # iroh QUIC transport: endpoint, pairing, op-log delta sync
     ├── outl-import/           # adapter-based graph importers (Roam, Logseq, Obsidian + auto-detect)
     ├── outl-config/           # `outl.toml` parsing + schema
     ├── outl-theme/            # palette + presets (TUI + desktop)
@@ -425,7 +428,10 @@ Don't add code for these unless explicitly asked:
   What is still open is release plumbing, not the port: see [`docs/android-platform.md`](docs/android-platform.md)
 - App-closed reminder delivery — `remind::` fires today only while the app runs.
   The iOS `UNCalendarNotificationTrigger` pre-registration, the macOS launch agent, the Windows scheduled toast and the systemd user timer are all follow-ups to issue #63; see [`docs/reminders.md`](docs/reminders.md) → Background delivery
-- Per-page op log shards ([`docs/sync.md` Part 2 — Per-page op log shards](docs/sync.md#per-page-op-log-shards-for-10k-pages); only land it when the single-jsonl-per-device layout hits the 10k-page wall)
+- An automatic switch to per-page op log shards.
+  The layout itself **shipped** (RFC 0137 Phase B): `PageScope::PerPage(slug)` writes `ops/<actor>/<slug>.jsonl`, `outl init --scope=per-page` starts a workspace on it and `outl migrate-to-per-page-ops` converts one.
+  What does not exist is a trigger — nothing counts pages and nothing flips at the 10k wall, so the layout is opt-in per workspace.
+  Tracked with the rest of the op-log growth work in [#110](https://github.com/outlmd/outl/issues/110)
 - Character cursor inside the selected block in desktop Normal mode.
   TUI-only today.
   The desktop's vim mode has only a selected block id, so the char-level vim ops `x`/`X`/`D`/`C`/`s`/`r`/`f`/`F`/`~`/`e` surface a status-line nudge instead of firing.

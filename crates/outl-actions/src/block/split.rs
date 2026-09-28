@@ -15,9 +15,9 @@ use outl_core::workspace::Workspace;
 use crate::error::ActionError;
 use crate::text::split_at_char;
 
-use super::create::create_after;
 use super::edit::edit_text;
 use super::ensure_in_tree;
+use super::siblings::create_after;
 
 /// Split `node` at `char_offset`: the text up to the offset stays in
 /// `node`, the text from the offset onward moves into a **new sibling

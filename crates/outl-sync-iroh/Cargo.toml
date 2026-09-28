@@ -68,5 +68,11 @@ fs2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# The two structural guards in `bind.rs` walk `src/` recursively. A flat
+# `read_dir` skipped every file under `protocol/` and `test_support/` — the
+# module declaring the ALPNs and frames included — and skipped it silently:
+# both guards still found files, so neither failed. Same walk the rest of the
+# workspace uses (`outl_actions::backup::repo`, `doctor::oplog::jsonl_files`).
+walkdir = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 outl-core = { workspace = true }

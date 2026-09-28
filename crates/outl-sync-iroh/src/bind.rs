@@ -349,6 +349,77 @@ mod tests {
         );
     }
 
+    /// Every `.rs` file under `src/`, as `(path relative to src/, contents)`.
+    ///
+    /// **Recursive, NOT `read_dir`.** Both guards below grep source text, and a
+    /// flat scan reads only the top level — so the moment a module becomes a
+    /// directory, every file in it stops being checked. `protocol/` (the module
+    /// that declares the ALPNs and the frames, i.e. the code most likely to
+    /// reach for an endpoint) and `test_support/` are both directories today.
+    ///
+    /// The loss is silent in the worst way: the flat scan still finds plenty of
+    /// files, so `scanned > 1` still holds and
+    /// [`only_the_sync_endpoint_advertises`] still asserts that `engine.rs` is
+    /// the only advertiser — while unable to see the files that would prove
+    /// otherwise. A guard that passes over code it never read is worse than no
+    /// guard, because it is cited as evidence.
+    ///
+    /// Same walk as `outl_actions::backup::repo::verify_op_log_captured` and
+    /// `doctor::oplog::jsonl_files`, for the same reason.
+    ///
+    /// The path is relative to `src/`, not the bare file name: two files in
+    /// different directories can share a basename, so a name-only exclusion
+    /// (`bind.rs`, `lan.rs`) would silently exempt a future
+    /// `protocol/bind.rs` too.
+    fn rust_sources() -> Vec<(String, String)> {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut out = Vec::new();
+        for entry in walkdir::WalkDir::new(&src) {
+            let entry = entry.expect("walk src/");
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&src)
+                .expect("walkdir yields paths under its root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(path).expect("read source file");
+            out.push((rel, text));
+        }
+        out.sort();
+        out
+    }
+
+    /// The scan reaches nested modules, so neither guard can go blind quietly.
+    ///
+    /// This is the ratchet on [`rust_sources`]: reverting it to a flat
+    /// `read_dir` leaves both guards green while they skip whole directories,
+    /// which is exactly how `protocol/` went unchecked. Asserted separately so
+    /// that a regression names itself instead of surfacing as "the advertise
+    /// guard still passes".
+    ///
+    /// If this crate ever legitimately has no subdirectory under `src/`, this
+    /// is the one test to update — and the update is deliberate, which is the
+    /// point.
+    #[test]
+    fn the_source_scan_reaches_nested_modules() {
+        let nested = rust_sources()
+            .into_iter()
+            .filter(|(rel, _)| rel.contains('/'))
+            .count();
+        assert!(
+            nested > 0,
+            "the source scan found no file inside a subdirectory of src/, so it \
+             is flat again — every module that is a directory (`protocol/`, \
+             `test_support/`) is now unchecked by the two guards below",
+        );
+    }
+
     /// The IPv4-only STOPGAP, pinned so a "cleanup" cannot quietly re-add IPv6.
     ///
     /// Re-adding it re-triggers the iroh 1.0.0 multipath stall this works
@@ -369,22 +440,16 @@ mod tests {
     /// `bind_ipv4_only`.
     #[test]
     fn every_endpoint_in_this_crate_binds_through_the_one_owner() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
         let mut scanned = 0usize;
-        for entry in std::fs::read_dir(&src).expect("read src/") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
+        for (rel, text) in rust_sources() {
             // This file is the owner; it is the one place allowed to call it.
-            if path.file_name().is_some_and(|n| n == "bind.rs") {
+            if rel == "bind.rs" {
                 continue;
             }
             scanned += 1;
-            let text = std::fs::read_to_string(&path).expect("read source file");
             if text.contains("n0_builder_ipv4_only") {
-                offenders.push(path.file_name().expect("file name").to_owned());
+                offenders.push(rel);
             }
         }
         assert!(
@@ -413,26 +478,19 @@ mod tests {
     /// change this exists to stop.
     #[test]
     fn only_the_sync_endpoint_advertises() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut advertising = Vec::new();
-        for entry in std::fs::read_dir(&src).expect("read src/") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
+        for (rel, text) in rust_sources() {
             // `bind.rs` declares the enum; `lan.rs` names it in doc comments.
-            let name = path.file_name().expect("file name").to_owned();
-            if name == "bind.rs" || name == "lan.rs" {
+            if rel == "bind.rs" || rel == "lan.rs" {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).expect("read source file");
             if text.contains("Advertise::Yes") {
-                advertising.push(name);
+                advertising.push(rel);
             }
         }
         assert_eq!(
             advertising,
-            vec![std::ffi::OsString::from("engine.rs")],
+            vec!["engine.rs".to_string()],
             "only the long-lived sync endpoint (engine.rs) may advertise on the LAN; \
              a transient endpoint publishes an address that dies with it",
         );

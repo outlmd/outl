@@ -462,7 +462,7 @@ The `@`-prefixed link text is what makes the rendered reference visually a menti
 
 - ❌ `id::` lines (Logseq-style) — IDs go in the sidecar
 - ❌ `<!-- block-uid: ... -->` — no HTML comments for metadata
-- ❌ YAML frontmatter (`---`) — page properties use `::` syntax instead
+- ❌ YAML frontmatter (`---`) as outl syntax — use `key:: value`; a fence another tool wrote is [kept verbatim](markdown-frontmatter.md)
 - ❌ `\`\`\`outl` fenced metadata blocks
 
 ### Permissive parsing & warnings
@@ -888,9 +888,12 @@ That same arm also failed to flush held blank lines, so `"a\n\n```…"` lost the
 **Fences are both CommonMark fence characters.**
 `fence::fence_marker` recognises ``` ``` ``` and `~~~`, and the marker travels with the opener (including into the synthetic close) so a fence closes only on its **own** character — the other one inside the body is content.
 Before this, a bullet inside a `~~~` fence became a real block, with an `UnrecognizedBlockMarker` raised against a line the user wrote correctly.
-**A UTF-8 BOM is stripped at the top of `parse`.**
+**A UTF-8 BOM is stripped before anything reads the file.**
 U+FEFF is not whitespace, so `trim` left it glued to the first `- ` and the first line stopped being a bullet: the whole first block was recovered as verbatim text with its marker inside it, and a leading `title::` stopped being a page property the same way.
 Any `.md` written by a Windows editor lost its first block's identity on import.
+`frontmatter::strip_bom` is the single owner of where those bytes end, and it sits next to the fence scan rather than in the parser for a reason: while only the grammar called it, `\u{feff}---` was frontmatter to `parse` and no fence at all to `frontmatter_line_count`, so [the unlogged-content check](#the-outl-sidecar) skipped none of the fence's lines and reported every one of them as content the op log never saw.
+That withholds `last_synced_hash` and refuses every re-projection, permanently — the write that would have dropped the BOM is the same write being refused.
+The same strip runs in `unlogged`, so a BOM'd file with no fence at all (the mark glued to the first bullet) does not read as one unlogged line either.
 
 **Known, unfixed, and deliberately so.**
 All four are convergent and guard-safe — each costs one `Op::Edit` and none can freeze a page — and each would be a grammar decision rather than a bug fix:

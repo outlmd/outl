@@ -151,12 +151,32 @@ fn arb_node(depth: u32) -> BoxedStrategy<OutlineNode> {
     }
 }
 
+/// A YAML frontmatter body, delimiters excluded — what
+/// `ParsedPage::frontmatter` holds.
+///
+/// `key: value` lines only. A body carrying its own `---` or `...` line
+/// is not representable (either one closes the fence, which is YAML's own
+/// rule, not ours), so generating one would assert a roundtrip the format
+/// does not offer.
+fn arb_frontmatter() -> impl Strategy<Value = Option<String>> {
+    proptest::option::of(
+        proptest::collection::vec(
+            ("[a-z]{2,8}", "[a-zA-Z0-9 ,\\[\\]/-]{0,20}")
+                .prop_map(|(k, v): (String, String)| format!("{k}: {v}")),
+            0..4,
+        )
+        .prop_map(|lines| lines.join("\n")),
+    )
+}
+
 fn arb_page() -> impl Strategy<Value = ParsedPage> {
     (
+        arb_frontmatter(),
         proptest::collection::vec(arb_property(), 0..3),
         proptest::collection::vec(arb_node(2), 1..4),
     )
-        .prop_map(|(properties, blocks)| ParsedPage {
+        .prop_map(|(frontmatter, properties, blocks)| ParsedPage {
+            frontmatter,
             properties,
             blocks,
             warnings: Vec::new(),

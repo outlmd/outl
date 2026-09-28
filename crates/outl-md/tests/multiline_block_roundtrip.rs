@@ -7,7 +7,7 @@
 //! `Op::Edit` while stamping `last_synced_hash` over the *whole* file.
 //!
 //! The consumer-side net (the guard that refuses to overwrite such a
-//! page) lives in `outl-actions/src/journal/tests.rs` and
+//! page) lives in `outl-actions/src/journal/tests/if_stale.rs` and
 //! `outl-cli/src/cmd/doctor/tests/safety.rs`. This file pins the other
 //! end: the state must not be *created* in the first place.
 //!
@@ -25,6 +25,7 @@ use outl_md::{OutlineNode, ParsedPage};
 fn page_of(blocks: Vec<OutlineNode>) -> ParsedPage {
     ParsedPage {
         blocks,
+        frontmatter: None,
         properties: Vec::new(),
         warnings: Vec::new(),
     }

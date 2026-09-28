@@ -104,7 +104,7 @@ skipping and why — put that reason in a comment next to the call.
 ## The `tree → .md` executor
 
 `journal::survey_page_projections` is the **single owner** of "where does this page's `.md` stand relative to the op log", and `journal::reproject_stale_pages` is the executor built on it.
-Both live in `journal/survey.rs`.
+Both live in `journal/survey/`: `mod.rs` classifies, `sweep.rs` executes.
 
 The classification used to be inline and private inside `outl doctor`, which is why this direction had no executor at all: the only code that knew which pages were safe to re-project was a read-only report a human had to run by hand.
 The `.md → tree` direction has had a permanent executor since `outl serve` existed; this one had none, so ops arriving by sync left a page's `.md` wrong until somebody opened it.
@@ -126,13 +126,26 @@ Three rules that are not negotiable here:
 
 `NotFound` is not "this page has no `.md`".
 An undownloaded iCloud file answers `NotFound` too — the real name does not exist, only `.foo.md.icloud` does — and so does a `.md` that vanished from beside a live sidecar.
-`journal::apply::guard_absent_markdown` is the single owner of that distinction, and **both** writers ask it.
+`journal::guard::guard_absent_markdown` is the single owner of that distinction, and **both** writers ask it.
 `mutate_page_md` would otherwise recreate the page as a single block;
 `apply_page_md_with_sidecar_if_stale` would otherwise write a file the arriving bytes collide with, unattended, on every `outl serve` sweep.
 The survey routes the same call into `PageProjectionState::MarkdownNotHereYet`, so the listing and the pass cannot reach different verdicts.
 
 `lines_removed` is measured by asking `content_lines_missing_from` about the **new render** ("will this line survive the write"), which is a different question from the guard's ("does the op log know this line", asked of the *sidecar*).
 Both are correct and they are not interchangeable — see the `lines_removed_by` doc comment.
+
+**A YAML frontmatter fence is a third case, on a second channel.**
+It rides `Op::SetProp` on the page root rather than a block's text ([`docs/markdown-frontmatter.md`](../../docs/markdown-frontmatter.md)), so a block list cannot answer for it and `content_lines_missing_from` skips the region.
+`guard::frontmatter_loss_error` asks `outl_md::unlogged::frontmatter_lines_missing_from` of the **render** instead, and both write gates run it.
+`lines_removed_by` adds the same count, so the listing and the pass cannot disagree.
+Narrow on purpose: only a render carrying *no* fence counts as a loss, because a fence that merely differs is a peer edit, and refusing that would freeze the page.
+
+**Which writers ask, and which do not, is a test rather than a sentence.**
+`journal/apply.rs` holds six public writers and two of them are gates, and the module doc used to say "both write gates run all three" — true, and still read as a census.
+`apply_page_md_with_sidecar_rendered` sat next to that sentence: public, exported, straight to `write_page_projection`, no guard, no caller anywhere in the repo.
+During the #281 upgrade window (op log carrying a page's frontmatter fence as bullets, render that does not) that call is the write that deletes the fence.
+It is gone, and `tests/projection_writer_gates.rs` now pins both halves: every `pub fn` in `apply.rs` has a recorded verdict, and `guard.rs`'s doc names all six.
+Adding a writer without saying which side of the gate it is on fails there.
 
 ## Page namespaces
 

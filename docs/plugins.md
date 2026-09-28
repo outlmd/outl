@@ -354,7 +354,7 @@ The five touch points are:
   They **never shadow a native action**: `native_normal_chord` mirrors what `handle_normal_key` consumes, so a plugin can't rebind `j`, `dd`, `Ctrl+T`, `Ctrl+P`, etc. (use a free chord like `Ctrl+G` or a two-chord sequence).
   No host / no bindings / a key with no `Chord` form all short-circuit to native handling.
 - **Op hooks** (`App::run_plugin_op_hooks`).
-  Called once per iteration at the **single post-mutation point** in `runtime.rs`'s event loop (after the mode key handler, before the next draw).
+  Called once per iteration at the **single post-mutation point** in `runtime/event_loop.rs` (after the mode key handler, before the next draw).
   Deferred while in `Mode::Insert` (same reason as `pending_reload`: a hook-driven `load_current` would clobber the in-flight buffer; the edit isn't in the op log until commit anyway).
 - **Content transformers** (`App::recompute_transforms`).
   **Pre-compute, not render-time.**

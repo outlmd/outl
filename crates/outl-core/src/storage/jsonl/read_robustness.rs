@@ -235,3 +235,83 @@ fn ops_for_node_surfaces_missing_ops_instead_of_dropping_them() {
         "the error must name the index/file disagreement, got: {err}"
     );
 }
+
+/// A `position` that never went through [`Fractional::parse`] is refused
+/// where the log is **read**, not where the tree is later walked.
+///
+/// `ops-<actor>.jsonl` is untrusted input: it arrives over iroh, over
+/// iCloud, or half-written after a crash. The derived `Deserialize` on
+/// `Fractional` used to accept `""` / `"!"` and hand the value on, so a
+/// remote peer picked the moment this process died — inside
+/// `Fractional::between`, three layers down from the line that carried
+/// it (issue #282). `#[serde(try_from = "String")]` turns that into one
+/// skipped record, named in the log, with every healthy op around it
+/// still replayed (invariant #5).
+#[test]
+fn an_op_whose_position_skipped_validation_is_skipped_not_applied() {
+    let tmp = TempDir::new().unwrap();
+    let actor = ActorId::new();
+    let g = HlcGenerator::new(actor);
+
+    let ops: Vec<LogOp> = {
+        let mut storage = JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap();
+        let ops: Vec<LogOp> = (0..3).map(|_| mk_create(&g)).collect();
+        for op in &ops {
+            storage.append_op(op).unwrap();
+        }
+        ops
+    };
+
+    // Rewrite the middle record's position to a byte outside `a..=z`.
+    // Everything else about the line stays valid JSON, which is the
+    // point: only the alphabet is wrong.
+    let path = tmp.path().join(format!("ops-{actor}.jsonl"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let poisoned = lines[1].replace("\"position\":\"a\"", "\"position\":\"!\"");
+    assert_ne!(
+        poisoned, lines[1],
+        "fixture must actually poison the position"
+    );
+    lines[1] = poisoned;
+    std::fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
+    for path in sidecar::paths_for(tmp.path(), actor, &PageScope::Global) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    let storage = JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap();
+    let seen = storage.all_ops().unwrap();
+    let seen_ts: Vec<_> = seen.iter().map(|o| o.ts).collect();
+    assert_eq!(
+        seen.len(),
+        2,
+        "exactly the poisoned record is lost: {seen_ts:?}"
+    );
+    assert!(
+        !seen_ts.contains(&ops[1].ts),
+        "the poisoned op must not replay"
+    );
+    assert!(seen_ts.contains(&ops[0].ts) && seen_ts.contains(&ops[2].ts));
+
+    // And it never reaches the materialized tree.
+    let ws = crate::workspace::Workspace::open_with_storage(
+        actor,
+        Box::new(JsonlStorage::open(tmp.path().to_path_buf(), actor).unwrap()),
+        None,
+    )
+    .unwrap();
+    let nodes: Vec<NodeId> = ops
+        .iter()
+        .map(|op| match op.op {
+            Op::Create { node, .. } => node,
+            _ => unreachable!("fixture builds Create ops"),
+        })
+        .collect();
+    assert_eq!(
+        ws.tree().parent(nodes[1]),
+        None,
+        "poisoned op must not apply"
+    );
+    assert_eq!(ws.tree().parent(nodes[0]), Some(NodeId::root()));
+    assert_eq!(ws.tree().parent(nodes[2]), Some(NodeId::root()));
+}

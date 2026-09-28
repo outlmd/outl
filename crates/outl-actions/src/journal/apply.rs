@@ -1,19 +1,40 @@
-//! Write `.md` + `.outl` projections to disk — the `apply_*` family,
-//! `mutate_page_md`, and the workspace-wide sweep.
+//! The `apply_*` family: render a page and put the projection on disk.
+//!
+//! Every entry point here renders the same string; they differ only in
+//! **when the write is allowed** — unconditionally, only when the `.md`
+//! is absent, only when the tree has moved past it, or only when the
+//! write deletes nothing the op log cannot account for.
+//!
+//! The three things they are built out of live next door, one owner
+//! each, because each is asked by more than one of them:
+//!
+//! - `guard` — the verdicts ("may these bytes be overwritten")
+//! - `write` — the locked on-disk transaction (`.md` + sidecar)
+//! - `mutate` — the `.md`-as-source-of-truth rewrite path
+//!
+//! `apply_page_md_with_sidecar_guarded` and
+//! `apply_page_md_with_sidecar_if_stale` are the two **write gates**,
+//! and they run the same guards in the same order for opposite reasons;
+//! root `CLAUDE.md` invariant 8 is the contract both implement. Read
+//! `guard`'s module doc before touching either.
 
-use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
-use outl_md::sidecar::{content_hash, file_hash, sidecar_path_for, Sidecar, SidecarBlock};
+use outl_md::sidecar::{file_hash, sidecar_path_for};
 
+use super::guard::{
+    frontmatter_loss_error, guard_absent_markdown, sidecar_can_answer, unlogged_content_error,
+};
 use super::paths::{page_md_path, write_md_atomic};
 use super::render::render_page_md;
-use super::sidecar::build_sidecar;
+use super::write::{
+    write_page_projection, write_page_projection_if_unchanged, write_page_projection_unlocked,
+    ProjectionLock,
+};
 use crate::error::ActionError;
-use crate::page::{list_all as list_pages, page_meta, PageMeta};
+use crate::page::{list_all as list_pages, page_meta};
 
 /// Render `page_root`'s sub-tree and write it to its canonical path
 /// under `root`.
@@ -50,39 +71,6 @@ pub fn apply_page_md_with_sidecar(
     let md = render_page_md(workspace, page_root);
     write_page_projection(workspace, root, page_root, &meta, &md)
 }
-
-/// `Some(error)` when re-projecting over `disk` would delete content the
-/// op log cannot account for.
-///
-/// The one place that phrases this verdict as an `ActionError`, so the
-/// two callers cannot drift on what the message says or which fields it
-/// carries.
-///
-/// **`None` covers two different situations on purpose**, and the caller
-/// decides what each one means:
-///
-/// - nothing is at risk;
-/// - the sidecar cannot answer at all (every one written before 0.11).
-///
-/// [`apply_page_md_with_sidecar_guarded`] treats both as "go ahead" —
-/// there is a real mutation to project and refusing every pre-0.11 page
-/// would freeze the app. [`apply_page_md_with_sidecar_if_stale`] asks
-/// [`sidecar_can_answer`] *first* and declines the second case, because
-/// re-projecting a page it cannot vouch for is how bytes go missing.
-/// Reading one policy as the other is the bug this whole module guards.
-fn unlogged_content_error(path: &Path, disk: &str, blocks: &[SidecarBlock]) -> Option<ActionError> {
-    if !sidecar_can_answer(blocks) {
-        return None;
-    }
-    let unlogged = content_lines_missing_from(disk, blocks);
-    let sample = unlogged.first()?;
-    Some(ActionError::PageMarkdownAheadOfLog {
-        path: path.display().to_string(),
-        lines: unlogged.len(),
-        sample: format!("{sample:?}"),
-    })
-}
-
 /// [`apply_page_md_with_sidecar`], but refusing when the write would
 /// delete content the op log has never seen.
 ///
@@ -177,129 +165,15 @@ pub fn apply_page_md_with_sidecar_guarded(
     }
 
     let md = render_page_md(workspace, page_root);
+    // The frontmatter channel, asked after the render because the render is
+    // its reference — see `frontmatter_loss_error`.
+    if let Some(disk) = disk.as_deref() {
+        if let Some(e) = frontmatter_loss_error(&path, disk, &md) {
+            return Err(e);
+        }
+    }
     write_page_projection_if_unchanged(workspace, root, page_root, &meta, &md, disk.as_deref())
 }
-
-/// Cross-process serialization for a page's guarded check-and-write.
-///
-/// The stable sibling stays locked while the atomic write replaces the
-/// `.md` inode, closing the check-to-rename window between outl processes.
-pub(crate) struct ProjectionLock {
-    file: File,
-}
-
-impl ProjectionLock {
-    pub(crate) fn acquire(md_path: &Path) -> Result<Self, ActionError> {
-        let parent = md_path.parent().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "page path has no parent")
-        })?;
-        std::fs::create_dir_all(parent)?;
-        let name = md_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid page filename")
-            })?;
-        let lock_path = md_path.with_file_name(format!(".{name}.lock"));
-        // The lock file carries no content; it exists only to be `flock`ed,
-        // so there is nothing to truncate or preserve.
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(lock_path)?;
-        file.lock_exclusive()?;
-        Ok(Self { file })
-    }
-}
-
-impl Drop for ProjectionLock {
-    fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
-    }
-}
-
-/// Like [`apply_page_md_with_sidecar`] but reuses an already-rendered
-/// `md` instead of rendering the page again.
-///
-/// The GUI commit path renders the page once to diff it for undo; passing
-/// that string here saves a second whole-page render (which materializes
-/// every block's text). On a large journal that render is tens of ms in
-/// release, hundreds in debug, and it ran on every keystroke-commit.
-pub fn apply_page_md_with_sidecar_rendered(
-    workspace: &Workspace,
-    root: &Path,
-    page_root: NodeId,
-    md: &str,
-) -> Result<PathBuf, ActionError> {
-    let meta = page_meta(workspace, page_root)
-        .ok_or_else(|| ActionError::NotInTree(page_root.to_string()))?;
-    write_page_projection(workspace, root, page_root, &meta, md)
-}
-
-/// Write an already-rendered page `md` to its `.md` and rebuild the matching
-/// sidecar from the same tree. Split out of [`apply_page_md_with_sidecar`] so a
-/// caller that already rendered the page (to detect a stale projection) reuses
-/// that string instead of rendering it a second time.
-fn write_page_projection(
-    workspace: &Workspace,
-    root: &Path,
-    page_root: NodeId,
-    meta: &PageMeta,
-    md: &str,
-) -> Result<PathBuf, ActionError> {
-    let path = page_md_path(root, meta);
-    let _lock = ProjectionLock::acquire(&path)?;
-    write_page_projection_unlocked(workspace, root, page_root, meta, md)
-}
-
-fn write_page_projection_unlocked(
-    workspace: &Workspace,
-    root: &Path,
-    page_root: NodeId,
-    meta: &PageMeta,
-    md: &str,
-) -> Result<PathBuf, ActionError> {
-    let path = page_md_path(root, meta);
-    write_md_atomic(&path, md)?;
-    let sidecar = build_sidecar(workspace, page_root, md);
-    outl_md::sidecar::write(&sidecar_path_for(&path), &sidecar)?;
-    Ok(path)
-}
-
-/// Best-effort compare-before-replace for editors that do not honour
-/// [`ProjectionLock`].
-///
-/// There is no portable atomic compare-and-swap for a pathname. The page lock
-/// closes the window between cooperating outl processes; this final re-read
-/// closes the practical window where rendering or sidecar construction gave an
-/// external editor time to save. If the bytes no longer match the revision the
-/// guard authorized, refuse and let the filesystem reconciliation path ingest
-/// the external edit.
-fn write_page_projection_if_unchanged(
-    workspace: &Workspace,
-    root: &Path,
-    page_root: NodeId,
-    meta: &PageMeta,
-    md: &str,
-    expected_disk: Option<&str>,
-) -> Result<PathBuf, ActionError> {
-    let path = page_md_path(root, meta);
-    let unchanged = match (expected_disk, std::fs::read_to_string(&path)) {
-        (Some(expected), Ok(current)) => current == expected,
-        (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => true,
-        (_, Err(error)) => return Err(error.into()),
-        _ => false,
-    };
-    if !unchanged {
-        return Err(ActionError::PageMarkdownChangedDuringProjection(
-            path.display().to_string(),
-        ));
-    }
-    write_page_projection_unlocked(workspace, root, page_root, meta, md)
-}
-
 /// Like [`apply_page_md_with_sidecar`], but **skips the write when the
 /// `.md` file already exists on disk**.
 ///
@@ -468,246 +342,16 @@ pub fn apply_page_md_with_sidecar_if_stale(
     if let Some(e) = unlogged_content_error(&path, &disk, &sidecar.blocks) {
         return Err(e);
     }
+    // And the frontmatter channel, which the block list above cannot answer
+    // for — see `frontmatter_loss_error`. Without it this is the one gate a
+    // page whose fence the log does not know walks straight through, and
+    // `outl serve`'s sweep runs it over every page, unattended.
+    if let Some(e) = frontmatter_loss_error(&path, &disk, &rendered) {
+        return Err(e);
+    }
     write_page_projection_if_unchanged(workspace, root, page_root, &meta, &rendered, Some(&disk))
         .map(Some)
 }
-
-/// The content lines in `disk` that **no block the op log knows** can
-/// account for.
-///
-/// Re-exported from [`outl_md::unlogged`], which is where it lives so
-/// that `reconcile_md` — the *producer* of the unlogged state, one
-/// crate down — can ask the same question before it advances
-/// `last_synced_hash`. Every existing `outl_actions::` path still
-/// resolves through this re-export.
-///
-/// Public because `outl doctor` must reach the *same* verdict in its
-/// read-only listing that `--repair` reaches when it writes; two opinions
-/// about which pages are safe is how a listing promises a repair the pass
-/// then silently skips.
-pub use outl_md::unlogged::content_lines_missing_from;
-
-pub use outl_md::unlogged::sidecar_can_answer;
-
-/// Apply a pure-AST mutation to a page's `.md`, then rewrite both the
-/// `.md` and its sidecar.
-///
-/// **This is the path mobile mutations should take.** The workspace
-/// op log isn't on the hot edit path here — we read the `.md` as the
-/// source of truth, mutate the parsed AST, render it back, and rebuild
-/// the sidecar by content-hash-matching the new blocks against the
-/// previous sidecar so unchanged blocks keep their `NodeId`. Anything
-/// the closure inserts gets a fresh ULID. Peers reading the resulting
-/// `.md` + `.outl` see consistent ids.
-///
-/// The closure receives a map `NodeId -> block_path` derived from the
-/// sidecar so callers can translate the ids the frontend passes in
-/// (e.g. "create after block ABC") into the path-based mutations that
-/// [`outl_md::outline_ops`] expects.
-pub fn mutate_page_md<F>(root: &Path, meta: &PageMeta, mutation: F) -> Result<PathBuf, ActionError>
-where
-    F: FnOnce(
-        &mut outl_md::parse::ParsedPage,
-        &std::collections::HashMap<NodeId, Vec<usize>>,
-    ) -> Result<(), ActionError>,
-{
-    use std::collections::HashMap;
-
-    let md_path = page_md_path(root, meta);
-    // NOT `unwrap_or_default()`: this function renders the parsed AST
-    // straight back over `md_path`, so a read that fails for any reason
-    // other than "the page doesn't exist yet" would replace the page
-    // with an empty one — and rebuild the sidecar to agree, hiding it
-    // from every later consistency scan. See `read_for_rewrite`.
-    let md_text = outl_md::read_for_rewrite(&md_path)?;
-
-    let sidecar_path = outl_md::resolve_sidecar_path(&md_path);
-    // `read_for_rewrite` answers "absent" with `Ok("")`, which is only
-    // legitimate for a page that does not exist yet. Everything else
-    // that presents as absent is checked here, before the empty parse
-    // becomes a write.
-    if md_text.is_empty() {
-        guard_absent_markdown(&md_path, &sidecar_path)?;
-    }
-
-    let mut parsed = outl_md::parse::parse(&md_text);
-
-    // NOT `.ok()`: the same "unreadable reads as empty" bug the `.md`
-    // was fixed for, one line down and worse. With `old_sidecar = None`
-    // every block content-hash lookup misses, `build_sidecar_from_ast`
-    // mints a **fresh ULID per block**, and the rewritten sidecar
-    // replaces the id ↔ text mapping wholesale: every `((blk-…))`
-    // pointing into this page stops resolving, and the next
-    // `reconcile_md` sees N unknown ids and trashes the tree's blocks.
-    // A `.md` is recoverable from the op log; that mapping is not.
-    let old_sidecar = match outl_md::sidecar::read(&sidecar_path) {
-        Ok(sidecar) => Some(sidecar),
-        // Genuinely absent — a page this device has never projected.
-        // The only case where minting ids is correct.
-        Err(outl_md::sidecar::SidecarError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-            None
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    // Build NodeId -> block_path map from the AST + sidecar (DFS
-    // preorder lines up between the two).
-    let mut id_to_path: HashMap<NodeId, Vec<usize>> = HashMap::new();
-    if let Some(sc) = &old_sidecar {
-        let mut iter = sc.blocks.iter();
-        build_id_path_map(&parsed.blocks, &mut Vec::new(), &mut iter, &mut id_to_path);
-    }
-
-    mutation(&mut parsed, &id_to_path)?;
-
-    let new_md = outl_md::render::render(&parsed);
-    outl_md::write_atomic(&md_path, new_md.as_bytes())?;
-
-    let page_id_ulid = ulid::Ulid::from_string(&meta.id)
-        .map_err(|e| ActionError::NotInTree(format!("invalid page id {}: {e}", meta.id)))?;
-    let page_id = NodeId(page_id_ulid);
-    let new_sidecar = build_sidecar_from_ast(&parsed, old_sidecar.as_ref(), &new_md, page_id);
-    outl_md::sidecar::write(&sidecar_path, &new_sidecar)?;
-
-    Ok(md_path)
-}
-
-/// Decide whether an absent `.md` really means "this page does not
-/// exist yet".
-///
-/// **Both writers that can create a `.md` ask this**, and for a while
-/// only one did. [`mutate_page_md`] rewrites the parsed AST, so an
-/// unguarded absence recreated the page as a single block;
-/// [`apply_page_md_with_sidecar_if_stale`] renders from the op log, so
-/// an unguarded absence writes a file the bytes still arriving then
-/// collide with. Different damage, same misreading of `NotFound`, and
-/// the second one runs unattended inside `outl serve`'s projection
-/// sweep.
-///
-/// Two ways an absence is not an absence, both of which used to end in
-/// a write:
-///
-/// - **A sidecar is present.** The sidecar is only ever written next to
-///   a `.md` this device projected, so its existence is proof the page
-///   existed. A missing `.md` beside it is a lost file — a half-finished
-///   sync, an editor that deleted-and-recreated, a user emptying a
-///   folder — never a new page. Rewriting over it converts a recoverable
-///   loss (the `.md` is a projection; the op log still has the content)
-///   into an unrecoverable one, because the rewrite rebuilds the sidecar
-///   from one block and the next reconcile emits `Move`→`TRASH_ROOT` for
-///   every id it can no longer find.
-/// - **An iCloud placeholder sibling is present.** On iOS and on legacy
-///   iCloud Drive, a file whose bytes have not been downloaded is
-///   `.foo.md.icloud` and *the real name does not exist* — so the read
-///   is `NotFound`, not the permission/IO error the `read_for_rewrite`
-///   contract assumes. Same outcome, on a file that is not lost at all
-///   and will materialise on its own.
-pub(super) fn guard_absent_markdown(
-    md_path: &Path,
-    sidecar_path: &Path,
-) -> Result<(), ActionError> {
-    // Re-check existence rather than trusting the empty read: a page
-    // that legitimately renders to an empty string is not absent.
-    if md_path.exists() {
-        return Ok(());
-    }
-    if icloud_placeholder(md_path).is_some() {
-        return Err(ActionError::PageMarkdownNotDownloaded(
-            md_path.display().to_string(),
-        ));
-    }
-    if sidecar_path.exists() {
-        return Err(ActionError::PageMarkdownVanished(
-            md_path.display().to_string(),
-        ));
-    }
-    Ok(())
-}
-
-/// The iCloud placeholder that stands in for `md_path` while its bytes
-/// are still in the cloud: `pages/foo.md` → `pages/.foo.md.icloud`.
-fn icloud_placeholder(md_path: &Path) -> Option<PathBuf> {
-    let name = md_path.file_name()?.to_str()?;
-    let placeholder = md_path.with_file_name(format!(".{name}.icloud"));
-    placeholder.exists().then_some(placeholder)
-}
-
-fn build_id_path_map<'a>(
-    blocks: &[outl_md::parse::OutlineNode],
-    current_path: &mut Vec<usize>,
-    sidecar_iter: &mut std::slice::Iter<'a, SidecarBlock>,
-    out: &mut std::collections::HashMap<NodeId, Vec<usize>>,
-) {
-    for (i, block) in blocks.iter().enumerate() {
-        current_path.push(i);
-        if let Some(sc) = sidecar_iter.next() {
-            out.insert(sc.id, current_path.clone());
-        }
-        build_id_path_map(&block.children, current_path, sidecar_iter, out);
-        current_path.pop();
-    }
-}
-
-fn build_sidecar_from_ast(
-    parsed: &outl_md::parse::ParsedPage,
-    old_sidecar: Option<&Sidecar>,
-    md: &str,
-    page_id: NodeId,
-) -> Sidecar {
-    use std::collections::HashSet;
-    let mut used: HashSet<NodeId> = HashSet::new();
-    let mut blocks: Vec<SidecarBlock> = Vec::new();
-    let mut line = 1usize;
-    walk_ast_for_sidecar(
-        &parsed.blocks,
-        0,
-        old_sidecar,
-        &mut used,
-        &mut line,
-        &mut blocks,
-    );
-    Sidecar {
-        version: outl_md::sidecar::SIDECAR_VERSION,
-        page_id,
-        last_synced_hash: file_hash(md),
-        last_synced_at: chrono::Local::now().fixed_offset(),
-        blocks,
-        // Built from a parsed `.md` + workspace tree — both sources
-        // already carry the page properties consistently, so this
-        // sidecar represents a fully-propagated state.
-        pipeline_version: outl_md::sidecar::CURRENT_PIPELINE_VERSION,
-    }
-}
-
-fn walk_ast_for_sidecar(
-    blocks: &[outl_md::parse::OutlineNode],
-    indent: u32,
-    old_sidecar: Option<&Sidecar>,
-    used: &mut std::collections::HashSet<NodeId>,
-    line: &mut usize,
-    out: &mut Vec<SidecarBlock>,
-) {
-    for block in blocks {
-        let hash = content_hash(&block.text);
-        let id = old_sidecar
-            .and_then(|sc| {
-                sc.blocks
-                    .iter()
-                    .find(|b| b.content_hash == hash && !used.contains(&b.id))
-                    .map(|b| b.id)
-            })
-            .unwrap_or_else(|| {
-                // No content-hash match: this is a freshly inserted
-                // block, so allocate a new random id.
-                NodeId::new()
-            });
-        used.insert(id);
-        out.push(SidecarBlock::from_text(id, *line, indent, &block.text));
-        *line += 1;
-        walk_ast_for_sidecar(&block.children, indent + 1, old_sidecar, used, line, out);
-    }
-}
-
 /// Render **every** page in the workspace to its `.md` file. Useful
 /// after a workspace-wide change (sync pull, migration, …) when we
 /// don't know which pages actually moved.

@@ -37,6 +37,8 @@ pub mod loader;
 pub mod lockfile;
 pub mod manifest;
 pub mod model;
+#[cfg(feature = "js")]
+mod net;
 pub mod permission;
 pub mod registry;
 pub mod runtime;

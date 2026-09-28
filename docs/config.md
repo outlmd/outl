@@ -19,7 +19,8 @@ TUI and desktop import the same module so a field can't drift between clients �
 ## Global config (`~/.config/outl/config.toml`)
 
 Every field is optional; missing values fall back to the documented default.
-A malformed file is logged and replaced with defaults rather than refused to boot — preferences aren't worth blocking the app on.
+A malformed file does not stop the app booting — it runs on defaults — but nothing will overwrite it either, and every client can say so.
+See [Editing safely](#editing-safely).
 
 ```toml
 # ~/.config/outl/config.toml — full example with every supported field
@@ -326,14 +327,42 @@ Unknown preset names fall through to the next step rather than erroring.
 The TOML reader (`outl-config::load`) is **forgiving by design**:
 
 - Missing file → defaults, no warning (first launch is normal).
-- Malformed TOML → defaults + a `tracing::warn` log line, the app boots normally.
+- Malformed TOML → defaults, the app boots normally, and the load carries the failure with it (`outl-config::load_result`).
 - Unknown fields → ignored.
   Older binaries reading a newer config don't choke; you can add fields ahead of time.
 - Partial schema (e.g. only `[theme]` populated) → other sections fall back to their per-section `Default`.
 
-Saving (`outl-config::save`) publishes by rename: the new content lands in a hidden sibling scratch file (`.config.toml.tmp`), is `fsync`ed, renamed on top of `config.toml`, and the parent directory is `fsync`ed so the rename itself survives a power loss.
+### A file that doesn't parse is never overwritten
+
+Booting on defaults is recoverable: the file is still on disk, fix the comma, restart.
+What used to make it unrecoverable was the write path.
+Every client does *load → change one field → save*, and `save` writes the **whole** struct, so the first toggle in any UI replaced your theme, `vim_mode`, timezone and `[sync] transport` with defaults — one bad character and one click, and the original was gone ([issue #284](https://github.com/outlmd/outl/issues/284)).
+
+So `outl-config::save` **refuses** when the file on disk does not parse:
+
+- Changing a setting from the desktop Settings modal, the backlinks toggle, or the mobile reminders sheet fails with `settings not saved: <path> could not be read (line N: …). Fix that file, then try again`, shown in the app's error toast.
+- The TUI prints the same line in its status line, and names it on the first frame after launch.
+- `outl doctor` reports it as a warning ([Global preferences](doctor.md#what-it-checks)).
+- Best-effort writes — persisting the workspace you just picked — are skipped and logged.
+
+There is no force flag.
+The escape hatch is the file itself: it is hand-editable by design, it is byte-for-byte intact, and the message names its path and the line that failed.
+
+Saving (`outl-config::save`) publishes by rename: the new content lands in a hidden sibling scratch file (`.config.toml.tmp.<ulid>`), is `fsync`ed, renamed on top of `config.toml`, and the parent directory is `fsync`ed so the rename itself survives a power loss.
 A crash mid-write never leaves a truncated config, and never leaves the scratch file behind — it is unlinked on every failure path, not just a failed rename.
 Both `fsync`s matter here: a config that comes back zero-length silently resets the user to defaults (theme, vim mode, last workspace).
+
+**The ULID in the scratch name is per write, and that is what makes concurrent saves safe.**
+This file has several writers by design — the TUI and the desktop app share it, and people run both.
+One shared scratch name meant one shared inode: the second writer's `create` truncated the body the first had already `fsync`ed, the first published those zero bytes, and the second then wrote through a descriptor pointing at the live `config.toml` while its own rename failed with "could not write … No such file or directory".
+
+A zero-byte `config.toml` is the worst landing spot this file has, because **it is not treated as broken**.
+Every field has a default, so an empty file parses into a complete config of defaults — the refusal above never fires, and the next save writes defaults over the lot.
+Classifying zero bytes as unreadable is not the fix either: an empty `config.toml` is a legitimate config meaning "all defaults", and refusing to save over one would lock that user out of every settings toggle while telling them to repair a file that is not broken.
+So the length stays uninterpreted and the cause is gone instead.
+
+A scratch file a *killed* process leaves behind is swept on a later save, once it is more than 24 hours old.
+The age is what keeps a live writer's scratch from being unlinked under it.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: crdt-invariant-checker
-description: Validates that changes in outl-core preserve the tree CRDT invariants (convergence, idempotency, no-cycle, no-silent-loss). Use PROACTIVELY after any edit in crates/outl-core/src/tree.rs, log.rs, op.rs, or in tree CRDT tests. Rejects PRs that break any invariant.
+description: Validates that changes in outl-core preserve the tree CRDT invariants (convergence, idempotency, no-cycle, no-silent-loss). Use PROACTIVELY after any edit in crates/outl-core/src/tree/, log.rs, op.rs, or in tree CRDT tests. Rejects PRs that break any invariant.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -34,7 +34,7 @@ You are the last line before code lands on main.
 
 When invoked:
 
-1. **Identify the scope.** Run `git diff HEAD -- crates/outl-core/src/{tree,log,op,fractional,hlc}.rs crates/outl-core/tests/`.
+1. **Identify the scope.** Run `git diff HEAD -- crates/outl-core/src/tree/ crates/outl-core/src/{log,op,fractional,hlc}.rs crates/outl-core/tests/`.
    If none of those changed, stop and return "out of scope".
 
 2. **Replay the paper in your head.** Core algorithm:

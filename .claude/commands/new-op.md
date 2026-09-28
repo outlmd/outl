@@ -17,7 +17,7 @@ $1 {
 }
 ```
 
-## 2. Implement `do_op` in `crates/outl-core/src/tree.rs`
+## 2. Implement `do_op` in `crates/outl-core/src/tree/op.rs`
 
 - Fill `old_*` in the `LogOp` before applying the mutation.
 - If the op can violate an invariant (cycle, etc), check first and treat as a no-op on materialization (but the op still goes to the log).

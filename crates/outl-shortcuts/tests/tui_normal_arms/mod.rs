@@ -182,17 +182,20 @@ fn the_tui_normal_key_arms_have_not_moved() {
 #[test]
 fn the_quit_intercept_still_sits_above_the_normal_handler() {
     // `Ctrl+C` is the one divergence whose TUI half is not in
-    // `normal.rs` at all: `runtime.rs` returns from the event loop
-    // before `handle_normal_key` is called, so the catalog's
+    // `normal.rs` at all: `runtime/event_loop.rs` returns from the
+    // loop before `handle_normal_key` is called, so the catalog's
     // `Normal` → `CopyBlock` row can never fire on the TUI. Pinned
     // separately because the snapshot above cannot see it.
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../outl-tui/src/runtime.rs");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../outl-tui/src/runtime/event_loop.rs"
+    );
     let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     assert!(
         squash(&src).contains(squash(
             "if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')"
         ).as_str()),
-        "the Ctrl+C quit intercept in outl-tui/src/runtime.rs moved — the `Ctrl+c` row in \
+        "the Ctrl+C quit intercept in outl-tui/src/runtime/event_loop.rs moved — the `Ctrl+c` row in \
          KNOWN_DIVERGENCES describes it, so re-check that row",
     );
 }

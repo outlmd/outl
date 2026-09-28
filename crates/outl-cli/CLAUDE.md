@@ -78,11 +78,19 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   Its drift check asks `outl_actions::content_lines_missing_from` before offering a page for re-projection, because the sidecar hash gate proves the sidecar agrees with the bytes on disk and **not** that those bytes came from the log.
   A page holding unlogged content is reported and withheld from the plan, so the read-only listing never promises a repair `--repair` then refuses (invariant 4 below).
   `theme.rs` — warns when a `[theme]` pair's `preset` holds a dark palette or `preset_dark` holds a light one (`Palette::is_light()`), checked for every `mode` (RFC 0022).
-  It reads the **global** `~/.config/outl/config.toml` (`outl_config::load().theme`), not the per-workspace `cfg` this module also reads (`outl_ws::layout::Config` — actor id only, no theme section).
+  It reads the **global** `~/.config/outl/config.toml` (`outl_config::load_result()`), not the per-workspace `cfg` this module also reads (`outl_ws::layout::Config` — actor id only, no theme section).
   `collect_internal` takes `theme: &outl_config::ThemeCfg` as a parameter for the same test-isolation reason it takes `store: &DeviceStore`.
   A config with no `preset_dark` (every pre-RFC-0022 config) is silently skipped, never a finding.
-  `repair.rs` — the `--repair` pass.
-  `mod.rs` — report types + orchestration.
+  An unreadable global `config.toml` is reported in `mod.rs` itself, before the `[theme]` check (issue #284) — one `b.warn` of the sentence `outl_config::Loaded::notice` produced, so this report and the TUI's boot line cannot describe the same file differently.
+  `collect_internal` takes it as `config_notice: Option<String>`, a parameter for the same reason `theme` and `store` are: resolved inside the pass, every finding count in the battery would depend on whether the developer's own config parses.
+  Ordered first because when it fires, `theme` is a default nobody chose.
+  `repair/` — the `--repair` pass.
+  `device_store.rs` — the actor bindings, the one subject that is not in this workspace at all.
+  `gate.rs` — what takes a planned page write back *out* of the plan: a damaged op log (invariant 3) and a deletion past the ceilings (invariant 5).
+  Both withhold, neither is silent, and `RepairScope` lives there because the gate is the only code that reads it.
+  `report.rs` — the vocabulary the checks write into (`Severity`, `Finding`, `Builder`, `DoctorReport`); no check lives there, which is what keeps a new check a function taking `&mut Builder`.
+  `print.rs` — the human listing, the `--json` envelope, the exit code each implies.
+  `mod.rs` — the pass: which checks run, and in what order.
 
   Two invariants for anyone touching this:
 
@@ -340,16 +348,7 @@ src/
 │   │   ├── mod.rs         #   watcher half + wiring
 │   │   └── projection.rs  #   tree → .md sweep, throttle, change-only reporter
 │   ├── sync_supervisor.rs # outl serve — deferential endpoint lease loop
-│   ├── doctor/            # outl doctor — one file per class of check
-│   │   ├── mod.rs         #   report types + orchestration
-│   │   ├── oplog.rs       #   raw .jsonl sweep, snapshots, offset indexes
-│   │   ├── files.rs       #   .md ↔ sidecar, parse warnings, conflicts
-│   │   ├── tree.rs        #   trash, unmaterialized ops, projection drift
-│   │   ├── ops_guard.rs   #   restores ops/ byte-for-byte after the run
-│   │   ├── theme.rs       #   [theme] pair validation (global config)
-│   │   └── repair/        #   the --repair pass
-│   │       ├── mod.rs     #     page re-projection, sidecars, backups
-│   │       └── snapshots.rs #   boot-cache drops, re-judged at write time
+│   ├── doctor/            # outl doctor — per-file list in the `outl doctor` entry above
 │   ├── reconcile.rs       # outl reconcile
 │   ├── recover.rs         # outl recover — op-log-side text recovery
 │   ├── theme.rs           # outl theme

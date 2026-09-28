@@ -154,7 +154,7 @@ The sidecar isn't a dotfile, by the way — iCloud silently drops dotted paths d
 
 ### 3. The CRDT matches the paper
 
-`do_op`, `undo_op`, `apply_op`, and `creates_cycle` in `outl-core/src/tree.rs` follow Kleppmann et al. 2022 literally.
+`do_op`, `undo_op`, `apply_op`, and `creates_cycle` in `outl-core/src/tree/` follow Kleppmann et al. 2022 literally.
 These four functions carry a **100% line and branch coverage rule**.
 
 **Why:** the paper has a formal correctness proof.

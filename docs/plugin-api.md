@@ -244,6 +244,14 @@ A few load-bearing notes:
 - **`ctx.net.fetch(url, opts)`** is **blocking** on the plugin thread (on the TUI it blocks the UI for the duration of the request, bounded by `timeoutMs`).
   A domain the manifest didn't grant **returns `{ ok: false, error }`** rather than throwing.
   `network:<domain>` gates it; a bare `network:*` is rejected at parse time (use `domain` or `*.domain`).
+  Four limits apply to the whole exchange, not just the URL you typed, and each one **returns** the refusal instead of throwing:
+  - **`timeoutMs` is capped at 60s** and covers every redirect hop together, not each one.
+    Ask for more and you get 60s; ask for nothing and you get 10s.
+    The plugin thread is shared by every plugin feature in the app, so an unbounded wait is not a slow fetch — it is the whole plugin surface, until the process restarts.
+  - **Only `http` and `https`.** `ftp://`, `ws://` and friends carry a host your grant may well cover, and are refused anyway.
+  - **Every redirect hop is re-checked** against your grants, and an `https → http` downgrade is refused outright.
+  - **Your `headers` stop at an origin change.** A redirect to a different host, port or scheme is followed *without* them, so a token in `X-Api-Key` never lands on a host that merely happens to be inside a wildcard grant (`*.s3.amazonaws.com`, `*.github.io`).
+    If your API needs the header after a cross-origin redirect, follow the redirect yourself with a second `fetch`.
 - **`ctx.sync.register({ push, pull })`** registers a sync transport: the host serializes local ops into `push(opsJsonl)` and applies whatever `pull()` returns through `Workspace::apply`.
   The core path is live and convergence is tested; what's missing is a client that calls `push`/`pull` on a timer — see [Roadmap](#roadmap-not-yet-available).
 

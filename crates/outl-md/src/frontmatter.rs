@@ -3,52 +3,228 @@
 //!
 //! Markdown produced by other tools (Obsidian, Bear, Jekyll/Hugo
 //! exports, …) carries page metadata in a leading `---` fenced YAML
-//! block and/or a leading `# H1` heading. Outl represents the same
-//! facts as `key:: value` properties, so importers need to split the
-//! fenced block off the body, parse the YAML into flat properties, and
-//! optionally lift a leading H1 into the page title.
+//! block and/or a leading `# H1` heading.
 //!
-//! This module owns the **generic** parsing/rewriting half of that
-//! job. Source-specific policy — which keys a given tool considers
-//! app-only metadata, how a `date` value should be normalized — stays
-//! with the caller: [`parse_frontmatter`] takes the drop-list as a
-//! parameter and returns property values verbatim.
+//! Two consumers, two different jobs:
+//!
+//! - **The importers** ([`parse_frontmatter`]) *translate* the YAML into
+//!   outl `key:: value` properties, because an import is a one-way
+//!   conversion into the dialect and the source file is left behind.
+//!   Source-specific policy — which keys a given tool considers app-only
+//!   metadata, how a `date` value should be normalized — stays with the
+//!   caller: the drop-list is a parameter and values come back verbatim.
+//! - **The dialect parser** ([`crate::parse::parse`]) *preserves* it. A
+//!   workspace folder that is also an Obsidian vault is the interop story
+//!   `transport = "file"` exists for, so the fence is split off with
+//!   [`split_frontmatter_counted`], carried verbatim in
+//!   [`crate::ParsedPage::frontmatter`], written back byte-for-byte by
+//!   [`crate::render::render`], and stored in the op log under
+//!   [`PAGE_FRONTMATTER_KEY`] so a projection from the tree can re-emit
+//!   it. See [`PAGE_FRONTMATTER_KEY`] for why the log is not optional
+//!   here.
+//!
+//! Both routes read the same scan, so they can never disagree about
+//! where the fence ends — and `strip_bom` lives here, rather than in
+//! `parse`, so they cannot disagree about where it *starts* either.
 
 use serde_yaml_ng::Value as YamlValue;
+
+/// Page-property key that carries a page's verbatim YAML frontmatter
+/// through the **op log**.
+///
+/// The value is the fence's *body* — no delimiters, no trailing newline —
+/// exactly as [`split_frontmatter`] returns it.
+/// [`crate::render::render`] puts the `---` lines back.
+///
+/// # Why the op log and not just the file
+///
+/// Preserving the fence in the parser alone leaves it as content the log
+/// has never seen, and invariant 8 then has only two moves, both bad: it
+/// refuses every re-projection (the page freezes, so no Obsidian page can
+/// ever be appended to again) or it allows one (the fence is deleted the
+/// first time any client renders the tree over the `.md`). Page-level
+/// metadata that must converge between devices belongs in an `Op` —
+/// invariant 7 — and the page-property channel already is one
+/// (`Op::SetProp` on the page root), so the fence rides it.
+///
+/// Reserved, like `page-slug` / `page-kind`, and in
+/// `outl_actions::tree::is_page_model_key` alongside them: it names a fact
+/// the dialect renders with its own syntax, so no surface offers it as a
+/// user-editable property. This crate cannot enforce that — the predicate
+/// lives one layer up — so the enforcement is there, not in this comment.
+///
+/// **The renderer has to see it, which is an ordering rule, not an
+/// exemption.** `outl_actions::journal::render_page_md_with` lifts the key
+/// into [`crate::ast::ParsedPage::frontmatter`] *before* filtering the
+/// page-model keys out of the property list. Filtering first drops the
+/// fence from every projection — the write issue #281 reported.
+pub const PAGE_FRONTMATTER_KEY: &str = "page-frontmatter";
+
+/// Drop a leading UTF-8 BOM.
+///
+/// An encoding artifact, not content. It is not whitespace
+/// (`char::is_whitespace` is false for U+FEFF), so `trim` leaves it glued
+/// to the first `- ` and that line stops being a bullet: the whole first
+/// block is recovered as verbatim text with the marker inside it, warning
+/// and all. Any `.md` written by a Windows editor lost its first block's
+/// identity on import, and a leading `title::` stopped being a page
+/// property the same way.
+///
+/// Dropped rather than preserved: no renderer re-emits it, so keeping it
+/// would leave the file changing shape on every save.
+///
+/// # Why it lives in this module
+///
+/// Because [`scan_fence`] and [`crate::parse::parse_fragment`] both have
+/// to reach the **same** answer about where the file's first real byte is,
+/// and this module is the one they already share. It used to live in
+/// `parse`, where only the grammar called it, so the scan below read a
+/// BOM'd Obsidian page as having no fence at all while the parser read it
+/// as having one. The two disagreed on exactly the files that carry a BOM,
+/// and `frontmatter_line_count` is what tells [`crate::unlogged`] which
+/// leading lines are page metadata — a verdict that decides whether bytes
+/// get overwritten. A second copy of "where the BOM ends" is the same
+/// class of divergence as a second copy of "where the fence ends".
+pub(crate) fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
+/// Where a well-formed leading `---` fence ends.
+struct Fence {
+    /// Byte range of the YAML body inside the (LF-normalized) text.
+    yaml_end: usize,
+    /// Byte offset of the first body byte after the closing delimiter.
+    body_offset: usize,
+    /// How many source **lines** the whole fence occupied, delimiters
+    /// included.
+    lines: usize,
+}
+
+/// Locate the closing delimiter of a leading `---` fence.
+///
+/// Returns `None` when `text` does not open with `---` on its own line,
+/// or when no closing delimiter follows — a malformed fence must never
+/// swallow the file.
+///
+/// Tolerates CRLF without normalizing, so a caller that only wants the
+/// line count pays no allocation.
+///
+/// **A leading BOM is skipped, and the returned byte offsets index the
+/// stripped text.** A caller that slices has to slice the same string —
+/// [`split_frontmatter_counted`] strips for that reason, not for tidiness.
+/// [`Fence::lines`] is unaffected: the BOM shares the opening delimiter's
+/// line either way.
+fn scan_fence(text: &str) -> Option<Fence> {
+    let text = strip_bom(text);
+    let open = if text.starts_with("---\n") {
+        "---\n".len()
+    } else if text.starts_with("---\r\n") {
+        "---\r\n".len()
+    } else {
+        return None;
+    };
+    let after_open = &text[open..];
+
+    let mut cursor = 0usize;
+    // `seen` counts the lines after the opening delimiter; a closing one is
+    // found at `seen`, so the fence spans `open + seen + close` lines.
+    for (seen, line) in after_open.split_inclusive('\n').enumerate() {
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        // YAML's `...` document-end marker closes a fence too.
+        if trimmed == "---" || trimmed == "..." {
+            return Some(Fence {
+                yaml_end: open + cursor,
+                body_offset: open + cursor + line.len(),
+                lines: seen + 2,
+            });
+        }
+        cursor += line.len();
+    }
+    None
+}
 
 /// Split a leading `---\n...\n---\n` block from the file. Returns
 /// `(Some(yaml_text), body)` when present and well-formed; otherwise
 /// `(None, original_text)`. YAML's `...` document-end marker is also
 /// honoured as a closing fence.
 pub fn split_frontmatter(text: &str) -> (Option<String>, String) {
-    let normalized: &str = if text.starts_with("---\r\n") {
-        return split_frontmatter(&text.replace("\r\n", "\n"));
-    } else if text.starts_with("---\n") {
-        text
-    } else {
-        return (None, text.to_string());
-    };
-    let after_open = &normalized["---\n".len()..];
+    let (yaml, body, _) = split_frontmatter_counted(text);
+    (yaml, body)
+}
 
-    let mut cursor = 0usize;
-    for line in after_open.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']);
-        if trimmed == "---" || trimmed == "..." {
-            let yaml = after_open[..cursor].to_string();
-            let yaml = yaml.strip_suffix('\n').unwrap_or(&yaml).to_string();
-            let body_offset = "---\n".len() + cursor + line.len();
-            let body = if body_offset >= normalized.len() {
-                String::new()
-            } else {
-                normalized[body_offset..].to_string()
-            };
-            return (Some(yaml), body);
-        }
-        cursor += line.len();
+/// [`split_frontmatter`] plus the number of source **lines** the fence
+/// occupied (`0` when there is none).
+///
+/// The count exists so [`crate::parse::parse`] can keep
+/// [`crate::ParseWarning::line`] file-relative after handing the body to
+/// the outline grammar. A warning that points at the wrong row sends the
+/// user to the wrong line of their own file, and `doctor` prints it
+/// verbatim.
+///
+/// Shares one scan with [`split_frontmatter`] and
+/// [`frontmatter_line_count`] — "where does the fence end" has one owner.
+pub fn split_frontmatter_counted(text: &str) -> (Option<String>, String, usize) {
+    // [`scan_fence`] skips a BOM, and the offsets it hands back index the
+    // text *it* read — so slice that same string, and return a body with
+    // no BOM in it. Stripping only inside the scan would leave the two
+    // three bytes apart and the slices would land mid-fence.
+    let text = strip_bom(text);
+    // A CRLF file is normalized before slicing, because the byte offsets
+    // below index the returned body. `str::lines` already strips `\r`, so
+    // the outline grammar downstream never sees the difference; the
+    // renderer writes LF either way.
+    if text.starts_with("---\r\n") {
+        let normalized = text.replace("\r\n", "\n");
+        let (yaml, body, lines) = split_frontmatter_counted(&normalized);
+        return (yaml, body, lines);
     }
-    // No closing fence — treat whole file as body so we don't drop
-    // user content.
-    (None, normalized.to_string())
+    let Some(fence) = scan_fence(text) else {
+        // No closing fence — treat the whole file as body so we don't
+        // drop user content.
+        return (None, text.to_string(), 0);
+    };
+    let yaml = &text["---\n".len()..fence.yaml_end];
+    let yaml = yaml.strip_suffix('\n').unwrap_or(yaml).to_string();
+    let body = text
+        .get(fence.body_offset..)
+        .unwrap_or_default()
+        .to_string();
+    (Some(yaml), body, fence.lines)
+}
+
+/// How many leading lines of `text` a well-formed `---` frontmatter fence
+/// occupies — `0` when there is none.
+///
+/// Allocation-free, which is why it exists next to
+/// [`split_frontmatter_counted`]: `crate::unlogged` asks this per page on
+/// every sweep and only needs to know which lines to skip, not what they
+/// said.
+///
+/// A leading BOM is skipped but **counted as part of the first line**, so
+/// the result stays a `lines()` index into the caller's own text.
+pub fn frontmatter_line_count(text: &str) -> usize {
+    scan_fence(text).map_or(0, |f| f.lines)
+}
+
+/// Render a frontmatter body back to its fenced form, delimiters and
+/// trailing newline included.
+///
+/// The inverse of [`split_frontmatter`]'s first element, and paired with
+/// it deliberately: an encoder and its decoder ship together so the next
+/// consumer does not re-derive half of one.
+///
+/// Normalizes a `...` closing delimiter to `---`. Both mean "the fence
+/// ends here", so nothing is lost, and the file settles on one spelling
+/// after the first save instead of carrying two.
+pub fn render_frontmatter(yaml: &str) -> String {
+    let mut out = String::with_capacity(yaml.len() + 9);
+    out.push_str("---\n");
+    if !yaml.is_empty() {
+        out.push_str(yaml);
+        out.push('\n');
+    }
+    out.push_str("---\n");
+    out
 }
 
 /// Parsed frontmatter, ready to re-emit as outl `key:: value`
@@ -209,152 +385,4 @@ pub fn extract_leading_h1(body: &str) -> (Option<String>, String) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // --- split_frontmatter -------------------------------------------------
-
-    #[test]
-    fn split_extracts_fenced_block() {
-        let (yaml, body) = split_frontmatter("---\ntitle: X\n---\n- body\n");
-        assert_eq!(yaml.as_deref(), Some("title: X"));
-        assert_eq!(body, "- body\n");
-    }
-
-    #[test]
-    fn split_honours_document_end_marker() {
-        let (yaml, body) = split_frontmatter("---\ntitle: X\n...\n- body\n");
-        assert_eq!(yaml.as_deref(), Some("title: X"));
-        assert_eq!(body, "- body\n");
-    }
-
-    #[test]
-    fn split_handles_crlf() {
-        let (yaml, body) = split_frontmatter("---\r\ntitle: X\r\n---\r\n- body\r\n");
-        assert_eq!(yaml.as_deref(), Some("title: X"));
-        assert_eq!(body, "- body\n");
-    }
-
-    #[test]
-    fn split_without_fence_returns_original() {
-        let (yaml, body) = split_frontmatter("- just bullets\n");
-        assert!(yaml.is_none());
-        assert_eq!(body, "- just bullets\n");
-    }
-
-    #[test]
-    fn split_without_closing_fence_keeps_whole_file_as_body() {
-        // Malformed frontmatter must not eat the file.
-        let (yaml, body) = split_frontmatter("---\ntitle: half\n- bullet\n");
-        assert!(yaml.is_none());
-        assert_eq!(body, "---\ntitle: half\n- bullet\n");
-    }
-
-    #[test]
-    fn split_with_empty_body_after_fence() {
-        let (yaml, body) = split_frontmatter("---\ntitle: X\n---\n");
-        assert_eq!(yaml.as_deref(), Some("title: X"));
-        assert_eq!(body, "");
-    }
-
-    // --- parse_frontmatter ---------------------------------------------------
-
-    #[test]
-    fn title_and_tags_are_extracted() {
-        let fm = parse_frontmatter("title: Real Title\ntags: [foo, bar]", &[]).unwrap();
-        assert_eq!(fm.title.as_deref(), Some("Real Title"));
-        assert_eq!(
-            fm.props,
-            vec![("tags".to_string(), "#foo #bar".to_string())]
-        );
-        assert_eq!(fm.dropped, 0);
-    }
-
-    #[test]
-    fn tags_block_list_form() {
-        let fm = parse_frontmatter("tags:\n  - alpha\n  - beta", &[]).unwrap();
-        assert_eq!(
-            fm.props,
-            vec![("tags".to_string(), "#alpha #beta".to_string())]
-        );
-    }
-
-    #[test]
-    fn tags_scalar_comma_separated_and_hash_prefixed() {
-        let fm = parse_frontmatter("tags: \"#foo, bar\"", &[]).unwrap();
-        assert_eq!(
-            fm.props,
-            vec![("tags".to_string(), "#foo #bar".to_string())]
-        );
-    }
-
-    #[test]
-    fn unknown_scalar_keys_pass_through_in_order() {
-        let fm = parse_frontmatter("author: jane\nrating: 7\ndone: true", &[]).unwrap();
-        assert_eq!(
-            fm.props,
-            vec![
-                ("author".to_string(), "jane".to_string()),
-                ("rating".to_string(), "7".to_string()),
-                ("done".to_string(), "true".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn drop_keys_are_counted_not_emitted() {
-        let fm = parse_frontmatter(
-            "aliases: [foo, bar]\ncssclass: wide\npublish: false",
-            &["aliases", "cssclass", "publish", "scroll"],
-        )
-        .unwrap();
-        assert!(fm.props.is_empty());
-        assert_eq!(fm.dropped, 3);
-    }
-
-    #[test]
-    fn non_scalar_values_are_dropped_and_counted() {
-        let fm = parse_frontmatter("meta:\n  nested: 1\nok: yes", &[]).unwrap();
-        assert_eq!(fm.dropped, 1);
-        assert_eq!(fm.props.len(), 1);
-    }
-
-    #[test]
-    fn invalid_yaml_returns_none() {
-        assert!(parse_frontmatter("title: [unclosed", &[]).is_none());
-    }
-
-    #[test]
-    fn non_mapping_yaml_yields_empty_frontmatter() {
-        let fm = parse_frontmatter("- a\n- b", &[]).unwrap();
-        assert_eq!(fm, Frontmatter::default());
-    }
-
-    // --- extract_leading_h1 ------------------------------------------------
-
-    #[test]
-    fn leading_h1_is_lifted_and_stripped() {
-        let (title, rest) = extract_leading_h1("# Real Heading\n- under h1\n");
-        assert_eq!(title.as_deref(), Some("Real Heading"));
-        assert_eq!(rest, "- under h1");
-    }
-
-    #[test]
-    fn blank_lines_before_h1_are_skipped() {
-        let (title, _rest) = extract_leading_h1("\n\n# Heading\n- x\n");
-        assert_eq!(title.as_deref(), Some("Heading"));
-    }
-
-    #[test]
-    fn buried_heading_is_not_a_title() {
-        let (title, rest) = extract_leading_h1("- first\n# Not Title\n");
-        assert!(title.is_none());
-        assert_eq!(rest, "- first\n# Not Title\n");
-    }
-
-    #[test]
-    fn empty_h1_is_ignored() {
-        let (title, _) = extract_leading_h1("# \n- x\n");
-        assert!(title.is_none());
-    }
-}
+mod tests;

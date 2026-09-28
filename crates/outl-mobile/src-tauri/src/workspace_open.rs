@@ -102,6 +102,18 @@ pub(crate) fn resolve_storage_root(app_data_dir: &Path, persisted: Option<&Path>
 /// Writes `WorkspaceCfg.last` through `outl-config` (the single config
 /// reader/writer — never hand-edit the TOML). Best-effort: a failure is
 /// logged, never fatal, because the workspace is already open in memory.
+///
+/// One of those failures is a refusal: `outl_config::save` will not write
+/// over a `config.toml` that failed to parse (issue #284). The cost of
+/// that refusal here is small and recoverable — the next launch opens the
+/// default workspace instead of this one — and it is the alternative that
+/// is not: writing would have replaced the user's whole config with
+/// defaults.
+///
+/// Nothing tells the user here, and on iOS there is no `outl doctor` to
+/// fall back on: the reminders sheet is the only mobile surface that
+/// reports this, and only when the user tries to change a setting. A boot
+/// notice is the open gap (`outl-config/CLAUDE.md` → The write guard).
 #[allow(dead_code)] // Wired by the folder picker; see workspace_picker.rs.
 pub(crate) fn persist_workspace_path(path: &Path) {
     let mut cfg = outl_config::load();

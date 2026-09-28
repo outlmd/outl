@@ -43,7 +43,7 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   Lives in `actions/zoom.rs` (an `impl App` block) and hangs off `App::zoom_stack: Vec<Vec<usize>>` — a stack of **DFS paths**, top = current render root, empty = whole page.
   Path-based (not id-based) because the TUI already navigates the in-flight AST by path via `outl_md::outline_ops`, so the breadcrumb is just a walk down the root path's ancestors (`zoom_breadcrumb`, rendered in `view::chrome::breadcrumb`).
   `selected` / `id_by_flat` stay **whole-page** flat indices; `render_outline` draws only the root subtree but keeps `cursor` counting from the root's whole-page index (`zoom_root_node`), so nothing re-indexes.
-  Navigation is confined to `zoom_root_window()` — `step_forward`/`step_backward` in `actions/nav.rs` clamp to `[start, end)` and don't cross into backlinks while zoomed.
+  Navigation is confined to `zoom_root_window()` — `step_forward`/`step_backward` in `actions/nav/selection.rs` clamp to `[start, end)` and don't cross into backlinks while zoomed.
   Zooming a leaf is allowed (Workflowy shows just that block); `z o` at the page root is a silent no-op.
   **Pure local view state** — never an `Op`, per-device, cleared on every view switch (`load_current_no_autorun` empties `zoom_stack` alongside `focus`).
   A stale root path (block moved/deleted) degrades to the whole page instead of panicking.
@@ -73,7 +73,7 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   Flips `App::backlinks_newest_first` and persists the choice to `[display] backlinks_order` in `~/.config/outl/config.toml`; no index rebuild, since `sort_backlinks` runs on every read.
   Same pure-display-preference policy as `theme.preset` — it never converges between devices.
   The panel header shows the current direction (`↓ newest (^O)` / `↑ oldest (^O)`).
-  Read once at boot in `runtime.rs` and set post-construction on `App` (mirrors `mouse_capture`'s wiring).
+  Read once at boot in `runtime/mod.rs` and set post-construction on `App` (mirrors `mouse_capture`'s wiring).
   Ordering itself runs through `outl_actions::sort_backlinks` in `App::backlinks_for_slug`, the same function the desktop and mobile clients call.
 - **Mouse capture (opt-in).**
   Set `[tui] mouse_capture = true` in `~/.config/outl/config.toml` to enable `Event::Mouse` handling (`actions/mouse.rs`).
@@ -299,11 +299,11 @@ Adding a sixth step to the hand-written sequence deepens the divergence the issu
 
 ## Theme mode: `auto` means dark here
 
-`runtime::resolve_preset_name(&ThemeCfg) -> &str` decides which side of the `[theme] preset` / `preset_dark` pair the global-config fallback resolves to: `Light` → `preset`, `Dark` and `Auto` → `ThemeCfg::dark()`.
+`runtime::preset::resolve_preset_name(&ThemeCfg) -> &str` decides which side of the `[theme] preset` / `preset_dark` pair the global-config fallback resolves to: `Light` → `preset`, `Dark` and `Auto` → `ThemeCfg::dark()`.
 A terminal has no API to read the OS appearance setting, and probing (OSC 11, `COLORFGBG`) is unreliable under tmux/screen and several emulators — so `Auto` is hardcoded to the dark side rather than guessed.
 This is a declared, permanent gap (RFC 0022), not a TODO; see [`docs/theming.md` → Light / dark pair and `mode`](../../docs/theming.md#light--dark-pair-and-mode).
 
-Only the global-config lookup in `resolve_theme` (`runtime.rs`) goes through this resolver.
+Only the global-config lookup in `resolve_theme` (`runtime/preset.rs`) goes through this resolver.
 The `--theme <preset>` CLI override and the per-workspace `.outl/config.toml` `[theme] preset` both stay a bare preset name with no pair — an explicit preset always overrides the pair, per `docs/theming.md`'s precedence order.
 Don't route those two through `resolve_preset_name`.
 
@@ -314,10 +314,21 @@ src/
 ├── main.rs              # binary entry (clap + outl_tui::run)
 ├── lib.rs               # exposes `run` so outl-cli can reuse the TUI
 ├── app.rs               # thin re-export shim + cross-module tests
+├── runtime/             # path → running program: boot, event loop, teardown
+│   ├── workspace.rs     # locks, device actor, storage backend, snapshot/LRU policy
+│   ├── preset.rs        # which theme preset this launch resolves to
+│   ├── event_loop.rs    # poll, draw, drain the coalesced save, route one keystroke
+│   ├── terminal.rs      # is stdout a terminal + the panic-time restore hook
+│   └── logging.rs       # every dependency's `tracing` output → file, not the canvas
 ├── state.rs             # plain data: App, Mode, Focus, Overlay, snapshots
 ├── actions/             # impl App { ... } blocks, one per concern
 │   ├── lifecycle.rs     # load / save / external-edit polling / new
-│   ├── nav.rs           # page/journal jumps, cursor, ref open, Focus-aware move
+│   ├── nav/             # which view is open (path / title / slug)
+│   │   ├── open.rs      # everything that *changes* it: journals, refs, pages
+│   │   ├── selection.rs # selection block to block, across the backlink zone
+│   │   ├── cursor.rs    # the caret inside the selected block's text
+│   │   ├── backlinks.rs # backlink index: accessors, background build, sort order
+│   │   └── search.rs    # `*` / `#` search for the word under the cursor
 │   ├── block.rs         # Insert mode, create/indent/outdent/delete blocks
 │   ├── history.rs       # undo / redo snapshots
 │   ├── visual.rs        # Visual mode + range ops

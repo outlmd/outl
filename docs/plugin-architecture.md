@@ -257,7 +257,11 @@ Mobile registers the subset its capabilities allow — no `keybinding`, since th
 | JS↔host data (`ReadModel`, `HostIntent`, …) | `crates/outl-plugins/src/model.rs` |
 | Engine seam (`PluginEngine` trait) | `crates/outl-plugins/src/runtime.rs` |
 | Boa engine + JS prelude (the `ctx` object) | `crates/outl-plugins/src/engine.rs` |
-| `PluginHost` (load, run, hooks, intent apply) | `crates/outl-plugins/src/host.rs` |
+| `PluginHost` (load, per-turn engine state, run, hooks) | `crates/outl-plugins/src/host.rs` |
+| Workspace → `ReadModel` / `LogOpView` projection | `crates/outl-plugins/src/host/project.rs` |
+| Intent apply (the only host-side mutation) | `crates/outl-plugins/src/host/intents.rs` |
+| `contributes` → palette / chords / toolbar | `crates/outl-plugins/src/host/contributions.rs` |
+| `sync-transport` push + pull (+ HLC skew gate) | `crates/outl-plugins/src/host/sync.rs` |
 | Disk loader + `install_from_dir` | `crates/outl-plugins/src/loader.rs` |
 
 The full crate context, invariants, and current status live in `crates/outl-plugins/CLAUDE.md`.

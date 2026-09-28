@@ -24,19 +24,13 @@
 #
 # Neither argument generalises. A third raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
-761 crates/outl-actions/src/block/create.rs
-763 crates/outl-actions/src/journal/apply.rs
-810 crates/outl-actions/src/journal/survey.rs
 699 crates/outl-actions/src/outline.rs
 980 crates/outl-actions/src/page.rs
-702 crates/outl-actions/src/paste/mod.rs
 673 crates/outl-actions/src/sync.rs
 642 crates/outl-actions/src/timeline/tests.rs
 678 crates/outl-actions/tests/ref_extraction_divergence.rs
 604 crates/outl-cli/src/cmd/block.rs
-737 crates/outl-cli/src/cmd/doctor/mod.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
-798 crates/outl-cli/src/cmd/doctor/tests/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
 713 crates/outl-config/src/schema.rs
 768 crates/outl-core/src/storage/jsonl/read.rs
@@ -51,15 +45,12 @@
 750 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
-853 crates/outl-md/src/reconcile.rs
-731 crates/outl-md/src/sidecar.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 833 crates/outl-mobile/src/components/BlockRow.tsx
 2071 crates/outl-mobile/src/components/Journal.tsx
-796 crates/outl-plugins/src/engine.rs
-862 crates/outl-plugins/src/host_tests.rs
-830 crates/outl-plugins/src/host.rs
+733 crates/outl-plugins/src/engine.rs
+640 crates/outl-plugins/src/host_tests.rs
 773 crates/outl-shortcuts/src/defaults.rs
 706 crates/outl-shortcuts/src/support.rs
 764 crates/outl-sync-iroh/src/engine_pairing.rs
@@ -72,12 +63,10 @@
 1210 crates/outl-sync-iroh/tests/regression.rs
 681 crates/outl-theme/src/presets.rs
 738 crates/outl-tui/src/actions/autocomplete.rs
-797 crates/outl-tui/src/actions/nav.rs
 924 crates/outl-tui/src/actions/overlay.rs
 985 crates/outl-tui/src/actions/plugins.rs
 620 crates/outl-tui/src/actions/properties.rs
 661 crates/outl-tui/src/input/normal.rs
 646 crates/outl-tui/src/input/overlay.rs
-697 crates/outl-tui/src/runtime.rs
 983 crates/outl-tui/src/state.rs
 1166 crates/outl-tui/src/view/overlays.rs

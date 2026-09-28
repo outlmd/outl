@@ -223,7 +223,7 @@ impl Palette {
     /// (`crates/outl-cli/src/cmd/doctor/theme.rs`), which validates
     /// a configured `[theme]` pair has one light side and one dark
     /// side. `mode = "auto"` does **not** call this — the TUI's
-    /// `resolve_preset_name` (`crates/outl-tui/src/runtime.rs`)
+    /// `resolve_preset_name` (`crates/outl-tui/src/runtime/preset.rs`)
     /// matches on `ThemeMode` directly and always resolves `Auto` to
     /// the dark side (a terminal can't read the OS setting), and no
     /// GUI client resolves `auto` in Rust at all yet (see root

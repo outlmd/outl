@@ -208,15 +208,48 @@ fn raise_to(s: &mut State, ts: Hlc) {
 /// be reachable from the seeding path.
 pub const MAX_CLOCK_SKEW_MS: u64 = 24 * 60 * 60 * 1_000;
 
+/// How far past the [`MAX_CLOCK_SKEW_MS`] window `ts` sits, or `None` when it
+/// is close enough to trust.
+///
+/// **The single owner of "how far ahead is too far" for every path that
+/// ingests an op written by someone else's clock.** Two such paths exist —
+/// `outl-sync-iroh`'s `ingest_received_ops` and `outl-plugins`'
+/// `PluginHost::sync_pull` — and the gate has to live where both can reach
+/// it, next to the constant and to the [`HlcGenerator::seed`] clamp that uses
+/// the same number. The plugin path shipped without it and inherited the bug
+/// that motivates the gate: `observe` is monotonic, so one op from the year
+/// 584 million raises this device's clock and *keeps* it there, every op the
+/// device writes afterwards is beyond its peers' own gate, and the device
+/// keeps working locally while silently syncing nothing.
+///
+/// `now_ms` is the local wall clock as [`wall_clock_ms_checked`] reports it;
+/// `None` (a clock before the epoch) means the caller cannot anchor "the
+/// future" at all, and every op is accepted. Applying an op the gate cannot
+/// judge is recoverable — HLC ordering absorbs it — while refusing all sync
+/// is a silent black hole.
+///
+/// The comparison is a subtraction rather than `ts > now + MAX_CLOCK_SKEW_MS`
+/// so an absurd `now` cannot overflow the right-hand side; the two agree on
+/// every value where the addition is representable. The returned value is the
+/// distance itself, so the caller's log line can name it.
+pub fn skew_ahead_ms(ts: Hlc, now_ms: Option<u64>) -> Option<u64> {
+    let ahead = ts.physical_ms.checked_sub(now_ms?)?;
+    (ahead > MAX_CLOCK_SKEW_MS).then_some(ahead)
+}
+
 /// Local wall clock in milliseconds since the Unix epoch, or `None` when
 /// the system clock is set before the epoch.
 ///
-/// The fallible form exists because the two callers want opposite
-/// fallbacks. [`tick`] wants a number and treats an unreadable clock as
-/// "not ahead of us" (`0`), which is harmless: it just bumps the logical
-/// counter. A caller deciding a *ceiling* cannot do that — `0` would put
-/// the ceiling in January 1970 and clamp away every legitimate seed.
-pub(crate) fn wall_clock_ms_checked() -> Option<u64> {
+/// The fallible form exists because the callers want opposite fallbacks.
+/// `tick` wants a number and treats an unreadable clock as "not ahead of
+/// us" (`0`), which is harmless: it just bumps the logical counter. A caller
+/// deciding a *ceiling* cannot do that — `0` would put the ceiling in January
+/// 1970 and clamp away every legitimate seed, or (for
+/// [`skew_ahead_ms`]) drop every incoming op as 55 years in the future.
+/// Public because the two ingest paths read the clock once per batch and then
+/// judge each op against it, so they need the same fallible reading the
+/// `None` arm of `skew_ahead_ms` is written for.
+pub fn wall_clock_ms_checked() -> Option<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -333,6 +366,42 @@ mod tests {
             assert!(next > last, "monotonicity broke after seeding");
             last = next;
         }
+    }
+
+    #[test]
+    fn the_skew_gate_accepts_up_to_the_window_and_drops_one_millisecond_past_it() {
+        // The boundary is what both ingest paths stand on, so it is pinned
+        // exactly rather than "roughly a day". `Some(ahead)` means drop.
+        let them = ActorId::new();
+        let now = 1_700_000_000_000u64;
+        let at = |p: u64| Hlc::new(p, 0, them);
+
+        assert_eq!(skew_ahead_ms(at(now + MAX_CLOCK_SKEW_MS), Some(now)), None);
+        assert_eq!(
+            skew_ahead_ms(at(now + MAX_CLOCK_SKEW_MS + 1), Some(now)),
+            Some(MAX_CLOCK_SKEW_MS + 1)
+        );
+        // An op from the past is always fine — that is ordinary lag, and the
+        // CRDT reorders it.
+        assert_eq!(skew_ahead_ms(at(0), Some(now)), None);
+        assert_eq!(skew_ahead_ms(at(now), Some(now)), None);
+    }
+
+    #[test]
+    fn a_clock_the_gate_cannot_read_accepts_instead_of_dropping_everything() {
+        // A local clock before UNIX_EPOCH cannot anchor "the future". Refusing
+        // every op there would be a silent sync black hole; applying one the
+        // gate cannot judge is recoverable.
+        let them = ActorId::new();
+        assert_eq!(skew_ahead_ms(Hlc::new(u64::MAX, 0, them), None), None);
+    }
+
+    #[test]
+    fn the_gate_cannot_overflow_on_an_absurd_local_clock() {
+        // Spelled as a subtraction precisely so `now + MAX_CLOCK_SKEW_MS`
+        // cannot wrap (release) or panic (debug) and invert the verdict.
+        let them = ActorId::new();
+        assert_eq!(skew_ahead_ms(Hlc::new(5, 0, them), Some(u64::MAX)), None);
     }
 
     #[test]

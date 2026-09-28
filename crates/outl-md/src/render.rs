@@ -12,6 +12,25 @@ const INDENT_UNIT: &str = "  ";
 pub fn render(page: &ParsedPage) -> String {
     let mut out = String::new();
 
+    // A YAML frontmatter fence, when the page has one, goes first and
+    // verbatim — it is only valid at the very top of the file, so its
+    // position here is not a formatting choice. `properties` never
+    // carries it (see `ParsedPage::frontmatter`), so there is nothing to
+    // skip in the loop below.
+    if let Some(yaml) = &page.frontmatter {
+        out.push_str(&crate::frontmatter::render_frontmatter(yaml));
+        // A blank line after the closing delimiter, but **only** when the
+        // outline follows it directly. `read_page_header` ends the
+        // page-property run at the first blank line, so writing one in
+        // front of `title:: x` would push every page property out of the
+        // header and into the outline as recovered blocks — the same
+        // "content read in the wrong shape" this fix exists to stop, one
+        // construct over.
+        if page.properties.is_empty() && !page.blocks.is_empty() {
+            out.push('\n');
+        }
+    }
+
     // Page properties at the top.
     for (k, v) in &page.properties {
         write_property(&mut out, 0, k, v);

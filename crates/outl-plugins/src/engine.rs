@@ -35,8 +35,8 @@ struct EngineShared {
     read_model: ReadModel,
     config: Value,
     out: TurnOutput,
-    /// Network domains this plugin may `fetch` (from approved permissions).
-    net_domains: Vec<crate::permission::NetworkDomain>,
+    /// Who this plugin is + the domains it may `fetch` (approved permissions).
+    net: crate::permission::NetGrant,
     /// Whether `storage:local` is granted. When false, `ctx.storage.*` throws.
     storage_enabled: bool,
     /// Per-plugin local KV, loaded by the host before the turn.
@@ -140,8 +140,8 @@ impl PluginEngine for BoaEngine {
         Ok(self.take_output())
     }
 
-    fn set_network(&mut self, domains: Vec<crate::permission::NetworkDomain>) {
-        self.shared.borrow_mut().net_domains = domains;
+    fn set_network(&mut self, grant: crate::permission::NetGrant) {
+        self.shared.borrow_mut().net = grant;
     }
 
     fn set_storage(&mut self, enabled: bool, kv: serde_json::Map<String, Value>) {
@@ -310,7 +310,7 @@ fn register_natives(
                 .and_then(|v| v.to_string(ctx).ok())
                 .map(|s| s.to_std_string_escaped())
                 .unwrap_or_default();
-            let result = do_fetch(&fetch_shared.borrow().net_domains, &url, &opts);
+            let result = crate::net::fetch(&fetch_shared.borrow().net, &url, &opts);
             Ok(JsValue::from(js_string!(result)))
         })
     };
@@ -410,69 +410,6 @@ fn secret_guard(s: &EngineShared) -> boa_engine::JsResult<()> {
         Err(boa_engine::JsError::from_opaque(JsValue::from(js_string!(
             "ctx.secrets needs the `secrets` permission"
         ))))
-    }
-}
-
-/// Perform a gated blocking HTTP request. Returns a JSON string the JS side
-/// parses: `{ ok, status, body }` on success, `{ ok: false, status: 0, error }`
-/// when denied or on a transport error.
-fn do_fetch(domains: &[crate::permission::NetworkDomain], url: &str, opts_json: &str) -> String {
-    let err = |msg: &str| serde_json::json!({ "ok": false, "status": 0, "error": msg }).to_string();
-    let Some(host) = reqwest::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(String::from))
-    else {
-        return err("invalid or hostless url");
-    };
-    if !domains.iter().any(|d| d.matches_host(&host)) {
-        return err(&format!(
-            "network denied for host `{host}` (no matching network:<domain> permission)"
-        ));
-    }
-
-    let opts: Value = serde_json::from_str(opts_json).unwrap_or(Value::Null);
-    let method = opts
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or("GET")
-        .to_uppercase();
-    let timeout_ms = opts
-        .get("timeoutMs")
-        .and_then(Value::as_u64)
-        .unwrap_or(10_000);
-
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return err(&e.to_string()),
-    };
-    let mut req = match method.as_str() {
-        "POST" => client.post(url),
-        "PUT" => client.put(url),
-        "DELETE" => client.delete(url),
-        "PATCH" => client.patch(url),
-        _ => client.get(url),
-    };
-    if let Some(headers) = opts.get("headers").and_then(Value::as_object) {
-        for (k, v) in headers {
-            if let Some(vs) = v.as_str() {
-                req = req.header(k, vs);
-            }
-        }
-    }
-    if let Some(body) = opts.get("body").and_then(Value::as_str) {
-        req = req.body(body.to_string());
-    }
-    match req.send() {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let ok = resp.status().is_success();
-            let body = resp.text().unwrap_or_default();
-            serde_json::json!({ "ok": ok, "status": status, "body": body }).to_string()
-        }
-        Err(e) => err(&e.to_string()),
     }
 }
 

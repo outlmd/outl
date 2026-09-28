@@ -191,7 +191,7 @@ Lead each finding with the file and line.
 Each finding follows this shape:
 
 ```
-**`crates/outl-core/src/tree.rs:184`** — 🔴 Blocker
+**`crates/outl-core/src/tree/apply.rs:184`** — 🔴 Blocker
 Calling `apply_op` directly here bypasses the log append, so the
 mutation will not replay on a second device. Route through
 `Workspace::apply` instead; see the existing call at

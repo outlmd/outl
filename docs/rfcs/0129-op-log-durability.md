@@ -180,7 +180,8 @@ It also appends a permanent `Op::Create` for every day the user merely opened, o
 A tolerant reader boots a workspace missing exactly the damaged records, behind a `warn` the user never sees.
 The mirrored question — *what if the reader is the healthy side and the file is the short one?* — is exactly why an index rebuild that hit a read error refuses to persist its sidecars.
 A cached short index makes the omission permanent, because the next snapshot's cutoff is derived from the index and records the missing op as already folded in.
-`outl doctor` is the surface that tells the user, and `glued_op_lines_are_reported_as_recovered` and `sync_conflict_copies_are_reported_as_errors` (`crates/outl-cli/src/cmd/doctor/tests/mod.rs`) pin that it keeps saying so.
+`outl doctor` is the surface that tells the user.
+`glued_op_lines_are_reported_as_recovered` (`doctor/tests/oplog.rs`) and `sync_conflict_copies_are_reported_as_errors` (`doctor/tests/files.rs`) pin that it keeps saying so.
 
 **Decision 2 widens the crash window from one op to one batch, and the order the two shipped in is not incidental.**
 Before, a crash could cost at most the op being written.
@@ -238,7 +239,7 @@ It has no automated test — see the gap below.
    `append_ops_batch_equals_sequential_appends`, `append_ops_rejects_foreign_actor_without_writing`, `append_ops_empty_batch_is_noop`, `append_ops_heals_torn_tail_once`, `append_ops_indexes_every_op` (`crates/outl-core/src/storage/jsonl/tests.rs`);
    `batch_persists_same_ops_as_sequential`, `batch_calls_append_ops_once_per_destination`, `batch_drop_without_commit_still_persists`,
    `nested_batches_flush_once_at_outermost`, `batch_buffers_cycle_move_and_keeps_it_in_log`, `reload_after_batch_reproduces_tree` (`crates/outl-core/src/workspace/batch.rs`);
-   `append_forest_batched_matches_sequential_and_persists` (`crates/outl-actions/src/block/create.rs`).
+   `append_forest_batched_matches_sequential_and_persists` (`crates/outl-actions/src/block/forest.rs`).
 
    *Replay fidelity:*
    `reedit_after_snapshot_matches_full_replay`, `ops_for_node_complete_after_non_edit_op_on_empty_cache_boot`, `three_edits_across_sessions`, `multi_actor_edit_converges_on_replay` (`crates/outl-core/tests/text_replace_rebuild.rs`).

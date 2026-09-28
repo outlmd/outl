@@ -119,6 +119,7 @@ fn ast_indent_and_outdent_preserves_subtree() {
     use outl_md::parse::OutlineNode;
 
     let mut page = ParsedPage {
+        frontmatter: None,
         properties: vec![],
         warnings: vec![],
         blocks: vec![

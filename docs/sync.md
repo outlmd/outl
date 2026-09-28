@@ -12,7 +12,8 @@ The doc is split in two:
   Tree CRDT core, op log on disk, the `SyncTransport` abstraction with **both** the file transport (iCloud Drive / shared filesystem) and the iroh P2P transport behind it.
   Plus the shared `SyncEngine`, the `outl peer` pairing flow, and what we explicitly trade off to get here.
 - **[Part 2 — What's still ahead](#part-2--whats-still-ahead)** is the designed-but-not-built work.
-  Per-page op log shards for 10k+ pages, per-page snapshots, signed ops, iroh-blobs snapshot transfer, and the migration path from today's layout to that one.
+  Per-page snapshots, signed ops, iroh-blobs snapshot transfer, and the migration path from today's layout to that one.
+  Per-page op log shards are in this part for their remaining gap only: the layout ships, nothing triggers it automatically.
 
 > **Companion read:** [File sync isn't trivial][avelino-file-sync] — a long-form post on *why* the problem is hard before this doc shows *how* outl solves it.
 > Same author, written as the project was being built.
@@ -858,80 +859,35 @@ Here are ours:
 # Part 2 — What's still ahead
 
 What's in Part 1 ships and works.
-What follows is designed, referenced from the code, and waiting for the right moment to land — the order is roughly the order in which we expect the constraints to bite.
+What follows is designed and referenced from the code, in roughly the order we expect the constraints to bite.
+One item here has since shipped in part, and says so in its own section rather than being moved: per-page op log shards exist and are opt-in, with no automatic trigger.
 
 ## Per-page op log shards (for 10k+ pages)
 
+**This shipped** (RFC 0137 Phase B), and it is opt-in.
+The layout, its sidecar names and the rule for which files may be collected are owned by [`storage.md` → the layout table](storage.md), not restated here.
+The short version: `PageScope::PerPage(slug)` writes `ops/<actor>/<slug>.jsonl`, one shard per page per actor, so a boot reads the pages it opens instead of the whole history.
+
+Note the nesting, because an earlier draft of this section had it inverted: the **actor** is the directory and the **slug** is the file. An actor-derived file name would give every page shard of one actor the same index file, with offsets into different `.jsonl` files interleaved in it.
+
 ### Why the monolithic jsonl breaks at scale
 
-The current layout has one `ops-<actor>.jsonl` per device for **the entire workspace**.
-Boot replays the full file; memory holds every op in history.
-Past ~1k pages × 50 ops/page the boot starts showing visibly (1–5 s on a laptop, more on a phone), and the iCloud sync window for a single growing file gets wider as the file grows.
+The `PageScope::Global` layout has one `ops-<actor>.jsonl` per device for **the entire workspace**.
+Boot replays the full file, and memory holds every op in history.
+Past ~1k pages × 50 ops/page the boot starts showing (1–5 s on a laptop, more on a phone), and the sync window for a single growing file widens as the file grows.
 
-### New layout
+### Getting onto it
 
-```
-ops/
-├── <page-slug>/
-│   ├── ops-<actor>.jsonl              ← ops for this page, this actor
-│   └── ops-<peer-actor>.jsonl         ← ops for this page, synced from a peer
-├── <other-page-slug>/
-│   └── …
-└── global/
-    └── ops-<actor>.jsonl              ← cross-page ops (move block between pages)
-```
+| | |
+|---|---|
+| New workspace | `outl init --scope=per-page` |
+| Existing workspace | `outl migrate-to-per-page-ops <path>` |
 
-Each page gets its own op log directory. iCloud syncs page by page.
-Reading "ops for this page" is `O(ops_for_this_page)`, not `O(total_ops)`.
+The migration resolves each op's node to its page's slug through the materialized tree, routes unresolvable ops (orphan, root, deleted-before-boot) to a `_default` bucket so nothing is lost, and keeps the original as `ops/ops-<actor>.jsonl.v0.bak`. It is idempotent.
 
-### Boot
+### What is still ahead
 
-```
-list_pages()           → walk pages/ and journals/ on the filesystem  (O(pages))
-                         ↑ doesn't touch the op log
-open_page(slug):
-    read ops/<slug>/ops-*.jsonl
-    materialise just this page
-    render → outline
-```
-
-Boot total = **O(pages)** to list + **O(ops for the home page)** to show.
-Independent of total history size.
-
-### Single-page mutations
-
-The vast majority (edit, toggle TODO, indent, delete, create_after):
-
-```
-mutation → workspace.apply(op) with page_id implicit
-         → append to ops/<slug>/ops-<actor>.jsonl
-         → render .md + sidecar (already loaded for this page)
-```
-
-Cost: `O(1)` append + `O(blocks_in_page)` render.
-
-### Cross-page mutations
-
-Rare but real (dragging a block to another page, refactors):
-
-```
-cross-page mutation → append to ops/global/ops-<actor>.jsonl
-                    → also touch the two affected pages
-```
-
-Boot needs to replay the global ops too.
-The `global/` directory is expected to stay small in normal use.
-
-### Incremental sync
-
-When iCloud delivers a new `ops/<slug>/ops-<peer>.jsonl`:
-
-- the watcher (`NSMetadataQuery`) fires *for that page*
-- only that page reloads (not the whole workspace)
-- the local `.md` + sidecar for that page get re-projected
-
-There's no "reload everything" path anymore.
-Granularity stays at the page.
+**Nothing flips the switch.** No page count is watched and no workspace converts itself at the 10k wall, so a user who never runs the command never gets the layout. Tracked with the rest of the op-log growth work in [#110](https://github.com/outlmd/outl/issues/110).
 
 ## Snapshots
 

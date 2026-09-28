@@ -57,18 +57,48 @@ pub use crate::property::parse_property_line;
 pub(crate) const INDENT_WIDTH: usize = 2;
 
 /// Parse a `.md` string into a [`ParsedPage`].
+///
+/// A leading `---` YAML frontmatter fence is **split off, not read**: it
+/// lands verbatim in [`ParsedPage::frontmatter`] and never becomes block
+/// text. Reading it as content turned four lines of an Obsidian vault
+/// page into five bullets, one of them `- ---`, and the next write
+/// projected that back over the user's file ([issue #281]).
+///
+/// Use [`parse_fragment`] for a markdown **fragment** (clipboard text, a
+/// pasted subtree), where a leading `---` is content and there is no page
+/// for its metadata to belong to.
+///
+/// [issue #281]: https://github.com/outlmd/outl/issues/281
 pub fn parse(md: &str) -> ParsedPage {
-    // A UTF-8 BOM is an encoding artifact, not content. It is not
-    // whitespace (`char::is_whitespace` is false for U+FEFF), so `trim`
-    // leaves it glued to the first `- ` and the first line stops being a
-    // bullet: the whole first block was recovered as verbatim text with
-    // the marker inside it, warning and all. Any `.md` written by a
-    // Windows editor lost its first block's identity on import, and a
-    // leading `title::` stopped being a page property the same way.
-    //
-    // Dropped rather than preserved: no renderer re-emits it, so keeping
-    // it would leave the file changing shape on every save.
-    let md = md.strip_prefix('\u{feff}').unwrap_or(md);
+    let (frontmatter, body, fence_lines) = crate::frontmatter::split_frontmatter_counted(md);
+    if frontmatter.is_none() {
+        return parse_fragment(md);
+    }
+    let mut page = parse_fragment(&body);
+    // Warnings carry **file**-relative line numbers: `doctor` and the TUI
+    // banner print them for the user to go and look at. The outline
+    // grammar only saw the body, so shift past the fence it never read.
+    for warning in &mut page.warnings {
+        warning.line += fence_lines;
+    }
+    page.frontmatter = frontmatter;
+    page
+}
+
+/// [`parse`] without frontmatter recognition.
+///
+/// For a markdown **fragment**: clipboard text, a pasted subtree, a
+/// rendered block. A leading `---` there is content the user copied, not
+/// page metadata — there is no page whose header it could be, so
+/// absorbing it would delete it.
+pub fn parse_fragment(md: &str) -> ParsedPage {
+    // A BOM is an encoding artifact, not content, and it is not whitespace
+    // — see `frontmatter::strip_bom` for what leaving it glued to the
+    // first `- ` costs. That function is the single owner of "where the
+    // BOM ends"; the fence scan asks it too, which is what keeps this
+    // grammar and that scan from disagreeing about whether a file even
+    // has frontmatter.
+    let md = crate::frontmatter::strip_bom(md);
     let lines: Vec<&str> = md.lines().collect();
     let mut cursor = 0usize;
 
@@ -80,6 +110,9 @@ pub fn parse(md: &str) -> ParsedPage {
     let blocks = parse_block_list(&lines, &mut cursor, 0, &mut warnings);
 
     ParsedPage {
+        // A fragment has no page header, so no fence either. `parse` sets
+        // this after splitting one off.
+        frontmatter: None,
         properties: page_props,
         blocks,
         warnings,

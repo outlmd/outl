@@ -13,9 +13,10 @@ publish = false
 [dependencies]
 serde = { workspace = true }
 toml = { workspace = true }
-anyhow = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+ulid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

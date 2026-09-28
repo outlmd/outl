@@ -467,7 +467,7 @@ mod tests {
     /// Unlike this crate's `open_in_memory` test convention, this test
     /// needs the real disk-root path: `run_callable_template`'s
     /// reprojection guard is gated on `self.workspace.root.is_some()`,
-    /// exactly like production (`runtime.rs` always opens with
+    /// exactly like production (`runtime/mod.rs` always opens with
     /// `Some(root)`). See `template.rs`'s identical helper for the
     /// same reasoning.
     fn test_app_with_root() -> (crate::state::App, tempfile::TempDir) {

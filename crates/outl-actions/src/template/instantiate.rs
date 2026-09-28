@@ -14,7 +14,7 @@ use outl_core::workspace::Workspace;
 
 use crate::block::append_block;
 use crate::error::ActionError;
-use crate::page::{read_text_prop, set_property, KIND_KEY, SLUG_KEY};
+use crate::page::{read_text_prop, set_property, SLUG_KEY};
 use crate::template::list::find_template_by_name;
 use crate::template::vars::{substitute_vars, VarContext};
 use crate::template::{FROM_TEMPLATE_KEY, PARAMS_KEY, TEMPLATE_KEY};
@@ -180,7 +180,16 @@ fn copy_block_properties(
     let props_to_copy: Vec<(String, PropValue)> = workspace
         .tree()
         .properties_of(source)
-        .filter(|(k, _)| *k != SLUG_KEY && *k != KIND_KEY && *k != TEMPLATE_KEY && *k != PARAMS_KEY)
+        // Page-model book-keeping goes through `crate::tree`'s predicate
+        // rather than a second spelling of it here: that list had
+        // `page-slug` / `page-kind` and never learned `page-source` or
+        // `page-frontmatter`, and a copy of either onto an instance claims
+        // a provenance the instance does not have. `template` / `params`
+        // stay explicit — they are this module's own metadata, not the
+        // page model's.
+        .filter(|(k, _)| {
+            !crate::tree::is_page_model_key(k) && *k != TEMPLATE_KEY && *k != PARAMS_KEY
+        })
         .filter_map(|(k, v)| match v {
             PropValue::Text(s) => Some((k.to_string(), PropValue::Text(substitute_vars(s, ctx)))),
             PropValue::PageRef(_) | PropValue::Tag(_) => Some((k.to_string(), v.clone())),

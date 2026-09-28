@@ -642,7 +642,7 @@ mod tests {
     /// Unlike this crate's `open_in_memory` test convention, this test
     /// needs the real disk-root path: the mention-sugar reprojection
     /// is gated on `self.workspace_root` being real (it always is in
-    /// production — `runtime.rs` opens with a real root). See
+    /// production — `runtime/mod.rs` opens with a real root). See
     /// `template.rs`'s identical helper for the same reasoning.
     fn test_app_with_root() -> (crate::state::App, tempfile::TempDir) {
         use outl_core::id::ActorId;

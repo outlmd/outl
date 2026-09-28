@@ -75,6 +75,22 @@ impl NetworkDomain {
     }
 }
 
+/// The network access one plugin was granted: who, and which hosts.
+///
+/// The plugin id travels **with** the domains rather than alongside them
+/// because every refusal `net.rs` logs has to name the plugin that attempted
+/// it — a host log saying "a redirect to attacker.example was blocked" tells
+/// the user nothing they can act on, and the whole point of logging a refusal
+/// is that the plugin can `catch (e) {}` the copy it is handed. Two parallel
+/// parameters is a pair that can be wired up out of sync; one value cannot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetGrant {
+    /// The plugin's manifest id, e.g. `acme.sync`.
+    pub plugin_id: String,
+    /// The hosts it may reach, from its approved `network:<domain>` grants.
+    pub domains: Vec<NetworkDomain>,
+}
+
 impl Permission {
     /// Parse the wire string form (`read-page`, `network:api.openai.com`).
     pub fn parse(raw: &str) -> Result<Self, String> {
