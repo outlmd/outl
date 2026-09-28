@@ -220,7 +220,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   A `blockAssets` prop carries the second question on its own now.
   It defaults to what the variant used to imply, so the contexts that genuinely cannot hold a block image (backlinks, embedded subtrees, breadcrumbs) keep their chip without passing anything.
-  Thanks to [@DYNOSuprovo](https://github.com/DYNOSuprovo).
+  Reported by [@jes-carr](https://github.com/jes-carr), fixed by [@DYNOSuprovo](https://github.com/DYNOSuprovo).
 
 - **The Insert-mode caret pushed every character to its right one column over in the TUI ([#320](https://github.com/outlmd/outl/issues/320)).**
   `emit_row_with_cursor` drew the caret as a literal `▏` span spliced *between* two characters of the block's text.
