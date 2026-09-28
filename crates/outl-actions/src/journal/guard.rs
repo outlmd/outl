@@ -110,20 +110,22 @@ pub(super) fn unlogged_content_error(
 /// because it is a separate **question about a separate channel**: the
 /// fence lives in the op log as one `Op::SetProp` on the page root, so a
 /// block list cannot answer for it and `content_lines_missing_from` skips
-/// it. The reference here is the render, which carries the fence exactly
-/// when the log knows it.
+/// it. The references here are the render, which carries the fence exactly
+/// when the log knows it, and the sidecar's `last_synced_hash`, which says
+/// whether the fence on disk is the one the log held at the last agreement.
 ///
 /// Same error and same recovery as its sibling on purpose —
 /// `outl reconcile --ahead-of-log` re-reads the fence into the log, which
 /// is precisely what clears this. `outl_md::frontmatter_lines_missing_from`
-/// owns the narrowness (a *differing* fence is a peer edit, not a loss);
-/// see its doc before widening this.
+/// owns the narrowness (a *differing* fence over bytes outl wrote last is a
+/// peer edit, not a loss); see its doc before widening this.
 pub(super) fn frontmatter_loss_error(
     path: &Path,
     disk: &str,
     rendered: &str,
+    last_synced_hash: &str,
 ) -> Option<ActionError> {
-    let lines = outl_md::unlogged::frontmatter_lines_missing_from(disk, rendered);
+    let lines = outl_md::unlogged::frontmatter_lines_missing_from(disk, rendered, last_synced_hash);
     if lines == 0 {
         return None;
     }

@@ -333,6 +333,39 @@ fn a_blocked_redirect_is_logged_not_only_returned() {
 }
 
 #[test]
+fn a_refusal_logs_the_origin_never_the_credentials_in_the_url() {
+    // The log is readable by anything local; the plugin's URL may carry a
+    // token in its query, fragment or userinfo. The origin is enough to act on.
+    for url in [
+        "https://user:SECRET-USERINFO@blocked.test/search?api_key=SECRET-QUERY#SECRET-FRAG",
+        "not a url?api_key=SECRET-INVALID",
+    ] {
+        let (_out, log) = capturing(|| fetch(&domains(&["example.com"]), url, "{}"));
+        let seen = log.joined();
+        assert!(
+            seen.contains(PLUGIN),
+            "the refusal must still be logged: {seen:?}"
+        );
+        assert!(
+            !seen.contains("SECRET"),
+            "a credential reached the log: {seen:?}"
+        );
+    }
+    let (_out, log) = capturing(|| {
+        fetch(
+            &domains(&["example.com"]),
+            "https://blocked.test/p?api_key=x",
+            "{}",
+        )
+    });
+    assert!(
+        log.joined().contains("origin=https://blocked.test"),
+        "the refusal must say where the plugin tried to go: {:?}",
+        log.lines()
+    );
+}
+
+#[test]
 fn a_body_over_the_cap_is_logged_not_only_returned() {
     let over = MAX_RESPONSE_BYTES + 1;
     let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {over}\r\nConnection: close\r\n\r\n")

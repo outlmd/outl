@@ -152,8 +152,23 @@ pub fn reconcile_md_with_guard(
     // write — would empty the page as quietly as deleting a bullet.
     // Refusing here refuses before any op exists, since `match_blocks`
     // is pure.
-    let (matches, orphans) =
-        crate::matching::guard::match_blocks_guarded(&new_ast.blocks, &old_blocks, guard)?;
+    //
+    // One exemption from the *count*, never from the deletion: a sidecar
+    // from before the fence parser (issue #281) holds each YAML line as a
+    // block, and those orphan on the first pass. They are the fence still on
+    // disk, logged as `page-frontmatter` below, so counting them would
+    // refuse the one pass that migrates the page. Only asked when this `.md`
+    // has a fence, so a truncated file (no fence, no body) gets no discount.
+    let fence_lines = match new_ast.frontmatter {
+        Some(_) => crate::frontmatter::legacy_fence_lines(&md_text),
+        None => Default::default(),
+    };
+    let (matches, orphans) = crate::matching::guard::match_blocks_guarded_except(
+        &new_ast.blocks,
+        &old_blocks,
+        guard,
+        |b| crate::frontmatter::is_legacy_fence_block(&fence_lines, &b.text),
+    )?;
 
     if !orphans.is_empty() {
         if let Some(log_path) = orphan_log_path {

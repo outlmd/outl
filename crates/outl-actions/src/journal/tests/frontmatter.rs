@@ -242,3 +242,52 @@ fn if_stale_refuses_to_drop_a_frontmatter_fence_that_sits_behind_a_bom() {
         "the file must be untouched by a refused projection"
     );
 }
+
+/// An external edit to the fence that no reconcile has read yet must not be
+/// overwritten by a local mutation's projection.
+///
+/// The tree still holds fence A, disk now holds fence B. A block append
+/// lands before the orphan reconcile, every disk block line is known to the
+/// sidecar, and the render carries a fence, so without the hash as a
+/// witness the post-mutation gate would write A over B, and the user's
+/// Obsidian edit would be gone with no op ever recording it.
+#[test]
+fn guarded_refuses_to_overwrite_an_unreconciled_fence_edit() {
+    let tmp = TempDir::new().unwrap();
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = Workspace::open_in_memory(actor).unwrap();
+
+    let md_path = tmp.path().join("pages").join("fm.md");
+    std::fs::create_dir_all(md_path.parent().unwrap()).unwrap();
+    std::fs::write(&md_path, REPORTED).unwrap();
+    outl_md::reconcile::reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+
+    let edited = "---\ntitle: Edited In Obsidian\ntags: [a, b]\n---\n\n- body\n";
+    std::fs::write(&md_path, edited).unwrap();
+
+    let page = NodeId::from_slug("fm");
+    append_block(&mut ws, &hlc, Some(page), Some("novo bloco")).unwrap();
+    let err = apply_page_md_with_sidecar_guarded(&ws, tmp.path(), page)
+        .expect_err("the tree's older fence must not replace an unreconciled edit");
+    assert!(
+        matches!(err, ActionError::PageMarkdownAheadOfLog { .. }),
+        "the refusal must name the recovery the user can run: {err:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&md_path).unwrap(),
+        edited,
+        "the file must be untouched by a refused projection"
+    );
+
+    // Once the reconcile reads the edit into the log, the same write goes
+    // through and keeps the user's fence.
+    outl_md::reconcile::reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+    append_block(&mut ws, &hlc, Some(page), Some("depois")).unwrap();
+    apply_page_md_with_sidecar_guarded(&ws, tmp.path(), page).unwrap();
+    let disk = std::fs::read_to_string(&md_path).unwrap();
+    assert!(
+        disk.starts_with("---\ntitle: Edited In Obsidian\ntags: [a, b]\n---\n"),
+        "the reconciled fence must survive the projection: {disk:?}"
+    );
+}

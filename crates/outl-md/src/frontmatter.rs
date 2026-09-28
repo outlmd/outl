@@ -206,6 +206,43 @@ pub fn frontmatter_line_count(text: &str) -> usize {
     scan_fence(text).map_or(0, |f| f.lines)
 }
 
+/// The lines of `disk`'s fence as a pre-fence parser read them: each line
+/// trimmed, plus the same line without a leading `- ` (an indented YAML list
+/// item became a child block). Empty when `disk` has no fence.
+///
+/// Only a migration question: which blocks of a sidecar written before
+/// issue #281 were the fence all along. See [`is_legacy_fence_block`].
+pub(crate) fn legacy_fence_lines(disk: &str) -> std::collections::HashSet<&str> {
+    let mut set = std::collections::HashSet::new();
+    for line in strip_bom(disk).lines().take(frontmatter_line_count(disk)) {
+        let line = line.trim();
+        if !line.is_empty() {
+            set.insert(line);
+            set.insert(line.strip_prefix("- ").unwrap_or(line).trim());
+        }
+    }
+    set
+}
+
+/// Whether a block recorded by a pre-fence parser was only the fence: it
+/// says something, and every non-blank line of it is one of `fence_lines`.
+///
+/// The fence still on disk carries that content (it reaches the log as
+/// [`PAGE_FRONTMATTER_KEY`] in the same pass), so trashing the block loses
+/// nothing. A body block that merely shares one line with the fence does
+/// not qualify unless all of its lines do.
+pub(crate) fn is_legacy_fence_block(
+    fence_lines: &std::collections::HashSet<&str>,
+    text: &str,
+) -> bool {
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .peekable();
+    lines.peek().is_some() && lines.all(|l| fence_lines.contains(l))
+}
+
 /// Render a frontmatter body back to its fenced form, delimiters and
 /// trailing newline included.
 ///

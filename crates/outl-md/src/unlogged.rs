@@ -59,27 +59,56 @@ pub fn sidecar_can_answer(blocks: &[SidecarBlock]) -> bool {
 /// answer it, and it is why both live in this module rather than one
 /// growing a second meaning.
 ///
-/// **Deliberately narrow: it fires only when `rendered` has no fence at
-/// all.** A render whose fence merely *differs* is a peer that edited the
-/// frontmatter, which is a legitimate remote change and no more a loss
-/// than a remote block edit — refusing it would freeze the page, which is
-/// issue #166 with the blame moved (see [`content_lines_missing_from`]).
-/// What it does catch is the tree not knowing the channel exists, which
-/// is the state a workspace is in between upgrading to a binary that
-/// reads the fence and that page's first reconcile: the log holds the
-/// fence as bullets from the older parser, the render therefore has none,
-/// and writing it back is the [issue #281] rewrite happening once more.
+/// Two shapes count as a loss:
+///
+/// - **`rendered` has no fence at all.** The tree does not know the
+///   channel exists, which is the state a workspace is in between
+///   upgrading to a binary that reads the fence and that page's first
+///   reconcile: the log holds the fence as bullets from the older parser,
+///   the render therefore has none, and writing it back is the
+///   [issue #281] rewrite happening once more.
+/// - **`rendered` carries a *different* fence and `disk` is not what outl
+///   last wrote** (`last_synced_hash` does not match it). The fence was
+///   edited on disk after the last agreement, so the log has never seen
+///   the disk version, and a post-mutation projection that runs before
+///   the orphan reconcile would replace it with the tree's older one.
+///
+/// A differing fence over bytes outl **did** write last is not a loss: the
+/// fence on disk is the one the log held at the last agreement (reconcile
+/// logs it before stamping the hash, and a projection renders it from the
+/// log), so the render differs only because a peer edited the frontmatter.
+/// That is a legitimate remote change and no more a loss than a remote
+/// block edit; refusing it would freeze the page, which is issue #166
+/// with the blame moved (see [`content_lines_missing_from`]).
+///
+/// The sidecar keeps no copy of the fence, so the hash is the witness for
+/// "the log held this fence", exactly as the sidecar's blocks are the
+/// witness for block text. Fences are compared by body, so a CRLF file, a
+/// BOM or a `...` closing delimiter never reads as an edit.
+///
 /// `outl reconcile --ahead-of-log` — the recovery
 /// `ActionError::PageMarkdownAheadOfLog` already names — re-reads the
-/// fence into the log and clears it.
+/// fence into the log and clears both shapes.
 ///
 /// [issue #281]: https://github.com/outlmd/outl/issues/281
-pub fn frontmatter_lines_missing_from(disk: &str, rendered: &str) -> usize {
+pub fn frontmatter_lines_missing_from(disk: &str, rendered: &str, last_synced_hash: &str) -> usize {
     let lines = crate::frontmatter::frontmatter_line_count(disk);
-    if lines == 0 || crate::frontmatter::frontmatter_line_count(rendered) > 0 {
+    if lines == 0 {
         return 0;
     }
-    lines
+    if crate::frontmatter::frontmatter_line_count(rendered) == 0 {
+        return lines;
+    }
+    if crate::sidecar::file_hash(disk) == last_synced_hash {
+        return 0;
+    }
+    let (on_disk, _) = crate::frontmatter::split_frontmatter(disk);
+    let (in_render, _) = crate::frontmatter::split_frontmatter(rendered);
+    if on_disk == in_render {
+        0
+    } else {
+        lines
+    }
 }
 
 /// The content lines in `disk` that **no block the op log knows** can

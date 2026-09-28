@@ -38,7 +38,7 @@ use outl_core::workspace::Workspace;
 use outl_md::parse::parse;
 use outl_md::reconcile::reconcile_md;
 use outl_md::render::render;
-use outl_md::sidecar::SidecarBlock;
+use outl_md::sidecar::{file_hash, SidecarBlock};
 
 /// The op-log page-property key that carries the verbatim fence.
 ///
@@ -240,7 +240,7 @@ fn reconcile_puts_the_frontmatter_in_the_op_log() {
 fn a_render_without_the_fence_is_reported_as_a_frontmatter_loss() {
     let bullets = "- ---\n- title: My Note\n- tags: [a, b]\n- ---\n- body\n";
     assert_eq!(
-        outl_md::unlogged::frontmatter_lines_missing_from(REPORTED, bullets),
+        outl_md::unlogged::frontmatter_lines_missing_from(REPORTED, bullets, &file_hash(REPORTED)),
         4,
         "a render that dropped the fence must be reported"
     );
@@ -253,11 +253,19 @@ fn a_render_without_the_fence_is_reported_as_a_frontmatter_loss() {
 #[test]
 fn a_render_that_keeps_the_fence_reports_no_loss() {
     assert_eq!(
-        outl_md::unlogged::frontmatter_lines_missing_from(REPORTED, &render(&parse(REPORTED))),
+        outl_md::unlogged::frontmatter_lines_missing_from(
+            REPORTED,
+            &render(&parse(REPORTED)),
+            &file_hash(REPORTED)
+        ),
         0
     );
     assert_eq!(
-        outl_md::unlogged::frontmatter_lines_missing_from(OBSIDIAN, &render(&parse(OBSIDIAN))),
+        outl_md::unlogged::frontmatter_lines_missing_from(
+            OBSIDIAN,
+            &render(&parse(OBSIDIAN)),
+            &file_hash(OBSIDIAN)
+        ),
         0
     );
 }
@@ -271,9 +279,42 @@ fn a_render_that_keeps_the_fence_reports_no_loss() {
 fn a_peer_edit_to_the_fence_is_not_reported_as_a_loss() {
     let peer = "---\ntitle: Renamed By Peer\n---\n\n- body\n";
     assert_eq!(
-        outl_md::unlogged::frontmatter_lines_missing_from(REPORTED, peer),
+        outl_md::unlogged::frontmatter_lines_missing_from(REPORTED, peer, &file_hash(REPORTED)),
         0,
         "a differing fence is a remote edit; refusing it freezes the page"
+    );
+}
+
+/// The mirror of the test above: the **disk** fence changed after outl last
+/// wrote the file, and the tree still holds the old one.
+///
+/// Nothing in the log has seen the disk version, so a post-mutation
+/// projection that runs before the orphan reconcile would write the tree's
+/// fence over the user's edit. The hash is the witness: bytes outl did not
+/// write last carry a fence the log may never have held.
+#[test]
+fn an_external_edit_to_the_fence_is_reported_as_a_loss() {
+    let edited = "---\ntitle: Edited In Obsidian\ntags: [a, b]\n---\n\n- body\n";
+    assert_eq!(
+        outl_md::unlogged::frontmatter_lines_missing_from(
+            edited,
+            &render(&parse(REPORTED)),
+            &file_hash(REPORTED)
+        ),
+        4,
+        "an unreconciled fence edit must not be overwritten by the tree's older fence"
+    );
+    // The same disk bytes with the same fence the tree holds are not a
+    // loss, even when the hash is stale: the log already knows that fence.
+    let body_edited = "---\ntitle: My Note\ntags: [a, b]\n---\n\n- body edited\n";
+    assert_eq!(
+        outl_md::unlogged::frontmatter_lines_missing_from(
+            body_edited,
+            &render(&parse(REPORTED)),
+            &file_hash(REPORTED)
+        ),
+        0,
+        "a fence the log already holds is never a loss"
     );
 }
 
@@ -444,7 +485,11 @@ fn a_bom_does_not_hide_content_the_log_lacks() {
 fn a_render_without_the_fence_is_a_loss_behind_a_bom_too() {
     let bullets = "- ---\n- title: My Note\n- tags: [a, b]\n- ---\n- body\n";
     assert_eq!(
-        outl_md::unlogged::frontmatter_lines_missing_from(BOM_REPORTED, bullets),
+        outl_md::unlogged::frontmatter_lines_missing_from(
+            BOM_REPORTED,
+            bullets,
+            &file_hash(BOM_REPORTED)
+        ),
         4,
         "a render that dropped the fence must be reported, BOM or not"
     );
@@ -461,7 +506,8 @@ fn a_render_that_keeps_the_fence_reports_no_loss_behind_a_bom() {
     assert_eq!(
         outl_md::unlogged::frontmatter_lines_missing_from(
             BOM_REPORTED,
-            &render(&parse(BOM_REPORTED))
+            &render(&parse(BOM_REPORTED)),
+            &file_hash(BOM_REPORTED)
         ),
         0
     );

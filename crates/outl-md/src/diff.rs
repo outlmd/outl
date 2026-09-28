@@ -160,17 +160,17 @@ pub fn diff_to_ops_with_page_props(
     // divergence the desktop's `@` autocomplete hit on
     // fixture-populated person pages.
     //
-    // Internal book-keeping keys are skipped: the page-model layer
-    // (`outl-actions::page`) owns `page-slug` / `page-kind` through its
-    // own ops, and re-applying them from a `.md` parse would either
-    // no-op or accidentally overwrite a slug the renderer hides.
-    // Strings inlined here because `outl-md` does not depend on
-    // `outl-actions`; the canonical constants are
-    // `outl_actions::page::{SLUG_KEY, KIND_KEY}` — keep these in sync.
+    // Book-keeping keys are skipped. `outl-actions::page` owns `page-slug` /
+    // `page-kind` via its own ops (inlined: no dep on `outl-actions`; keep in
+    // sync with `outl_actions::page::{SLUG_KEY, KIND_KEY}`). `page-frontmatter`
+    // is written only by `reconcile::page_root::sync_page_frontmatter` from the
+    // real `---` fence; a typed `page-frontmatter::` line would land after it,
+    // replace the fence body, and the next projection would clobber the YAML.
     const PAGE_SLUG_KEY: &str = "page-slug";
     const PAGE_KIND_KEY: &str = "page-kind";
+    const PAGE_FRONTMATTER_KEY: &str = crate::frontmatter::PAGE_FRONTMATTER_KEY;
     for (key, value) in page_properties {
-        if key == PAGE_SLUG_KEY || key == PAGE_KIND_KEY {
+        if [PAGE_SLUG_KEY, PAGE_KIND_KEY, PAGE_FRONTMATTER_KEY].contains(&key.as_str()) {
             continue;
         }
         ops.push(Op::SetProp {

@@ -191,6 +191,96 @@ fn reconcile_twice_without_sidecar_does_not_duplicate_root() {
     );
 }
 
+fn frontmatter_prop(ws: &Workspace, md_path: &Path) -> Option<outl_core::property::PropValue> {
+    let page = sidecar::read(&sidecar_path_for(md_path)).unwrap().page_id;
+    ws.tree()
+        .property(page, crate::frontmatter::PAGE_FRONTMATTER_KEY)
+        .cloned()
+}
+
+/// `page-frontmatter` is written only from the real `---` fence. A typed
+/// `page-frontmatter::` line must not land after that op and replace the
+/// fence body, or the next projection writes the fake value over the YAML.
+#[test]
+fn a_typed_page_frontmatter_line_never_replaces_the_fence() {
+    let (dir, mut ws, hlc) = setup_workspace();
+    let md_path = dir.path().join("note.md");
+    let md = "---\ntitle: X\n---\npage-frontmatter:: fake\n\n- body\n";
+    fs::write(&md_path, md).unwrap();
+    reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+
+    let fence = parse(md).frontmatter.expect("the fence parses");
+    assert_eq!(
+        frontmatter_prop(&ws, &md_path),
+        Some(outl_core::property::PropValue::Text(fence))
+    );
+}
+
+#[test]
+fn a_typed_page_frontmatter_line_cannot_invent_a_fence() {
+    let (dir, mut ws, hlc) = setup_workspace();
+    let md_path = dir.path().join("note.md");
+    fs::write(&md_path, "page-frontmatter:: fake\n\n- body\n").unwrap();
+    reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+    assert_eq!(frontmatter_prop(&ws, &md_path), None);
+}
+
+/// A page reconciled by a pre-fence parser (issue #281): every YAML line
+/// is a block, 24 of them, above two real ones.
+fn legacy_fenced_page(dir: &TempDir, ws: &mut Workspace, hlc: &HlcGenerator) -> PathBuf {
+    let md_path = dir.path().join("vault-note.md");
+    let keys: String = (0..22).map(|i| format!("- k{i}: v{i}\n")).collect();
+    fs::write(
+        &md_path,
+        format!("- ---\n{keys}- ---\n- body one\n- body two\n"),
+    )
+    .unwrap();
+    reconcile_md(ws, hlc, &md_path, None).unwrap();
+    assert_eq!(
+        sidecar::read(&sidecar_path_for(&md_path))
+            .unwrap()
+            .blocks
+            .len(),
+        26
+    );
+    md_path
+}
+
+/// The migration pass orphans 24 of 26 blocks, past the bulk-delete
+/// ceiling. They are the fence still on disk, so the guard must not
+/// count them, or the page stays frozen with no `page-frontmatter` op.
+#[test]
+fn the_legacy_fence_blocks_do_not_trip_the_bulk_delete_guard() {
+    let (dir, mut ws, hlc) = setup_workspace();
+    let md_path = legacy_fenced_page(&dir, &mut ws, &hlc);
+    let keys: String = (0..22).map(|i| format!("k{i}: v{i}\n")).collect();
+    let md = format!("---\n{keys}---\n\n- body one\n- body two\n");
+    fs::write(&md_path, &md).unwrap();
+
+    let report =
+        reconcile_md(&mut ws, &hlc, &md_path, None).expect("the migration is not a bulk delete");
+    assert_eq!(report.orphans, 24);
+    let fence = parse(&md).frontmatter.expect("the fence parses");
+    assert_eq!(
+        frontmatter_prop(&ws, &md_path),
+        Some(outl_core::property::PropValue::Text(fence))
+    );
+}
+
+/// The discount is grounded in the fence on disk, not in the sidecar: a
+/// fence that lost its lines, or never closes, earns none of it.
+#[test]
+fn a_truncated_md_after_a_legacy_fence_is_still_refused() {
+    for truncated in ["---\nk0: v0\n---\n", "---\nk0: v0\nk1: v1\n"] {
+        let (dir, mut ws, hlc) = setup_workspace();
+        let md_path = legacy_fenced_page(&dir, &mut ws, &hlc);
+        fs::write(&md_path, truncated).unwrap();
+        let err = reconcile_md(&mut ws, &hlc, &md_path, None)
+            .expect_err("losing the page body and the fence is a bulk delete");
+        assert!(matches!(err, ReconcileError::BulkDelete(_)), "{err}");
+    }
+}
+
 #[test]
 fn orphans_get_logged_when_log_path_set() {
     let (dir, mut ws, hlc) = setup_workspace();

@@ -408,8 +408,9 @@ Normalise either and the file still passes while pinning nothing.
    Pinned by `tests/multiline_block_roundtrip.rs` (`the_hash_is_still_advanced_for_every_shape_a_real_workspace_holds` and siblings).
    The bulk-delete half has the same shape: `reconcile_md_with_guard` refuses the whole pass (`ReconcileError::BulkDelete`) instead of trashing an oversized orphan list — see "Second hard rule" under the matching algorithm.
 
-   **A block list cannot answer for the frontmatter fence**: it rides `Op::SetProp`, so `content_lines_missing_from` skips the region and `frontmatter_lines_missing_from` asks the render instead.
+   **A block list cannot answer for the frontmatter fence**: it rides `Op::SetProp`, so `content_lines_missing_from` skips the region and `frontmatter_lines_missing_from` asks the render instead, with `last_synced_hash` as the witness that the log held the disk fence (a fence edited on disk since then is a loss, a peer's edit is not).
    Two channels, neither interchangeable; pinned by `tests/frontmatter_roundtrip.rs`.
+   The migration off a pre-fence sidecar (YAML lines recorded as blocks) is exempt from the bulk-delete **count** only, via `match_blocks_guarded_except` + `frontmatter::is_legacy_fence_block`, and only when the `.md` still has a fence carrying those lines.
 
 ## Things to never do here
 

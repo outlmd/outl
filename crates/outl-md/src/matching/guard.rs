@@ -177,10 +177,37 @@ pub fn match_blocks_guarded(
     old_blocks: &[SidecarBlock],
     guard: &OrphanGuard,
 ) -> Result<(Vec<super::Match>, Vec<NodeId>), MatchGuardError> {
+    match_blocks_guarded_except(new_blocks, old_blocks, guard, |_| false)
+}
+
+/// [`match_blocks_guarded`], leaving out of the **volume** the orphans
+/// `carried_elsewhere` says the same pass keeps some other way.
+///
+/// The only caller is reconcile's pre-fence migration (issue #281): a
+/// sidecar written before the fence parser recorded each YAML line as a
+/// block, so a metadata-heavy page orphans most of its blocks on the first
+/// pass and would be refused forever, frozen. Those blocks' content is the
+/// fence still on disk, logged as a page property in the same pass.
+///
+/// Exempt orphans are still returned, trashed and logged: this changes
+/// what the guard counts, never what the pass deletes. A predicate that
+/// answers `true` for real content is a hole in the guard, so it has to be
+/// narrow and grounded in bytes on disk, not in the sidecar alone.
+pub(crate) fn match_blocks_guarded_except(
+    new_blocks: &[OutlineNode],
+    old_blocks: &[SidecarBlock],
+    guard: &OrphanGuard,
+    carried_elsewhere: impl Fn(&SidecarBlock) -> bool,
+) -> Result<(Vec<super::Match>, Vec<NodeId>), MatchGuardError> {
     let (matches, orphans) = super::match_blocks(new_blocks, old_blocks);
+    let orphan_ids: std::collections::HashSet<NodeId> = orphans.iter().copied().collect();
+    let exempt = old_blocks
+        .iter()
+        .filter(|b| orphan_ids.contains(&b.id) && carried_elsewhere(b))
+        .count();
     let volume = OrphanVolume {
-        orphaned: orphans.len(),
-        previously_known: old_blocks.len(),
+        orphaned: orphans.len().saturating_sub(exempt),
+        previously_known: old_blocks.len().saturating_sub(exempt),
     };
     if let Err(e) = guard.check(volume) {
         // Loud on the way out: the caller gets the `Err`, and an

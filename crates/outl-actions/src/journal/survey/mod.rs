@@ -276,7 +276,7 @@ fn classify(
     // remote edit and every remote delete also answers yes to (#166).
     if log_damaged {
         return PageProjectionState::Stale {
-            lines_removed: lines_removed_by(&disk, &rendered),
+            lines_removed: lines_removed_by(&disk, &rendered, &sidecar.last_synced_hash),
         };
     }
     if !sidecar_can_answer(&sidecar.blocks) {
@@ -297,7 +297,7 @@ fn classify(
         return PageProjectionState::HashWithheldButClean;
     }
     PageProjectionState::Stale {
-        lines_removed: lines_removed_by(&disk, &rendered),
+        lines_removed: lines_removed_by(&disk, &rendered, &sidecar.last_synced_hash),
     }
 }
 
@@ -313,7 +313,7 @@ fn classify(
 /// peer legitimately deleted is not unlogged, but it is still content
 /// this write removes, and nobody should be asked to authorise that
 /// without the number.
-fn lines_removed_by(disk: &str, rendered: &str) -> usize {
+fn lines_removed_by(disk: &str, rendered: &str, last_synced_hash: &str) -> usize {
     let ast = outl_md::parse(rendered);
     let flat = outl_md::matching::flatten(&ast.blocks);
     // The **texts** entry point, because that is all the comparison
@@ -332,5 +332,5 @@ fn lines_removed_by(disk: &str, rendered: &str) -> usize {
     // `CLAUDE.md` invariant 8's "one owner per verdict", applied to the
     // second channel.
     outl_md::unlogged::content_lines_missing_from_texts(disk, flat.iter().map(|b| b.text)).len()
-        + outl_md::unlogged::frontmatter_lines_missing_from(disk, rendered)
+        + outl_md::unlogged::frontmatter_lines_missing_from(disk, rendered, last_synced_hash)
 }

@@ -129,6 +129,9 @@ pub fn apply_page_md_with_sidecar_guarded(
         // turns into an overwrite.
         Err(e) => return Err(e.into()),
     };
+    // The sidecar's hash, kept for the frontmatter channel below: it is the
+    // witness for "the fence on disk is the one the log held".
+    let mut last_synced_hash = String::new();
     if let Some(disk) = disk.as_deref() {
         // **An unreadable sidecar is a refusal, not a fall-through.**
         //
@@ -162,13 +165,16 @@ pub fn apply_page_md_with_sidecar_guarded(
         if let Some(e) = unlogged_content_error(&path, disk, &sidecar.blocks) {
             return Err(e);
         }
+        last_synced_hash = sidecar.last_synced_hash;
     }
 
     let md = render_page_md(workspace, page_root);
     // The frontmatter channel, asked after the render because the render is
-    // its reference — see `frontmatter_loss_error`.
+    // its reference; see `frontmatter_loss_error`. This is the writer an
+    // unreconciled fence edit on disk reaches first (a local mutation lands
+    // before the orphan reconcile), so the hash matters here.
     if let Some(disk) = disk.as_deref() {
-        if let Some(e) = frontmatter_loss_error(&path, disk, &md) {
+        if let Some(e) = frontmatter_loss_error(&path, disk, &md, &last_synced_hash) {
             return Err(e);
         }
     }
@@ -346,7 +352,7 @@ pub fn apply_page_md_with_sidecar_if_stale(
     // for — see `frontmatter_loss_error`. Without it this is the one gate a
     // page whose fence the log does not know walks straight through, and
     // `outl serve`'s sweep runs it over every page, unattended.
-    if let Some(e) = frontmatter_loss_error(&path, &disk, &rendered) {
+    if let Some(e) = frontmatter_loss_error(&path, &disk, &rendered, &sidecar.last_synced_hash) {
         return Err(e);
     }
     write_page_projection_if_unchanged(workspace, root, page_root, &meta, &rendered, Some(&disk))

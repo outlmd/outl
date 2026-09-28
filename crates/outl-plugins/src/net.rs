@@ -271,10 +271,24 @@ fn redirect_target(resp: &reqwest::blocking::Response, current: &Url) -> Option<
 fn refuse(grant: &NetGrant, url: &str, reason: &str) -> String {
     tracing::warn!(
         plugin = grant.plugin_id,
-        url,
+        origin = %log_origin(url),
         "plugin fetch refused: {reason}"
     );
     error_json(reason)
+}
+
+/// The part of a plugin-supplied URL the host log may keep: its origin.
+///
+/// Path, query, fragment and userinfo are where credentials ride
+/// (`?api_key=…`, `https://user:token@…`), and the log is readable by
+/// anything local. The origin still says where the plugin tried to go,
+/// which is what makes the line actionable. An unparseable URL is logged
+/// as a placeholder, never verbatim, for the same reason.
+fn log_origin(url: &str) -> String {
+    Url::parse(url).map_or_else(
+        |_| "<invalid url>".to_string(),
+        |u| u.origin().ascii_serialization(),
+    )
 }
 
 /// The network failed. Not a refusal — nobody decided anything — so it is not
