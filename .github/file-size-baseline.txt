@@ -44,7 +44,7 @@
 877 crates/outl-core/src/workspace.rs
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
-1608 crates/outl-desktop/src/components/BlockRow.tsx
+1411 crates/outl-desktop/src/components/BlockRow.tsx
 967 crates/outl-desktop/src/components/OutlineView.tsx
 1038 crates/outl-desktop/src/lib/action-handlers.ts
 872 crates/outl-frontend-shared/src/api/commands.ts

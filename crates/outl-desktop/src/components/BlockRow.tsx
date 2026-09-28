@@ -65,6 +65,12 @@ import { appState, setAppState } from "../lib/store";
 import { handlePopupNav } from "../lib/popup-nav";
 import { PropertyEditor } from "./PropertyEditor";
 import {
+  BlockSuggestPopup,
+  EmojiSuggestPopup,
+  RefSuggestPopup,
+  SlashCommandPopup,
+} from "./SuggestPopups";
+import {
   assetSlashCommands,
   rankSlashCommands,
   templateSlashCommands,
@@ -1055,6 +1061,7 @@ export function BlockRow(props: {
                                   <MarkdownInline
                                     tokens={renderedTokens}
                                     variant="inline"
+                                    blockAssets
                                     onRefClick={props.cb.onRefClick}
                                     onTagClick={props.cb.onTagClick}
                                     onLinkClick={props.cb.onLinkClick}
@@ -1183,210 +1190,6 @@ export function BlockRow(props: {
         </For>
       </Show>
     </div>
-  );
-}
-
-/**
- * Floating page-suggestion list shown while the caret is inside an
- * open `[[…]]`. Anchored just below the block's textarea.
- *
- * Selection uses `onMouseDown` + `preventDefault` (not `onClick`): a
- * plain click would blur the textarea first, firing its `onBlur`
- * commit and tearing down edit mode before the pick registered.
- * Preventing the default on mousedown keeps focus in the textarea so
- * `acceptSuggestion` can splice the value and re-park the caret.
- */
-function RefSuggestPopup(props: {
-  items: PageMeta[];
-  activeIndex: number;
-  onHover: (i: number) => void;
-  onPick: (page: PageMeta) => void;
-}) {
-  return (
-    <Show when={props.items.length > 0}>
-      <ul
-        class="absolute top-full left-0 z-30 mt-1 max-h-56 w-72 overflow-y-auto rounded-md border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 text-[13px] shadow-lg"
-        role="listbox"
-      >
-        <For each={props.items}>
-          {(page, i) => (
-            <li role="option" aria-selected={i() === props.activeIndex}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  props.onPick(page);
-                }}
-                onMouseEnter={() => props.onHover(i())}
-                class={`flex w-full items-center gap-1.5 px-2 py-1 text-left ${
-                  i() === props.activeIndex
-                    ? "bg-(--color-outl-accent) text-(--color-outl-bg)"
-                    : "hover:bg-(--color-outl-bg)/50"
-                }`}
-              >
-                <span aria-hidden="true" class="shrink-0 opacity-70">
-                  {page.icon || (page.kind === "journal" ? "📅" : "📄")}
-                </span>
-                <span class="truncate">
-                  {page.kind === "journal" ? page.slug : page.title}
-                </span>
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
-    </Show>
-  );
-}
-
-/**
- * Floating block-suggestion list shown while the caret is inside an
- * open `((…))`. Anchored just below the block's textarea — same pattern
- * as `RefSuggestPopup`. Each row shows the block's text snippet with its
- * hosting page slug dimmed on the right, so the user picks by content
- * (the `blk-XXXXXX` handle it inserts is never shown — it's an internal
- * id, not something the user reasons about).
- */
-function BlockSuggestPopup(props: {
-  items: BlockHit[];
-  activeIndex: number;
-  onHover: (i: number) => void;
-  onPick: (hit: BlockHit) => void;
-}) {
-  return (
-    <Show when={props.items.length > 0}>
-      <ul
-        class="absolute top-full left-0 z-30 mt-1 max-h-56 w-96 overflow-y-auto rounded-md border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 text-[13px] shadow-lg"
-        role="listbox"
-      >
-        <For each={props.items}>
-          {(hit, i) => (
-            <li role="option" aria-selected={i() === props.activeIndex}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  props.onPick(hit);
-                }}
-                onMouseEnter={() => props.onHover(i())}
-                class={`flex w-full items-center gap-2 px-2 py-1 text-left ${
-                  i() === props.activeIndex
-                    ? "bg-(--color-outl-accent) text-(--color-outl-bg)"
-                    : "hover:bg-(--color-outl-bg)/50"
-                }`}
-              >
-                <span class="min-w-0 flex-1 truncate">
-                  {hit.text || "(empty block)"}
-                </span>
-                <span class="shrink-0 truncate text-[11px] opacity-60">
-                  {hit.source_slug}
-                </span>
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
-    </Show>
-  );
-}
-
-/**
- * Floating emoji-shortcode suggestion list shown while the caret is
- * inside an open `:shortcode` trigger. Anchored just below the block's
- * textarea — same pattern as `RefSuggestPopup`. The row shows the
- * glyph on the left and the canonical `:shortcode:` form on the right
- * so the user can scan by glyph but still see the literal that will
- * land on disk.
- */
-function EmojiSuggestPopup(props: {
-  items: EmojiHit[];
-  activeIndex: number;
-  onHover: (i: number) => void;
-  onPick: (hit: EmojiHit) => void;
-}) {
-  return (
-    <Show when={props.items.length > 0}>
-      <ul
-        class="absolute top-full left-0 z-30 mt-1 max-h-56 w-72 overflow-y-auto rounded-md border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 text-[13px] shadow-lg"
-        role="listbox"
-      >
-        <For each={props.items}>
-          {(hit, i) => (
-            <li role="option" aria-selected={i() === props.activeIndex}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  props.onPick(hit);
-                }}
-                onMouseEnter={() => props.onHover(i())}
-                class={`flex w-full items-center gap-2 px-2 py-1 text-left ${
-                  i() === props.activeIndex
-                    ? "bg-(--color-outl-accent) text-(--color-outl-bg)"
-                    : "hover:bg-(--color-outl-bg)/50"
-                }`}
-              >
-                <span aria-hidden="true" class="shrink-0 text-base">
-                  {hit.glyph}
-                </span>
-                <span class="truncate font-mono text-[12px] opacity-80">
-                  :{hit.shortcode}:
-                </span>
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
-    </Show>
-  );
-}
-
-/**
- * Floating `/command` slash menu shown while the caret is inside a
- * block-initial `/` trigger — the desktop's inline equivalent of the
- * TUI slash overlay. Same anchoring/keyboard pattern as
- * `RefSuggestPopup`. Each row shows the command **id** monospaced (what
- * the user types, mirrors `/stats` in the CLI) with the human title
- * dimmed beside it.
- */
-function SlashCommandPopup(props: {
-  items: PluginCommand[];
-  activeIndex: number;
-  onHover: (i: number) => void;
-  onPick: (cmd: PluginCommand) => void;
-}) {
-  return (
-    <Show when={props.items.length > 0}>
-      <ul
-        class="absolute top-full left-0 z-30 mt-1 max-h-56 w-72 overflow-y-auto rounded-md border border-(--color-outl-border) bg-(--color-outl-bg-elev) py-1 text-[13px] shadow-lg"
-        role="listbox"
-      >
-        <For each={props.items}>
-          {(cmd, i) => (
-            <li role="option" aria-selected={i() === props.activeIndex}>
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  props.onPick(cmd);
-                }}
-                onMouseEnter={() => props.onHover(i())}
-                class={`flex w-full items-center gap-2 px-2 py-1 text-left ${
-                  i() === props.activeIndex
-                    ? "bg-(--color-outl-accent) text-(--color-outl-bg)"
-                    : "hover:bg-(--color-outl-bg)/50"
-                }`}
-              >
-                <span class="shrink-0 font-mono text-[12px]">
-                  /{cmd.command_id}
-                </span>
-                <span class="truncate opacity-70">{cmd.title}</span>
-              </button>
-            </li>
-          )}
-        </For>
-      </ul>
-    </Show>
   );
 }
 

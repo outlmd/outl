@@ -292,3 +292,57 @@ describe("BlockRow commit — the ghost-block policy (#213)", () => {
     expect(cb.onCommit).toHaveBeenCalledWith("blk-edit", "after");
   });
 });
+
+describe("BlockRow image rendering — #322", () => {
+  it("renders an inline image as an <img> rather than a file chip", () => {
+    const block: BlockNode = {
+      ...makeBlock("blk-img", "![diagram](https://example.com/diagram.png)"),
+      tokens: [
+        {
+          kind: "image",
+          alt: "diagram",
+          href: "https://example.com/diagram.png",
+        },
+      ],
+    };
+    const host = mountView(block, makeCb());
+    const img = host.querySelector('img[alt="diagram"]');
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe("https://example.com/diagram.png");
+    expect(img?.getAttribute("alt")).toBe("diagram");
+  });
+
+  it("preserves desktop inline style for refs and tags alongside images", () => {
+    const block: BlockNode = {
+      ...makeBlock(
+        "blk-ref-tag",
+        "[[project]] #urgent ![diagram](https://example.com/diagram.png)",
+      ),
+      tokens: [
+        { kind: "ref", value: "project" },
+        { kind: "plain", value: " " },
+        { kind: "tag", value: "#urgent" },
+        { kind: "plain", value: " " },
+        {
+          kind: "image",
+          alt: "diagram",
+          href: "https://example.com/diagram.png",
+        },
+      ],
+    };
+    const host = mountView(block, makeCb());
+    const img = host.querySelector('img[alt="diagram"]');
+    expect(img).not.toBeNull();
+
+    // Verify ref and tag use desktop inline classes, not mobile pill chips
+    const buttons = host.querySelectorAll('[role="button"]');
+    const refSpan = Array.from(buttons).find((b) => b.textContent === "project");
+    expect(refSpan).toBeDefined();
+    expect(refSpan?.className).toContain("text-(--color-outl-ref-link-fg)");
+    expect(refSpan?.className).not.toContain("bg-(--color-outl-accent)/12");
+
+    const tagSpan = Array.from(buttons).find((b) => b.textContent === "#urgent");
+    expect(tagSpan).toBeDefined();
+    expect(tagSpan?.className).toContain("text-(--color-outl-tag-link-fg)");
+  });
+});

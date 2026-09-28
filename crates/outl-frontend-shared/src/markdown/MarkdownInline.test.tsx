@@ -22,6 +22,7 @@ function mount(
   variant?: "inline",
   onLinkClick?: (href: string) => void,
   embeds?: EmbedMap,
+  blockAssets?: boolean,
 ) {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -30,6 +31,7 @@ function mount(
       <MarkdownInline
         tokens={tokens}
         variant={variant}
+        blockAssets={blockAssets}
         onLinkClick={onLinkClick}
         embeds={embeds}
       />
@@ -198,6 +200,39 @@ describe("MarkdownInline — image / asset rendering (issue #203)", () => {
     expect(m.host.querySelector("img")).toBeNull();
     expect(readAssetDataUrlMock).not.toHaveBeenCalled();
     expect(m.host.textContent).toContain("diagram");
+    m.dispose();
+  });
+
+  it("renders a block <img> when variant='inline' and blockAssets is true", async () => {
+    readAssetDataUrlMock.mockClear();
+    const tokens: InlineToken[] = [
+      { kind: "image", alt: "diagram", href: "assets/abc.png" },
+    ];
+    const m = mount(tokens, "inline", undefined, undefined, true);
+    expect(readAssetDataUrlMock).toHaveBeenCalledWith("assets/abc.png");
+    await tick();
+    const img = m.host.querySelector("img") as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute("src")).toBe("data:image/png;base64,QUJD");
+    expect(img.getAttribute("alt")).toBe("diagram");
+    m.dispose();
+  });
+
+  it("preserves inline-variant text styling for refs and tags when blockAssets is true", () => {
+    const tokens: InlineToken[] = [
+      { kind: "ref", value: "project" },
+      { kind: "tag", value: "#status" },
+    ];
+    const m = mount(tokens, "inline", undefined, undefined, true);
+    const buttons = m.host.querySelectorAll('[role="button"]');
+    const refSpan = Array.from(buttons).find((b) => b.textContent === "project");
+    expect(refSpan).toBeDefined();
+    expect(refSpan?.className).toContain("text-(--color-outl-ref-link-fg)");
+    expect(refSpan?.className).not.toContain("bg-(--color-outl-accent)/12");
+
+    const tagSpan = Array.from(buttons).find((b) => b.textContent === "#status");
+    expect(tagSpan).toBeDefined();
+    expect(tagSpan?.className).toContain("text-(--color-outl-tag-link-fg)");
     m.dispose();
   });
 

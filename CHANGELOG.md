@@ -212,6 +212,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Desktop showed a `🖼️ name` chip where an inline image should have been ([#322](https://github.com/outlmd/outl/issues/322)).**
+  `MarkdownInline`'s `variant` flag was answering two questions with one value.
+  `variant="inline"` is what gives the desktop its TUI-style underlined refs and tags instead of mobile's pill chips, and the `image` arm read that same flag to decide whether an asset may take a block of its own.
+  The main outline row wants the first and not the second, so every image on desktop collapsed to a chip.
+  Mobile passes no `variant` at all, which is the only reason it rendered the picture, and `docs/markdown-format.md` has said "Desktop and mobile show an `<img>`" the whole time.
+
+  A `blockAssets` prop carries the second question on its own now.
+  It defaults to what the variant used to imply, so the contexts that genuinely cannot hold a block image (backlinks, embedded subtrees, breadcrumbs) keep their chip without passing anything.
+  Thanks to [@DYNOSuprovo](https://github.com/DYNOSuprovo).
+
 - **The Insert-mode caret pushed every character to its right one column over in the TUI ([#320](https://github.com/outlmd/outl/issues/320)).**
   `emit_row_with_cursor` drew the caret as a literal `▏` span spliced *between* two characters of the block's text.
   A terminal is a cell grid and a glyph costs a cell, so the tail of the line sat one column right of where it really was, and walked back and forth by one as the cursor moved through the text.

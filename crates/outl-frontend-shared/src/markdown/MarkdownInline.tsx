@@ -128,6 +128,13 @@ interface MarkdownInlineProps {
   /** Render style. Defaults to `"pill"` (mobile-style chips).
    *  Desktop passes `"inline"` for TUI-style underlined text. */
   variant?: Variant;
+  /** Whether the context permits assets (e.g. images) to render as block
+   *  elements (`<img>`). Defaults to `false` when `variant === "inline"`
+   *  (compact inline contexts like breadcrumbs, previews, backlinks, embedded subtrees)
+   *  and `true` when `variant === "pill"`. Desktop's main `BlockRow` passes
+   *  `blockAssets={true}` (with `variant="inline"`) so images render as `<img>`
+   *  without altering the desktop text affordances on refs, tags, and links. */
+  blockAssets?: boolean;
   /** Invoked when the user taps a `[[ref]]`. The argument is the
    * target name (slug or page title) inside the brackets. Skip the
    * default tap handling (e.g. when this lives inside a textarea). */
@@ -145,6 +152,8 @@ interface MarkdownInlineProps {
 
 export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
   const variant = (): Variant => props.variant ?? "pill";
+  const allowBlockAssets = (): boolean =>
+    props.blockAssets ?? (variant() !== "inline");
 
   return (
     <For each={props.tokens}>
@@ -163,6 +172,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <MarkdownInline
                   tokens={tok.inner}
                   variant={props.variant}
+                  blockAssets={props.blockAssets}
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
@@ -175,6 +185,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <MarkdownInline
                   tokens={tok.inner}
                   variant={props.variant}
+                  blockAssets={props.blockAssets}
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
@@ -187,6 +198,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <MarkdownInline
                   tokens={tok.inner}
                   variant={props.variant}
+                  blockAssets={props.blockAssets}
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
@@ -199,6 +211,7 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                 <MarkdownInline
                   tokens={tok.inner}
                   variant={props.variant}
+                  blockAssets={props.blockAssets}
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
@@ -240,11 +253,11 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
           }
           case "image": {
             const label = assetFileName(tok.href);
-            // The compact inline variant (breadcrumbs, previews) can't
+            // The compact inline variant (breadcrumbs, previews, backlinks) can't
             // hold a block image without breaking the line, so any asset
-            // renders as an inline-sized chip there. The block/pill
-            // variant renders the real <img> below.
-            if (variant() === "inline") {
+            // renders as an inline-sized chip there. When block assets are permitted
+            // (the main outline row on mobile and desktop), the real <img> renders below.
+            if (!allowBlockAssets()) {
               return (
                 <FileChip
                   href={tok.href}
