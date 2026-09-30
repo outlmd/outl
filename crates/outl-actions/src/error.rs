@@ -55,12 +55,19 @@ pub enum ActionError {
     /// #287 was measured against. Inventing a free slug would make
     /// `trash::restore` a second owner of the slug rule, so v1 refuses
     /// and says where the content still is.
+    ///
+    /// It points at `outl block tree <id>` rather than `outl page
+    /// history <slug>`: the history resolves the slug among the live
+    /// pages, so it cannot find a deleted one, and when the slug has
+    /// been reused it shows the replacement's history instead.
     #[error(
         "cannot restore the page `{slug}` yet — only blocks can be restored today. \
          Nothing is lost: the content is still in the op log, and \
-         `outl page history {slug}` shows it"
+         `outl block tree {node}` shows it"
     )]
     TrashPageRestoreUnsupported {
+        /// The deleted page root's id, as `outl trash list` shows it.
+        node: String,
         /// The deleted page's slug.
         slug: String,
     },

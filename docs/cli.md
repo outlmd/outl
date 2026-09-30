@@ -229,10 +229,10 @@ Each refusal has its own code, so an agent can tell them apart without reading p
 | Code                       | When                                                              |
 |----------------------------|-------------------------------------------------------------------|
 | `TRASH_PARENT_TRASHED`     | the block it was deleted from is in the trash too — restore that one first, the message names it |
-| `TRASH_PAGE_UNSUPPORTED`   | the id is a deleted **page**, which needs a re-projected `.md` and usually collides with a live slug; `outl page history <slug>` still shows the content |
+| `TRASH_PAGE_UNSUPPORTED`   | the id is a deleted **page**, which needs a re-projected `.md` and usually collides with a live slug; `outl block tree <id>` still shows the content |
 | `NOT_TRASHED`              | the block is not in the trash, so there is nothing to undo        |
 | `TRASH_PARENT_MISSING`     | the folded parent is not in the tree at all — run `outl doctor` ([#301](https://github.com/outlmd/outl/issues/301)) |
-| `TRASH_ORIGIN_UNKNOWN`     | the block is in the trash and the log cannot say where it came from: no move placed it, its ops would not read, or the only move on record is one the tree refused as a cycle ([invariant 4](../CLAUDE.md#critical-invariants-never-violate)). The text is still in the listing, so recovering it is a copy/paste |
+| `TRASH_ORIGIN_UNKNOWN`     | the block is in the trash and the log cannot say where it came from: no move placed it, its ops would not read, or the block it was deleted from has since moved inside it. The text is still in the listing, so recovering it is a copy/paste |
 
 **Nothing ever leaves the trash on its own, and there is no way to empty it.**
 That is deliberate rather than unfinished: emptying is the one operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)) rather than as an `rm`.

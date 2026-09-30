@@ -9,7 +9,6 @@
 
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::NodeId;
-use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
@@ -63,7 +62,10 @@ fn landing_for(workspace: &Workspace, node: NodeId) -> Result<NodeId, ActionErro
     // A page root is a `Move` *plus* a re-projected `.md`, and the slug
     // is usually taken by now. See `ActionError::TrashPageRestoreUnsupported`.
     if let Some(meta) = crate::page::page_meta(workspace, node) {
-        return Err(ActionError::TrashPageRestoreUnsupported { slug: meta.slug });
+        return Err(ActionError::TrashPageRestoreUnsupported {
+            node: node.to_string(),
+            slug: meta.slug,
+        });
     }
 
     // Past this point `node` is provably in the trash, so no arm may
@@ -80,13 +82,13 @@ fn landing_for(workspace: &Workspace, node: NodeId) -> Result<NodeId, ActionErro
         Err(_) => return Err(unknown("its ops could not be read — run `outl doctor`")),
     };
 
-    // The fold replays `Move.new_parent`, and invariant 4 keeps a `Move`
-    // the tree **refused** as a cycle in the log. Such an op names a
-    // target inside `node`'s own subtree, so believing it would produce
-    // "restore X first" naming X itself, forever.
+    // The fold only keeps moves the tree applied, so `parent` was outside
+    // `node` when it was deleted. It can have moved inside since (a later
+    // `Move` under the trashed subtree), and landing there would be a
+    // cycle the tree refuses, reported as a restore that worked.
     if crate::tree::is_under(workspace, parent, node) {
         return Err(unknown(
-            "the only move on record would have put it inside itself",
+            "the block it was deleted from has since moved inside it",
         ));
     }
 
@@ -187,6 +189,12 @@ const PREVIEW_CHARS: usize = 80;
 /// log never rewrites them, so reading the field would work on this
 /// week's history and lie about every year before it.
 ///
+/// Only placements the tree **applied** count. A `Move` refused as a
+/// cycle stays in the log (invariant 4), and whether it was refused
+/// depends on the tree at the time: `Move(A, B)` with `B` under `A`,
+/// then `B` moved away, leaves nothing in today's tree to say so. The
+/// replay decides each one the way `do_op` did.
+///
 /// This is the same fold [`crate::timeline`] needs to attribute a
 /// deletion to a page, and it is deliberately the only one — two
 /// answers to "where did this block live" is the drift the reuse-first
@@ -195,44 +203,21 @@ pub fn parent_at_deletion(
     workspace: &Workspace,
     node: NodeId,
 ) -> Result<Option<NodeId>, ActionError> {
-    let ops = workspace.ops_for_node(node)?;
-    let mut parent: Option<NodeId> = None;
-    let mut created = false;
+    // Only the placements the tree applied. Invariant 4 keeps a `Move`
+    // refused as a cycle in the log, and whether one was refused depends
+    // on the tree when it ran, not now; see `replay`.
+    let mut replay = replay::Replay::new(workspace);
+    let mut previous: Option<NodeId> = None;
     let mut at_deletion: Option<NodeId> = None;
 
-    for logged in &ops {
-        match &logged.op {
-            // First `Create` only. A reconcile re-emits one for a block
-            // that already exists, and the tree discards the stale
-            // parent it names (`do_op`'s `if !self.nodes.contains_key`),
-            // so trusting it here would fold a parent the tree never had.
-            Op::Create { parent: p, .. } if !created => {
-                created = true;
-                parent = Some(*p);
-            }
-            Op::Create { .. } => {}
-            Op::Move { new_parent, .. } => {
-                // A node cannot become its own parent: `creates_cycle`
-                // always refuses this one, so the tree never applied it
-                // and neither may the fold (invariant 4). The wider case
-                // — a target deeper inside `node`'s subtree — needs the
-                // tree as it was then, so `landing_for` catches it
-                // against the tree as it is now instead.
-                if *new_parent == node {
-                    continue;
-                }
-                // Re-emitting a block's current parent moves nothing, and
-                // must not overwrite the answer with the trash itself.
-                if parent == Some(*new_parent) {
-                    continue;
-                }
-                if *new_parent == NodeId::trash() {
-                    at_deletion = parent;
-                }
-                parent = Some(*new_parent);
-            }
-            _ => {}
+    for &parent in replay.trail(node)? {
+        // Re-emitting the trash as the parent of a block already there
+        // moves nothing, and must not overwrite the answer with the
+        // trash itself.
+        if parent == Some(NodeId::trash()) && previous != parent {
+            at_deletion = previous;
         }
+        previous = parent;
     }
 
     Ok(at_deletion)
@@ -257,6 +242,8 @@ pub fn restore(
     crate::block::move_under(workspace, hlc, node, target)?;
     Ok(entry)
 }
+
+mod replay;
 
 #[cfg(test)]
 mod tests;

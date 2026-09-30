@@ -25,4 +25,5 @@ pub use children::{children_of, next_sibling, ChildrenIndex};
 pub use position::{position_after, position_before, position_for_new_last_child};
 pub use props::is_page_model_key;
 pub(crate) use props::{renderable_prop_value, text_properties_of};
-pub use traverse::{enclosing_page_id, is_trashed, is_under, page_slug_of, walk_subtree};
+pub(crate) use traverse::is_under;
+pub use traverse::{enclosing_page_id, is_trashed, page_slug_of, walk_subtree};

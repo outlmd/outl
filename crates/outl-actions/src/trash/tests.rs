@@ -276,7 +276,7 @@ fn restore_refuses_a_page_root_and_names_the_slug() {
     let err = restore(&mut f.ws, &f.hlc, page).expect_err("should refuse a page root");
 
     assert!(
-        matches!(&err, ActionError::TrashPageRestoreUnsupported { slug } if slug == "archive"),
+        matches!(&err, ActionError::TrashPageRestoreUnsupported { slug, .. } if slug == "archive"),
         "expected TrashPageRestoreUnsupported naming the slug, got {err:?}"
     );
     assert_eq!(
@@ -383,6 +383,35 @@ fn a_move_the_tree_refused_as_a_cycle_never_becomes_the_origin() {
         Some(parent),
         "the fold has to agree with the tree about which moves happened"
     );
+}
+
+#[test]
+fn a_move_refused_into_a_descendant_stays_refused_after_the_descendant_leaves() {
+    // `Move(section, item)` is a cycle while `item` sits under `section`,
+    // so the tree refuses it. Then `item` moves back to the page, and
+    // today's tree no longer shows any cycle: a check against it would
+    // take `item` as where `section` lived and restore it there.
+    let mut f = Fixture::new();
+    let section = f.block(f.page, "seção");
+    let item = f.block(section, "item");
+
+    f.move_to(section, item);
+    assert_eq!(
+        f.ws.tree().parent(section),
+        Some(f.page),
+        "precondition: the tree must have refused the cycle"
+    );
+
+    f.move_to(item, f.page);
+    f.delete(section);
+
+    assert_eq!(
+        parent_at_deletion(&f.ws, section).expect("fold"),
+        Some(f.page),
+        "the refused move must not become the origin once its target moves away"
+    );
+    restore(&mut f.ws, &f.hlc, section).expect("restore");
+    assert_eq!(f.ws.tree().parent(section), Some(f.page));
 }
 
 #[test]

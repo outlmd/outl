@@ -231,7 +231,7 @@ Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invarian
 
 **Deliberately narrower than it looks.** Three things it does not do, each for its own reason:
 
-- **A page cannot be restored.** It needs a re-projected `.md` on top of the `Move`, and on a real 2,576-page workspace 16 of the 18 deleted pages have their slug taken by a live page today. Picking a free slug would make this a second owner of the slug rule, so it refuses and names where the content still is (`outl page history <slug>`).
+- **A page cannot be restored.** It needs a re-projected `.md` on top of the `Move`, and on a real 2,576-page workspace 16 of the 18 deleted pages have their slug taken by a live page today. Picking a free slug would make this a second owner of the slug rule, so it refuses and names where the content still is (`outl block tree <id>`, since `outl page history` only resolves live slugs).
 - **A block whose parent is also in the trash cannot be restored on its own** — 89 of 393 top-level deletions on that workspace. Restoring it would succeed structurally and change nothing the user can see; the refusal names the ancestor to restore first.
 - **A restored block lands as the last child**, not in the slot it held. `Move.old_position` is the originating replica's local derivation for `undo_op`, not something a reader of the log may trust.
 

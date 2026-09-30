@@ -502,9 +502,18 @@ fn trash_restore_refuses_a_deleted_page_and_says_where_the_content_is() {
     assert_eq!(env["ok"], false);
     let message = env["error"]["message"].as_str().unwrap();
     assert!(
-        message.contains("archive") && message.contains("outl page history"),
+        message.contains("archive") && message.contains(&format!("outl block tree {page_id}")),
         "the refusal has to name the page and where the content still is: {message}"
     );
+
+    // And the command it names has to reach the deleted page.
+    let tree = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["block", "tree", &page_id, "--json"])
+        .output()
+        .unwrap());
+    assert_eq!(tree["data"]["id"], page_id.as_str());
 }
 
 #[test]
