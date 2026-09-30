@@ -63,7 +63,7 @@ mod support;
 pub use action::Action;
 pub use binding::{Binding, Mode};
 pub use capability::Capability;
-pub use capability_support::capability_support;
+pub use capability_support::{capability_support, CLI_ONLY};
 pub use chord::{Chord, ChordSequence, Key, Modifiers};
 pub use defaults::default_bindings;
 pub use support::{support, Client, ClientSupport, Support};

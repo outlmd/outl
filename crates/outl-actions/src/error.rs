@@ -26,6 +26,101 @@ pub enum ActionError {
     #[error("block {0} has no position in the tree")]
     MissingPosition(String),
 
+    /// `trash::restore` was asked to put a block back under a parent
+    /// that is itself in the trash.
+    ///
+    /// Deleting a child on its own and then deleting its parent leaves
+    /// both as direct children of the trash root — 89 of the 393
+    /// top-level deletions on the workspace issue #287 was measured
+    /// against. Restoring the child alone would succeed structurally
+    /// and change nothing the user can see, which is worse than a
+    /// refusal: it reports success for a block that stays invisible.
+    /// The ancestor is restorable too, so the refusal names it.
+    #[error(
+        "cannot restore {node}: the block it was deleted from ({parent}) is in the trash too — \
+         restore {parent} first"
+    )]
+    TrashParentTrashed {
+        /// The block the caller asked to restore.
+        node: String,
+        /// Its parent at deletion time, itself trashed.
+        parent: String,
+    },
+
+    /// `trash::restore` was asked to restore a deleted **page**.
+    ///
+    /// A block comes back with one `Move`. A page needs that plus a
+    /// re-projected `.md`, and the slug it answered to is very often
+    /// taken by now — 16 of the 18 deleted pages on the workspace issue
+    /// #287 was measured against. Inventing a free slug would make
+    /// `trash::restore` a second owner of the slug rule, so v1 refuses
+    /// and says where the content still is.
+    #[error(
+        "cannot restore the page `{slug}` yet — only blocks can be restored today. \
+         Nothing is lost: the content is still in the op log, and \
+         `outl page history {slug}` shows it"
+    )]
+    TrashPageRestoreUnsupported {
+        /// The deleted page's slug.
+        slug: String,
+    },
+
+    /// `trash::restore` folded a parent out of the op log that is not
+    /// in the materialized tree at all.
+    ///
+    /// Zero occurrences on the workspace issue #287 was measured
+    /// against, and it is not hypothetical: the ops that *create* a node
+    /// can be missing while ops that reference it survive, which is
+    /// exactly [#301](https://github.com/outlmd/outl/issues/301). Naming
+    /// it as its own refusal keeps that diagnosis separate from "your
+    /// parent is in the trash", which has a fix the user can act on.
+    #[error(
+        "cannot restore {node}: the block it was deleted from ({parent}) is not in the tree — \
+         run `outl doctor` to see whether ops for it are missing"
+    )]
+    TrashParentMissing {
+        /// The block the caller asked to restore.
+        node: String,
+        /// Its parent at deletion time, absent from the tree.
+        parent: String,
+    },
+
+    /// `trash::restore` was asked to restore a node the op log never
+    /// moved to the trash. Distinct from [`ActionError::NotInTree`]:
+    /// the block is fine, there is simply nothing to undo.
+    ///
+    /// **Only for a node that is genuinely outside the trash.** It used
+    /// to double as the answer when the *fold* came back empty, which
+    /// contradicted the `is_trashed` check made moments earlier: the
+    /// listing showed the block and the line under it said the block
+    /// was not in the trash. That case is
+    /// [`ActionError::TrashOriginUnknown`] now.
+    #[error("block {0} is not in the trash — there is nothing to restore")]
+    NotTrashed(String),
+
+    /// The node is in the trash, but the op log cannot say where it was
+    /// before.
+    ///
+    /// Three shapes reach this, and they share an answer because the
+    /// user's options are the same in all three — the block's text is
+    /// readable in the listing, and putting it back is a copy/paste:
+    ///
+    /// - the log holds no move that placed it (a node created straight
+    ///   under the trash root);
+    /// - reading its ops failed, which is the damaged-log class
+    ///   `outl doctor` reports;
+    /// - the only move on record is one the tree **refused** as a cycle.
+    ///   Invariant 4 keeps such an op in the log, so a fold that replays
+    ///   it lands inside the subtree being restored. Believing it would
+    ///   produce "restore X first" naming X itself.
+    #[error("cannot restore {node}: the op log cannot say where it was ({why})")]
+    TrashOriginUnknown {
+        /// The block the caller asked to restore.
+        node: String,
+        /// Which of the three shapes this is, in the user's words.
+        why: String,
+    },
+
     /// The block is at the top of its sibling list and cannot be
     /// indented under a previous sibling.
     #[error("cannot indent {0}: no previous sibling")]

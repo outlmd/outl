@@ -147,6 +147,21 @@ During the #281 upgrade window (op log carrying a page's frontmatter fence as bu
 It is gone, and `tests/projection_writer_gates.rs` now pins both halves: every `pub fn` in `apply.rs` has a recorded verdict, and `guard.rs`'s doc names all six.
 Adding a writer without saying which side of the gate it is on fails there.
 
+## Trash
+
+`trash.rs` is the reading half of invariant 6. Delete is `Move(node, TRASH_ROOT)`, so the *preserving* half has always worked; until issue #287 nothing could list a deletion or put one back, which made the invariant's safety property "the bytes are still on disk" rather than "you can get it back".
+
+Two single-owner rules, and both exist because a second copy already went wrong once:
+
+- **`parent_at_deletion`** folds the parent trail from `Create.parent` / `Move.new_parent`. `timeline::came_from` calls it instead of keeping its own fold. The old copy returned `true` on the *first* `Move` to the trash whose parent matched, which answers "the first page this block was ever deleted from" — wrong the moment a block can be restored and deleted somewhere else, which is exactly what `restore` made reachable. Pinned by `a_deletion_is_attributed_to_the_page_the_block_left_last`.
+- **`refusal_for`** is the only thing that decides whether a restore would work. `restore` asks it before touching anything and `list` asks it per entry, so a listing cannot promise an action the mutation then refuses — the same shape as invariant 8's "one owner of the verdict". Pinned by `a_listing_carries_the_same_refusal_restore_would_return`.
+
+**A restored block lands as the last child**, not in the slot it held. `Move.old_position` carries the same "originating replica's local derivation, undo-only" caveat as `old_parent`, so the original position is not recoverable from the log as data.
+
+Two things are deliberately absent. Restoring a **page** needs a re-projected `.md` on top of the `Move`, and on the reference workspace 16 of 18 deleted pages have their slug taken by a live page today — picking a free slug would make this module a second owner of the slug rule, so it refuses and names where the content still is. **`empty`** is the only operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)), not here.
+
+Surfaces: `outl trash list` / `outl trash restore`, the `outl_trash_*` MCP tools, and `outl doctor`'s trash section (which now renders this listing rather than walking the tree itself). No GUI client has it — recorded as `Capability::Trash` in `outl_shortcuts::CLI_ONLY`, whose rules live in [`outl-shortcuts/CLAUDE.md`](../outl-shortcuts/CLAUDE.md).
+
 ## Page namespaces
 
 A page named `os/linux/debian` is nested under `os/linux`, which is nested under `os` (issue #275).

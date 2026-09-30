@@ -148,6 +148,28 @@ pub(crate) fn children_index_unordered(workspace: &Workspace) -> ChildrenIndex {
     map
 }
 
+/// `root` and everything under it, given a pre-built index.
+///
+/// The walk `timeline` needs to collect a deleted subtree and `trash`
+/// needs to count one. It was written twice, in the same crate, within
+/// fifty lines of each other's callers — the order they return differs
+/// from [`children_of`]'s only in that it is a DFS, which neither
+/// caller depends on.
+///
+/// A node missing from `index` contributes only itself, which is what
+/// [`ChildrenIndex`]'s "no entry means no children" contract says.
+pub(crate) fn subtree_ids(index: &ChildrenIndex, root: NodeId) -> Vec<NodeId> {
+    let mut out = vec![root];
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        for &child in index.get(&node).into_iter().flatten() {
+            out.push(child);
+            stack.push(child);
+        }
+    }
+    out
+}
+
 /// Previous sibling of `node` in its parent's children order.
 pub(crate) fn previous_sibling(workspace: &Workspace, node: NodeId) -> Option<NodeId> {
     let parent = workspace.tree().parent(node)?;

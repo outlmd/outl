@@ -42,6 +42,17 @@ pub mod codes {
     pub const SLUG_CONFLICT: &str = "SLUG_CONFLICT";
     /// Property key not found on the page.
     pub const PROP_NOT_FOUND: &str = "PROP_NOT_FOUND";
+
+    /// `outl trash restore` was given a block that is not in the trash.
+    pub const NOT_TRASHED: &str = "NOT_TRASHED";
+    /// The trashed node is a page root, which v1 cannot restore.
+    pub const TRASH_PAGE_UNSUPPORTED: &str = "TRASH_PAGE_UNSUPPORTED";
+    /// The block it was deleted from is in the trash too.
+    pub const TRASH_PARENT_TRASHED: &str = "TRASH_PARENT_TRASHED";
+    /// The folded parent is absent from the materialized tree (#301).
+    pub const TRASH_PARENT_MISSING: &str = "TRASH_PARENT_MISSING";
+    /// The block is in the trash but the log cannot say where it was.
+    pub const TRASH_ORIGIN_UNKNOWN: &str = "TRASH_ORIGIN_UNKNOWN";
     /// Underlying CRDT / storage / filesystem error.
     pub const INTERNAL: &str = "INTERNAL";
     /// Generic user-input validation failure.

@@ -87,6 +87,10 @@ Two rules the module owns: a deleted block stays in its page's history (a histor
 | Every change to a page, newest first (`total` is the count before `limit`, so a capped list never reads as complete) | `outl_actions::page_timeline` → `PageTimeline` | `crates/outl-actions/src/timeline.rs` |
 | Every change to one block, following it across pages | `outl_actions::block_timeline` | `crates/outl-actions/src/timeline.rs` |
 | Slug of the page hosting a node | `outl_actions::page_slug_of` | `crates/outl-actions/src/tree/traverse.rs` |
+| Every top-level deletion in the trash, with whether it can be restored | `outl_actions::trash::list` → `Vec<TrashEntry>` | `crates/outl-actions/src/trash.rs` |
+| Put a deleted block back where it was deleted from | `outl_actions::trash::restore` | `crates/outl-actions/src/trash.rs` |
+| Why a restore would refuse (single owner; `list` and `restore` both ask) | `outl_actions::trash::refusal_for` | `crates/outl-actions/src/trash.rs` |
+| The parent a node sat under just before it was trashed (folded from the log, never `Move.old_parent`) | `outl_actions::trash::parent_at_deletion` | `crates/outl-actions/src/trash.rs` |
 
 Recently added — check these before writing a parallel reminder helper (catalog: `docs/primitives-actions.md` → "Reminders"):
 

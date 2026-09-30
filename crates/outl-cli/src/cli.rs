@@ -361,6 +361,11 @@ pub(crate) enum Command {
     Search(cmd::search::SearchArgs),
     /// Structured query over pages.
     Query(cmd::query::QueryArgs),
+    /// Deleted blocks: list what is in the trash, put one back.
+    Trash {
+        #[command(subcommand)]
+        sub: cmd::trash::TrashCommand,
+    },
     /// Backlinks and reference lookups.
     Backlinks {
         #[command(subcommand)]

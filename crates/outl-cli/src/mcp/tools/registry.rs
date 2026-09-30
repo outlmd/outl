@@ -339,6 +339,23 @@ pub fn list() -> Vec<Value> {
                 }
             }),
         ),
+        // Trash — invariant 6 keeps every delete in the log; these are
+        // the two tools that let an agent act on that. Restoring a page
+        // is deliberately not offered: see `outl_actions::trash`.
+        tool_def(
+            "outl_trash_list",
+            "Deleted blocks still in the trash, with whether each can be restored.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool_def(
+            "outl_trash_restore",
+            "Put a deleted block back under the parent it was deleted from.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
         // Backlinks / Refs
         tool_def(
             "outl_backlinks",

@@ -236,7 +236,7 @@ fn page_nodes(workspace: &Workspace, page_root: NodeId) -> Vec<NodeId> {
     // second copy of the builder.
     let children = crate::tree::children_index_unordered(workspace);
     let mut nodes = Vec::new();
-    push_subtree(&children, page_root, &mut nodes);
+    nodes.extend(crate::tree::subtree_ids(&children, page_root));
     let mut known: HashSet<NodeId> = nodes.iter().copied().collect();
 
     // Deletion is `Move(node, TRASH_ROOT)`, so every deleted subtree root
@@ -257,8 +257,7 @@ fn page_nodes(workspace: &Workspace, page_root: NodeId) -> Vec<NodeId> {
             if !came_from(workspace, trashed, &known) {
                 return true;
             }
-            let mut subtree = Vec::new();
-            push_subtree(&children, trashed, &mut subtree);
+            let subtree = crate::tree::subtree_ids(&children, trashed);
             known.extend(subtree.iter().copied());
             nodes.extend(subtree);
             admitted = true;
@@ -270,50 +269,29 @@ fn page_nodes(workspace: &Workspace, page_root: NodeId) -> Vec<NodeId> {
     }
 }
 
-/// Append `root` and everything under it to `out`.
-fn push_subtree(children: &HashMap<NodeId, Vec<NodeId>>, root: NodeId, out: &mut Vec<NodeId>) {
-    out.push(root);
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        for &child in children.get(&node).into_iter().flatten() {
-            out.push(child);
-            stack.push(child);
-        }
-    }
-}
-
 /// Whether `trashed` was moved to the trash out of `known`.
+///
+/// The fold itself belongs to [`crate::trash::parent_at_deletion`] —
+/// one owner for "where did this block live when it was deleted",
+/// shared with `outl trash list` / `outl trash restore`. Two answers to
+/// that question drift, and the half that drifts here silently drops a
+/// deletion out of a page's history.
 ///
 /// Best-effort by design: a node whose ops are unreadable, or whose
 /// parent at deletion time is a block this page no longer holds, is left
 /// out rather than guessed into the page. Over-including would put
 /// another page's deletions in this page's history, which is worse than
 /// a gap — a gap is visibly a gap.
+///
+/// **The parent is the one the block left last**, not the first page it
+/// was ever deleted from. Those differ once a block can be restored and
+/// deleted again somewhere else, which `trash::restore` made reachable;
+/// pinned by `a_deletion_is_attributed_to_the_page_the_block_left_last`.
 fn came_from(workspace: &Workspace, trashed: NodeId, known: &HashSet<NodeId>) -> bool {
-    let Ok(ops) = workspace.ops_for_node(trashed) else {
-        return false;
-    };
-    let mut parent: Option<NodeId> = None;
-    let mut created = false;
-    for logged in &ops {
-        match &logged.op {
-            // First `Create` only — see `block_events` for why a
-            // re-emitted one must not move the parent.
-            Op::Create { parent: p, .. } if !created => {
-                created = true;
-                parent = Some(*p);
-            }
-            Op::Create { .. } => {}
-            Op::Move { new_parent, .. } => {
-                if *new_parent == NodeId::trash() && parent.is_some_and(|p| known.contains(&p)) {
-                    return true;
-                }
-                parent = Some(*new_parent);
-            }
-            _ => {}
-        }
-    }
-    false
+    matches!(
+        crate::trash::parent_at_deletion(workspace, trashed),
+        Ok(Some(parent)) if known.contains(&parent)
+    )
 }
 
 /// Turn one block's ops into events.

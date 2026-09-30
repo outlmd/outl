@@ -29,4 +29,5 @@ pub mod sync_supervisor;
 pub mod tag;
 pub mod template;
 pub mod theme;
+pub mod trash;
 pub mod workspace_info;

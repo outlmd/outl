@@ -90,6 +90,7 @@ pub mod template;
 mod text;
 pub mod timeline;
 pub mod todo;
+pub mod trash;
 pub mod tree;
 
 pub use asset::{assets_dir, import_asset, import_asset_bytes, resolve_asset_path, ImportedAsset};

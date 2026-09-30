@@ -31,7 +31,9 @@ The only thing a default run writes is its own stdout.
 
 - **Trash contents.**
   Deletion is `Move(node, TRASH_ROOT)`, never a physical removal, so deleted blocks are still in the graph — invisible to every view.
-  Doctor reports the total block count in the trash, how many top-level deletions produced it, and a text preview of each one.
+  Doctor reports the total block count in the trash, how many top-level deletions produced it, a text preview of each one, and how many of them `outl trash restore` would accept.
+  That last count comes from the same verdict the command itself uses (`outl_actions::trash::refusal_for`), so the doctor cannot promise a restore that then refuses.
+  See [`docs/cli.md`](cli.md#trash) for the command and what it declines.
 - **Unmaterialized ops** — node ids the op log touches that never landed in the tree, i.e. `Edit` / `SetProp` / `SetCollapsed` whose effect you will never see.
 - **Projection drift** — every page in the op log compared against its `.md` on disk: missing files, stale projections, missing sidecars.
 - **`.md` content that never reached the op log** — a page whose sidecar agrees with the bytes on disk (so it looks like a merely *stale* projection) but which holds lines that exist in no op.

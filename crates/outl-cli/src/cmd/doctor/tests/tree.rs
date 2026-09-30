@@ -48,6 +48,38 @@ fn deleted_blocks_are_counted_and_previewed() {
     );
 }
 
+/// The doctor is where a user first learns the trash is restorable at
+/// all, so the count it prints is a verdict from `trash::refusal_for`
+/// and not decoration. It had no assertion until this test: the string
+/// appears exactly once in the repo, in the code that emits it.
+#[test]
+fn the_doctor_says_how_many_deletions_can_be_put_back() {
+    let (_dir, root, _paths) = fresh();
+    let page = seed_page(&root, "notes", &["keep me", "delete me"]);
+
+    {
+        let mut ctx = crate::ws::open(&root).expect("open");
+        let victim = outl_actions::project_outline(&ctx.workspace, page)
+            .into_iter()
+            .find(|n| n.text.contains("delete me"))
+            .expect("the block to delete");
+        let id: NodeId = victim
+            .id
+            .parse::<ulid::Ulid>()
+            .map(NodeId)
+            .expect("node id");
+        outl_actions::delete(&mut ctx.workspace, &ctx.hlc, id).expect("delete");
+        outl_actions::apply_page_md_with_sidecar(&ctx.workspace, &root, page).expect("re-project");
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "1 of 1 can be put back"),
+        "the doctor has to name the restorable count, got: {:#?}",
+        messages(&report)
+    );
+}
+
 #[test]
 fn an_empty_trash_says_so() {
     let (_dir, root, _paths) = fresh();

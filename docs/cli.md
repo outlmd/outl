@@ -211,6 +211,36 @@ That happens when a file was edited outside outl and no reconcile has run yet, o
 In exchange, a block the log holds stays findable even while its sidecar is stale, which the previous disk-walking implementation could not promise: it dropped every block after the first one whose hash disagreed.
 The `--raw='…'` flag is reserved for the not-yet-implemented query DSL and currently rejects with `INVALID_ARG` — when the DSL lands it folds into the same `outl_query` tool, not a new one.
 
+### Trash
+
+| CLI                             | MCP tool              |
+|---------------------------------|-----------------------|
+| `outl trash list [--json]`      | `outl_trash_list`     |
+| `outl trash restore <blk-XXX>`  | `outl_trash_restore`  |
+
+Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invariants-never-violate)), so nothing is ever physically removed.
+These two commands are how you read that back.
+
+`trash list` names every top-level deletion with a preview, how many blocks ride along under it, and whether it can be restored.
+`trash restore` puts a block back **as the last child** of the parent it was deleted from, not in the slot it used to hold — `Move.old_position` is the originating replica's local derivation for `undo_op` and is not authoritative to a reader of the log, the same caveat that applies to `old_parent`.
+
+Each refusal has its own code, so an agent can tell them apart without reading prose:
+
+| Code                       | When                                                              |
+|----------------------------|-------------------------------------------------------------------|
+| `TRASH_PARENT_TRASHED`     | the block it was deleted from is in the trash too — restore that one first, the message names it |
+| `TRASH_PAGE_UNSUPPORTED`   | the id is a deleted **page**, which needs a re-projected `.md` and usually collides with a live slug; `outl page history <slug>` still shows the content |
+| `NOT_TRASHED`              | the block is not in the trash, so there is nothing to undo        |
+| `TRASH_PARENT_MISSING`     | the folded parent is not in the tree at all — run `outl doctor` ([#301](https://github.com/outlmd/outl/issues/301)) |
+| `TRASH_ORIGIN_UNKNOWN`     | the block is in the trash and the log cannot say where it came from: no move placed it, its ops would not read, or the only move on record is one the tree refused as a cycle ([invariant 4](../CLAUDE.md#critical-invariants-never-violate)). The text is still in the listing, so recovering it is a copy/paste |
+
+**Nothing ever leaves the trash on its own, and there is no way to empty it.**
+That is deliberate rather than unfinished: emptying is the one operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)) rather than as an `rm`.
+Until that lands, retention is unbounded and there is no user action that changes it.
+A workspace's trash therefore only grows; `outl doctor` reports its size.
+
+No client has a trash surface yet — it is CLI and MCP only, recorded as `Capability::Trash` in [docs/client-parity.md](client-parity.md).
+
 ### Backlinks / Refs
 
 | CLI                                | MCP tool              |

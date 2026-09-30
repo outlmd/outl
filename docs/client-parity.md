@@ -166,6 +166,7 @@ the drift this RFC exists to prevent.
 | `NestedPages` | ⚠️ The TUI lists nested pages but can't open one from that list — press Ctrl+P and type the page name (`os/linux`) to jump there. | ✅ | ✅ |
 | `ToolbarOrderLock` | — _There's no on-screen toolbar to pin here — these actions have fixed keyboard shortcuts, so they never move._ | — _There's no on-screen toolbar to pin here — these actions have fixed keyboard shortcuts, so they never move._ | ✅ |
 | `OpenExternalFile` | — _A file manager has no terminal client to hand a file to — open the file in the desktop app, or paste its text into a block._ | ✅ | ❌ Opening a file into outl from another app isn't wired up on mobile yet — send it to a computer and open it there, or paste the text into a block. |
+| `Trash` | ❌ Restoring a deleted block isn't in the app yet — run `outl trash list` in a terminal to see what was deleted, then `outl trash restore <id>`. | ❌ Restoring a deleted block isn't in the app yet — run `outl trash list` in a terminal to see what was deleted, then `outl trash restore <id>`. | ❌ Restoring a deleted block isn't in the app yet — run `outl trash list` in a terminal to see what was deleted, then `outl trash restore <id>`. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

@@ -85,6 +85,16 @@ pub enum Capability {
     /// client, so any of them can import a path it is given. What
     /// differs is whether the platform ever hands one over.
     OpenExternalFile,
+    /// Reading the trash back: listing what has been deleted and
+    /// putting a block back where it was deleted from (issue #287).
+    ///
+    /// Invariant 6 makes delete a `Move(node, TRASH_ROOT)`, so every
+    /// client already *preserves* deletions. This is the other half —
+    /// whether a client can show them and undo one. Distinct from
+    /// `Undo`, which has a chord and only reaches the current
+    /// session's stack: this reaches a deletion from any device, on
+    /// any day, because it reads the op log rather than a stack.
+    Trash,
 }
 
 impl Capability {
@@ -107,6 +117,7 @@ impl Capability {
         Capability::NestedPages,
         Capability::ToolbarOrderLock,
         Capability::OpenExternalFile,
+        Capability::Trash,
     ];
 }
 
@@ -118,7 +129,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_10: usize = 10;
+    const EXPECTED_11: usize = 11;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -132,6 +143,7 @@ mod tests {
             Capability::NestedPages => "NestedPages",
             Capability::ToolbarOrderLock => "ToolbarOrderLock",
             Capability::OpenExternalFile => "OpenExternalFile",
+            Capability::Trash => "Trash",
         }
     }
 
@@ -148,9 +160,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_10,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_10} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_10)",
+            EXPECTED_11,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_11} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_11)",
             names.len(),
         );
     }

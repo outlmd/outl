@@ -47,8 +47,13 @@ These never mutate the workspace and never need confirmation:
 - `outl_backlinks` / `outl_block_refs` — graph reads.
 - `outl_tag_list` / `outl_tag_pages` — tag discovery.
 - `outl_block_get` / `outl_block_tree` — block reads.
+- `outl_trash_list` — what has been deleted, and whether it can be put back.
 
 Destructive tools (`outl_page_delete`, `outl_block_delete`) require `confirm: true` and should almost never appear in a drafting command.
+
+`outl_trash_restore` mutates but does not destroy — it moves a block back where it was deleted from, so the worst case is a block reappearing.
+It takes no `confirm`, and an agent that deleted something should be able to undo it without asking twice.
+It refuses a deleted *page* and a block whose parent is also in the trash; both come back as a stable error code rather than prose ([`docs/cli.md`](cli.md#trash)).
 
 ## Worked example: a `/standup` slash command
 

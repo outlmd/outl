@@ -225,6 +225,12 @@ Each handler returns a `serde_json::Value` so the same code path serves both the
   CLI + MCP (`outl_asset_add`) share the `cmd::asset::add_asset` handler so they can't drift.
 - `outl search "<query>" [--in=blocks|pages|all] [--limit=N]`
 - `outl query [--tag=…] [--not-tag=… …] [--priority=…] [--since=…d] [--kind=…] [--prop key[=value] …] [--not-prop key[=value] …]`
+- `outl trash list|restore` — read deletions back.
+  Delete is `Move(node, TRASH_ROOT)` (invariant 6), so this is the half that makes "preserves history" actionable.
+  Glue only: `outl_actions::trash` owns what an entry is, and `refusal_for` owns whether a restore would work — `list` reports that verdict rather than deriving its own, so the listing cannot offer a restore the mutation then refuses.
+  `restore` re-projects the landing page (`ctx.commit`), because the `.md` otherwise keeps saying the block is gone.
+  Each refusal carries its own stable code so an agent can tell them apart without parsing prose (see [`docs/cli.md`](../../docs/cli.md#trash) for the table — a count written here would be a second copy of its length).
+  **No `trash empty`** — the only destroying operation here, so it belongs with `outl compact` (#110), and retention is a stated policy in [`docs/cli.md`](../../docs/cli.md#trash) rather than an inferred one.
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
 - `outl prop set|get|list`
@@ -319,7 +325,7 @@ This is the **CLI** `--json` shape.
 MCP shares the handlers, not the wire format: a successful `tools/call` is content-only, and an error keeps the envelope in `structuredContent`.
 [`docs/cli.md`](../../docs/cli.md#commands-by-domain) owns that fact; the [MCP](#mcp) section below says why the projection exists.
 
-Stable error codes live in `output::codes` (`NO_WORKSPACE`, `PAGE_NOT_FOUND`, `BLOCK_NOT_FOUND`, `INVALID_BLOCK_ID`, `INVALID_DATE`, `CONFIRM_REQUIRED`, `CYCLE_REJECTED`, `SLUG_CONFLICT`, `PROP_NOT_FOUND`, `INTERNAL`, `INVALID_ARG`).
+Stable error codes live in `output::codes` (`NO_WORKSPACE`, `PAGE_NOT_FOUND`, `BLOCK_NOT_FOUND`, `INVALID_BLOCK_ID`, `INVALID_DATE`, `CONFIRM_REQUIRED`, `CYCLE_REJECTED`, `SLUG_CONFLICT`, `PROP_NOT_FOUND`, `INTERNAL`, `INVALID_ARG`, `NOT_TRASHED`, `TRASH_PAGE_UNSUPPORTED`, `TRASH_PARENT_TRASHED`, `TRASH_PARENT_MISSING`, `TRASH_ORIGIN_UNKNOWN`, `PAGE_MARKDOWN_AHEAD_OF_LOG`).
 Add new codes by appending — never renumber existing ones (LLMs cache them).
 
 Exit codes follow:

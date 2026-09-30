@@ -77,9 +77,24 @@ pub fn enclosing_page_id(workspace: &Workspace, node: NodeId) -> Option<NodeId> 
 /// inside of a deleted subtree, which is the majority of what a user
 /// deleted.
 pub fn is_trashed(workspace: &Workspace, node: NodeId) -> bool {
+    is_under(workspace, node, NodeId::trash())
+}
+
+/// Whether `node` is `ancestor` or sits anywhere beneath it.
+///
+/// The walk [`is_trashed`] always was, with the sentinel as a
+/// parameter. The second caller is `trash::landing_for`, which has to
+/// ask "is this folded origin inside the very subtree we are
+/// restoring" — the shape a `Move` the tree refused as a cycle leaves
+/// in the op log (root `CLAUDE.md` invariant 4).
+///
+/// Reflexive: a node is under itself, because both callers are asking
+/// "would landing here be inside that subtree", and landing on the node
+/// itself is the degenerate case of yes.
+pub fn is_under(workspace: &Workspace, node: NodeId, ancestor: NodeId) -> bool {
     let mut current = node;
     loop {
-        if current == NodeId::trash() {
+        if current == ancestor {
             return true;
         }
         match workspace.tree().parent(current) {

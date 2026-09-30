@@ -47,7 +47,7 @@ use crate::cmd::{
     asset as asset_cmd, backlinks as bl_cmd, batch as batch_cmd, block as block_cmd,
     daily as daily_cmd, doctor as doctor_cmd, export_v2 as exp_cmd, page as page_cmd,
     prop as prop_cmd, query as query_cmd, search as search_cmd, tag as tag_cmd,
-    template as tpl_cmd, workspace_info as wi_cmd,
+    template as tpl_cmd, trash as trash_cmd, workspace_info as wi_cmd,
 };
 use crate::mcp::protocol::JsonRpcError;
 use crate::mcp::ServerCtx;
@@ -87,6 +87,7 @@ const MUTATING: &[&str] = &[
     "outl_page_prop_set",
     "outl_batch",
     "outl_template_apply",
+    "outl_trash_restore",
 ];
 
 /// Dispatch a `tools/call` request to the correct handler.
@@ -318,6 +319,11 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         }
 
         // --- backlinks / refs ---
+        "outl_trash_list" => ctx.with_workspace(|wc| trash_cmd::list(wc)),
+        "outl_trash_restore" => {
+            let id = require_str(args, "id")?.to_string();
+            ctx.with_workspace(|wc| trash_cmd::restore(wc, &id))
+        }
         "outl_backlinks" => {
             let slug = require_str(args, "slug")?.to_string();
             ctx.with_workspace(|wc| bl_cmd::page(wc, &slug))

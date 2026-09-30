@@ -20,6 +20,16 @@ use Support::{Full, Missing, NotApplicable, Partial};
 /// Reasons repeated across rows, named once so a re-wording lands on
 /// every row at once instead of some.
 mod why {
+    /// No client has a trash surface yet — `outl trash list` /
+    /// `outl trash restore` are CLI and MCP only (issue #287).
+    ///
+    /// One string for all three clients on purpose: the wording is the
+    /// catalog's to own, not each client's, and a client that writes
+    /// its own is a second copy of the fact (invariant 12).
+    pub const NO_TRASH_SURFACE: &str =
+        "Restoring a deleted block isn't in the app yet — run `outl trash list` in a terminal \
+         to see what was deleted, then `outl trash restore <id>`.";
+
     /// The TUI has no marketplace UI at all — installing an
     /// unlisted or registry plugin from inside the terminal client
     /// goes through the CLI, not a browse-and-tap surface.
@@ -124,6 +134,26 @@ mod why {
 /// [`crate::support::support`]: adding a [`Capability`] variant
 /// breaks the build here until all three clients have declared what
 /// they do with it.
+/// Capabilities that no client reaches, because their only surface is
+/// the CLI (and the MCP tools built on it).
+///
+/// `no_capability_is_out_of_reach_on_every_client` would otherwise be
+/// right to reject them: a capability nobody can reach is normally a
+/// feature that does not exist, and the catalog exists to stop those
+/// going unrecorded. A CLI-only capability is the one case where
+/// "missing on all three" is a true and useful statement rather than a
+/// bug — the feature ships, the surface does not.
+///
+/// So it is a declared list with a reason, the same shape
+/// `outl-tauri-shared`'s `DECLARED_GAPS` uses, rather than a weakened
+/// assertion. A row here is a decision; an empty reason is not one.
+pub const CLI_ONLY: &[(Capability, &str)] = &[(
+    Capability::Trash,
+    "`outl trash list` / `outl trash restore` and the `outl_trash_*` MCP tools shipped first \
+     because the primitives already existed; a surface in each client is the follow-up \
+     (issue #287).",
+)];
+
 pub fn capability_support(cap: Capability) -> ClientSupport {
     match cap {
         // Desktop: `TimelinePanel.tsx`, opened by the page header's
@@ -245,6 +275,16 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // button order" freezes the row, "Reset button order" drops
         // the MFU counts. The other two clients have no soft-keyboard
         // bar for the setting to act on.
+        // Nobody has this yet. `outl trash list` / `outl trash restore`
+        // and the matching MCP tools shipped first because the primitives
+        // were already there (`doctor` walks the trash, restore is a
+        // `Move`); a surface in each client is the follow-up. Recorded
+        // here rather than discovered by a user hunting for a recycle bin.
+        Capability::Trash => ClientSupport {
+            tui: Missing(why::NO_TRASH_SURFACE),
+            desktop: Missing(why::NO_TRASH_SURFACE),
+            mobile: Missing(why::NO_TRASH_SURFACE),
+        },
         Capability::ToolbarOrderLock => ClientSupport {
             tui: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
             desktop: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
@@ -310,7 +350,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 10, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 11, "Capability::ALL changed size");
     }
 
     #[test]
@@ -363,10 +403,30 @@ mod tests {
     #[test]
     fn no_capability_is_out_of_reach_on_every_client() {
         for cap in Capability::ALL {
+            if CLI_ONLY.iter().any(|(declared, _)| declared == cap) {
+                continue;
+            }
             let s = capability_support(*cap);
             assert!(
                 Client::ALL.iter().any(|c| s.get(*c).is_reachable()),
-                "{cap:?} is unreachable on every client",
+                "{cap:?} is unreachable on every client — if that is deliberate because \
+                 its only surface is the CLI, add it to CLI_ONLY with the reason",
+            );
+        }
+    }
+
+    #[test]
+    fn a_cli_only_capability_is_declared_with_a_reason_and_really_unreachable() {
+        for (cap, reason) in CLI_ONLY {
+            assert!(
+                reason.len() > 20,
+                "{cap:?} is exempted from the reachability rule without a real reason",
+            );
+            let s = capability_support(*cap);
+            assert!(
+                !Client::ALL.iter().any(|c| s.get(*c).is_reachable()),
+                "{cap:?} is on CLI_ONLY but a client reaches it — drop the row, or the \
+                 exemption starts hiding a real gap",
             );
         }
     }

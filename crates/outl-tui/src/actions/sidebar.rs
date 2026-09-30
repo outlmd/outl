@@ -189,8 +189,17 @@ impl App {
     ///
     /// Refuses to delete a journal (date-shaped slug) from the
     /// outline branch: deleting today's note by accident from `gd`
-    /// would be a hostile surprise, and there's no trash UI to
-    /// recover from today. Matches the sidebar's calendar exclusion.
+    /// would be a hostile surprise. Matches the sidebar's calendar
+    /// exclusion.
+    ///
+    /// The guard used to rest on a second argument — "and there's no
+    /// trash UI to recover from today" — which stopped being true when
+    /// `outl trash restore` shipped (issue #287). It is still the wrong
+    /// recovery to lean on here: restoring a **page** is exactly what
+    /// that command refuses, so a journal deleted by accident is still
+    /// only reachable through the op log. The guard stays; only its
+    /// reasoning got narrower.
+    /// `Capability::Trash` records that no client has a trash surface.
     pub(crate) fn delete_page_from_chord(&mut self) {
         if self.sidebar_focus.is_some() {
             self.sidebar_delete_current();

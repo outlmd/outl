@@ -404,3 +404,173 @@ fn workspace_info_returns_summary() {
     assert!(info["data"]["actor"].is_string());
     assert!(info["data"]["ops"].is_number());
 }
+
+#[test]
+fn trash_list_then_restore_brings_the_block_back() {
+    // Invariant 6 keeps a deleted block in the op log. Until `outl
+    // trash` existed, "preserves history" bought the user nothing they
+    // could act on (issue #287).
+    let ws = init_workspace();
+    let _ = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "create", "ideas", "--json"])
+        .output()
+        .unwrap());
+    let append = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args([
+            "block", "append", "--page", "ideas", "--text", "ship it", "--json",
+        ])
+        .output()
+        .unwrap());
+    let id = append["data"]["id"].as_str().unwrap().to_string();
+
+    let _ = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["block", "delete", &id, "--confirm", "--json"])
+        .output()
+        .unwrap());
+
+    let listed = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["trash", "list", "--json"])
+        .output()
+        .unwrap());
+    let entries = listed["data"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "the deleted block should be listed");
+    assert_eq!(entries[0]["id"], id);
+    assert_eq!(entries[0]["preview"], "ship it");
+    assert_eq!(entries[0]["restorable"], true);
+
+    let restored = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["trash", "restore", &id, "--json"])
+        .output()
+        .unwrap());
+    assert_eq!(restored["data"]["id"], id);
+
+    let page = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "get", "ideas", "--json"])
+        .output()
+        .unwrap());
+    let outline = serde_json::to_string(&page["data"]["outline"]).unwrap();
+    assert!(
+        outline.contains("ship it"),
+        "the restored block should be back on the page: {outline}"
+    );
+
+    let after = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["trash", "list", "--json"])
+        .output()
+        .unwrap());
+    assert!(after["data"]["entries"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn trash_restore_refuses_a_deleted_page_and_says_where_the_content_is() {
+    let ws = init_workspace();
+    let created = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "create", "archive", "--json"])
+        .output()
+        .unwrap());
+    let page_id = created["data"]["meta"]["id"].as_str().unwrap().to_string();
+    let _ = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "delete", "archive", "--confirm", "--json"])
+        .output()
+        .unwrap());
+
+    let out = outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["trash", "restore", &page_id, "--json"])
+        .output()
+        .unwrap();
+    let env: Value = serde_json::from_slice(&out.stdout).expect("non-JSON stdout");
+    assert_eq!(env["ok"], false);
+    let message = env["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("archive") && message.contains("outl page history"),
+        "the refusal has to name the page and where the content still is: {message}"
+    );
+}
+
+#[test]
+fn the_human_listing_states_each_refusal_once() {
+    // Every other trash test runs with `--json`, so the path a person
+    // actually reads had no coverage — and that is where the bug was:
+    // `print_list` prefixed a sentence `ActionError::Display` already
+    // owns, printing "cannot restore: cannot restore <id>: …".
+    let ws = init_workspace();
+    let _ = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "create", "ideas", "--json"])
+        .output()
+        .unwrap());
+    let parent = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args([
+            "block", "append", "--page", "ideas", "--text", "section", "--json",
+        ])
+        .output()
+        .unwrap())["data"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let child = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args([
+            "block", "append", "--parent", &parent, "--text", "item", "--json",
+        ])
+        .output()
+        .unwrap())["data"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    for id in [&child, &parent] {
+        let _ = ok(outl()
+            .args(["--workspace"])
+            .arg(ws.path())
+            .args(["block", "delete", id, "--confirm", "--json"])
+            .output()
+            .unwrap());
+    }
+
+    let out = outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["trash", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        text.contains("is in the trash too"),
+        "the fixture should produce a refused entry: {text}"
+    );
+    assert!(
+        !text.contains("cannot restore: cannot restore"),
+        "the refusal is stated twice: {text}"
+    );
+    assert_eq!(
+        text.matches("cannot restore").count(),
+        1,
+        "exactly one refusal, stated once: {text}"
+    );
+}

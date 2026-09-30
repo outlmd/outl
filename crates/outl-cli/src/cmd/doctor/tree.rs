@@ -13,7 +13,7 @@
 //! - [`check_projections`] — every page in the tree vs its `.md` on
 //!   disk, which is also where the `--repair` plan comes from.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use outl_actions::journal::{survey_page_projections, PageProjectionState};
 use outl_core::id::NodeId;
@@ -27,67 +27,40 @@ const MAX_LISTED: usize = 20;
 
 /// Report what sits in the trash, with a preview.
 ///
-/// Counts the whole subtree, not just trash's direct children: deleting
-/// a parent moves only that node, its descendants ride along implicitly.
+/// The walk, the subtree count and the preview all belong to
+/// `outl_actions::trash::list` — the same listing `outl trash list` and
+/// the `outl_trash_*` MCP tools render. This used to be its own
+/// traversal, which is how the doctor could count 683 blocks that no
+/// other surface could name (issue #287).
 pub(super) fn check_trash(b: &mut Builder, ws: &Workspace) {
-    let trash = NodeId::trash();
-    let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    for (node, parent, _) in ws.tree().iter_nodes() {
-        children.entry(parent).or_default().push(node);
-    }
-
-    let tops = children.get(&trash).cloned().unwrap_or_default();
-    if tops.is_empty() {
+    let entries = outl_actions::trash::list(ws);
+    if entries.is_empty() {
         b.ok("trash is empty — nothing has been deleted in this workspace");
         return;
     }
 
-    // Walk the whole deleted subtree so the count matches what the user
-    // would lose if the trash were ever purged.
-    let mut total = 0usize;
-    let mut stack = tops.clone();
-    while let Some(node) = stack.pop() {
-        total += 1;
-        if let Some(kids) = children.get(&node) {
-            stack.extend(kids.iter().copied());
-        }
-    }
-
+    let total: usize = entries.iter().map(|entry| entry.subtree_len).sum();
     b.info(format!(
         "trash holds {total} block(s) across {} top-level deletion(s) — \
          deletes are `Move(node, TRASH_ROOT)`, so nothing was physically removed",
-        tops.len()
+        entries.len()
     ));
 
-    let mut listed: Vec<(NodeId, String)> = tops
-        .iter()
-        .map(|id| (*id, preview(ws, *id)))
-        .collect::<Vec<_>>();
-    listed.sort_by_key(|a| a.0);
-    for (id, text) in listed.iter().take(MAX_LISTED) {
-        b.info(format!("  trashed {id}: {text}"));
+    for entry in entries.iter().take(MAX_LISTED) {
+        b.info(format!("  trashed {}: {}", entry.node, entry.preview));
     }
-    if listed.len() > MAX_LISTED {
+    if entries.len() > MAX_LISTED {
         b.info(format!(
             "  … and {} more top-level deletion(s)",
-            listed.len() - MAX_LISTED
+            entries.len() - MAX_LISTED
         ));
     }
-}
 
-/// One-line preview of a block's text, safe to print.
-fn preview(ws: &Workspace, node: NodeId) -> String {
-    let text = ws.block_text(node).unwrap_or_default();
-    let single = text.replace(['\n', '\r'], " ");
-    let trimmed = single.trim();
-    if trimmed.is_empty() {
-        return "(empty block)".to_string();
-    }
-    let mut out: String = trimmed.chars().take(80).collect();
-    if trimmed.chars().count() > 80 {
-        out.push('…');
-    }
-    out
+    let restorable = entries.iter().filter(|e| e.refusal.is_none()).count();
+    b.info(format!(
+        "  {restorable} of {} can be put back with `outl trash restore <id>`",
+        entries.len()
+    ));
 }
 
 /// Node ids the op log touches that are absent from the materialized

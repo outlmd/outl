@@ -176,6 +176,10 @@ fn main() -> Result<()> {
             let p = resolve_path(cli.workspace.as_ref(), None)?;
             std::process::exit(cmd::query::run(&args, &p));
         }
+        Some(Command::Trash { sub }) => {
+            let p = resolve_path(cli.workspace.as_ref(), None)?;
+            std::process::exit(cmd::trash::run(&sub, &p));
+        }
         Some(Command::Backlinks { sub }) => {
             let p = resolve_path(cli.workspace.as_ref(), None)?;
             std::process::exit(cmd::backlinks::run(&sub, &p));

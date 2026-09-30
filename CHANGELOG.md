@@ -7,6 +7,33 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **`outl trash list` and `outl trash restore <id>` — deleted blocks are readable and recoverable.**
+  Invariant 6 makes delete a `Move(node, TRASH_ROOT)`, "simplifies the algorithm and preserves history". The preserving half has worked since day one; the reading half did not exist, so on a real workspace `outl doctor` could report 683 blocks across 393 deletions and nothing else could name one of them ([#287](https://github.com/outlmd/outl/issues/287)). What the invariant bought was "the bytes are still on disk", which is a much weaker promise than "you can get it back" — the difference between a recycle bin and a deleted file on a drive you have not overwritten yet.
+
+  ```console
+  $ outl trash list
+  393 deletion(s) in the trash
+    01KVWQX6G8MAS26T1BENQ61ET7  asdasdasd
+    01KWEVH8CD7YE79RD2AZAJPT5C  dkfjdskjf
+        cannot restore 01KWEVH8CD7YE79RD2AZAJPT5C: the block it was deleted from (01KWEVH5EVX4A533ER9SYBCW8R) is in the trash too — restore 01KWEVH5EVX4A533ER9SYBCW8R first
+  ```
+
+  Also `outl_trash_list` / `outl_trash_restore` over MCP, because an agent that can delete a block should be able to undo it.
+
+  **Where a block came from is folded from the op log, never read off `Move.old_parent`.** That field is the originating replica's local derivation for `undo_op` — on the reference workspace 65,141 of 65,703 stored `Move`s name `root` regardless of where the block actually was, and an append-only log never rewrites them. `trash::parent_at_deletion` is the single owner of that fold, and `timeline::came_from` now calls it instead of keeping its own. The old copy answered with the *first* page a block was ever deleted from, which was harmless only because nothing could restore a block and delete it somewhere else; shipping `restore` made that reachable, so it is pinned by `a_deletion_is_attributed_to_the_page_the_block_left_last`.
+
+  **The listing and the mutation share one verdict** (`trash::refusal_for`). A listing that decided "restorable" for itself is a second owner of the rule, and it drifts towards promising a restore that then fails — the same shape invariant 8 applies to which pages are safe to overwrite.
+
+  **A restored block lands as the last child**, not in the slot it held: `Move.old_position` carries the same caveat as `old_parent`.
+
+  **Two things are deliberately absent.** Restoring a **page** needs a re-projected `.md` on top of the `Move`, and 16 of the 18 deleted pages on that workspace have their slug taken by a live page today — inventing a free slug would make this a second owner of the slug rule, so it refuses and points at `outl page history <slug>`. And there is no **`trash empty`**: it is the only operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)). Retention is "forever until that lands", which is a policy — `docs/cli.md` now states it rather than leaving it to be inferred.
+
+  No client has a trash surface yet. That is recorded as `Capability::Trash` rather than left to be discovered, and it needed a new mechanism: `no_capability_is_out_of_reach_on_every_client` is right that a capability nobody reaches is normally a feature that does not exist, so a CLI-only capability is a declared row in `outl_shortcuts::CLI_ONLY` with its reason — the shape `outl-tauri-shared`'s `DECLARED_GAPS` already uses — instead of a weakened assertion.
+
+  Measured against the 393 deletions on that workspace: 286 restorable, 89 refused for a trashed parent, 18 refused as pages.
+
+  **Two things the fold has to get right that are not obvious.** Invariant 4 keeps a `Move` the tree **refused as a cycle** in the op log, so a fold that replays `new_parent` unconditionally disagrees with the tree on exactly those ops — and because a cycle target is always inside the node's own subtree, the result was a block that could never be restored, told to restore itself first. And `refusal_for` proves the node is in the trash before it folds, so an empty fold could not keep answering "this block is not in the trash": that contradiction is `TRASH_ORIGIN_UNKNOWN` now, which also separates a damaged log from a parent that is merely gone. Pinned by `a_move_the_tree_refused_as_a_cycle_never_becomes_the_origin` and `a_block_the_log_cannot_place_is_not_reported_as_untrashed`.
+
 - **Every ` ```query ` filter now has a negative: `not-status`, `not-tag`, `not-prop`, `not-kind`, `not-since`, `not-text`.**
   The DSL could only say what a block *is*. A workspace with a `#someday` / `#backlog` parking lot mixed into live notes had no way to write "open work tasks, minus the parked ones" — every directive was a positive containment check, implicitly ANDed ([#323](https://github.com/outlmd/outl/issues/323)).
 

@@ -225,6 +225,30 @@ Two rules that decide what a reader sees:
 
 Related but different: **undo / redo** (`outl_actions::history`) is this session's mutations, and `outl backup` is workspace-granular git snapshots. Neither answers "what did this page say last Tuesday" — that is this.
 
+## Restoring a deleted block
+
+Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invariants-never-violate)), so nothing is ever physically removed. `outl_actions::trash` is the single owner of reading that back — what is in the trash, where each entry came from, and whether putting it back would work.
+
+**Deliberately narrower than it looks.** Three things it does not do, each for its own reason:
+
+- **A page cannot be restored.** It needs a re-projected `.md` on top of the `Move`, and on a real 2,576-page workspace 16 of the 18 deleted pages have their slug taken by a live page today. Picking a free slug would make this a second owner of the slug rule, so it refuses and names where the content still is (`outl page history <slug>`).
+- **A block whose parent is also in the trash cannot be restored on its own** — 89 of 393 top-level deletions on that workspace. Restoring it would succeed structurally and change nothing the user can see; the refusal names the ancestor to restore first.
+- **A restored block lands as the last child**, not in the slot it held. `Move.old_position` is the originating replica's local derivation for `undo_op`, not something a reader of the log may trust.
+
+**The listing and the mutation share one verdict function** (`trash::refusal_for`). A listing that decided "restorable" for itself would drift towards offering an action that then fails — the same rule invariant 8 applies to which pages are safe to overwrite.
+
+| Client | Surface |
+|--------|---------|
+| CLI | `outl trash list` and `outl trash restore <id>`. See [`docs/cli.md`](cli.md#trash). |
+| MCP | `outl_trash_list`, `outl_trash_restore` — an agent that can delete a block can undo it. |
+| Desktop | Not yet. |
+| Mobile | Not yet. |
+| TUI | Not yet. |
+
+No client surface exists, which is why `Capability::Trash` is in `outl_shortcuts::CLI_ONLY` rather than simply missing: a capability nobody reaches is normally a feature that does not exist, and that exemption has to be a declared row with a reason instead of a weakened test. Tracked in [issue #287](https://github.com/outlmd/outl/issues/287).
+
+Related but different: **undo / redo** is this session's mutations and does not survive a restart; this reaches a deletion from any device, on any day, because it reads the op log.
+
 ## Running code blocks
 
 Every client that lets the user execute a `` ```lang ``` `` block (TUI `g x`, desktop `Cmd+Shift+X` / Run button, mobile long-press → "Run code") goes through **one** shared entry point:

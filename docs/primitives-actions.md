@@ -176,11 +176,35 @@ Two rules the module owns, so no client re-decides them:
 
 **Never read `Move.old_parent` from storage.** `do_op` fills it on the copy that reaches the in-memory log, but `Workspace::apply` persists the caller's original — 99% of the `Move` ops in the reference workspace say `root` no matter where the block was. The parent trail is folded from `Create.parent` / `Move.new_parent`, which are the op's own effect.
 
+That fold has **one owner**, `outl_actions::trash::parent_at_deletion` (section 5c), which `came_from` calls. It used to be a second copy living here, and the copy answered with the *first* page a block was ever deleted from — wrong the moment a block can be restored and deleted somewhere else.
+
 | Intent | Use this | File |
 |---|---|---|
 | Every change to a page, newest first, capped at `limit` (the **count** is never capped — `total` + `truncated()` let a listing say what it left out) | `outl_actions::page_timeline` → `PageTimeline` | `crates/outl-actions/src/timeline.rs` |
 | Every change to one block, following it across pages | `outl_actions::block_timeline` → `Vec<TimelineEvent>` | `crates/outl-actions/src/timeline.rs` |
 | The change itself (`Created` / `Edited` / `Deleted` / `Restored` / `Moved` / `PropertySet`) | `outl_actions::Change` | `crates/outl-actions/src/timeline.rs` |
+
+---
+
+## 5c. Trash (outl-actions::trash)
+
+Delete is `Move(node, TRASH_ROOT)` (root invariant 6), so a deleted block is still in the tree, parked under a sentinel nothing renders. This module is the reading half: what is in there, and how to put one back.
+
+Two rules the module owns:
+
+- **Where a block came from** is folded from the op log, never read off `Move.old_parent` (see 5b). `parent_at_deletion` is the single owner of that fold — `timeline::came_from` calls it rather than keeping its own. It answers with the parent the block left **last**, which differs from "the first page it was deleted from" once a block can be restored and deleted again.
+- **Whether a restore would work** is `refusal_for`, asked by both `restore` and `list`. A listing that decided this for itself would drift towards offering the user an action that then fails.
+
+A restored block comes back as the **last child** of that parent, not in the slot it held: `Move.old_position` carries the same "local derivation, undo-only" caveat as `old_parent`.
+
+Restoring a **page** is deliberately absent. It needs a re-projected `.md` on top of the `Move`, and on the reference workspace 16 of 18 deleted pages have their slug taken by a live page — inventing a free one would make this module a second owner of the slug rule. `trash empty` is absent for a different reason: it is the only operation here that destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)).
+
+| Intent | Use this | File |
+|---|---|---|
+| Every top-level deletion, with preview, subtree size, page slug and why a restore would refuse | `outl_actions::trash::list` → `Vec<TrashEntry>` | `crates/outl-actions/src/trash.rs` |
+| Put a deleted block back under the parent it was deleted from | `outl_actions::trash::restore` | `crates/outl-actions/src/trash.rs` |
+| Whether a restore would refuse, and why (the single owner of that verdict) | `outl_actions::trash::refusal_for` → `Option<ActionError>` | `crates/outl-actions/src/trash.rs` |
+| The parent a node sat under immediately before it was trashed | `outl_actions::trash::parent_at_deletion` | `crates/outl-actions/src/trash.rs` |
 
 ---
 

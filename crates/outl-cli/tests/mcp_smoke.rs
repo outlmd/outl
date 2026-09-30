@@ -1,90 +1,16 @@
 //! Smoke test for the MCP stdio surface.
 //!
-//! Spawns `outl mcp serve --workspace <tmp>` in a subprocess, sends
-//! `initialize`, `tools/list`, and `tools/call outl_workspace_info`
-//! through stdin, and asserts the JSON-RPC responses. This is the
-//! ground truth — if Claude Desktop / Cursor break, this would too.
+//! Sends `initialize`, `tools/list`, and a handful of `tools/call`
+//! round trips through the real server. This is the ground truth — if
+//! Claude Desktop / Cursor break, this would too.
+//!
+//! The client itself lives in `mcp_support/`, shared with
+//! `mcp_trash.rs`.
 
+mod mcp_support;
+
+use mcp_support::{init_workspace, success_data, McpClient};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use tempfile::TempDir;
-
-fn outl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_outl"))
-}
-
-fn init_workspace() -> TempDir {
-    let dir = TempDir::new().unwrap();
-    let status = outl()
-        .arg("init")
-        .arg(dir.path())
-        .status()
-        .expect("init failed");
-    assert!(status.success());
-    dir
-}
-
-struct McpClient {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-}
-
-impl McpClient {
-    fn spawn(workspace: &std::path::Path) -> Self {
-        let mut child = outl()
-            .args(["--workspace"])
-            .arg(workspace)
-            .args(["mcp", "serve"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn mcp serve");
-        let stdin = child.stdin.take().unwrap();
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        Self {
-            child,
-            stdin,
-            stdout,
-        }
-    }
-
-    fn call(&mut self, payload: Value) -> Value {
-        let line = payload.to_string();
-        writeln!(self.stdin, "{line}").unwrap();
-        self.stdin.flush().unwrap();
-        let mut response = String::new();
-        self.stdout.read_line(&mut response).expect("read response");
-        serde_json::from_str(response.trim()).expect("response was JSON")
-    }
-}
-
-/// Parse the data payload out of a **successful** `tools/call` result.
-///
-/// Success replies are content-only (no `structuredContent` at this
-/// protocol version); the data lives as compact JSON in
-/// `content[0].text`. Markdown-first tools put raw `.md` there instead,
-/// so this is only for the JSON-shaped tools.
-fn success_data(result: &Value) -> Value {
-    assert_eq!(
-        result["isError"], false,
-        "expected a success reply: {result}"
-    );
-    let text = result["content"][0]["text"]
-        .as_str()
-        .expect("content[0].text is a string");
-    serde_json::from_str(text).expect("success content is JSON")
-}
-
-impl Drop for McpClient {
-    fn drop(&mut self) {
-        // Closing stdin makes the MCP loop exit.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
 
 #[test]
 fn initialize_then_call_workspace_info() {

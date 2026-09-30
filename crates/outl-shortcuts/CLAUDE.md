@@ -51,6 +51,11 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   A capability that already has an `Action` (backlinks, block properties, reminders) stays tracked there only — a `Capability` entry for the same fact would be two catalogs disagreeing about one thing.
   Rendered as a second table in [`docs/client-parity.md`](../../docs/client-parity.md), inside its own `<!-- BEGIN/END GENERATED: capability-parity -->` markers, by the same `the_parity_doc_matches_the_code` test.
   See [RFC 0253](../../docs/rfcs/0253-client-capability-catalog.md).
+- **`CLI_ONLY`** (`src/capability_support.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
+  That test is right in general: a capability no client reaches is normally a feature that does not exist, and recording it would be noise.
+  A **CLI-only** capability is the case where "missing on all three" is a true and useful statement instead — the feature ships, the surface does not.
+  `Capability::Trash` is the first (issue [#287](https://github.com/outlmd/outl/issues/287)): `outl trash list` / `outl trash restore` and the `outl_trash_*` MCP tools exist, no client has a recycle bin.
+  It is a **declared row with a reason**, the shape `outl-tauri-shared`'s `DECLARED_GAPS` already uses, rather than a weakened assertion — and `a_cli_only_capability_is_declared_with_a_reason_and_really_unreachable` fails if a client starts reaching one, so the exemption cannot outlive its reason and quietly hide a real gap.
 - **[`bindings_for_mode`] / [`lookup`]** — query helpers.
   `lookup` is `O(n)` over the table; the table is small (under 100 entries today) so we don't bother with a hashmap.
   **`lookup` prefers a mode-specific binding over a `Global` one** for the same chord — it can't rely on table order because the `Global` chrome rows are listed first for help-overlay readability,
