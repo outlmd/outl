@@ -353,3 +353,133 @@ fn the_sweep_projects_a_page_that_has_no_md_on_disk_at_all() {
     assert!(std::fs::read_to_string(&md_path).unwrap().contains("first"));
     let _ = page;
 }
+
+/// Issue #332, through the classifier the sweep and `outl doctor` read.
+///
+/// A page whose only block is empty must be reported as `Stale` and
+/// re-projected, not parked in `SidecarCannotAnswer`. Fixing only the
+/// write path would leave the survey blind to the same pages: the sweep
+/// folds this state into the arm commented "nothing here is a page that
+/// silently stopped converging", which is exactly what a frozen page is.
+#[test]
+fn the_sweep_reprojects_a_page_whose_only_block_is_empty() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page(&[""]);
+    append_block(&mut ws, &hlc, Some(page), Some("synced-in")).unwrap();
+
+    let survey = survey_page_projections(&ws, tmp.path(), false);
+    assert!(
+        matches!(
+            survey.iter().find(|p| p.page_root == page).unwrap().state,
+            PageProjectionState::Stale { .. }
+        ),
+        "a page holding one bare bullet has nothing to lose — got {:?}",
+        survey.iter().find(|p| p.page_root == page).unwrap().state
+    );
+
+    let sweep = reproject_stale_pages(&ws, tmp.path());
+    assert_eq!(sweep.written.len(), 1, "the sweep must re-project it");
+    assert!(
+        std::fs::read_to_string(&md_path)
+            .unwrap()
+            .contains("synced-in"),
+        "the peer's block must reach the .md"
+    );
+}
+
+/// The mirror: an unanswerable sidecar over a `.md` holding real text
+/// stays `SidecarCannotAnswer`, and the sweep still writes nothing.
+///
+/// `the_sweep_never_writes_a_page_whose_sidecar_cannot_answer` pins the
+/// same decline for a page whose text the sidecar once knew; this one
+/// pins it for content that reached disk and never became ops, which is
+/// the #210 loss itself.
+#[test]
+fn the_sweep_still_declines_when_an_unanswerable_sidecar_covers_real_text() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page(&[""]);
+    let disk = "title:: Notes\n\n- precious text only on disk\n";
+    std::fs::write(&md_path, disk).unwrap();
+    let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+    let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+    sc.last_synced_hash = outl_md::sidecar::file_hash(disk);
+    outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+    append_block(&mut ws, &hlc, Some(page), Some("synced-in")).unwrap();
+
+    let survey = survey_page_projections(&ws, tmp.path(), false);
+    assert_eq!(
+        survey.iter().find(|p| p.page_root == page).unwrap().state,
+        PageProjectionState::SidecarCannotAnswer
+    );
+
+    let sweep = reproject_stale_pages(&ws, tmp.path());
+    assert!(sweep.written.is_empty(), "nothing may be written");
+    assert_eq!(
+        std::fs::read_to_string(&md_path).unwrap(),
+        disk,
+        "the file must be left exactly as it was"
+    );
+}
+
+/// Issue #332, the shape that reaches `outl serve` rather than a page
+/// open: a peer **types into** the page's only (empty) block instead of
+/// appending next to it.
+///
+/// The render then holds `- typed text` where disk holds a bare `-`, so
+/// the bare bullet matches nothing in `lines_removed_by`'s reference and
+/// used to be counted as a removed content line. `lines_removed > 0`
+/// routes the page to `withheld` *before* the write arm, so the sweep
+/// left it at one empty bullet every 30 seconds, for good, while
+/// reporting that re-projecting it would delete a line holding no bytes.
+///
+/// An empty line is exactly what `sidecar_can_vouch_for` defines as
+/// nothing to lose; counting it here was the same conflation one layer
+/// down, and it made `sweep.rs`'s "nothing here is a page that silently
+/// stopped converging" false for the commonest #332 page there is.
+#[test]
+fn the_sweep_converges_a_page_whose_only_empty_block_a_peer_typed_into() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page(&[""]);
+    let child = crate::tree::children_of(&ws, page)[0].0;
+    crate::block::edit_text(&mut ws, &hlc, child, "typed text").unwrap();
+
+    assert_eq!(
+        survey_page_projections(&ws, tmp.path(), false)
+            .iter()
+            .find(|p| p.page_root == page)
+            .unwrap()
+            .state,
+        PageProjectionState::Stale { lines_removed: 0 },
+        "a bare bullet holds no bytes, so re-projecting removes nothing"
+    );
+
+    let sweep = reproject_stale_pages(&ws, tmp.path());
+    assert_eq!(sweep.written.len(), 1, "the sweep must converge this page");
+    assert!(sweep.withheld.is_empty(), "nothing was at risk to withhold");
+    assert!(
+        std::fs::read_to_string(&md_path)
+            .unwrap()
+            .contains("typed text"),
+        "the peer's text must reach the .md"
+    );
+}
+
+/// The counter must still see real content. A peer deleting a line the
+/// log knows is not unlogged, but it *is* content this write removes, and
+/// the volume guard is owed that number.
+#[test]
+fn the_sweep_still_counts_a_real_line_a_reprojection_would_remove() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page(&["keep", "gone"]);
+    let child = crate::tree::children_of(&ws, page)[1].0;
+    crate::block::delete(&mut ws, &hlc, child).unwrap();
+
+    assert_eq!(
+        survey_page_projections(&ws, tmp.path(), false)
+            .iter()
+            .find(|p| p.page_root == page)
+            .unwrap()
+            .state,
+        PageProjectionState::Stale { lines_removed: 1 },
+        "a real line the render drops must still be counted"
+    );
+    let sweep = reproject_stale_pages(&ws, tmp.path());
+    assert_eq!(sweep.withheld.len(), 1, "a real removal is withheld");
+    assert!(std::fs::read_to_string(&md_path).unwrap().contains("gone"));
+}

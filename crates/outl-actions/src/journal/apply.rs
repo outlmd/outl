@@ -25,7 +25,7 @@ use outl_core::workspace::Workspace;
 use outl_md::sidecar::{file_hash, sidecar_path_for};
 
 use super::guard::{
-    frontmatter_loss_error, guard_absent_markdown, sidecar_can_answer, unlogged_content_error,
+    frontmatter_loss_error, guard_absent_markdown, sidecar_can_vouch_for, unlogged_content_error,
 };
 use super::paths::{page_md_path, write_md_atomic};
 use super::render::render_page_md;
@@ -99,7 +99,7 @@ pub fn apply_page_md_with_sidecar(
 /// - **no `.md` yet** → write; there is nothing on disk to lose.
 /// - **sidecar present but cannot answer** (every one written before
 ///   0.11 carries `text: ""`) → write; refusing here would freeze every
-///   pre-0.11 page. See [`sidecar_can_answer`].
+///   pre-0.11 page. See [`outl_md::unlogged::sidecar_can_answer`].
 /// - **sidecar missing, corrupt, or from a newer binary** → **refuse**,
 ///   with [`ActionError::PageSidecarUnreadable`]. That is not "nothing
 ///   at risk", it is "I cannot tell", and writing on it reopens this
@@ -310,7 +310,12 @@ pub fn apply_page_md_with_sidecar_if_stale(
         // Asking the content question here costs one comparison on a
         // page that is already known to need attention, and it is the
         // honest answer: the page really does hold lines the log lacks.
-        if sidecar.last_synced_hash.is_empty() && sidecar_can_answer(&sidecar.blocks) {
+        //
+        // No predicate guard of its own: `unlogged_content_error` stands
+        // down on an unanswerable sidecar itself, so a conjunct here only
+        // reads as a policy split from the gate further down, which is
+        // not what this is.
+        if sidecar.last_synced_hash.is_empty() {
             if let Some(e) = unlogged_content_error(&path, &disk, &sidecar.blocks) {
                 return Err(e);
             }
@@ -337,9 +342,16 @@ pub fn apply_page_md_with_sidecar_if_stale(
     // guard froze any page a peer had touched, reintroducing #166 for
     // the most ordinary sync case there is.
     //
-    // A sidecar that cannot answer at all does not get to authorise the
-    // write either — see `sidecar_can_answer`.
-    if !sidecar_can_answer(&sidecar.blocks) {
+    // A sidecar that cannot vouch for the bytes on disk does not get to
+    // authorise the write either — see `sidecar_can_vouch_for`, which
+    // owns which sidecars those are.
+    //
+    // **Declining here is invisible.** `Ok(None)` is what
+    // `reproject_stale_md` reads as success, so a page refused on this
+    // line shows whatever is on disk with no banner and no log entry —
+    // which is why the gate has to be the narrow question and not a
+    // broader one (issue #332).
+    if !sidecar_can_vouch_for(&disk, &sidecar.blocks) {
         return Ok(None);
     }
     // Same verdict as the post-mutation guard, phrased once — see

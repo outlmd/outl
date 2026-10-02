@@ -83,9 +83,14 @@ use crate::error::ActionError;
 /// [`apply_page_md_with_sidecar_guarded`] treats both as "go ahead" —
 /// there is a real mutation to project and refusing every pre-0.11 page
 /// would freeze the app. [`apply_page_md_with_sidecar_if_stale`] asks
-/// [`sidecar_can_answer`] *first* and declines the second case, because
+/// [`sidecar_can_vouch_for`] *first* and declines the second case, because
 /// re-projecting a page it cannot vouch for is how bytes go missing.
 /// Reading one policy as the other is the bug this whole module guards.
+///
+/// It asks `sidecar_can_vouch_for` and not [`sidecar_can_answer`]: the
+/// second case is "could not check **and** there is something to check",
+/// and conflating it with "could not check" froze every page holding
+/// only bare bullets (issue #332).
 pub(super) fn unlogged_content_error(
     path: &Path,
     disk: &str,
@@ -94,7 +99,16 @@ pub(super) fn unlogged_content_error(
     if !sidecar_can_answer(blocks) {
         return None;
     }
-    let unlogged = content_lines_missing_from(disk, blocks);
+    // Empty entries are not content at risk: a bare `-` normalises to
+    // `""` and holds no bytes. The survey's `classify` and `outl
+    // reconcile`'s `collect_ahead` filter them too, so without the same
+    // rule here a surplus bare bullet over an answerable sidecar was
+    // refused with an empty sample by a writer whose listing and recovery
+    // command both reported the page clean (issue #332).
+    let unlogged: Vec<String> = content_lines_missing_from(disk, blocks)
+        .into_iter()
+        .filter(|l| !l.is_empty())
+        .collect();
     let sample = unlogged.first()?;
     Some(ActionError::PageMarkdownAheadOfLog {
         path: path.display().to_string(),
@@ -151,6 +165,7 @@ pub(super) fn frontmatter_loss_error(
 pub use outl_md::unlogged::content_lines_missing_from;
 
 pub use outl_md::unlogged::sidecar_can_answer;
+pub use outl_md::unlogged::sidecar_can_vouch_for;
 /// Decide whether an absent `.md` really means "this page does not
 /// exist yet".
 ///

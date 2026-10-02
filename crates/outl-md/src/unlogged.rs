@@ -43,8 +43,50 @@ use crate::sidecar::SidecarBlock;
 /// An **empty** block list is the opposite case and answers `true` — a
 /// page with no blocks has nothing to lose, and treating it as
 /// unanswerable would freeze every freshly created page.
+///
+/// **A write caller wants [`sidecar_can_vouch_for`], not this.** This
+/// predicate answers a question about the *sidecar*; a caller about to
+/// overwrite a file needs the one about the file, because a page holding
+/// only bare bullets is unanswerable here and has nothing to lose
+/// (issue #332). Gating a write on this alone is the defect, and the
+/// shared-primitives catalogue says to flag it in review.
 pub fn sidecar_can_answer(blocks: &[SidecarBlock]) -> bool {
     blocks.is_empty() || blocks.iter().any(|b| !b.text.is_empty())
+}
+
+/// Whether `blocks` can vouch for the `.md` currently on `disk` — the
+/// question a caller about to **overwrite** that file actually has.
+///
+/// [`sidecar_can_answer`] answers "can these blocks say what the log
+/// held", and a caller that stops there refuses a page it had no reason
+/// to: the two questions come apart for every page whose blocks are all
+/// empty, because that is the shape of a pre-0.11 sidecar *and* the shape
+/// of a page nobody has written in yet.
+///
+/// `outl init` leaves two pages holding a single empty block, every page
+/// created for a `[[link]]` that was never filled is the same shape, and
+/// so is a journal day the first time it is opened. Reading those as
+/// "cannot vouch" froze them: the tree took a peer's blocks, the `.md`
+/// kept its lone bare bullet, and no open, sweep or repair would
+/// re-project it (issue #332). Measured on a 2,874-page workspace: one
+/// page in that state and **zero** genuine pre-0.11 sidecars, so every
+/// decline the first arm produced there was a page with nothing to lose.
+///
+/// The second arm is the comparison the write it guards would make,
+/// through the same owner, so the two cannot disagree about what a
+/// content line is: a pre-0.11 page holds real text and still refuses,
+/// a fresh one holds only bare bullets and properties, which
+/// [`content_lines_missing_from`] already normalises away.
+///
+/// **This narrows which pages are refused, never which content is
+/// protected.** A line the log does not hold still refuses, and it is
+/// `unlogged_content_error`, not this predicate, that phrases the
+/// refusal.
+pub fn sidecar_can_vouch_for(disk: &str, blocks: &[SidecarBlock]) -> bool {
+    sidecar_can_answer(blocks)
+        || content_lines_missing_from(disk, blocks)
+            .iter()
+            .all(String::is_empty)
 }
 
 /// Lines of `disk`'s YAML frontmatter fence that `rendered` would not

@@ -474,7 +474,9 @@ outl reconcile [<path>] [--ahead-of-log] [--allow-bulk-delete]
 
 **Pages it could not judge are counted and named.**
 There are three states, not two: a page can be reconciled, read and found clean, or never read at all.
-An `.md` that exists and will not open, a sidecar that will not parse, and a sidecar that records no block text are all the third.
+An `.md` that exists and will not open, a sidecar that will not parse, and a sidecar that records no block text *over a `.md` holding lines that need vouching for* are all the third.
+A sidecar with no text whose page holds nothing but bare bullets is read as clean instead, because nothing on disk could be outside the log.
+Reporting those made the list mostly empty pages, which teaches you to skim past the entries that mean something ([issue #332](https://github.com/outlmd/outl/issues/332)).
 Each used to be dropped without a line of output, so a workspace where *every* page was skipped printed `no page holds content outside the op log` and exited `0` — a refusal that never reached the user, on the command you run precisely because a silent refusal already cost you content ([invariant 8](../CLAUDE.md)).
 Both writing modes now end with the list:
 

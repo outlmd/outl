@@ -304,6 +304,61 @@ proptest! {
             rendered
         );
     }
+
+    /// Property 4. The gate every write path asks must never refuse a
+    /// page whose own log wrote it — the freeze direction.
+    ///
+    /// Property 3 pins the comparison; this pins the predicate layered on
+    /// it. Mutation-checked: reverting the gate to `sidecar_can_answer`
+    /// alone fails here, shrunk to `text = "\n"` (a page whose only block
+    /// is empty, which is issue #332 at its smallest). The named cases in
+    /// `tests/unlogged_vouching.rs` pin the shapes someone enumerated;
+    /// this pins the ones nobody did.
+    #[test]
+    fn a_rendered_page_is_always_vouched_for_by_its_own_log(text in arb_any_text()) {
+        let rendered = render(&page_of(&text));
+        prop_assert!(
+            outl_md::unlogged::sidecar_can_vouch_for(&rendered, &blocks_of(&rendered)),
+            "a faithful page was refused, freezing it in both directions\
+             \n--- rendered ---\n{}",
+            rendered
+        );
+    }
+
+    /// Property 5. The loss direction, and the teeth of the second arm:
+    /// vouching on a reference that records no text means the file really
+    /// holds no text.
+    ///
+    /// This is the only mechanical guard that the second arm cannot go
+    /// blind. Mutation-checked: stubbing it to `true` fails here on
+    /// `["a"]` while property 4 still passes, so the two are not
+    /// redundant — one catches re-narrowing the gate, this one catches
+    /// widening it, and widening is the direction that deletes bytes.
+    #[test]
+    fn vouching_on_a_text_less_reference_implies_nothing_to_lose(text in arb_any_text()) {
+        let rendered = render(&page_of(&text));
+        // The pre-0.11 shape: one entry per block, every text dropped.
+        let text_less: Vec<SidecarBlock> = blocks_of(&rendered)
+            .iter()
+            .map(|b| SidecarBlock::from_text(NodeId::new(), b.line, b.indent, ""))
+            .collect();
+        if outl_md::unlogged::sidecar_can_vouch_for(&rendered, &text_less) {
+            let back = parse(&rendered);
+            let held: Vec<&str> = back
+                .blocks
+                .iter()
+                .map(|b| b.text.as_str())
+                .filter(|t| !t.trim().is_empty())
+                .collect();
+            prop_assert!(
+                held.is_empty(),
+                "vouched for a page holding text no text-less sidecar can \
+                 account for: {:?}\n--- rendered ---\n{}",
+                held,
+                rendered
+            );
+        }
+    }
 }
 
 /// The deterministic pin for the shape proptest found on a later seed,

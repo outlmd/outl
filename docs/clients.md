@@ -614,8 +614,14 @@ The op log is authoritative: the next boot re-projects any stale page, and peers
 
 - the `.md` no longer matches its sidecar (an external edit is pending; `outl reconcile` owns it);
 - the `.md` holds content that exists in **no op**, which surfaces as an error naming the line count and one sample (`outl doctor` lists the pages, `outl reconcile --ahead-of-log` brings them into the log);
-- the sidecar cannot answer whether it does — every block written without `SidecarBlock::text`, i.e. by a peer still on a pre-0.11 binary.
+- the sidecar cannot vouch for what is on disk — it records no text for any block (`SidecarBlock::text` missing, i.e. written by a peer still on a pre-0.11 binary) **and** the `.md` holds lines that need vouching for.
   That page is already queued for the pipeline migration, whose reconcile rewrites the sidecar with text; the next open re-projects normally.
+
+A page whose `.md` holds nothing but bare bullets is **not** one of these, and it used to be.
+A fresh journal day, an unfilled `[[link]]` page and both pages `outl init` creates all carry a sidecar with no text, just like a pre-0.11 one, so the narrow check refused them.
+Being queued for the pipeline migration did not clear it either: the page observed on a real workspace carried `pipeline_version` 4 against a current 5, so it *was* queued, but its blocks are genuinely empty, so each reconcile rewrote the same `text: ""` and the next open refused it again.
+The page showed one empty bullet for good the moment a peer wrote into it, with no banner, no log line and no `doctor` entry, because `Ok(None)` is what `reproject_stale_md` reads as success ([issue #332](https://github.com/outlmd/outl/issues/332)).
+`outl_md::unlogged::sidecar_can_vouch_for` is the single owner of that verdict now, and it asks about the bytes rather than the sidecar's shape.
 
 The same rule governs the desync recovery (`recover_desynced_projection`): it recovers the lost ops but leaves the file alone when a block the log already knows carries different text on disk.
 A stale view is recoverable; deleted bytes are not.
