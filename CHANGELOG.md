@@ -259,7 +259,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   **The question is about the bytes on disk, not the sidecar's shape**, and one of the three callers already paired it that way: `collect_ahead`, behind `outl reconcile --ahead-of-log`, asked "is anything actually on disk" inline.
   Only the gate, though — its verdict then counted those same empty entries as lines ahead of the log, so that half moved with the rest (below).
-  That pairing is `outl_md::unlogged::sidecar_can_vouch_for` now, the single owner of "may this `.md` be overwritten", asked by the write path, the survey's classifier and `recover` alike.
+  That pairing is `outl_md::unlogged::sidecar_can_vouch_for` now, the single owner of "can this sidecar vouch for the `.md` on disk", asked by the write path, the survey's classifier and `outl reconcile`'s `collect_ahead` alike.
   Three owners of one fact, where two were wrong and the difference was recorded nowhere.
   Measured on a 2,874-page workspace: one page frozen in that state, and **zero** genuine pre-0.11 sidecars, so every refusal the narrow gate produced there was a page with nothing at risk.
 
@@ -270,10 +270,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   That page is a peer **typing into** a journal's seed bullet rather than appending beside it, which is what the reporter's laptop did, and it is pinned by `the_sweep_converges_a_page_whose_only_empty_block_a_peer_typed_into`.
   `classify` had it too, and there it made the listing contradict the writing pass: `AheadOfLog { sample: "" }` sent the user to `outl reconcile --ahead-of-log` for a page `apply.rs` was about to write.
   `collect_ahead` had it in its own count, putting a false row in that command's pick list.
-  All three count only non-empty lines now; `the_sweep_still_counts_a_real_line_a_reprojection_would_remove` pins that a real removal is still withheld.
+  The writer's own refusal, `unlogged_content_error`, had it as well: an answerable sidecar under a `.md` with one surplus bare bullet was refused with an empty sample, for a page the listing and `outl reconcile --ahead-of-log` both reported clean (`if_stale_reprojects_over_a_surplus_bare_bullet_on_an_answerable_sidecar`).
+  All four count only non-empty lines now; `the_sweep_still_counts_a_real_line_a_reprojection_would_remove` pins that a real removal is still withheld.
 
   **This narrows which pages are refused, never which content is protected.**
-  A pre-0.11 sidecar over a `.md` holding real text still declines and the bytes still survive, phrased by the same unchanged `unlogged_content_error`.
+  A pre-0.11 sidecar over a `.md` holding real text still declines and the bytes still survive, phrased by the same `unlogged_content_error`.
   Two proptests over the existing generator carry that mechanically, and each catches the mutation the other misses.
   Reverting the gate to `sidecar_can_answer` fails `a_rendered_page_is_always_vouched_for_by_its_own_log`, shrunk to a page whose only block is empty.
   Stubbing the second arm to `true` fails `vouching_on_a_text_less_reference_implies_nothing_to_lose`.

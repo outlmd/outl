@@ -80,8 +80,8 @@ pub fn sidecar_can_answer(blocks: &[SidecarBlock]) -> bool {
 ///
 /// **This narrows which pages are refused, never which content is
 /// protected.** A line the log does not hold still refuses, and it is
-/// `unlogged_content_error` — not this predicate — that phrases the
-/// refusal, unchanged.
+/// `unlogged_content_error`, not this predicate, that phrases the
+/// refusal.
 pub fn sidecar_can_vouch_for(disk: &str, blocks: &[SidecarBlock]) -> bool {
     sidecar_can_answer(blocks)
         || content_lines_missing_from(disk, blocks)

@@ -480,6 +480,30 @@ fn if_stale_reprojects_a_page_whose_only_block_is_empty() {
     );
 }
 
+/// An **answerable** sidecar (it records real text) over a `.md` carrying
+/// one bare bullet more than it records: two presses of Enter in an
+/// external editor. `sidecar_can_vouch_for` lets it through, and the survey
+/// and `outl reconcile --ahead-of-log` both report it clean, so the writer
+/// must not refuse it with an empty sample either: that is a page the
+/// recovery command it names cannot find.
+#[test]
+fn if_stale_reprojects_over_a_surplus_bare_bullet_on_an_answerable_sidecar() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page("first");
+    std::fs::write(&md_path, "title:: Notes\n\n- first\n-\n").unwrap();
+    restamp_sidecar_as_faithful(&md_path);
+    append_block(&mut ws, &hlc, Some(page), Some("synced-in")).unwrap();
+
+    let wrote = apply_page_md_with_sidecar_if_stale(&ws, tmp.path(), page).unwrap();
+
+    assert!(
+        wrote.is_some(),
+        "a surplus bare bullet holds no bytes, it must not freeze the page"
+    );
+    assert!(std::fs::read_to_string(&md_path)
+        .unwrap()
+        .contains("synced-in"));
+}
+
 /// The narrowing above must not reach the case the gate exists for. A
 /// pre-0.11 sidecar (every `text` empty) over a `.md` holding **real**
 /// text still declines, and the bytes still survive untouched.

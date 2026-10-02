@@ -99,7 +99,16 @@ pub(super) fn unlogged_content_error(
     if !sidecar_can_answer(blocks) {
         return None;
     }
-    let unlogged = content_lines_missing_from(disk, blocks);
+    // Empty entries are not content at risk: a bare `-` normalises to
+    // `""` and holds no bytes. The survey's `classify` and `outl
+    // reconcile`'s `collect_ahead` filter them too, so without the same
+    // rule here a surplus bare bullet over an answerable sidecar was
+    // refused with an empty sample by a writer whose listing and recovery
+    // command both reported the page clean (issue #332).
+    let unlogged: Vec<String> = content_lines_missing_from(disk, blocks)
+        .into_iter()
+        .filter(|l| !l.is_empty())
+        .collect();
     let sample = unlogged.first()?;
     Some(ActionError::PageMarkdownAheadOfLog {
         path: path.display().to_string(),

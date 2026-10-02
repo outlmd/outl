@@ -132,12 +132,12 @@ That is deliberate: it re-reads under the page lock, so a page that changed betw
 
 The extraction closed one real gap it was not aimed at.
 A sidecar written before 0.11 carries `text: ""` and cannot answer the question at all.
-That is narrower than it sounds.
-A page whose blocks are all empty carries the same shape without being pre-0.11.
-Classifying those as unanswerable parked every fresh journal day in a state the sweep is documented to stay quiet about ([issue #332](https://github.com/outlmd/outl/issues/332)).
-The gate is `sidecar_can_vouch_for`, which asks whether the `.md` holds anything that needs vouching for.
-`apply_page_md_with_sidecar_if_stale` declines those; the doctor's old inline code classified them as ordinary stale pages and offered a repair, which the pass then silently skipped with `ok: false`.
+`apply_page_md_with_sidecar_if_stale` declines such a sidecar when the `.md` under it holds real text; the doctor's old inline code classified them as ordinary stale pages and offered a repair, which the pass then silently skipped with `ok: false`.
 `PageProjectionState::SidecarCannotAnswer` is its own state now, reported as a warning rather than as repairable work — a listing that no longer promises something the writing pass refuses.
+
+A page whose blocks are all empty carries the same text-less shape without being pre-0.11, and it is **not** declined.
+Its `.md` holds nothing but bare bullets, so there is nothing to lose; classifying it as unanswerable parked every fresh journal day in a state the sweep is documented to stay quiet about ([issue #332](https://github.com/outlmd/outl/issues/332)).
+The gate is `sidecar_can_vouch_for`, which pairs `sidecar_can_answer` with whether the `.md` holds anything that needs vouching for: a text-less sidecar over real content still declines, a text-less sidecar over an empty page is re-projected.
 
 ## What this deliberately does not do
 

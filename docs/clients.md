@@ -619,7 +619,7 @@ The op log is authoritative: the next boot re-projects any stale page, and peers
 
 A page whose `.md` holds nothing but bare bullets is **not** one of these, and it used to be.
 A fresh journal day, an unfilled `[[link]]` page and both pages `outl init` creates all carry a sidecar with no text, just like a pre-0.11 one, so the narrow check refused them.
-  And since nothing on disk was at risk, nothing was ever queued to clear it.
+Being queued for the pipeline migration did not clear it either: the page observed on a real workspace carried `pipeline_version` 4 against a current 5, so it *was* queued, but its blocks are genuinely empty, so each reconcile rewrote the same `text: ""` and the next open refused it again.
 The page showed one empty bullet for good the moment a peer wrote into it, with no banner, no log line and no `doctor` entry, because `Ok(None)` is what `reproject_stale_md` reads as success ([issue #332](https://github.com/outlmd/outl/issues/332)).
 `outl_md::unlogged::sidecar_can_vouch_for` is the single owner of that verdict now, and it asks about the bytes rather than the sidecar's shape.
 
