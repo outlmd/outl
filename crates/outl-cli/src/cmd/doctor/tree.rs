@@ -205,10 +205,14 @@ pub(super) fn check_projections(
                 // Not "nothing at risk" — "I cannot tell". The write
                 // guard declines these, so offering a repair here would
                 // be a listing promising something the pass refuses.
+                //
+                // The wording says what was read, not where the sidecar
+                // came from — "written before 0.11" was a claim about
+                // provenance this check cannot make (issue #332).
                 b.warn(format!(
-                    "{}: the `.md` is stale but its sidecar cannot say whether the op log \
-                     knows the content on disk (written before 0.11) — `--repair` leaves \
-                     it alone; `outl reconcile` rebuilds the sidecar",
+                    "{}: the `.md` is stale and holds content its sidecar records no text \
+                     for, so nothing can say whether the op log knows it — `--repair` \
+                     leaves it alone; `outl reconcile` rebuilds the sidecar",
                     path.display()
                 ));
             }

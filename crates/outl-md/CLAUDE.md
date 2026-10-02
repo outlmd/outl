@@ -298,7 +298,7 @@ src/
 ├── matching/
 │   └── guard.rs    # match_blocks_guarded — volume guard over level-3 orphans (OrphanGuard, OrphanVolume)
 ├── similarity.rs   # level-2 scoring + global-confidence assignment (private to the crate)
-├── unlogged.rs     # content_lines_missing_from, sidecar_can_answer, frontmatter_lines_missing_from — "does the op log know this"
+├── unlogged.rs     # content_lines_missing_from, sidecar_can_answer, sidecar_can_vouch_for, frontmatter_lines_missing_from — "does the op log know this"
 ├── diff.rs         # AST diff → Op sequence (takes old_blocks to preserve ref_handle)
 ├── inline.rs       # the scan: tokenize / tokenize_owned, match_one precedence, inline_to_source
 ├── token.rs        # InlineTok (Plain/Bold/.../BlockRef/Embed/Emoji), owned InlineToken, RefTarget
@@ -404,7 +404,10 @@ Normalise either and the file still passes while pinning nothing.
    **Enforced, not just followed.**
    `reconcile_md` asks `unlogged::content_lines_missing_from` before writing the sidecar and, when it returns anything, writes an empty `last_synced_hash` instead of the real one so the page is looked at again next pass.
    `ReconcileReport.unlogged_lines` carries the count for callers to surface.
-   `unlogged.rs` lives here (not `outl-actions`) so the producer can ask the same question its consumers ask; `outl_actions::content_lines_missing_from` / `sidecar_can_answer` are re-exports.
+   `unlogged.rs` lives here (not `outl-actions`) so the producer can ask the same question its consumers ask; `outl_actions::content_lines_missing_from` / `sidecar_can_answer` / `sidecar_can_vouch_for` are re-exports.
+   **A write caller gates on `sidecar_can_vouch_for`, not `sidecar_can_answer`.**
+   The second answers a question about the *sidecar* ("can these blocks say what the log held"); the first answers the one about the *file* ("is anything here at risk").
+   They come apart for every page whose blocks are all empty: a pre-0.11 sidecar and a page nobody has written in yet have the same shape, and refusing the second froze it ([issue #332](https://github.com/outlmd/outl/issues/332)).
    Pinned by `tests/multiline_block_roundtrip.rs` (`the_hash_is_still_advanced_for_every_shape_a_real_workspace_holds` and siblings).
    The bulk-delete half has the same shape: `reconcile_md_with_guard` refuses the whole pass (`ReconcileError::BulkDelete`) instead of trashing an oversized orphan list — see "Second hard rule" under the matching algorithm.
 

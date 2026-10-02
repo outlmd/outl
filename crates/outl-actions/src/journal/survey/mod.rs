@@ -47,7 +47,7 @@ use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use outl_md::sidecar::{file_hash, sidecar_path_for};
 
-use super::guard::{content_lines_missing_from, sidecar_can_answer};
+use super::guard::{content_lines_missing_from, sidecar_can_vouch_for};
 use super::paths::page_md_path;
 use super::render::render_page_md_with;
 use crate::outline::ChildrenIndex;
@@ -89,10 +89,15 @@ pub enum PageProjectionState {
     /// No sidecar and the bytes differ from the render. Nothing
     /// establishes that outl wrote them; `outl reconcile` first.
     SidecarMissingAndDrifted,
-    /// A sidecar that cannot answer "does the op log know this line"
-    /// (every one written before 0.11 carries `text: ""`). Not a
+    /// A sidecar that cannot vouch for the content on disk: it records
+    /// no block text (every one written before 0.11 carries `text: ""`)
+    /// **and** the `.md` holds lines that need vouching for. Not a
     /// verdict of safety — a refusal to give one. See
-    /// [`sidecar_can_answer`].
+    /// `sidecar_can_vouch_for`.
+    ///
+    /// A page whose `.md` holds nothing but bare bullets does not land
+    /// here: its sidecar cannot answer either, but there is nothing to
+    /// lose, so it is classified on its own merits (issue #332).
     SidecarCannotAnswer,
     /// The `.md` exists and could not be read — a permission error,
     /// non-UTF8 bytes. Deliberately not treated as absent: that is how a
@@ -279,10 +284,25 @@ fn classify(
             lines_removed: lines_removed_by(&disk, &rendered, &sidecar.last_synced_hash),
         };
     }
-    if !sidecar_can_answer(&sidecar.blocks) {
+    // The same gate the write path asks, for the same reason: this is
+    // the classifier `outl serve`'s sweep and `outl doctor` read, so a
+    // narrower question here parks a page in a state both are
+    // documented to stay quiet about (issue #332).
+    if !sidecar_can_vouch_for(&disk, &sidecar.blocks) {
         return PageProjectionState::SidecarCannotAnswer;
     }
-    let unlogged = content_lines_missing_from(&disk, &sidecar.blocks);
+    // Empty entries are not content at risk, for the same reason
+    // `sidecar_can_vouch_for` just let this page through: a bare `-`
+    // holds no bytes. Without the filter the gate above and this verdict
+    // read one `Vec` two ways — the page vouches, so `apply.rs` writes
+    // it, while the listing names it `AheadOfLog` with an empty sample
+    // and sends the user to `outl reconcile --ahead-of-log`. A listing
+    // that contradicts the writing pass is the one thing `guard.rs`'s
+    // module doc says must not happen.
+    let unlogged: Vec<String> = content_lines_missing_from(&disk, &sidecar.blocks)
+        .into_iter()
+        .filter(|l| !l.is_empty())
+        .collect();
     if let Some(sample) = unlogged.first() {
         return PageProjectionState::AheadOfLog {
             lines: unlogged.len(),
@@ -331,6 +351,20 @@ fn lines_removed_by(disk: &str, rendered: &str, last_synced_hash: &str) -> usize
     // this listing from promising a repair that pass then refuses — root
     // `CLAUDE.md` invariant 8's "one owner per verdict", applied to the
     // second channel.
-    outl_md::unlogged::content_lines_missing_from_texts(disk, flat.iter().map(|b| b.text)).len()
+    //
+    // **Empty entries are not removed content.** A bare `-` on disk
+    // normalises to `""`, so it matches nothing in a reference whose
+    // blocks all hold text and is reported as a line this write would
+    // delete — a line holding no bytes. That is the same conflation
+    // `sidecar_can_vouch_for` exists to undo, one layer down, and the
+    // cost was higher here: `lines_removed > 0` routes a page to the
+    // sweep's `withheld` arm *before* it can be written, so the
+    // commonest #332 page (a peer typing into a journal's seed bullet)
+    // stayed at one empty bullet every 30 seconds, for good, while the
+    // doctor reported a content loss that could not happen.
+    outl_md::unlogged::content_lines_missing_from_texts(disk, flat.iter().map(|b| b.text))
+        .iter()
+        .filter(|l| !l.is_empty())
+        .count()
         + outl_md::unlogged::frontmatter_lines_missing_from(disk, rendered, last_synced_hash)
 }

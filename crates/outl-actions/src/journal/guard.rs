@@ -83,9 +83,14 @@ use crate::error::ActionError;
 /// [`apply_page_md_with_sidecar_guarded`] treats both as "go ahead" —
 /// there is a real mutation to project and refusing every pre-0.11 page
 /// would freeze the app. [`apply_page_md_with_sidecar_if_stale`] asks
-/// [`sidecar_can_answer`] *first* and declines the second case, because
+/// [`sidecar_can_vouch_for`] *first* and declines the second case, because
 /// re-projecting a page it cannot vouch for is how bytes go missing.
 /// Reading one policy as the other is the bug this whole module guards.
+///
+/// It asks `sidecar_can_vouch_for` and not [`sidecar_can_answer`]: the
+/// second case is "could not check **and** there is something to check",
+/// and conflating it with "could not check" froze every page holding
+/// only bare bullets (issue #332).
 pub(super) fn unlogged_content_error(
     path: &Path,
     disk: &str,
@@ -151,6 +156,7 @@ pub(super) fn frontmatter_loss_error(
 pub use outl_md::unlogged::content_lines_missing_from;
 
 pub use outl_md::unlogged::sidecar_can_answer;
+pub use outl_md::unlogged::sidecar_can_vouch_for;
 /// Decide whether an absent `.md` really means "this page does not
 /// exist yet".
 ///

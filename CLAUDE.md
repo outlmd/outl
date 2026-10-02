@@ -90,14 +90,26 @@ Violating any one breaks user trust irreversibly.
    **The general rule this is an instance of:** when you fix one direction of a `.md` ↔ tree divergence, state what happens in the opposite direction *before* merging.
    Reconciliation bugs come in mirrored pairs, and the pair that deletes is never the one being reported.
 
+   **The verdict is about the bytes on disk, not about the sidecar's shape.**
+   The gate is `outl_md::unlogged::sidecar_can_vouch_for`; `sidecar_can_answer` is one arm of it and answers a narrower question.
+   Asking only the second conflates a pre-0.11 sidecar with a page nobody has written in yet — both carry `text: ""` on every block, and the second has nothing to lose.
+   That froze every fresh journal day and every unfilled `[[link]]` page the moment a peer wrote into one, silently, since `Ok(None)` is what `reproject_stale_md` reads as success ([issue #332](https://github.com/outlmd/outl/issues/332)).
+   Measured: one such page and zero genuine pre-0.11 sidecars on a 2,874-page workspace.
+   **It narrows which pages are refused, never which content is protected** — a line the log does not hold still refuses, phrased by the same `unlogged_content_error`.
+
    **The regression net.**
    These tests exist to fail if someone re-simplifies the gate back to a hash comparison — do not delete or relax them:
    `if_stale_refuses_when_the_md_carries_content_the_log_lacks`,
    `if_stale_still_reprojects_when_the_md_holds_no_unlogged_content`,
    `if_stale_ignores_whitespace_only_differences_when_deciding`,
    `if_stale_declines_when_the_sidecar_cannot_answer` (an empty verdict from a reference that *cannot* answer is not permission to write — that is how a peer on an older binary re-arms the loss),
+   `if_stale_still_declines_when_an_unanswerable_sidecar_covers_real_text` (its other half: the decline is decided by what is on disk, so the narrowing above cannot reach the pre-0.11 case),
+   `if_stale_reprojects_a_page_whose_only_block_is_empty` (the #332 direction: a page holding one bare bullet has nothing to lose and must be re-projected),
    `if_stale_still_projects_a_page_whose_sidecar_has_no_blocks` (the opposite case: nothing on disk to lose)
    (`crates/outl-actions/src/journal/tests/if_stale.rs`), plus
+   `the_sweep_reprojects_a_page_whose_only_block_is_empty` and `the_sweep_still_declines_when_an_unanswerable_sidecar_covers_real_text`
+   (`crates/outl-actions/src/journal/survey/tests.rs` — the same pair through the classifier `outl serve`'s sweep and `doctor` read, because fixing the write path alone leaves them blind to it), plus
+   `crates/outl-md/tests/unlogged_vouching.rs` (the predicate itself, both directions), plus
    `recovery_does_not_reproject_over_text_the_log_never_saw`
    (`crates/outl-actions/tests/desync_recovery.rs`, the same defect reached through the desync recovery's re-projection), plus
    `a_torn_op_log_never_lets_repair_overwrite_a_good_md`
@@ -406,6 +418,7 @@ Don't unilaterally pivot.
 | Tauri for desktop (shipping today) | Rust core reuse, smaller than Electron. macOS / Linux / Windows; Solid frontend shares `@outl/shared` with mobile |
 | `outl-shortcuts` is the single (chord → action) catalog | Two parallel implementations is the bug we paid to remove (TUI used to define bindings in `input/`, desktop wired its own `KeyboardEvent` handlers — `Cmd+P` and `Ctrl+P` drifted within a sprint). Adding a key on any client without going through `defaults.rs` puts that drift back. See `outl-shortcuts/CLAUDE.md`. **Only the desktop resolves through `lookup()` today** — the TUI still dispatches Normal-mode keys from its own `match` in `input/normal.rs`, and mobile consumes neither; `docs/shortcuts.md` claimed otherwise for months. Finishing that migration is open work, not a settled decision |
 | `wrappers/catalog.rs` is the single declaration of the **Tauri command surface** | The bodies were shared; the wrappers were not, and 3,033 lines of hand-written shim diverged by omission (`history`: 183 lines vs 22). A client takes a whole module or records the gap. `tests/command_parity.rs` catches both a skipped module and a generated command missing from `generate_handler!`. See `outl-tauri-shared/CLAUDE.md` |
+| `outl_md::unlogged::sidecar_can_vouch_for` is the single owner of **may this `.md` be overwritten** | `sidecar_can_answer` is one arm of it and answers a narrower question. Three callers asked it; only `outl reconcile`'s `collect_ahead` paired it with "is anything actually on disk", and the two that did not froze every empty page a peer wrote into ([#332](https://github.com/outlmd/outl/issues/332)). See [invariant 8](#critical-invariants-never-violate) |
 | `outl_actions::commit_page` owns **what happens around a page mutation** | The five-step sequence had one implementation, behind a trait wanting `&Mutex<Option<Workspace>>` — unreachable from the TUI and CLI, which each re-derived a subset. `AppHost` stayed put on purpose ([#264](https://github.com/outlmd/outl/issues/264)) |
 | `Filter::Not(Box<Filter>)` is the single owner of **negation** in the query DSL | `not-<key>` parses `<key>` and wraps it, so every filter is negatable the moment it exists and the two sides cannot disagree. The first implementation hand-wrote `NotTag` / `NotProp`: two of six filters negatable, each with its own copy of the predicate. See [invariant 14](#critical-invariants-never-violate) |
 | `outl_shortcuts::support` is the single owner of **which client performs which action** | An exhaustive `match`, so a new `Action` variant does not compile until all three clients declare what they do with it. The lesser states carry the sentence shown to the user, so a client cannot invent its own wording. See [invariant 12](#critical-invariants-never-violate) |
@@ -462,6 +475,8 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
 - ❌ Storing op log fields outside the `Op` variant (breaks undo)
 - ❌ Overwriting a `.md` because its sidecar hash matches (invariant 8 — that proves outl wrote it last, not that the op log holds it)
 - ❌ Rewriting a sidecar to agree with content you did not emit ops for (this is what *produces* the state invariant 8 defends against)
+- ❌ Refusing a `.md` on the strength of `sidecar_can_answer` alone (invariant 8 — that answers "can these blocks say what the log held", not "is anything on this disk at risk").
+  Ask `sidecar_can_vouch_for`: a page holding only bare bullets has nothing to lose, and refusing it froze every fresh journal day and every unfilled `[[link]]` page, silently.
 - ❌ Fixing one direction of a `.md` ↔ tree divergence without stating what happens in the other
 - ❌ Rejecting a design over a cost the alternative pays too, or over a cost that was already there before your change (invariant 11 — attribute the cost before you let it decide)
 - ❌ Deriving a namespace from the slug, or `slugify` keeping `/` (it's in `title::`)

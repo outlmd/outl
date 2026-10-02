@@ -52,7 +52,7 @@ pub use apply::{
     apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_absent,
     apply_page_md_with_sidecar_if_stale, ProjectionFailure, ProjectionSweep,
 };
-pub use guard::{content_lines_missing_from, sidecar_can_answer};
+pub use guard::{content_lines_missing_from, sidecar_can_answer, sidecar_can_vouch_for};
 pub use mutate::mutate_page_md;
 pub use paths::{journals_dir, page_md_path, pages_dir, remove_page_projection, write_md_atomic};
 pub use render::{render_block_md, render_page_md};

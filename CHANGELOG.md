@@ -239,6 +239,50 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A page whose only block is empty stopped syncing the moment a peer wrote into it ([#332](https://github.com/outlmd/outl/issues/332)).**
+  Reported from iOS against a Linux `outl serve`: journal days written on a laptop showed as a single empty bullet on the phone while other days synced fine, and typing into that bullet made the whole day appear at once.
+  The op log and the tree were both correct; only the `.md` the view reads was stale, which is issue [#166](https://github.com/outlmd/outl/issues/166) mirrored, surviving the fix for it.
+
+  `apply_page_md_with_sidecar_if_stale` gated the re-projection on `sidecar_can_answer`, which asks whether a sidecar's blocks can say what the op log held.
+  A sidecar written before 0.11 carries `text: ""` on every block and cannot, and the gate exists so its empty verdict is never read as "nothing at risk" (invariant 8).
+  But **a page nobody has written in yet has exactly that shape too.**
+  A fresh journal day, every page created for a `[[link]]` that was never filled, and both pages `outl init` leaves behind all carry one block with no text, so each was treated as a page nothing could vouch for and refused for good.
+
+  Nothing said so.
+  `Ok(None)` is what `reproject_stale_md` reads as success, so no banner reached the view.
+  `outl serve`'s sweep folded the page into the arm commented *"nothing here is a page that silently stopped converging"*.
+  And `outl doctor` called it a sidecar "written before 0.11", which was a claim about provenance it could not make.
+  The argument for staying quiet was that the orphan scan's reconcile rewrites such a sidecar *with* text, which arms the real check.
+  That holds for a pre-0.11 sidecar and not for an empty page, and being queued was never the difference: the page observed on a real workspace carried `pipeline_version` 4 against a current 5, so it *was* queued.
+  Its blocks are genuinely empty, so each reconcile rewrote the same `text: ""` and the next open refused it again.
+  The self-healing cannot reach this class at all, which is why the gate has to tell it apart up front.
+
+  **The question is about the bytes on disk, not the sidecar's shape**, and one of the three callers already paired it that way: `collect_ahead`, behind `outl reconcile --ahead-of-log`, asked "is anything actually on disk" inline.
+  Only the gate, though — its verdict then counted those same empty entries as lines ahead of the log, so that half moved with the rest (below).
+  That pairing is `outl_md::unlogged::sidecar_can_vouch_for` now, the single owner of "may this `.md` be overwritten", asked by the write path, the survey's classifier and `recover` alike.
+  Three owners of one fact, where two were wrong and the difference was recorded nowhere.
+  Measured on a 2,874-page workspace: one page frozen in that state, and **zero** genuine pre-0.11 sidecars, so every refusal the narrow gate produced there was a page with nothing at risk.
+
+  **The same conflation sat one layer below the gate, in three counters, and the write path was the only one the gate alone fixed.**
+  A bare `-` normalises to the empty string, so it matches nothing in a reference whose blocks hold text and was counted as a line a re-projection would delete — a line holding no bytes.
+  In `lines_removed_by` that cost the most.
+  `lines_removed > 0` routes a page to the sweep's `withheld` arm *before* the write arm, so `outl serve` left the commonest #332 page at one bare bullet every 30 seconds, for good, while `outl doctor` reported a content loss that could not happen.
+  That page is a peer **typing into** a journal's seed bullet rather than appending beside it, which is what the reporter's laptop did, and it is pinned by `the_sweep_converges_a_page_whose_only_empty_block_a_peer_typed_into`.
+  `classify` had it too, and there it made the listing contradict the writing pass: `AheadOfLog { sample: "" }` sent the user to `outl reconcile --ahead-of-log` for a page `apply.rs` was about to write.
+  `collect_ahead` had it in its own count, putting a false row in that command's pick list.
+  All three count only non-empty lines now; `the_sweep_still_counts_a_real_line_a_reprojection_would_remove` pins that a real removal is still withheld.
+
+  **This narrows which pages are refused, never which content is protected.**
+  A pre-0.11 sidecar over a `.md` holding real text still declines and the bytes still survive, phrased by the same unchanged `unlogged_content_error`.
+  Two proptests over the existing generator carry that mechanically, and each catches the mutation the other misses.
+  Reverting the gate to `sidecar_can_answer` fails `a_rendered_page_is_always_vouched_for_by_its_own_log`, shrunk to a page whose only block is empty.
+  Stubbing the second arm to `true` fails `vouching_on_a_text_less_reference_implies_nothing_to_lose`.
+  The frontmatter channel was checked separately and survives both ways: a fence the log does not know is still refused with `PageMarkdownAheadOfLog`, and one it does know is re-emitted from the log.
+  Both directions are pinned: `unlogged_vouching.rs` for the predicate, and as pairs in `if_stale.rs` and `survey/tests.rs` for the two decision points.
+  Fixing the write path alone would leave the sweep and the doctor blind to the same pages.
+
+  Root cause, the repro and the fix shape are [@davclark](https://github.com/davclark)'s.
+
 - **Desktop showed a `🖼️ name` chip where an inline image should have been ([#322](https://github.com/outlmd/outl/issues/322)).**
   `MarkdownInline`'s `variant` flag was answering two questions with one value.
   `variant="inline"` is what gives the desktop its TUI-style underlined refs and tags instead of mobile's pill chips, and the `image` arm read that same flag to decide whether an asset may take a block of its own.

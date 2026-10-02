@@ -194,10 +194,16 @@ fn if_stale_reprojects_after_a_pure_indent() {
 /// exists to stop: it rewrites the sidecar without `text` and the next
 /// page open here overwrites the file. So the write is declined instead —
 /// quietly, because there is nothing to tell the user and nothing for
-/// them to do: a `text`-less sidecar necessarily carries a stale
-/// `pipeline_version`, so `scan_for_orphans` already has the page queued,
-/// and its reconcile rewrites the sidecar **with** text, which arms the
+/// them to do: a `text`-less sidecar over real text carries a stale
+/// `pipeline_version`, so `scan_for_orphans` has the page queued, and
+/// its reconcile rewrites the sidecar **with** that text, which arms the
 /// real check for the next open.
+///
+/// **That self-healing reaches this page and not every unanswerable
+/// one.** A page whose blocks are genuinely empty gets the same
+/// `text: ""` written back by each reconcile, so being queued never
+/// clears it; the gate tells the two apart up front instead
+/// (`sidecar_can_vouch_for`, issue #332).
 #[test]
 fn if_stale_declines_when_the_sidecar_cannot_answer() {
     let (tmp, mut ws, hlc, page, md_path) = projected_page("first");
@@ -432,5 +438,81 @@ fn if_stale_refuses_a_missing_md_beside_a_live_sidecar() {
         std::fs::read_to_string(&sidecar_path).unwrap(),
         sidecar_before,
         "the sidecar is the evidence; the refusal must not rewrite it"
+    );
+}
+
+/// Issue #332: a page whose only block is empty — a journal day the first
+/// time it is opened, a `[[link]]` page nobody filled, either page
+/// `outl init` leaves behind — is never re-projected once a peer's blocks
+/// reach the tree.
+///
+/// Its sidecar carries one entry with `text: ""`, which is byte-identical
+/// to a pre-0.11 sidecar, so [`sidecar_can_answer`] said no and the write
+/// declined. Nothing surfaced: `Ok(None)` is what `reproject_stale_md`
+/// reads as success, so the view was built from the stale `.md` and the
+/// page showed one empty bullet indefinitely. Reported from iOS against a
+/// Linux `outl serve`, on a workspace where the op log and tree were both
+/// correct.
+///
+/// This is the mirror of #166 and it survived the fix for it.
+#[test]
+fn if_stale_reprojects_a_page_whose_only_block_is_empty() {
+    let (tmp, mut ws, _hlc, page, md_path) = projected_page("");
+    assert_eq!(
+        std::fs::read_to_string(&md_path).unwrap(),
+        "title:: Notes\n\n-\n"
+    );
+
+    let peer = HlcGenerator::new(ActorId::new());
+    append_block(&mut ws, &peer, Some(page), Some("peer wrote this")).unwrap();
+    append_block(&mut ws, &peer, Some(page), Some("and this")).unwrap();
+
+    let wrote = apply_page_md_with_sidecar_if_stale(&ws, tmp.path(), page).unwrap();
+
+    assert!(
+        wrote.is_some(),
+        "a page holding one bare bullet has nothing to lose — it must be re-projected"
+    );
+    let md = std::fs::read_to_string(&md_path).unwrap();
+    assert!(
+        md.contains("peer wrote this") && md.contains("and this"),
+        "the re-projection must carry the peer's blocks: {md:?}"
+    );
+}
+
+/// The narrowing above must not reach the case the gate exists for. A
+/// pre-0.11 sidecar (every `text` empty) over a `.md` holding **real**
+/// text still declines, and the bytes still survive untouched.
+///
+/// This is the other half of `if_stale_declines_when_the_sidecar_cannot_answer`:
+/// that one pins the decline, this one pins that the decline is decided by
+/// what is on disk rather than by the sidecar's shape alone. Deleting
+/// either re-arms the #210 loss.
+#[test]
+fn if_stale_still_declines_when_an_unanswerable_sidecar_covers_real_text() {
+    let (tmp, mut ws, hlc, page, md_path) = projected_page("first");
+    let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+    let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+    for b in &mut sc.blocks {
+        b.text = String::new();
+    }
+    // Content the stripped sidecar cannot vouch for, declared faithful —
+    // the state a pre-0.11 `reconcile_md` leaves behind.
+    let disk = "title:: Notes\n\n- precious text only on disk\n";
+    std::fs::write(&md_path, disk).unwrap();
+    sc.last_synced_hash = outl_md::sidecar::file_hash(disk);
+    outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+    append_block(&mut ws, &hlc, Some(page), Some("synced-in")).unwrap();
+
+    let wrote = apply_page_md_with_sidecar_if_stale(&ws, tmp.path(), page).unwrap();
+
+    assert!(
+        wrote.is_none(),
+        "a sidecar that cannot vouch for real text on disk must not authorise the write"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&md_path).unwrap(),
+        disk,
+        "the file must be left exactly as it was"
     );
 }

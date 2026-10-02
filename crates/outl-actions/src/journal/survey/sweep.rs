@@ -113,6 +113,18 @@ pub fn reproject_stale_pages(workspace: &Workspace, root: &Path) -> Reprojection
             // and restamps a withheld hash, and `outl doctor` names a
             // sidecar that cannot vouch for its page. Nothing here is a
             // page that silently stopped converging.
+            //
+            // **That last sentence was false for two releases.** The
+            // quiet is only earned because an unanswerable sidecar gets
+            // rewritten *with* text by the orphan scan's reconcile, which
+            // arms the real check. A page holding only bare bullets never
+            // gets there: being queued is not the problem — the observed
+            // page carried `pipeline_version` 4 against a current 5, so it
+            // was queued — but its blocks are genuinely empty, so the
+            // reconcile rewrites the same `text: ""` and the page is
+            // refused again, forever (issue #332). The self-healing is
+            // structurally unable to reach this class, so the gate has to
+            // tell it apart up front: `sidecar_can_vouch_for`.
             PageProjectionState::InSync
             | PageProjectionState::SidecarMissingButFaithful
             | PageProjectionState::PendingExternalEdit

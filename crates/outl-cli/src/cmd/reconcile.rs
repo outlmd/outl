@@ -310,31 +310,26 @@ fn collect_ahead(ws: &outl_core::workspace::Workspace, root: &Path) -> Scan<Ahea
         // which every remote edit also answers yes to, and reconciling
         // those would write the pre-edit text back as ops — reverting the
         // peer, permanently, since the log is append-only.
-        // A sidecar that cannot answer does not get a vote — asked
-        // here rather than inside the verdict, so the render-based
-        // caller in `doctor` is not silenced by the same rule.
-        if !outl_actions::sidecar_can_answer(&sidecar.blocks) {
-            // A sidecar that cannot answer only matters when there is a
-            // question to answer. `outl init` leaves two pages holding a
-            // single empty block, and every page created for a `[[link]]`
-            // that was never filled is the same shape: their sidecars
-            // record no text, so they can answer nothing — but their
-            // `.md` holds no text either, so nothing on disk could be
-            // outside the log.
-            //
-            // Reporting those would make the unjudged list mostly empty
-            // pages on a real workspace, which teaches the user to skim
-            // past the entries that mean something. Asked through the
-            // same owner with an empty reference — "what is on disk that
-            // nothing accounts for" — so this is not a second opinion
-            // about what a content line is.
-            let on_disk = outl_actions::content_lines_missing_from(disk, &[]);
-            if on_disk.iter().all(String::is_empty) {
-                return Verdict::Clean;
-            }
+        // A sidecar that cannot vouch for the bytes on disk does not get
+        // a vote — asked here rather than inside the verdict, so the
+        // render-based caller in `doctor` is not silenced by the same
+        // rule. `sidecar_can_vouch_for` owns which sidecars those are;
+        // this call site used to spell the rule out inline and was the
+        // only one of three getting it right (issue #332).
+        if !outl_actions::sidecar_can_vouch_for(disk, &sidecar.blocks) {
             return Verdict::Unjudged(Unjudged::SidecarCannotAnswer);
         }
-        let missing = outl_actions::content_lines_missing_from(disk, &sidecar.blocks).len();
+        // Empty entries are not content ahead of the log. A bare `-`
+        // normalises to `""`, so a `.md` with more bare bullets than its
+        // sidecar records (two presses of Enter in an external editor)
+        // reports N lines ahead where all N hold no bytes. Reconciling
+        // them creates empty blocks, so nothing is lost either way — but
+        // a false row teaches you to skim past the rows that mean
+        // something, which is the whole reason this list is narrow.
+        let missing = outl_actions::content_lines_missing_from(disk, &sidecar.blocks)
+            .iter()
+            .filter(|l| !l.is_empty())
+            .count();
         if missing == 0 {
             return Verdict::Clean;
         }
