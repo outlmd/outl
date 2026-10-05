@@ -1065,4 +1065,47 @@ mod tests {
         let after = std::fs::read_to_string(&path).expect("reread peers");
         assert_eq!(before, after, "off-LAN inbounds must not rewrite the entry");
     }
+
+    /// Inline `PeerEntry` with a fixed hex id, for the label-format contract.
+    fn entry_with(alias: Option<&str>) -> PeerEntry {
+        PeerEntry {
+            node_id: "a1b2c3d4e5f60718".to_string(),
+            alias: alias.map(|s| s.to_string()),
+            relay_url: None,
+            endpoint_addr: None,
+            added_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    /// The exact strings `status.rs` / `revoke.rs` emit. A revert to bare
+    /// `node_id` / `fmt_short()` changes these, so the sites' output is pinned.
+    #[test]
+    fn log_and_display_label_format() {
+        let named = entry_with(Some("macbook-pro"));
+        assert_eq!(named.log_label(), "macbook-pro (a1b2c3d4)");
+        assert_eq!(named.display_label(), "macbook-pro");
+
+        let anon = entry_with(None);
+        assert_eq!(anon.log_label(), "a1b2c3d4");
+        assert_eq!(anon.display_label(), "a1b2c3d4");
+    }
+
+    /// Store lookups resolve to the entry's label while paired, and fall back to
+    /// the 8-char hex prefix for an id this store never knew (unpaired/revoked).
+    #[test]
+    fn store_label_lookup_resolves_known_and_unknown() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("peers.json");
+        let mut store = PeersStore::load_or_default(&path).expect("store");
+        store
+            .add(entry_with(Some("macbook-pro")))
+            .expect("seed entry");
+
+        let known = "a1b2c3d4e5f60718";
+        let unknown = "ffffffffffffffff";
+        assert_eq!(store.log_label_for(known), "macbook-pro (a1b2c3d4)");
+        assert_eq!(store.display_label_for(known), "macbook-pro");
+        assert_eq!(store.log_label_for(unknown), "ffffffff");
+        assert_eq!(store.display_label_for(unknown), "ffffffff");
+    }
 }

@@ -85,9 +85,10 @@ pub fn rotate_workspace_identity(workspace_root: &Path) -> Result<usize> {
         .map(|p| p.node_id.clone())
         .collect::<Vec<_>>()
     {
+        let label = store.log_label_for(&node_id);
         store
             .remove(&node_id)
-            .with_context(|| format!("unpair {node_id}"))?;
+            .with_context(|| format!("unpair {label} ({node_id})"))?;
     }
 
     Ok(unpaired)
