@@ -328,6 +328,16 @@ async fn delta_sync_inner(
     let peer_addr: iroh::EndpointAddr = peer.into();
     let peer_node_id = peer_addr.id;
     let peer_short = peer_node_id.fmt_short().to_string();
+    // Human label for the INFO lines below. Lazy: a quiet pass reads nothing.
+    // The `SyncProgress.peer` field keeps the short hex — the desktop resolves
+    // the alias client-side by prefix-matching it (`aliasFor`).
+    let peer_label = || {
+        crate::peers::PeersStore::load_or_default(&crate::peers::workspace_peers_path(
+            workspace_root,
+        ))
+        .map(|s| s.log_label_for(&peer_node_id.to_string()))
+        .unwrap_or_else(|_| peer_short.clone())
+    };
     progress.emit(SyncProgress::Connecting {
         peer: peer_short.clone(),
     });
@@ -372,7 +382,7 @@ async fn delta_sync_inner(
         info!(
             "delta sync: received {} ops from {}",
             received_count,
-            peer_node_id.fmt_short()
+            peer_label()
         );
         progress.emit(SyncProgress::ReceivedOps {
             peer: peer_short.clone(),
@@ -390,7 +400,7 @@ async fn delta_sync_inner(
         info!(
             "delta sync: pushed {} ops to {}",
             to_push.len(),
-            peer_node_id.fmt_short()
+            peer_label()
         );
         progress.emit(SyncProgress::PushedOps {
             peer: peer_short.clone(),
