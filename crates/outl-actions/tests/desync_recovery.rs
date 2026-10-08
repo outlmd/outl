@@ -172,7 +172,7 @@ fn legit_remote_delete_is_not_resurrected_while_lost_blocks_are_added() {
     let md_path = root.join("journals/2026-01-01.md");
     let sc_path = root.join("journals/2026-01-01.outl");
     let md_stale = format!("{}- gamma\n", fs::read_to_string(&md_path).unwrap());
-    let ghost = NodeId(ulid::Ulid::new());
+    let ghost = NodeId(ulid::Ulid::generate());
     let mut sc = outl_md::sidecar::read(&sc_path).unwrap();
     sc.blocks.push(outl_md::sidecar::SidecarBlock::from_text(
         ghost,
@@ -292,7 +292,7 @@ fn recovery_does_not_reproject_over_text_the_log_never_saw() {
     let md_path = root.join("journals/2026-04-04.md");
     let sc_path = root.join("journals/2026-04-04.outl");
     let md_offline = "- alpha reworded offline\n- gamma\n";
-    let ghost = NodeId(ulid::Ulid::new());
+    let ghost = NodeId(ulid::Ulid::generate());
     let mut sc = outl_md::sidecar::read(&sc_path).unwrap();
     sc.blocks = vec![
         outl_md::sidecar::SidecarBlock::from_text(alpha, 1, 0, "alpha reworded offline"),

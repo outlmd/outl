@@ -219,7 +219,7 @@ fn compaction_leaves_no_index_sidecar_behind() {
     // Every dead generation compaction must also clear.
     std::fs::write(ops.join(format!("ops-{actor}.idx")), "stale\n").unwrap();
     std::fs::write(ops.join(format!("ops-{actor}.nodes.idx")), "stale\n").unwrap();
-    let old_tmp = ops.join(format!(".ops-{actor}.idx.tmp.{}", ulid::Ulid::new()));
+    let old_tmp = ops.join(format!(".ops-{actor}.idx.tmp.{}", ulid::Ulid::generate()));
     std::fs::write(&old_tmp, "half written\n").unwrap();
     filetime::set_file_mtime(
         &old_tmp,

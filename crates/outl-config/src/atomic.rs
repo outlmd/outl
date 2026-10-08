@@ -104,7 +104,7 @@ fn tmp_path(path: &Path) -> PathBuf {
         "."
     });
     scratch.push(name);
-    scratch.push(format!("{SCRATCH_MARKER}{}", ulid::Ulid::new()));
+    scratch.push(format!("{SCRATCH_MARKER}{}", ulid::Ulid::generate()));
     path.with_file_name(scratch)
 }
 

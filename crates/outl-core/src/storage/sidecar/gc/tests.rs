@@ -59,7 +59,7 @@ fn the_undotted_generation_is_prunable() {
 fn an_old_write_temp_is_prunable() {
     let tmp = TempDir::new().unwrap();
     let a = ActorId::new();
-    let name = format!(".ops-{a}.idx.tmp.{}", ulid::Ulid::new());
+    let name = format!(".ops-{a}.idx.tmp.{}", ulid::Ulid::generate());
     let p = touch(tmp.path(), &name, "half written");
     age(&p, Duration::from_secs(60 * 60 * 48));
 
@@ -125,7 +125,7 @@ fn a_live_sidecar_for_an_unknown_actor_is_kept() {
 fn a_fresh_write_temp_is_refused() {
     let tmp = TempDir::new().unwrap();
     let a = ActorId::new();
-    let name = format!(".ops-{a}.idx.tmp.{}", ulid::Ulid::new());
+    let name = format!(".ops-{a}.idx.tmp.{}", ulid::Ulid::generate());
     touch(tmp.path(), &name, "in flight");
 
     let survey = survey(tmp.path()).unwrap();

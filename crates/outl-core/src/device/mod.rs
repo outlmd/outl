@@ -262,7 +262,7 @@ impl DeviceStore {
                 _ => return Ok(MachineId(id.to_string())),
             }
         }
-        let fresh = ulid::Ulid::new().to_string();
+        let fresh = ulid::Ulid::generate().to_string();
         let record: Vec<(&str, &str)> = match host {
             Some(now) => vec![("id", fresh.as_str()), ("host", now)],
             None => vec![("id", fresh.as_str())],

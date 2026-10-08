@@ -21,7 +21,7 @@ fn plant_debris(paths: &Paths) -> (PathBuf, PathBuf, PathBuf) {
     let legacy_nodes = paths.ops.join(format!("ops-{actor}.nodes.idx"));
     let scratch = paths
         .ops
-        .join(format!(".ops-{actor}.idx.tmp.{}", ulid::Ulid::new()));
+        .join(format!(".ops-{actor}.idx.tmp.{}", ulid::Ulid::generate()));
     std::fs::write(&legacy, "offsets nothing reads\n").expect("write legacy idx");
     std::fs::write(&legacy_nodes, "offsets nothing reads\n").expect("write legacy nodes idx");
     std::fs::write(&scratch, "half a write\n").expect("write scratch");
@@ -112,7 +112,9 @@ fn repair_still_leaves_every_op_log_in_ops_untouched() {
     seed_page(&root, "home", &["one", "two"]);
     plant_debris(&paths);
     // A peer's log, the file the guard must never treat as debris.
-    let peer = paths.ops.join(format!("ops-{}.jsonl", ulid::Ulid::new()));
+    let peer = paths
+        .ops
+        .join(format!("ops-{}.jsonl", ulid::Ulid::generate()));
     std::fs::write(&peer, "").expect("write peer log");
 
     let logs_before: std::collections::BTreeMap<PathBuf, Vec<u8>> = dir_snapshot(&paths.ops)
@@ -163,7 +165,7 @@ fn a_clean_ops_directory_produces_no_sidecar_finding() {
 fn actor_write_locks_are_counted_and_never_collected() {
     let (_tmp, root, paths) = fresh();
     seed_page(&root, "home", &["one"]);
-    let orphan = paths.ops.join(format!(".lock-{}", ulid::Ulid::new()));
+    let orphan = paths.ops.join(format!(".lock-{}", ulid::Ulid::generate()));
     std::fs::write(&orphan, "").expect("write orphan lock");
     backdate(&orphan, 400);
 

@@ -274,7 +274,7 @@ fn a_cloned_device_store_remints_and_forks_every_actor() {
 #[test]
 fn a_pre_binding_machine_id_is_stamped_in_place() {
     let (dir, store) = store();
-    let legacy = ulid::Ulid::new().to_string();
+    let legacy = ulid::Ulid::generate().to_string();
     std::fs::write(dir.path().join("machine-id"), format!("{legacy}\n")).unwrap();
     assert_eq!(store.machine_id().unwrap().as_str(), legacy);
     assert_eq!(store.machine_id().unwrap().as_str(), legacy);

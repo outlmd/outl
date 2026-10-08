@@ -17,7 +17,7 @@ pub struct NodeId(pub ulid::Ulid);
 impl NodeId {
     /// Generate a fresh `NodeId` using the current time and a random tail.
     pub fn new() -> Self {
-        Self(ulid::Ulid::new())
+        Self(ulid::Ulid::generate())
     }
 
     /// Deterministic [`NodeId`] derived from a page slug.
@@ -100,7 +100,7 @@ pub struct ActorId(pub ulid::Ulid);
 impl ActorId {
     /// Generate a fresh `ActorId`.
     pub fn new() -> Self {
-        Self(ulid::Ulid::new())
+        Self(ulid::Ulid::generate())
     }
 }
 

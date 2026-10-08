@@ -68,7 +68,10 @@ fn three_snapshots(
         std::fs::rename(&written, &own).expect("rename to the doctor's actor");
     }
 
-    let mut names = [ulid::Ulid::new().to_string(), ulid::Ulid::new().to_string()];
+    let mut names = [
+        ulid::Ulid::generate().to_string(),
+        ulid::Ulid::generate().to_string(),
+    ];
     names.sort();
     let loser = dir.join(format!("snap-{}.bin", names[0]));
     let winner = dir.join(format!("snap-{}.bin", names[1]));

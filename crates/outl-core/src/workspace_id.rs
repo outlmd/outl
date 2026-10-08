@@ -56,7 +56,7 @@ pub enum WorkspaceIdError {
 impl WorkspaceId {
     /// Generate a fresh workspace id.
     pub fn new() -> Self {
-        Self(ulid::Ulid::new().to_string())
+        Self(ulid::Ulid::generate().to_string())
     }
 
     /// Wrap a raw string as a workspace id (e.g. one received over the wire from

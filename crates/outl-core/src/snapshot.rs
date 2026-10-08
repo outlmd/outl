@@ -343,7 +343,7 @@ pub(crate) fn scratch_path(final_path: &Path) -> PathBuf {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    name.push_str(&format!(".tmp.{}", ulid::Ulid::new()));
+    name.push_str(&format!(".tmp.{}", ulid::Ulid::generate()));
     final_path.with_file_name(name)
 }
 

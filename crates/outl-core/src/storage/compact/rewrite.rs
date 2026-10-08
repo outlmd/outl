@@ -487,7 +487,7 @@ fn lock_every_actor(
 pub(super) fn backup_generation(root: &Path, stamp: &str) -> PathBuf {
     root.join(".outl")
         .join("compact-backup")
-        .join(format!("{stamp}-{}", ulid::Ulid::new()))
+        .join(format!("{stamp}-{}", ulid::Ulid::generate()))
 }
 
 fn copy_durable(from: &Path, to: &Path) -> Result<(), CompactError> {
@@ -520,7 +520,7 @@ fn rewrite_one(
     drops: &BTreeSet<crate::hlc::Hlc>,
 ) -> Result<(), CompactError> {
     let path = ops_path(ops_dir, actor);
-    let tmp = ops_dir.join(format!(".compact-{actor}-{}.tmp", ulid::Ulid::new()));
+    let tmp = ops_dir.join(format!(".compact-{actor}-{}.tmp", ulid::Ulid::generate()));
     let mut out = File::create(&tmp).map_err(|e| CompactError::Io {
         path: tmp.clone(),
         source: e,

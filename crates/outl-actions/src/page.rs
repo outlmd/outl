@@ -856,7 +856,7 @@ mod tests {
         slug: &str,
         kind: PageKind,
     ) -> NodeId {
-        let dup_id = NodeId(ulid::Ulid::new());
+        let dup_id = NodeId(ulid::Ulid::generate());
         let pos = position_for_new_last_child(w, NodeId::root());
         create_with_explicit_id(w, hlc, dup_id, NodeId::root(), pos, Some(slug)).unwrap();
         set_prop(w, hlc, dup_id, SLUG_KEY, PropValue::Text(slug.to_string())).unwrap();
