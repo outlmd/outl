@@ -52,7 +52,7 @@ outl-ws = { path = "crates/outl-ws", version = "0.12.0" }
 outl-tui = { path = "crates/outl-tui", version = "0.12.0" }
 
 # IDs and time
-ulid = { version = "1", features = ["serde"] }
+ulid = { version = "3", features = ["serde"] }
 
 # OS keychain for per-plugin secrets (`ctx.secrets`). Native stores on macOS /
 # Windows; on Linux the Secret Service via `async-secret-service` (zbus, pure
