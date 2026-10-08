@@ -235,7 +235,7 @@ jobs:
   # Produces a fully signed `.ipa` (Apple Distribution + App Store
   # provisioning profile) and uploads it as the `outl-ios-release`
   # artifact. `testflight.yml` consumes this artifact via
-  # `actions/download-artifact@v7` and only runs the altool upload —
+  # `actions/download-artifact@v8` and only runs the altool upload —
   # so the heavy build only happens once.
   #
   # Triggers:
