@@ -458,7 +458,7 @@ pub fn tokenize_table(text: &str) -> Option<TableView> {
         (0..cols)
             .map(|col| {
                 let cell = cells.get(col).map(String::as_str).unwrap_or("");
-                crate::tokenize_owned(&unescape_cell(cell))
+                crate::tokenize_owned(&cell_for_tokenizer(cell))
             })
             .collect()
     };
@@ -469,38 +469,95 @@ pub fn tokenize_table(text: &str) -> Option<TableView> {
     })
 }
 
-/// Whether `text` is a row of a table that `blocks` already carries.
+/// A cell's source as the tokenizer should read it.
 ///
-/// The one question reconcile's bulk-delete guard asks about a table.
+/// [`unescape_cell`] everywhere except inside a code span, where a
+/// backslash is literal: there only the pipe's own escape is consumed
+/// (GFM does the same), so `` `C:\\server` `` keeps both backslashes.
+/// The span boundaries mirror `emphasis::try_code`: one backtick, closed
+/// by the next one, non-empty.
+fn cell_for_tokenizer(cell: &str) -> String {
+    if !cell.contains('`') {
+        return unescape_cell(cell);
+    }
+    let mut out = String::with_capacity(cell.len());
+    let mut rest = cell;
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        match after.find('`') {
+            Some(close) if close > 0 => {
+                out.push_str(&unescape_cell(&rest[..open]));
+                out.push('`');
+                out.push_str(&after[..close].replace("\\|", "|"));
+                out.push('`');
+                rest = &after[close + 1..];
+            }
+            _ => break,
+        }
+    }
+    out.push_str(&unescape_cell(rest));
+    out
+}
+
+/// Every line of every table in `blocks`, counted, for reconcile's
+/// bulk-delete guard.
+///
 /// A sidecar written before tables were modelled holds each row as its
-/// own block, so the pass that consolidates them into one table block
-/// orphans **every** one of them — on a page that is mostly the table,
-/// that is 100% of its known blocks and `OrphanGuard` refuses the pass
-/// forever, freezing the page.
+/// own block, so the pass consolidating them orphans every one; on a
+/// page that is mostly the table, `OrphanGuard` would refuse forever.
+/// The exemption is positive evidence: an orphan's text has to be a
+/// table line on disk right now, consumed once per occurrence.
 ///
-/// Identical in shape to the pre-fence migration (issue #281) this
-/// mechanism was built for, and the exemption is just as narrow: it is
-/// positive evidence, not a bypass. The orphan's text has to **be** a
-/// line of a table that is on disk right now, so a `.md` that arrived
-/// truncated gets no discount, and a row whose cell the user also
-/// edited does not match and still counts.
-///
-/// Changes the *volume*, never the outcome: the row blocks are still
-/// trashed and logged, and their content lives in the new table block
-/// (and in the trash, restorable by id).
-pub(crate) fn row_carried_by(blocks: &[crate::parse::OutlineNode], text: &str) -> bool {
-    let needle = text.trim();
-    if needle.is_empty() {
-        return false;
+/// Uses [`table_span`] rather than [`parse_table`]: the rendering cap
+/// says nothing about whether a line is on disk, and applying it here
+/// refused the migration of exactly the tables `take_table` still
+/// consolidates.
+#[derive(Debug, Default)]
+pub(crate) struct TableLines(std::cell::RefCell<std::collections::HashMap<String, usize>>);
+
+impl TableLines {
+    pub(crate) fn from_blocks(blocks: &[crate::parse::OutlineNode]) -> Self {
+        fn walk(
+            blocks: &[crate::parse::OutlineNode],
+            counts: &mut std::collections::HashMap<String, usize>,
+        ) {
+            for block in blocks {
+                if block.text.contains('|') {
+                    let lines: Vec<&str> = block.text.lines().collect();
+                    if !lines.is_empty() && table_span(&lines, 0) == Some(lines.len()) {
+                        for line in lines {
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                *counts.entry(line.to_string()).or_default() += 1;
+                            }
+                        }
+                    }
+                }
+                walk(&block.children, counts);
+            }
+        }
+        let mut counts = std::collections::HashMap::new();
+        walk(blocks, &mut counts);
+        Self(std::cell::RefCell::new(counts))
     }
-    fn walk(blocks: &[crate::parse::OutlineNode], needle: &str) -> bool {
-        blocks.iter().any(|block| {
-            (parse_table(&block.text).is_some()
-                && block.text.lines().any(|line| line.trim() == needle))
-                || walk(&block.children, needle)
-        })
+
+    /// Whether `text` is a table line on disk not yet claimed by
+    /// another orphan. Each line on disk exempts at most one orphan, so
+    /// one row cannot vouch for a thousand deleted duplicates.
+    pub(crate) fn consume(&self, text: &str) -> bool {
+        let needle = text.trim();
+        if needle.is_empty() {
+            return false;
+        }
+        let mut counts = self.0.borrow_mut();
+        match counts.get_mut(needle) {
+            Some(n) if *n > 0 => {
+                *n -= 1;
+                true
+            }
+            _ => false,
+        }
     }
-    walk(blocks, needle)
 }
 
 #[cfg(test)]

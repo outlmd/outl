@@ -173,13 +173,14 @@ pub fn reconcile_md_with_guard(
         Some(_) => crate::frontmatter::legacy_fence_lines(&md_text),
         None => Default::default(),
     };
+    let table_lines = crate::table::TableLines::from_blocks(&new_ast.blocks);
     let (matches, orphans) = crate::matching::guard::match_blocks_guarded_except(
         &new_ast.blocks,
         &old_blocks,
         guard,
         |b| {
             crate::frontmatter::is_legacy_fence_block(&fence_lines, &b.text)
-                || crate::table::row_carried_by(&new_ast.blocks, &b.text)
+                || table_lines.consume(&b.text)
         },
     )?;
 

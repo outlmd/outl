@@ -128,11 +128,35 @@ export function tableElementToMarkdown(
   const rows = table.querySelectorAll?.(
     ":scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr",
   );
+  // Columns still occupied by a `rowspan` from an earlier row, keyed by
+  // column, with how many more rows they cover. Without this, a cell
+  // under a row-spanning header slid left into the spanned column.
+  const pending = new Map<number, number>();
   for (const row of Array.from(rows ?? [])) {
     const cells = cellElements(row as HTMLElement);
     if (cells.length === 0) continue;
     if (grid.length === 0) aligns = cells.map(alignOf);
-    grid.push(cells.flatMap((c) => cellText(c, convert)));
+    const out: string[] = [];
+    const skipSpanned = (): void => {
+      while ((pending.get(out.length) ?? 0) > 0) out.push("");
+    };
+    for (const cell of cells) {
+      skipSpanned();
+      const texts = cellText(cell, convert);
+      const raw = Number.parseInt(cell.getAttribute?.("rowspan") ?? "1", 10);
+      // Same ceiling as the spec's rowspan clamp.
+      const down = Number.isFinite(raw) ? Math.min(Math.max(1, raw), 65534) : 1;
+      for (const text of texts) {
+        if (down > 1) pending.set(out.length, down);
+        out.push(text);
+      }
+    }
+    skipSpanned();
+    for (const [col, left] of pending) {
+      if (left <= 1) pending.delete(col);
+      else pending.set(col, left - 1);
+    }
+    grid.push(out);
   }
   if (grid.length === 0) return "";
 

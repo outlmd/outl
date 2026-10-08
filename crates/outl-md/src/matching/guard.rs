@@ -193,7 +193,7 @@ pub fn match_blocks_guarded(
 ///   as a page property in the same pass;
 /// - **the pre-table sidecar** (issue #329), which recorded each table
 ///   row as a block; their content is the table block the same pass
-///   creates (`table::row_carried_by`).
+///   creates (`table::TableLines`).
 ///
 /// Both predicates are **positive evidence** rather than a bypass: each
 /// asks whether the orphan's content is on disk right now, so a
@@ -222,7 +222,7 @@ pub(crate) fn match_blocks_guarded_except(
     // refuses deletions that are nowhere near the ceiling.
     //
     // Harmless while the only predicate was `is_legacy_fence_block`,
-    // which exempts the handful of lines in a YAML fence. `row_carried_by`
+    // which exempts the handful of lines in a YAML fence. `TableLines`
     // routinely exempts dozens, which is what made the term observable:
     // a 60-row table plus 25 prose bullets, 20 of them cleared in an
     // editor, measured as "20 of 25 known, 80%" and was refused — an
@@ -447,9 +447,10 @@ mod tests {
             "precondition: unexempted, this is a 100% orphan rate"
         );
 
+        let lines = crate::table::TableLines::from_blocks(&ast.blocks);
         let (_, orphans) =
             match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
-                crate::table::row_carried_by(&ast.blocks, &b.text)
+                lines.consume(&b.text)
             })
             .expect("the migrating pass is allowed through");
         // The volume changed, the outcome did not: the rows are still
@@ -465,7 +466,7 @@ mod tests {
         let (old, _) = old_table_rows(30);
         let ast = parse("");
         let err = match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
-            crate::table::row_carried_by(&ast.blocks, &b.text)
+            crate::table::TableLines::from_blocks(&ast.blocks).consume(&b.text)
         })
         .expect_err("an empty file is exactly what the guard is for");
         assert!(matches!(err, MatchGuardError::BulkDelete { .. }), "{err:?}");
@@ -479,11 +480,18 @@ mod tests {
         let (old, md) = old_table_rows(30);
         let edited = md.replace("| 0 | x |", "| 0 | CHANGED |");
         let ast = parse(&edited);
-        let exempt = old
-            .iter()
-            .filter(|b| crate::table::row_carried_by(&ast.blocks, &b.text))
-            .count();
+        let lines = crate::table::TableLines::from_blocks(&ast.blocks);
+        let exempt = old.iter().filter(|b| lines.consume(&b.text)).count();
         assert_eq!(exempt, old.len() - 1, "the edited row is not carried");
+    }
+
+    #[test]
+    fn one_table_line_exempts_at_most_one_orphan() {
+        // A single row on disk cannot vouch for many deleted duplicates.
+        let ast = parse("| a | b |\n| --- | --- |\n| 1 | x |\n");
+        let lines = crate::table::TableLines::from_blocks(&ast.blocks);
+        let exempt = (0..1000).filter(|_| lines.consume("| 1 | x |")).count();
+        assert_eq!(exempt, 1);
     }
 
     #[test]
@@ -522,7 +530,7 @@ mod tests {
         }
         let ast = parse(&md);
         match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
-            crate::table::row_carried_by(&ast.blocks, &b.text)
+            crate::table::TableLines::from_blocks(&ast.blocks).consume(&b.text)
         })
         .expect("20 deletions out of 85 known blocks is an ordinary edit");
     }

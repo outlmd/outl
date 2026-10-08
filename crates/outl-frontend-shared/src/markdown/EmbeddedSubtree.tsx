@@ -61,7 +61,11 @@ export function EmbeddedSubtree(props: EmbeddedSubtreeProps): JSX.Element {
             >
               {/* An embedded table is a grid, not a wall of pipes.
                   Inert: an embed is a borrowed, read-only view. */}
-              <MarkdownTable table={node.table!} variant="inline" />
+              <MarkdownTable
+                table={node.table!}
+                variant="inline"
+                embeds={props.embeds}
+              />
             </Show>
           </span>
           <Show when={depth() < MAX_DEPTH && node.children.length > 0}>
