@@ -100,7 +100,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
 > `doc-sync-guard.sh` hook (`PostToolUse:Edit`) now fires the moment
 > `defaults.rs`, `action.rs`, `outl-tui/src/input/*`, or the desktop
 > frontend's shortcut wiring (`shortcuts.ts`, `action-handlers.ts`,
-> `BlockRow.tsx`) is touched — it requires the matching CLAUDE.md
+> `BlockRow.tsx`, `BlockEditor.tsx`) is touched — it requires the matching CLAUDE.md
 > tables to update in the same edit. We learned this the hard way on
 > the `Cmd+T` → `Cmd+J` swap: the binding moved silently because the
 > hook only watched line counts, not the catalog file. Don't disable

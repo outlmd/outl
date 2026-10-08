@@ -273,10 +273,16 @@ esac
 # handlers. Catches `Cmd+T` swaps that live entirely in JS or in
 # the per-block textarea `onKeyDown` (the `Cmd+Enter` race we just
 # undid is the canonical incident).
+#
+# `BlockEditor.tsx` is in the list because that textarea's `onKeyDown`
+# moved there when `BlockRow.tsx` was split; `BlockRow.tsx` now has no
+# keyboard code at all, so watching only it meant a one-line chord swap
+# fired nothing.
 case "$rel" in
   crates/outl-desktop/src/lib/shortcuts.ts \
   | crates/outl-desktop/src/lib/action-handlers.ts \
-  | crates/outl-desktop/src/components/BlockRow.tsx)
+  | crates/outl-desktop/src/components/BlockRow.tsx \
+  | crates/outl-desktop/src/components/BlockEditor.tsx)
     docs_to_check+=("crates/outl-desktop/CLAUDE.md")
     docs_to_check+=("crates/outl-shortcuts/CLAUDE.md")
     shortcut_change=1
