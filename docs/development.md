@@ -689,6 +689,12 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 | [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully | Downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Cron | Garbage-collects stale beta tags. | n/a |
 
+### Action pinning
+
+Every `uses:` points at a full commit SHA with the release tag in a comment (`actions/checkout@<sha> # v5.1.0`), so a moved or hijacked tag can't change what runs next to the release secrets.
+Don't hand-edit a SHA back to a tag: `.github/dependabot.yml` bumps the GitHub Actions pins weekly in one grouped PR, along with Cargo and Bun.
+To pin a new action, resolve the tag with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` and, when that returns a `tag` object, follow it to the commit.
+
 ### Runner sizing
 
 Every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`), never on GitHub-hosted ones.
