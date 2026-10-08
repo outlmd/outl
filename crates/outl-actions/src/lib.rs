@@ -143,8 +143,8 @@ pub use page::{
 pub use page_repair_namespaces::{repair_namespaced_titles, NamespaceTitleRepair};
 pub use page_repair_titles::repair_doubled_journal_titles;
 pub use paste::{
-    looks_like_outline, normalize_external_syntax, paste_markdown, paste_plain, PasteAnchor,
-    PasteOutcome,
+    looks_like_outline, looks_like_table, looks_like_tabular, looks_structured,
+    normalize_external_syntax, paste_markdown, paste_plain, PasteAnchor, PasteOutcome,
 };
 pub use person::{search_persons, PERSON_TYPE, TYPE_KEY};
 pub use property::known_keys;

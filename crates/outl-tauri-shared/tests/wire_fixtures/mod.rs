@@ -47,8 +47,19 @@ pub fn outline_node() -> OutlineNode {
         collapsed: true,
         properties: vec![("owner".into(), "avelino".into())],
         tokens: Vec::new(),
+        // Populated, not `None`: a key behind `skip_serializing_if` that
+        // is never emitted cannot be compared against the TypeScript
+        // mirror (see `wire_types.rs` → "Adding a DTO").
+        table: Some(table_view()),
         children: Vec::new(),
     }
+}
+
+/// A table block's reading, built through `outl_md::tokenize_table` so
+/// the fixture cannot disagree with what the backend actually emits.
+pub fn table_view() -> outl_md::TableView {
+    outl_md::tokenize_table("| Route | Pax |\n| --- | --: |\n| SP | 1203 |")
+        .expect("the fixture is a table")
 }
 
 pub fn backlink_crumb() -> BacklinkCrumb {

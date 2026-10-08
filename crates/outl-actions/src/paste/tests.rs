@@ -369,3 +369,94 @@ fn paste_plain_never_splits_or_converts() {
     assert_eq!(kids.len(), 1, "plain paste is one block, never split");
     assert_eq!(workspace.block_text(kids[0].0).as_deref(), Some(raw));
 }
+
+// ---- tabular paste -----------------------------------------------------
+//
+// The user's words on #329: "if we copy tabular data from somewhere we
+// should convert it to our table format on paste". These pin both
+// sources — a spreadsheet's tab-separated clipboard, and a markdown
+// table copied from a README or an assistant's reply — landing as ONE
+// block instead of one per row.
+
+#[test]
+fn tab_separated_data_pastes_as_one_table_block() {
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("host")).unwrap();
+    // What Excel / Sheets / Numbers / `psql` put on the clipboard.
+    let tsv = "Route\tPax\nSP → RJ\t1203\nBH → CWB\t12";
+    paste_markdown(&mut workspace, &hlc, PasteAnchor::AsLastChildOf(host), tsv).unwrap();
+
+    let kids = crate::tree::children_of(&workspace, host);
+    assert_eq!(
+        kids.len(),
+        1,
+        "tabular data is one table, not one block per row"
+    );
+    let text = workspace.block_text(kids[0].0).unwrap_or_default();
+    let table = outl_md::parse_table(&text).expect("the block is a table");
+    assert_eq!(table.header, vec!["Route", "Pax"]);
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.rows[0], vec!["SP → RJ", "1203"]);
+}
+
+#[test]
+fn a_pasted_markdown_table_stays_one_block() {
+    // Copied from a README / a chat reply. Before `looks_like_table`
+    // this reached the paragraph path and landed as four blocks.
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("host")).unwrap();
+    let md = "| Name | Age |\n| --- | --- |\n| Ana | 30 |\n| Roberta | 7 |";
+    paste_markdown(&mut workspace, &hlc, PasteAnchor::AsLastChildOf(host), md).unwrap();
+
+    let kids = crate::tree::children_of(&workspace, host);
+    assert_eq!(kids.len(), 1);
+    let text = workspace.block_text(kids[0].0).unwrap_or_default();
+    assert_eq!(outl_md::parse_table(&text).expect("a table").rows.len(), 2);
+}
+
+#[test]
+fn a_table_pasted_among_prose_keeps_its_rows_together() {
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("host")).unwrap();
+    let md = "the numbers so far\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nand a closing line";
+    paste_markdown(&mut workspace, &hlc, PasteAnchor::AsLastChildOf(host), md).unwrap();
+
+    let kids = crate::tree::children_of(&workspace, host);
+    let texts: Vec<String> = kids
+        .iter()
+        .map(|(id, _)| workspace.block_text(*id).unwrap_or_default())
+        .collect();
+    assert_eq!(texts.len(), 3, "prose, table, prose — got {texts:?}");
+    assert!(outl_md::parse_table(&texts[1]).is_some(), "{:?}", texts[1]);
+}
+
+#[test]
+fn tab_indented_text_is_not_turned_into_a_table() {
+    // The false positive that would hurt: pasting tab-indented code
+    // must keep today's behaviour (one block per line), not be
+    // rearranged into a grid.
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("host")).unwrap();
+    let code = "\tif x:\n\t\treturn y";
+    paste_markdown(&mut workspace, &hlc, PasteAnchor::AsLastChildOf(host), code).unwrap();
+
+    let kids = crate::tree::children_of(&workspace, host);
+    for (id, _) in &kids {
+        let text = workspace.block_text(*id).unwrap_or_default();
+        assert!(
+            outl_md::parse_table(&text).is_none(),
+            "{text:?} became a table"
+        );
+    }
+}
+
+#[test]
+fn plain_paste_never_converts_tabular_data() {
+    // "Paste without formatting" means without formatting.
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("host")).unwrap();
+    let tsv = "a\tb\n1\t2";
+    paste_plain(&mut workspace, &hlc, PasteAnchor::AsLastChildOf(host), tsv).unwrap();
+    let kids = crate::tree::children_of(&workspace, host);
+    assert_eq!(workspace.block_text(kids[0].0).as_deref(), Some(tsv));
+}

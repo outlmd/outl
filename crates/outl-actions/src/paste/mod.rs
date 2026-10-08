@@ -26,6 +26,7 @@
 //! | `{{video: url}}` and other unknown `{{…}}` | (stripped) | various |
 //! | `id:: 01HXY…` (alone on a line) | (line dropped) | Logseq |
 //! | 4-space indent | 2-space indent | Roam/Notion export |
+//! | tab-separated rows | a markdown table | spreadsheet / SQL client / `column -t` |
 //!
 //! The unknown-token strip is deliberate: blocks come into outl clean.
 //! We never invent information; we only delete tokens that aren't
@@ -89,7 +90,7 @@ use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
 
-pub use detect::looks_like_outline;
+pub use detect::{looks_like_outline, looks_like_table, looks_like_tabular, looks_structured};
 pub use normalize::normalize_external_syntax;
 
 use detect::split_paragraphs;
@@ -181,7 +182,24 @@ fn paste_markdown_inner(
     // pasting "look at {{video: https://x}}!" into a block would
     // land a mangled string, not what they copied. Normalisation is
     // only legitimate when we're actually going to parse bullets.
-    if !looks_like_outline(raw) {
+    // Tabular data first: a spreadsheet, a database client, a terminal
+    // that prints columns all put **tab-separated** lines on the
+    // clipboard, and that means one table — not one block per row,
+    // which is what the paragraph path below would make of it.
+    // Converting here rather than in a branch of its own is what keeps
+    // the two tabular sources on one path: the result *is* a markdown
+    // table, so `looks_like_table` claims it and the parser builds the
+    // same single block a pasted markdown table builds.
+    //
+    // `normalize_external_syntax` later collapses the column padding
+    // `render_table` wrote. Deliberate — the cells are what carry the
+    // data, and reformatting the user's file is not this function's job
+    // (the TUI pads when it paints, the GUI clients hand the cells to
+    // `<table>`).
+    let tabular = outl_md::tsv_to_markdown(raw);
+    let raw = tabular.as_deref().unwrap_or(raw);
+
+    if !looks_like_outline(raw) && !looks_like_table(raw) {
         // Plain text (no bullets). If it has two or more blank-line
         // separated paragraphs, graft one block per paragraph so a
         // pasted chat reply lands as a readable outline instead of one

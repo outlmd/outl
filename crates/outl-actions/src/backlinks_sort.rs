@@ -97,6 +97,7 @@ mod tests {
                 collapsed: false,
                 properties: Vec::new(),
                 tokens: Vec::new(),
+                table: None,
                 children: Vec::new(),
             },
             source_block_path: Vec::new(),

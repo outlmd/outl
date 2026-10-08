@@ -30,6 +30,56 @@ pub fn looks_like_outline(s: &str) -> bool {
     })
 }
 
+/// True when the payload carries a markdown table anywhere in it.
+///
+/// The second gate on the tree-conversion pipeline, beside
+/// [`looks_like_outline`]. Without it a pasted table — from a README, a
+/// web page, an assistant's reply — reaches `split_paragraphs` and
+/// lands as one block **per row**, which is the shape the user then has
+/// to undo by hand.
+///
+/// Asks `outl_md::table_span` at every line rather than looking for a
+/// `|`, so the answer cannot disagree with what the parser will do with
+/// the same text. A line of prose carrying a pipe is not a table to
+/// either of them.
+///
+/// Mirrored in TypeScript (`@outl/shared/paste::looksLikeTable`) for
+/// the same reason `looks_like_outline` is: the client gates the Tauri
+/// round-trip before the browser splices the text in place. **Keep both
+/// in lockstep.**
+pub fn looks_like_table(s: &str) -> bool {
+    let lines: Vec<&str> = s.lines().collect();
+    (0..lines.len()).any(|start| outl_md::table_span(&lines, start).is_some())
+}
+
+/// True when the payload is tab-separated tabular data.
+///
+/// Delegates to `outl_md::from_delimited`, which is the single owner of
+/// that gate (two lines or more, the same field count on every line,
+/// no line starting with a tab) and also does the conversion — asking
+/// it rather than re-deriving the rule is what keeps a client's "should
+/// I route this" from disagreeing with the pipeline's "is this a
+/// table".
+pub fn looks_like_tabular(s: &str) -> bool {
+    outl_md::from_delimited(s, '\t').is_some()
+}
+
+/// Whether the payload carries structure [`super::paste_markdown`] will
+/// act on — an outline, a markdown table, or tabular data.
+///
+/// The question a client asks **before** calling the pipeline: a
+/// payload with no structure is better spliced where the caret already
+/// is (the TUI's Insert mode, the browser's native paste) than sent on
+/// a round trip that would only hand it back unchanged.
+///
+/// One predicate rather than three at each call site, because three
+/// copies of "is this worth converting" is how one client learns about
+/// tables and another doesn't. Mirrored by
+/// `@outl/shared/paste::choosePasteRoute`'s `structured` arm.
+pub fn looks_structured(s: &str) -> bool {
+    looks_like_outline(s) || looks_like_table(s) || looks_like_tabular(s)
+}
+
 /// Split pasted plain text into one block per non-blank line.
 ///
 /// In a `text/plain` clipboard a paragraph is a **single line** — the
@@ -66,6 +116,37 @@ mod tests {
         assert!(!looks_like_outline("just words"));
         assert!(!looks_like_outline("multi\nline\ntext"));
         assert!(!looks_like_outline(""));
+    }
+
+    #[test]
+    fn table_detector_finds_a_table_anywhere_in_the_payload() {
+        assert!(looks_like_table("| a | b |\n| --- | --- |"));
+        assert!(looks_like_table(
+            "some prose\n\n| a | b |\n| --- | --- |\n| 1 | 2 |"
+        ));
+        assert!(looks_like_table("a | b\n--- | ---"));
+    }
+
+    #[test]
+    fn table_detector_is_false_on_prose_that_carries_a_pipe() {
+        // The false positive that would matter: this must stay on the
+        // paragraph path, one block per line.
+        assert!(!looks_like_table("run `a | b` in the shell"));
+        assert!(!looks_like_table("a | b\nc | d"));
+        assert!(!looks_like_table("plain words"));
+        assert!(!looks_like_table(""));
+    }
+
+    #[test]
+    fn structured_covers_all_three_shapes_and_nothing_else() {
+        assert!(looks_structured("- a bullet"));
+        assert!(looks_structured("| a | b |\n| --- | --- |"));
+        assert!(looks_structured("Route\tPax\nSP\t1203"));
+        // Prose stays unstructured: a round trip would hand it back
+        // unchanged, so the caller splices it where the caret is.
+        assert!(!looks_structured("one sentence"));
+        assert!(!looks_structured("a | b\nc | d"));
+        assert!(!looks_structured("\tif x:\n\treturn y"));
     }
 
     #[test]

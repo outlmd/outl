@@ -59,6 +59,19 @@ pub enum BlockRowKind {
     /// A line inside an open fence — preserved literally, not
     /// tokenized as inline markdown.
     CodeFenceBody,
+    /// A row of a markdown table (header or body). Only emitted when
+    /// the block's **whole** text is a table — a block that merely
+    /// contains a pipe is prose, and painting it as a grid would be a
+    /// lie about what the user wrote.
+    ///
+    /// Row 0 of a table block is still [`Self::Bullet`], for the same
+    /// reason a fence opener is: the `- ` glyph is what anchors the
+    /// block in the outline.
+    TableRow,
+    /// A table's delimiter row (`| --- | :-: |`). Carries the column
+    /// alignment, not content — renderers draw it as a rule, and the
+    /// GUI clients drop it entirely in favour of `<table>` borders.
+    TableRule,
 }
 
 /// Convert a char index into a `(line, col)` pair using `\n` as the
@@ -152,6 +165,11 @@ pub fn block_to_rows<'a>(
 
     let cursor_lc = cursor_char.map(|c| char_to_line_col(text, c));
 
+    // Whole-block check, not per-line: see `BlockRowKind::TableRow`.
+    // `table_span` short-circuits on the first line for every block
+    // that carries no pipe, which is almost all of them.
+    let is_table = crate::table::table_span(&lines, 0) == Some(lines.len());
+
     let mut rows = Vec::with_capacity(lines.len());
     let mut in_fence = false;
     for (idx, line) in lines.iter().enumerate() {
@@ -163,6 +181,20 @@ pub fn block_to_rows<'a>(
         // `- ` glyph that anchors the block in the outline.
         let kind = if idx == 0 {
             BlockRowKind::Bullet
+        } else if is_table {
+            // Position, not shape. `table_span` requires the rule at
+            // index 1 and `is_table` requires the span to cover the
+            // whole text, so the rule is *always* there and nowhere
+            // else. Asking `is_delimiter_row` of every row instead made
+            // any body row whose cells are all dash-shaped read as a
+            // rule — a spreadsheet using `-` for "no data" had its data
+            // row painted as `├───┼───┤`, so the cells vanished from the
+            // screen while staying on disk and in the log.
+            if idx == 1 {
+                BlockRowKind::TableRule
+            } else {
+                BlockRowKind::TableRow
+            }
         } else if is_marker {
             BlockRowKind::CodeFenceMarker
         } else if in_fence {
@@ -244,6 +276,45 @@ mod tests {
         assert_eq!(rows[0].text, "```lisp");
         assert_eq!(rows[1].kind, BlockRowKind::CodeFenceBody);
         assert_eq!(rows[2].kind, BlockRowKind::CodeFenceMarker);
+    }
+
+    #[test]
+    fn a_table_blocks_rows_are_classified() {
+        let rows = block_to_rows("| a | b |\n| --- | --- |\n| 1 | 2 |", 0, None);
+        assert_eq!(rows.len(), 3);
+        // Row 0 keeps the bullet — the glyph anchors the block, same
+        // rule as a fence opener.
+        assert_eq!(rows[0].kind, BlockRowKind::Bullet);
+        assert_eq!(rows[1].kind, BlockRowKind::TableRule);
+        assert_eq!(rows[2].kind, BlockRowKind::TableRow);
+    }
+
+    #[test]
+    fn a_body_row_of_dashes_is_not_the_rule() {
+        // A spreadsheet using `-` as the "no data" placeholder. Its
+        // cells are all rule-shaped, so classifying by shape painted the
+        // user's data row as a horizontal rule and the values
+        // disappeared from the screen.
+        let rows = block_to_rows("| a | b |\n| --- | --- |\n| - | - |", 0, None);
+        assert_eq!(rows[1].kind, BlockRowKind::TableRule);
+        assert_eq!(rows[2].kind, BlockRowKind::TableRow, "the data row is data");
+    }
+
+    #[test]
+    fn a_block_that_merely_contains_a_pipe_is_not_a_table() {
+        // Painting this as a grid would be a lie about what the user
+        // wrote, so every row after the first stays Continuation.
+        let rows = block_to_rows("a | b\nc | d", 0, None);
+        assert_eq!(rows[1].kind, BlockRowKind::Continuation);
+    }
+
+    #[test]
+    fn a_table_with_a_trailing_sentence_is_not_a_table() {
+        // The whole text has to be the table; otherwise the sentence
+        // would render as a row.
+        let rows = block_to_rows("| a |\n| --- |\nand a note", 0, None);
+        assert_eq!(rows[1].kind, BlockRowKind::Continuation);
+        assert_eq!(rows[2].kind, BlockRowKind::Continuation);
     }
 
     #[test]

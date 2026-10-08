@@ -203,6 +203,11 @@ TUI-specific contracts worth remembering:
   The chrome lives in **`view::inline::render_pretty_block_text_impl`** and is the **only owner** of the bar + checkbox + token rendering pipeline;
   the outline view's `BlockRowKind::Bullet if single_line_pretty` branch delegates to it directly (one owner, every caller wraps).
   The bar composes with the task checkbox (`│ ☐ foo`) and `view::inline::split_block_prefixes` accepts the prefixes in **either order**, so `"> TODO foo"` and `"TODO > foo"` render the same.
+- **A block whose whole text is a markdown table draws as a grid** (`view/table.rs`).
+  The block is re-emitted through `outl_md::render_table` before `block_to_rows` splits it, so every column is padded to its widest cell and the `│` separators line up down the grid; the delimiter row is drawn as `├────┼────┤` (dim) by substituting one character per input character, which is what keeps its junctions under the row above.
+  Cell contents go through the inline tokenizer, so a `[[ref]]` or `**bold**` inside a cell renders like it does anywhere else, and `\|` shows as `|` (via `outl_md::unescape_cell`, the shared owner of that decision).
+  **Pretty only** — the cursor modes render the raw source, because padding the user never typed would put the caret on the wrong character, the same rule `render_markdown_inline` follows.
+  A table wider than the pane wraps instead of scrolling sideways; that gap is recorded as `Capability::TableRendering` → `Partial` in `outl_shortcuts::capability_support`, with the wording the user sees.
 - **Task states draw as `☐` (TODO), `◐` (DOING), `☑` (DONE).**
   DOING shares `theme.todo_open`'s colour rather than claiming a third palette entry — it is unfinished work and the glyph already says which kind.
   Only DONE dims and strikes the body.
@@ -348,6 +353,7 @@ src/
 │   ├── outline.rs       # outline rendering (render_outline, render_block, emit_block_lines)
 │   ├── row_chrome.rs    # what a block draws around its text: fold slot, ⚡, the body pad, `key:: value` rows
 │   ├── embed.rs         # `!((blk-X))` expansion: the read-only subtree a block draws below itself
+│   ├── table.rs         # the pretty reading of a table block: column padding, `│` separators, a drawn rule row
 │   ├── wrap.rs          # width-aware word wrap of styled spans (push_wrapped)
 │   ├── overlays.rs      # every modal popup
 │   ├── properties.rs    # the `g p` property editor popup

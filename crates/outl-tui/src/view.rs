@@ -10,6 +10,8 @@
 //! - `backlinks` — the inline backlinks section below the outline.
 //! - `inline` — span-level markdown (used by `outline` and
 //!   `backlinks`).
+//! - `table` — the pretty reading of a markdown-table block: column
+//!   padding, `│` separators, a drawn rule row.
 //!
 //! Only `render_app` is callable from outside the module — the rest is
 //! `pub(crate)` for cross-file reuse inside `view/`.
@@ -24,6 +26,7 @@ pub(crate) mod overlays;
 mod properties;
 pub(crate) mod row_chrome;
 mod sidebar;
+mod table;
 mod toasts;
 mod warnings_banner;
 mod wrap;

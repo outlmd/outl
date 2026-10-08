@@ -153,12 +153,22 @@ pub fn reconcile_md_with_guard(
     // Refusing here refuses before any op exists, since `match_blocks`
     // is pure.
     //
-    // One exemption from the *count*, never from the deletion: a sidecar
-    // from before the fence parser (issue #281) holds each YAML line as a
-    // block, and those orphan on the first pass. They are the fence still on
-    // disk, logged as `page-frontmatter` below, so counting them would
-    // refuse the one pass that migrates the page. Only asked when this `.md`
-    // has a fence, so a truncated file (no fence, no body) gets no discount.
+    // Two exemptions from the *count*, never from the deletion, and both
+    // the same shape: an orphan whose content this very pass keeps
+    // somewhere else is not evidence of a truncated file.
+    //
+    // 1. A sidecar from before the fence parser (issue #281) holds each
+    //    YAML line as a block, and those orphan on the first pass. They
+    //    are the fence still on disk, logged as `page-frontmatter` below.
+    //    Only asked when this `.md` has a fence, so a truncated file (no
+    //    fence, no body) gets no discount.
+    // 2. A sidecar from before tables were modelled (issue #329) holds
+    //    each table row as a block, and consolidating them into one
+    //    table block orphans every one. On a page that is mostly the
+    //    table that is 100% of its known blocks, so the guard would
+    //    refuse the migrating pass forever and freeze the page. The
+    //    evidence is positive: the orphan's text must *be* a line of a
+    //    table that is on disk right now.
     let fence_lines = match new_ast.frontmatter {
         Some(_) => crate::frontmatter::legacy_fence_lines(&md_text),
         None => Default::default(),
@@ -167,7 +177,10 @@ pub fn reconcile_md_with_guard(
         &new_ast.blocks,
         &old_blocks,
         guard,
-        |b| crate::frontmatter::is_legacy_fence_block(&fence_lines, &b.text),
+        |b| {
+            crate::frontmatter::is_legacy_fence_block(&fence_lines, &b.text)
+                || crate::table::row_carried_by(&new_ast.blocks, &b.text)
+        },
     )?;
 
     if !orphans.is_empty() {

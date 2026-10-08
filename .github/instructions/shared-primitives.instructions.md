@@ -93,6 +93,20 @@ Two rules the module owns: a deleted block stays in its page's history (a histor
 | Why a restore would refuse (single owner; `list` and `restore` both ask) | `outl_actions::trash::refusal_for` | `crates/outl-actions/src/trash.rs` |
 | The parent a node sat under just before it was trashed (folded from the log, never `Move.old_parent`) | `outl_actions::trash::parent_at_deletion` | `crates/outl-actions/src/trash.rs` |
 
+Recently added — check these before writing a parallel **table** helper (catalog: `docs/primitives-markdown.md` → "Parse / render", "View helpers", "Cross-runtime TS contracts"):
+
+| Intent | Use this | File |
+|---|---|---|
+| Read a block's text as a table (cells + per-column alignment); does a table start at this line | `outl_md::table::parse_table` / `table_span` / `is_delimiter_row` | `crates/outl-md/src/table.rs` |
+| Read it with every **cell tokenized**, for a client that renders from tokens (`BlockNode.table`) | `outl_md::table::tokenize_table` → `TableView` | `crates/outl-md/src/table.rs` |
+| Write a table back as canonical, column-padded markdown — where outl **creates** one (a tabular paste, the TUI grid), never to reformat what the user typed | `outl_md::table::render_table` | `crates/outl-md/src/table.rs` |
+| Split a row into cells (escape-aware), or resolve a cell for display (`\|` → `|`) | `outl_md::table::split_cells` / `unescape_cell` | `crates/outl-md/src/table.rs` |
+| Tab-separated clipboard text → a markdown table, and the owner of the "is this tabular" gate both runtimes answer from | `outl_md::table::tsv_to_markdown` / `from_delimited` | `crates/outl-md/src/table.rs` |
+| Does a payload carry structure the paste pipeline will act on (outline, markdown table, tabular)? | `outl_actions::paste::looks_structured` | `crates/outl-actions/src/paste/detect.rs` |
+| Render a block's `table` as an HTML `<table>`; convert a clipboard `<table>` to markdown; detect either in pasted text | `<MarkdownTable />` (`@outl/shared/markdown`), `tableElementToMarkdown` / `looksLikeTable` / `looksLikeTabular` (`@outl/shared/paste`) | `crates/outl-frontend-shared/src/markdown/MarkdownTable.tsx`; `crates/outl-frontend-shared/src/paste/table.ts` |
+
+**Block a second table parser.** A table is not a new block kind and has no `Op`: it is a block whose text carries the pipe rows, like a fence or a `> ` quote. A client that splits the pipes itself also has no tokenizer, so a cell's `[[ref]]` renders as literal text — read `BlockNode.table`.
+
 Recently added — check these before writing a parallel reminder helper (catalog: `docs/primitives-actions.md` → "Reminders"):
 
 | Intent | Use this | File |
@@ -201,6 +215,6 @@ Frontend shared primitives (`@outl/shared`) — canonical home is [`crates/outl-
 | Wire the Tauri webview's OS file drag-drop to a block-resolved handler; desktop and mobile both consume this so the drop geometry (physical→CSS pixels, `data-block-id` hit-test) can't drift | `installFileDrop(handlers)`, `physicalToCss`, `blockIdFromElement` / `blockIdAtPhysical`, `joinAssetMarkdowns`, `appendMarkdownToBlock` (`@outl/shared/drag-drop`) | `crates/outl-frontend-shared/src/drag-drop/index.ts` |
 | Import a dropped file **without** creating a block, returning the ready-to-insert markdown link for the caller to splice at the drop target | `importAssetFile(sourcePath) → Promise<ImportedAsset>` (`@outl/shared/api/commands`) | `crates/outl-frontend-shared/src/api/commands.ts`; backend `import_asset_file` wraps `outl_actions::import_asset` |
 | Render the "Nested pages" list — every page under the open page's namespace, indented by `depth`, one click opens it. Pure: the hierarchy arrives decided from `outl_actions::namespace`, so no client splits a title on `/` | `<NestedPages children= … onOpen= … />` (`@outl/shared/namespace`) | `crates/outl-frontend-shared/src/namespace/NestedPages.tsx` |
-| Detect whether pasted plain text looks like an outline; convert a textarea's UTF-16 `selectionStart` to a codepoint offset before splicing (no Rust mirror — a supplementary-plane char otherwise shifts the splice) | `looksLikeOutline` / `utf16OffsetToCharOffset` (`@outl/shared/paste`) | `crates/outl-frontend-shared/src/paste/index.ts`; `looksLikeOutline` mirrors `outl_actions::paste::looks_like_outline` |
+| Detect whether pasted plain text looks like an outline / a markdown table / tab-separated data; convert a textarea's UTF-16 `selectionStart` to a codepoint offset before splicing (no Rust mirror — a supplementary-plane char otherwise shifts the splice) | `looksLikeOutline` / `looksLikeTable` / `looksLikeTabular` / `utf16OffsetToCharOffset` (`@outl/shared/paste`) | `crates/outl-frontend-shared/src/paste/index.ts`; the three detectors mirror `outl_actions::paste::looks_like_outline` / `looks_like_table` / `looks_like_tabular` |
 | Write a `Palette` onto `<html>` as `--color-outl-*` CSS custom properties plus `<body>` background/foreground and `color-scheme` | `applyPaletteToRoot` (`@outl/shared/theme`) | `crates/outl-frontend-shared/src/theme/palette.ts`; its `color-scheme` pick uses a hand-synced `isLightHex` copy of `outl_theme::Palette::is_light()` (`crates/outl-theme/src/palette.rs`) — a method can't cross the Tauri wire, so two implementations by design |
 | Detect a `[[` / `((` autocomplete trigger under the caret + the accept/insert helpers; auto-pair `(`/`[`/`{` and step over an auto-inserted closer (wired via `onBeforeInput` since iOS soft keyboards skip per-char `keydown`) | `detectRefContext`, `autoClose/DeletePair`, `insertPair/Text`, `applySuggestion`, `autoPairBracket` (`@outl/shared/autocomplete`) | `crates/outl-frontend-shared/src/autocomplete/index.ts`; mirrors `outl_tui::actions::overlay::detect_trigger` + `outl_tui::input::insert` |

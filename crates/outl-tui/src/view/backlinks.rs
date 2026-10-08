@@ -296,6 +296,7 @@ mod tests {
             collapsed: false,
             properties,
             tokens: Vec::new(),
+            table: None,
             children: Vec::new(),
         }
     }

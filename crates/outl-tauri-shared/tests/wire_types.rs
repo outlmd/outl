@@ -66,7 +66,7 @@ use outl_tauri_shared::state::{
 
 use wire_fixtures::{
     backlink, backlink_crumb, md_ahead_of_log, namespace_child, outline_node, page_meta, page_view,
-    parse_warning,
+    parse_warning, table_view,
 };
 use wire_pin::assert_wire_shape;
 
@@ -82,6 +82,14 @@ fn page_meta_matches_its_interface() {
 #[test]
 fn outline_node_matches_block_node() {
     assert_wire_shape(&outline_node(), "BlockNode", &[]);
+}
+
+/// A block whose text is a table carries the backend's reading of it.
+/// Without this pin the field is `undefined` on the client and every
+/// table falls silently back to a wall of pipes.
+#[test]
+fn table_view_matches_its_interface() {
+    assert_wire_shape(&table_view(), "TableView", &[]);
 }
 
 #[test]

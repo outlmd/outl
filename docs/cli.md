@@ -96,7 +96,7 @@ A **success** reply is content-only: `content[].text` carries the payload as com
 Those two flatten because their payload is `{slug, md}` and you supplied the slug.
 The journal reads (`outl_daily_today`, `outl_daily_get`) stay JSON on purpose: their `outline` carries the block ids, a rendered `.md` has none, and `outl_block_update` / `_move` / `_delete` / `_toggle_todo` all need one.
 There is no `structuredContent` on success — the text already carries the full payload as JSON, so an envelope around it is a duplicate.
-The MCP copy also drops fields only a GUI renderer reads (an outline node's `tokens`, and default-valued `collapsed` / `todo` / empty `properties`); the CLI's own `--json` output keeps them.
+The MCP copy also drops fields only a GUI renderer reads (an outline node's `tokens` and `table`, and default-valued `collapsed` / `todo` / empty `properties`); the CLI's own `--json` output keeps them.
 That pruning applies only to outline nodes carrying an `id`, so `outl_export_json`'s parser AST comes back exactly as the parser produced it.
 An **error** reply is the deliberate exception: it sets `isError: true` and keeps `structuredContent: { ok: false, error }`.
 That lets a caller read `error.data` — e.g. `PAGE_MARKDOWN_AHEAD_OF_LOG`'s `path` / `lines` / `sample` / `recovery_command` — instead of parsing prose.

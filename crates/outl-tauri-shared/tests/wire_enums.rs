@@ -78,6 +78,22 @@ fn parse_warning_kind_matches_its_union() {
     assert_string_enum(&variants, "ParseWarningKind");
 }
 
+/// A column's alignment reaches the client as a bare string, so the
+/// union has to carry all four. Reading `"none"` as left-aligned is the
+/// client's choice; not *knowing* about `"center"` is a silently
+/// mis-rendered table.
+#[test]
+fn column_align_matches_its_union() {
+    use outl_md::ColumnAlign as A;
+    let variants = wire_variants!(A;
+        A::None => A::None,
+        A::Left => A::Left,
+        A::Center => A::Center,
+        A::Right => A::Right,
+    );
+    assert_string_enum(&variants, "ColumnAlign");
+}
+
 #[test]
 fn page_kind_matches_its_union() {
     use outl_actions::PageKind as K;
@@ -161,6 +177,7 @@ fn todo_state_matches_its_union() {
                 collapsed: false,
                 properties: Vec::new(),
                 tokens: Vec::new(),
+                table: None,
                 children: Vec::new(),
             };
             match serde_json::to_value(&node).expect("node serializes")["todo"] {

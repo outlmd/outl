@@ -133,7 +133,7 @@ Read `warning.kind` before wording anything.
 
 | Kind | What actually happened |
 |---|---|
-| `unrecognized_block_marker` | A line outside the dialect, kept verbatim as a block. |
+| `unrecognized_block_marker` | A line outside the dialect, kept verbatim as a block. A **table** is no longer one of these — it is modelled ([Tables](markdown-format.md#tables)); a table-looking run with no delimiter row still is. |
 | `remind_missing_anchor` | `remind:: every 1h` — a repeat with nothing to repeat from. |
 | `remind_invalid_time` | `remind:: 25:00` — not a wall-clock time the dialect recognises. |
 | `remind_invalid_interval` | `remind:: 10am every 30s` — below the 1min floor, or a bad unit. |

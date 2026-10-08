@@ -2,6 +2,7 @@ import { For, JSX, Show } from "solid-js";
 
 import type { BlockNode } from "../api/types";
 import { MarkdownInline, type EmbedMap } from "./MarkdownInline";
+import { MarkdownTable } from "./MarkdownTable";
 
 /**
  * Read-only render of an embedded block's subtree — the children of a
@@ -48,11 +49,20 @@ export function EmbeddedSubtree(props: EmbeddedSubtreeProps): JSX.Element {
         >
           <span>
             ↳ {todoMark(node.todo)}
-            <MarkdownInline
-              tokens={node.tokens}
-              variant="inline"
-              embeds={props.embeds}
-            />
+            <Show
+              when={node.table}
+              fallback={
+                <MarkdownInline
+                  tokens={node.tokens}
+                  variant="inline"
+                  embeds={props.embeds}
+                />
+              }
+            >
+              {/* An embedded table is a grid, not a wall of pipes.
+                  Inert: an embed is a borrowed, read-only view. */}
+              <MarkdownTable table={node.table!} variant="inline" />
+            </Show>
           </span>
           <Show when={depth() < MAX_DEPTH && node.children.length > 0}>
             <EmbeddedSubtree

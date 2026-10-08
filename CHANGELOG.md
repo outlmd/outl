@@ -5,7 +5,44 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Fixed
+
+- **Imported data carrying a backslash no longer gains a column.**
+  `escape_cell` turned `|` into `\|` and left `\` alone, so a spreadsheet cell holding `foo\|bar` — sed/grep alternation, ordinary data — became `foo\\|bar`: an even backslash run, which the parser reads as a real delimiter. Three cells where the user had two, with every later value under the wrong header, written to the op log. The producer now doubles a literal backslash and `unescape_cell` collapses it, so the two are a real pair. The same bug reached the TypeScript side through a `<code>` cell, since Turndown escapes `\` in a text node but deliberately not inside code.
+
+- **Mobile: a nested block could not paste with formatting, and a property chip edited nothing.**
+  Two props were declared on `BlockRow` and never forwarded — optional, so omitting them compiled. `onSetProperty` never reached `<BlockBody />`, so tapping a `key:: value` chip was a no-op on *every* block; and the recursive `<BlockRow />` dropped both it and `onPasteMarkdown`, so any block below the top level fell back to the browser's literal splice. Found while closing [#329](https://github.com/outlmd/outl/issues/329): it is what made pasting a spreadsheet range into a nested block produce a wall of tabs instead of a table.
+
+  `BlockRow.recursion.test.ts` now fails on the next one. It reads the JSX and asserts every declared prop is either forwarded or listed with a reason, because that is the defect's actual shape — rendering this component needs haptics, a Tauri bridge and a WKWebView-shaped textarea, and a test mocking all three would pin the mocks.
+
 ### Added
+
+- **Markdown tables render as tables, on all three clients — and tabular data pasted from anywhere becomes one.**
+  A pipe table used to arrive as a wall of `|` characters plus one `unrecognized_block_marker` warning *per row*, because the parser had no table in its grammar and kept each line verbatim ([#329](https://github.com/outlmd/outl/issues/329)). The content was safe; it just wasn't readable, and the warnings made a correct file look broken.
+
+  ```
+  - | Route   | Pax | Owner       |
+    | ------- | --: | :---------- |
+    | SP → RJ | 1203 | [[avelino]] |
+  ```
+
+  A table is **not a new block kind** and there is no `Op::Table`. It is a block whose text carries the rows, exactly like a fenced code block and a `> ` quote, so the op log never learns a new shape and the existing continuation grammar already round-trips it. The parser claims the rows as one block and raises no warning — a table is understood, not recovered. The TUI pads the columns and draws `│` separators with a `├───┼───┤` rule row; the desktop and mobile hand the cells to an HTML `<table>` that scrolls sideways inside the block, so a wide grid doesn't stretch the outline on a phone.
+
+  **Cells carry ordinary inline markdown** — `[[refs]]`, `#tags`, `**bold**`, `((blk-…))` — because the backend tokenizes each one (`outl_md::tokenize_table` → `BlockNode.table`). A client that split the pipes for itself would have no tokenizer, and a cell's `[[ref]]` would render as literal text; that is the same bargain `BlockNode.tokens` already made one construct down.
+
+  **Paste**: copy a range out of Excel, Sheets, Numbers, a Notion database, `psql`, or an HTML table on a web page, and it lands as an outl table. Three clipboard shapes, one destination — a `<table>` in `text/html` (Turndown ships no table rule, so `@outl/shared/paste::tableElementToMarkdown` is it), tab-separated `text/plain`, and a markdown table copied from a README or an assistant's reply. All three converge on the same markdown before anything is written, so there is one table reader rather than three. Comma-separated text is deliberately **not** tabular (prose carries commas), and neither is tab-indented code or an outline — that gate also requires no line to *start* with a tab, which is what separates a grid from indentation.
+
+  **A table is recognised by shape rather than by a marker**, which makes it the one construct that can swallow a line meant for something else. Three did, and all three were found by running shapes through `parse → render → parse` rather than by anybody enumerating them: a bullet-looking delimiter row (`- | -`), a `key:: value` row under a table, and a row opening a code fence. Each made the file change on a later save; the first also made the unlogged-content check report a line the op log *does* hold, which withholds `last_synced_hash` and freezes a page with nothing wrong with it — invariant 8's false-positive direction. So `is_row` now refuses every line another part of the grammar owns, and `table_span` asks it of the delimiter row too (a delimiter-shape check alone accepts `- | -`). The lasting fix is the **generator**: `tests/block_text_roundtrip_properties.rs` grew `arb_table_block`, so these three properties now cross the table code on every run instead of relying on someone having thought of the shape.
+
+  **Two deliberate departures from GFM, both in the same direction.** GFM truncates a row wider than its header; outl widens the table and keeps the cell. A short row pads instead of dropping. A cell you can see in your editor and cannot see in outl is the loss this crate exists to prevent.
+
+  **The upgrade path is handled.** A sidecar written before this shipped holds one block *per row*, so the pass that consolidates them into one table block orphans every one of them — on a page that is mostly the table, 100% of its known blocks, which `OrphanGuard` refuses. Unfixed, that freezes the page in both directions and the user sees a repeating reconcile error. It is exempt from the bulk-delete **count** only, through the same `match_blocks_guarded_except` hook the pre-frontmatter migration uses, and with the same kind of predicate: positive evidence, not a bypass. The orphan's text has to *be* a line of a table on disk right now, so a truncated `.md` — the thing the guard exists for — gets no discount, and a row whose cell the user also edited still counts. The rows are still trashed and logged, and `outl trash restore` reaches them.
+
+  **A table is capped at 65,536 materialised cells**, because `columns()` is the widest row and every row pads to it — so a *ragged* table costs `columns × rows`. Measured before the cap: a 17 KB block holding a 4,000-cell header over 400 one-cell rows produced 1.6M cell vectors, a 4 MB wire payload, and a 9 MB string the TUI rebuilt **every repaint**; at 109 KB it is gigabytes. The `.md` arrives over iroh / iCloud / Syncthing from another device, so opening the page was the whole interaction. Past the cap the block keeps its text and falls back to `tokens` — the pipe rows render verbatim, which is what every client did before tables were modelled.
+
+  **outl never reformats a table you wrote.** Re-emitting every table column-padded on read is a whitespace-only rewrite of a hand-written file, and the reconcile that follows turns it into an `Op::Edit` per table — churn in the log for a space nobody typed. Alignment is a *render* decision; `render_table` is for where outl **creates** a table.
+
+  Editing is editing the markdown: no add-row / add-column UI on any client, by design. The one real per-client difference is recorded rather than left to be discovered — `Capability::TableRendering` is `Partial` on the TUI (a table wider than the pane wraps instead of scrolling; every row is still there, the columns stop lining up) and `Full` on desktop and mobile, with the wording the user sees living in the catalog (invariant 12).
 
 - **`outl trash list` and `outl trash restore <id>` — deleted blocks are readable and recoverable.**
   Invariant 6 makes delete a `Move(node, TRASH_ROOT)`, "simplifies the algorithm and preserves history". The preserving half has worked since day one; the reading half did not exist, so on a real workspace `outl doctor` could report 683 blocks across 393 deletions and nothing else could name one of them ([#287](https://github.com/outlmd/outl/issues/287)). What the invariant bought was "the bytes are still on disk", which is a much weaker promise than "you can get it back" — the difference between a recycle bin and a deleted file on a drive you have not overwritten yet.

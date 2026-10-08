@@ -93,8 +93,19 @@ pub(crate) fn emit_embedded_children(
             guides.push(Span::raw("  "));
         }
         let head = vec![Span::styled("↳ ", app.theme.dim)];
-        let content = render_pretty_block_text(&child.text, &app.theme, &app.index, &app.icons);
-        push_wrapped(guides, head, content, text_width, None, out);
+        // An embedded table reads as a grid, like it does in the
+        // outline. This is the one block-text path that does not go
+        // through `emit_block_lines`, so it asks for the grid itself; a
+        // table is multi-line, so each row becomes its own `↳` row.
+        if let Some(grid) = crate::view::table::aligned_grid(&child.text) {
+            for line in grid.lines() {
+                let row = crate::view::table::render_row(line, &app.theme, &app.index, &app.icons);
+                push_wrapped(guides.clone(), head.clone(), row, text_width, None, out);
+            }
+        } else {
+            let content = render_pretty_block_text(&child.text, &app.theme, &app.index, &app.icons);
+            push_wrapped(guides, head, content, text_width, None, out);
+        }
         emit_embedded_children(
             &child.children,
             outer_indent,

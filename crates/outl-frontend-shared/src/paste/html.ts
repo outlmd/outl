@@ -29,9 +29,16 @@
  *   `<img alt=":bus:">`; the default `![alt](src)` would drop an image
  *   token into the block. We keep the `alt` (the `:shortcode:` outl
  *   already renders) and discard the URL.
+ * - **tables** — Turndown ships no table rule, so a pasted `<table>`
+ *   (a spreadsheet, a Notion database, a web page) collapsed into a run
+ *   of cell text with the structure gone. `./table` converts it to a
+ *   markdown table; the backend then reads it as one table block
+ *   ([issue #329](https://github.com/outlmd/outl/issues/329)).
  */
 
 import TurndownService from "turndown";
+
+import { addTableRule } from "./table";
 
 /**
  * True when a CSS `font-weight` value reads as bold — the keyword `bold`
@@ -110,6 +117,16 @@ function buildService(): TurndownService {
 // Turndown holds no mutable per-call state once configured, so one
 // instance is reused across pastes.
 let cached: TurndownService | null = null;
+// A second one, for the cells of a pasted table. Same factory, so the
+// same dialect — it exists only so a cell's conversion does not reenter
+// the instance that is already converting the document around it. Built
+// on first use: a clipboard with no table never pays for it.
+let cachedCell: TurndownService | null = null;
+
+function cellService(): TurndownService {
+  cachedCell ??= buildService();
+  return cachedCell;
+}
 
 /**
  * Collapse Turndown's list-marker padding to the outl list shape.
@@ -136,6 +153,12 @@ function normalizeBullets(md: string): string {
  */
 export function htmlToOutlMarkdown(html: string): string {
   if (!html.trim()) return "";
-  cached ??= buildService();
+  if (cached === null) {
+    cached = buildService();
+    // On the document instance only: a `<table>` nested in a cell is
+    // not a shape this dialect has, and installing the rule on the cell
+    // converter too would let one recurse forever.
+    addTableRule(cached, cellService);
+  }
   return normalizeBullets(cached.turndown(html)).trim();
 }

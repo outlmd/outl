@@ -30,6 +30,16 @@ mod why {
         "Restoring a deleted block isn't in the app yet — run `outl trash list` in a terminal \
          to see what was deleted, then `outl trash restore <id>`.";
 
+    /// Every client renders a table (`outl_md::table` is shared), and
+    /// only the terminal has nowhere to put one that does not fit: the
+    /// outline wraps a long line rather than scrolling it sideways, so
+    /// the rows are all still there and the columns stop lining up.
+    /// The GUI clients scroll the grid inside the block.
+    pub const TUI_TABLE_NO_SCROLL: &str =
+        "A table wider than the pane wraps instead of scrolling sideways — every row is still \
+         there, the columns just stop lining up. Widen the terminal, or open the page in the \
+         desktop app.";
+
     /// The TUI has no marketplace UI at all — installing an
     /// unlisted or registry plugin from inside the terminal client
     /// goes through the CLI, not a browse-and-tap surface.
@@ -280,6 +290,17 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // were already there (`doctor` walks the trash, restore is a
         // `Move`); a surface in each client is the follow-up. Recorded
         // here rather than discovered by a user hunting for a recycle bin.
+        // All three read the grid through `outl_md::table`, so the
+        // cells and the alignment cannot disagree. The desktop and
+        // mobile hand them to `<table>` inside an `overflow-x-auto`
+        // wrapper (`MarkdownTable.tsx`); the TUI pads the columns and
+        // paints `│` separators with a drawn rule row
+        // (`view/table.rs`), and has no sideways scroll to offer.
+        Capability::TableRendering => ClientSupport {
+            tui: Partial(why::TUI_TABLE_NO_SCROLL),
+            desktop: Full,
+            mobile: Full,
+        },
         Capability::Trash => ClientSupport {
             tui: Missing(why::NO_TRASH_SURFACE),
             desktop: Missing(why::NO_TRASH_SURFACE),
@@ -350,7 +371,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 11, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 12, "Capability::ALL changed size");
     }
 
     #[test]

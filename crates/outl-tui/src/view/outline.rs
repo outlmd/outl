@@ -290,6 +290,16 @@ pub(crate) fn emit_block_lines(
         mode,
         RenderMode::Pretty { .. } | RenderMode::Transformed { .. }
     );
+    // A table block is re-emitted column-padded before it is split into
+    // rows, so the `│` separators line up down the grid. Only when
+    // painting pretty: the cursor modes render the raw source, because a
+    // column of padding the user never typed would put the caret on the
+    // wrong character.
+    let grid = pretty
+        .then(|| crate::view::table::aligned_grid(text))
+        .flatten();
+    let is_table_grid = grid.is_some();
+    let text = grid.as_deref().unwrap_or(text);
     let rows = block_to_rows(text, indent, cursor_char);
 
     // TODO/DONE checkbox decoration only fits on single-line bullets
@@ -324,7 +334,9 @@ pub(crate) fn emit_block_lines(
             }
             BlockRowKind::Continuation
             | BlockRowKind::CodeFenceMarker
-            | BlockRowKind::CodeFenceBody => {
+            | BlockRowKind::CodeFenceBody
+            | BlockRowKind::TableRow
+            | BlockRowKind::TableRule => {
                 push_body_indent(&mut head, has_auto_run, &app.icons);
             }
         }
@@ -358,6 +370,14 @@ pub(crate) fn emit_block_lines(
                 }
                 BlockRowKind::CodeFenceBody if pretty => {
                     content.push(Span::styled(row.text.to_string(), app.theme.code));
+                }
+                BlockRowKind::TableRule if pretty => {
+                    content.extend(crate::view::table::render_rule(row.text, &app.theme));
+                }
+                BlockRowKind::TableRow | BlockRowKind::Bullet if pretty && is_table_grid => {
+                    content.extend(crate::view::table::render_row(
+                        row.text, &app.theme, &app.index, &app.icons,
+                    ));
                 }
                 BlockRowKind::Bullet if single_line_pretty => {
                     // Single owner for the bullet's pretty render: it

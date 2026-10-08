@@ -4,7 +4,7 @@ import type {
   BacklinksOrder,
   TodoState,
 } from "@outl/shared/api/types";
-import { MarkdownInline } from "@outl/shared/markdown";
+import { MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
 import { sameCrumbTrail } from "@outl/shared/outline";
 
 interface BacklinksSectionProps {
@@ -170,9 +170,18 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                                   link.todo === "DONE",
                               }}
                             >
-                              <MarkdownInline
-                                tokens={link.source_block.tokens}
-                              />
+                              <Show
+                                when={link.source_block.table}
+                                fallback={
+                                  <MarkdownInline
+                                    tokens={link.source_block.tokens}
+                                  />
+                                }
+                              >
+                                <MarkdownTable
+                                  table={link.source_block.table!}
+                                />
+                              </Show>
                             </p>
                           </div>
                         </div>

@@ -114,6 +114,88 @@ fn arb_fence_block() -> impl Strategy<Value = String> {
         })
 }
 
+/// A pipe table, generated as a unit because its lines only mean
+/// anything together — a header, a delimiter row, and a body.
+///
+/// Generated rather than literal for the reason this whole file exists:
+/// a table is the one construct recognised by **shape** instead of by a
+/// marker, so it can swallow a line meant for something else, and the
+/// three shapes that did (a bullet-looking delimiter row, a `key:: value`
+/// row, a fence-opening row) were found by probing rather than by
+/// anybody enumerating them. Without a generator here, nothing crosses
+/// `outl_md::table` on the way through these properties.
+///
+/// Cells avoid `|` and `\` so the generator cannot accidentally write a
+/// row with a different column count than the header — that is a
+/// *parser* question, pinned in `table/tests.rs`, not a roundtrip one.
+fn arb_table_block() -> impl Strategy<Value = String> {
+    let cell = prop_oneof![
+        4 => "[a-z]{1,6}".prop_map(String::from),
+        1 => Just("[[ref]]".to_string()),
+        1 => Just("**b**".to_string()),
+        1 => Just(String::new()),
+    ];
+    let rule = prop_oneof![
+        Just("---"),
+        Just(":--"),
+        Just(":-:"),
+        Just("--:"),
+        Just("-"),
+    ];
+    (
+        proptest::collection::vec(cell.clone(), 1..4),
+        proptest::collection::vec(rule, 1..4),
+        proptest::collection::vec(proptest::collection::vec(cell, 1..4), 0..3),
+        // Outer pipes are optional in the dialect, so both forms have to
+        // round-trip.
+        any::<bool>(),
+    )
+        .prop_map(|(header, rules, rows, outer)| {
+            let cols = header.len();
+            // Two shapes need the outer pipes, and the generator found
+            // both on its first runs — which is the argument for having
+            // it rather than a list of literals:
+            //
+            // - **one column**, which with no outer pipes carries no `|`
+            //   at all, so it is not a table in this dialect: it is a
+            //   line of prose followed by `-`, which is a bullet;
+            // - **a leading `-` rule** (`- | ---`), which with no outer
+            //   pipes *starts* with `- ` and so is a bullet too. That is
+            //   the shape `table::is_row` now refuses, and it belongs in
+            //   `arb_any_text` as a literal rather than here, because a
+            //   `- ` line splits the block in two — an exclusion this
+            //   file already documents.
+            let outer = outer || cols == 1 || rules.first().is_some_and(|r| *r == "-");
+            let line = |cells: &[String]| -> String {
+                let mut cells: Vec<String> = cells.to_vec();
+                cells.resize(cols, String::new());
+                let inner = cells.join(" | ");
+                let line = if outer { format!("| {inner} |") } else { inner };
+                // An empty cell at either end with no pipe beside it
+                // leaves the line padded, and the continuation grammar
+                // trims — one of this file's documented normalisations,
+                // and not something a hand-written table carries.
+                // `split_cells` trims the row anyway, so trimming here
+                // changes nothing about which cells the parser reads.
+                line.trim().to_string()
+            };
+            let mut out = vec![line(&header)];
+            let mut rules: Vec<String> = rules.iter().map(|r| (*r).to_string()).collect();
+            rules.resize(cols, "---".to_string());
+            out.push(line(&rules));
+            for row in &rows {
+                out.push(line(row));
+            }
+            out.join("\n")
+        })
+        // A header of only empty cells with no outer pipes is a line of
+        // bare spaces: the renderer normalises it, which is property 2's
+        // business and not property 1's.
+        .prop_filter("the header carries something", |t| {
+            t.lines().next().is_some_and(|l| !l.trim().is_empty())
+        })
+}
+
 /// A continuation line, which unlike the first line may carry its own
 /// leading indentation — `render::write_block_text` writes the levels it
 /// added and `parse::strip_indent_levels` takes back exactly those, so
@@ -169,6 +251,7 @@ fn arb_block_text() -> impl Strategy<Value = String> {
                 6 => arb_continuation(),
                 2 => Just(String::new()),
                 3 => arb_fence_block(),
+                3 => arb_table_block(),
             ],
             0..5,
         ),
@@ -218,6 +301,7 @@ fn arb_block_text() -> impl Strategy<Value = String> {
 fn arb_any_text() -> impl Strategy<Value = String> {
     prop_oneof![
         8 => arb_block_text(),
+        2 => arb_table_block(),
         1 => Just("\tleading tab".to_string()),
         1 => Just("has\rcarriage".to_string()),
         1 => Just("trailing blanks\n\n".to_string()),
@@ -233,6 +317,15 @@ fn arb_any_text() -> impl Strategy<Value = String> {
         1 => Just("a\nkey:: v".to_string()),
         1 => Just("a\n```\nunclosed".to_string()),
         1 => Just("~~~\n- a\n~~~".to_string()),
+        // The three lines a table must not swallow, each a line another
+        // construct of the grammar already owns. All three used to make
+        // the document change shape on a later save; the first also made
+        // `content_lines_missing_from` report a line the log does hold,
+        // which freezes the page. See `table::is_row`.
+        1 => Just("a | b\n- | -\n1 | 2".to_string()),
+        1 => Just("| a | b |\n| - | - |\nstatus:: x | y".to_string()),
+        1 => Just("| a | b |\n| - | - |\n```| x |".to_string()),
+        1 => Just("| a |\n| - |\n- item | pipe".to_string()),
     ]
 }
 

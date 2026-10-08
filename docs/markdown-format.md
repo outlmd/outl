@@ -259,6 +259,56 @@ Query blocks auto-run on every page load — no `gx` or `auto-run::` needed.
 
 Full syntax reference, examples, and architecture: [Query code blocks](query.md).
 
+### Tables
+
+A pipe-delimited table is **one block**, whose text carries the rows.
+Same shape as a fenced code block and a `> ` quote: the dialect stays one-block-per-bullet and the op log never learns a new kind.
+
+On disk, written as a bullet with continuation lines:
+
+```
+- | Route   | Pax | Owner      |
+  | ------- | --: | :--------- |
+  | SP → RJ | 1203 | [[avelino]] |
+  | BH      |   12 |             |
+```
+
+Written (or pasted) **without** a bullet, the parser claims the rows as one block and raises **no warning** — a table is understood, not recovered:
+
+```
+| Route | Pax |
+| --- | --: |
+| SP    | 1203 |
+```
+
+The next save normalises it to the bulleted form above.
+That is the only change it makes: outl **never reformats the columns** of a table you wrote.
+Alignment is a render decision (the TUI pads when it paints, the GUI clients hand the cells to `<table>`), so a hand-written table keeps its bytes and produces no `Op::Edit` churn.
+
+What counts as a table:
+
+- A row carrying an unescaped `|`, then a **delimiter row** (`| --- |`, `| :-- |`, `| :-: |`, `| --: |`), then every row after it.
+  Outer pipes are optional (`a | b` works).
+  Two lines is the minimum — a header with a rule under it and no body is a table you are still typing.
+- The delimiter row is what declares the intent.
+  Two pipe-carrying lines with no rule between them are prose, keep today's `unrecognized_block_marker` warning, and are not painted as a grid.
+- **A line another construct already owns is never a row**, whatever pipes it carries. A bullet (`- item | with a pipe`), a `key:: value` property (`status:: x | y`), and a fence opener all stay themselves — including in the **delimiter** position, so `- | -` is a bullet and not a rule.
+- `\|` is a literal pipe inside a cell. It splits nothing and renders as `|`.
+
+A cell carries ordinary inline markdown — `[[refs]]`, `#tags`, `**bold**`, `` `code` ``, `((blk-…))` — rendered exactly as it is anywhere else.
+The backend tokenizes each cell (`outl_md::tokenize_table`) and ships the result in `BlockNode.table`, so no client splits the pipes for itself.
+
+Two deliberate departures from GFM, both in the same direction:
+
+- **A surplus cell is kept.**
+  GFM truncates a row wider than its header; outl widens the table instead.
+  A cell you can see in your editor and not in outl is the loss this dialect exists to prevent.
+- **A short row is padded, not dropped.**
+
+Editing is editing the markdown.
+There is no add-row / add-column UI on any client, by design — see [issue #329](https://github.com/outlmd/outl/issues/329).
+Per-client rendering differences are recorded as `Capability::TableRendering` in [client parity](client-parity.md); pasting tabular data from a spreadsheet is in [Paste](paste.md).
+
 ### Block properties
 
 A line in the form `key:: value` *as a child of an outline item* is a block property:
@@ -467,7 +517,8 @@ The `@`-prefixed link text is what makes the rendered reference visually a menti
 
 ### Permissive parsing & warnings
 
-A hand-written or imported `.md` may contain lines that don't fit the dialect — typically a leading `# heading`, a paragraph, an HTML snippet, or a table.
+A hand-written or imported `.md` may contain lines that don't fit the dialect — typically a leading `# heading`, a paragraph, or an HTML snippet.
+(A **table** used to be in that list. It is modelled now — see [Tables](#tables) — so it raises no warning; only a table-looking run with no delimiter row still does.)
 The parser is **permissive at every depth, not just the top level**.
 Such a line is preserved verbatim as a recovered block — a sibling at depth 0, a child of the block above it when indented with no open continuation to absorb it — and the recovery is recorded in `ParsedPage.warnings: Vec<ParseWarning>`.
 

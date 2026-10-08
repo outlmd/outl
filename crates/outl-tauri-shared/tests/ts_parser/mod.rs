@@ -58,6 +58,8 @@ pub use reader::{
 /// pins nothing extra.
 pub const MIRROR_FILES: &[&str] = &[
     "../outl-frontend-shared/src/api/types.ts",
+    "../outl-frontend-shared/src/api/table.ts",
+    "../outl-frontend-shared/src/api/tokens.ts",
     "../outl-frontend-shared/src/api/plugins.ts",
     "../outl-frontend-shared/src/api/commands.ts",
     "../outl-desktop/src/lib/api.ts",

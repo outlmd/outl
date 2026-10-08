@@ -29,6 +29,10 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Flatten an `OutlineNode` subtree to DFS paths (for selection / navigation) | `outl_actions::outline::flatten_subtree_paths` | `crates/outl-actions/src/outline.rs` |
 | Read a page from disk + project to outline view in one call | `outl_actions::outline::read_page_view` / `read_page_view_with_workspace` | `crates/outl-actions/src/outline.rs` |
 | Read a page **and** surface parser warnings (banner, doctor, status line) | `outl_actions::outline::read_page_outline` / `read_page_outline_with_workspace` → `PageOutline { nodes, warnings }` | `crates/outl-actions/src/outline.rs` |
+| Read a block's text as a **table** (cells + per-column alignment), `None` unless the whole text is one | `outl_md::table::parse_table` → `Table` / `ColumnAlign` | `crates/outl-md/src/table.rs` |
+| Does a table start at this line? (what lets the parser claim pasted rows as **one** block instead of one per row) | `outl_md::table::table_span` / `is_delimiter_row` | `crates/outl-md/src/table.rs` |
+| Write a table back as canonical markdown, every column padded to its widest cell — for where outl **creates** one (a tabular paste, the TUI's grid), never to reformat what the user typed | `outl_md::table::render_table` | `crates/outl-md/src/table.rs` |
+| Split one table row into cells (escape-aware: `\|` splits nothing), or resolve a cell for **display** (`\|` → `|`) | `outl_md::table::split_cells` / `unescape_cell` | `crates/outl-md/src/table.rs` |
 | Slugify a user-visible page name into a filesystem-safe slug (lowercase, folds Latin diacritics `á` → `a`, non-alphanumerics collapse to `-`; empty input → `UNTITLED_SLUG`) — never hand-roll an ASCII-only copy | `outl_md::slug::slugify` / `UNTITLED_SLUG` | `crates/outl-md/src/slug.rs` |
 
 ---
@@ -37,6 +41,8 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 
 | Intent | Use this | File |
 |---|---|---|
+| Tab-separated clipboard text → a markdown table, and the owner of the "is this tabular" gate both runtimes answer from | `outl_md::table::tsv_to_markdown` / `from_delimited` | `crates/outl-md/src/table.rs` |
+| Does a payload carry structure the paste pipeline will act on (an outline, a markdown table, tabular data)? The one predicate a client asks before paying for a round trip | `outl_actions::paste::looks_structured` (and `looks_like_table` / `looks_like_tabular`) | `crates/outl-actions/src/paste/detect.rs` |
 | Coerce **external markdown** (line endings, indent unit 4→2, Roam/GitHub/Logseq tokens, long-form dates → ISO, strip `id::` with Crockford validation, strip unknown `{{…}}` / `^^…^^`) | `outl_actions::paste::normalize_external_syntax` | `crates/outl-actions/src/paste/normalize.rs` |
 | Split a leading `---` YAML frontmatter fence off a `.md` body (CRLF-safe, honours `...` end marker, no-fence → verbatim body) | `outl_md::frontmatter::split_frontmatter` | `crates/outl-md/src/frontmatter.rs` |
 | Parse a YAML frontmatter block into flat `key:: value` properties (`title` lifted, `tags` normalized to `#name`, caller-supplied drop-list; values verbatim — date normalization stays with the caller) | `outl_md::frontmatter::parse_frontmatter` → `Frontmatter` | `crates/outl-md/src/frontmatter.rs` |
@@ -136,6 +142,7 @@ UI-agnostic; both TUI and mobile consume them.
 | Char ↔ (line, col) on a buffer (both TUI and mobile editors share) | `outl_md::view::char_to_line_col` / `line_col_to_char` | `crates/outl-md/src/view.rs` |
 | Project a block to renderable rows (with `BlockRowKind` discrimination) | `outl_md::view::block_to_rows` → `BlockRow` / `BlockRowKind` | `crates/outl-md/src/view.rs` |
 | Tokenize inline markdown (`**bold**`, `[[refs]]`, `#tags`, `((blk-…))`, `!((blk-…))`) | `outl_md::inline::tokenize` → `InlineTok` | `crates/outl-md/src/inline.rs` |
+| Read a block as a table with every **cell tokenized**, for a client that renders from tokens (`BlockNode.table`) | `outl_md::table::tokenize_table` → `TableView` | `crates/outl-md/src/table.rs` |
 | Tokenize inline markdown into an **owned, Serde-friendly** form for wire / DTO payloads (mobile renders these straight; no parallel TS tokenizer) | `outl_md::inline::tokenize_owned` → `InlineToken` | `crates/outl-md/src/inline.rs` |
 | Reconstruct the source markdown from a `Vec<InlineTok>` (Bold / Italic / Strike now carry recursively-tokenized inners; use this when a surface wants the whole inner span as one styled string instead of dispatching per-variant) | `outl_md::inline::inline_to_source` | `crates/outl-md/src/inline.rs` |
 | Resolve the ref under a caret position (`Page` / `Journal` / `Tag` / `Block`) | `outl_md::inline::ref_at_cursor` → `RefTarget` | `crates/outl-md/src/cursor.rs` |
@@ -179,6 +186,9 @@ Moved out of `crates/outl-mobile/CLAUDE.md` (that file was pinned near the per-c
 |---|---|---|
 | Detect whether pasted plain text looks like an outline (drives paste-as-outline vs. paste-as-block) | `looksLikeOutline` (`@outl/shared/paste`) | `outl_actions::paste::looks_like_outline` |
 | Render inline markdown tokens to JSX; `variant` picks the ref/tag style (`pill` chips vs `inline` TUI-style text) and `blockAssets` decides whether an image may render as a block `<img>` (defaults to `variant !== "inline"`, so compact contexts keep a chip; the desktop's main `BlockRow` passes `variant="inline" blockAssets`) | `<MarkdownInline variant? blockAssets? embeds? />` (`@outl/shared/markdown`) | `outl_md::tokenize_owned` (backend produces the tokens; the renderer is a discriminant-to-JSX switch) |
+| Render a block's `table` as an HTML `<table>` (per-column alignment, horizontal scroll so a wide grid doesn't stretch the outline, cells through `<MarkdownInline />`) | `<MarkdownTable table variant? onEdit? />` (`@outl/shared/markdown`) | `outl_md::tokenize_table` (backend decides the grid; the renderer is a `<tr>`/`<td>` walk) |
+| Convert a clipboard `<table>` to a markdown table (Turndown ships no table rule) | `tableElementToMarkdown` (`@outl/shared/paste`) | TypeScript-only — HTML never reaches the Rust side |
+| Detect a markdown table / tab-separated data in pasted plain text (gates the round trip) | `looksLikeTable` / `looksLikeTabular` (`@outl/shared/paste`) | `outl_actions::paste::looks_like_table` / `looks_like_tabular` |
 | Detect a `[[` / `((` autocomplete trigger under the caret, plus the accept/insert helpers (`autoClose/DeletePair`, `insertPair/Text`, `applySuggestion`) | `detectRefContext` (`@outl/shared/autocomplete`) | `outl_tui::actions::overlay::detect_trigger` (the `[[` and `((` triggers; TUI also covers `#` and `/`) |
 | Auto-pair `(`/`[`/`{` and step over an auto-inserted closer; wired via `onBeforeInput` since iOS soft keyboards skip per-char `keydown` | `autoPairBracket` (`@outl/shared/autocomplete`) | `outl_tui::input::insert` (`insert_pair`) + `EditBuffer::delete_pair_back` |
 | Convert a textarea's UTF-16 `selectionStart` to a codepoint offset before splicing text the backend expects in codepoints | `utf16OffsetToCharOffset` (`@outl/shared/paste`) | runtime gap, no Rust mirror — a supplementary-plane char otherwise shifts the splice |

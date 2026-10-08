@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use outl_actions::{
-    children_of, find_by_slug, import_asset, looks_like_outline, paste_markdown, paste_plain,
+    children_of, find_by_slug, import_asset, looks_structured, paste_markdown, paste_plain,
     PasteAnchor, PasteOutcome,
 };
 use outl_core::id::NodeId;
@@ -76,10 +76,11 @@ impl App {
         // Plain-text paste inside Insert mode is the common "drop a
         // URL / snippet into what I'm writing" workflow. Splicing the
         // raw text into the live buffer keeps the keyboard up and
-        // the cursor where the user expects. Outline-shaped pastes
-        // still go through the full pipeline below so they create
-        // siblings as documented.
-        if !looks_like_outline(&text) {
+        // the cursor where the user expects. Structured pastes — an
+        // outline, a markdown table, a spreadsheet's tab-separated rows
+        // — still go through the full pipeline below so they create
+        // siblings (or one table block) as documented.
+        if !looks_structured(&text) {
             if let Mode::Insert { buffer, .. } = &mut self.mode {
                 buffer.insert_str(&text);
                 self.status = "pasted text".into();

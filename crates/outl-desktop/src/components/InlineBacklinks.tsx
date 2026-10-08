@@ -6,7 +6,7 @@ import {
   setBacklinksOrder,
   toggleTodo,
 } from "@outl/shared/api/commands";
-import { MarkdownInline } from "@outl/shared/markdown";
+import { MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
 import { sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink } from "@outl/shared/api/types";
 
@@ -271,10 +271,24 @@ export function InlineBacklinks() {
                                   : ""
                               }`}
                             >
-                              <MarkdownInline
-                                tokens={link.source_block.tokens}
-                                variant="inline"
-                              />
+                              <Show
+                                when={link.source_block.table}
+                                fallback={
+                                  <MarkdownInline
+                                    tokens={link.source_block.tokens}
+                                    variant="inline"
+                                  />
+                                }
+                              >
+                                {/* A citing block that is a table reads
+                                    as a grid here too. Inert (no
+                                    `onEdit`) — a backlink is a read-only
+                                    view of someone else's page. */}
+                                <MarkdownTable
+                                  table={link.source_block.table!}
+                                  variant="inline"
+                                />
+                              </Show>
                             </button>
                           </div>
                         </li>

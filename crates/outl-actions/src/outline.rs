@@ -171,8 +171,36 @@ pub struct OutlineNode {
     /// borrowed [`outl_md::InlineTok`] on `text` directly when it
     /// already has the string in scope.
     pub tokens: Vec<outl_md::InlineToken>,
+    /// The block read as a table, when its **whole** text is one.
+    ///
+    /// Same bargain as [`Self::tokens`], one construct up: the backend
+    /// decides what the grid is so no client splits pipes for itself
+    /// and renders a cell's `[[ref]]` as literal text. A client that
+    /// has this field draws a `<table>`; one that doesn't falls back
+    /// to `tokens` and shows the rows verbatim, which is what every
+    /// client did before tables were modelled.
+    ///
+    /// Omitted from the wire for an ordinary block (almost all of
+    /// them), so the field costs nothing until a table exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table: Option<outl_md::TableView>,
     /// Children, in their fractional-index order.
     pub children: Vec<OutlineNode>,
+}
+
+impl OutlineNode {
+    /// The two fields that are **functions of the block's text** —
+    /// inline tokens and the tokenized table reading — derived in one
+    /// call.
+    ///
+    /// Together on purpose. Four producers build this type, and one
+    /// that set `tokens` and forgot `table` would ship a block that
+    /// renders as a grid on the page and as a wall of pipes in a
+    /// backlink. Call this instead of `outl_md::tokenize_owned`
+    /// directly.
+    fn rendered(text: &str) -> (Vec<outl_md::InlineToken>, Option<outl_md::TableView>) {
+        (outl_md::tokenize_owned(text), outl_md::tokenize_table(text))
+    }
 }
 
 fn serialize_todo_state<S>(state: &Option<TodoState>, ser: S) -> Result<S::Ok, S::Error>
@@ -251,7 +279,7 @@ pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) 
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
-    let tokens = outl_md::tokenize_owned(body);
+    let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
         text: body.to_string(),
@@ -259,6 +287,7 @@ pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) 
         collapsed: workspace.tree().is_collapsed(node),
         properties,
         tokens,
+        table,
         children: Vec::new(),
     }
 }
@@ -272,7 +301,7 @@ fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> O
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
-    let tokens = outl_md::tokenize_owned(body);
+    let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
         text: body.to_string(),
@@ -280,6 +309,7 @@ fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> O
         collapsed: workspace.tree().is_collapsed(node),
         properties,
         tokens,
+        table,
         children: project_children(workspace, node, index),
     }
 }
@@ -455,7 +485,7 @@ fn outline_from_parsed(
     // `OutlineNode.properties` doc-comment.
     let mut properties = block.properties.clone();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
-    let tokens = outl_md::tokenize_owned(body);
+    let (tokens, table) = OutlineNode::rendered(body);
     // `collapsed` is overlaid by the caller using the workspace as the
     // source of truth (`Op::SetCollapsed` lives in the op log). The
     // bare `read_page_view` path leaves it `false`; the workspace-
@@ -467,233 +497,10 @@ fn outline_from_parsed(
         collapsed: false,
         properties,
         tokens,
+        table,
         children,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::todo::TodoState;
-
-    fn node(text: &str, children: Vec<OutlineNode>) -> OutlineNode {
-        OutlineNode {
-            id: format!("test-{text}"),
-            text: text.into(),
-            todo: None,
-            collapsed: false,
-            properties: Vec::new(),
-            tokens: Vec::new(),
-            children,
-        }
-    }
-
-    fn leaf(text: &str) -> OutlineNode {
-        node(text, Vec::new())
-    }
-
-    #[test]
-    fn flatten_subtree_paths_returns_dfs_preorder() {
-        // Mirrors the previous `outl_md::outline_ops::flatten_backlink_subtree`
-        // coverage so behaviour stays identical after the move.
-        let root = node(
-            "root",
-            vec![node("a", vec![leaf("a1"), leaf("a2")]), leaf("b")],
-        );
-        assert_eq!(
-            flatten_subtree_paths(&root),
-            vec![
-                Vec::<usize>::new(), // root
-                vec![0],             // a
-                vec![0, 0],          // a1
-                vec![0, 1],          // a2
-                vec![1],             // b
-            ]
-        );
-    }
-
-    #[test]
-    fn flatten_subtree_paths_leaf_returns_just_root() {
-        let only = leaf("only-me");
-        assert_eq!(flatten_subtree_paths(&only), vec![Vec::<usize>::new()]);
-    }
-
-    fn parsed(text: &str, children: Vec<ParsedOutlineNode>) -> ParsedOutlineNode {
-        ParsedOutlineNode {
-            text: text.into(),
-            properties: Vec::new(),
-            children,
-        }
-    }
-
-    #[test]
-    fn project_parsed_subtree_attaches_tokens_and_recurses() {
-        // The embed subtree (`!((blk-…))` expansion) rides this: a parsed
-        // subtree with inline markup + a nested child must come back as
-        // wire nodes carrying tokens, or the client renders empty rows.
-        let tree = vec![parsed(
-            "parent **bold**",
-            vec![parsed("TODO child", Vec::new())],
-        )];
-
-        let wire = project_parsed_subtree(&tree);
-
-        assert_eq!(wire.len(), 1);
-        let parent = &wire[0];
-        assert_eq!(parent.text, "parent **bold**");
-        // Tokens are attached (not the empty vec a bare clone would leave).
-        assert!(
-            parent.tokens.len() > 1,
-            "expected tokenized inline markup, got {:?}",
-            parent.tokens
-        );
-        // The child recurses, and its TODO prefix is split off text into `todo`.
-        assert_eq!(parent.children.len(), 1);
-        let child = &parent.children[0];
-        assert_eq!(child.todo, Some(TodoState::Todo));
-        assert_eq!(child.text, "child");
-        assert!(!child.tokens.is_empty());
-    }
-
-    #[test]
-    fn prop_value_to_string_covers_every_variant() {
-        // `Text` is what `outl-md` actually emits today; the other
-        // variants are surfaced for forward-compat. The helper still
-        // has to behave sensibly on each so a future indexer doesn't
-        // crash on a non-Text page property.
-        assert_eq!(
-            prop_value_to_string(&PropValue::Text("high".into())),
-            "high"
-        );
-        assert_eq!(
-            prop_value_to_string(&PropValue::PageRef("Avelino".into())),
-            "Avelino"
-        );
-        assert_eq!(
-            prop_value_to_string(&PropValue::Tag("urgent".into())),
-            "urgent"
-        );
-        assert_eq!(
-            prop_value_to_string(&PropValue::List(vec![
-                PropValue::Tag("a".into()),
-                PropValue::Tag("b".into()),
-            ])),
-            "a b"
-        );
-    }
-
-    fn with_id(text: &str, id: NodeId, children: Vec<OutlineNode>) -> OutlineNode {
-        OutlineNode {
-            id: id.to_string(),
-            text: text.into(),
-            todo: None,
-            collapsed: false,
-            properties: Vec::new(),
-            tokens: Vec::new(),
-            children,
-        }
-    }
-
-    #[test]
-    fn flat_index_for_block_walks_dfs_preorder() {
-        // Layout (DFS pre-order indices in parens):
-        //   a (0)
-        //     a1 (1)
-        //     a2 (2)
-        //   b (3)
-        // Every node id is exercised so an off-by-one in either the
-        // `*counter += 1` or the recursive descent would flip at least
-        // one expected index.
-        let a = NodeId::new();
-        let a1 = NodeId::new();
-        let a2 = NodeId::new();
-        let b = NodeId::new();
-        let outline = vec![
-            with_id(
-                "a",
-                a,
-                vec![with_id("a1", a1, vec![]), with_id("a2", a2, vec![])],
-            ),
-            with_id("b", b, vec![]),
-        ];
-
-        assert_eq!(flat_index_for_block(&outline, a), Some(0));
-        assert_eq!(flat_index_for_block(&outline, a1), Some(1));
-        assert_eq!(flat_index_for_block(&outline, a2), Some(2));
-        assert_eq!(flat_index_for_block(&outline, b), Some(3));
-    }
-
-    #[test]
-    fn flat_index_for_block_traverses_deep_nesting() {
-        // Single chain four levels deep: catches a counter that resets
-        // when recursing (would make `d` land on 0 instead of 3).
-        let a = NodeId::new();
-        let b = NodeId::new();
-        let c = NodeId::new();
-        let d = NodeId::new();
-        let outline = vec![with_id(
-            "a",
-            a,
-            vec![with_id(
-                "b",
-                b,
-                vec![with_id("c", c, vec![with_id("d", d, vec![])])],
-            )],
-        )];
-
-        assert_eq!(flat_index_for_block(&outline, a), Some(0));
-        assert_eq!(flat_index_for_block(&outline, b), Some(1));
-        assert_eq!(flat_index_for_block(&outline, c), Some(2));
-        assert_eq!(flat_index_for_block(&outline, d), Some(3));
-    }
-
-    #[test]
-    fn flat_index_for_block_returns_none_for_unknown_id() {
-        // The block was never in this forest. Caller surfaces as a
-        // soft "outline drifted" error; we must not return a stale
-        // index from a sibling.
-        let known = NodeId::new();
-        let outline = vec![with_id("only", known, vec![])];
-        let stranger = NodeId::new();
-        assert_eq!(flat_index_for_block(&outline, stranger), None);
-    }
-
-    #[test]
-    fn flat_index_for_block_returns_none_for_empty_forest() {
-        let stranger = NodeId::new();
-        assert_eq!(flat_index_for_block(&[], stranger), None);
-    }
-
-    #[test]
-    fn flat_index_for_block_finds_first_match_only() {
-        // Same NodeId planted twice (impossible in a real workspace,
-        // but the function should not panic and should pick the first
-        // DFS hit). Locks in the contract.
-        let dup = NodeId::new();
-        let outline = vec![
-            with_id("first", dup, vec![]),
-            with_id("second-with-same-id", dup, vec![]),
-        ];
-        assert_eq!(flat_index_for_block(&outline, dup), Some(0));
-    }
-
-    #[test]
-    fn outline_node_carries_todo_text_and_properties() {
-        // Smoke that the DTO surface a backlink hands the renderer
-        // exposes the fields the TUI uses. We don't go through the
-        // workspace here — that's covered by `backlinks` tests.
-        let n = OutlineNode {
-            id: "x".into(),
-            text: "ship it".into(),
-            todo: Some(TodoState::Done),
-            collapsed: false,
-            properties: vec![("priority".into(), "high".into())],
-            tokens: Vec::new(),
-            children: vec![leaf("child")],
-        };
-        assert_eq!(n.text, "ship it");
-        assert_eq!(n.todo, Some(TodoState::Done));
-        assert_eq!(n.properties[0], ("priority".into(), "high".into()));
-        assert_eq!(n.children.len(), 1);
-    }
-}
+mod tests;

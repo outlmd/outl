@@ -85,6 +85,19 @@ pub enum Capability {
     /// client, so any of them can import a path it is given. What
     /// differs is whether the platform ever hands one over.
     OpenExternalFile,
+    /// Rendering a markdown table a user wrote as a table, rather
+    /// than as the pipe rows it is on disk.
+    ///
+    /// Every client **models** one — `outl_md::table` is shared, so
+    /// the cells and the alignment are read identically everywhere
+    /// (issue #329). What differs is what the client can do with a
+    /// table too wide for the space it has.
+    ///
+    /// Not about *editing* a table: no client has add-row /
+    /// add-column, by design, and the block's raw markdown is what
+    /// gets edited on all three. A capability every client lacks
+    /// equally would be a row that says nothing.
+    TableRendering,
     /// Reading the trash back: listing what has been deleted and
     /// putting a block back where it was deleted from (issue #287).
     ///
@@ -117,6 +130,7 @@ impl Capability {
         Capability::NestedPages,
         Capability::ToolbarOrderLock,
         Capability::OpenExternalFile,
+        Capability::TableRendering,
         Capability::Trash,
     ];
 }
@@ -129,7 +143,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_11: usize = 11;
+    const EXPECTED_12: usize = 12;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -143,6 +157,7 @@ mod tests {
             Capability::NestedPages => "NestedPages",
             Capability::ToolbarOrderLock => "ToolbarOrderLock",
             Capability::OpenExternalFile => "OpenExternalFile",
+            Capability::TableRendering => "TableRendering",
             Capability::Trash => "Trash",
         }
     }
@@ -160,9 +175,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_11,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_11} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_11)",
+            EXPECTED_12,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_12} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_12)",
             names.len(),
         );
     }

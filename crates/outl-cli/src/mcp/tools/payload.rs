@@ -110,6 +110,12 @@ fn prune_gui_fields(v: &mut Value) {
         Value::Object(map) => {
             if map.contains_key("id") && map.contains_key("text") && map.contains_key("children") {
                 map.remove("tokens");
+                // Same category, one construct up: a pre-tokenized
+                // restatement of `text` that only a GUI renderer reads.
+                // Left in, it shipped the whole `TableView` — `aligns`
+                // plus every cell's token list — on top of the pipe rows
+                // already in `text`, measured at 235x the source bytes.
+                map.remove("table");
                 if map.get("collapsed") == Some(&Value::Bool(false)) {
                     map.remove("collapsed");
                 }

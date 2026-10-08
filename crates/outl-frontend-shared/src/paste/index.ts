@@ -22,6 +22,7 @@
 import { htmlToOutlMarkdown } from "./html";
 
 export { htmlToOutlMarkdown };
+export { tableElementToMarkdown } from "./table";
 
 /**
  * True when `text` looks like a markdown bullet list (at least one
@@ -43,6 +44,79 @@ export function looksLikeOutline(text: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * True when `text` carries a markdown table — a header row, a delimiter
+ * row under it, and any rows after that.
+ *
+ * The second gate on routing a paste to the backend, beside
+ * {@link looksLikeOutline}. Without it a pasted table stays on the
+ * native splice (a single-line payload) or lands as one block per row
+ * (multi-line), and the user undoes it by hand.
+ *
+ * Mirror of `outl_actions::paste::looks_like_table`, which asks
+ * `outl_md::table_span` at every line. **Keep both in sync** — the Rust
+ * side is the canonical contract; this copy only decides whether the
+ * round-trip happens. It errs towards "table" the same way the outline
+ * detector errs towards "outline": a false positive costs one round
+ * trip, a false negative costs the user's structure.
+ *
+ * A pipe alone is not enough, here or in Rust: `run \`a | b\`` is prose,
+ * and the delimiter row is what declares the intent.
+ */
+export function looksLikeTable(text: string): boolean {
+  if (!text || !text.includes("|")) return false;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i + 1 < lines.length; i += 1) {
+    if (isTableRow(lines[i]) && isDelimiterRow(lines[i + 1])) return true;
+  }
+  return false;
+}
+
+/** A line that could be a row: non-blank, carries a pipe, not a bullet. */
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed === "-" || trimmed.startsWith("- ")) return false;
+  return /(^|[^\\])\|/.test(trimmed);
+}
+
+/** `| --- | :-: |` — every cell a rule. Mirror of `is_delimiter_row`. */
+function isDelimiterRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return false;
+  const cells = trimmed
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|");
+  return cells.length > 0 && cells.every((c) => /^\s*:?-+:?\s*$/.test(c));
+}
+
+/**
+ * True when `text` is tab-separated tabular data — what a spreadsheet,
+ * a SQL client or `column -t` puts on the clipboard as `text/plain`.
+ *
+ * Mirror of `outl_md::from_delimited`'s gate, which does the actual
+ * conversion on the backend. **Keep both in sync.** The three
+ * conditions and why each one is there:
+ *
+ * - **Two or more lines** — one row has no header to rule off.
+ * - **The same field count on every line, two or more** — a ragged
+ *   count is prose or code that happens to carry tabs.
+ * - **No line starts with a tab** — tab-indented code and tab-indented
+ *   outlines pass the first two, and rearranging either into a grid
+ *   destroys it.
+ *
+ * Comma-separated text is deliberately **not** tabular: prose carries
+ * commas, and `a, b` on two lines is far more often two sentences than
+ * a 2×2 grid.
+ */
+export function looksLikeTabular(text: string): boolean {
+  if (!text.includes("\t")) return false;
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length < 2 || lines.some((l) => l.startsWith("\t"))) return false;
+  const width = lines[0].split("\t").length;
+  return width >= 2 && lines.every((l) => l.split("\t").length === width);
 }
 
 /**
@@ -125,8 +199,11 @@ export type PasteRoute =
  * 1. Convert `text/html` to markdown ({@link htmlToOutlMarkdown}). If it
  *    is non-empty AND differs from the trimmed plain text, the clipboard
  *    is *rich* — route the markdown (`bold` / links / lists survive).
- * 2. Otherwise, if the plain text {@link looksLikeOutline} or
- *    {@link hasMultipleParagraphs}, route the plain text as *structured*.
+ * 2. Otherwise, if the plain text {@link looksLikeOutline},
+ *    {@link looksLikeTable}, {@link looksLikeTabular} or
+ *    {@link hasMultipleParagraphs}, route the plain text as
+ *    *structured* — the backend splits / normalises it, and turns
+ *    tab-separated rows into a table.
  * 3. Otherwise it is trivial — `native`, no round-trip.
  *
  * `html` / `plain` are the raw `clipboardData.getData(...)` strings
@@ -140,7 +217,21 @@ export function choosePasteRoute(html: string, plain: string): PasteRoute {
   if (md !== "" && md !== plain.trim()) {
     return { route: "rich", text: md };
   }
-  if (plain && (looksLikeOutline(plain) || hasMultipleParagraphs(plain))) {
+  // The two table detectors are **redundant here** and kept for
+  // readability: both require two or more non-blank lines, which
+  // `hasMultipleParagraphs` already answers `true` for, so neither can
+  // change a route today. They are the exported mirror of
+  // `outl_actions::paste::{looks_like_table, looks_like_tabular}` and
+  // the thing to reach for on a surface that is *not* behind the
+  // paragraph gate — the TUI's `looks_structured` shape, say. Do not
+  // assume they are what protects a pasted table.
+  if (
+    plain &&
+    (looksLikeOutline(plain) ||
+      looksLikeTable(plain) ||
+      looksLikeTabular(plain) ||
+      hasMultipleParagraphs(plain))
+  ) {
     return { route: "structured", text: plain };
   }
   return { route: "native" };

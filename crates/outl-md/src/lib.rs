@@ -37,6 +37,7 @@ mod shortcode;
 pub mod sidecar;
 mod similarity;
 pub mod slug;
+pub mod table;
 pub mod tag;
 mod token;
 pub mod unlogged;
@@ -71,6 +72,14 @@ pub use sidecar::{
     content_hash, file_hash, resolve_sidecar_path, sidecar_path_for, Sidecar, SidecarBlock,
 };
 pub use slug::{slugify, UNTITLED_SLUG};
+// `is_delimiter_row` and `split_cells` are deliberately not re-exported
+// here: they are reachable as `outl_md::table::…` and nothing outside
+// the module asks for them, so a root alias would be surface with no
+// consumer.
+pub use table::{
+    from_delimited, parse_table, render_table, render_table_with, table_span, tokenize_table,
+    tsv_to_markdown, unescape_cell, ColumnAlign, Table, TableView,
+};
 pub use tag::{text_contains_tag, text_contains_tag_or_child};
 pub use unlogged::content_lines_missing_from;
 pub use view::{block_to_rows, char_to_line_col, BlockRow, BlockRowKind};

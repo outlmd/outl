@@ -380,6 +380,7 @@ fn shallow_parsed(node: &OutlineNode) -> OutlineNode {
         collapsed: node.collapsed,
         properties: node.properties.clone(),
         tokens: node.tokens.clone(),
+        table: node.table.clone(),
         children: Vec::new(),
     }
 }

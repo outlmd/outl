@@ -183,11 +183,22 @@ pub fn match_blocks_guarded(
 /// [`match_blocks_guarded`], leaving out of the **volume** the orphans
 /// `carried_elsewhere` says the same pass keeps some other way.
 ///
-/// The only caller is reconcile's pre-fence migration (issue #281): a
-/// sidecar written before the fence parser recorded each YAML line as a
-/// block, so a metadata-heavy page orphans most of its blocks on the first
-/// pass and would be refused forever, frozen. Those blocks' content is the
-/// fence still on disk, logged as a page property in the same pass.
+/// One caller, `reconcile_md`, asking on behalf of two migrations with
+/// the same shape — a sidecar written before a construct was modelled
+/// holds its lines as separate blocks, so the pass that consolidates
+/// them orphans most of a page and would be refused forever, frozen:
+///
+/// - **the pre-fence sidecar** (issue #281), which recorded each YAML
+///   line as a block; their content is the fence still on disk, logged
+///   as a page property in the same pass;
+/// - **the pre-table sidecar** (issue #329), which recorded each table
+///   row as a block; their content is the table block the same pass
+///   creates (`table::row_carried_by`).
+///
+/// Both predicates are **positive evidence** rather than a bypass: each
+/// asks whether the orphan's content is on disk right now, so a
+/// truncated `.md` — the thing this guard exists for — gets no
+/// discount from either.
 ///
 /// Exempt orphans are still returned, trashed and logged: this changes
 /// what the guard counts, never what the pass deletes. A predicate that
@@ -205,9 +216,24 @@ pub(crate) fn match_blocks_guarded_except(
         .iter()
         .filter(|b| orphan_ids.contains(&b.id) && carried_elsewhere(b))
         .count();
+    // `exempt` comes off the **numerator only**. Taking it off both
+    // sides raises the ratio for the orphans that are not exempt —
+    // `(O-E)/(K-E) >= O/K` — so a page carrying a big exempt set
+    // refuses deletions that are nowhere near the ceiling.
+    //
+    // Harmless while the only predicate was `is_legacy_fence_block`,
+    // which exempts the handful of lines in a YAML fence. `row_carried_by`
+    // routinely exempts dozens, which is what made the term observable:
+    // a 60-row table plus 25 prose bullets, 20 of them cleared in an
+    // editor, measured as "20 of 25 known, 80%" and was refused — an
+    // honest 20 of 85 is 24%. Nothing is written on a refusal, so the
+    // next pass sees the same inputs and refuses again: the page freezes
+    // permanently, which is the outcome the exemption exists to prevent.
+    //
+    // Pinned by `a_big_exempt_set_does_not_refuse_an_ordinary_delete`.
     let volume = OrphanVolume {
         orphaned: orphans.len().saturating_sub(exempt),
-        previously_known: old_blocks.len().saturating_sub(exempt),
+        previously_known: old_blocks.len(),
     };
     if let Err(e) = guard.check(volume) {
         // Loud on the way out: the caller gets the `Err`, and an
@@ -385,6 +411,120 @@ mod tests {
         assert_eq!(guarded_matches.len(), matches.len());
         assert_eq!(guarded_orphans, orphans);
         assert_eq!(guarded_orphans.len(), 5);
+    }
+
+    // ------------------------------------- the table-row exemption (#329)
+
+    /// A pre-#329 sidecar: one block per table row, which is what the
+    /// parser produced before a table was a block of its own.
+    fn old_table_rows(body_rows: usize) -> (Vec<SidecarBlock>, String) {
+        let mut rows = vec!["| a | b |".to_string(), "| --- | --- |".to_string()];
+        for i in 0..body_rows {
+            rows.push(format!("| {i} | x |"));
+        }
+        let old = rows
+            .iter()
+            .enumerate()
+            .map(|(i, text)| SidecarBlock::from_text(NodeId::new(), i + 1, 0, text))
+            .collect();
+        (old, rows.join("\n") + "\n")
+    }
+
+    #[test]
+    fn consolidating_a_tables_rows_is_not_a_bulk_delete() {
+        // Every known block orphans — the table is now one block whose
+        // text is too dissimilar to any single row for level 2. On a
+        // page that is mostly the table that is 100%, so without the
+        // exemption the guard refuses the migrating pass forever and the
+        // page is frozen in both directions.
+        let (old, md) = old_table_rows(30);
+        let ast = parse(&md);
+        assert_eq!(ast.blocks.len(), 1, "the table is one block now");
+
+        let refused = match_blocks_guarded(&ast.blocks, &old, &OrphanGuard::Enforced);
+        assert!(
+            refused.is_err(),
+            "precondition: unexempted, this is a 100% orphan rate"
+        );
+
+        let (_, orphans) =
+            match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
+                crate::table::row_carried_by(&ast.blocks, &b.text)
+            })
+            .expect("the migrating pass is allowed through");
+        // The volume changed, the outcome did not: the rows are still
+        // trashed and logged, and their content is in the table block.
+        assert_eq!(orphans.len(), 32);
+    }
+
+    #[test]
+    fn a_truncated_file_gets_no_discount_from_the_table_exemption() {
+        // The direction that matters. Same sidecar, but the `.md` is
+        // gone — there is no table on disk for a row to belong to, so
+        // the exemption finds nothing and the guard still refuses.
+        let (old, _) = old_table_rows(30);
+        let ast = parse("");
+        let err = match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
+            crate::table::row_carried_by(&ast.blocks, &b.text)
+        })
+        .expect_err("an empty file is exactly what the guard is for");
+        assert!(matches!(err, MatchGuardError::BulkDelete { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn a_row_the_user_also_edited_is_not_exempt() {
+        // The exemption is positive evidence, not a bypass: a row whose
+        // cell changed is not a line of the table on disk, so it counts
+        // towards the volume like any other orphan.
+        let (old, md) = old_table_rows(30);
+        let edited = md.replace("| 0 | x |", "| 0 | CHANGED |");
+        let ast = parse(&edited);
+        let exempt = old
+            .iter()
+            .filter(|b| crate::table::row_carried_by(&ast.blocks, &b.text))
+            .count();
+        assert_eq!(exempt, old.len() - 1, "the edited row is not carried");
+    }
+
+    #[test]
+    fn a_big_exempt_set_does_not_refuse_an_ordinary_delete() {
+        // A 60-row table plus 25 prose bullets, pre-#329 sidecar (one
+        // block per table line). The user clears 20 of the 25 bullets in
+        // an editor — ordinary section-clearing, and `MAX_ORPHANED_RATIO`
+        // is set high precisely to allow it.
+        //
+        // The table's 60 rows orphan too (they are now one block) and are
+        // exempt. Subtracting them from the denominator as well reported
+        // "20 of 25, 80%" and refused; the honest figure is 20 of 85.
+        let mut rows = vec!["| a | b |".to_string(), "| --- | --- |".to_string()];
+        for i in 0..58 {
+            rows.push(format!("| {i} | x |"));
+        }
+        let mut old: Vec<SidecarBlock> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, t)| SidecarBlock::from_text(NodeId::new(), i + 1, 0, t))
+            .collect();
+        for i in 0..25 {
+            old.push(SidecarBlock::from_text(
+                NodeId::new(),
+                old.len() + 1,
+                0,
+                format!("prose {i}"),
+            ));
+        }
+        assert_eq!(old.len(), 85);
+
+        let mut md = rows.join("\n");
+        md.push('\n');
+        for i in 20..25 {
+            md.push_str(&format!("- prose {i}\n"));
+        }
+        let ast = parse(&md);
+        match_blocks_guarded_except(&ast.blocks, &old, &OrphanGuard::Enforced, |b| {
+            crate::table::row_carried_by(&ast.blocks, &b.text)
+        })
+        .expect("20 deletions out of 85 known blocks is an ordinary edit");
     }
 
     #[test]

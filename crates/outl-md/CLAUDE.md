@@ -105,6 +105,17 @@ Treat matching with the same paranoia as the CRDT.
 - **External wiki-link rewriting** (`wikilink.rs`) — `rewrite_wikilinks` / `clean_wikilink_target` collapse `[[Note|alias]]` / `[[Note#heading]]` / `[[Note^block-id]]` / `[[folder/Note]]` to canonical `[[Note]]`;
   `convert_image_links` / `is_image_target` turn image wiki-links and embeds (`![[img.png]]`, `[[a/b.jpeg|cap]]`) into standard CommonMark links with the folder path preserved.
   Pure text → text; no vault layout or routing policy.
+- **Tables** (`table.rs`) — the pipe-delimited table, which is **not a new block kind**: a block whose text carries the rows, like a fence or a `> ` quote, so the op log never learns a new shape.
+  `table_span` answers "do the lines starting here form a table" (what lets `parse` claim pasted rows as **one** block instead of one recovered block per row, with no warning); `parse_table` decomposes a block's whole text into cells + `ColumnAlign`; `tokenize_table` is the same reading with every cell through `tokenize_owned`, shipped to clients as `BlockNode.table` so none of them splits pipes for itself (a client that did would have no tokenizer and would render a cell's `[[ref]]` as literal text).
+  `render_table` writes the canonical column-padded form, `tsv_to_markdown` / `from_delimited` read a spreadsheet's clipboard, and `unescape_cell` is the single owner of "what does a cell *show*" (`\|` → `|`), asked by both the TUI's grid and `tokenize_table`.
+  **The parser does not reformat.**
+  Re-emitting a hand-written table through `render_table` on read is a whitespace-only rewrite that the reconcile turns into an `Op::Edit` per table — churn for a space nobody typed.
+  Alignment is a render decision; `render_table` is for where outl *creates* a table (a tabular paste, the TUI painting a grid).
+  **Nothing is dropped**: GFM truncates a row wider than its header, `Table::columns` widens instead, and a short row pads.
+  **A table is recognised by shape, not by a marker**, which makes it the one construct that can swallow a line meant for something else — so `is_row` refuses every line another part of the grammar already owns (a bullet, a `key:: value` property, a fence opener), and `table_span` asks it of the **delimiter row too**, not only the header and body.
+  `is_delimiter_row` answers a narrower question (is every cell a rule) and `- | -` satisfies it, so the two are not interchangeable: reading a table around that bullet renders it back at `indent + 1`, where the next parse makes it a *child* — and `content_lines_missing_from` then reports a line the log does hold, which withholds `last_synced_hash` and freezes a page with nothing wrong with it (invariant 8).
+  Pinned by `a_bullet_shaped_delimiter_row_is_not_a_delimiter_row` / `a_property_line_is_not_a_body_row` / `a_fence_opener_is_not_a_body_row` (`table/tests.rs`), the `table_bullet_rule.md` and `table_then_property.md` corpus files, and `arb_table_block` in `tests/block_text_roundtrip_properties.rs` — **the generator is the part that matters**: all three shapes were found by probing, none by a hand-written case.
+  User-facing spec: [`docs/markdown-format.md` → Tables](../../docs/markdown-format.md#tables).
 - **Tag predicates** (`tag.rs`) — boundary-correct "does this text mention `#tag`?", built on the tokenizer.
   `#tag-longer` / `#tagged` never match `tag`; a `#tag` inside a `` `code` `` span is not a tag.
   Consumers must use these instead of `text.contains("#tag")` (the substring form is the false-positive bug this module deleted from the CLI, and then from the ` ```query ` DSL).
@@ -333,7 +344,7 @@ tests/
 ├── similarity_contention.rs  # two new blocks claim one old entry: confidence decides, not index order
 ├── mixed_version_sidecar.rs  # shipped v2 binary + current one over one folder: no dup, no handle rotation
 ├── multiline_block_roundtrip.rs  # render → parse roundtrip for multi-line/blank-line/indented/leading-newline block text (issue #210 producer)
-├── block_text_roundtrip_properties.rs  # the corpus gate's three properties, generated (proptest) over block text
+├── block_text_roundtrip_properties.rs  # the corpus gate's three properties, generated (proptest) over block text — incl. `arb_table_block`
 └── corpus_gate.rs            # the three properties over tests/corpus/
 
 benches/
@@ -414,6 +425,7 @@ Normalise either and the file still passes while pinning nothing.
    **A block list cannot answer for the frontmatter fence**: it rides `Op::SetProp`, so `content_lines_missing_from` skips the region and `frontmatter_lines_missing_from` asks the render instead, with `last_synced_hash` as the witness that the log held the disk fence (a fence edited on disk since then is a loss, a peer's edit is not).
    Two channels, neither interchangeable; pinned by `tests/frontmatter_roundtrip.rs`.
    The migration off a pre-fence sidecar (YAML lines recorded as blocks) is exempt from the bulk-delete **count** only, via `match_blocks_guarded_except` + `frontmatter::is_legacy_fence_block`, and only when the `.md` still has a fence carrying those lines.
+   **The pre-table sidecar is the same shape** (issue #329): one block per table row, consolidated into one table block, so a page that is mostly the table orphans 100% of its known blocks and the guard would refuse the migrating pass forever. `table::row_carried_by` is its predicate, and like the fence one it is positive evidence — the orphan's text has to *be* a line of a table on disk right now, so a truncated `.md` gets no discount and a row whose cell the user also edited still counts. Pinned in both directions by `consolidating_a_tables_rows_is_not_a_bulk_delete` / `a_truncated_file_gets_no_discount_from_the_table_exemption` / `a_row_the_user_also_edited_is_not_exempt`.
 
 ## Things to never do here
 

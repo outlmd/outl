@@ -1,4 +1,6 @@
 export * from "./api/types";
+export * from "./api/table";
+export * from "./api/tokens";
 export * from "./api/commands";
 export * from "./journal";
 export * from "./markdown";
