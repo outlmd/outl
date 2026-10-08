@@ -61,7 +61,7 @@ jobs:
       prerelease: ${{ steps.compute.outputs.prerelease }}
       create_tag: ${{ steps.compute.outputs.create_tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - id: compute
         shell: bash
@@ -100,7 +100,7 @@ jobs:
     if: needs.prepare.outputs.create_tag == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -131,7 +131,7 @@ jobs:
       # origin, and the same fetch also missed beta.174 and beta.175 from
       # runs seven hours earlier. `github.sha` is what the `tag` job tagged,
       # so it names the same tree and is already in the mirror.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -204,7 +204,7 @@ jobs:
             artifact: outl-windows-x64
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
 
@@ -231,7 +231,7 @@ jobs:
           grep -n "version" Cargo.toml | head -10
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -336,7 +336,7 @@ jobs:
     #   * The dmg is ~2× bigger (carries both archs), which for
     #     outl-desktop's ~20MB binaries means ~40MB. Fine.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
 
@@ -352,7 +352,7 @@ jobs:
           rustup target list --installed
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -369,7 +369,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (desktop universal)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -437,17 +437,17 @@ jobs:
     # (24.04) would raise the glibc floor and break older distros.
     runs-on: blacksmith-8vcpu-ubuntu-2204
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: x86_64-unknown-linux-gnu
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -478,7 +478,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (desktop linux)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -543,17 +543,17 @@ jobs:
     if: needs.create_release.result == 'success'
     runs-on: blacksmith-4vcpu-windows-2025
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -568,7 +568,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (desktop windows)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -651,7 +651,7 @@ jobs:
     # A failure here never blocks the release: `publish_release` waits for
     # this job but does not require its success (see its `if`).
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.sha }}
 
@@ -662,13 +662,13 @@ jobs:
           rustup target list --installed
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
 
       - name: Install Android NDK
         shell: bash
@@ -716,7 +716,7 @@ jobs:
         run: cargo install tauri-cli --version "^2.0" --locked
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -732,7 +732,7 @@ jobs:
           rm Cargo.toml.bak
 
       - name: Cache cargo (android)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -840,7 +840,7 @@ jobs:
       needs.build_desktop_windows.result == 'success'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Flip draft to published
         env:
@@ -876,7 +876,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: main
 
@@ -980,13 +980,13 @@ jobs:
     # `NPM_TOKEN` lives in the `release` environment.
     environment: release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # The build commit itself — not the tag, which the parallel `tag`
           # job may not have pushed yet on a main-push run.
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 20
           # Writes the `.npmrc` that reads NODE_AUTH_TOKEN below.
@@ -1050,14 +1050,14 @@ jobs:
     # `CARGO_REGISTRY_TOKEN` lives in the `release` environment.
     environment: release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # The build commit itself — not the tag, which the parallel `tag`
           # job may not have pushed yet on a main-push run.
           ref: ${{ github.sha }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
 
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash

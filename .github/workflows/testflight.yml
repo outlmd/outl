@@ -90,7 +90,7 @@ jobs:
       # Needed for `.github/scripts/testflight_set_whatsnew.py`
       # invoked later. The script is small and the checkout is cheap
       # (a few MB), so we always do it.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Resolve Mobile run ID
         id: src
@@ -127,7 +127,7 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Download IPA artifact from Mobile run
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: outl-ios-release
           path: ipa-bundle
@@ -173,7 +173,7 @@ jobs:
       # install on the runner (any version works for upload; this
       # step doesn't compile anything).
       - name: Select Xcode (for altool)
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
 
@@ -232,7 +232,7 @@ jobs:
 
       - name: Re-upload IPA as workflow artifact (audit trail)
         if: always() && steps.ipa.outputs.path != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: outl-ios-testflight-${{ steps.meta.outputs.short_version }}-${{ steps.meta.outputs.build_number }}
           path: ${{ steps.ipa.outputs.path }}

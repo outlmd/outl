@@ -1,0 +1,38 @@
+version: 2
+updates:
+  # Every action is pinned to a commit SHA with the release tag in a
+  # comment. Dependabot moves both together, one PR a week.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # One Cargo workspace at the root (Cargo.lock). The toolchain is
+  # pinned in rust-toolchain.toml, so a bump that needs a newer rustc
+  # fails CI here instead of on main.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Bun workspace at the root (bun.lock covers every package listed in
+  # package.json workspaces).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      bun-minor-patch:
+        update-types: ["minor", "patch"]
