@@ -27,6 +27,9 @@ hex = { workspace = true }
 strsim = { workspace = true }
 chrono = { workspace = true }
 walkdir = { workspace = true }
+# Display width for the table renderer's column padding — a CJK or emoji
+# cell is wider than its char count, and the grid has to line up.
+unicode-width = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
