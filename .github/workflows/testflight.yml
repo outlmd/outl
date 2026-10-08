@@ -185,6 +185,10 @@ jobs:
           mkdir -p "$KEY_DIR"
           echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode \
             -o "$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          # `env.HOME` is empty in an expression: the env context only holds
+          # vars set in the workflow, not the runner's HOME. Export the real
+          # path so the whatsNew step reads the key from where it was written.
+          echo "APP_STORE_CONNECT_KEY_PATH=$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" >> "$GITHUB_ENV"
 
       - name: Upload IPA to TestFlight
         shell: bash
@@ -222,7 +226,6 @@ jobs:
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_KEY_PATH: ${{ env.HOME }}/.appstoreconnect/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8
           BUNDLE_ID: app.outl.mobile-app
           SHORT_VERSION: ${{ steps.meta.outputs.short_version }}
           BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}

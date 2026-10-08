@@ -150,7 +150,9 @@ jobs:
             ${{ runner.os }}-cargo-bench-
             ${{ runner.os }}-cargo-
       - name: Install hyperfine
-        run: cargo install hyperfine --locked
+        # Pinned: hyperfine 1.21+ needs rustc 1.97 and the workspace
+        # toolchain is 1.95.0 (rust-toolchain.toml). Bump with the toolchain.
+        run: cargo install hyperfine --version 1.20.0 --locked
       - name: Build release binaries
         run: cargo build --release -p outl-cli -p xtask
       - name: Generate 10k-page batch payload
