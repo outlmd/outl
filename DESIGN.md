@@ -359,7 +359,7 @@ The scale, as it actually appears in the code:
 | Body | 17px / 1.4 | mobile `body` and `BlockRow` (`text-[17px] leading-[1.42]`); desktop has no CSS base and takes `DesktopSettings.font_size`, default `15` |
 | Inline chip, inline code | 14px | `MarkdownInline.tsx` — block-ref chip, `` `code` `` |
 | Ref / tag chip (mobile) | 15px, weight 500 | `MarkdownInline.tsx` chip variant |
-| Popover / autocomplete row | 13px | `BlockRow.tsx` (desktop) — the four `text-[13px]` dropdowns |
+| Popover / autocomplete row | 13px | `SuggestPopups.tsx` (desktop) — the four `text-[13px]` dropdowns |
 | Secondary meta | 12px | truncated paths, mono |
 | Chrome label | 10px, uppercase, mono | code-fence language label |
 | Gutter | 9px, mono | `BlockRow.tsx` left gutter |

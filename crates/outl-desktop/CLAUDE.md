@@ -46,6 +46,36 @@ What this crate **does** own:
 
 The frontend / `src-tauri` file tree (which component owns what, where each `lib/*.ts` helper lives) is in [`docs/development.md`](../../docs/development.md#desktop-crate-layout).
 
+### `BlockRow.tsx` is five files
+
+It was 1,425 lines.
+It is the row **chrome** now: selection / Visual / pending-cut / drop-target state, indent guides, fold chevron, the bullet-vs-checkbox gesture split, the quote wrapper, the recursion.
+New code of one of these shapes goes in the sibling, not back in the parent:
+
+- **`block-callbacks.ts`** — the `BlockCallbacks` interface alone.
+  Three components need the type; none should import a component to get it.
+  Re-exported from `BlockRow.tsx`, so `import { type BlockCallbacks } from "./BlockRow"` keeps resolving.
+- **`BlockBody.tsx`** — read mode: fence → `<CodeFenceView />`, table → `<MarkdownTable />`, embed-only → `<EmbeddedSubtree />`, else `<MarkdownInline />` + the chip row.
+  Flat, mutually exclusive branches, each routing a click back through the same `onStartEdit` — a table has no cell editor and a fence has no fence editor, by design (#329).
+- **`BlockEditor.tsx`** — the textarea: chords, bracket auto-pairing, paste routing, `autoSize`, `commit`.
+  Mounted only while editing, which is why focus + pending caret intent are `onMount` and not an effect on an `editing` flag.
+- **`block-suggest.ts`** — `createBlockSuggest(deps)`: the four inline autocomplete triggers, their round-trips and staleness guards, and the popup keyboard contract.
+  One module because **only one popup is ever open at a time** is the invariant all of it rests on.
+  Detection and span replacement are not here — `@outl/shared/autocomplete` owns those, and the TUI and mobile run them too.
+- **`CodeFenceView.tsx`** — the rendered fence plus `RichFenceFrame`'s sandboxed iframe (`allow-scripts`, never `allow-same-origin`).
+
+Two things the split decided on purpose:
+
+- **The draft signal stays on `<BlockRow />`.**
+  Its lifetime is the row, not the edit session.
+  Moving it into `<BlockEditor />` would re-seed it from `props.block` on every entry into Insert, which is a behaviour change (it would mask the bug below), not a move.
+- **`startEdit` no longer calls `focusTextarea()`.**
+  The editor focuses itself on mount, in the microtask the removed call landed in anyway.
+
+**Known, pre-existing, not fixed here:** the draft is seeded once per row instance, and only `startEdit` re-seeds it.
+`setOutline` reconciles on id, so a block a peer rewrote keeps its row instance and its old draft.
+Entering Insert by a path that bypasses `startEdit` (`i` / `A`, which write `editingBlockId` straight from `action-handlers.ts`) then shows the stale text and commits it over the peer's.
+
 ## First-run onboarding
 
 `components/Onboarding.tsx` is the first-run flow. `App.tsx` decides between it and `<AppShell />`:
@@ -231,7 +261,7 @@ Chord table: [`docs/shortcuts.md`](../../docs/shortcuts.md).
 Load-bearing notes a contributor needs:
 
 - **Plain `Enter` → splits the block at the caret** (`onEnter`, issue #184).
-  `Shift+Enter` → literal `\n` soft break (issue #119), handled in `BlockRow`'s `handleKeydown` (not the catalog; see the code comment).
+  `Shift+Enter` → literal `\n` soft break (issue #119), handled in `BlockEditor`'s `handleKeydown` (not the catalog; see the code comment).
 - `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
   Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
 - Bracket auto-pairing (`[[`/`((` auto-close, `(`/`[`/`{` auto-pair with caret between, closer step-over, empty-pair collapse on `Backspace`) all live in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity).
@@ -283,7 +313,7 @@ This section captures only the **architectural decisions** a contributor needs t
 
 - **`NewBlockAbove` (`O`) uses `beforeId`, not a post-creation move walk.**
   `createBlock({ beforeId: anchor })` → `create_before` (floor-slot swap in core); never reintroduce the old create-at-tail + `moveBlockDown`-loop.
-  `Cmd/Ctrl+Shift+Enter` is caret-aware in `BlockRow`'s keydown (col 0 → *before*, past col 0 → *below*); `stopImmediatePropagation` preempts the catalog's create-below binding.
+  `Cmd/Ctrl+Shift+Enter` is caret-aware in `BlockEditor`'s keydown (col 0 → *before*, past col 0 → *below*); `stopImmediatePropagation` preempts the catalog's create-below binding.
 
 - **Block clipboard: view-mode cut/copy/paste of a whole block** (chords: [`docs/shortcuts.md`](../../docs/shortcuts.md)).
   **Normal**-mode only; `appState.blockClipboard` = `{ kind: "cut", nodeId } | { kind: "copy", markdown }` (backend resolves the page via `enclosing_page_id`).
@@ -319,21 +349,21 @@ Why diverge from the TUI: the TUI has a char cursor so "open the ref under curso
 
 ### `:shortcode:` emoji autocomplete
 
-Inside an open `:shortcode` trigger, `BlockRow` shows `EmojiSuggestPopup`, reusing `detectEmojiContext` / `applyEmojiSuggestion` and the `searchEmojis` command (backed by `outl_md::emoji::search`).
+Inside an open `:shortcode` trigger, `BlockEditor` shows `EmojiSuggestPopup`, reusing `detectEmojiContext` / `applyEmojiSuggestion` and the `searchEmojis` command (backed by `outl_md::emoji::search`).
 Accept inserts the canonical `:shortcode:` (the `.md` stores the literal, never the codepoint).
 It beats the ref popup at the same caret (`detectEmojiContext` only fires on word-initial `:[a-z]`).
 
 ### `[[page]]` ref autocomplete
 
-Inside an open `[[…]]`, `BlockRow` shows `RefSuggestPopup`, reusing the shared `detectRefContext` / `applySuggestion` helpers and the `search_pages` command the `Cmd+P` picker already calls.
+Inside an open `[[…]]`, `BlockEditor` shows `RefSuggestPopup`, reusing the shared `detectRefContext` / `applySuggestion` helpers and the `search_pages` command the `Cmd+P` picker already calls.
 Accept inserts the page title (or ISO slug for journals).
 
 ### `((block ref))` autocomplete + rendering
 
-Inside an open `((…))` (issue #116), `BlockRow` shows `BlockSuggestPopup` — `detectRefContext` (`kind: "block"`) / `applySuggestion` + `search_blocks` (from disk, debounced ~150ms).
+Inside an open `((…))` (issue #116), `BlockEditor` shows `BlockSuggestPopup` — `detectRefContext` (`kind: "block"`) / `applySuggestion` + `search_blocks` (from disk, debounced ~150ms).
 The pick inserts the **ref handle** (`((blk-XXXXXX))`), never the text; mobile registers it, popup unwired.
 Rendering then **resolves** the handle (issue #147, TUI parity): `OutlineView` gathers handles via `collectBlockRefHandles` + `resolveEmbeds` into `appState.embeds`.
-`BlockRow` feeds it to `<MarkdownInline embeds= />` (inline `((blk))` → source text, orphan → raw chip).
+`BlockBody` feeds it to `<MarkdownInline embeds= />` (inline `((blk))` → source text, orphan → raw chip).
 An embed-only block (`embedOnlyHandle`) renders `<EmbeddedSubtree />` beneath it — read-only, depth 4, from `ResolvedBlock.children` (`resolve_embeds`).
 
 ### Clicking external `[label](url)` links

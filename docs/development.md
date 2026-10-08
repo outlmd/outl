@@ -76,8 +76,10 @@ crates/outl-desktop/
 ├── package.json / tsconfig*.json / vite.config.ts / vitest.config.ts / index.html
 ├── src/                       # frontend (Solid)
 │   ├── index.tsx  App.tsx (Onboarding/AppShell gate)  styles.css  setup.test.ts
-│   ├── components/            # AppShell, Sidebar, OutlineView (owns BlockCallbacks),
-│   │                         #   BlockRow (+CodeFenceView), BacklinksPanel, Picker,
+│   ├── components/            # AppShell, Sidebar, OutlineView (impl BlockCallbacks),
+│   │                         #   BlockRow (chrome) → BlockBody (read) / BlockEditor
+│   │                         #     (textarea) / block-suggest / block-callbacks /
+│   │                         #     CodeFenceView / SuggestPopups, BacklinksPanel, Picker,
 │   │                         #   SettingsModal, ChromeToggleBar, SyncIndicator,
 │   │                         #   PropertyEditor (key:: value chips + create/delete),
 │   │                         #   Onboarding, WorkspacePicker

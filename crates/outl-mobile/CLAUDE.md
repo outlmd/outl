@@ -104,6 +104,30 @@ What is left is ~2,070 lines, almost all of it one `Journal()` function.
 That is real debt, not a finished job: what is left is a state/effects question (edit lifecycle, sync signals, the native bridges, the sheet stack), not a "move these functions" question — phases 1-3 were the movable half — and it wants its own plan.
 `.github/file-size-baseline.txt` holds the current number, and the CI ratchet means it can go down but not up.
 
+## `BlockRow.tsx` is four files
+
+Same treatment, same reason (846 lines).
+`BlockRow` is the **recursion** now: it knows a row has an id and children, so it is where `(id)` is bound onto each callback before it goes down, and where the swipe affordance wraps the row.
+The haptics stay on that side on purpose — a buzz is feedback for a *decision* (this delete happened, this TODO flipped), and the decision is made there; `BlockBody` only reports the gesture.
+
+- **`BlockBody.tsx`** — the row's own content: the touch-gesture layer plus the read / edit branch, and the `rowPadLeft(depth)` the parent's guide line is positioned against.
+  Three of its rules answer one question — *who already handled this touch?* — and they do not collapse into one.
+  A press that starts on a ref must not arm the long-press timer.
+  A click a child already consumed must not fall through to "start editing".
+  And while a range selection is active, every touch means "extend the range to here".
+- **`BlockMarkers.tsx`** — `CollapseTriangle` + `BulletOrCheckbox`.
+  Together because they are one column: both reserve their slot even with nothing to draw, so a change to one's width is a change to the other's offset.
+  Presentational only — neither knows what a tap means.
+- **`BlockTextarea.tsx`** — `EditableTextarea`.
+  Its own file because the rules in it are about iOS text input, not about outlines: `beforeinput` rather than `keydown` (WKWebView emits no reliable per-character key events) and `parkCaret` twice around every programmatic `value =`.
+
+**A prop this component accepts must reach the recursive call, and `BlockRow.recursion.test.ts` is what makes that fail.**
+Two were declared and never forwarded, and both were invisible: optional props, so omitting them compiles.
+`BlockRow` withheld `onSetProperty` from `<BlockBody />`, so tapping a `key:: value` chip edited nothing on **every** block; and the recursive `<BlockRow />` dropped `onSetProperty` *and* `onPasteMarkdown`, so a nested block fell back to the browser's literal splice — pasting a spreadsheet range or a markdown table into anything but a root block produced a wall of tabs instead of a table (found while closing [#329](https://github.com/outlmd/outl/issues/329)).
+Both are fixed.
+The test reads the JSX rather than rendering it (rendering needs haptics, a Tauri bridge and a WKWebView-shaped textarea — mocking all three would pin the mocks, and the defect is in the JSX), and a prop the children legitimately must not have goes in its `NOT_FORWARDED` table with a reason.
+Same "declare the gap, don't discover it" shape as `outl_shortcuts::support` and `wire_types.rs`.
+
 ## Storage is a chosen folder, not forced iCloud (Fase 2)
 
 **The workspace root is a folder the user picks.**
