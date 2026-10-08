@@ -2,7 +2,7 @@ name: outl-mobile
 options:
   bundleIdPrefix: app.outl.mobile-app
   deploymentTarget:
-    iOS: 14.0
+    iOS: 15.0
 fileGroups: [../../src]
 configs:
   debug: debug

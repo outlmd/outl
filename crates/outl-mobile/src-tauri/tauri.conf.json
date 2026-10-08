@@ -33,6 +33,7 @@
     ],
     "iOS": {
       "developmentTeam": "CPEEKT3E77",
+      "minimumSystemVersion": "15.0",
       "frameworks": ["SystemConfiguration", "Network", "CoreFoundation"]
     }
   }
