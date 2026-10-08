@@ -25,8 +25,11 @@ updates:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
 
-  # Bun workspace at the root (bun.lock covers every package listed in
-  # package.json workspaces).
+  # Bun workspace at the root (bun.lock). Only versions written directly
+  # in a manifest are updated: Dependabot's bun backend skips `catalog:`
+  # requirements (dependabot-core#14320), so the shared versions in
+  # package.json `workspaces.catalog` (TypeScript, Vite, Vitest, Solid,
+  # Tailwind, Tauri) still need a manual bump until that lands.
   - package-ecosystem: "bun"
     directory: "/"
     schedule:
