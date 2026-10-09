@@ -64,7 +64,7 @@ mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 sha2 = { workspace = true }
 
 # WASM sandbox stack (gated behind `wasm`). Workspace MSRV is rust 1.95.
-wasmtime = { version = "48", optional = true }
+wasmtime = { version = "49", optional = true }
 wasmtime-wasi = { version = "48", optional = true }
 dirs = { workspace = true, optional = true }
 
