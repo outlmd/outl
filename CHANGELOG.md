@@ -17,6 +17,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Sync and serve logs name peers by device name, not hex.**
+  Pairing stores a human alias for every device (defaults to the hostname), but every `outl sync` line identified a peer by iroh's 10-hex `fmt_short()`, forcing a cross-reference against `outl peer list` to learn which machine had pushed. Internal `tracing` lines now read `macbook-pro (a1b2c3d4)` — alias plus the short hex, so lines stay grep-correlatable — across boot, catch-up, gossip, pairing, force-sync, probe and unpair; unknown dialers (authz refusals, pre-alias entries) keep the plain short hex. `outl sync` itself now lists each peer by display name with a `v` / `x` reachability marker. `SyncProgress.peer` keeps the short hex: the desktop resolves the alias client-side by prefix match. `outl-sync-iroh` tests `peers::tests::{log_and_display_label_format, store_label_lookup_resolves_known_and_unknown}` pin the format contract and the known/unknown fallback.
+
 - **Markdown tables render as tables, on all three clients — and tabular data pasted from anywhere becomes one.**
   A pipe table used to arrive as a wall of `|` characters plus one `unrecognized_block_marker` warning *per row*, because the parser had no table in its grammar and kept each line verbatim ([#329](https://github.com/outlmd/outl/issues/329)). The content was safe; it just wasn't readable, and the warnings made a correct file look broken.
 
