@@ -164,29 +164,6 @@ pub struct PeerEntry {
     pub added_at: String,
 }
 
-impl PeerEntry {
-    /// User-facing label: the alias when set, else a short hex prefix.
-    pub fn display_label(&self) -> String {
-        self.alias.clone().unwrap_or_else(|| self.short_hex())
-    }
-
-    /// Log-facing label: `"macbook-pro (a1b2c3d4)"` or just `"a1b2c3d4"`.
-    ///
-    /// Always carries the hex prefix so a line can be grep-correlated back to
-    /// `peers.json` or `outl peer list` without losing the human name.
-    pub fn log_label(&self) -> String {
-        let hex = self.short_hex();
-        match &self.alias {
-            Some(name) => format!("{name} ({hex})"),
-            None => hex,
-        }
-    }
-
-    fn short_hex(&self) -> String {
-        self.node_id[..self.node_id.len().min(8)].to_string()
-    }
-}
-
 /// Base64-encode an [`iroh::EndpointAddr`] (as JSON) for storage in a
 /// [`PeerEntry`] or a pairing ticket.
 pub fn encode_endpoint_addr(addr: &iroh::EndpointAddr) -> Result<String> {
@@ -468,29 +445,6 @@ impl PeersStore {
     /// List all trusted peers.
     pub fn list(&self) -> &[PeerEntry] {
         &self.inner.peers
-    }
-
-    /// Resolve a node id to its log-facing label (`"alias (hex)"` or bare hex).
-    ///
-    /// Falls back to the truncated hex prefix when the id is unknown to this
-    /// store (an unpaired or revoked peer on the inbound path).
-    pub fn log_label_for(&self, node_id: &str) -> String {
-        self.inner
-            .peers
-            .iter()
-            .find(|p| p.node_id == node_id)
-            .map(|p| p.log_label())
-            .unwrap_or_else(|| node_id[..node_id.len().min(8)].to_string())
-    }
-
-    /// Resolve a node id to its user-facing label (alias or short hex).
-    pub fn display_label_for(&self, node_id: &str) -> String {
-        self.inner
-            .peers
-            .iter()
-            .find(|p| p.node_id == node_id)
-            .map(|p| p.display_label())
-            .unwrap_or_else(|| node_id[..node_id.len().min(8)].to_string())
     }
 
     /// Path this store reads from / writes to
@@ -1064,48 +1018,5 @@ mod tests {
         // peers.json is byte-for-byte unchanged — the good LAN addr stayed.
         let after = std::fs::read_to_string(&path).expect("reread peers");
         assert_eq!(before, after, "off-LAN inbounds must not rewrite the entry");
-    }
-
-    /// Inline `PeerEntry` with a fixed hex id, for the label-format contract.
-    fn entry_with(alias: Option<&str>) -> PeerEntry {
-        PeerEntry {
-            node_id: "a1b2c3d4e5f60718".to_string(),
-            alias: alias.map(|s| s.to_string()),
-            relay_url: None,
-            endpoint_addr: None,
-            added_at: "2026-01-01T00:00:00Z".to_string(),
-        }
-    }
-
-    /// The exact strings `status.rs` / `revoke.rs` emit. A revert to bare
-    /// `node_id` / `fmt_short()` changes these, so the sites' output is pinned.
-    #[test]
-    fn log_and_display_label_format() {
-        let named = entry_with(Some("macbook-pro"));
-        assert_eq!(named.log_label(), "macbook-pro (a1b2c3d4)");
-        assert_eq!(named.display_label(), "macbook-pro");
-
-        let anon = entry_with(None);
-        assert_eq!(anon.log_label(), "a1b2c3d4");
-        assert_eq!(anon.display_label(), "a1b2c3d4");
-    }
-
-    /// Store lookups resolve to the entry's label while paired, and fall back to
-    /// the 8-char hex prefix for an id this store never knew (unpaired/revoked).
-    #[test]
-    fn store_label_lookup_resolves_known_and_unknown() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let path = tmp.path().join("peers.json");
-        let mut store = PeersStore::load_or_default(&path).expect("store");
-        store
-            .add(entry_with(Some("macbook-pro")))
-            .expect("seed entry");
-
-        let known = "a1b2c3d4e5f60718";
-        let unknown = "ffffffffffffffff";
-        assert_eq!(store.log_label_for(known), "macbook-pro (a1b2c3d4)");
-        assert_eq!(store.display_label_for(known), "macbook-pro");
-        assert_eq!(store.log_label_for(unknown), "ffffffff");
-        assert_eq!(store.display_label_for(unknown), "ffffffff");
     }
 }

@@ -65,6 +65,7 @@ mod lease;
 mod oplog;
 pub(crate) mod pairing;
 pub mod peer_conn;
+mod peer_labels;
 mod peers;
 mod peers_lock;
 mod progress;
