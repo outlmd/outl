@@ -65,7 +65,7 @@ sha2 = { workspace = true }
 
 # WASM sandbox stack (gated behind `wasm`). Workspace MSRV is rust 1.95.
 wasmtime = { version = "48", optional = true }
-wasmtime-wasi = { version = "48", optional = true }
+wasmtime-wasi = { version = "49", optional = true }
 dirs = { workspace = true, optional = true }
 
 [dev-dependencies]
