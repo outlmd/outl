@@ -503,31 +503,34 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
         }
     }
 
-    let health = transport.peer_health();
+    // `peer_health()` holds only peers dialed this session; merge it onto the
+    // full paired list so a still-pending peer reads as offline, not missing.
+    let paired = transport.peers();
+    let health: std::collections::HashMap<String, _> = transport
+        .peer_health()
+        .into_iter()
+        .map(|h| (h.node_id.clone(), h))
+        .collect();
     transport.shutdown();
 
-    let online = health.iter().filter(|h| h.reachable).count();
-    if health.is_empty() {
-        println!("Sync pass complete — no paired peers.");
-        return Ok(output::EXIT_OK);
-    }
+    let online = paired
+        .iter()
+        .filter(|p| health.get(&p.node_id).is_some_and(|h| h.reachable))
+        .count();
     println!(
         "Sync pass complete — {online}/{} peer(s) reachable:",
-        health.len()
+        paired.len()
     );
-    let peers_path = outl_sync_iroh::workspace_peers_path(path);
-    let labelled: Vec<(String, String)> = health
+    let labelled: Vec<(String, String)> = paired
         .iter()
-        .map(|h| {
-            let state = match (h.reachable, h.last_rtt_ms) {
-                (true, Some(ms)) => format!("online ({ms}ms)"),
-                (true, None) => "online".to_string(),
-                (false, _) => "offline".to_string(),
+        .map(|p| {
+            let h = health.get(&p.node_id);
+            let state = match h.map(|h| (h.reachable, h.last_rtt_ms)) {
+                Some((true, Some(ms))) => format!("online ({ms}ms)"),
+                Some((true, None)) => "online".to_string(),
+                _ => "offline".to_string(),
             };
-            (
-                outl_sync_iroh::display_label_at(&peers_path, &h.node_id),
-                state,
-            )
+            (outl_sync_iroh::display_label(p), state)
         })
         .collect();
     let width = labelled

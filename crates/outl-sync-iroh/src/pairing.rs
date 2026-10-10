@@ -277,7 +277,7 @@ impl PairingPayload {
         });
         PeerEntry {
             node_id: self.node_id,
-            alias: self.alias,
+            alias: crate::peer_label::sanitize_alias(self.alias.as_deref()),
             relay_url: self.relay_url,
             endpoint_addr,
             added_at: chrono::Utc::now().to_rfc3339(),
