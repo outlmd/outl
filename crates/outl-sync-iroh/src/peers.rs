@@ -514,8 +514,8 @@ impl PeersStore {
     /// Unlike [`add`](Self::add), a known node_id keeps its current `PeerEntry`
     /// (its locally-captured `endpoint_addr`, e.g. from direct pairing, may beat a
     /// gossiped one) — the ADD-only primitive membership auto-discovery uses.
-    /// Returns `(added, refused)` — `refused` counts incoming peers dropped
-    /// because this device revoked them.
+    /// Sanitizes each incoming alias. Returns `(added, refused)` — `refused`
+    /// counts incoming peers this device revoked.
     ///
     /// The second number is the one worth logging. Silently dropping a gossiped
     /// peer looks identical to never having been told about it, and "the
@@ -526,8 +526,7 @@ impl PeersStore {
         incoming: impl IntoIterator<Item = PeerEntry>,
     ) -> Result<(usize, usize)> {
         let mut incoming: Vec<PeerEntry> = incoming.into_iter().collect();
-        let mut added = 0usize;
-        let mut refused = 0usize;
+        let (mut added, mut refused) = (0usize, 0usize);
         self.mutate_full(|file| {
             for mut entry in incoming.drain(..) {
                 entry.alias = crate::peer_label::sanitize_alias(entry.alias.as_deref());
