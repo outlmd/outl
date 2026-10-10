@@ -28,6 +28,8 @@ use tracing::{debug, info, warn};
 
 use crate::engine::{AppendLock, SharedWorkspaceId};
 use crate::oplog::{ingest_received_ops, local_vector_clock, ops_missing_for};
+use crate::peer_label::peer_log_label;
+use crate::peers::{refresh_peer_direct_addr, workspace_peers_path};
 use crate::protocol::{
     classify_close, close_refusal_reason, decode_ops_blob, decode_request, decode_response,
     encode_blob_frame, encode_ops_blob, encode_request, encode_response, CloseVerdict, SyncRequest,
@@ -328,6 +330,8 @@ async fn delta_sync_inner(
     let peer_addr: iroh::EndpointAddr = peer.into();
     let peer_node_id = peer_addr.id;
     let peer_short = peer_node_id.fmt_short().to_string();
+    let peers_path = workspace_peers_path(workspace_root);
+    let label = peer_log_label(&peers_path, peer_node_id);
     progress.emit(SyncProgress::Connecting {
         peer: peer_short.clone(),
     });
@@ -369,11 +373,7 @@ async fn delta_sync_inner(
     let (received_count, touched_nodes) =
         ingest_received_ops(&ops_dir, actor, &received, &peer_ready_tx, append_lock).await?;
     if received_count > 0 {
-        info!(
-            "delta sync: received {} ops from {}",
-            received_count,
-            crate::peer_labels::sync_log_label(workspace_root, &peer_node_id, &peer_short)
-        );
+        info!("delta sync: received {received_count} ops from {label}");
         progress.emit(SyncProgress::ReceivedOps {
             peer: peer_short.clone(),
             count: received_count as u64,
@@ -387,11 +387,7 @@ async fn delta_sync_inner(
     send.write_all(&blob).await.context("send our ops blob")?;
     send.finish().context("finish send")?;
     if !to_push.is_empty() {
-        info!(
-            "delta sync: pushed {} ops to {}",
-            to_push.len(),
-            crate::peer_labels::sync_log_label(workspace_root, &peer_node_id, &peer_short)
-        );
+        info!("delta sync: pushed {} ops to {label}", to_push.len());
         progress.emit(SyncProgress::PushedOps {
             peer: peer_short.clone(),
             count: to_push.len() as u64,
@@ -690,13 +686,17 @@ impl SyncProtocolHandler {
         if let Some(sock) = direct_sock {
             let workspace_root = self.workspace_root.clone();
             let remote = conn.remote_id();
-            let refreshed = tokio::task::spawn_blocking(move || {
-                crate::peers::refresh_peer_direct_addr(&workspace_root, remote, sock)
+            let refreshed = tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+                let changed = refresh_peer_direct_addr(&workspace_root, remote, sock)?;
+                // Resolved here, not at the `info!`: `peer_log_label` reads
+                // `peers.json` in `Display::fmt`, which belongs off this task.
+                let peers = workspace_peers_path(&workspace_root);
+                Ok(changed.then(|| peer_log_label(&peers, remote).to_string()))
             })
             .await;
             match refreshed {
-                Ok(Ok(true)) => info!("refreshed direct addr for {} → {sock}", remote.fmt_short()),
-                Ok(Ok(false)) => {}
+                Ok(Ok(Some(label))) => info!("refreshed direct addr for {label} → {sock}"),
+                Ok(Ok(None)) => {}
                 Ok(Err(e)) => debug!("peer addr refresh failed: {e}"),
                 Err(e) => debug!("peer addr refresh task failed: {e}"),
             }

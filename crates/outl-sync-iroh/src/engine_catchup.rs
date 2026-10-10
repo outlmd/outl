@@ -89,7 +89,7 @@ pub(crate) async fn catch_up_loop(
     progress: crate::progress::ProgressSink,
 ) {
     // Default resolver: reload peers.json each tick and build a full
-    // EndpointAddr (id + relay) for every known peer, paired with its log label.
+    // EndpointAddr (id + relay) for every known peer.
     let resolver = move || match PeersStore::load_or_default(&peers_path) {
         Ok(store) => {
             // Enumerate local interfaces once per tick, not once per peer:
@@ -98,10 +98,7 @@ pub(crate) async fn catch_up_loop(
             store
                 .list()
                 .iter()
-                .filter_map(|p| {
-                    let addr = p.iroh_endpoint_addr_with_ifaces(&ifaces).ok()?;
-                    Some((addr, p.log_label()))
-                })
+                .filter_map(|p| p.iroh_endpoint_addr_with_ifaces(&ifaces).ok())
                 .collect::<Vec<_>>()
         }
         Err(e) => {
@@ -157,31 +154,31 @@ pub(crate) async fn force_sync_all(
     in_flight: InFlightPeers,
     progress: crate::progress::ProgressSink,
 ) {
-    let peers_with_labels: Vec<(iroh::EndpointAddr, String)> =
-        match PeersStore::load_or_default(&peers_path) {
-            Ok(store) => {
-                let ifaces = crate::peers::local_v4_ifaces();
-                store
-                    .list()
-                    .iter()
-                    .filter_map(|p| {
-                        let addr = p.iroh_endpoint_addr_with_ifaces(&ifaces).ok()?;
-                        Some((addr, p.log_label()))
-                    })
-                    .collect()
-            }
-            Err(e) => {
-                debug!("sync-now: reload peers.json failed: {e}");
-                return;
-            }
-        };
+    let addrs: Vec<iroh::EndpointAddr> = match PeersStore::load_or_default(&peers_path) {
+        Ok(store) => {
+            let ifaces = crate::peers::local_v4_ifaces();
+            store
+                .list()
+                .iter()
+                .filter_map(|p| p.iroh_endpoint_addr_with_ifaces(&ifaces).ok())
+                .collect()
+        }
+        Err(e) => {
+            debug!("sync-now: reload peers.json failed: {e}");
+            return;
+        }
+    };
 
-    for (addr, label) in peers_with_labels {
+    let label = |nid| crate::peer_label::peer_log_label(&peers_path, nid);
+    for addr in addrs {
         let nid = addr.id;
         // Coordinate with boot / catch-up / gossip dials: skip if one is
         // already running for this peer (its result lands anyway).
         let Some(_in_flight) = try_acquire_in_flight(&in_flight, nid) else {
-            debug!("sync-now: sync to {} already in flight, skipping", label);
+            debug!(
+                "sync-now: sync to {} already in flight, skipping",
+                label(nid)
+            );
             continue;
         };
         let started = Instant::now();
@@ -202,11 +199,11 @@ pub(crate) async fn force_sync_all(
         .await
         {
             Ok(()) => {
-                info!("sync-now: sync to {} ok", label);
+                info!("sync-now: sync to {} ok", label(nid));
                 health.record_success(nid, started);
             }
             Err(e) => {
-                warn!("sync-now: sync to {} failed: {e}", label);
+                warn!("sync-now: sync to {} failed: {e}", label(nid));
                 health.record_failure(nid);
             }
         }
@@ -319,7 +316,7 @@ pub(crate) async fn run_catch_up<F>(
     progress: crate::progress::ProgressSink,
     pull_assets: bool,
 ) where
-    F: FnMut() -> Vec<(iroh::EndpointAddr, String)>,
+    F: FnMut() -> Vec<iroh::EndpointAddr>,
 {
     // When each peer last completed a delta_sync cleanly this session. A peer is
     // re-dialed once its last success is older than `resync_after` (the
@@ -332,6 +329,10 @@ pub(crate) async fn run_catch_up<F>(
     // fires immediately — the old `tokio::time::interval` fired its first tick
     // at once, and a freshly paired peer must sync without waiting a tick.
     let mut tick_count: u32 = 0;
+    // Names a peer by its `peers.json` alias. Resolved inside the log line's
+    // `Display`, so a tick that dials nobody reads no file.
+    let peers_path = crate::peers::workspace_peers_path(&workspace_root);
+    let label = |nid| crate::peer_label::peer_log_label(&peers_path, nid);
 
     loop {
         let elapsed_ticks = tick_count;
@@ -379,7 +380,7 @@ pub(crate) async fn run_catch_up<F>(
             }
         }
 
-        for (addr, label) in resolve_peers() {
+        for addr in resolve_peers() {
             let nid = addr.id;
             // Skip a peer only while its last clean sync is still fresh (younger
             // than `resync_after`). New peers (from pairing), previously-failed
@@ -415,7 +416,7 @@ pub(crate) async fn run_catch_up<F>(
             .await
             {
                 Ok(()) => {
-                    info!("catch-up: sync to {} ok", label);
+                    info!("catch-up: sync to {} ok", label(nid));
                     // Stamp the success so this peer is skipped until it goes
                     // stale (`resync_after`), then re-dialed as maintenance.
                     last_synced.insert(nid, Instant::now());
@@ -437,11 +438,11 @@ pub(crate) async fn run_catch_up<F>(
                         .await
                         {
                             Ok(n) if n > 0 => {
-                                info!("catch-up: pulled {n} assets from {}", label)
+                                info!("catch-up: pulled {n} assets from {}", label(nid))
                             }
                             Ok(_) => {}
                             Err(e) => {
-                                debug!("catch-up: asset pull from {} failed: {e}", label)
+                                debug!("catch-up: asset pull from {} failed: {e}", label(nid))
                             }
                         }
                     }
@@ -449,7 +450,7 @@ pub(crate) async fn run_catch_up<F>(
                 Err(e) => {
                     // Drop any stale timestamp so the next tick retries it now.
                     last_synced.remove(&nid);
-                    warn!("catch-up: sync to {} failed: {e}", label);
+                    warn!("catch-up: sync to {} failed: {e}", label(nid));
                     if let Some(h) = &health {
                         h.record_failure(nid);
                     }

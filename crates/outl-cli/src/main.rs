@@ -506,26 +506,37 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
     let health = transport.peer_health();
     transport.shutdown();
 
-    let store =
-        outl_sync_iroh::PeersStore::load_or_default(&outl_sync_iroh::workspace_peers_path(path))
-            .ok();
-
     let online = health.iter().filter(|h| h.reachable).count();
     if health.is_empty() {
-        println!("Sync pass complete — no peers.");
-    } else {
-        println!(
-            "Sync pass complete — {online}/{} peer(s) reachable:",
-            health.len()
-        );
-        for h in &health {
-            let label = store
-                .as_ref()
-                .map(|s| s.display_label_for(&h.node_id))
-                .unwrap_or_else(|| h.node_id[..h.node_id.len().min(8)].to_string());
-            let status = if h.reachable { "✓" } else { "✗" };
-            println!("  {status} {label}");
-        }
+        println!("Sync pass complete — no paired peers.");
+        return Ok(output::EXIT_OK);
+    }
+    println!(
+        "Sync pass complete — {online}/{} peer(s) reachable:",
+        health.len()
+    );
+    let peers_path = outl_sync_iroh::workspace_peers_path(path);
+    let labelled: Vec<(String, String)> = health
+        .iter()
+        .map(|h| {
+            let state = match (h.reachable, h.last_rtt_ms) {
+                (true, Some(ms)) => format!("online ({ms}ms)"),
+                (true, None) => "online".to_string(),
+                (false, _) => "offline".to_string(),
+            };
+            (
+                outl_sync_iroh::display_label_at(&peers_path, &h.node_id),
+                state,
+            )
+        })
+        .collect();
+    let width = labelled
+        .iter()
+        .map(|(l, _)| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    for (label, state) in &labelled {
+        println!("  {label:<width$} {state}");
     }
     Ok(output::EXIT_OK)
 }

@@ -65,7 +65,7 @@ mod lease;
 mod oplog;
 pub(crate) mod pairing;
 pub mod peer_conn;
-mod peer_labels;
+mod peer_label;
 mod peers;
 mod peers_lock;
 mod progress;
@@ -93,6 +93,7 @@ pub use pairing::{
     PairingSecret,
     WorkspaceAdoption,
 };
+pub use peer_label::{display_label, display_label_at, display_label_in, sanitize_alias};
 pub use peers::{migrate_global_peers_if_absent, workspace_peers_path, PeerEntry, PeersStore};
 pub use protocol::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};
 pub use revoke::rotate_workspace_identity;

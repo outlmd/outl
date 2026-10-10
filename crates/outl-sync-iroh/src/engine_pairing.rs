@@ -39,7 +39,7 @@ use crate::identity::IrohIdentity;
 use crate::pairing::{
     accept_host_handshake, mint_ticket, ready_addr, run_join_handshake, PairingSecret,
 };
-use crate::peers::{workspace_peers_path, PeerEntry, PeersStore};
+use crate::peers::{PeerEntry, PeersStore};
 
 /// How long an armed host waits for a joiner before the arm expires and the
 /// `pair_host` future resolves with a timeout error. Mirrors the CLI's
@@ -441,15 +441,14 @@ pub(crate) async fn drain_pair_completions(
     in_flight: crate::engine::InFlightPeers,
     progress: crate::progress::ProgressSink,
 ) {
+    let peers_path = crate::peers::workspace_peers_path(&workspace_root);
     while let Some(addr) = rx.recv().await {
         let nid = addr.id;
-        let label = PeersStore::load_or_default(&workspace_peers_path(&workspace_root))
-            .map(|s| s.log_label_for(&nid.to_string()))
-            .unwrap_or_else(|_| nid.fmt_short().to_string());
         let Some(_guard) = crate::engine::try_acquire_in_flight(&in_flight, nid) else {
             continue;
         };
         let started = std::time::Instant::now();
+        let label = crate::peer_label::peer_log_label(&peers_path, nid);
         info!(peer = %label, "pairing: immediate sync to freshly paired peer");
         // Read the LIVE id: if this device just adopted the host's id during the
         // handshake, the immediate post-pair sync must use the adopted value so
@@ -472,7 +471,7 @@ pub(crate) async fn drain_pair_completions(
         {
             Ok(()) => health.record_success(nid, started),
             Err(e) => {
-                warn!("pairing: immediate sync to {} failed: {e}", label);
+                warn!("pairing: immediate sync to {label} failed: {e}");
                 health.record_failure(nid);
             }
         }
@@ -494,9 +493,9 @@ pub(crate) async fn drain_pair_completions(
         )
         .await
         {
-            Ok(true) => info!("pairing: pulled snapshot from {}", label),
+            Ok(true) => info!("pairing: pulled snapshot from {label}"),
             Ok(false) => {}
-            Err(e) => warn!("pairing: snapshot pull from {} failed: {e}", label),
+            Err(e) => warn!("pairing: snapshot pull from {label} failed: {e}"),
         }
 
         // Asset sync: pull the peer's binary assets (uploaded PDFs / images) that
@@ -513,9 +512,9 @@ pub(crate) async fn drain_pair_completions(
         )
         .await
         {
-            Ok(n) if n > 0 => info!("pairing: pulled {n} assets from {}", label),
+            Ok(n) if n > 0 => info!("pairing: pulled {n} assets from {label}"),
             Ok(_) => {}
-            Err(e) => warn!("pairing: asset pull from {} failed: {e}", label),
+            Err(e) => warn!("pairing: asset pull from {label} failed: {e}"),
         }
     }
 }

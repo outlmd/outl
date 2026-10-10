@@ -112,12 +112,9 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
                     incoming,
                 ) {
                     Ok(added) if added > 0 => {
-                        let label = crate::peers::PeersStore::load_or_default(&ctx.peers_path)
-                            .map(|s| s.log_label_for(&msg.delivered_from.to_string()))
-                            .unwrap_or_else(|_| msg.delivered_from.fmt_short().to_string());
                         info!(
                             "membership gossip: discovered {added} new peer(s) from {}",
-                            label
+                            crate::peer_label::peer_log_label(&ctx.peers_path, msg.delivered_from)
                         );
                     }
                     Ok(_) => {}
@@ -158,16 +155,12 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
     // page slug in that field — so gating on it would silently drop a
     // mixed-version mesh to catch-up latency in exchange for no security at all.
     if let Err(refusal) = crate::authz::authorize_blocking(&ctx.peers_path, peer_node_id) {
-        let label = PeersStore::load_or_default(&ctx.peers_path)
-            .map(|s| s.log_label_for(&peer_node_id.to_string()))
-            .unwrap_or_else(|_| peer_node_id.fmt_short().to_string());
-        debug!("gossip: ignoring an announce from {} ({refusal:?})", label);
+        debug!(
+            "gossip: ignoring an announce from {} ({refusal:?})",
+            crate::peer_label::peer_log_label(&ctx.peers_path, peer_node_id)
+        );
         return;
     }
-
-    let label = PeersStore::load_or_default(&ctx.peers_path)
-        .map(|s| s.log_label_for(&peer_node_id.to_string()))
-        .unwrap_or_else(|_| peer_node_id.fmt_short().to_string());
 
     let conns = ctx.conns.clone();
     let wr = ctx.workspace_root.clone();
@@ -178,9 +171,11 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
     let lock = ctx.append_lock.clone();
     let in_flight = ctx.in_flight.clone();
     let prog = ctx.progress.clone();
+    let peers_path = ctx.peers_path.clone();
     tokio::spawn(async move {
+        let label = crate::peer_label::peer_log_label(&peers_path, peer_node_id);
         let Some(_in_flight) = try_acquire_in_flight(&in_flight, peer_node_id) else {
-            debug!("gossip: sync from {} already in flight, skipping", label);
+            debug!("gossip: sync from {label} already in flight, skipping");
             return;
         };
         let started = Instant::now();
@@ -199,7 +194,7 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         {
             Ok(()) => health.record_success(peer_node_id, started),
             Err(e) => {
-                warn!("gossip-triggered sync from {} failed: {e}", label);
+                warn!("gossip-triggered sync from {label} failed: {e}");
                 health.record_failure(peer_node_id);
             }
         }

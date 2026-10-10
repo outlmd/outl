@@ -194,7 +194,11 @@ pub(crate) async fn pull_snapshot_from_peer(
     progress: &crate::progress::ProgressSink,
 ) -> Result<bool> {
     let peer_node_id = peer.id;
+    // Two renderings of one peer, and `crate::peer_label` says why: `peer_short`
+    // is the wire field, `label` is for the log lines.
     let peer_short = peer_node_id.fmt_short().to_string();
+    let peers_path = crate::peers::workspace_peers_path(workspace_root);
+    let label = crate::peer_label::peer_log_label(&peers_path, peer_node_id);
     let conn = connect_snapshot(endpoint, peer).await?;
     let (mut send, mut recv) = conn.open_bi().await.context("open snapshot bi stream")?;
 
@@ -229,10 +233,7 @@ pub(crate) async fn pull_snapshot_from_peer(
 
     let body_bytes = &frame[4..];
     if body_bytes.is_empty() {
-        debug!(
-            "snapshot pull: peer {} has no snapshot",
-            peer_node_id.fmt_short()
-        );
+        debug!("snapshot pull: peer {label} has no snapshot");
         return Ok(false);
     }
 
@@ -244,10 +245,7 @@ pub(crate) async fn pull_snapshot_from_peer(
     let body = match SnapshotBody::decode(body_bytes) {
         Ok(b) => b,
         Err(e) => {
-            warn!(
-                "snapshot pull from {}: undecodable snapshot skipped ({e})",
-                peer_node_id.fmt_short()
-            );
+            warn!("snapshot pull from {label}: undecodable snapshot skipped ({e})");
             return Ok(false);
         }
     };
@@ -267,10 +265,7 @@ pub(crate) async fn pull_snapshot_from_peer(
     // transport or a restored backup, paths this function never sees — but a
     // poisoned cache file is cheaper to never write than to fall back from.
     if body.cutoff.is_empty() {
-        warn!(
-            "snapshot pull from {}: refusing a snapshot with no per-actor cutoff",
-            peer_node_id.fmt_short()
-        );
+        warn!("snapshot pull from {label}: refusing a snapshot with no per-actor cutoff");
         return Ok(false);
     }
     let received_len = body_bytes.len();
@@ -291,10 +286,7 @@ pub(crate) async fn pull_snapshot_from_peer(
         Err(e) => return Err(anyhow::Error::new(e).context("join snapshot write task")),
     }
 
-    info!(
-        "snapshot pull: adopted peer {}'s snapshot ({received_len} bytes)",
-        peer_node_id.fmt_short()
-    );
+    info!("snapshot pull: adopted peer {label}'s snapshot ({received_len} bytes)");
     // Fire the reload so boot/reload adopts the freshly written snapshot.
     peer_ready_tx.send(()).ok();
     Ok(true)

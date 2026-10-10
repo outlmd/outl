@@ -26,6 +26,13 @@ Implements `outl_actions::SyncTransport` using iroh QUIC + iroh-gossip.
   The label is **not** `EndpointId`'s `Display`: that is 64 hex chars, one over RFC 6763's 63-byte cap on a DNS label, so publishing it fails outright — and `from_str` accepts both encodings, so the breakage is one-directional and silent.
   `Advertise::No` is for a **transient** endpoint (the `outl peer status` probe): all endpoints share the device node id, so a short-lived one that publishes leaves a dead address for this device on every LAN peer, and multipath stalls on it — a diagnostic that degrades everyone's next dial.
   iOS never needs `com.apple.developer.networking.multicast` and **must not declare it** (a profile without it fails code signing); a fixed, declared Bonjour service type is exempt. What a user can hit there is declining the local-network prompt, which iOS reports to nobody; [`docs/sync.md`](../../docs/sync.md) says where to look.
+- `peer_label` — the **single owner** of *how a log line names a peer*.
+  `PeerEntry::log_label()` where the entry is in hand, `peer_log_label(path, id)` where only a path is — both render `macbook-pro (b75b908373)`: the alias pairing stored, plus the same `fmt_short()` hex the line carried before, so an old grep still matches.
+  Crate-internal on purpose; no client names it yet, and the clients that render aliases read `peers.json` themselves.
+  Three groups of sites keep printing bare hex and the module header records which and why (issue #337): this device's own id, a dialer `authz` just refused, and `SyncProgress.peer`.
+  Those are verdicts, not omissions — a new log line that names a peer resolves it through this module, and a new one that deliberately does not gets a row in that list.
+  That rule is **structural**, like `bind.rs`'s: `every_fmt_short_in_this_crate_is_an_accounted_for_exemption` counts `fmt_short` per file against a table of reasons, so a new hex-named peer fails the build instead of quietly undoing issue #337.
+  It counts rather than just listing file names because every remaining file is already on the list for a reason that covers only the sites it has today — `engine_assets.rs` reused its wire-field `peer_short` in three log lines and nothing failed.
 - `authz` — the **single owner** of "is this dialer an approved device for this workspace?".
   One fail-closed `peers.json` read, called by every protocol that touches workspace content: `SYNC_ALPN`, `SNAPSHOT_ALPN`, `ASSET_ALPN`, and the gossip supervisor before it *dials* an announcer.
   It used to be inline in `SYNC_ALPN`'s handler.

@@ -333,7 +333,11 @@ pub(crate) async fn pull_assets_from_peer(
     progress: &crate::progress::ProgressSink,
 ) -> Result<usize> {
     let peer_node_id = peer.id;
+    // Two renderings of one peer, and `crate::peer_label` says why: `peer_short`
+    // is the wire field, `label` is for the log lines.
     let peer_short = peer_node_id.fmt_short().to_string();
+    let peers_path = crate::peers::workspace_peers_path(workspace_root);
+    let label = crate::peer_label::peer_log_label(&peers_path, peer_node_id);
     let conn = connect_asset(endpoint, peer).await?;
     let (mut send, mut recv) = conn.open_bi().await.context("open asset bi stream")?;
 
@@ -390,14 +394,14 @@ pub(crate) async fn pull_assets_from_peer(
 
         let body = &frame[4..];
         if body.is_empty() {
-            debug!("asset pull: peer {peer_short} lacks {name}");
+            debug!("asset pull: peer {label} lacks {name}");
             continue;
         }
         // Defense in depth against a corrupt / malicious peer: the filename IS
         // the content's sha-256, so recompute and compare before landing it. A
         // mismatch means the bytes are not what the name claims — discard.
         if outl_md::asset::hash_bytes(body) != claimed_hash(name) {
-            warn!("asset pull: {name} from {peer_short} failed content-hash check; discarding");
+            warn!("asset pull: {name} from {label} failed content-hash check; discarding");
             continue;
         }
         write_asset_atomic(&dir, name, body).await?;
@@ -408,7 +412,7 @@ pub(crate) async fn pull_assets_from_peer(
     conn.close(0u32.into(), b"done");
     if written > 0 {
         info!(
-            "asset pull: wrote {written}/{} assets from {peer_short}",
+            "asset pull: wrote {written}/{} assets from {label}",
             wanted.len()
         );
     }

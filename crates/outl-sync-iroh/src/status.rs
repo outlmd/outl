@@ -173,8 +173,6 @@ async fn probe_one(endpoint: &Endpoint, entry: PeerEntry) -> PeerStatus {
         rtt_ms: None,
     };
 
-    let label = entry.log_label();
-
     // Dial the peer's full `EndpointAddr` (relay + direct addrs captured at
     // pairing) so the probe doesn't depend on n0 discovery resolving a bare
     // node id — that dependency was why the status dot showed offline even when
@@ -183,7 +181,7 @@ async fn probe_one(endpoint: &Endpoint, entry: PeerEntry) -> PeerStatus {
     let addr = match entry.iroh_endpoint_addr() {
         Ok(addr) => addr,
         Err(e) => {
-            tracing::debug!("peer {} has an unparseable node id: {e}", label);
+            tracing::debug!("peer {} has an unparseable node id: {e}", entry.node_id);
             return status;
         }
     };
@@ -198,10 +196,16 @@ async fn probe_one(endpoint: &Endpoint, entry: PeerEntry) -> PeerStatus {
             conn.close(0u32.into(), b"probe");
         }
         Ok(Err(e)) => {
-            tracing::debug!("probe connect to {} failed: {e}", label);
+            tracing::debug!(
+                "probe connect to {} failed: {e}",
+                crate::peer_label::log_label(&entry)
+            );
         }
         Err(_timeout) => {
-            tracing::debug!("probe connect to {} timed out", label);
+            tracing::debug!(
+                "probe connect to {} timed out",
+                crate::peer_label::log_label(&entry)
+            );
         }
     }
 

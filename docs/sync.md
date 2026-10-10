@@ -616,6 +616,13 @@ It now reports the refusal, and the fix for it is to re-pair.
 
 #### Troubleshooting sync
 
+**Which machine is this log line about?**
+A sync or serve line names a peer by the alias it advertised at pairing time, followed by the first 10 hex of its node id: `delta sync: received 14 ops from macbook-pro (b75b908373)`.
+The hex is what the line carried before aliases, so a prefix grepped out of an older log still matches.
+`outl peer list` prints the same aliases.
+A device that advertised none reads as the bare hex, and so does one absent from `peers.json` altogether — a stranger's dial is refused *because* it is unlisted, and this machine's own node id has no alias to look up.
+The alias a peer shows up under is the name **it** sent, so to change it, re-pair from that machine with `outl peer pair --name <name>`.
+
 **`rejecting sync from peer on a different workspace` (in a log or the GUI).**
 The two devices have different `workspace-id`s, so the transport refuses to merge them — they look like two unrelated graphs.
 This almost always means the joining device **never adopted the host's workspace** during pairing.

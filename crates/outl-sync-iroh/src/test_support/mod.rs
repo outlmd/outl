@@ -399,7 +399,7 @@ pub async fn run_catch_up_loop<F>(
     endpoint: iroh::Endpoint,
     period: Duration,
     resync_after: Duration,
-    mut resolve_peers: F,
+    resolve_peers: F,
     workspace_root: PathBuf,
     workspace_id: WorkspaceId,
     actor: ActorId,
@@ -408,20 +408,11 @@ pub async fn run_catch_up_loop<F>(
 ) where
     F: FnMut() -> Vec<iroh::EndpointAddr>,
 {
-    let wrap = move || {
-        resolve_peers()
-            .into_iter()
-            .map(|a| {
-                let label = a.id.fmt_short().to_string();
-                (a, label)
-            })
-            .collect()
-    };
     run_catch_up(
         crate::peer_conn::PeerConnections::new(endpoint.clone()),
         period,
         resync_after,
-        wrap,
+        resolve_peers,
         workspace_root,
         Arc::new(RwLock::new(workspace_id)),
         actor,
