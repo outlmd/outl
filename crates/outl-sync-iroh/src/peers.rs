@@ -530,8 +530,6 @@ impl PeersStore {
         let mut refused = 0usize;
         self.mutate_full(|file| {
             for mut entry in incoming.drain(..) {
-                // A gossiped alias is remote input on its way to `peers.json`
-                // and every surface that prints it.
                 entry.alias = crate::peer_label::sanitize_alias(entry.alias.as_deref());
                 // Read the tombstones from the freshly-loaded file, not from
                 // the caller's snapshot: another process may have revoked this
