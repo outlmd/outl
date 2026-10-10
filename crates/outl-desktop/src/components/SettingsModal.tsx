@@ -56,6 +56,11 @@ export function SettingsModal() {
    * carries the same pair for the same reason.
    */
   const [telemetryError, setTelemetryError] = createSignal(false);
+  const [windowDecorations, setWindowDecorationsState] = createSignal(true);
+  // True when an external config manager (Nix / home-manager) owns the file.
+  // Read off the draft the backend sent — the same verdict that blocks Save
+  // server-side — never re-derived here.
+  const managed = createMemo(() => draft()?.managed ?? false);
   let activeTheme: ThemeConfig | null = null;
   let initialDiagrams = "pele";
   const [themes] = createResource(async () => {
@@ -217,6 +222,16 @@ export function SettingsModal() {
               class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4"
               onKeyDown={(e) => rovingKeydown(e, "vertical", { includeFields: true })}
             >
+              <Show when={managed()}>
+                <div class="rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-3 py-2 text-xs leading-relaxed">
+                  These settings are managed externally (by Nix / home-manager),
+                  so changes made here are not saved. Edit them in your Nix
+                  config —{" "}
+                  <code class="font-mono">programs.outl.settings</code>{" "}
+                  — and rebuild. A theme you pick below still previews live but
+                  won't persist.
+                </div>
+              </Show>
               <label class="flex items-center justify-between gap-4">
                 <div>
                   <div class="text-sm font-medium">Vim mode</div>
@@ -476,7 +491,8 @@ export function SettingsModal() {
             <button
               type="button"
               onClick={() => void save()}
-              disabled={busy() || !draft()}
+              disabled={busy() || !draft() || managed()}
+              title={managed() ? "Managed externally by Nix / home-manager" : undefined}
               class="rounded bg-(--color-outl-fg)/15 px-3 py-1 text-sm font-medium hover:bg-(--color-outl-fg)/25 disabled:opacity-50"
             >
               {busy() ? "Saving…" : "Save"}

@@ -358,9 +358,35 @@ Init uses `set_global_default`, not `.try_init()`: `try_init` also claims the `l
 
 Stored through `outl-config` at the shared global config path; the flat JSON DTO `settings.rs::Settings` hands the frontend, field by field, is in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#settings-modal).
 
+<<<<<<< HEAD
 `settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
 **A new unmodeled config field omitted there will get silently dropped on the next modal save.**
 `backlinks_order` is the same pattern from the other side: it rides the DTO but `save` restores it from disk, so the modal cannot clobber the dedicated `set_backlinks_order` command's write.
+=======
+```jsonc
+{
+  "managed": false,             // true = Nix/home-manager owns the file → Save disabled
+  "last_workspace": "/Users/me/iCloud/outl",
+  "vim_mode": false,
+  "theme": "outl-light",
+  "theme_dark": "outl",
+  "theme_mode": "auto",       // "light" | "dark" | "auto"
+  "font_size": 15,
+  "sync_transport": "iroh",  // "iroh" (P2P, default) | "file" (iCloud/fs)
+  "backlinks_order": "newest",  // "newest" (default) | "oldest" — read-only, see below
+  "diagrams": "pele"  // "pele" (default) | "off". Mermaid fences. Mobile writes the same key.
+}
+```
+
+The Sync transport select in `SettingsModal` writes `sync_transport`.
+`settings.rs` maps it to/from `[sync] transport` and preserves `relay_url` on save; takes effect on next launch.
+`backlinks_order` is read-only here — `save` restores it from disk (same pattern as `[calendar]`) so the modal can't clobber the dedicated `set_backlinks_order` command's write.
+`theme`, `theme_dark`, and `theme_mode` carry the complete RFC 0022 pair and are owned by the modal.
+Live preview goes through the shared `installTheme`; Save installs the persisted reply, while Cancel or backdrop click reinstalls the configuration captured on open.
+`settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
+A new unmodeled config field omitted there will get silently dropped on the next modal save.
+`managed` is one of those: it belongs to whoever installed the file (Nix/home-manager), so `restore_unmodeled_sections` restores it from disk and `update_settings` pins the DTO field to `outl_config::managed()` before storing — the client's `managed` value is display-only and can never reach the file. When set, `outl_config::save` is itself a no-op, `settings::load` carries the flag, and `SettingsModal` shows a notice and disables Save (the theme picker still previews live). See [`docs/nix.md`](../../docs/nix.md#declarative-config).
+>>>>>>> 973d972c (feat(config): add a managed flag so a declarative config wins)
 
 ### Privacy: the crash-reporting toggle writes outside Save
 
