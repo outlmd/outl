@@ -19,6 +19,10 @@ import { SyncPanel } from "./SyncPanel";
 export function SettingsModal() {
   const [draft, setDraft] = createSignal<Settings | null>(null);
   const [busy, setBusy] = createSignal(false);
+  // True when an external config manager (Nix / home-manager) owns the file.
+  // Read off the draft the backend sent — the same verdict that blocks Save
+  // server-side — never re-derived here.
+  const managed = createMemo(() => draft()?.managed ?? false);
   let activeTheme: ThemeConfig | null = null;
   const [themes] = createResource(async () => {
     try {
@@ -120,6 +124,17 @@ export function SettingsModal() {
             fallback={<div class="px-5 py-6 opacity-60">Loading…</div>}
           >
             <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+              <Show when={managed()}>
+                <div class="rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-3 py-2 text-xs leading-relaxed">
+                  These settings are managed externally (by Nix / home-manager),
+                  so changes made here are not saved. Edit them in your Nix
+                  config —{" "}
+                  <code class="font-mono">programs.outl.settings</code>{" "}
+                  — and rebuild. A theme you pick below still previews live but
+                  won't persist.
+                </div>
+              </Show>
+
               <label class="flex items-center justify-between gap-4">
                 <div>
                   <div class="text-sm font-medium">Vim mode</div>
@@ -316,7 +331,8 @@ export function SettingsModal() {
             <button
               type="button"
               onClick={() => void save()}
-              disabled={busy() || !draft()}
+              disabled={busy() || !draft() || managed()}
+              title={managed() ? "Managed externally by Nix / home-manager" : undefined}
               class="rounded bg-(--color-outl-fg)/15 px-3 py-1 text-sm font-medium hover:bg-(--color-outl-fg)/25 disabled:opacity-50"
             >
               {busy() ? "Saving…" : "Save"}

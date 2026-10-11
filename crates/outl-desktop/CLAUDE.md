@@ -408,6 +408,7 @@ The frontend still receives this flat JSON DTO from `crates/outl-desktop/src-tau
 
 ```jsonc
 {
+  "managed": false,             // true = Nix/home-manager owns the file → Save disabled
   "last_workspace": "/Users/me/iCloud/outl",
   "vim_mode": false,
   "theme": "outl-light",
@@ -426,6 +427,7 @@ The Sync transport select in `SettingsModal` writes `sync_transport`.
 Live preview goes through the shared `installTheme`; Save installs the persisted reply, while Cancel or backdrop click reinstalls the configuration captured on open.
 `settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
 A new unmodeled config field omitted there will get silently dropped on the next modal save.
+`managed` is one of those: it belongs to whoever installed the file (Nix/home-manager), so `restore_unmodeled_sections` restores it from disk and `update_settings` pins the DTO field to `outl_config::managed()` before storing — the client's `managed` value is display-only and can never reach the file. When set, `outl_config::save` is itself a no-op, `settings::load` carries the flag, and `SettingsModal` shows a notice and disables Save (the theme picker still previews live). See [`docs/nix.md`](../../docs/nix.md#declarative-config).
 
 The actor id (one per device) lives next to it as `actor` — a plain ULID.
 Switching workspaces does not rotate it.

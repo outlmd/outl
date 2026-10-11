@@ -17,6 +17,9 @@
 //! ## Schema
 //!
 //! ```toml
+//! managed = false     # set by a package manager (Nix/home-manager) that owns
+//!                     # this file; when true every client refuses to rewrite it
+//!
 //! [workspace]
 //! last = "/Users/me/iCloud/outl"
 //!
@@ -288,11 +291,49 @@ fn one_line(raw: &str, e: &toml::de::Error) -> String {
     }
 }
 
+/// Whether an external configuration manager (Nix / home-manager) owns
+/// `config.toml`, in which case no client may rewrite it.
+///
+/// Either signal suffices:
+///
+/// - the `managed = true` key in the **on-disk** config — what
+///   home-manager writes when it generates the file, so the directive
+///   travels inside the file it describes;
+/// - the `OUTL_CONFIG_MANAGED` environment variable (`1`/`true`/`yes`/`on`)
+///   — an escape hatch for a test or container that cannot rewrite the
+///   file, mirroring the existing `OUTL_DEVICE_DIR` override.
+///
+/// Read off the on-disk config, **not** the value a caller hands to
+/// [`save`]: the desktop reconstructs a fresh [`Config`] from its flat
+/// `Settings` DTO, which need not carry the flag, and the file the
+/// package manager owns is the only authority on whether it is owned.
+pub fn managed() -> bool {
+    if let Ok(v) = std::env::var("OUTL_CONFIG_MANAGED") {
+        if matches!(v.as_str(), "1" | "true" | "yes" | "on") {
+            return true;
+        }
+    }
+    load().managed
+}
+
 /// Save `config` to the default path atomically (hidden scratch file →
 /// `config.toml` rename). Creates `~/.config/outl/` if missing.
 ///
 /// Refuses when the file on disk does not parse — see [`save_to`].
+///
+/// A no-op (returning `Ok`) when [`managed`] reports the file is
+/// externally owned. That is what lets Nix/home-manager manage settings
+/// completely: the managed config keeps the file a symlink into the Nix
+/// store, and the clients — which would otherwise atomically replace it
+/// with a regular file on their first write (`workspace.last`, the theme
+/// toggle, the backlinks direction) — leave it untouched. Without the
+/// gate that rewrite detaches home-manager's symlink, and the next
+/// activation aborts with "file exists and cannot be overridden".
 pub fn save(config: &Config) -> Result<(), SaveError> {
+    if managed() {
+        tracing::debug!("config.toml is externally managed; not rewriting it");
+        return Ok(());
+    }
     save_to(&config_path(), config)
 }
 
@@ -394,6 +435,95 @@ mod tests {
         fs::write(&path, "[unclosed").unwrap();
         let cfg = load_from(&path);
         assert_eq!(cfg, Config::default());
+    }
+
+    /// `toml::to_string_pretty` emits scalar fields before tables, so the
+    /// top-level `managed` key must land **before** `[workspace]`. After a
+    /// table it would re-parse as `[workspace].managed`, silently dropping
+    /// the directive. This is the guard for `managed` staying the first
+    /// field of [`Config`].
+    #[test]
+    fn managed_is_the_first_key_in_serialised_toml() {
+        let cfg = Config {
+            managed: true,
+            ..Config::default()
+        };
+        let body = toml::to_string_pretty(&cfg).unwrap();
+        let managed_at = body.find("managed").expect("`managed` is emitted");
+        let first_table = body.find("[workspace]").expect("[workspace] is emitted");
+        assert!(
+            managed_at < first_table,
+            "`managed` must precede the first table, got:\n{body}"
+        );
+        assert!(body.contains("managed = true"));
+    }
+
+    #[test]
+    fn managed_round_trips_and_defaults_false() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        let cfg = Config {
+            managed: true,
+            ..Config::default()
+        };
+        save_to(&path, &cfg).unwrap();
+        assert!(load_from(&path).managed, "managed=true must round-trip");
+
+        save_to(&path, &Config::default()).unwrap();
+        assert!(
+            !load_from(&path).managed,
+            "an absent `managed` key must default to false"
+        );
+    }
+
+    /// The gate that lets home-manager own `config.toml`: while managed,
+    /// [`save`] must not rewrite the file. Folded into one test because
+    /// `XDG_CONFIG_HOME` / `OUTL_CONFIG_MANAGED` are process-wide — the
+    /// same constraint that packs `outl-sync-iroh`'s lease scenarios into
+    /// a single `#[test]`.
+    #[test]
+    fn save_honours_the_managed_directive() {
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+
+        // Managed via the env escape hatch: `save` must be a no-op, leaving
+        // whatever the package manager put on disk untouched.
+        std::env::set_var("OUTL_CONFIG_MANAGED", "1");
+        let dir = tmp.path().join("outl");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(&path, "# sentinel from nix\n").unwrap();
+        save(&Config {
+            theme: ThemeCfg {
+                preset: "dracula".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# sentinel from nix\n",
+            "a managed config must never be rewritten"
+        );
+
+        // Unmanaged: the same `save` now writes through the default path.
+        std::env::remove_var("OUTL_CONFIG_MANAGED");
+        let cfg = Config {
+            theme: ThemeCfg {
+                preset: "gruvbox".into(),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        save(&cfg).unwrap();
+        assert_eq!(
+            load_from(&path).theme.preset,
+            "gruvbox",
+            "an unmanaged save must land on disk"
+        );
+
+        std::env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]

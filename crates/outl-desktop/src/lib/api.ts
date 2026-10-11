@@ -103,6 +103,13 @@ export {
 // ---------------------------------------------------------------------------
 
 export interface Settings {
+  /**
+   * True when an external configuration manager (Nix / home-manager) owns
+   * `config.toml`. The Settings modal then shows a notice and disables Save:
+   * the backend refuses to rewrite the file (`outl_config::managed`), so edits
+   * here would be silently discarded. Mirrors the Rust `Settings.managed`.
+   */
+  managed: boolean;
   last_workspace: string | null;
   vim_mode: boolean;
   /**

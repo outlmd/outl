@@ -100,3 +100,4 @@
   * [0265 — Index sidecar lifecycle: one owner, and a GC](rfcs/0265-index-sidecar-lifecycle.md)
   * [0266 — The most dangerous stale fact is one that was true](rfcs/0266-measure-before-you-believe.md)
   * [0276 — An MCP reply carries its payload once, and an error is the exception](rfcs/0276-mcp-content-only-replies.md)
+  * [0357 — A managed config file is owned by the package manager, and no client rewrites it](rfcs/0357-managed-config-file.md)

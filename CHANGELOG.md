@@ -30,6 +30,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `BlockRow.recursion.test.ts` now fails on the next one. It reads the JSX and asserts every declared prop is either forwarded or listed with a reason, because that is the defect's actual shape — rendering this component needs haptics, a Tauri bridge and a WKWebView-shaped textarea, and a test mocking all three would pin the mocks.
 
 ### Added
+- **Nix flake + home-manager module: install and configure outl declaratively.**
+  The flake builds `packages.outl` (CLI + TUI) and `packages.outl-desktop` (Tauri app) for `x86_64-linux`/`aarch64-linux` from source — no external inputs beyond the pinned `nixpkgs-unstable`, `flake-utils`, `rust-overlay`, and `home-manager`; CI builds them on every change ([#356](https://github.com/outlmd/outl/issues/356)).
+  `programs.outl` renders `~/.config/outl/config.toml` from typed options, can install the packages (desktop entry + icons included), and can run per-user background sync as a systemd user service.
+  Guide: [docs/nix.md](docs/nix.md).
+- **`managed = true` in `config.toml` makes a declarative config win.**
+  Every client skips its config rewrite when the directive is set, so the home-manager symlink survives `home-manager switch` and the desktop Settings modal disables Save and points at the declarative source.
+  Set `managed = false` to hand the file back to the clients.
 
 - **Markdown tables render as tables, on all three clients — and tabular data pasted from anywhere becomes one.**
   A pipe table used to arrive as a wall of `|` characters plus one `unrecognized_block_marker` warning *per row*, because the parser had no table in its grammar and kept each line verbatim ([#329](https://github.com/outlmd/outl/issues/329)). The content was safe; it just wasn't readable, and the warnings made a correct file look broken.

@@ -30,7 +30,7 @@
 604 crates/outl-cli/src/cmd/block.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
-713 crates/outl-config/src/schema.rs
+728 crates/outl-config/src/schema.rs
 768 crates/outl-core/src/storage/jsonl/read.rs
 810 crates/outl-core/src/storage/jsonl/tests.rs
 877 crates/outl-core/src/workspace.rs

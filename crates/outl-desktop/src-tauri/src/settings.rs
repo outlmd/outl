@@ -80,6 +80,16 @@ fn theme_mode_str(m: outl_config::ThemeMode) -> String {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Whether an external configuration manager (Nix / home-manager) owns
+    /// `config.toml`, so no setting the user changes here can be persisted.
+    ///
+    /// Display-only: the frontend reads it to show a "managed by Nix" notice and
+    /// disable Save. It is **not** round-tripped into [`Config`] — [`outl_config::save`]
+    /// gates on the on-disk directive and `OUTL_CONFIG_MANAGED` (see
+    /// [`outl_config::managed`]), not on this field, so a reconstructed DTO can
+    /// never write the file back over its owner. `load` sets it to that exact
+    /// verdict; `From<Config>` projects the raw file field for faithful round-trips.
+    pub managed: bool,
     pub last_workspace: Option<std::path::PathBuf>,
     /// Defaults to `true` — outl is keyboard-first and the same
     /// behaviour ships in the TUI.
@@ -135,6 +145,7 @@ impl From<Config> for Settings {
         let theme_dark = c.theme.dark().to_string();
         let theme_mode = theme_mode_str(c.theme.mode);
         Self {
+            managed: c.managed,
             last_workspace: c.workspace.last,
             vim_mode: c.editor.vim_mode,
             theme: c.theme.preset,
@@ -152,6 +163,9 @@ impl From<Config> for Settings {
 impl From<Settings> for Config {
     fn from(s: Settings) -> Self {
         Self {
+            // Display flag on the DTO; `restore_unmodeled_sections` overwrites it
+            // from disk before any write, so the modal can never set this itself.
+            managed: s.managed,
             workspace: WorkspaceCfg {
                 last: s.last_workspace,
             },
@@ -236,7 +250,11 @@ impl From<Settings> for Config {
 /// signature (other modules read it for the actor file location)
 /// but the config itself ignores it; the path is XDG-driven.
 pub fn load(_app_config_dir: &std::path::Path) -> Settings {
-    outl_config::load().into()
+    let mut s: Settings = outl_config::load().into();
+    // The gate's exact verdict (on-disk directive ∪ `OUTL_CONFIG_MANAGED`), so
+    // the modal shows the notice for precisely the condition that blocks Save.
+    s.managed = outl_config::managed();
+    s
 }
 
 /// Overwrite the sections of `cfg` that the flat `Settings` wire shape
@@ -248,6 +266,13 @@ pub fn load(_app_config_dir: &std::path::Path) -> Settings {
 /// `[theme]` pair added in RFC 0022 — can be pinned by a unit test
 /// without touching the real `~/.config/outl/config.toml`.
 fn restore_unmodeled_sections(cfg: &mut Config, on_disk: &Config) {
+    // The top-level `managed` directive belongs to whoever installed this file
+    // (Nix / home-manager), never to the modal — restore it so a settings write
+    // can never clear the flag out from under its owner. [`outl_config::save`]
+    // additionally refuses outright while it is set; this keeps the DTO's
+    // display-only field from leaking into the bytes that would be written
+    // should the gate ever not fire.
+    cfg.managed = on_disk.managed;
     // The flat `Settings` carries the transport choice (the Sync panel
     // writes it), so `into()` already set `cfg.sync.transport`. It does NOT
     // model `relay_url` or `[calendar]`, so restore those from disk in one
@@ -337,6 +362,7 @@ mod tests {
     #[test]
     fn round_trips_via_config() {
         let s = Settings {
+            managed: false,
             last_workspace: Some(PathBuf::from("/tmp/ws")),
             vim_mode: false,
             theme: "dracula".into(),
@@ -466,6 +492,41 @@ mod tests {
             cfg.storage, on_disk.storage,
             "[storage] is unmodelled by Settings and must be restored from disk — \
              dropping it silently flips the op-log LRU cap back to the default"
+        );
+    }
+
+    #[test]
+    fn from_config_projects_the_managed_flag() {
+        let cfg = Config {
+            managed: true,
+            ..Config::default()
+        };
+        let s: Settings = cfg.into();
+        assert!(
+            s.managed,
+            "the on-disk `managed` directive must reach the DTO"
+        );
+    }
+
+    /// The `managed` field on the flat `Settings` is display-only. A save
+    /// restores it from disk, so a DTO that arrived with `managed = false`
+    /// (the frontend never sends `true` — Save is disabled while managed) can
+    /// never clear a home-manager directive out from under its owner.
+    #[test]
+    fn a_save_never_clears_an_on_disk_managed_directive() {
+        let on_disk = Config {
+            managed: true,
+            ..Config::default()
+        };
+        let mut cfg: Config = Settings {
+            managed: false,
+            ..Settings::fresh()
+        }
+        .into();
+        restore_unmodeled_sections(&mut cfg, &on_disk);
+        assert!(
+            cfg.managed,
+            "a settings save must keep the owner's `managed` directive set"
         );
     }
 }

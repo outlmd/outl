@@ -164,6 +164,11 @@ pub(crate) fn update_settings(
     state: State<'_, AppState>,
 ) -> Result<Settings, String> {
     let mut guard = state.settings.lock();
+    // `managed` is not client-editable: pin it to the gate's authoritative
+    // verdict so a save can't clear the notice out of app state, and so the
+    // reply the frontend rehydrates from carries the real flag.
+    let mut next = next;
+    next.managed = outl_config::managed();
     *guard = next;
     settings::save(&state.app_config_dir, &guard).map_err(|e| format!("save settings: {e}"))?;
     Ok(guard.clone())

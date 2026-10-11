@@ -25,6 +25,11 @@ See [Editing safely](#editing-safely).
 ```toml
 # ~/.config/outl/config.toml — full example with every supported field
 
+# Set by an external configuration manager (Nix / home-manager) that owns this
+# file. When true, every client refuses to rewrite it — see "Managed config"
+# below. Omit (the default) to let the clients persist their own settings.
+managed = false
+
 [workspace]
 # Absolute path to the workspace the user last opened. The desktop
 # writes this on every `set_workspace` call; the TUI / CLI read it
@@ -96,6 +101,27 @@ quiet_hours = "22:00-07:00"
 ```
 
 > **Why `[calendar] timezone` exists at all:** [RFC 0107](rfcs/0107-page-identity.md) — the journal's date decides its slug, so "what day is it" is an identity question, not a display preference.
+
+### Managed config
+
+The top-level `managed = true` directive tells outl that **something else owns this file** — in practice Nix / home-manager — and no client may rewrite it.
+
+Without it, a declaratively-managed config breaks the moment a client persists anything.
+Clients write `config.toml` by **atomic rename** (scratch file → rename), which replaces home-manager's **symlink** into the Nix store with a plain regular file.
+The next `home-manager switch` then refuses: the managed target is now a regular file it can't override.
+`managed = true` makes every `outl_config::save` a no-op, so the symlink survives every switch.
+
+| Signal | Effect |
+|---|---|
+| `managed = true` in `config.toml` | Every client (`save`, `save_to` callers) skips rewriting the file. The home-manager module emits this key when `programs.outl.settings.managed` is true (its default). |
+| `OUTL_CONFIG_MANAGED=1` (also `true`/`yes`/`on`) | Same effect, without editing the file — an escape hatch for a test or container, mirroring `OUTL_DEVICE_DIR`. |
+
+Two consequences of a managed config, both intentional:
+
+- **The desktop's Settings modal disables Save** and shows a notice — a change there would be silently discarded, since the write is refused server-side. Edit `programs.outl.settings` and rebuild instead. The theme picker still previews live.
+- **`[workspace] last` stops following the user around.** The desktop can no longer persist the last-opened workspace. Pin it (`programs.outl.settings.workspace.last`) if you want the desktop to reopen a workspace on launch.
+
+See [Nix & home-manager](nix.md#declarative-config) for the module wiring.
 
 ### Field reference
 
