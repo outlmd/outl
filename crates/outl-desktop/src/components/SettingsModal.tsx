@@ -56,7 +56,6 @@ export function SettingsModal() {
    * carries the same pair for the same reason.
    */
   const [telemetryError, setTelemetryError] = createSignal(false);
-  const [windowDecorations, setWindowDecorationsState] = createSignal(true);
   // True when an external config manager (Nix / home-manager) owns the file.
   // Read off the draft the backend sent — the same verdict that blocks Save
   // server-side — never re-derived here.
