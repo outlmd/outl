@@ -62,6 +62,27 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
+  # RustSec gate. Dependabot only surfaces a fraction of the RustSec
+  # advisories for this workspace (it showed 1 while an OSV scan of
+  # Cargo.lock found 17), so `cargo deny check advisories` fails the PR
+  # on any known vulnerability in the lockfile. Ignores live in
+  # `deny.toml`, each with a reason. Never compiles, so smallest SKU.
+  advisories:
+    name: cargo-deny advisories
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install toolchain
+        run: rustup show
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny@0.20.2
+      - name: cargo deny check advisories
+        run: cargo deny --locked check advisories
+
   # 8 vCPU: clippy is a pure compile job and the 4 vCPU run sat at 71%
   # average CPU with only 2.6 GB of 16 GB used — CPU-bound, memory to
   # spare. Blacksmith bills per vCPU-minute, so doubling cores is

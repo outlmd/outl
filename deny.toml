@@ -1,0 +1,27 @@
+# cargo-deny config. CI runs `cargo deny check advisories` (RustSec gate).
+# Dependabot misses most RustSec advisories for this workspace, so this is the
+# check that catches them. Vulnerabilities always fail; every ignore below is an
+# unmaintained-only advisory (no known vulnerability) pulled in transitively.
+# Drop an entry as soon as the upstream crate moves off it.
+
+[graph]
+all-features = true
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained, transitive (no fix upstream yet)" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained, transitive build-time macro" },
+    { id = "RUSTSEC-2026-0215", reason = "smallstr unmaintained, transitive" },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained, via serde_yaml_ng" },
+    { id = "RUSTSEC-2025-0075", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0083", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0094", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-* unmaintained, transitive" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1 unmaintained, via steel-core (outl-exec)" },
+    { id = "RUSTSEC-2026-0247", reason = "bitmaps unmaintained, via im-rc (steel-core)" },
+    { id = "RUSTSEC-2026-0250", reason = "im-rc unmaintained, via steel-core (outl-exec)" },
+    { id = "RUSTSEC-2026-0251", reason = "sized-chunks unmaintained, via im-rc (steel-core)" },
+]
