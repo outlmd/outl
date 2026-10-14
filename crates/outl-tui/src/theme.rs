@@ -280,6 +280,7 @@ pub fn by_name(name: &str) -> Option<Theme> {
         "monokai" => Some(monokai()),
         "outl-light" => Some(outl_light()),
         "gruvbox" | "gruvbox-dark" => Some(gruvbox()),
+        "gruvbox-light" => Some(gruvbox_light()),
         _ => None,
     }
 }
@@ -478,6 +479,11 @@ pub fn monokai() -> Theme {
 /// Gruvbox Dark — morhetz's retro-groove palette.
 pub fn gruvbox() -> Theme {
     theme_from_palette("gruvbox", &outl_theme::presets::gruvbox())
+}
+
+/// Gruvbox Light — the light side of morhetz's retro-groove palette.
+pub fn gruvbox_light() -> Theme {
+    theme_from_palette("gruvbox-light", &outl_theme::presets::gruvbox_light())
 }
 
 #[cfg(test)]

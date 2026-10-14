@@ -411,3 +411,75 @@ pub fn gruvbox() -> Palette {
         help_title_fg: yellow.into(),
     }
 }
+
+/// Gruvbox Light — the light side of morhetz's retro-groove palette.
+/// Warm cream canvas (`#fbf1c7`), dark warm-gray text (`#3c3836`), and
+/// the classic muted accents darkened for a light background. Hex
+/// values sourced from the canonical gruvbox palette (light variant);
+/// the accent and destructive hues use the palette's normal (dark)
+/// color set so they clear WCAG AA on the cream canvas.
+pub fn gruvbox_light() -> Palette {
+    let bg = "#fbf1c7"; // bg0
+    let bg_elev = "#ebdbb2"; // bg1
+    let border = "#d5c4a1"; // bg2
+    let fg = "#3c3836"; // fg0
+    let fg_soft = "#504945"; // fg1
+    let fg_dim = "#665c54"; // fg3
+    let fg_dimmer = "#7c6f64"; // fg4
+    let yellow = "#d7992f";
+    let orange = "#af3a03"; // normal orange — bright #d65d0e is too dim on bg0
+    let green = "#98971a";
+    let aqua = "#427b58";
+    let blue = "#076678";
+    let purple = "#8f3f71";
+    let red = "#9d0006"; // normal red — bright #cc241d is too dim on bg0
+
+    Palette {
+        name: "gruvbox-light".into(),
+        bg: bg.into(),
+        bg_elev: bg_elev.into(),
+        fg: fg.into(),
+        fg_dim: fg_dim.into(),
+        fg_dimmer: fg_dimmer.into(),
+        border: border.into(),
+        hint: fg_dim.into(),
+        accent: orange.into(),
+        accent_fg: bg.into(), // the canvas itself, 5.40:1
+        accent_soft: yellow.into(),
+        accent_alt: green.into(),
+        warn: orange.into(),
+        destructive: red.into(),
+        destructive_fg: "#ebdbb2".into(), // gruvbox light bg1, 6.28:1
+        ref_link_fg: aqua.into(),
+        tag_link_fg: purple.into(),
+        md_link_fg: blue.into(),
+        bold_fg: fg.into(),
+        italic_fg: fg_soft.into(),
+        strike_fg: fg_dimmer.into(),
+        highlight_bg: yellow.into(),
+        highlight_fg: "#1d2021".into(), // gruvbox dark0_hard
+        code_fg: green.into(),
+        todo_open_fg: orange.into(),
+        todo_done_fg: green.into(),
+        todo_done_body_fg: fg_dimmer.into(),
+        property_key_fg: fg_dimmer.into(),
+        property_value_fg: fg_soft.into(),
+        heading_fg: fg.into(),
+        dim_fg: fg_dimmer.into(),
+        selected_bullet_bg: yellow.into(),
+        selected_bullet_fg: "#1d2021".into(),
+        cursor_block_bg: fg.into(),
+        cursor_block_fg: bg.into(),
+        cursor_caret_fg: fg_soft.into(),
+        status_normal_bg: yellow.into(),
+        status_normal_fg: "#1d2021".into(),
+        status_insert_bg: green.into(),
+        status_insert_fg: "#1d2021".into(),
+        status_visual_bg: "#d3869b".into(), // bright purple — normal #8f3f71 is too dim on dark0_hard
+        status_visual_fg: "#1d2021".into(),
+        status_message_fg: orange.into(),
+        list_selected_bg: border.into(),
+        list_selected_fg: fg.into(),
+        help_title_fg: orange.into(),
+    }
+}
