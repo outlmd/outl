@@ -23,7 +23,7 @@
 //!
 //! ## Presets
 //!
-//! Nine built-in palettes, named identically to the TUI presets
+//! Eleven built-in palettes, named identically to the TUI presets
 //! that shipped before this crate existed. The TUI's render path is
 //! unchanged; it now derives its `Theme` from these. Adding a
 //! preset means: extend `presets`, add a name to
@@ -47,6 +47,7 @@ pub const PRESETS: &[&str] = &[
     "nord",
     "monokai",
     "gruvbox",
+    "gruvbox-light",
 ];
 
 /// Resolve a preset by name. Accepts the canonical name or any of
@@ -76,6 +77,7 @@ pub fn by_name(name: &str) -> Option<Palette> {
         "nord" => Some(presets::nord()),
         "monokai" => Some(presets::monokai()),
         "gruvbox" | "gruvbox-dark" => Some(presets::gruvbox()),
+        "gruvbox-light" => Some(presets::gruvbox_light()),
         _ => None,
     }
 }
