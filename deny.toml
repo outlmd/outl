@@ -1,13 +1,17 @@
 # cargo-deny config. CI runs `cargo deny check advisories` (RustSec gate).
 # Dependabot misses most RustSec advisories for this workspace, so this is the
 # check that catches them. Vulnerabilities always fail; every ignore below is an
-# unmaintained-only advisory (no known vulnerability) pulled in transitively.
+# unmaintained or unsound advisory (no known vulnerability) pulled in
+# transitively, each with a reason.
 # Drop an entry as soon as the upstream crate moves off it.
 
 [graph]
 all-features = true
 
 [advisories]
+# Defaults are "workspace" in cargo-deny 0.20; check the whole graph.
+unmaintained = "all"
+unsound = "all"
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained, transitive (no fix upstream yet)" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained, transitive build-time macro" },
@@ -24,4 +28,7 @@ ignore = [
     { id = "RUSTSEC-2026-0247", reason = "bitmaps unmaintained, via im-rc (steel-core)" },
     { id = "RUSTSEC-2026-0250", reason = "im-rc unmaintained, via steel-core (outl-exec)" },
     { id = "RUSTSEC-2026-0251", reason = "sized-chunks unmaintained, via im-rc (steel-core)" },
+    # Unsound (not vulnerabilities), no fixed release reachable yet:
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsound, via Tauri's gtk3 chain on Linux desktop; no glib 0.20+ release reachable while Tauri is on gtk3 (Dependabot alert #33)" },
+    { id = "RUSTSEC-2026-0255", reason = "sized-chunks unsound on panic, via im-rc in steel-core; only in the non-default lang-lisp feature" },
 ]
