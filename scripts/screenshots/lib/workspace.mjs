@@ -2,7 +2,7 @@
 // binary, then dumps what the clients need as JSON straight from the
 // CLI, so every block, token and backlink in a shot is backend output.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const p2 = (n) => String(n).padStart(2, "0");
@@ -34,9 +34,6 @@ export function buildWorkspace({ outl, fixtureDir, workDir, today = new Date() }
   // The fixture is plain outl markdown laid out like a Logseq graph, which
   // is the importer that takes a directory of .md as-is.
   run(outl, ["import", "logseq", src, ws, "--json"]);
-  // A `remind::` that is already due would pop a TUI toast over the shot.
-  // The rule stays in the page; this device just doesn't fire it.
-  appendFileSync(join(ws, ".outl", "config.toml"), "\n[reminders]\nenabled = false\n");
   cpSync(src, join(workDir, "fixture-expanded"), { recursive: true });
   return ws;
 }

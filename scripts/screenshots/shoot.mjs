@@ -37,7 +37,15 @@ rmSync(out, { recursive: true, force: true });
 for (const d of ["raw", "framed", "hero"]) mkdirSync(join(out, d), { recursive: true });
 
 const work = join(out, ".work");
+// Every outl subprocess (import, JSON dumps, the TUI under vhs) shares
+// disposable device and config state under .work, never the caller's.
+process.env.OUTL_DEVICE_DIR = join(work, "device");
+process.env.XDG_CONFIG_HOME = join(work, "xdg");
 const ws = buildWorkspace({ outl, fixtureDir: join(here, "fixture"), workDir: work });
+// A `remind::` that is already due would pop a TUI toast over the shot.
+// The TUI reads this from $XDG_CONFIG_HOME/outl/config.toml.
+mkdirSync(join(work, "xdg", "outl"), { recursive: true });
+writeFileSync(join(work, "xdg", "outl", "config.toml"), "[reminders]\nenabled = false\n");
 const fx = dumpFixture({ outl, ws });
 writeFileSync(join(work, "fixture.json"), JSON.stringify(fx, null, 2));
 console.log(`workspace: ${fx.pages.length} pages, today is ${fx.today}`);
@@ -116,6 +124,8 @@ async function shootWeb(browser, url, device, shots) {
   }
 }
 
+const sq = (s) => `'${s.replaceAll("'", `'\\''`)}'`;
+
 function shootTui() {
   const tapes = join(here, "tui");
   const shots = [
@@ -141,7 +151,8 @@ function shootTui() {
           `Set Padding 24`,
           `Set Theme ${JSON.stringify(scheme === "light" ? "Github" : "GitHub Dark")}`,
           `Hide`,
-          `Type "cd ${ws} && clear && ${outl} --theme ${theme}"`,
+          // Backtick-delimited so the shell's single quotes pass through untouched.
+          `Type \`cd ${sq(ws)} && clear && ${sq(outl)} --theme ${theme}\``,
           `Enter`,
           `Sleep 2s`,
           `Show`,
