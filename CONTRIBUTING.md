@@ -58,7 +58,18 @@ Body for the *why* if it's not obvious from the diff.
   Include repro steps and what you expected.
 - **Security issue:** see [SECURITY.md](SECURITY.md).
   Don't open a public issue.
+- **Question or half-formed idea:** start a thread in [Discussions](https://github.com/outlmd/outl/discussions) or ask on [Discord](https://discord.gg/dnfAbCYWv).
 - **Design discussion:** open an issue with the `discussion` label or a draft PR labeled `RFC`.
+
+## Where to start
+
+Issues labeled [`good first issue`](https://github.com/outlmd/outl/labels/good%20first%20issue) have a clear scope and don't need you to know the whole codebase.
+[`help wanted`](https://github.com/outlmd/outl/labels/help%20wanted) are bigger, but nobody is on them yet.
+Comment on the issue before you start so two people don't build the same thing.
+
+## Code of conduct
+
+Everyone in the project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

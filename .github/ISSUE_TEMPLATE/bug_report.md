@@ -1,7 +1,7 @@
 ---
 name: Bug report
 about: Something doesn't work the way you expect
-labels: bug
+labels: ["kind:bug", "status:triage"]
 ---
 
 ## What happened

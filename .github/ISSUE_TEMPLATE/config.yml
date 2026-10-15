@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/outlmd/outl/discussions
+    about: Not sure it's a bug, or want to talk an idea through first? Start a discussion.
+  - name: Discord
+    url: https://discord.gg/dnfAbCYWv
+    about: Chat with other people using and building outl.
+  - name: Docs
+    url: https://github.com/outlmd/outl/tree/main/docs
+    about: How outl works, the RFCs, and the reference for the CLI, TUI and query language.
+  - name: Security issue
+    url: https://github.com/outlmd/outl/blob/main/SECURITY.md
+    about: Please don't open a public issue for vulnerabilities. Follow SECURITY.md instead.

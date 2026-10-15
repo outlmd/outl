@@ -1,7 +1,7 @@
 ---
 name: Feature request
 about: Suggest something outl should do
-labels: enhancement
+labels: ["kind:feature", "status:triage"]
 ---
 
 ## What problem does this solve
