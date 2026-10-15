@@ -132,7 +132,20 @@ function shootTui() {
     { name: "journal", tape: "journal.tape" },
     { name: "person-backlinks", tape: "person-backlinks.tape" },
   ];
-  const themes = { light: "light", dark: "default-dark" };
+  // The brand presets every client ships by default (outl-theme
+  // presets.rs). The terminal canvas uses the same bg/fg so the TUI
+  // reads like it does in a terminal themed to match.
+  const themes = { light: "outl-light", dark: "outl" };
+  const ansi = {
+    black: "#24292f", red: "#cf222e", green: "#116329", yellow: "#4d2d00",
+    blue: "#0969da", magenta: "#8250df", cyan: "#1b7c83", white: "#6e7781",
+    brightBlack: "#57606a", brightRed: "#a40e26", brightGreen: "#1a7f37", brightYellow: "#633c01",
+    brightBlue: "#218bff", brightMagenta: "#a475f9", brightCyan: "#3192aa", brightWhite: "#8c959f",
+  };
+  const canvas = {
+    light: { ...ansi, name: "outl-light", background: "#ffffff", foreground: "#111827", selection: "#e5e7eb", cursor: "#7c3aed" },
+    dark: { ...ansi, name: "outl", background: "#0c0814", foreground: "#f4f1fa", selection: "#382c54", cursor: "#c4b5fd" },
+  };
   const jobs = [];
   for (const shot of shots) {
     for (const [scheme, theme] of Object.entries(themes)) {
@@ -149,10 +162,15 @@ function shootTui() {
           `Set Width 1400`,
           `Set Height 820`,
           `Set Padding 24`,
-          `Set Theme ${JSON.stringify(scheme === "light" ? "Github" : "GitHub Dark")}`,
+          `Set Theme ${JSON.stringify(canvas[scheme])}`,
+          // Same color depth on every machine: without these the TUI
+          // falls back to fewer colors wherever the caller's env lacks them.
+          `Env TERM "xterm-256color"`,
+          `Env COLORTERM "truecolor"`,
           `Hide`,
           // Backtick-delimited so the shell's single quotes pass through untouched.
-          `Type \`cd ${sq(ws)} && clear && ${sq(outl)} --theme ${theme}\``,
+          // NO_COLOR in the caller's env (CI images, sandboxes) would strip the palette.
+          `Type \`unset NO_COLOR FORCE_COLOR && cd ${sq(ws)} && clear && ${sq(outl)} --theme ${theme}\``,
           `Enter`,
           `Sleep 2s`,
           `Show`,
