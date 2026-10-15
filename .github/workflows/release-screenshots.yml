@@ -12,6 +12,9 @@ name: Release screenshots
 # the shot list without touching a release.
 
 on:
+  # TEMPORARY: proof run for #374, removed in the next commit.
+  push:
+    branches: [avelino/feat/release-screenshots]
   workflow_call:
     inputs:
       tag:
