@@ -825,7 +825,11 @@ jobs:
   screenshots:
     name: Release screenshots
     needs: [prepare, create_release]
-    if: needs.create_release.result == 'success'
+    # Only for a version tag pushed by hand (GA), not the beta cut on
+    # every push to main: those also get a tag, but `github.ref` is then
+    # `refs/heads/main`. When skipped, `publish_release` still runs: it
+    # carries `!cancelled()` and doesn't check this job's result.
+    if: needs.create_release.result == 'success' && startsWith(github.ref, 'refs/tags/v')
     # Best-effort, like `build_android`: listed in `publish_release.needs`
     # so the images land while the release is still a draft, but absent
     # from its conditions, so a broken shot never blocks a release.
