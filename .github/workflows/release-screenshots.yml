@@ -1,0 +1,134 @@
+name: Release screenshots
+
+# Regenerates the product screenshots (desktop, iPhone, Android, TUI) with
+# scripts/screenshots and attaches them to a release. Nothing is committed.
+#
+# Called by release.yml between `create_release` and `publish_release`,
+# while the release is still a draft: releases are immutable once
+# published, so assets can't be added after the flip.
+#
+# `workflow_dispatch` runs the same thing by hand. Without a tag it keeps
+# the images as a workflow artifact, which is how to preview a change to
+# the shot list without touching a release.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to attach the screenshots to
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release tag to attach to (empty = artifact only)
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  VHS_VERSION: 0.10.0
+  VHS_SHA256: b552c3870aca101dcafe533cfef32dceb7b783400ad32642e728775c9f125407
+  TTYD_VERSION: 1.7.7
+  TTYD_SHA256: 8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+
+jobs:
+  shoot:
+    name: Take screenshots
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-screenshots-cli-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build outl
+        run: cargo build --release --bin outl
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install frontend and script dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd scripts/screenshots
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+
+      - name: Install vhs, ttyd and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-jetbrains-mono fonts-noto-color-emoji
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP"
+          curl -fsSLo vhs.tgz "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${VHS_SHA256}  vhs.tgz" | sha256sum -c -
+          tar -xzf vhs.tgz --strip-components=1 -C bin "vhs_${VHS_VERSION}_Linux_x86_64/vhs"
+          curl -fsSLo bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          echo "${TTYD_SHA256}  bin/ttyd" | sha256sum -c -
+          chmod +x bin/ttyd bin/vhs
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Take screenshots
+        working-directory: scripts/screenshots
+        run: node shoot.mjs --out "$RUNNER_TEMP/screenshots" --outl "$GITHUB_WORKSPACE/target/release/outl"
+
+      - name: Package
+        run: |
+          cd "$RUNNER_TEMP/screenshots"
+          tar -czf outl-screenshots.tar.gz raw framed hero
+          ls -la hero
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: outl-screenshots
+          path: |
+            ${{ runner.temp }}/screenshots/outl-screenshots.tar.gz
+            ${{ runner.temp }}/screenshots/hero/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  upload:
+    name: Attach to release
+    needs: shoot
+    if: inputs.tag != ''
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: outl-screenshots
+          path: shots
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cd shots
+          # Hero shots go up one by one so they can be linked directly;
+          # the tarball carries the full set (raw + framed + hero).
+          for f in hero/*.png; do
+            mv "$f" "screenshot-$(basename "$f")"
+          done
+          gh release upload "$TAG" outl-screenshots.tar.gz screenshot-*.png \
+            --repo "$GITHUB_REPOSITORY" --clobber

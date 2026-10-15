@@ -1,0 +1,3 @@
+- Call with [[@Priya Shah]] about Android parity for [[Project Atlas]]
+  - TODO Share the conflict banner sketches #atlas
+- DONE Finished chapter 5 from the [[Reading list]] :books:

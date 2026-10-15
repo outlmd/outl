@@ -822,9 +822,22 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
 
+  screenshots:
+    name: Release screenshots
+    needs: [prepare, create_release]
+    if: needs.create_release.result == 'success'
+    # Best-effort, like `build_android`: listed in `publish_release.needs`
+    # so the images land while the release is still a draft, but absent
+    # from its conditions, so a broken shot never blocks a release.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-screenshots.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+
   publish_release:
     name: Publish release
-    needs: [prepare, build, build_desktop, build_desktop_linux, build_desktop_windows, build_android]
+    needs: [prepare, build, build_desktop, build_desktop_linux, build_desktop_windows, build_android, screenshots]
     # Android is best-effort. GitHub auto-skips a job when a `needs` entry
     # fails UNLESS its `if` contains a status-check function; `!cancelled()`
     # is that function, so this job still evaluates when `build_android`

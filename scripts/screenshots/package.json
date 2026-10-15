@@ -1,0 +1,12 @@
+{
+  "name": "outl-screenshots",
+  "private": true,
+  "description": "Regenerates the product screenshots attached to each release. Not part of the frontend workspace.",
+  "type": "module",
+  "scripts": {
+    "shoot": "node shoot.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}
