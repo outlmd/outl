@@ -11,9 +11,18 @@
     if (!v) throw new Error(`shots: no page ${slug}`);
     return { ...structuredClone(v), backlinks: [], backlinks_order: "newest" };
   };
+  // Same decision tree as the real resolver (docs/markdown-format.md,
+  // Mentions): drop a leading `@`, then slug, slugified, title.
+  const slugify = (t) =>
+    t.toLowerCase().trim().replace(/[^\p{L}\p{N}/_-]+/gu, "-").replaceAll("/", "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   const bySlugOrTitle = (target) => {
-    const t = String(target).toLowerCase();
-    return fx.pages.find((p) => p.slug === t || p.title.toLowerCase() === t);
+    const raw = String(target).replace(/^@/, "");
+    const t = raw.toLowerCase();
+    return (
+      fx.pages.find((p) => p.slug === raw) ??
+      fx.pages.find((p) => p.slug === slugify(raw)) ??
+      fx.pages.find((p) => p.title.toLowerCase() === t)
+    );
   };
   const filterPages = (q) => {
     const s = String(q ?? "").toLowerCase();

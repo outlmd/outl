@@ -1,6 +1,6 @@
 icon:: 👤
 role:: Android engineer
-title:: @Priya Shah
+title:: Priya Shah
 type:: person
 
 - Leads Android parity for [[Project Atlas]]

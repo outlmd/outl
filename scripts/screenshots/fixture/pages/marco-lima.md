@@ -1,6 +1,6 @@
 icon:: 👤
 role:: Mobile engineer
-title:: @Marco Lima
+title:: Marco Lima
 type:: person
 
 - Maintains the sync worker and the beta builds
