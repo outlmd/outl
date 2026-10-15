@@ -15,6 +15,16 @@
   doesn't corrupt your tree when two devices edit offline.
 </p>
 
+<p align="center">
+  <img src="assets/readme/tui.gif" alt="outl TUI: mentioning @Priya Shah in today's journal, then opening her page with the new backlink" width="820" />
+</p>
+
+<p align="center">
+  <img src="assets/readme/desktop-journal.png" alt="outl desktop, today's journal" width="410" />
+  <img src="assets/readme/desktop-person.png" alt="outl desktop, a person page with its backlinks (dark)" width="410" />
+  <img src="assets/readme/mobile-journal.png" alt="outl on iPhone, today's journal" width="180" />
+</p>
+
 Inspired by [Roam Research](https://roamresearch.com) and [Logseq](https://logseq.com).
 Tree CRDT sync ([Kleppmann et al. 2022][paper]), per-device append-only op log, IDs in a sidecar so the `.md` you see is the `.md` you wrote.
 
