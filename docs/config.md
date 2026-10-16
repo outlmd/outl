@@ -130,7 +130,7 @@ That is a one-time, behaviour-preserving change to the file, since `ThemeCfg::da
 
 `outl doctor` warns when a configured pair has two light or two dark sides (e.g. `mode = "light"` naming a dark preset) — a misconfigured pair, not a resolution bug.
 
-Available presets: `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`.
+Available presets: `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`.
 See [theming.md](theming.md) for the look of each.
 
 #### `[editor]`

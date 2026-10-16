@@ -39,7 +39,7 @@ This is what lets every other crate cheaply depend on us.
 - [`Palette`] — the struct of named hex strings (one per semantic surface).
   Field naming follows "what the surface IS", not "what it looks like" (`ref_link_fg`, not `purple_underline`).
   Two surfaces that genuinely share a style share the field.
-- The ten built-in presets in `src/presets.rs`: `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`.
+- The eleven built-in presets in `src/presets.rs`: `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`.
 - [`PRESETS`] — the canonical user-visible order (alphabetical-ish, brand first).
 - [`by_name`] — case- and separator-insensitive lookup so `"Solarized Dark"`, `"solarized_dark"`, and `"solarized-dark"` all resolve.
 - [`default`] / [`all`] — fallback + iterator helpers for pickers.

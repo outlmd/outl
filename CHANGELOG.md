@@ -70,6 +70,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **`gruvbox-light` theme preset.**
+  The light side of morhetz's retro-groove palette, pairing with the existing `gruvbox` (dark). Warm cream canvas (`#fbf1c7`), dark warm-gray text, and the classic muted accents darkened so every fill pair clears WCAG AA on the light background. Selectable in the TUI (`outl --theme gruvbox-light`), the desktop Settings picker, and mobile, like every other preset.
 - **Mobile command palette, and one look across desktop and phone.**
   Type `>` in the phone's Search or Pages sheet to list actions (today, capture, tasks, reminders, calendar, sync, devices, plugins, settings, fold); a plain query shows matching actions under the pages, as the desktop palette does.
   Block text and its edit box share one line height on both clients, so rows keep one rhythm and no longer jump when you start editing on the phone; task boxes use the theme's task colours on the phone too; the phone's debug footer (block and op counts) is gone, as it never was on desktop.
