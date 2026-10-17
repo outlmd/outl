@@ -449,7 +449,14 @@ export function withCreateNewPersonCandidate<T extends PageMetaLike>(
 ): T[] {
   const trimmed = query.trim();
   if (trimmed.length === 0) return list;
-  if (list.some((p) => p.title.toLowerCase() === trimmed.toLowerCase())) {
+  const lower = trimmed.toLowerCase();
+  if (
+    list.some(
+      (p) =>
+        p.title.toLowerCase() === lower ||
+        (p.aliases ?? []).some((a) => a.toLowerCase() === lower),
+    )
+  ) {
     return list;
   }
   const synthetic = {
@@ -473,6 +480,7 @@ export interface PageMetaLike {
   title: string;
   kind: "page" | "journal";
   page_type?: string | null;
+  aliases?: string[];
 }
 
 /**

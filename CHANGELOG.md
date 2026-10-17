@@ -179,6 +179,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
   Editing is editing the markdown: no add-row / add-column UI on any client, by design. The one real per-client difference is recorded rather than left to be discovered — `Capability::TableRendering` is `Partial` on the TUI (a table wider than the pane wraps instead of scrolling; every row is still there, the columns stop lining up) and `Full` on desktop and mobile, with the wording the user sees living in the catalog (invariant 12).
 
+- **`alias::` — a page answers to short or alternative names.**
+  A page had exactly one human name: its `title::`. Long titles make dense refs — `[[São Paulo]]` typed next to `[[SP]]` from the other half of a vault is two names for one page, and outl only recognised the long one ([#302](https://github.com/outlmd/outl/issues/302)).
+  A page property `alias:: Big Apple, NYC` now lists extra names, comma-separated. Every resolution surface matches them beside the title: `[[NYC]]` opens the New York page, `#nyc` and `@NYC` land there too, its backlinks collect all three spellings, and autocomplete finds it from any of them. The aliases ride the title's paths — one case-insensitive comparison in the resolver ladder, one `title → slug` map in the workspace index — so no client changes anything to benefit (RFC 0107).
+  `outl doctor` reports alias names claimed by more than one page, so the shared spelling is visible instead of silently resolving to whichever match comes first.
+
 - **`outl trash list` and `outl trash restore <id>` — deleted blocks are readable and recoverable.**
   Invariant 6 makes delete a `Move(node, TRASH_ROOT)`, "simplifies the algorithm and preserves history". The preserving half has worked since day one; the reading half did not exist, so on a real workspace `outl doctor` could report 683 blocks across 393 deletions and nothing else could name one of them ([#287](https://github.com/outlmd/outl/issues/287)). What the invariant bought was "the bytes are still on disk", which is a much weaker promise than "you can get it back" — the difference between a recycle bin and a deleted file on a drive you have not overwritten yet.
 

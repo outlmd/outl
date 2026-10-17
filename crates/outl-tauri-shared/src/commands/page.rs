@@ -46,15 +46,24 @@ pub fn search_pages<S: AppHost>(state: &S, query: String) -> Result<Vec<PageMeta
             .filter_map(|p| {
                 let title = p.title.to_lowercase();
                 let slug = p.slug.to_lowercase();
-                let score = if title == q || slug == q {
-                    0
-                } else if title.starts_with(&q) || slug.starts_with(&q) {
-                    1
-                } else if title.contains(&q) || slug.contains(&q) {
-                    2
-                } else {
+                let names = std::iter::once(title)
+                    .chain(std::iter::once(slug))
+                    .chain(p.aliases.iter().map(|a| a.to_lowercase()));
+                let score = names.fold(3u8, |best, n| {
+                    let s = if n == q {
+                        0
+                    } else if n.starts_with(&q) {
+                        1
+                    } else if n.contains(&q) {
+                        2
+                    } else {
+                        3
+                    };
+                    best.min(s)
+                });
+                if score == 3 {
                     return None;
-                };
+                }
                 Some((score, p))
             })
             .collect();

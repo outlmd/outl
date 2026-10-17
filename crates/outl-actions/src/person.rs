@@ -35,8 +35,9 @@ pub const PERSON_TYPE: &str = "person";
 /// mention autocomplete every client surfaces (TUI, desktop, mobile).
 ///
 /// Ranking uses the same shape as the desktop's `search_pages` Tauri
-/// command (exact → prefix → contains), against both the title and
-/// the slug. An empty query returns the first 25 person pages in
+/// ranking (exact → prefix → contains), against the title, the slug,
+/// and every `alias::` name. An empty query returns the first 25 person
+/// pages in
 /// **slug** order (the order `list_all` produces — slugs sort
 /// lexicographically). Returns at most 25 results.
 ///
@@ -56,15 +57,24 @@ pub fn search_persons(workspace: &Workspace, query: &str) -> Vec<PageMeta> {
         .filter_map(|p| {
             let title = p.title.to_lowercase();
             let slug = p.slug.to_lowercase();
-            let score = if title == q || slug == q {
-                0
-            } else if title.starts_with(&q) || slug.starts_with(&q) {
-                1
-            } else if title.contains(&q) || slug.contains(&q) {
-                2
-            } else {
+            let names = std::iter::once(title)
+                .chain(std::iter::once(slug))
+                .chain(p.aliases.iter().map(|a| a.to_lowercase()));
+            let score = names.fold(3u8, |best, n| {
+                let s = if n == q {
+                    0
+                } else if n.starts_with(&q) {
+                    1
+                } else if n.contains(&q) {
+                    2
+                } else {
+                    3
+                };
+                best.min(s)
+            });
+            if score == 3 {
                 return None;
-            };
+            }
             Some((score, p))
         })
         .collect();

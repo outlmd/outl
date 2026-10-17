@@ -26,6 +26,7 @@ pub fn page_meta() -> PageMeta {
         icon: Some("🛠".into()),
         pinned: true,
         page_type: Some("person".into()),
+        aliases: vec!["Infra".into()],
     }
 }
 

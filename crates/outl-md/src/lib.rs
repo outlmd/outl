@@ -53,7 +53,7 @@ pub use frontmatter::{
     frontmatter_line_count, render_frontmatter, split_frontmatter, split_frontmatter_counted,
     PAGE_FRONTMATTER_KEY,
 };
-pub use index::{PageEntry, WorkspaceIndex};
+pub use index::{parse_alias_list, PageEntry, WorkspaceIndex};
 pub use inline::{
     byte_index_for_char, link_at_cursor, plain_text, ref_at_cursor, tokenize, tokenize_owned,
     InlineTok, InlineToken, RefTarget,
