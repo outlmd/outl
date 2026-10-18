@@ -11,7 +11,19 @@
  * https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/style-src
  */
 
-const DROPPED = new Set(["script", "foreignobject"]);
+const XLINK = "http://www.w3.org/1999/xlink";
+
+const DROPPED = new Set([
+  "script",
+  "foreignobject",
+  "style",
+  "animate",
+  "set",
+  "animatemotion",
+  "animatetransform",
+]);
+
+const ALLOWED_SCHEMES = new Set(["http", "https", "mailto"]);
 
 /** Parse `svg` and return a node safe to insert into the live document. */
 export function adoptDiagramSvg(svg: string): Node {
@@ -27,45 +39,6 @@ export function adoptDiagramSvg(svg: string): Node {
   return imported;
 }
 
-/**
- * Re-apply every `style` attribute under `root` through the CSSOM.
- *
- * Pele's zoom controls and `.pele-error` call `setAttribute("style")`
- * after `sanitize` returns. The same assignment, done through
- * `cssText`, is what the content-security policy allows.
- */
-let lifting = false;
-
-export function liftStyleAttributes(root: Element): void {
-  if (lifting) return;
-  lifting = true;
-  try {
-    const elements: Element[] = [root];
-    root.querySelectorAll("*").forEach((el) => elements.push(el));
-    for (const el of elements) applyStyle(el);
-  } finally {
-    lifting = false;
-  }
-}
-
-/**
- * Pele adds zoom controls after `sanitize` returns, and a resize can
- * add them again. Watch the host and send each new `style` attribute
- * through the CSSOM. `applyStyle` skips a value it already wrote, so
- * the observer does not loop.
- */
-export function watchStyleAttributes(root: HTMLElement): () => void {
-  liftStyleAttributes(root);
-  const observer = new MutationObserver(() => liftStyleAttributes(root));
-  observer.observe(root, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ["style"],
-  });
-  return () => observer.disconnect();
-}
-
 function scrub(el: Element): void {
   for (const child of [...el.children]) {
     if (DROPPED.has(child.localName.toLowerCase())) {
@@ -75,9 +48,38 @@ function scrub(el: Element): void {
     scrub(child);
   }
   for (const name of [...el.getAttributeNames()]) {
-    if (name.toLowerCase().startsWith("on")) el.removeAttribute(name);
+    const lower = name.toLowerCase();
+    if (lower.startsWith("on")) el.removeAttribute(name);
+    if (isHrefName(lower)) {
+      const value = el.getAttribute(name);
+      if (value === null || !hrefAllowed(value)) el.removeAttribute(name);
+    }
   }
+  const xlink = el.getAttributeNS(XLINK, "href");
+  if (xlink !== null && !hrefAllowed(xlink)) el.removeAttributeNS(XLINK, "href");
   applyStyle(el);
+}
+
+function isHrefName(name: string): boolean {
+  return name === "href" || name.endsWith(":href");
+}
+
+/**
+ * `http`, `https`, `mailto`, or a `#fragment`.
+ * The scheme is trimmed, lowercased, and stripped of whitespace and
+ * control characters before that check, so `java\nscript:` does not
+ * survive. Anything else, including a relative path, is removed.
+ */
+function hrefAllowed(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("#")) return true;
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0) return false;
+  const scheme = trimmed
+    .slice(0, colon)
+    .toLowerCase()
+    .replace(/[\s\u0000-\u001f\u007f-\u009f]/g, "");
+  return ALLOWED_SCHEMES.has(scheme);
 }
 
 function applyStyle(el: Element): void {

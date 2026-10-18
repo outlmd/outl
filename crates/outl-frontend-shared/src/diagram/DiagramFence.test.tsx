@@ -5,6 +5,32 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DiagramFence } from "./DiagramFence";
 import { createPeleRenderer } from "./renderer";
 
+const mountGate = vi.hoisted(() => {
+  return {
+    holdAfterPaint: undefined as undefined | ((source: string) => Promise<void>),
+  };
+});
+
+vi.mock("pele/lazy", async () => {
+  const actual = await vi.importActual<typeof import("pele/lazy")>("pele/lazy");
+  return {
+    ...actual,
+    mountAsync(
+      element: HTMLElement,
+      source: string,
+      options?: Parameters<typeof actual.mountAsync>[2],
+    ) {
+      const painted = actual.mountAsync(element, source, options);
+      const hold = mountGate.holdAfterPaint;
+      if (!hold) return painted;
+      return painted.then(async (mounted) => {
+        await hold(source);
+        return mounted;
+      });
+    },
+  };
+});
+
 let dispose: (() => void) | undefined;
 
 beforeAll(() => {
@@ -72,6 +98,7 @@ async function waitFor(pred: () => boolean, ms = 8000): Promise<void> {
 afterEach(() => {
   dispose?.();
   dispose = undefined;
+  mountGate.holdAfterPaint = undefined;
   document.body.innerHTML = "";
 });
 
@@ -183,20 +210,65 @@ describe("DiagramFence", () => {
     setSource("flowchart LR\n  A[Notes]:::internal-link --> B[Other]");
     await waitFor(() => document.querySelector("a.internal-link") !== null);
     const anchor = document.querySelector("a.internal-link") as HTMLAnchorElement;
+    // The click path also treats `class="internal-link"` as a page link.
+    // Strip it so this only passes when `onLinks` saw the new source.
+    anchor.classList.remove("internal-link");
     anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(onOpenPage).toHaveBeenCalledWith("Notes");
   });
 
   it("keeps the latest diagram when the source changes twice before the first mount resolves", async () => {
+    let releaseFirst: () => void = () => {};
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let held = 0;
+    mountGate.holdAfterPaint = async (source) => {
+      if (!source.includes("[One]")) return;
+      held += 1;
+      await firstHeld;
+    };
     const setSource = mountLive("flowchart LR\n  A[One] --> B[Two]");
+    await waitFor(
+      () => held >= 1 && (document.querySelector("svg")?.textContent?.includes("One") ?? false),
+    );
     setSource("flowchart LR\n  C[Three] --> D[Four]");
     setSource("flowchart LR\n  E[Last] --> F[Six]");
     await waitFor(() => document.querySelector("svg")?.textContent?.includes("Last") ?? false);
-    await new Promise((r) => setTimeout(r, 200));
+    releaseFirst();
+    await new Promise((r) => setTimeout(r, 400));
     const svg = document.querySelector("svg");
     expect(svg).not.toBeNull();
     expect(svg?.textContent).toContain("Last");
+    expect(svg?.textContent).not.toContain("One");
     expect(document.querySelector("[data-diagram-error]")).toBeNull();
+  });
+
+  it("does not render zoom controls", async () => {
+    const previous = SVGElement.prototype.getBoundingClientRect;
+    SVGElement.prototype.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 40,
+        bottom: 20,
+        width: 40,
+        height: 20,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    try {
+      mount("flowchart LR\n  A[Start] --> B[Middle] --> C[End]");
+      await waitFor(() => document.querySelector("svg") !== null);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(document.querySelector(".pele-zoom")).toBeNull();
+      expect(document.querySelector(".pele-zoom-in, .pele-zoom-out, .pele-zoom-reset")).toBeNull();
+    } finally {
+      SVGElement.prototype.getBoundingClientRect = previous;
+    }
   });
 
   it("lets a link click reach the row when no navigation handler is set", async () => {

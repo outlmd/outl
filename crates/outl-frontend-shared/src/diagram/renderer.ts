@@ -9,14 +9,17 @@
  * Mount options follow https://pele.run/api and https://pele.run/security:
  * images off (no remote fetch), link schemes limited to http / https /
  * mailto, no icon resolver. `sanitize` inserts the SVG through the
- * CSSOM so a style-src nonce still paints strokes. Zoom stays at
- * Pele's default (`"auto"`); its controls are restyled the same way
- * after each paint.
+ * CSSOM so a style-src nonce still paints strokes. Zoom is off: Pele
+ * writes the control bar with `setAttribute("style")` and then reads
+ * it back through the CSSOM, which keeps `cursor` and drops the rest,
+ * so the buttons do nothing under a nonce. `autoDirection` is left
+ * unset, so Pele's default stands: a wide left-to-right flowchart
+ * turns top-to-bottom when the host is narrow.
  */
 
 import type { LinkInfo, PeleError } from "pele/lazy";
 
-import { adoptDiagramSvg, liftStyleAttributes, watchStyleAttributes } from "./sanitize";
+import { adoptDiagramSvg } from "./sanitize";
 
 export interface DiagramLink {
   id: string;
@@ -67,6 +70,7 @@ function mountOptions(hooks: DiagramHooks) {
   return {
     images: false as const,
     linkSchemes: ["http", "https", "mailto"],
+    zoom: false as const,
     sanitize: adoptDiagramSvg,
     onRender: (result: { links?: LinkInfo[] }) => {
       hooks.onLinks?.(
@@ -126,16 +130,13 @@ export function createPeleRenderer(): DiagramRenderer {
       const type = api.detectType(source);
       if (type) await api.load(type);
       const painted = await api.mountAsync(element, source, mountOptions(hooks));
-      const stopWatch = watchStyleAttributes(element);
       return {
         async update(next, nextHooks) {
           const nextType = api.detectType(next);
           if (nextType) await api.load(nextType);
           painted.update(next, mountOptions(nextHooks));
-          liftStyleAttributes(element);
         },
         destroy() {
-          stopWatch();
           painted.destroy();
           if (epochByElement.get(element) === mine) {
             element.textContent = "";

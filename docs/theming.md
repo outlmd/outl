@@ -201,7 +201,9 @@ Mermaid diagrams map Pele's `--pele-*` properties onto that same `--color-outl-*
 Background, foreground, border, accent, destructive (`--pele-error` and `--pele-critical`), and the UI fonts come from the palette.
 `--pele-surface` is the elevated background.
 `--pele-surface-alt` is `--color-outl-accent-soft`, so a second fill is distinct from the first.
-`--pele-series-1` through `--pele-series-8` are accent, accent-alt, ref-link, tag-link, markdown-link, warn, todo-done, and destructive, in that order.
+`--pele-series-1` through `--pele-series-8` are accent, accent-alt, bold, tag-link, markdown-link, warn, todo-done, and destructive, in that order.
+`ref-link` is not one of them: on the brand presets it is the same colour as accent, so it would repeat series 1.
+`bold` differs from accent in every shipped preset.
 Both GUI clients import the stylesheet.
 A theme switch repaints an already mounted diagram. Nothing re-renders it.
 

@@ -18,7 +18,8 @@
   --pele-error: var(--color-outl-destructive);
   --pele-series-1: var(--color-outl-accent);
   --pele-series-2: var(--color-outl-accent-alt);
-  --pele-series-3: var(--color-outl-ref-link-fg);
+  /* ref-link is the same colour as accent on the brand presets. */
+  --pele-series-3: var(--color-outl-bold-fg);
   --pele-series-4: var(--color-outl-tag-link-fg);
   --pele-series-5: var(--color-outl-md-link-fg);
   --pele-series-6: var(--color-outl-warn);

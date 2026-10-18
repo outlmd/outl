@@ -333,6 +333,8 @@ A node opens a note when it carries the class `internal-link` (`class A internal
 The click target is the note name, the node's text, not a path.
 A relative `href` (`click A "pages/journal"`) is dropped.
 `http`, `https` and `mailto` open outside the app.
+The diagram has no zoom buttons.
+A left-to-right flowchart wider than the page is drawn top-to-bottom.
 
 A plugin can declare a transformer for a code-fence language (`mermaid`, …); matching fences render through it in `CodeFenceView` (`components/BlockRow.tsx`).
 Registry + cache glue: `@outl/shared/plugins/transformer-registry` (shared with mobile); keeps `BlockRow` a renderer.
