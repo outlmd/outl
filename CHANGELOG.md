@@ -7,6 +7,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The Android app says why when it cannot start, instead of closing on open.**
+  When a device refuses the app's native library — the 16 KB page-size failure above, or an ABI the APK does not carry — the load error surfaced inside Tauri's own startup and killed the app with nothing on screen.
+  The app now checks the library first and, if it did not load, shows a screen saying so, with the device's ABI and page size and a link to the issue tracker, and logs the same facts to logcat under `outl`.
+  Nothing after the check touches the library: the share target, the background sync worker and the activity itself all stop short of it.
+
 - **The Android app no longer crashes on open on a phone with 16 KB memory pages.**
   Some Android devices page at 16 KB rather than 4 KB — the Pixel 8 and 9 families as a developer option, newer hardware by default — and there `dlopen` refuses a library whose LOAD segments are aligned to 4 KB.
   The refusal lands on the first `System.loadLibrary`, in `MainActivity.onCreate`, so the app died before running a line of its own — on a device where nothing else was wrong.

@@ -53,6 +53,12 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
     // `failure()` is the honest middle: it never retries one-time work, the
     // periodic schedule stays in place, and the broken state shows up in
     // WorkManager's bookkeeping instead of only in logcat.
+    // Ask first: a library the device refused will not load on this run
+    // either, and the reason is already in logcat from OutlNativeLibrary.
+    if (!OutlNativeLibrary.isLoaded) {
+      Log.e(TAG, "bg-sync: $reason pass skipped, native library did not load")
+      return Result.failure()
+    }
     val synced = runCatching { NativeSync.backgroundSync() }.getOrElse { e ->
       Log.e(TAG, "bg-sync: $reason pass could not reach the native library", e)
       return Result.failure()

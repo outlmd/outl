@@ -42,6 +42,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Shown instead of crashing when liboutl_mobile_lib.so will not
+             load on this device. A plain activity that never touches the
+             library; see OutlNativeLibrary.kt. -->
+        <activity
+            android:name=".NativeLoadErrorActivity"
+            android:label="@string/app_name"
+            android:exported="false" />
+
         <!-- Share target: text or a link shared to outl becomes one line
              in the capture inbox (RFC 0363). Invisible — translucent, no
              history, out of recents — so the user stays in the app they

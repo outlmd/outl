@@ -12,4 +12,17 @@
     <string name="capture_widget_description">Open outl on a new line in today\'s journal.</string>
     <string name="capture_saved">Saved, opens in outl.</string>
     <string name="capture_nothing_to_save">Nothing to save.</string>
+
+    <!--
+      Shown by NativeLoadErrorActivity when liboutl_mobile_lib.so will not
+      load on this device (a 16 KB page size against a 4 KB-aligned build,
+      an ABI the APK does not carry). Nothing in the workspace was opened,
+      so the body says so: the fear on seeing this is lost notes.
+    -->
+    <string name="native_load_error_title">outl can\'t start on this device</string>
+    <string name="native_load_error_body">outl could not load its native library on this device, so it stopped before opening anything. Your notes were not opened or changed.</string>
+    <string name="native_load_error_details">ABI: %1$s\nPage size: %2$s\nAndroid: %3$s\nDevice: %4$s\noutl: %5$s\nError: %6$s</string>
+    <string name="native_load_error_report">Please open an issue at %1$s and paste the details above.</string>
+    <string name="native_load_error_open_issues">Open GitHub issues</string>
+    <string name="native_load_error_unknown">unknown</string>
 </resources>

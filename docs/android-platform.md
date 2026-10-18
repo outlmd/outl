@@ -8,7 +8,7 @@ The user-facing background-sync behaviour is [sync.md → Background sync on And
 
 ## Where the Android-specific code lives
 
-Twelve files, none of which holds business logic — the same rule as every other client.
+Fourteen files, none of which holds business logic — the same rule as every other client.
 
 | Piece | Path | Job |
 |---|---|---|
@@ -19,7 +19,9 @@ Twelve files, none of which holds business logic — the same rule as every othe
 | Widget | `gen/android/…/OutlCaptureWidget.kt` | One tap opens `outl://capture` |
 | Quick settings tile | `gen/android/…/OutlCaptureTile.kt` | Same, from the pull-down |
 | Background sync (Rust) | `crates/outl-mobile/src-tauri/src/bg_sync.rs` | Two JNI entry points over a shared, platform-agnostic core |
-| Activity | `gen/android/app/src/main/java/app/outl/mobile_app/MainActivity.kt` | Calls `NativeSetup.install` + `OutlBackgroundSync.install` before Tauri boots |
+| Activity | `gen/android/app/src/main/java/app/outl/mobile_app/MainActivity.kt` | Checks the native library loaded, then calls `NativeSetup.install` + `OutlBackgroundSync.install` before Tauri boots |
+| Library probe | `gen/android/…/OutlNativeLibrary.kt` | The one "did `liboutl_mobile_lib.so` load?" answer, logged with ABI and page size |
+| Load error screen | `gen/android/…/NativeLoadErrorActivity.kt` | Plain activity shown instead of a crash when the library will not load |
 | Native binding | `gen/android/…/NativeSync.kt` | `external fun` declarations matching the JNI symbols |
 | Scheduler | `gen/android/…/OutlBackgroundSync.kt` | Lifecycle observer + the two WorkManager schedules |
 | Worker | `gen/android/…/SyncWorker.kt` | Drives one forced pass, then finishes |
@@ -38,6 +40,39 @@ So the first QUIC connection panicked, the panic poisoned a `quinn` mutex, and t
 `MainActivity.onCreate` calls `NativeSetup.install(applicationContext)` **before** `super.onCreate` boots Tauri, priming both globals exactly once.
 The `rustls-platform-verifier` Kotlin component is not on Maven ([rustls/rustls-platform-verifier#115](https://github.com/rustls/rustls-platform-verifier/issues/115)).
 Its `.aar` is therefore vendored under `gen/android/app/libs/`, and must be re-copied whenever the crate version bumps.
+
+---
+
+## When the native library does not load
+
+A device can refuse `liboutl_mobile_lib.so` outright: a 4 KB-aligned build on a 16 KB-page phone (v0.12.0-beta.226, see [below](#the-so-has-to-be-linked-for-16-kb-pages)), or an ABI the APK does not carry.
+Before this was handled, that refusal surfaced inside Tauri's generated `Rust` object, whose static initializer calls `System.loadLibrary`.
+A throwing static initializer reaches the caller as `ExceptionInInitializerError` at the first line that touches the class — `super.onCreate` in `MainActivity` — so the app closed on open with nothing on screen.
+
+`OutlNativeLibrary` now owns the question.
+It loads the library once, remembers the error, and logs one line under the `outl` tag with what a report needs: supported ABIs, the kernel page size (`Os.sysconf(_SC_PAGESIZE)`), API level, device and app version.
+
+```bash
+adb logcat -s outl
+# E outl: native library liboutl_mobile_lib.so did not load: abis=[arm64-v8a] pageSize=16384 sdk=35 ...
+```
+
+Every Kotlin path that reaches Rust asks it first:
+
+| Entry point | When the library did not load |
+|---|---|
+| `MainActivity` | Starts `NativeLoadErrorActivity` and finishes; `NativeSetup`, the capture env var and `OutlBackgroundSync` are never reached |
+| `OutlShareActivity` (via `OutlCapture.save`) | "Nothing to save." toast, no write |
+| `SyncWorker` | `Result.failure()` without touching `NativeSync` |
+
+`NativeLoadErrorActivity` is a plain `AppCompatActivity`, not a `TauriActivity`, because wry and Tauri call into the library from every lifecycle hook.
+It says the app could not load its native library on this device, shows the ABI and page size as selectable text, and links to the issue tracker.
+
+**`MainActivity` still calls `super.onCreate`, and catches what it throws.**
+Android requires the call, and the part it checks (`Activity.onCreate`) runs first in the chain; wry's `Rust.onCreate` comes after and is what throws.
+The activity then finishes from `onCreate`, which sends it straight to `onDestroy` and skips `onStart`, `onResume`, `onPause` and `onStop` — every other hook where wry calls `Rust`.
+`onDestroy` catches the same `LinkageError` for the same reason.
+This depends on wry calling `super` before `Rust` in those two hooks, which is true of wry 0.57; re-read `WryActivity.kt` when bumping it.
 
 ---
 
@@ -294,6 +329,7 @@ Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same t
 Some Android devices page at 16 KB rather than 4 KB, and there `dlopen` refuses a library whose LOAD segments are aligned to 4 KB.
 The Pixel 8 and 9 families expose the mode as a developer option, newer hardware ships with it on, and since November 2025 Google Play has required support from every app update targeting Android 15+.
 The app dies on its first `System.loadLibrary`, which is `NativeSetup`'s initializer in `MainActivity.onCreate` — so the whole app crashes on open, before any of our code runs, on a device where nothing else is wrong.
+It now shows an error screen instead of closing ([When the native library does not load](#when-the-native-library-does-not-load)), but that only makes the failure legible; the APK is still unusable on that device until the alignment below holds.
 
 v0.12.0-beta.226 shipped exactly that.
 Its three native libraries, read out of the published APK:

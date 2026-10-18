@@ -5,7 +5,38 @@ import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
+  /**
+   * The native library did not load, so this activity only exists long
+   * enough to hand over to [NativeLoadErrorActivity] and finish.
+   */
+  private var nativeUnavailable = false
+
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Ask before anything below touches Rust. Every line after this block,
+    // and Tauri's own `super.onCreate`, assumes the library is up; finding
+    // out from inside one of them is an uncaught `ExceptionInInitializerError`
+    // and an app that closes on open. See OutlNativeLibrary.
+    val loadError = OutlNativeLibrary.loadError
+    if (loadError != null) {
+      nativeUnavailable = true
+      startActivity(NativeLoadErrorActivity.intent(this, loadError))
+      // `super.onCreate` is mandatory, and the part of it that matters to
+      // Android (`Activity.onCreate`) runs first. wry's `WryActivity.onCreate`
+      // then calls `Rust.onCreate`, whose initializer reloads the library and
+      // throws. Catching that is safe because nothing after it in wry or
+      // Tauri is needed: the activity finishes on the next line, and a
+      // finish from `onCreate` goes straight to `onDestroy`, skipping
+      // onStart / onResume / onPause / onStop — every other lifecycle hook
+      // that would call into `Rust`.
+      try {
+        super.onCreate(savedInstanceState)
+      } catch (expected: LinkageError) {
+        // The same load failure, already logged by OutlNativeLibrary.
+      }
+      finish()
+      return
+    }
+
     enableEdgeToEdge()
     // Prime the JVM-backed globals iroh's TLS verifier + system-DNS reader
     // need on Android, BEFORE super.onCreate() boots Tauri (and the iroh
@@ -45,6 +76,20 @@ class MainActivity : TauriActivity() {
   override fun onPause() {
     OutlMulticast.release()
     super.onPause()
+  }
+
+  override fun onDestroy() {
+    if (!nativeUnavailable) {
+      super.onDestroy()
+      return
+    }
+    // `Activity.onDestroy` runs first inside the chain, then wry calls
+    // `Rust.onDestroy`, which is a `NoClassDefFoundError` after the failed
+    // initializer in `onCreate`. Same reasoning as there.
+    try {
+      super.onDestroy()
+    } catch (expected: LinkageError) {
+    }
   }
 }
 
