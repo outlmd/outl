@@ -3,6 +3,8 @@ import { For, Show, createMemo, createResource, createSignal, onMount } from "so
 import { listThemes } from "@outl/shared/api/commands";
 import { installTheme, pickSide, type ThemeConfig, type ThemeMode } from "@outl/shared/theme";
 
+import { setDiagramsMode } from "@outl/shared/diagram";
+
 import { getSettings, updateSettings, type Settings } from "../lib/api";
 import { appState, setAppState } from "../lib/store";
 import { SyncPanel } from "./SyncPanel";
@@ -21,6 +23,7 @@ export function SettingsModal() {
   const [draft, setDraft] = createSignal<Settings | null>(null);
   const [busy, setBusy] = createSignal(false);
   let activeTheme: ThemeConfig | null = null;
+  let initialDiagrams = "pele";
   const [themes] = createResource(async () => {
     try {
       return await listThemes();
@@ -59,6 +62,7 @@ export function SettingsModal() {
 
   function close(restore = true) {
     if (restore && activeTheme) void installTheme(activeTheme);
+    if (restore) setDiagramsMode(initialDiagrams);
     setAppState("settingsOpen", false);
   }
 
@@ -66,6 +70,8 @@ export function SettingsModal() {
     try {
       const s = await getSettings();
       activeTheme = themeConfig(s);
+      initialDiagrams = s.diagrams === "off" ? "off" : "pele";
+      setDiagramsMode(initialDiagrams);
       setDraft(s);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
@@ -93,6 +99,7 @@ export function SettingsModal() {
     try {
       const persisted = await updateSettings(d);
       activeTheme = themeConfig(persisted);
+      setDiagramsMode(persisted.diagrams);
       setDraft(persisted);
       await installTheme(activeTheme);
       close(false);
@@ -213,6 +220,26 @@ export function SettingsModal() {
                   mode.
                 </div>
               </div>
+
+              <label class="block">
+                <div class="mb-1 text-sm font-medium">Diagrams</div>
+                <select
+                  aria-label="Diagrams"
+                  value={draft()!.diagrams === "off" ? "off" : "pele"}
+                  onChange={(e) => {
+                    const diagrams = e.currentTarget.value === "off" ? "off" : "pele";
+                    setDraft({ ...draft()!, diagrams });
+                    setDiagramsMode(diagrams);
+                  }}
+                  class="w-full rounded border border-(--color-outl-fg)/15 bg-(--color-outl-fg)/5 px-2 py-1 text-sm outline-none focus:border-(--color-outl-fg)/30"
+                >
+                  <option value="pele">Pele</option>
+                  <option value="off">Off</option>
+                </select>
+                <div class="mt-1 text-xs opacity-50">
+                  Mermaid fences. Off leaves the highlighted source. Applies as you pick it. Cancel puts the previous choice back.
+                </div>
+              </label>
 
               <label class="block">
                 <div class="mb-1 text-sm font-medium">Font size (px)</div>

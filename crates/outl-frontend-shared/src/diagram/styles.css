@@ -1,0 +1,31 @@
+/*
+ * Map Pele's tokens onto the outl palette so a theme switch repaints
+ * the diagram without remounting it.
+ * https://pele.run/theming
+ * Colours come from `outl_theme::Palette` via `applyPaletteToRoot`
+ * (invariant 13). No hex literals here.
+ */
+.outl-diagram {
+  --pele-bg: var(--color-outl-bg);
+  --pele-fg: var(--color-outl-fg);
+  --pele-muted: var(--color-outl-fg-dim);
+  --pele-line: var(--color-outl-fg);
+  --pele-surface: var(--color-outl-bg-elev);
+  --pele-surface-alt: var(--color-outl-bg-elev);
+  --pele-border: var(--color-outl-border);
+  --pele-accent: var(--color-outl-accent);
+  --pele-critical: var(--color-outl-destructive);
+  --pele-error: var(--color-outl-destructive);
+  --pele-font: var(--font-sans, sans-serif);
+  --pele-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-x: auto;
+}
+
+.outl-diagram-error {
+  margin: 0;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--color-outl-destructive);
+}

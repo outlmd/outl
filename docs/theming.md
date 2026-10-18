@@ -197,6 +197,10 @@ The legacy `--color-ios-*` / `--color-iosd-*` namespace it used to also write is
 `src/styles.css` provides boot-default values for `--color-outl-*` so the page isn't flash-unstyled before `applyPaletteToRoot` runs.
 `color-scheme` is set from the palette's `bg` luminance so native controls (scrollbars, `<select>`) follow the active preset.
 
+Mermaid diagrams map Pele's `--pele-*` properties onto that same `--color-outl-*` set in `@outl/shared/diagram/styles` (background, foreground, elevated background, border, accent, destructive for `--pele-error`, and the UI fonts).
+Both GUI clients import the stylesheet.
+A theme switch repaints an already mounted diagram. Nothing re-renders it.
+
 ## Future
 
 - **User TOML overrides** — `[theme.colors]` table letting you tweak fields without rebuilding the binary.

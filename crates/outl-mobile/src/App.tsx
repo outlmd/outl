@@ -1,7 +1,10 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 
 import { getThemeConfig } from "@outl/shared/api/commands";
+import { setDiagramsMode } from "@outl/shared/diagram";
 import { installTheme } from "@outl/shared/theme";
+
+import { getEditorDiagrams } from "./lib/api";
 
 import { Journal } from "./components/Journal";
 import { Onboarding } from "./components/Onboarding";
@@ -76,7 +79,12 @@ function App() {
       const unsubscribe = await installTheme(cfg);
       onCleanup(unsubscribe);
     } catch {
-      // No backend at all (shouldn't happen) — keep the static boot frame.
+      // No backend at all (shouldn't happen). Keep the static boot frame.
+    }
+    try {
+      setDiagramsMode(await getEditorDiagrams());
+    } catch {
+      // No config yet. The default is Pele.
     }
   });
 

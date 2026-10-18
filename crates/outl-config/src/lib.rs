@@ -28,6 +28,7 @@
 //! [editor]
 //! vim_mode = true
 //! font_size = 15
+//! diagrams = "pele"   # "pele" (default) | "off". GUI mermaid fences. TUI ignores this.
 //!
 //! [calendar]
 //! timezone = "Europe/London"   # IANA name; omit = OS local timezone
@@ -73,8 +74,9 @@ mod tui;
 
 pub use paths::{config_dir, config_path};
 pub use schema::{
-    AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DisplayCfg, EditorCfg, RemindersCfg,
-    SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode, WorkspaceCfg,
+    AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DiagramsMode, DisplayCfg, EditorCfg,
+    RemindersCfg, SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode,
+    WorkspaceCfg,
 };
 pub use tui::{TuiCfg, TuiIconStyle};
 

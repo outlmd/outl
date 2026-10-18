@@ -318,6 +318,17 @@ The `⧉` button in `ChromeToggleBar` toggles `appState.pluginsOpen`; `component
 
 ### Content transformers (inline code-fence rendering)
 
+A fenced block is rendered in this order, on both GUI clients:
+
+1. A plugin content transformer whose `lang` matches the fence.
+2. The built-in Pele diagram, only for a `mermaid` fence, and only when `[editor] diagrams` is `"pele"` (the default).
+3. Highlighted source.
+
+`"off"` skips step 2.
+The TUI has no diagram renderer, so a mermaid fence stays source there unless a plugin transformer claims it.
+A plugin that claims `mermaid` replaces Pele for that language.
+The edit affordance on a Pele fence matches a transformed fence: Edit on the desktop, tap the diagram (not a link inside it) to edit on mobile.
+
 A plugin can declare a transformer for a code-fence language (`mermaid`, …); matching fences render through it in `CodeFenceView` (`components/BlockRow.tsx`).
 Registry + cache glue: `@outl/shared/plugins/transformer-registry` (shared with mobile); keeps `BlockRow` a renderer.
 It owns a `lang → PluginTransformer` registry (Solid signal via `loadTransformers`, re-run on `workspace-ready`; a boot fetch can be empty since plugins load lazily).

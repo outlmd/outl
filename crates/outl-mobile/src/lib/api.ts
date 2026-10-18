@@ -29,6 +29,16 @@ export function setWorkspace(path: string): Promise<void> {
   return invoke<void>("set_workspace", { path });
 }
 
+/** `[editor] diagrams` from the shared config. `"pele"` or `"off"`. */
+export function getEditorDiagrams(): Promise<string> {
+  return invoke<string>("get_editor_diagrams");
+}
+
+/** Persist `[editor] diagrams`. Unknown values are stored as `"pele"`. */
+export function setEditorDiagrams(diagrams: "pele" | "off"): Promise<void> {
+  return invoke<void>("set_editor_diagrams", { diagrams });
+}
+
 // The whole plugin surface lives in `@outl/shared`: DTOs
 // (`PluginCommand`, `PluginToolbarButton`, `PluginRunReply`,
 // `PluginSyncHooksReply`, `PluginTransformer`, `PluginTransformResult`)

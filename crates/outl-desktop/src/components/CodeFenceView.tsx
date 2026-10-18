@@ -10,6 +10,7 @@ import {
 
 import type { PluginTransformResult } from "@outl/shared/api/types";
 import { listTemplates } from "@outl/shared/api/commands";
+import { DiagramFence, chooseFence, diagramsMode } from "@outl/shared/diagram";
 import { HighlightedCode } from "@outl/shared/highlight";
 import {
   runTransform,
@@ -37,6 +38,11 @@ import {
  * The transform runs the plugin's JS, so it is cached by `(blockId, body)`
  * (`runTransform`, `@outl/shared/plugins/transformer-registry`) and only
  * re-runs when the body changes.
+ *
+ * Priority, shared with mobile (`chooseFence`): a plugin transformer
+ * for the language, then the built-in Pele diagram for a mermaid
+ * fence when `editor.diagrams` is `pele`, then highlighted source.
+ * A diagram keeps the same Edit affordance as a transformed fence.
  */
 export function CodeFenceView(props: {
   blockId: string;
@@ -44,9 +50,13 @@ export function CodeFenceView(props: {
   body: string;
   onEdit: () => void;
   onRun: () => Promise<void>;
-  /** Navigate to a page by slug — wired for `call:<name>` fences so the
+  /** Navigate to a page by slug. Wired for `call:<name>` fences so the
    *  language chip links to the template's page. */
   onOpenPage?: (slug: string) => void;
+  /** Open the note named by an internal diagram link. */
+  onRefClick?: (name: string) => void;
+  /** Open an http(s) or mailto link from a diagram. */
+  onLinkClick?: (href: string) => void;
 }) {
   const [busy, setBusy] = createSignal(false);
 
@@ -75,6 +85,14 @@ export function CodeFenceView(props: {
   // Reactive transformer lookup: a fence that mounts before the registry
   // loads picks the transformer up once `loadTransformers` resolves.
   const match = createMemo(() => transformerFor(props.language));
+  const choice = createMemo(() =>
+    chooseFence({
+      hasTransformer: match() != null,
+      language: props.language,
+      diagrams: diagramsMode(),
+    }),
+  );
+  const diagram = () => choice() === "diagram";
 
   // Run (or replay) the transformer when one matches, re-keyed by body so a
   // fence edit re-transforms. `undefined` source ⇒ resource stays unset and
@@ -119,7 +137,7 @@ export function CodeFenceView(props: {
           )}
         </Show>
         <Show
-          when={match()}
+          when={match() || diagram()}
           fallback={
             <button
               type="button"
@@ -169,6 +187,21 @@ export function CodeFenceView(props: {
         </Match>
         <Match when={result()?.kind === "rich"}>
           <RichFenceFrame html={result()?.content ?? ""} />
+        </Match>
+        <Match when={diagram()}>
+          <DiagramFence
+            source={props.body}
+            onOpenPage={props.onRefClick}
+            onLinkClick={props.onLinkClick}
+            fallback={
+              <div onClick={props.onEdit} class="cursor-text">
+                <HighlightedCode
+                  language={props.language}
+                  code={props.body || " "}
+                />
+              </div>
+            }
+          />
         </Match>
       </Switch>
     </div>

@@ -147,6 +147,11 @@ mod why {
         "There's no task list here yet. Add a `query` code block with `status: open` to any page \
          and it lists every open task in the workspace.";
 
+    /// The TUI paints the fence bytes. Diagrams are a GUI surface.
+    pub const TUI_KEEPS_MERMAID_SOURCE: &str =
+        "The terminal keeps a mermaid fence as source. Open the page in the desktop or mobile \
+         app to see the diagram.";
+
     pub const NO_SOFT_KEYBOARD_BAR: &str =
         "There's no on-screen toolbar to pin here — these actions have fixed keyboard \
          shortcuts, so they never move.";
@@ -374,6 +379,15 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Missing(why::NO_TASK_LIST),
             mobile: Full,
         },
+        // Desktop `CodeFenceView` and mobile `BlockBody` both render a
+        // mermaid fence through `<DiagramFence />` (Pele) unless
+        // `[editor] diagrams` is `off` or a plugin transformer owns
+        // the language. The TUI has no equivalent surface.
+        Capability::DiagramRendering => ClientSupport {
+            tui: Missing(why::TUI_KEEPS_MERMAID_SOURCE),
+            desktop: Full,
+            mobile: Full,
+        },
         Capability::ToolbarOrderLock => ClientSupport {
             tui: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
             desktop: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
@@ -439,7 +453,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 15, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 16, "Capability::ALL changed size");
     }
 
     #[test]

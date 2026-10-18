@@ -365,8 +365,8 @@ The gesture stays as the shortcut.
 
 Two rules govern what may go in it:
 
-- **Per-device UI state only, in `localStorage`.** Nothing here goes through the op log — two devices disagreeing about their own toolbar layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7). The sheet calls no Tauri command at all today, and a preference that *is* workspace data belongs in `outl.toml`, not here.
-- **The setting's logic lives in `@outl/shared`, not in the sheet.** The toolbar lock is `@outl/shared/toolbar`'s `lock.ts`; this file only renders the row and calls it. A preference implemented inside the sheet is a preference the other bar can't honour.
+- **Per-device UI state, not workspace data.** Nothing here goes through the op log. Two devices disagreeing about their own toolbar layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7). The toolbar lock stays in `localStorage`. `editor.diagrams` is also per-device, and it lives in `~/.config/outl/config.toml` so the desktop on this machine sees the same choice. The sheet reads and writes that one key through `get_editor_diagrams` / `set_editor_diagrams`. A preference that *is* workspace data belongs in `outl.toml`, not here.
+- **The setting's logic lives in `@outl/shared`, not in the sheet.** The toolbar lock is `@outl/shared/toolbar`'s `lock.ts`. The diagram switch is `@outl/shared/diagram`'s `diagramsMode`. This file only renders the row and calls them. A preference implemented inside the sheet is a preference the other bar can't honour.
 
 **The sheet is mounted for the app's lifetime, not per open** — `<Show>` gates its markup, and `Journal` renders it unconditionally. So state it reads out of a store goes in a `createEffect` guarded on `props.open`, the way `TemplateSheet` and `RemindersSheet` already do. A plain `createSignal(readSomething())` in the body reads once, at app start, and then quietly shows a stale value forever.
 

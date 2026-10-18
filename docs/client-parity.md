@@ -174,6 +174,7 @@ the drift this RFC exists to prevent.
 | `QuickCapture` | ⚠️ There's no one-key capture here. Press `t` to jump to today's journal, then add the block there. Press `[` to go back to the day you were on. | ⚠️ There's no one-click capture here. Press Cmd+J to open today's journal, then add the block at the end. The quick switcher (Cmd+P) takes you back. | ✅ |
 | `CaptureOutsideTheApp` | ⚠️ A line captured with `outl capture` lands the next time you start outl here — the desktop and phone apps pick one up while they're running. | ⚠️ Capturing from outside the app runs `outl capture "your line"` — wire it to a Shortcut, a macOS Service or a hotkey and it lands here on the next window focus. | ✅ |
 | `TaskList` | ❌ There's no task list here yet. Add a `query` code block with `status: open` to any page and it lists every open task in the workspace. | ❌ There's no task list here yet. Add a `query` code block with `status: open` to any page and it lists every open task in the workspace. | ✅ |
+| `DiagramRendering` | ❌ The terminal keeps a mermaid fence as source. Open the page in the desktop or mobile app to see the diagram. | ✅ | ✅ |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

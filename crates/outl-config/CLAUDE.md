@@ -59,6 +59,7 @@ mode = "auto"                     # "light" | "dark" | "auto" (default); TUI tre
 [editor]
 vim_mode = true                   # default true
 font_size = 15                    # pixels, desktop-only
+diagrams = "pele"                 # "pele" (default) | "off". GUI mermaid fences. TUI ignores this.
 
 [calendar]
 timezone = "Europe/London"        # optional IANA name; omit = OS local timezone
@@ -196,6 +197,7 @@ If the field **must converge between devices**, it doesn't belong in TOML at all
 | `theme.preset` | TUI palette resolver; desktop settings | `crates/outl-tui/src/runtime/preset.rs::resolve_theme`, `crates/outl-desktop/src-tauri/src/commands/theme.rs` |
 | `editor.vim_mode` | Desktop only (TUI ignores) | `crates/outl-desktop/src-tauri/src/settings.rs` |
 | `editor.font_size` | Desktop only | `crates/outl-desktop/src-tauri/src/settings.rs` |
+| `editor.diagrams` | Desktop settings DTO and the mobile `get_editor_diagrams` / `set_editor_diagrams` commands. Both write the same key. The TUI does not read it. | `crates/outl-desktop/src-tauri/src/settings.rs`, `crates/outl-mobile/src-tauri/src/commands/editor.rs` |
 | `calendar.timezone` | Every client at boot, via `outl_actions::clock::init` (resolves the IANA name once into the process-wide clock) | `crates/outl-tui/src/runtime/mod.rs`, `crates/outl-cli/src/main.rs`, `crates/outl-desktop/src-tauri/src/lib.rs`, `crates/outl-mobile/src-tauri/src/lib.rs` |
 | `sync.transport` / `sync.relay_url` | TUI peer-sync wiring | `crates/outl-tui/src/actions/lifecycle/peer_sync.rs::wire_sync_transport` (config-driven; replaces the `OUTL_IROH=1` env gate) |
 | `tui.icons` | TUI chrome icon set | `crates/outl-tui/src/runtime/mod.rs` |

@@ -68,6 +68,7 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
     backlinks_order: "newest",
     reminders_enabled: false,
     reminders_quiet_hours: "",
+    diagrams: "pele",
   };
 
   const page = (args: Args) => {

@@ -5,6 +5,7 @@
 @import "@outl/shared/trust/styles";
 @import "@outl/shared/polish/styles";
 @import "@outl/shared/plugins/styles";
+@import "@outl/shared/diagram/styles";
 
 /* Scan the shared package too: the inline ref/tag/link classes live only
    in `MarkdownInline.tsx`, so without this Tailwind never emits them and

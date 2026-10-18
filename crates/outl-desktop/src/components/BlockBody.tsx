@@ -56,6 +56,8 @@ export function BlockBody(props: {
         onEdit={props.onStartEdit}
         onRun={() => props.cb.onRunCodeBlock(props.block.id)}
         onOpenPage={props.cb.onOpenPage}
+        onRefClick={props.cb.onRefClick}
+        onLinkClick={props.cb.onLinkClick}
       />
     );
   }

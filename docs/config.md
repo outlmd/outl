@@ -49,6 +49,11 @@ vim_mode = true
 # terminal font).
 font_size = 15
 
+# Mermaid fences in the desktop and mobile apps.
+# "pele" (default) draws them. "off" leaves the highlighted source.
+# The TUI keeps the fence as source either way.
+diagrams = "pele"
+
 [calendar]
 # Optional IANA timezone name for the journal date + status-line clock.
 # Omit (the default) to use the operating system's local timezone.
@@ -139,6 +144,7 @@ See [theming.md](theming.md) for the look of each.
 |---|---|---|---|---|
 | `vim_mode` | bool | `true` | desktop | When `false`, the desktop drops the modal `Normal / Insert / Visual` model and only listens to OS-standard chrome chords (`⌘P`, `⌘B`, …). The TUI is vim-style by definition and ignores this. |
 | `font_size` | integer (pixels) | `15` | desktop | Outline body font size. The TUI uses the user's terminal font; setting this has no effect there. |
+| `diagrams` | `"pele"` \| `"off"` | `"pele"` | desktop, mobile | Mermaid fences. `"pele"` draws them with the built-in renderer. `"off"` leaves the highlighted source. The TUI ignores this and keeps the source. A plugin content transformer for `mermaid` still wins over both. |
 
 #### `[sync]`
 

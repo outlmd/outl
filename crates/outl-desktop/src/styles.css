@@ -5,6 +5,7 @@
 @import "@outl/shared/trust/styles";
 @import "@outl/shared/polish/styles";
 @import "@outl/shared/plugins/styles";
+@import "@outl/shared/diagram/styles";
 
 /*
  * Tailwind v4 content scanning. By default the plugin walks the

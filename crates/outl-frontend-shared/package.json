@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "highlight.js": "^11.12.0",
+    "pele": "1.6.0",
     "qrcode": "^1.5.4",
     "turndown": "^7.2.4"
   },
@@ -44,6 +45,8 @@
     "./trust": "./src/trust/index.ts",
     "./trust/styles": "./src/trust/styles.css",
     "./drag-drop": "./src/drag-drop/index.ts",
+    "./diagram": "./src/diagram/index.ts",
+    "./diagram/styles": "./src/diagram/styles.css",
     "./highlight": "./src/highlight/index.ts",
     "./highlight/styles": "./src/highlight/styles.css",
     "./icons": "./src/icons/index.tsx",

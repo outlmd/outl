@@ -241,6 +241,21 @@ impl Default for ThemeCfg {
     }
 }
 
+/// How a GUI client paints a mermaid fence.
+///
+/// Device-local, like the rest of `[editor]`. Two devices may
+/// disagree and that is fine: the fence on disk does not change.
+/// The TUI ignores this and keeps the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DiagramsMode {
+    /// Render a mermaid fence with Pele.
+    #[default]
+    Pele,
+    /// Highlight the fence as source.
+    Off,
+}
+
 /// Editor preferences. `vim_mode` defaults to `true` because
 /// outl is keyboard-first — the same default the TUI ships with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,6 +271,10 @@ pub struct EditorCfg {
     /// doesn't read this; terminal font is the user's terminal
     /// setting.
     pub font_size: u32,
+
+    /// Mermaid fences in the desktop and mobile apps.
+    /// `"pele"` (default) draws them. `"off"` leaves the source.
+    pub diagrams: DiagramsMode,
 }
 
 impl Default for EditorCfg {
@@ -263,6 +282,7 @@ impl Default for EditorCfg {
         Self {
             vim_mode: true,
             font_size: 15,
+            diagrams: DiagramsMode::Pele,
         }
     }
 }
@@ -479,6 +499,7 @@ mod tests {
         assert_eq!(c.theme.dark(), "outl");
         assert!(c.editor.vim_mode);
         assert_eq!(c.editor.font_size, 15);
+        assert_eq!(c.editor.diagrams, DiagramsMode::Pele);
         assert!(c.workspace.last.is_none());
         assert!(c.calendar.timezone.is_none());
         assert_eq!(c.sync.transport, SyncTransportKind::Iroh);
@@ -506,6 +527,21 @@ mod tests {
             toml::from_str("[backup]\nenabled = false\ninterval_minutes = 120\n").unwrap();
         assert!(!c.backup.enabled);
         assert_eq!(c.backup.interval_minutes, 120);
+    }
+
+    #[test]
+    fn missing_diagrams_stays_pele() {
+        let c: Config = toml::from_str("[editor]\nvim_mode = false\n").unwrap();
+        assert_eq!(c.editor.diagrams, DiagramsMode::Pele);
+        assert!(!c.editor.vim_mode);
+    }
+
+    #[test]
+    fn diagrams_off_parses() {
+        let c: Config = toml::from_str("[editor]\ndiagrams = \"off\"\n").unwrap();
+        assert_eq!(c.editor.diagrams, DiagramsMode::Off);
+        assert!(c.editor.vim_mode);
+        assert_eq!(c.editor.font_size, 15);
     }
 
     #[test]

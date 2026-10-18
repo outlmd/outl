@@ -1,6 +1,7 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 
 import { getThemeConfig } from "@outl/shared/api/commands";
+import { setDiagramsMode } from "@outl/shared/diagram";
 import { installTheme } from "@outl/shared/theme";
 
 import { currentWorkspace, getSettings, workspaceStats } from "./lib/api";
@@ -113,6 +114,7 @@ function App() {
       if (s.backlinks_order === "oldest" || s.backlinks_order === "newest") {
         setAppState("backlinksOrder", s.backlinks_order);
       }
+      setDiagramsMode(s.diagrams);
       const cfg = await getThemeConfig();
       return await installTheme({
         mode: cfg.mode,

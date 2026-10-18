@@ -8,8 +8,11 @@ import {
   unlockOrderInStore,
 } from "@outl/shared/toolbar";
 
+import { diagramsMode, setDiagramsMode, type DiagramsMode } from "@outl/shared/diagram";
+
 import { createSheetDrag } from "../lib/sheet-drag";
 import { haptic } from "../lib/haptics";
+import { getEditorDiagrams, setEditorDiagrams } from "../lib/api";
 
 /**
  * `<SettingsSheet />` — mobile's preferences surface.
@@ -22,11 +25,11 @@ import { haptic } from "../lib/haptics";
  * as one of the family rather than a new kind of screen.
  *
  * One row is navigation (devices and pairing, which the desktop keeps
- * in Settings too); everything else is **per-device UI state in
- * `localStorage`**, not workspace data: none of it goes through the op log, because two
- * devices disagreeing about their own toolbar layout is not a conflict
- * to reconcile (root `CLAUDE.md` invariant 7). That is also why this
- * sheet calls no Tauri command.
+ * in Settings too). The toolbar lock is per-device UI state in
+ * `localStorage`. Diagrams are also per-device, but they live in
+ * `config.toml` (`[editor] diagrams`) so the desktop on this machine
+ * sees the same choice. Neither goes through the op log (root
+ * `CLAUDE.md` invariant 7).
  */
 export function SettingsSheet(props: {
   open: boolean;
@@ -39,6 +42,7 @@ export function SettingsSheet(props: {
   const drag = createSheetDrag(() => props.onClose());
   const [locked, setLocked] = createSignal(false);
   const [resetDone, setResetDone] = createSignal(false);
+  const [diagrams, setDiagrams] = createSignal<DiagramsMode>(diagramsMode());
 
   // Re-read on every open. `<Show>` gates the markup, not the
   // component: `Journal` mounts this once and toggles `open`, so a
@@ -49,7 +53,32 @@ export function SettingsSheet(props: {
     if (!props.open) return;
     setLocked(isOrderLocked());
     setResetDone(false);
+    setDiagrams(diagramsMode());
+    try {
+      void getEditorDiagrams()
+        .then((value) => {
+          const mode: DiagramsMode = value === "off" ? "off" : "pele";
+          setDiagrams(mode);
+          setDiagramsMode(mode);
+        })
+        .catch(() => {
+          // The sheet still renders. The fence keeps the current mode.
+        });
+    } catch {
+      // No host in a test. Leave the signal as it is.
+    }
   });
+
+  function onDiagramsChange(value: string) {
+    const mode: DiagramsMode = value === "off" ? "off" : "pele";
+    setDiagrams(mode);
+    setDiagramsMode(mode);
+    try {
+      void setEditorDiagrams(mode).catch(() => {});
+    } catch {
+      // Same as the read: a missing host must not take the sheet down.
+    }
+  }
 
   function toggleLock() {
     haptic("light");
@@ -142,6 +171,32 @@ export function SettingsSheet(props: {
               reachable, and sync now.
             </span>
           </button>
+
+          <div class="px-4 pb-1 pt-3">
+            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
+              Editor
+            </span>
+          </div>
+
+          <label class="flex w-full items-center gap-3 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left">
+            <span class="min-w-0 flex-1">
+              <span class="block text-[16px] font-medium text-(--color-outl-fg)">
+                Diagrams
+              </span>
+              <span class="mt-0.5 block text-[13px] leading-snug text-(--color-outl-fg-dim)">
+                Mermaid fences. Off leaves the highlighted source.
+              </span>
+            </span>
+            <select
+              aria-label="Diagrams"
+              value={diagrams()}
+              onChange={(e) => onDiagramsChange(e.currentTarget.value)}
+              class="rounded-lg border border-(--color-outl-border) bg-(--color-outl-bg) px-2 py-1 text-[15px] text-(--color-outl-fg)"
+            >
+              <option value="pele">Pele</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
 
           <div class="px-4 pb-1 pt-3">
             <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">

@@ -432,7 +432,8 @@ The frontend still receives this flat JSON DTO from `crates/outl-desktop/src-tau
   "theme_mode": "auto",       // "light" | "dark" | "auto"
   "font_size": 15,
   "sync_transport": "iroh",  // "iroh" (P2P, default) | "file" (iCloud/fs)
-  "backlinks_order": "newest"  // "newest" (default) | "oldest" — read-only, see below
+  "backlinks_order": "newest",  // "newest" (default) | "oldest" — read-only, see below
+  "diagrams": "pele"  // "pele" (default) | "off". Mermaid fences. Mobile writes the same key.
 }
 ```
 

@@ -138,6 +138,13 @@ pub enum Capability {
     /// question on every client, inside a page; this is whether the
     /// client has a place for it of its own.
     TaskList,
+    /// Drawing a mermaid fence as a diagram.
+    ///
+    /// Desktop and mobile do this with Pele when `[editor] diagrams`
+    /// is `pele` (the default). `off` leaves the highlighted source
+    /// on those two. The TUI has no diagram surface and keeps the
+    /// fence as source either way.
+    DiagramRendering,
 }
 
 impl Capability {
@@ -165,6 +172,7 @@ impl Capability {
         Capability::QuickCapture,
         Capability::CaptureOutsideTheApp,
         Capability::TaskList,
+        Capability::DiagramRendering,
     ];
 }
 
@@ -176,7 +184,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_15: usize = 15;
+    const EXPECTED_16: usize = 16;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -195,6 +203,7 @@ mod tests {
             Capability::QuickCapture => "QuickCapture",
             Capability::CaptureOutsideTheApp => "CaptureOutsideTheApp",
             Capability::TaskList => "TaskList",
+            Capability::DiagramRendering => "DiagramRendering",
         }
     }
 
@@ -211,9 +220,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_15,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_15} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_15)",
+            EXPECTED_16,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_16} variants. \
+             Add the new variant to Capability::ALL (and bump EXPECTED_16).",
             names.len(),
         );
     }

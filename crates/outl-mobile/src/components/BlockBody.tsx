@@ -9,6 +9,7 @@ import {
   splitQuote,
   stripQuoteFromTokens,
 } from "@outl/shared/markdown";
+import { DiagramFence, chooseFence, diagramsMode } from "@outl/shared/diagram";
 import { HighlightedCode, detectFence } from "@outl/shared/highlight";
 import { transformerFor } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
@@ -258,13 +259,28 @@ export function BlockBody(props: {
                   // or a sandboxed iframe for `rich`), falling back to the
                   // plain highlighted code while it loads or if it declines.
                   const transformer = transformerFor(fence.language);
-                  if (transformer) {
+                  const choice = chooseFence({
+                    hasTransformer: transformer != null,
+                    language: fence.language,
+                    diagrams: diagramsMode(),
+                  });
+                  if (choice === "plugin" && transformer) {
                     return (
                       <PluginFence
                         blockId={props.block.id}
                         transformer={transformer}
                         body={fence.body}
                         fallback={plainFence}
+                      />
+                    );
+                  }
+                  if (choice === "diagram") {
+                    return (
+                      <DiagramFence
+                        source={fence.body}
+                        onOpenPage={tap(props.onRefClick)}
+                        onLinkClick={tap(props.onLinkClick)}
+                        fallback={plainFence()}
                       />
                     );
                   }

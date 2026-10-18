@@ -152,6 +152,11 @@ export interface Settings {
    * landing inside it is pushed to the window's end, never dropped.
    */
   reminders_quiet_hours: string;
+  /**
+   * Mermaid fences: `"pele"` (default) draws them, `"off"` leaves
+   * the highlighted source. Mirrors `[editor] diagrams`.
+   */
+  diagrams: string;
 }
 
 // `Palette`, `listThemes` and `getTheme` moved to `@outl/shared` (RFC 0022,

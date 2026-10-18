@@ -11,9 +11,28 @@
 use serde::{Deserialize, Serialize};
 
 use outl_config::{
-    BacklinksOrder, Config, DisplayCfg, EditorCfg, SyncConfig, SyncTransportKind, ThemeCfg,
-    WorkspaceCfg,
+    BacklinksOrder, Config, DiagramsMode, DisplayCfg, EditorCfg, SyncConfig, SyncTransportKind,
+    ThemeCfg, WorkspaceCfg,
 };
+
+fn default_diagrams() -> String {
+    "pele".to_string()
+}
+
+fn parse_diagrams(s: &str) -> DiagramsMode {
+    match s {
+        "off" => DiagramsMode::Off,
+        _ => DiagramsMode::Pele,
+    }
+}
+
+fn diagrams_str(mode: DiagramsMode) -> String {
+    match mode {
+        DiagramsMode::Pele => "pele",
+        DiagramsMode::Off => "off",
+    }
+    .to_string()
+}
 
 /// Parse the flat wire string into a transport kind. Anything that isn't an
 /// explicit `"file"` opt-out (including an empty string from an older frontend)
@@ -116,6 +135,10 @@ pub struct Settings {
     /// Quiet-hours window as `"22:00-07:00"`, or `""` for none. A fire
     /// landing inside it is pushed to the window's end.
     pub reminders_quiet_hours: String,
+    /// Mermaid fences: `"pele"` (default) or `"off"`. An empty or
+    /// unknown string from an older frontend stays on Pele.
+    #[serde(default = "default_diagrams")]
+    pub diagrams: String,
 }
 
 impl Settings {
@@ -145,6 +168,7 @@ impl From<Config> for Settings {
             backlinks_order: backlinks_order_str(c.display.backlinks_order),
             reminders_enabled: c.reminders.enabled,
             reminders_quiet_hours: c.reminders.quiet_hours.unwrap_or_default(),
+            diagrams: diagrams_str(c.editor.diagrams),
         }
     }
 }
@@ -176,6 +200,7 @@ impl From<Settings> for Config {
             editor: EditorCfg {
                 vim_mode: s.vim_mode,
                 font_size: s.font_size,
+                diagrams: parse_diagrams(&s.diagrams),
             },
             // The flat desktop Settings doesn't model `[calendar]`; `save`
             // restores it from disk so a hand-set timezone survives a
@@ -332,6 +357,33 @@ mod tests {
             "`remind::` on a block is the opt-in; the switch defaults on"
         );
         assert_eq!(s.reminders_quiet_hours, "");
+        assert_eq!(s.diagrams, "pele");
+    }
+
+    #[test]
+    fn missing_diagrams_on_the_wire_defaults_to_pele() {
+        let s: Settings = serde_json::from_str(r#"{"font_size": 18}"#).unwrap();
+        assert_eq!(s.diagrams, "pele");
+        assert_eq!(s.font_size, 18);
+    }
+
+    #[test]
+    fn diagrams_off_round_trips_and_unknown_stays_pele() {
+        let off = Settings {
+            diagrams: "off".into(),
+            ..Settings::fresh()
+        };
+        let cfg: Config = off.into();
+        assert_eq!(cfg.editor.diagrams, DiagramsMode::Off);
+        let back: Settings = cfg.into();
+        assert_eq!(back.diagrams, "off");
+
+        let unknown = Settings {
+            diagrams: "nope".into(),
+            ..Settings::fresh()
+        };
+        let cfg: Config = unknown.into();
+        assert_eq!(cfg.editor.diagrams, DiagramsMode::Pele);
     }
 
     #[test]
@@ -347,6 +399,7 @@ mod tests {
             backlinks_order: "oldest".into(),
             reminders_enabled: true,
             reminders_quiet_hours: "22:00-07:00".into(),
+            diagrams: "off".into(),
         };
         let cfg: Config = s.clone().into();
         let back: Settings = cfg.into();
@@ -360,6 +413,7 @@ mod tests {
         assert_eq!(back.backlinks_order, s.backlinks_order);
         assert_eq!(back.reminders_enabled, s.reminders_enabled);
         assert_eq!(back.reminders_quiet_hours, s.reminders_quiet_hours);
+        assert_eq!(back.diagrams, s.diagrams);
     }
 
     /// Regression test for the RFC 0022 follow-up that added
