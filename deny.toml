@@ -28,6 +28,14 @@ ignore = [
     { id = "RUSTSEC-2026-0247", reason = "bitmaps unmaintained, via im-rc (steel-core)" },
     { id = "RUSTSEC-2026-0250", reason = "im-rc unmaintained, via steel-core (outl-exec)" },
     { id = "RUSTSEC-2026-0251", reason = "sized-chunks unmaintained, via im-rc (steel-core)" },
+    # zbus 6.0.0 folded zvariant / zvariant_derive / zbus_names into itself and the
+    # standalone crates were marked unmaintained. We reach them through zbus 5 (Tauri's
+    # notification, opener and single-instance plugins, notify-rust, all pinned to
+    # `zbus ^5`) and zbus 4 (keyring 3 -> secret-service 4). Linux desktop only.
+    # Drop these once Tauri's plugins move to zbus 6 and keyring moves off zbus 4.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6), via zbus 4/5 in keyring and Tauri plugins; no zbus 6 path upstream yet" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (merged into zbus 6), via zbus 4/5 in keyring and Tauri plugins; no zbus 6 path upstream yet" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (merged into zbus 6), via zbus 4/5 in keyring and Tauri plugins; no zbus 6 path upstream yet" },
     # Unsound (not vulnerabilities), no fixed release reachable yet:
     { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsound, via Tauri's gtk3 chain on Linux desktop; no glib 0.20+ release reachable while Tauri is on gtk3 (Dependabot alert #33)" },
     { id = "RUSTSEC-2026-0255", reason = "sized-chunks unsound on panic, via im-rc in steel-core; only in the non-default lang-lisp feature" },
