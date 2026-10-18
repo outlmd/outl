@@ -12,6 +12,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The app now checks the library first and, if it did not load, shows a screen saying so, with the device's ABI and page size and a link to the issue tracker, and logs the same facts to logcat under `outl`.
   Nothing after the check touches the library: the share target, the background sync worker and the activity itself all stop short of it.
 
+- **`@outl/plugin-sdk` publishes to npm again.**
+  npm was stuck at `0.12.0-beta.217`: every release since 2026-10-14 failed the publish job with `E404` on the `PUT`.
+  The npm token in the `release` environment had reached npm's 90-day cap for write tokens, and a newer repo-level token never reached the job, because an environment secret shadows a repo secret with the same name.
+  The job now publishes through npm trusted publishing (OIDC) on a GitHub-hosted runner, so there is no token to expire, and every version carries a provenance attestation.
+
 - **The Android app no longer crashes on open on a phone with 16 KB memory pages.**
   Some Android devices page at 16 KB rather than 4 KB — the Pixel 8 and 9 families as a developer option, newer hardware by default — and there `dlopen` refuses a library whose LOAD segments are aligned to 4 KB.
   The refusal lands on the first `System.loadLibrary`, in `MainActivity.onCreate`, so the app died before running a line of its own — on a device where nothing else was wrong.

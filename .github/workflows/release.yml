@@ -1034,30 +1034,64 @@ jobs:
     #   tag vX.Y.Z -> X.Y.Z                       (GA)
     # Both publish under the `latest` dist-tag, so `npm i @outl/plugin-sdk`
     # always resolves the newest build cut from main.
+    #
+    # Auth is npm trusted publishing (OIDC), not a stored token. npm caps a
+    # write token at 90 days. The `NPM_TOKEN` in the `release` environment
+    # was stored on 2026-07-16 and every publish from 2026-10-14 on answered
+    # E404 on the PUT, which is how npm says "this credential can't write
+    # here". A fresh repo-level `NPM_TOKEN` didn't help either: an
+    # environment secret shadows a repo secret of the same name. With
+    # OIDC each run gets a short-lived token minted for this exact workflow,
+    # so there is nothing to rotate, and npm attaches provenance on its own.
+    #
+    # The trust is configured on npmjs.com (package → Settings → Trusted
+    # publishing) and must match exactly: owner `outlmd`, repo `outl`,
+    # workflow `release.yml`, environment `release`, publish allowed.
+    #
+    # Two constraints follow from it:
+    # - GitHub-hosted runner. npm doesn't accept OIDC from self-hosted
+    #   runners yet, and Blacksmith runners are self-hosted to GitHub. The
+    #   job is a two-second `npm publish`, so the runner choice costs nothing.
+    # - npm >= 11.5.1 (Node 24 ships it). Older npm ignores OIDC and fails
+    #   with ENEEDAUTH.
     if: needs.prepare.result == 'success'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    # `NPM_TOKEN` lives in the `release` environment.
+    runs-on: ubuntu-24.04
+    # Keeps the environment's protection rules on the publish; the trusted
+    # publisher entry on npmjs.com names this environment.
     environment: release
+    permissions:
+      contents: read
+      id-token: write # mints the OIDC token npm exchanges for a publish token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The build commit itself — not the tag, which the parallel `tag`
           # job may not have pushed yet on a main-push run.
           ref: ${{ github.sha }}
+          persist-credentials: false
 
+      # No `registry-url`: that input writes an `.npmrc` expecting
+      # NODE_AUTH_TOKEN, and there is no token anymore. The default registry
+      # is already registry.npmjs.org.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 20
-          # Writes the `.npmrc` that reads NODE_AUTH_TOKEN below.
-          registry-url: https://registry.npmjs.org
+          node-version: 24
+          package-manager-cache: false # never restore a cache into a publish
 
       - name: Publish (idempotent)
         working-directory: plugin-sdk
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          # Fail loud on an npm that predates OIDC instead of the bare
+          # ENEEDAUTH it would print otherwise.
+          NPM_VERSION=$(npm --version)
+          echo "npm ${NPM_VERSION}"
+          if [ "$(printf '%s\n' 11.5.1 "${NPM_VERSION}" | sort -V | head -n1)" != 11.5.1 ]; then
+            echo "::error::npm ${NPM_VERSION} can't use trusted publishing; need >= 11.5.1"
+            exit 1
+          fi
           # A re-run — or a retried beta run_number — may target a version
           # already on npm. Republishing the same version is a hard error,
           # so skip when it's already there (also the clean no-op path when

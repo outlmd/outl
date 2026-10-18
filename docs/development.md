@@ -700,6 +700,9 @@ To pin a new action, resolve the tag with `gh api repos/<owner>/<repo>/git/ref/t
 ### Runner sizing
 
 Every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`), never on GitHub-hosted ones.
+The one exception is `release.yml::publish_npm`, which runs on `ubuntu-24.04`: npm trusted publishing (OIDC) does not accept self-hosted runners yet, and Blacksmith registers as self-hosted.
+Moving it back to Blacksmith breaks the npm publish.
+Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted publishing) must stay configured as owner `outlmd`, repository `outl`, workflow `release.yml`, environment `release`, with publishing allowed.
 Billing is per vCPU-minute, with a platform multiplier on top: ARM 0.625x, x64 Linux 1x, Windows 2x, macOS 6.67x.
 That multiplier is why job placement matters more than job speed: a 29s macOS job costs more than a 5min Linux one.
 
@@ -717,7 +720,7 @@ Sizes as of the Blacksmith migration, from a full run of every workflow:
 |---|---|---|
 | `ci.yml::fmt`, `ci.yml::advisories` | 2 vCPU | rustfmt and cargo-deny compile nothing (16s for fmt) |
 | `mobile.yml::frontend`, `ci.yml::frontend`, `hygiene.yml::hygiene` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU; the other two are ~4s of vitest and a line-count scan, with no compilation at all |
-| `release.yml` orchestration (`prepare`, `tag`, `create_release`, `publish_*`, `update_tap`), `cleanup-tags.yml` | 2 vCPU | shell + `gh` calls, no compilation |
+| `release.yml` orchestration (`prepare`, `tag`, `create_release`, `publish_*` except `publish_npm`, `update_tap`), `cleanup-tags.yml` | 2 vCPU | shell + `gh` calls, no compilation |
 | `ci.yml::docs`, `ci.yml::sync`, `bench.yml` | 4 vCPU | doc/proptest jobs already finish in ~100s; bench stays fixed so numbers remain comparable run over run |
 | `ci.yml::clippy`, `ci.yml::test (linux)`, `desktop.yml::check`, release builds | 8 vCPU | measured 71–76% average CPU on 4 vCPU with 2.6–4.7 GB of 16 GB used and zero OOM: CPU-bound, so more cores cut wall clock at roughly flat billing |
 | macOS jobs | 6 vCPU | smallest macOS tier Blacksmith offers |
