@@ -11,11 +11,19 @@
   --pele-muted: var(--color-outl-fg-dim);
   --pele-line: var(--color-outl-fg);
   --pele-surface: var(--color-outl-bg-elev);
-  --pele-surface-alt: var(--color-outl-bg-elev);
+  --pele-surface-alt: var(--color-outl-accent-soft);
   --pele-border: var(--color-outl-border);
   --pele-accent: var(--color-outl-accent);
   --pele-critical: var(--color-outl-destructive);
   --pele-error: var(--color-outl-destructive);
+  --pele-series-1: var(--color-outl-accent);
+  --pele-series-2: var(--color-outl-accent-alt);
+  --pele-series-3: var(--color-outl-ref-link-fg);
+  --pele-series-4: var(--color-outl-tag-link-fg);
+  --pele-series-5: var(--color-outl-md-link-fg);
+  --pele-series-6: var(--color-outl-warn);
+  --pele-series-7: var(--color-outl-todo-done-fg);
+  --pele-series-8: var(--color-outl-destructive);
   --pele-font: var(--font-sans, sans-serif);
   --pele-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-x: auto;
@@ -26,6 +34,6 @@
   padding: 4px 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  white-space: pre-wrap;
+  white-space: normal;
   color: var(--color-outl-destructive);
 }

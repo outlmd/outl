@@ -144,7 +144,7 @@ See [theming.md](theming.md) for the look of each.
 |---|---|---|---|---|
 | `vim_mode` | bool | `true` | desktop | When `false`, the desktop drops the modal `Normal / Insert / Visual` model and only listens to OS-standard chrome chords (`⌘P`, `⌘B`, …). The TUI is vim-style by definition and ignores this. |
 | `font_size` | integer (pixels) | `15` | desktop | Outline body font size. The TUI uses the user's terminal font; setting this has no effect there. |
-| `diagrams` | `"pele"` \| `"off"` | `"pele"` | desktop, mobile | Mermaid fences. `"pele"` draws them with the built-in renderer. `"off"` leaves the highlighted source. The TUI ignores this and keeps the source. A plugin content transformer for `mermaid` still wins over both. |
+| `diagrams` | `"pele"` \| `"off"` | `"pele"` | desktop, mobile | Mermaid fences. `"pele"` draws them with the built-in renderer. `"off"` leaves the highlighted source. The TUI ignores this and keeps the source. A plugin content transformer for `mermaid` still wins over both. Any other string fails to parse `config.toml`, the same way an unknown value does for the other enum keys. |
 
 #### `[sync]`
 

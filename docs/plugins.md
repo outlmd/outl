@@ -329,6 +329,11 @@ The TUI has no diagram renderer, so a mermaid fence stays source there unless a 
 A plugin that claims `mermaid` replaces Pele for that language.
 The edit affordance on a Pele fence matches a transformed fence: Edit on the desktop, tap the diagram (not a link inside it) to edit on mobile.
 
+A node opens a note when it carries the class `internal-link` (`class A internal-link`, or `A[Journal]:::internal-link`).
+The click target is the note name, the node's text, not a path.
+A relative `href` (`click A "pages/journal"`) is dropped.
+`http`, `https` and `mailto` open outside the app.
+
 A plugin can declare a transformer for a code-fence language (`mermaid`, …); matching fences render through it in `CodeFenceView` (`components/BlockRow.tsx`).
 Registry + cache glue: `@outl/shared/plugins/transformer-registry` (shared with mobile); keeps `BlockRow` a renderer.
 It owns a `lang → PluginTransformer` registry (Solid signal via `loadTransformers`, re-run on `workspace-ready`; a boot fetch can be empty since plugins load lazily).

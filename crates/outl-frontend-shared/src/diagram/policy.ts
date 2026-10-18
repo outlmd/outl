@@ -34,9 +34,30 @@ export function overDiagramLimit(source: string): boolean {
   return source.length > DIAGRAM_SOURCE_LIMIT;
 }
 
-/** User-facing line. Callers assign this with `textContent`, never `innerHTML`. */
+/**
+ * User-facing line. Callers assign this with `textContent`, never `innerHTML`.
+ *
+ * Jison's dump is a source excerpt, a caret line and "Parse error on
+ * line N". The line and column are already in the prefix, so the
+ * caret and that sentence are dropped and the rest is one line.
+ */
 export function formatDiagramError(line: number, column: number, message: string): string {
-  return `line ${line}, col ${column}: ${message}`;
+  return `line ${line}, col ${column}: ${diagramErrorDetail(message)}`;
+}
+
+function diagramErrorDetail(message: string): string {
+  const lines = message
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .filter((part) => !isCaretLine(part))
+    .filter((part) => !/^parse error on line \d+:?$/i.test(part));
+  const joined = (lines.length > 0 ? lines : [message]).join(" ");
+  return joined.replace(/^parse error on line \d+:\s*/i, "").replace(/\s+/g, " ").trim();
+}
+
+function isCaretLine(line: string): boolean {
+  return /^[-^|.\s]+$/.test(line);
 }
 
 /**

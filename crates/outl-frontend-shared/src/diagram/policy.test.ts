@@ -77,6 +77,21 @@ describe("diagram errors", () => {
     );
   });
 
+  it("collapses a jison dump to one line without repeating the line number", () => {
+    const message = [
+      "Parse error on line 3:",
+      "flowchart LR",
+      "  A -->",
+      "----------^",
+      "Expecting 'NODE_STRING', got 'EOF'",
+    ].join("\n");
+    const text = formatDiagramError(3, 1, message);
+    expect(text).toBe(
+      "line 3, col 1: flowchart LR A --> Expecting 'NODE_STRING', got 'EOF'",
+    );
+    expect(text.match(/line 3/g)).toEqual(["line 3"]);
+  });
+
   it("shows source plus an error line for a syntax failure", () => {
     expect(diagramFailureView("syntax")).toBe("error");
     expect(diagramFailureView("semantic")).toBe("error");

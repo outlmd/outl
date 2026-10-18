@@ -1,8 +1,9 @@
 //! `editor.diagrams` for the mobile settings sheet.
 //!
 //! The desktop writes the same field through its flat `Settings` DTO.
-//! This pair only reads and writes that one key, so the sheet does
-//! not round-trip the rest of `config.toml`.
+//! These commands load and save the whole `config.toml`. Only
+//! `editor.diagrams` changes; every other field is written back as
+//! it was read.
 
 use outl_config::DiagramsMode;
 

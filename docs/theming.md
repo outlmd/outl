@@ -197,7 +197,11 @@ The legacy `--color-ios-*` / `--color-iosd-*` namespace it used to also write is
 `src/styles.css` provides boot-default values for `--color-outl-*` so the page isn't flash-unstyled before `applyPaletteToRoot` runs.
 `color-scheme` is set from the palette's `bg` luminance so native controls (scrollbars, `<select>`) follow the active preset.
 
-Mermaid diagrams map Pele's `--pele-*` properties onto that same `--color-outl-*` set in `@outl/shared/diagram/styles` (background, foreground, elevated background, border, accent, destructive for `--pele-error`, and the UI fonts).
+Mermaid diagrams map Pele's `--pele-*` properties onto that same `--color-outl-*` set in `@outl/shared/diagram/styles`.
+Background, foreground, border, accent, destructive (`--pele-error` and `--pele-critical`), and the UI fonts come from the palette.
+`--pele-surface` is the elevated background.
+`--pele-surface-alt` is `--color-outl-accent-soft`, so a second fill is distinct from the first.
+`--pele-series-1` through `--pele-series-8` are accent, accent-alt, ref-link, tag-link, markdown-link, warn, todo-done, and destructive, in that order.
 Both GUI clients import the stylesheet.
 A theme switch repaints an already mounted diagram. Nothing re-renders it.
 

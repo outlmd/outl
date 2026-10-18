@@ -44,6 +44,16 @@ fn missing_diagrams_stays_pele() {
 }
 
 #[test]
+fn unknown_diagrams_value_fails_to_parse() {
+    let err = toml::from_str::<Config>("[editor]\ndiagrams = \"yes\"\n").unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("diagrams") || message.contains("unknown"),
+        "{message}"
+    );
+}
+
+#[test]
 fn diagrams_off_parses() {
     let c: Config = toml::from_str("[editor]\ndiagrams = \"off\"\n").unwrap();
     assert_eq!(c.editor.diagrams, DiagramsMode::Off);

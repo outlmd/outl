@@ -9,6 +9,7 @@ import {
 import {
   createPeleRenderer,
   type DiagramFailure,
+  type DiagramHooks,
   type DiagramLink,
   type DiagramMount,
 } from "./renderer";
@@ -41,10 +42,24 @@ export function DiagramFence(props: {
   }
 
   function dropMount() {
-    mounted?.destroy();
+    const active = mounted;
     mounted = undefined;
     links = [];
+    active?.destroy();
     clearHost();
+  }
+
+  function hooksFor(token: number): DiagramHooks {
+    return {
+      onLinks: (next: DiagramLink[]) => {
+        if (token !== generation) return;
+        links = next;
+      },
+      onError: (failure: DiagramFailure) => {
+        if (token !== generation) return;
+        showFailure(failure);
+      },
+    };
   }
 
   function showFailure(failure: DiagramFailure) {
@@ -81,19 +96,10 @@ export function DiagramFence(props: {
     }
     if (!host) return;
     setView("diagram");
-    const hooks = {
-      onLinks: (next: DiagramLink[]) => {
-        if (token !== generation) return;
-        links = next;
-      },
-      onError: (failure: DiagramFailure) => {
-        if (token !== generation) return;
-        showFailure(failure);
-      },
-    };
+    const hooks = hooksFor(token);
     try {
       if (mounted) {
-        await mounted.update(source);
+        await mounted.update(source, hooks);
       } else {
         const next = await renderer.mount(host, source, hooks);
         if (token !== generation || view() !== "diagram") {
@@ -132,8 +138,6 @@ export function DiagramFence(props: {
     if (!(target instanceof Element)) return;
     const anchor = target.closest("a");
     if (!anchor || !host?.contains(anchor)) return;
-    event.preventDefault();
-    event.stopPropagation();
     const raw = anchor.getAttribute("data-href") ?? anchor.getAttribute("href") ?? "";
     const hit = links.find((link) => link.href === raw);
     const link = hit ?? {
@@ -142,8 +146,19 @@ export function DiagramFence(props: {
       internal: anchor.classList.contains("internal-link"),
     };
     const disposition = linkDisposition(link);
-    if (disposition === "page") props.onOpenPage?.(link.href);
-    else if (disposition === "external") props.onLinkClick?.(link.href);
+    if (disposition === "page") {
+      if (!props.onOpenPage) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.onOpenPage(link.href);
+      return;
+    }
+    if (disposition === "external") {
+      if (!props.onLinkClick) return;
+      event.preventDefault();
+      event.stopPropagation();
+      props.onLinkClick(link.href);
+    }
   }
 
   return (

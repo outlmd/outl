@@ -8,10 +8,15 @@
  *
  * Mount options follow https://pele.run/api and https://pele.run/security:
  * images off (no remote fetch), link schemes limited to http / https /
- * mailto, no icon resolver, zoom left at its default (`"auto"`).
+ * mailto, no icon resolver. `sanitize` inserts the SVG through the
+ * CSSOM so a style-src nonce still paints strokes. Zoom stays at
+ * Pele's default (`"auto"`); its controls are restyled the same way
+ * after each paint.
  */
 
-import type { LinkInfo, Mounted, PeleError } from "pele/lazy";
+import type { LinkInfo, PeleError } from "pele/lazy";
+
+import { adoptDiagramSvg, liftStyleAttributes, watchStyleAttributes } from "./sanitize";
 
 export interface DiagramLink {
   id: string;
@@ -26,42 +31,43 @@ export interface DiagramFailure {
   code: string;
 }
 
+export interface DiagramHooks {
+  onLinks?: (links: DiagramLink[]) => void;
+  onError?: (failure: DiagramFailure) => void;
+}
+
 export interface DiagramMount {
-  update(source: string): Promise<void>;
+  update(source: string, hooks: DiagramHooks): Promise<void>;
   destroy(): void;
 }
 
 export interface DiagramRenderer {
   supports(source: string): Promise<boolean>;
-  mount(
-    element: HTMLElement,
-    source: string,
-    hooks: {
-      onLinks?: (links: DiagramLink[]) => void;
-      onError?: (failure: DiagramFailure) => void;
-    },
-  ): Promise<DiagramMount>;
+  mount(element: HTMLElement, source: string, hooks: DiagramHooks): Promise<DiagramMount>;
 }
 
 type PeleLazy = typeof import("pele/lazy");
 
 let loading: Promise<PeleLazy> | undefined;
+const epochByElement = new WeakMap<HTMLElement, number>();
 
 function loadPele(): Promise<PeleLazy> {
   loading ??= import("pele/lazy");
   return loading;
 }
 
-/** Shared across mount and update so a re-render cannot widen the policy. */
-function mountOptions(
-  hooks: {
-    onLinks?: (links: DiagramLink[]) => void;
-    onError?: (failure: DiagramFailure) => void;
-  },
-) {
+function bumpEpoch(element: HTMLElement): number {
+  const next = (epochByElement.get(element) ?? 0) + 1;
+  epochByElement.set(element, next);
+  return next;
+}
+
+/** Shared shape for mount and update. Each call gets its own hooks. */
+function mountOptions(hooks: DiagramHooks) {
   return {
     images: false as const,
     linkSchemes: ["http", "https", "mailto"],
+    sanitize: adoptDiagramSvg,
     onRender: (result: { links?: LinkInfo[] }) => {
       hooks.onLinks?.(
         (result.links ?? []).map((link) => ({
@@ -115,20 +121,25 @@ export function createPeleRenderer(): DiagramRenderer {
     },
 
     async mount(element, source, hooks) {
+      const mine = bumpEpoch(element);
       const api = await loadPele();
       const type = api.detectType(source);
       if (type) await api.load(type);
-      const options = mountOptions(hooks);
-      let current: Mounted = await api.mountAsync(element, source, options);
+      const painted = await api.mountAsync(element, source, mountOptions(hooks));
+      const stopWatch = watchStyleAttributes(element);
       return {
-        async update(next) {
+        async update(next, nextHooks) {
           const nextType = api.detectType(next);
           if (nextType) await api.load(nextType);
-          current.update(next, options);
+          painted.update(next, mountOptions(nextHooks));
+          liftStyleAttributes(element);
         },
         destroy() {
-          current.destroy();
-          element.textContent = "";
+          stopWatch();
+          painted.destroy();
+          if (epochByElement.get(element) === mine) {
+            element.textContent = "";
+          }
         },
       };
     },
