@@ -29,7 +29,7 @@ default = ["lang-js", "lang-python", "lang-lua", "lang-rust", "lang-query"]
 # `src/runtimes/lisp.rs`.
 lang-lisp = ["dep:steel-core"]
 lang-js = ["dep:boa_engine"]
-lang-python = ["dep:rustpython-vm"]
+lang-python = ["dep:rustpython-vm", "dep:rustpython-host_env"]
 lang-lua = ["dep:mlua"]
 # Rust support requires the wasmtime sandbox
 lang-rust = ["wasm"]
@@ -70,3 +70,10 @@ dirs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# rustpython-host_env 0.6.0 compiles its Windows `wmi` module unconditionally
+# but that module calls into `ctypes`, which only exists behind the `ctypes`
+# feature. rustpython-vm turns it on through `host_env`, which we leave off,
+# so enable it here on Windows only. libffi is built from source on MSVC.
+[target.'cfg(windows)'.dependencies]
+rustpython-host_env = { version = "0.6", optional = true, default-features = false, features = ["ctypes"] }
