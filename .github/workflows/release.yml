@@ -813,9 +813,13 @@ jobs:
           set -euo pipefail
           TOOLS="${XDG_CACHE_HOME:-${HOME}/.cache}/tauri"
           mkdir -p "${TOOLS}"
+          # apprun-old is a mutable release asset, so pin the bytes we strip
+          # and ship. Bump the hash only after checking the new upload.
+          APPRUN_SHA256=f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
           curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-connrefused \
             -o "${TOOLS}/AppRun-x86_64" \
             https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+          echo "${APPRUN_SHA256}  ${TOOLS}/AppRun-x86_64" | sha256sum -c -
           strip "${TOOLS}/AppRun-x86_64"
           chmod +x "${TOOLS}/AppRun-x86_64"
           python3 scripts/check-artifact-stripped.py "${TOOLS}/AppRun-x86_64"
