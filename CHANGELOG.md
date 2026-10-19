@@ -5,6 +5,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Changed
+
+- **The workspace builds with Rust 1.99.**
+  `rust-toolchain.toml` pins 1.99.1, and the workspace `rust-version` is 1.99.
+  wasmtime 49 needs rustc 1.96, so the sandbox moves to wasmtime 49.0.3 in the same change.
+  That is the release after 49.0.2: same major, with the later security fixes.
+
 ### Fixed
 
 - **The Android app says why when it cannot start, instead of closing on open.**

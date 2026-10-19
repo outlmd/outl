@@ -20,7 +20,7 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-You need Rust **1.88+**.
+You need Rust **1.99+**.
 `rust-toolchain.toml` pins the exact version, so `rustup` installs it on the first build.
 No other system dependency is needed for the core, CLI, TUI, or MCP server.
 
@@ -42,7 +42,7 @@ Press `?` inside the TUI for the keymap.
 | `outl-mobile` (iOS app) | macOS + Xcode 15+ + Bun (`curl -fsSL https://bun.sh/install \| bash`) |
 | `outl-desktop` (Tauri 2) | Bun + the Tauri prerequisites for your OS (Linux: `webkit2gtk-4.1`, `libgtk-3-dev`; Windows: WebView2 runtime) |
 | Frontend tests (`crates/outl-mobile/src/**`, `crates/outl-desktop/src/**`, `crates/outl-frontend-shared/**`) | Bun + `bun run test` |
-| Bench job locally | `cargo install hyperfine --version 1.20.0 --locked` (1.21+ needs a newer rustc than the pinned toolchain) for the CLI side; criterion ships with `cargo bench` |
+| Bench job locally | `cargo install hyperfine --version 1.21.0 --locked` for the CLI side; criterion ships with `cargo bench` |
 
 The CI containers don't install GTK, so `outl-mobile` and `outl-desktop` are **excluded from the workspace `cargo clippy/test/doc` runs** (see [CI walkthrough](#9-ci-walkthrough)).
 That means a clean `cargo test --workspace` does not exercise those two crates.

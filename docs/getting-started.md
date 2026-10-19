@@ -74,7 +74,7 @@ cd outl
 cargo build --release
 ```
 
-You need Rust 1.88+.
+You need Rust 1.99+.
 `rust-toolchain.toml` pins the version, so `rustup` will pick it up automatically.
 
 Drop the binary anywhere on your `PATH`:

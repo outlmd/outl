@@ -68,7 +68,7 @@ The runtime engine is **Boa** (already embedded in `outl-exec`, runs on iOS — 
    **Still open, deliberately: the allowlist is about host *strings*, not destinations.**
    A plugin author can ask for `network:api.their-own.example`, have it approved, and point the A record at `127.0.0.1` or `169.254.169.254`.
    The plugin has no fs and no socket, so reaching loopback is a sandbox escape — outl's own MCP server, a local Ollama, cloud instance metadata — and no redirect gate helps, because the hop never leaves the approved host.
-   Closing it means a `reqwest::dns::Resolve` that refuses non-global addresses; see the "What this gate does not cover" note at the top of `net.rs` before reaching for it, because the loopback test suite and `IpAddr::is_global` (still unstable on 1.95) both get in the way.
+   Closing it means a `reqwest::dns::Resolve` that refuses non-global addresses; see the "What this gate does not cover" note at the top of `net.rs` before reaching for it, because the loopback test suite and `IpAddr::is_global` (still unstable on 1.99) both get in the way.
 
 7. **`sync-transport` is trusted to move bytes, and for nothing else.**
    Not for the ops' content (they go through `Workspace::apply` and the CRDT, and a malformed line is skipped), not for the actors they name, and **not for their clocks**.

@@ -19,7 +19,7 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-You need Rust 1.88+.
+You need Rust 1.99+.
 `rust-toolchain.toml` pins the exact version, so `rustup` will install it for you on first build.
 
 ## Layout
