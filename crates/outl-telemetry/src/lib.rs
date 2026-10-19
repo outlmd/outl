@@ -35,7 +35,7 @@
 #![forbid(unsafe_code)]
 
 mod redact;
-pub use redact::{redact, FILE_MARKER, PATH_MARKER};
+pub use redact::{redact, FILE_MARKER, ID_MARKER, PATH_MARKER, TEXT_MARKER};
 
 #[cfg(feature = "sentry")]
 mod scrub;
