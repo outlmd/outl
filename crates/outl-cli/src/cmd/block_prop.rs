@@ -9,6 +9,11 @@
 //! `PropValue::Text("")` is what leaves a bare `key::` line in the
 //! rendered `.md` — the page-property ghost in issue #300. `delete`
 //! and `set key=` both take the removing path.
+//!
+//! A newline, a carriage return, or a null byte in the value is
+//! rejected. `write_property` emits the value on the same line as
+//! `key::`, so one of those bytes would split the line and the next
+//! parse would read a different tree.
 
 use std::path::Path;
 
@@ -201,6 +206,14 @@ fn assign(
 ) -> Result<Value, ApiError> {
     let node = require_block(ctx, id)?;
     let key = prepare_key(raw_key)?;
+    // Reject before trim. A value that is only a newline would otherwise
+    // trim to empty and take the clear path, and a value with a break
+    // in the middle would render as two lines.
+    if let Some(raw) = value {
+        if let Some(why) = value_rejection(raw) {
+            return Err(ApiError::new(codes::INVALID_ARG, why));
+        }
+    }
     // Same rule as `set_block_property`: trim, and an empty value is a
     // clear. `Text("")` would render as a bare `key::` line.
     let stored = value
@@ -232,6 +245,18 @@ fn require_block(ctx: &WsCtx, id: &str) -> Result<NodeId, ApiError> {
         ));
     }
     Ok(node)
+}
+
+/// A property is one `key:: value` line. A line break or a null byte
+/// cannot live in that line.
+fn value_rejection(value: &str) -> Option<&'static str> {
+    if value.contains(['\n', '\r', '\0']) {
+        Some(
+            "property value must stay on one line and cannot contain a newline, a carriage return, or a null byte",
+        )
+    } else {
+        None
+    }
 }
 
 fn prepare_key(raw: &str) -> Result<String, ApiError> {

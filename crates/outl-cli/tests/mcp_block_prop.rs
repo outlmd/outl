@@ -116,3 +116,50 @@ fn block_prop_tools_round_trip_and_delete_drops_the_line() {
     );
     assert!(md.contains("owner:: ada"), "owner stays:\n{md}");
 }
+
+#[test]
+fn a_line_break_or_null_in_the_value_is_rejected_and_the_markdown_stays() {
+    let ws = init_workspace();
+    let mut client = McpClient::spawn(ws.path());
+    let _ = client.call(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2024-11-05", "capabilities": {} }
+    }));
+    let _ = call(
+        &mut client,
+        2,
+        "outl_page_create",
+        json!({ "slug": "ideas", "title": "Ideas" }),
+    );
+    let append = call(
+        &mut client,
+        3,
+        "outl_block_append",
+        json!({ "page": "ideas", "text": "ship it" }),
+    );
+    let id = success_data(&append["result"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let path = ws.path().join("pages/ideas.md");
+    let before = std::fs::read_to_string(&path).expect("pages/ideas.md");
+
+    for (n, value) in [(4_i64, "high\nlow"), (5, "high\0low")] {
+        let set = call(
+            &mut client,
+            n,
+            "outl_block_prop_set",
+            json!({ "id": id, "key": "priority", "value": value }),
+        );
+        assert_eq!(set["result"]["isError"], true, "{set}");
+        assert_eq!(
+            set["result"]["structuredContent"]["error"]["code"], "INVALID_ARG",
+            "{set}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("pages/ideas.md"),
+            before,
+            "a rejected value must not touch the page"
+        );
+    }
+}

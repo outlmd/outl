@@ -73,6 +73,7 @@ Without it they return a recoverable `CONFIRM_REQUIRED` error and the workspace 
 Block properties are `outl_block_prop_set`, `outl_block_prop_get`, `outl_block_prop_list`, and `outl_block_prop_delete`.
 `id` is the block id.
 `set` with an empty `value`, and `delete`, both remove the property, so the page's `.md` does not keep a bare `key::` line.
+`set` rejects a value that contains a newline, a carriage return, or a null byte (`INVALID_ARG`) and leaves the page untouched.
 `list` returns every property on the block.
 Neither needs `confirm`: the removal is an op, and the previous value is still in the log.
 

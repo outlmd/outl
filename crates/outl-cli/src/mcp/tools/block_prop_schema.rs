@@ -12,7 +12,7 @@ pub(crate) fn defs() -> Vec<Value> {
     vec![
         tool_def(
             "outl_block_prop_set",
-            "Set a block-level `key:: value` property. An empty value removes it.",
+            "Set a block-level `key:: value` property. An empty value removes it. A newline, a carriage return, or a null byte in the value is rejected.",
             json!({
                 "type": "object",
                 "properties": {

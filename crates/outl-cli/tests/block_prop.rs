@@ -171,6 +171,73 @@ fn deleting_a_block_property_removes_the_line_from_the_markdown() {
 }
 
 #[test]
+fn a_line_break_in_the_value_is_rejected_and_the_markdown_stays() {
+    let ws = init_workspace();
+    let id = page_with_block(&ws);
+    let before = page_md(&ws);
+
+    for value in ["high\nlow", "high\rlow", "high\r\nlow"] {
+        let assignment = format!("priority={value}");
+        let out = run(&ws, &["block", "prop", "set", &id, &assignment, "--json"]);
+        let env = envelope(&out);
+        assert!(
+            !out.status.success() && env["ok"] == false,
+            "a line break must not be stored:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert_eq!(env["error"]["code"], "INVALID_ARG");
+        let message = env["error"]["message"].as_str().unwrap_or("");
+        assert!(
+            message.contains("newline") || message.contains("carriage return"),
+            "the message should say why: {message}"
+        );
+        assert_eq!(
+            page_md(&ws),
+            before,
+            "a rejected value must not touch the page"
+        );
+    }
+}
+
+#[test]
+fn a_double_colon_inside_a_value_survives_a_reparse() {
+    let ws = init_workspace();
+    let id = page_with_block(&ws);
+    let value = "https://a::b";
+
+    let set = ok(run(
+        &ws,
+        &[
+            "block",
+            "prop",
+            "set",
+            &id,
+            &format!("url={value}"),
+            "--json",
+        ],
+    ));
+    assert_eq!(set["data"]["value"], value);
+
+    let md = page_md(&ws);
+    let parsed = outl_md::parse(&md);
+    let block = parsed.blocks.first().expect("the page has its block");
+    let parsed_value = block
+        .properties
+        .iter()
+        .find(|(key, _)| key == "url")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(
+        parsed_value,
+        Some(value),
+        "reparse of the rendered page must keep the value:\n{md}"
+    );
+
+    let get = ok(run(&ws, &["block", "prop", "get", &id, "url", "--json"]));
+    assert_eq!(get["data"]["value"], value);
+}
+
+#[test]
 fn an_empty_assignment_removes_the_property_instead_of_writing_a_bare_key() {
     let ws = init_workspace();
     let id = page_with_block(&ws);

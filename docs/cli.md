@@ -305,6 +305,8 @@ Either way the `.md` omits a value that is empty or only whitespace, so a bare `
 A block property is the same `key:: value` line indented under that block.
 `<id>` is the block id `block append` and `block get` return.
 `outl block prop delete`, and `set` with an empty value (`key=`), remove the key, so the rendered page does not keep a bare `key::` line.
+`set` rejects a value that contains a newline, a carriage return, or a null byte (`INVALID_ARG`) and leaves the page untouched.
+A `::` inside the value is kept (`url:: https://a::b` reads back as `https://a::b`).
 `list` returns every property on the block, alphabetical by key.
 
 ### Export
