@@ -6,7 +6,7 @@ Nothing it produces is committed.
 
 ## How it works
 
-1. `fixture/` holds the "Atlas" demo workspace as plain outl markdown: person pages with `type:: person`, `[[@Name]]` mentions, tags, page and block properties, tasks, a table, a code block, a `remind::` and a template.
+1. `fixture/` holds the "Atlas" demo workspace as plain outl markdown: person pages with `type:: person`, `[[@Name]]` mentions, tags, page and block properties, tasks, a table, a code block, a mermaid flowchart and a mermaid fence with a syntax error, a `remind::` and a template.
 2. The real `outl` binary imports it (`outl import logseq`, the importer that takes a directory of `.md` as-is), and the CLI's JSON (`page get`, `page prop get`, `backlinks page`, `search`, `template list`) becomes the data for the web clients.
 3. Desktop and mobile run their Vite dev servers under `?mock=1` in headless Chromium.
    `lib/bridge.js` sits in front of the mock backend and answers the content commands from that JSON, so every block, token and backlink on screen is backend output.

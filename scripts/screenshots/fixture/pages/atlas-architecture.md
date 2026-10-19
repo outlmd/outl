@@ -11,3 +11,19 @@ type:: doc
     ```
 - Open question from [[@Priya Shah]]: do we need ==conflict banners== on Android?
 - Storage choice and its trade-offs live on [[Project Atlas]]
+- Retry path after a write lands locally
+  - ```mermaid
+    flowchart LR
+      Write[Write lands locally] --> Queue[Offline queue]
+      Queue --> Worker[Worker]
+      Worker --> Reach{Peer reachable?}
+      Reach -->|yes| Push[Push the op log]
+      Reach -->|no| Wait[Backoff and retry]
+      Wait --> Worker
+      Push --> Atlas[Project Atlas]:::internal-link
+    ```
+  - Draft, the arrow is still unfinished
+    - ```mermaid
+      flowchart LR
+        Queue -->
+      ```
