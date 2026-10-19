@@ -62,8 +62,8 @@ nothing about the build looks wrong when it does. The names below are set
 on every job of the runners we use and never appear in our own source, so
 finding one in a shipped binary means a build environment was embedded:
 
-  * `GITHUB_RUN_ID`, `RUNNER_TEMP`, `ACTIONS_RUNTIME` — GitHub Actions
-  * `BLACKSMITH_` — the Blacksmith runner prefix
+  * `GITHUB_RUN_ID`, `RUNNER_TEMP`, `ACTIONS_RUNTIME`: GitHub Actions
+  * `BLACKSMITH_`: the Blacksmith runner prefix
 
 This rule has no opt-out flag on purpose.
 
