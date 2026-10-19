@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Accepted |
 | **Issue** | [#298](https://github.com/outlmd/outl/issues/298) |
-| **PR** | opened with this change |
+| **PR** | [#394](https://github.com/outlmd/outl/pull/394) |
 | **Date** | 2026-10-19 |
 | **Reference doc** | [doctor.md](../doctor.md) (the report), [storage.md](../storage.md) (why a lock is not deleted), [`crates/outl-core/CLAUDE.md`](../../crates/outl-core/CLAUDE.md) (invariant 9's four questions for the write actor) |
 | **Invariant** | root `CLAUDE.md` invariants 9 and 11 |
