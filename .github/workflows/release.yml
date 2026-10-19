@@ -1095,7 +1095,10 @@ jobs:
           set -euo pipefail
           PY=python3
           command -v python3 >/dev/null 2>&1 || PY=python
-          "${PY}" scripts/check-artifact-stripped.py target/release/outl.exe
+          # `outl-desktop.exe`, the Cargo binary name: Tauri's "Built
+          # application at" line names it, and `productName` (`outl`) is
+          # only what the installer calls it.
+          "${PY}" scripts/check-artifact-stripped.py target/release/outl-desktop.exe
 
       - name: Upload installer to draft release
         env:
@@ -1361,9 +1364,14 @@ jobs:
         run: python3 crates/outl-mobile/scripts/android-apk-page-alignment.py outl-android-arm64.apk
 
       # There is no `llvm-strip` step for Android because AGP already does it:
-      # the release buildType in `gen/android/app/build.gradle.kts` sets no
-      # `jniLibs.keepDebugSymbols` (only the debug one does), so Gradle's
-      # strip task runs on every `.so` on its way into the APK.
+      # `gen/android/app/build.gradle.kts` keeps debug symbols for the debug
+      # variant only (through `androidComponents`, not a `packaging` block
+      # inside the build type, which Kotlin applies to every variant), so
+      # Gradle's strip task runs on every `.so` on its way into the release
+      # APK. It strips with the NDK that file's `ndkVersion` names, which has
+      # to be the `NDK_VERSION` installed above: AGP falls back to its own
+      # default NDK otherwise, finds none, and packages the library
+      # unstripped with only a warning that `--quiet` Gradle never prints.
       #
       # Which makes the finished APK the only place that can confirm it. With
       # `[profile.release]` no longer stripping, the library Gradle is handed

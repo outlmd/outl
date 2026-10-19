@@ -16,6 +16,13 @@ val tauriProperties = Properties().apply {
 android {
     compileSdk = 36
     namespace = "app.outl.mobile_app"
+    // The NDK `release.yml` installs (`NDK_VERSION` in `build_android`).
+    // AGP strips every `.so` on its way into a release APK with this NDK's
+    // `llvm-strip`, and without a version here it looks for its own default
+    // NDK instead. That one is not on the runner, so AGP would print
+    // "Unable to strip the following libraries, packaging them as they are"
+    // and ship the library with full DWARF. Bump both together.
+    ndkVersion = "27.1.12297006"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "app.outl.mobile_app"
@@ -30,11 +37,13 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
-                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
-            }
+            // No `packaging { jniLibs.keepDebugSymbols... }` here, though
+            // the Tauri template puts one in this block. A build type has
+            // no `packaging`, so Kotlin resolves it on the enclosing
+            // `android {}` and the patterns apply to *every* variant: the
+            // release APK shipped `liboutl_mobile_lib.so` with full DWARF
+            // and its `.symtab`. The debug-only version is the
+            // `androidComponents` block below.
         }
         getByName("release") {
             isMinifyEnabled = true
@@ -50,6 +59,16 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+}
+
+// Debug builds keep the Rust library's symbols so a debugger can attach;
+// release builds are stripped by AGP with the NDK named in `ndkVersion`.
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.packaging.jniLibs.keepDebugSymbols.addAll(
+            listOf("*/arm64-v8a/*.so", "*/armeabi-v7a/*.so", "*/x86/*.so", "*/x86_64/*.so")
+        )
     }
 }
 

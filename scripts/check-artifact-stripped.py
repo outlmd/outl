@@ -20,8 +20,10 @@ APK rather than trusting the two build steps that decide its alignment.
 
 What counts as a failure:
 
-  * ELF   — any `.debug*` / `.zdebug*` section, or a `.symtab`
-            (binutils `strip` removes both; a stripped ELF keeps `.dynsym`)
+  * ELF   — any `.debug*` / `.zdebug*` section that is not loaded at run
+            time, or a `.symtab` (binutils `strip` removes both; a stripped
+            ELF keeps `.dynsym`, and keeps an allocated section whatever it
+            is named, such as rustc's `.debug_gdb_scripts`)
   * Mach-O — a `__DWARF` segment, a `__debug_*` section, a debug map left
             in the symbol table, or local symbols beyond the one `strip`
             itself adds. Neither count goes to zero: Apple's `strip` writes
@@ -79,6 +81,8 @@ def _u(fmt, buf, off):
 
 # ---------------------------------------------------------------- ELF
 
+SHF_ALLOC = 0x2
+
 
 def check_elf(name, blob, allow_symbols):
     bits = blob[4]
@@ -86,12 +90,12 @@ def check_elf(name, blob, allow_symbols):
     if bits == 2:
         (shoff,) = _u(endian + "Q", blob, 0x28)
         shentsize, shnum, shstrndx = _u(endian + "HHH", blob, 0x3A)
-        name_off, type_off, off_off, size_off = 0, 4, 0x18, 0x20
+        name_off, type_off, flags_off, off_off, size_off = 0, 4, 8, 0x18, 0x20
         word = endian + "Q"
     else:
         (shoff,) = _u(endian + "I", blob, 0x20)
         shentsize, shnum, shstrndx = _u(endian + "HHH", blob, 0x2E)
-        name_off, type_off, off_off, size_off = 0, 4, 0x10, 0x14
+        name_off, type_off, flags_off, off_off, size_off = 0, 4, 8, 0x10, 0x14
         word = endian + "I"
 
     if not shoff or not shnum or shstrndx >= shnum:
@@ -112,6 +116,16 @@ def check_elf(name, blob, allow_symbols):
         end = names.find(b"\0", n)
         section = names[n : end if end != -1 else None].decode("utf-8", "replace")
         if section.startswith((".debug", ".zdebug")):
+            (flags,) = _u(word, blob, h + flags_off)
+            if flags & SHF_ALLOC:
+                # Mapped into memory, so not something `strip` removes or
+                # DWARF a debugger reads off disk. The one we meet is rustc's
+                # `.debug_gdb_scripts`: every executable built with debuginfo
+                # carries it in its read-only segment (`AMS`), 34 bytes naming
+                # `gdb_load_rust_pretty_printers.py`, and `main` reads it so
+                # the linker keeps it. Flagging it would fail every stripped
+                # Linux binary for a section no strip can take out.
+                continue
             (size,) = _u(word, blob, h + size_off)
             failures.append(f"{name}: carries {section} ({size} bytes of DWARF)")
         elif section == ".symtab" and not allow_symbols:
@@ -242,7 +256,7 @@ def check_macho(name, blob, allow_symbols):
     (narch,) = _u(">I", blob, 4)
     wide = magic == FAT_MAGIC_64
     entry = 32 if wide else 20
-    if not 0 < narch <= 16 or 8 + narch * entry > len(blob):
+    if not 0 < narch <= MAX_FAT_SLICES or 8 + narch * entry > len(blob):
         return [
             f"{name}: fat header claims {narch} slices, which does not read as Mach-O"
         ]
@@ -294,13 +308,31 @@ def check_pe(name, blob, allow_symbols):
 # ------------------------------------------------------------ dispatch
 
 
+# A fat header's slice count sits where a Java class file keeps its version:
+# `0xcafebabe 0000 0034` is a Java 8 class, and reads as 52 slices. Class
+# files start at major version 45, and no universal binary has anywhere near
+# that many architectures, so the count alone tells the two apart (`file(1)`
+# draws the same line). An APK carries class files at its root —
+# kotlinx-coroutines' `DebugProbesKt.bin` is one — and they are not ours to
+# strip.
+MAX_FAT_SLICES = 16
+
+
+def _is_fat_macho(blob):
+    (magic,) = _u(">I", blob, 0)
+    if magic not in (FAT_MAGIC, FAT_MAGIC_64):
+        return False
+    (narch,) = _u(">I", blob, 4)
+    return 0 < narch <= MAX_FAT_SLICES
+
+
 def inspect(name, blob, allow_symbols):
     """Judge one blob, or return None when it is not a binary at all."""
     if len(blob) < 64:
         return None
     if blob[:4] == b"\x7fELF":
         return "ELF", check_elf(name, blob, allow_symbols)
-    if _macho_magic(blob) or _u(">I", blob, 0)[0] in (FAT_MAGIC, FAT_MAGIC_64):
+    if _macho_magic(blob) or _is_fat_macho(blob):
         return "Mach-O", check_macho(name, blob, allow_symbols)
     if blob[:2] == b"MZ":
         return "PE", check_pe(name, blob, allow_symbols)

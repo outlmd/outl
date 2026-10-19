@@ -321,6 +321,11 @@ The runner image does not ship that revision, so every run downloads ~700 MB, an
 beta.207 died at 33% on `Error reading Zip content from a SeekableByteChannel`, which `sdkmanager` logs as a *Warning* before exiting 1.
 The install retries three times, deleting the half-unzipped package and the download scratch between attempts.
 It gates on the `clang` binary `cargo-ndk` will invoke, not on the exit code: a partial unzip still leaves `source.properties` behind and claims to be installed.
+The same revision is `ndkVersion` in `gen/android/app/build.gradle.kts`, and the two move together.
+AGP strips the Rust `.so` on its way into the release APK with that NDK's `llvm-strip`; without `ndkVersion` it looks for its own default NDK, finds none on the runner, and packages the library with full DWARF behind a warning `--quiet` Gradle never prints.
+Debug builds keep the library's symbols through an `androidComponents` block scoped to the debug variant.
+The Tauri template's `packaging { jniLibs.keepDebugSymbols... }` inside `getByName("debug")` is not scoped at all: a build type has no `packaging`, so Kotlin resolves it on `android {}` and it kept the symbols in the release APK too.
+`scripts/check-artifact-stripped.py` reads the finished APK and is what turns that into a red job.
 Version comes from the workspace `Cargo.toml`, injected via `cargo tauri android build --config`.
 Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same trap as iOS, see [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
 

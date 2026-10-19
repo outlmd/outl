@@ -44,3 +44,6 @@ jobs:
       # forgets needs to fail, not a reminder.
       - name: docs index
         run: ./scripts/check-docs-index.sh
+
+      - name: release strip check
+        run: python3 scripts/tests/test_check_artifact_stripped.py
