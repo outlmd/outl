@@ -797,6 +797,29 @@ jobs:
             libsoup-3.0-dev \
             patchelf
 
+      # The AppImage's launcher is not ours, and it is not stripped either.
+      # Tauri copies `AppRun-x86_64` from its tool cache into the AppDir
+      # (linuxdeploy's gtk plugin then renames it `AppRun.wrapped`), and
+      # downloads it from tauri-apps/binary-releases only when the cache has
+      # none. That prebuilt binary carries DWARF and a `.symtab`. Once
+      # linuxdeploy has sealed the squashfs it cannot be changed, so the
+      # cache is the one place to strip it: seed it with a stripped copy of
+      # the same file. If Tauri ever renames or moves it, the seed is simply
+      # not used and the strip gate below goes red on `AppRun.wrapped`,
+      # which is the signal to update this step.
+      - name: Seed Tauri's AppImage launcher, stripped
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="${XDG_CACHE_HOME:-${HOME}/.cache}/tauri"
+          mkdir -p "${TOOLS}"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-connrefused \
+            -o "${TOOLS}/AppRun-x86_64" \
+            https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+          strip "${TOOLS}/AppRun-x86_64"
+          chmod +x "${TOOLS}/AppRun-x86_64"
+          python3 scripts/check-artifact-stripped.py "${TOOLS}/AppRun-x86_64"
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # Same sed pass as the other build jobs: rewrite every literal
