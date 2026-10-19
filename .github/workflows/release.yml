@@ -931,13 +931,8 @@ jobs:
       # Two extractions, because each bundler copies the binary itself rather
       # than sharing one. The AppImage unpacks itself (`--appimage-extract`
       # needs no FUSE, which the runner has no kernel module for) and
-      # `dpkg-deb` is core on Ubuntu.
-      #
-      # **Declared gap: the .rpm is not opened.** `rpm2cpio` is not on this
-      # image, and adding the `rpm` package to the apt step above to verify a
-      # third copy of the binary the other two already cover is not worth the
-      # build dependency. If the rpm bundler ever stops copying the same
-      # `target/release/outl`, this will not catch it.
+      # `dpkg-deb` is core on Ubuntu. The rpm is extracted below with
+      # `bsdtar` from `libarchive-tools`, which the step installs.
       - name: Verify the Linux bundles carry no debug info
         shell: bash
         run: |
