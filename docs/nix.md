@@ -160,7 +160,7 @@ A client write will then detach the symlink again, so also set `xdg.configFile."
 
 > **Migrating a machine that already hit the conflict.**
 > If you were using this module before the `managed` default, your `~/.config/outl/config.toml` is already a stray regular file and the switch is failing with *"file exists and cannot be overridden"*.
-> The module deliberately keeps Home Manager's collision guard on, so it will not silently clobber that file. Set `programs.outl.settings.managed = false` and `xdg.configFile."outl/config.toml".force = true`, then run `home-manager switch` to reclaim the target; afterwards set `managed = true` again so it stays a symlink. If you had edited the stray file by hand, move it aside first.
+> The module deliberately keeps Home Manager's collision guard on, so it will not silently clobber that file. Set `xdg.configFile."outl/config.toml".force = true` and run `home-manager switch` to reclaim the target — that is the whole migration. The module's `managed` default (`true`) keeps it a symlink afterwards; you do not need to touch `managed`. If you had edited the stray file by hand, move it aside first so `force` does not discard your edits.
 
 
 ### Theme precedence

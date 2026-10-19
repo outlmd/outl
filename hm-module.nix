@@ -120,8 +120,9 @@ in
 
               Set to false to let the clients persist their own runtime state
               again — accepting that a client write then detaches home-manager's
-              symlink, and the next activation only reclaims it if you also set
-              symlink, and a later activation refuses a conflicting file until you move it aside or configure Home Manager's backup handling.
+              symlink back to a plain file. Without `force = true` on the
+              target, the next `home-manager switch` refuses to overwrite that
+              conflicting file and aborts.
 
               When true, pin `settings.workspace.last` if you want the desktop to
               reopen your last workspace: the app can no longer store it.
