@@ -185,6 +185,14 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   And it recognises `.outl/import-in-progress.json`, the marker a real import holds for its duration, so an import that died at page 40k of 66k is resumable with a plain re-run instead of `--force`.
   See `crates/outl-import/CLAUDE.md`; `cmd/import/mod.rs` here is pure glue (args, workspace bootstrap, report printing).
 - `outl theme list|show <preset>` — TUI theme inspection.
+- `outl telemetry status|on|off` — the terminal opt-out for crash reporting.
+  Reads/writes one boolean (`[telemetry] enabled`) in the **user-level** `~/.config/outl/config.toml`, so the dispatch takes no `resolve_path` — there is no workspace in it.
+  It exists because reporting is on by default (RFC 0377) and the TUI has no settings screen, which is why `outl_shortcuts::capability_support` declares `CrashReportingOptOut` as `Missing` there and names these verbs in the nudge.
+  **`status` goes through `outl_config::load_result()`, never `load()`.**
+  `load()` discards the read verdict, so a `config.toml` holding `enabled = false` behind a syntax error would print a flat `crash reports: on` — misreporting the state of an opt-out, which is worse than failing because the user stops looking.
+  It prints the qualified state, surfaces `Loaded::notice()` and exits non-zero instead.
+  `on`/`off` propagate `SaveError::Unreadable` rather than engulfing it: a user who typed `off` and got exit 0 would believe reporting had stopped.
+  Nothing here initialises or inspects the reporter — the four conditions an event has to clear live in `outl-telemetry`; this owns condition 3 only.
 - `outl plugin init|list|install|run|enable|disable|remove` — manage the workspace's JS plugins (under `<workspace>/.outl/plugins/`), wrapping `outl-plugins`.
   `init <NAME> [--id <ID>] [--dir <PATH>]` scaffolds a buildable plugin project (manifest + `package.json` + `tsconfig` + `src/index.ts` + README); it touches no workspace.
   Templates live in `cmd/plugin_init.rs`.
@@ -358,6 +366,7 @@ src/
 │   ├── reconcile.rs       # outl reconcile
 │   ├── recover.rs         # outl recover — op-log-side text recovery
 │   ├── theme.rs           # outl theme
+│   ├── telemetry.rs       # outl telemetry — crash-reporting opt-out (no workspace)
 │   ├── import/            # outl import — glue over the outl-import crate
 │   │   ├── mod.rs         #   adapters, --dry-run, auto-detect, progress line, report printing
 │   │   └── guard.rs       #   re-import safety: op-log occupancy + the in-progress marker

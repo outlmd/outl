@@ -33,6 +33,12 @@ outl-plugins = { workspace = true, features = ["registry"] }
 outl-sync-iroh = { workspace = true }
 outl-config = { workspace = true }
 outl-tui = { workspace = true }
+# Crash reporting (RFC 0377). The dependency is unconditional; the *reporter*
+# is not. `outl-telemetry`'s own `sentry` feature is what links the SDK, and it
+# is off by default, so a build nobody passed `--features sentry` to contains
+# no reporter to switch on — that is condition 1, and it is why someone who
+# clones this repo and runs it has no Sentry in the binary at all.
+outl-telemetry = { workspace = true }
 anyhow = { workspace = true }
 # Terminal width only — a pairing QR wider than the terminal wraps into
 # an unscannable mess, so `outl peer pair` measures before it prints.
@@ -66,3 +72,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "signal", "macros"] }
 # Backdating a binding's mtime is the only way to exercise the device
 # store's staleness TTL without sleeping through it.
 filetime = { workspace = true }
+
+[features]
+default = []
+# Links the Sentry SDK. Set only by the release pipeline. Leave it off and
+# `outl_telemetry::init` is a function that returns `None`.
+sentry = ["outl-telemetry/sentry"]

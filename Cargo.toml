@@ -10,6 +10,7 @@ members = [
     "crates/outl-import",
     "crates/outl-plugins",
     "crates/outl-shortcuts",
+    "crates/outl-telemetry",
     "crates/outl-theme",
     "crates/outl-tauri-shared",
     "crates/outl-ws",
@@ -46,6 +47,7 @@ outl-import = { path = "crates/outl-import", version = "0.12.0" }
 outl-exec = { path = "crates/outl-exec", version = "0.12.0", default-features = false }
 outl-plugins = { path = "crates/outl-plugins", version = "0.12.0" }
 outl-shortcuts = { path = "crates/outl-shortcuts", version = "0.12.0" }
+outl-telemetry = { path = "crates/outl-telemetry", version = "0.12.0" }
 outl-theme = { path = "crates/outl-theme", version = "0.12.0" }
 outl-tauri-shared = { path = "crates/outl-tauri-shared", version = "0.12.0" }
 outl-ws = { path = "crates/outl-ws", version = "0.12.0" }
@@ -150,6 +152,34 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 # to the correct UTC offset per date (DST-aware), for `outl_actions::clock`.
 chrono-tz = "0.10"
 dirs = "7"
+# Path / identifier scrubber in `outl-telemetry`: the one predicate deciding
+# what a panic message may carry off the user's machine. Already in the lock
+# via `tauri-utils`, and `sentry-backtrace` depends on it too — declared here
+# anyway, because a safety predicate should not ride a transitive edge that
+# some other crate's refactor can remove.
+regex = "1"
+
+# Crash reporting (RFC 0377). `default-features = false` is load-bearing, not
+# tidiness: the default feature set is `transport = ["reqwest", "native-tls"]`,
+# and `native-tls` on Android resolves `openssl` + `openssl-sys` +
+# `tokio-native-tls` — none of which are in `Cargo.lock` and none of which
+# cross-compile without an NDK OpenSSL.
+#
+# `rustls`, NOT `rustls-no-provider`: `outl-plugins` and `outl-import` already
+# declare `reqwest = { features = ["blocking", "rustls"] }`, and features are
+# additive — asking for the no-provider variant here would leave reqwest with
+# two different crypto-provider stories in one build.
+#
+# `debug-images` is what lets the server resolve an address back to a function
+# name. Deliberately NOT enabled: `contexts` (it fills `server_name` from the
+# machine's hostname), `logs`, `metrics`, `release-health`, `tracing`.
+sentry = { version = "0.49.3", default-features = false, features = [
+    "panic",
+    "backtrace",
+    "reqwest",
+    "rustls",
+    "debug-images",
+] }
 
 # Tauri clients (desktop + mobile src-tauri)
 log = "0.4"
@@ -170,4 +200,12 @@ filetime = "0.2"
 [profile.release]
 lto = "thin"
 codegen-units = 1
-strip = "symbols"
+# `strip = "symbols"` used to live here and is gone on purpose (RFC 0377 §5).
+# A crash report from a stripped binary arrives as a list of bare addresses
+# instead of function names, which is the same as no crash report at all.
+#
+# So the release profile keeps line tables, and the *pipeline* strips the
+# artifact after `sentry-cli debug-files upload` has read the symbols. Putting
+# the strip back here silently un-symbolicates every event we receive.
+debug = "line-tables-only"
+split-debuginfo = "packed"

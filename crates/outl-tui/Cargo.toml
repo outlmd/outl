@@ -28,6 +28,12 @@ outl-exec = { workspace = true, default-features = true }
 outl-plugins = { workspace = true }
 outl-shortcuts = { workspace = true }
 outl-theme = { workspace = true }
+# Crash reporting (RFC 0377). The dependency is unconditional; the *reporter*
+# is not. `outl-telemetry`'s own `sentry` feature is what links the SDK, and it
+# is off by default, so a build nobody passed `--features sentry` to contains
+# no reporter to switch on — that is condition 1, and it is why someone who
+# clones this repo and runs it has no Sentry in the binary at all.
+outl-telemetry = { workspace = true }
 # Workspace layout + the device-actor protocol. The TUI used to parse
 # `.outl/config.toml` by hand and drifted from the CLI's schema; one
 # owner is the point.
@@ -72,3 +78,17 @@ rfd = { version = "0.17", default-features = false }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[features]
+default = []
+# Links the Sentry SDK. Leave it off and `outl_telemetry::init` is a function
+# that returns `None`.
+#
+# **No release job passes this**, and that is worth stating here rather than
+# leaving as an inference: the pipeline builds `-p outl-cli --bin outl`, and
+# `outl` with no subcommand *is* the TUI, so the `tui@<version>` reports that
+# reach Sentry come from that binary. This standalone one is a developer
+# entry point. The feature exists so the two cannot drift if it ever ships,
+# and `outl-telemetry/tests/client_manifests.rs` lists this crate for the
+# same reason.
+sentry = ["outl-telemetry/sentry"]

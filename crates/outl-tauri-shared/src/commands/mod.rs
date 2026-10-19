@@ -37,6 +37,11 @@
 //!   own scheduler); only the "what and when" is shared.
 //! - [`tasks`] and [`journal_days`]: the overview mobile's bottom bar
 //!   and week strip read: every open task, and which days hold text.
+//! - [`telemetry`] — read / write `[telemetry] enabled`, the
+//!   crash-reporting opt-out (RFC 0377). Pure config I/O, no workspace
+//!   access, and the **only** writer of that flag: the desktop's flat
+//!   `Settings` restores the section from disk on save, the way it does
+//!   for `[display] backlinks_order`.
 //! - [`theme`] — resolve a palette preset. Pure; no workspace access.
 //! - [`timeline`] — a page's history, read out of the op log.
 //! - [`trust`] — per-device activity and the plain Markdown export.
@@ -58,6 +63,7 @@ pub mod property;
 pub mod reminders;
 pub mod shortcuts;
 pub mod tasks;
+pub mod telemetry;
 pub mod template;
 pub mod theme;
 pub mod timeline;

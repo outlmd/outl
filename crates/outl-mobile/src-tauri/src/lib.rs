@@ -64,20 +64,20 @@ use tracing::info;
 
 use crate::commands::{
     add_block, attach_asset, copy_block_markdown, copy_block_ref, copy_markdown, create_block,
-    cut_block, date_title, delete_block, delete_page, edit_block, get_editor_diagrams, get_theme,
-    get_theme_config, import_asset_file, indent_block, instantiate_template_at, list_all_pages,
-    list_outline, list_templates_cmd, list_themes, move_block_after, move_block_down,
-    move_block_up, next_day, open_asset, open_external_file, open_journal_for, open_page_by_slug,
-    open_ref, open_today_journal, outdent_block, outl_emoji_search, outl_peer_list,
-    outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove, outl_peer_status, outl_sync_now,
-    page_backlinks, paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
-    plugin_install_official, plugin_list, plugin_registry_list, plugin_run, plugin_secret_remove,
-    plugin_secret_set, plugin_set_enabled, plugin_settings_describe, plugin_sync_hooks,
-    plugin_toolbar, plugin_transform, plugin_transformers, plugin_uninstall, previous_day,
-    read_asset_data_url, redo_page, reload_workspace, resolve_page_labels, resolve_ref,
-    search_blocks, search_pages, search_persons, set_backlinks_order, set_block_collapsed,
-    set_editor_diagrams, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
-    undo_page, workspace_stats,
+    cut_block, date_title, delete_block, delete_page, edit_block, get_editor_diagrams,
+    get_telemetry_enabled, get_theme, get_theme_config, import_asset_file, indent_block,
+    instantiate_template_at, list_all_pages, list_outline, list_templates_cmd, list_themes,
+    move_block_after, move_block_down, move_block_up, next_day, open_asset, open_external_file,
+    open_journal_for, open_page_by_slug, open_ref, open_today_journal, outdent_block,
+    outl_emoji_search, outl_peer_list, outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove,
+    outl_peer_status, outl_sync_now, page_backlinks, paste_block_after, paste_markdown_at,
+    paste_plain_at, plugin_config_set, plugin_install_official, plugin_list, plugin_registry_list,
+    plugin_run, plugin_secret_remove, plugin_secret_set, plugin_set_enabled,
+    plugin_settings_describe, plugin_sync_hooks, plugin_toolbar, plugin_transform,
+    plugin_transformers, plugin_uninstall, previous_day, read_asset_data_url, redo_page,
+    reload_workspace, resolve_page_labels, resolve_ref, search_blocks, search_pages,
+    search_persons, set_backlinks_order, set_block_collapsed, set_telemetry_enabled, split_block,
+    today_slug_cmd, toggle_pin, toggle_quote, toggle_todo, undo_page, workspace_stats,
 };
 // Registered on mobile for the first time by the shared command catalog
 // (`outl_tauri_shared::wrappers`): the bodies always existed, only the
@@ -155,7 +155,20 @@ fn dispatch_deep_link(app: &tauri::AppHandle, raw: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Install a `tracing` subscriber FIRST so the iroh P2P transport's
+    // Crash reporting (RFC 0377) goes up FIRST, before the subscriber and
+    // before the crypto provider, because the crashes worth the most are the
+    // ones during boot — the Android app that closed on open is what motivated
+    // this, and a reporter installed after the failing call reports nothing.
+    //
+    // `init` returns `None` unless all four conditions hold. A build without
+    // `--features sentry` links no SDK, so this is a no-op in every build but
+    // the release pipeline's.
+    //
+    // Named binding, never `let _ =`: the guard flushes pending events when
+    // dropped, and `let _ =` would drop it on this line.
+    let _telemetry = outl_telemetry::init("mobile", outl_config::telemetry_enabled());
+
+    // Install a `tracing` subscriber before anything that logs, so the iroh P2P transport's
     // `info!`/`warn!`/`debug!` lines reach the device console (on iOS, stderr
     // surfaces in idevicesyslog / Xcode). Without this the transport runs
     // blind. `RUST_LOG` overrides the default.
@@ -395,6 +408,10 @@ pub fn run() {
             merged_edits,
             drain_capture_inbox,
             undo_merged_edit,
+            // Privacy (crash reporting). The phone has no `outl` binary,
+            // so this pair is the only opt-out a mobile user has.
+            get_telemetry_enabled,
+            set_telemetry_enabled,
             // Theme
             list_themes,
             get_theme,

@@ -173,6 +173,36 @@ mod why {
         "Opening a file into outl from another app isn't wired up on mobile yet — send it to a \
          computer and open it there, or paste the text into a block.";
 
+    /// The TUI has no settings screen of any kind, so there is no
+    /// surface for a toggle to live on — and the command that does the
+    /// same job runs in the terminal the TUI was started from, which
+    /// the user already has open.
+    ///
+    /// `Missing`, not `NotApplicable`: reporting is on by default, so
+    /// the opt-out is something this user genuinely needs rather than
+    /// something the input device makes meaningless. The reach is one
+    /// command away, and the nudge names it.
+    pub const NO_TELEMETRY_TOGGLE_IN_THE_TUI: &str =
+        "Crash reporting is switched from the terminal here — run `outl telemetry off` to stop \
+         sending reports, or `outl telemetry status` to see where it stands.";
+
+    /// The TUI and the CLI both report and neither says so unprompted.
+    ///
+    /// Not a gap in the *information*: `docs/privacy.md` carries the
+    /// full field list and `outl telemetry status` answers honestly.
+    /// It is a gap in **when** the user meets it, which is the half
+    /// RFC 0377 section 6 says the legitimate-interest footing needs.
+    ///
+    /// Left open rather than closed quietly, because the obvious fix
+    /// is not obviously right: a terminal's first-run output is a
+    /// contract with whatever is reading the pipe, and printing into
+    /// somebody's script is its own defect. That is a product call,
+    /// recorded in RFC 0377's declared gaps.
+    pub const NO_PROACTIVE_NOTICE_IN_THE_TERMINAL: &str =
+        "Crash reporting is on, and the terminal does not announce it the way the apps do — run \
+         `outl telemetry status` to see where it stands, or read the full list of what a report \
+         carries at outl.app/privacy.";
+
     pub const DESKTOP_HOSTS_ONLY: &str =
         "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
          to join an existing workspace from a desktop, run `outl peer pair` in a terminal.";
@@ -408,6 +438,30 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Missing(why::NO_MOBILE_SHARE_TARGET),
         },
+        // Desktop `SettingsModal.tsx` and mobile `SettingsSheet.tsx`
+        // both carry a Privacy section holding the toggle and the
+        // shared `CRASH_REPORTS_SETTING` copy from
+        // `@outl/shared/onboarding` — GUI wording lives there, not in
+        // `outl_telemetry`, which owns the terminal strings. One owner
+        // per medium (RFC 0377 §6). The TUI has no settings screen for
+        // a toggle to live in; see
+        // `why::NO_TELEMETRY_TOGGLE_IN_THE_TUI`.
+        Capability::CrashReportingOptOut => ClientSupport {
+            tui: Missing(why::NO_TELEMETRY_TOGGLE_IN_THE_TUI),
+            desktop: Full,
+            mobile: Full,
+        },
+        // The other half of the same promise, and a separate row
+        // because a client can have either one without the other.
+        // Both GUIs mount the shared `CRASH_REPORTS_NOTICE` strip at
+        // their shell, dismissible and once. The terminal reports and
+        // says nothing until asked; `outl telemetry status` is a pull,
+        // and a pull is not a disclosure.
+        Capability::CrashReportingDisclosure => ClientSupport {
+            tui: Missing(why::NO_PROACTIVE_NOTICE_IN_THE_TERMINAL),
+            desktop: Full,
+            mobile: Full,
+        },
     }
 }
 
@@ -453,7 +507,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 16, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 18, "Capability::ALL changed size");
     }
 
     #[test]

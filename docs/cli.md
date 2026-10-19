@@ -369,10 +369,12 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl peer pair\|qr\|list\|remove\|status\|revoke-all` | —                 |
 | `outl plugin init\|search\|list\|install\|run\|config\|secret\|enable\|disable\|remove` | — |
 | `outl sync`                                  | —                       |
+| `outl telemetry status\|on\|off`             | —                       |
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
 | `outl import roam\|logseq\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
 
 `init`, `serve`, `reconcile`, `recover`, `compact`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
+`telemetry` is CLI-only for a different reason: it is a person's consent, and MCP is a program's surface rather than a person's.
 
 
 Importing a graph has its own page: [**Importing a graph**](import.md) — sources and dialect translations, what `--force` does and why re-importing is opt-in, the resumable-without-`--force` rule, and the reconciliation table that accounts for every block the source held.
@@ -605,6 +607,39 @@ On that workspace the naive rule matched 99.9% of `Move` ops and the sound predi
   Also the only route to an `ops-<ephemeral>.jsonl` this device wrote in a past session: those are ours in fact, but an ephemeral actor leaves no binding behind, so they are not ours provably.
 
 Measured: **62,209 of 217,811 ops dropped (28.6%)**, `ops/` 262MB → 195MB, materialized tree, properties and collapsed flags **byte-identical**, `outl doctor` reporting `integrity OK`.
+
+### `outl telemetry`
+
+Show or change whether this device sends crash reports.
+
+Reporting is **on by default** ([RFC 0377](rfcs/0377-crash-reporting.md)), so this command is the whole opt-out for anyone working from the TUI or the terminal.
+The desktop and mobile apps carry the same switch in their Settings, writing the same flag.
+
+```
+outl telemetry status   # is this device sending crash reports?
+outl telemetry on       # start sending them
+outl telemetry off      # stop sending them
+```
+
+**What a report carries:** the error message, where in outl's own source it happened (`file:line`), which client it was, its version, your OS and your CPU architecture.
+
+**What it never carries:** page titles, block text, file paths, your workspace location, your hostname, your username, or an account — there isn't one.
+Nothing in a report joins two of them into one person.
+The full account of what is sent, where it goes and how long it is kept lives in [privacy.md](privacy.md).
+
+The flag is `[telemetry] enabled` in `~/.config/outl/config.toml` — device-local, not per-workspace.
+It is read at process start, before a workspace exists, which is exactly when a boot crash happens.
+Consent is a property of the person rather than of the hardware, so a replicated `~/.config` carrying it to the next machine is the behaviour we want here, unlike the device actor.
+
+Two things the command refuses to do quietly:
+
+- **`status` never answers from a default.**
+  A `config.toml` it cannot parse is named, and the command exits non-zero, because printing the on-by-default as though you had chosen it is the worst thing a switch like this can say.
+- **`on` / `off` refuse to write over a config that did not parse.**
+  They write the whole struct, so saving there would replace your theme, `vim_mode`, timezone and `[sync] transport` with defaults.
+  Fix the file the error names, then run the verb again.
+
+There is deliberately no generic `outl config set <key> <value>`: that needs a schema story for every key in `Config`, which is a much larger change than the one boolean this command owns.
 
 ### `outl page history` / `outl block history`
 

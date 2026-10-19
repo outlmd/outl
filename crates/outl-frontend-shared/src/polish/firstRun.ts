@@ -2,9 +2,27 @@
  * The 30-second tour: three tips (blocks, links, daily) shown in the
  * empty state until the user dismisses them. Same words on both
  * clients; only the gesture hint differs.
+ *
+ * This file also owns **"show it once, then remember"** for every
+ * first-run surface, which is why the crash-reports key sits here next
+ * to the tour's. One pair of accessors over one defensive store, so a
+ * second surface cannot pick up its own idea of what a failed write
+ * means (it means: show it once more, never crash).
  */
 
 export const TIPS_KEY = "outl.first-run-tips";
+
+/**
+ * Dismissal key for the crash-reporting strip (RFC 0377 section 6).
+ *
+ * Separate from {@link TIPS_KEY} because the two are not the same
+ * event. The tour teaches the app and only ever appears on an empty
+ * page; this strip is a disclosure that has to reach an existing user
+ * on the first launch after upgrading, whose journal is not empty.
+ * Sharing a key would mean anyone who had dismissed the tour never saw
+ * the disclosure at all.
+ */
+export const CRASH_NOTICE_KEY = "outl.crash-reports-notice";
 
 export type TipClient = "desktop" | "mobile";
 
@@ -59,14 +77,23 @@ function safeStore(): Store | null {
   }
 }
 
-export function tipsDismissed(store: Store | null = safeStore()): boolean {
-  return store?.getItem(TIPS_KEY) === "done";
+/**
+ * Has this device already dismissed the surface stored under `key`?
+ *
+ * Device-local on purpose (`UX.md` principle 5): "I have read this" is
+ * view state and must not converge to another machine, so it never
+ * becomes an Op.
+ */
+export function dismissedOnce(key: string, store: Store | null = safeStore()): boolean {
+  return store?.getItem(key) === "done";
 }
 
-export function dismissTips(store: Store | null = safeStore()): void {
+/** Remember that the surface under `key` was dismissed. */
+export function dismissOnce(key: string, store: Store | null = safeStore()): void {
   try {
-    store?.setItem(TIPS_KEY, "done");
+    store?.setItem(key, "done");
   } catch {
-    // Not persisting just means the tips show once more.
+    // A store that will not take the flag just shows the surface once
+    // more. Never a thrown error in front of someone who was writing.
   }
 }

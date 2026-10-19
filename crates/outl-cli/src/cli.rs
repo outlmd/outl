@@ -301,6 +301,15 @@ pub(crate) enum Command {
         #[command(subcommand)]
         sub: Option<ThemeSubcommand>,
     },
+    /// Show or change whether this device sends crash reports.
+    ///
+    /// Reporting is on by default and never carries note content.
+    /// This is the whole opt-out for the TUI and the terminal; the
+    /// desktop and mobile apps have the same switch in Settings.
+    Telemetry {
+        #[command(subcommand)]
+        sub: cmd::telemetry::TelemetrySubcommand,
+    },
     /// Import a graph from another outliner.
     Import {
         /// Source format: `roam` (JSON file), `logseq` (graph

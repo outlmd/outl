@@ -250,7 +250,7 @@ User-facing spec: [`reminders.md`](reminders.md).
 | Local wall clock ↔ epoch ms, resolved through the configured timezone (never `chrono::Local` directly) | `outl_actions::local_naive_to_epoch_ms` / `epoch_ms_to_local_naive` | `crates/outl-actions/src/reminders/mod.rs` |
 | Read a block's converged snooze instant | `outl_core::tree::Tree::snoozed_until` / `snoozed_ids` | `crates/outl-core/src/tree/mod.rs` |
 | Every node carrying a given property key, without a tree walk (the transpose of `properties_of`; `O(total properties)`, materializes no block text) | `outl_core::tree::Tree::nodes_with_property` | `crates/outl-core/src/tree/mod.rs` |
-| Device-local delivery preferences (`enabled`, quiet hours as `(start, end)` minutes) | `outl_config::RemindersCfg` / `RemindersCfg::quiet_window` | `crates/outl-config/src/schema.rs` |
+| Device-local delivery preferences (`enabled`, quiet hours as `(start, end)` minutes) | `outl_config::RemindersCfg` / `RemindersCfg::quiet_window` | `crates/outl-config/src/schema/schedule.rs` |
 | Deliver what came due + update the device-local fired log (7-day TTL, `<root>/.outl/reminders-fired.json` — a dotfile so it never rides the sync surface). In `outl-actions` because **every** client delivers, the TUI included; behind the Tauri layer the TUI couldn't reach it | `outl_actions::take_due` (+ `load_fired_log` / `save_fired_log` / `fired_log_path` / `FIRED_TTL_DAYS`) | `crates/outl-actions/src/reminders/fired.rs` |
 | Format "in 3h" / "tomorrow 09:00" and bucket a list Today / Tomorrow / This week / Later / Done (shared by both GUI clients) | `@outl/shared` `formatNextFire` / `groupReminders` | `crates/outl-frontend-shared/src/api/commands.ts` |
 

@@ -1,0 +1,33 @@
+[package]
+name = "outl-telemetry"
+description = "Crash reporting gate and payload scrubber: the single owner of what may leave a user's machine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[features]
+# OFF by default, and `the_sentry_feature_is_off_by_default` fails if that
+# changes. Somebody who clones the repo and runs `cargo build --release` must
+# not link a reporter at all — `cfg(debug_assertions)` cannot express that,
+# because it is false in *their* release build too (RFC 0377 §2, condition 1).
+default = []
+sentry = ["dep:sentry"]
+
+[dependencies]
+regex = { workspace = true }
+sentry = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
+# `tests/client_manifests.rs` reads the four client manifests to check that
+# none of them switches the reporter on by default. Parsed rather than
+# grepped: a textual check passes against `default = [ "sentry" ]` written
+# with different spacing, and this is the test standing between a `git clone`
+# and a reporter nobody asked for.
+toml = { workspace = true }

@@ -28,6 +28,7 @@ pub mod search;
 pub mod serve;
 pub mod sync_supervisor;
 pub mod tag;
+pub mod telemetry;
 pub mod template;
 pub mod theme;
 pub mod trash;

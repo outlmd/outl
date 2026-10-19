@@ -212,7 +212,7 @@ paired device. Tracked separately.
   - `crates/outl-core/src/storage/jsonl.rs` (LRU + cap + index wiring)
   - `crates/outl-core/src/storage/mod.rs` (`Storage::resize_cache`)
   - `crates/outl-core/src/workspace.rs` (`Workspace::apply_lru_cap`)
-  - `crates/outl-config/src/schema.rs` (`[storage] lru_cap`)
+  - `crates/outl-config/src/schema/storage.rs` (`[storage] lru_cap`)
 
 [src-cache]: https://github.com/outlmd/outl/blob/main/crates/outl-core/src/storage/jsonl.rs#L42
 [src-reload]: https://github.com/outlmd/outl/blob/main/crates/outl-core/src/storage/jsonl.rs#L92

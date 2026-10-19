@@ -127,7 +127,7 @@ A user's `.gitignore` cannot exclude the required paths (`ops/`, `pages/`, `jour
 | Is `git` usable? / does this workspace have a repo? / where is it? | `outl_actions::backup::git_available` / `is_initialized` / `repo_dir` | `crates/outl-actions/src/backup/mod.rs` |
 | Drive an explicit `(git dir, work tree)` pair instead of the derived one | `outl_actions::backup::BackupRepo::at` | `crates/outl-actions/src/backup/repo.rs` |
 | Why a backup failed (incl. `OpLogNotCaptured` — a snapshot missing `ops/` is an error, not a success) | `outl_actions::backup::BackupError` | `crates/outl-actions/src/backup/mod.rs` |
-| Device-local preference (`enabled` defaults **on**, `interval_minutes`) | `outl_config::BackupCfg` | `crates/outl-config/src/schema.rs` |
+| Device-local preference (`enabled` defaults **on**, `interval_minutes`) | `outl_config::BackupCfg` | `crates/outl-config/src/schema/storage.rs` |
 
 Backed up: `ops/` (the source of truth), `pages/`, `journals/`, `templates/`, `assets/`, `.outl/config.toml`.
 Excluded: derived caches that the next boot rebuilds — `.outl/snapshots/`, `*.idx`, locks, `*.tmp`.

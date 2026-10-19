@@ -5,6 +5,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **outl reports crashes, on by default, and your notes are never part of it.**
+  A client that breaks on a device we do not own breaks silently: there is no server and no log, and the only signal was a user who cared enough to open an issue.
+  The Android app that closed on open on 16 KB devices is the shape of it.
+  When outl crashes it now sends the crash to Sentry, which is how a crash on a device we do not have gets fixed, and by sending it you are helping improve the product.
+  A report carries the client name, version, OS, CPU architecture, the file name and line where the panic happened and the panic message after a scrubber has removed paths, page identifiers and anything `std` quoted back at us.
+  It never carries page titles, block text, file paths, hostname, username, environment variables, your IP address, or any identifier that persists, so two reports cannot be tied to the same person.
+  Note data is private and is not sent.
+  Only panics are reported, not handled errors, performance data or usage events, and there is still no analytics.
+  Builds you compile yourself contain no Sentry key and report nothing, and no client reports from inside CI.
+  If the config file holding your choice cannot be read, nothing is sent: that file is the only record of your answer, and the default is the opposite of what someone who turned it off asked for.
+  The first time the desktop or mobile app opens after this, a strip at the bottom says so and names where to switch it off, and it stays dismissed once you dismiss it.
+  The terminal does not announce it that way, which is recorded as a gap rather than fixed: printing into somebody's pipeline is its own defect, so `outl telemetry status` and the published policy are the terminal's disclosure for now.
+  To turn it off, use Settings, Privacy on desktop and mobile, or `outl telemetry off` in the terminal (`status` and `on` are there too, and `OUTL_TELEMETRY=0` silences one run).
+  `docs/privacy.md` used to say there would be no crash reporting and, later, that it would be opt-in; it now describes what ships, which is opt-out.
+  The App Store declarations move with it: App Privacy declares Crash Data and Other Diagnostic Data, neither linked to you, purpose App Functionality, `PrivacyInfo.xcprivacy` carries the same two, and the Play Data Safety form is in the Android release checklist.
+  Crashes in Kotlin or Objective-C code are not covered, only Rust ([RFC 0377](docs/rfcs/0377-crash-reporting.md)).
+
 ### Changed
 
 - **The workspace builds with Rust 1.99.**

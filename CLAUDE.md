@@ -327,6 +327,7 @@ outl/
     ├── outl-import/           # adapter-based graph importers (Roam, Logseq, Obsidian + auto-detect)
     ├── outl-config/           # `outl.toml` parsing + schema
     ├── outl-theme/            # palette + presets (TUI + desktop)
+    ├── outl-telemetry/        # crash-report gate + payload scrubber (the one owner of what leaves the machine)
     ├── outl-cli/              # `outl` binary
     ├── outl-tui/              # `outl-tui` binary
     ├── outl-mobile/           # Tauri 2 mobile app (iOS first)

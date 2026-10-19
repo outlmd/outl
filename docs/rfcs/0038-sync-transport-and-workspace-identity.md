@@ -157,7 +157,7 @@ It also means a workspace whose `.outl/` is read-only pairs successfully and nev
    - Six `iroh_endpoint_addr_*` tests plus `is_reachable_lan_ipv4_matches_only_local_subnets` (`crates/outl-sync-iroh/src/peers.rs`) pin #133 issue 3.
      They cover keeping relay + on-LAN IPv4, dropping IPv6, dropping stale VPN IPv4, and the three fallbacks that must survive a missing relay, a bare id and a corrupt stored address.
    - `refresh_peer_direct_addr_replaces_stale_keeps_relay_and_is_idempotent` (`crates/outl-sync-iroh/src/peers.rs`) pins the inbound self-heal.
-   - `empty_config_defaults_to_iroh_transport` and `sync_relay_url_is_returned_when_set` (`crates/outl-config/src/schema.rs`) pin the default and the relay override.
+   - `empty_config_defaults_to_iroh_transport` and `sync_relay_url_is_returned_when_set` (`crates/outl-config/src/schema/sync.rs`) pin the default and the relay override.
    - `snapshot_transfers_from_peer_on_pair`, `backlog_below_watermark_crosses_after_gap_detected` and `full_actor_resend_converges_and_dedups` (`crates/outl-sync-iroh/tests/regression.rs`) pin #120.
      History has to reach a device that joined late, and reach it exactly once.
 

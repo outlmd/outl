@@ -73,6 +73,20 @@ mod tests {
              PeerPairing verdict for mobile must track that.",
         );
 
+        // Sharper than the rows above: reporting is on by default, so a
+        // mobile build without this pair is a build with no opt-out at
+        // all, and the phone has no `outl` binary to fall back on.
+        let _ = crate::commands::get_telemetry_enabled;
+        let _ = crate::commands::set_telemetry_enabled;
+        assert_eq!(
+            capability_support(Capability::CrashReportingOptOut).mobile,
+            Support::Full,
+            "outl-mobile registers get_telemetry_enabled / set_telemetry_enabled \
+             (SettingsSheet's Privacy row) — the catalog's CrashReportingOptOut \
+             verdict for mobile must track that, because a downgrade here means \
+             a user with no way to turn reporting off.",
+        );
+
         let _ = crate::commands::reminder_action_catalog;
         assert_eq!(
             capability_support(Capability::ReminderNotificationActions).mobile,

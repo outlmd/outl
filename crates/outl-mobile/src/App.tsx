@@ -2,6 +2,7 @@ import { Show, createSignal, onCleanup, onMount } from "solid-js";
 
 import { getThemeConfig } from "@outl/shared/api/commands";
 import { setDiagramsMode } from "@outl/shared/diagram";
+import { CrashReportsNotice } from "@outl/shared/polish";
 import { installTheme } from "@outl/shared/theme";
 
 import { getEditorDiagrams } from "./lib/api";
@@ -95,6 +96,11 @@ function App() {
         fallback={<Onboarding onFinish={finishOnboarding} />}
       >
         <Journal />
+        {/* After onboarding, never during it: the flow already owns the
+         *  screen, and a disclosure stacked on it is one more thing to
+         *  get past. `fixed`, so it is not a row in this flex column
+         *  (RFC 0377 section 6). */}
+        <CrashReportsNotice />
       </Show>
     </div>
   );

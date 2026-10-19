@@ -145,6 +145,41 @@ pub enum Capability {
     /// on those two. The TUI has no diagram surface and keeps the
     /// fence as source either way.
     DiagramRendering,
+    /// Turning crash reporting off.
+    ///
+    /// Reports are **on by default** (RFC 0377), so a client without
+    /// this is a client whose user has no opt-out — and the
+    /// legitimate-interest footing the whole feature stands on is the
+    /// user's ability to say no. That makes a missing toggle a legal
+    /// problem, not a thinner settings screen.
+    ///
+    /// Not about *what* gets sent: the allowlist lives in
+    /// `outl_telemetry` and is identical on every client, as is the
+    /// promise that no note text is part of it. This row is only
+    /// whether the person on the device can switch it off from where
+    /// they are.
+    CrashReportingOptOut,
+    /// Telling the user, unprompted, that crashes are sent.
+    ///
+    /// The sibling of [`Capability::CrashReportingOptOut`] and not the
+    /// same question. That row asks whether the user *can* say no;
+    /// this one asks whether they were ever told there was something
+    /// to say no to.
+    ///
+    /// Both halves are load-bearing for the same reason, and RFC 0377
+    /// section 6 is explicit about it: reporting is on by default, so
+    /// the legitimate-interest footing rests on **disclosure coming
+    /// first**. A user whose first notice is reading the source has
+    /// not been disclosed to, and a client that reports without ever
+    /// saying so has the opt-out and still not the consent story.
+    ///
+    /// "Proactive" is the whole content of the verdict. `outl
+    /// telemetry status` answers truthfully and answers only when
+    /// asked, which is a different thing from arriving unasked, so a
+    /// client that has the command and no notice is `Missing` here
+    /// rather than `Full`. `docs/privacy.md` is disclosure too, and it
+    /// is not in the product.
+    CrashReportingDisclosure,
 }
 
 impl Capability {
@@ -173,6 +208,8 @@ impl Capability {
         Capability::CaptureOutsideTheApp,
         Capability::TaskList,
         Capability::DiagramRendering,
+        Capability::CrashReportingOptOut,
+        Capability::CrashReportingDisclosure,
     ];
 }
 
@@ -184,7 +221,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_16: usize = 16;
+    const EXPECTED_18: usize = 18;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -204,6 +241,8 @@ mod tests {
             Capability::CaptureOutsideTheApp => "CaptureOutsideTheApp",
             Capability::TaskList => "TaskList",
             Capability::DiagramRendering => "DiagramRendering",
+            Capability::CrashReportingOptOut => "CrashReportingOptOut",
+            Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
         }
     }
 
@@ -220,9 +259,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_16,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_16} variants. \
-             Add the new variant to Capability::ALL (and bump EXPECTED_16).",
+            EXPECTED_18,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_18} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_18)",
             names.len(),
         );
     }

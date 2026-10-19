@@ -46,6 +46,9 @@
 //!
 //! [display]
 //! backlinks_order = "newest"   # "newest" (default) | "oldest"
+//!
+//! [telemetry]
+//! enabled = true        # default; crash reports only, never note content
 //! ```
 //!
 //! All fields are optional — missing values fall back to
@@ -75,8 +78,8 @@ mod tui;
 pub use paths::{config_dir, config_path};
 pub use schema::{
     AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DiagramsMode, DisplayCfg, EditorCfg,
-    RemindersCfg, SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, ThemeCfg, ThemeMode,
-    WorkspaceCfg,
+    RemindersCfg, SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, TelemetryCfg, ThemeCfg,
+    ThemeMode, WorkspaceCfg,
 };
 pub use tui::{TuiCfg, TuiIconStyle};
 
@@ -126,6 +129,24 @@ impl Loaded {
             ConfigSource::Unreadable(detail) => Some(detail),
             _ => None,
         }
+    }
+
+    /// Whether this device consents to crash reporting, with an
+    /// unreadable file counting as **no**.
+    ///
+    /// The reason this is a method on the verdict rather than a read of
+    /// `config.telemetry.enabled` is that the two answers differ exactly
+    /// when it matters. `Config::default()` carries `enabled = true`, so
+    /// a caller reading the field off an `Unreadable` load turns a
+    /// recorded opt-out into consent — silently, on the next launch,
+    /// for a user who had typed `outl telemetry off`.
+    ///
+    /// `Missing` keeps the default on: a first launch has no answer to
+    /// contradict. `Unreadable` fails closed, because a lost report
+    /// costs us a crash we never hear about and the other direction
+    /// costs the user a promise.
+    pub fn telemetry_enabled(&self) -> bool {
+        self.error().is_none() && self.config.telemetry.enabled
     }
 
     /// The sentence a client shows the user when the file could not be
@@ -226,6 +247,33 @@ pub fn load_from(path: &Path) -> Config {
 /// the app coming back in light mode (issue #284).
 pub fn load_result() -> Loaded {
     load_result_from(&config_path())
+}
+
+/// Whether this device consents to crash reporting, answered so that a file
+/// we could not read means **no**.
+///
+/// Every other preference degrades safely through [`load`]: an unreadable
+/// `config.toml` falls back to defaults, the user sees stock colours, and
+/// nothing has happened that cannot be undone by fixing the file. This one
+/// field is different, because its default is `true` and the thing it
+/// authorises is sending data off the machine. A user who ran
+/// `outl telemetry off` and later picked up a stray bracket in that file —
+/// or received it half-written from another device over the file transport —
+/// would have had their recorded "no" replaced by the default "yes" on the
+/// next launch, with only a `tracing::warn!` to say so.
+///
+/// So the verdict is consulted, not just the value. `Missing` keeps the
+/// default: a first launch has no answer to contradict, and on-by-default is
+/// the decision RFC 0377 records. `Unreadable` fails closed, the same
+/// direction `outl_telemetry::suppressed_by_ci` argues for — a lost report
+/// costs us a crash we never hear about, and the other way costs the user a
+/// promise.
+///
+/// The single owner on purpose: four binaries gate on this, plus the Tauri
+/// command behind both GUI toggles, and five callers reading
+/// `load().telemetry.enabled` is five chances to reintroduce the fallback.
+pub fn telemetry_enabled() -> bool {
+    load_result().telemetry_enabled()
 }
 
 /// [`load_result`] against a specific path.

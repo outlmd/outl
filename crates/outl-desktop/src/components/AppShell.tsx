@@ -11,6 +11,7 @@ import {
 import type { PageView } from "@outl/shared/api/types";
 import { installForegroundRefresh } from "@outl/shared/capture";
 import { flattenAll } from "@outl/shared/outline";
+import { CrashReportsNotice } from "@outl/shared/polish";
 
 import {
   appState,
@@ -409,6 +410,11 @@ export function AppShell() {
       <RemindersPanel applyView={applyView} setError={setError} />
       <TimelinePanel setError={setError} applyView={applyView} />
       <PluginEffectLayer />
+      {/* Shell level, not above the outline: it is a statement about the
+       *  app, so it must not re-run its dismissed check on every page
+       *  navigation, and it does not belong in the stack of banners that
+       *  report *this page's* health (RFC 0377 section 6). */}
+      <CrashReportsNotice />
       {/* Mounted last so the notification toast sits above every chrome
        *  element (ChromeToggleBar, overlays) in the stacking order. */}
       <ErrorToast />
