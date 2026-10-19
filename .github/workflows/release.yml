@@ -76,6 +76,18 @@ on:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      # Runs every build and every check against the branch it is
+      # dispatched on, and touches nothing outside this run: no tag, no
+      # draft release, no asset upload, no tap bump, no npm or crates.io
+      # publish. A change to this file, or to a step only this workflow
+      # runs (the strip gates, the bundlers), is otherwise first exercised
+      # by the beta it cuts on main. Push events carry no inputs, so they
+      # read this as false and behave exactly as before.
+      dry_run:
+        description: "Build and verify every artifact, publish nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -97,6 +109,7 @@ jobs:
       tag: ${{ steps.compute.outputs.tag }}
       prerelease: ${{ steps.compute.outputs.prerelease }}
       create_tag: ${{ steps.compute.outputs.create_tag }}
+      dry_run: ${{ steps.compute.outputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -117,6 +130,11 @@ jobs:
             CREATE_TAG="true"
           fi
 
+          DRY_RUN='${{ inputs.dry_run == true }}'
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            CREATE_TAG="false"
+          fi
+
           # Anything containing -alpha / -beta / -rc is a prerelease.
           if [[ "${VERSION}" == *-alpha* || "${VERSION}" == *-beta* || "${VERSION}" == *-rc* ]]; then
             PRERELEASE="true"
@@ -129,7 +147,8 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
           echo "create_tag=${CREATE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Building ${TAG} (prerelease=${PRERELEASE})"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Building ${TAG} (prerelease=${PRERELEASE}, dry_run=${DRY_RUN})"
 
   tag:
     name: Create tag
@@ -158,7 +177,11 @@ jobs:
     name: Create draft release
     needs: [prepare, tag]
     # `tag` is skipped for tag-triggered runs; don't let that fail us.
-    if: always() && needs.prepare.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.dry_run != 'true' &&
+      (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       # Check out the commit, not the tag we just pushed. The runner
@@ -208,7 +231,8 @@ jobs:
     needs: [prepare, create_release]
     if: >-
       !cancelled() &&
-      needs.create_release.result == 'success'
+      (needs.create_release.result == 'success' ||
+       (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -494,6 +518,7 @@ jobs:
           "${PY}" scripts/check-artifact-stripped.py "${ARTIFACTS[@]}"
 
       - name: Upload assets to draft release
+        if: needs.prepare.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -529,7 +554,8 @@ jobs:
     needs: [prepare, create_release]
     if: >-
       !cancelled() &&
-      needs.create_release.result == 'success'
+      (needs.create_release.result == 'success' ||
+       (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-6vcpu-macos-15
     # Single universal dmg instead of a matrix split. Tauri 2's
     # `--target universal-apple-darwin` builds both aarch64 and
@@ -719,6 +745,7 @@ jobs:
           python3 scripts/check-artifact-stripped.py "${APP}"
 
       - name: Upload dmg to draft release
+        if: needs.prepare.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -734,7 +761,8 @@ jobs:
     needs: [prepare, create_release]
     if: >-
       !cancelled() &&
-      needs.create_release.result == 'success'
+      (needs.create_release.result == 'success' ||
+       (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     # Pinned to 22.04 on purpose: AppImage/.deb/.rpm link against the
     # runner's glibc + webkit2gtk, so building on the oldest supported
     # image gives the widest downstream compatibility. `ubuntu-latest`
@@ -921,6 +949,7 @@ jobs:
           python3 scripts/check-artifact-stripped.py "${WORK}/appimage" "${WORK}/deb"
 
       - name: Upload bundles to draft release
+        if: needs.prepare.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -940,7 +969,8 @@ jobs:
     needs: [prepare, create_release]
     if: >-
       !cancelled() &&
-      needs.create_release.result == 'success'
+      (needs.create_release.result == 'success' ||
+       (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1101,6 +1131,7 @@ jobs:
           "${PY}" scripts/check-artifact-stripped.py target/release/outl-desktop.exe
 
       - name: Upload installer to draft release
+        if: needs.prepare.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -1117,7 +1148,8 @@ jobs:
     needs: [prepare, create_release]
     if: >-
       !cancelled() &&
-      needs.create_release.result == 'success'
+      (needs.create_release.result == 'success' ||
+       (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-8vcpu-ubuntu-2404
     # Optimized (release-build) APK, debug-signed, attached to the GitHub
     # Release (no Google Play). Like iOS, the build is RELEASE (optimized);
@@ -1383,6 +1415,7 @@ jobs:
         run: python3 scripts/check-artifact-stripped.py outl-android-arm64.apk
 
       - name: Upload APK to draft release
+        if: needs.prepare.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         # Two decisions meet here and close the recovery path, so the step
@@ -1442,6 +1475,7 @@ jobs:
     # is already uploaded before we flip the draft to published.
     if: >-
       !cancelled() &&
+      needs.prepare.outputs.dry_run != 'true' &&
       needs.build.result == 'success' &&
       needs.build_desktop.result == 'success' &&
       needs.build_desktop_linux.result == 'success' &&
@@ -1603,7 +1637,7 @@ jobs:
     #   job is a two-second `npm publish`, so the runner choice costs nothing.
     # - npm >= 11.5.1 (Node 24 ships it). Older npm ignores OIDC and fails
     #   with ENEEDAUTH.
-    if: needs.prepare.result == 'success'
+    if: needs.prepare.result == 'success' && needs.prepare.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04
     # Keeps the environment's protection rules on the publish; the trusted
     # publisher entry on npmjs.com names this environment.
@@ -1687,7 +1721,7 @@ jobs:
     # Only the embedder closure publishes (`outl-ws` -> `outl-actions` ->
     # {`outl-core`, `outl-md`, `outl-exec`}); every other crate carries
     # `publish = false` in its manifest.
-    if: needs.prepare.result == 'success'
+    if: needs.prepare.result == 'success' && needs.prepare.outputs.dry_run != 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # `CARGO_REGISTRY_TOKEN` lives in the `release` environment.
     environment: release
