@@ -511,3 +511,72 @@ fn query_negative_filters_reach_the_handler_over_mcp() {
         );
     }
 }
+
+#[test]
+fn page_prop_delete_via_mcp() {
+    let ws = init_workspace();
+    let mut client = McpClient::spawn(ws.path());
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "protocolVersion": "2024-11-05", "capabilities": {} }
+    }));
+    let tools = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list"
+    }));
+    let listed = tools["result"]["tools"]
+        .as_array()
+        .expect("tools list")
+        .iter()
+        .any(|t| t["name"] == "outl_page_prop_delete");
+    assert!(listed, "outl_page_prop_delete must be registered");
+
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_page_create",
+            "arguments": { "slug": "hb", "title": "HB" }
+        }
+    }));
+    let _ = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_page_prop_set",
+            "arguments": { "page": "hb", "key": "foo", "value": "bar" }
+        }
+    }));
+    let deleted = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_page_prop_delete",
+            "arguments": { "page": "hb", "key": "foo" }
+        }
+    }));
+    let data = success_data(&deleted["result"]);
+    assert_eq!(data["key"], "foo");
+
+    let get = client.call(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "outl_page_prop_get",
+            "arguments": { "page": "hb", "key": "foo" }
+        }
+    }));
+    assert_eq!(get["result"]["isError"], true);
+    let text = get["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("PROP_NOT_FOUND"),
+        "deleted key must be gone, got {text}"
+    );
+}

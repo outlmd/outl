@@ -48,6 +48,16 @@ pub enum PropCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Remove a page property: `outl page prop delete <page> <key>`.
+    Delete {
+        /// Page slug.
+        page: String,
+        /// Property key.
+        key: String,
+        /// Force JSON output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Run a `outl page prop …` invocation.
@@ -85,6 +95,13 @@ pub fn run(cmd: &PropCommand, path: &Path) -> i32 {
                 }
             })
         }
+        PropCommand::Delete { page, key, json } => {
+            let result = ws::open(path).and_then(|mut ctx| delete(&mut ctx, page, key));
+            emit(*json, result, |v| {
+                let key = v.get("key").and_then(Value::as_str).unwrap_or("?");
+                println!("deleted: {key}");
+            })
+        }
     }
 }
 
@@ -116,6 +133,25 @@ pub fn set_kv(ctx: &mut WsCtx, page: &str, key: &str, value: &str) -> Result<Val
         set_property(ws, &hlc, id, key, Some(PropValue::Text(owned)))
     })?;
     Ok(json!({ "page": page, "key": key, "value": value }))
+}
+
+/// Remove `key` from `page`.
+///
+/// This is `Op::SetProp { value: None }`, which `do_op` already treats
+/// as removal. An empty string is a stored value, not a delete — that
+/// is what `set` writes, and the projection omits it. The op is
+/// appended even when this device does not currently hold the key, so
+/// a peer that set it later still converges.
+pub fn delete(ctx: &mut WsCtx, page: &str, key: &str) -> Result<Value, ApiError> {
+    let key = outl_actions::property::normalize_key(key);
+    if let Some(why) = outl_actions::property::key_rejection(&key) {
+        return Err(ApiError::new(codes::INVALID_ARG, why));
+    }
+    let id = resolve_page(ctx, page)?;
+    let hlc = ctx.hlc.clone();
+    let key_owned = key.clone();
+    ctx.commit_with(id, |ws| set_property(ws, &hlc, id, &key_owned, None))?;
+    Ok(json!({ "page": page, "key": key }))
 }
 
 /// Get a property by key. Returns `null` value when unset.

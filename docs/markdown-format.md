@@ -48,6 +48,12 @@ status:: active
 - first block...
 ```
 
+A value that is empty or only whitespace is not written.
+`render` skips it, on a page and on a block, so a bare `key::` does not stay in the file.
+The parser still accepts that line and stores `""`.
+Removing the key is a separate write: `Op::SetProp` with no value (`outl page prop delete`).
+Storing an empty string (`outl page prop set key=`) keeps the key in the op log and still omits the line.
+
 The `type::` key carries the page's semantic kind and is consumed by surfaces that filter pages by role — `type:: person` is the canonical example, recognised by the `@` mention autocomplete (see [§Mentions](#mentions-name)).
 Other types (`type:: project`, `type:: meeting`, …) are free-form today; the autocomplete only filters on `person`.
 

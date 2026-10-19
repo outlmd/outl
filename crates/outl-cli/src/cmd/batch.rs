@@ -283,6 +283,11 @@ fn apply_op(ctx: &mut WsCtx, op: &str, args: &Value) -> Result<Value, ApiError> 
             let value = require_str(args, "value")?;
             prop_cmd::set_kv(ctx, page, key, value)
         }
+        "page_prop_delete" => {
+            let page = require_str(args, "page")?;
+            let key = require_str(args, "key")?;
+            prop_cmd::delete(ctx, page, key)
+        }
         other => Err(ApiError::new(
             codes::INVALID_ARG,
             format!("unknown batch op `{other}`"),

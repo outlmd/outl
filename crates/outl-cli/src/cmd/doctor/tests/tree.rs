@@ -206,3 +206,66 @@ fn a_missing_sidecar_over_diverged_content_is_never_repaired() {
     );
     assert!(repaired.repair.is_none(), "there was nothing safe to do");
 }
+
+/// A bare `foo::` is what an older render wrote for `PropValue::Text("")`.
+/// The value is in the op log, so this is ordinary projection drift:
+/// `--repair` rewrites the `.md` and the line goes away.
+#[test]
+fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
+    let (_dir, root, paths) = fresh();
+    let page = seed_page(&root, "notes", &["hello"]);
+
+    {
+        let mut ctx = crate::ws::open(&root).expect("open");
+        outl_actions::set_property(
+            &mut ctx.workspace,
+            &ctx.hlc,
+            page,
+            "foo",
+            Some(outl_core::property::PropValue::Text(String::new())),
+        )
+        .expect("store the empty value");
+    }
+
+    let md = paths.pages.join("notes.md");
+    let before = std::fs::read_to_string(&md).unwrap();
+    let planted = format!("foo::\n{before}");
+    std::fs::write(&md, &planted).unwrap();
+    let sidecar_path = outl_md::sidecar::sidecar_path_for(&md);
+    let mut sidecar = outl_md::sidecar::read(&sidecar_path).expect("sidecar");
+    sidecar.last_synced_hash = outl_md::sidecar::file_hash(&planted);
+    outl_md::sidecar::write(&sidecar_path, &sidecar).expect("stamp the planted hash");
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "stale projection"),
+        "a ghost `foo::` is stale projection, got: {:#?}",
+        messages(&report)
+    );
+    assert!(
+        has(&report, "removes 0 content line"),
+        "a property line is not block content, got: {:#?}",
+        messages(&report)
+    );
+    assert!(
+        !has(&report, "exist in no op"),
+        "the empty value is in the log, so this must not be unlogged content: {:#?}",
+        messages(&report)
+    );
+
+    let repaired = collect(&root, true).expect("doctor --repair runs");
+    let rep = repaired.repair.expect("a repair report");
+    assert_eq!(rep.failed, 0, "repair actions: {:#?}", rep.actions);
+    let after = std::fs::read_to_string(&md).unwrap();
+    assert_eq!(
+        after, before,
+        "repair rewrites the page to the projection the log holds"
+    );
+    let backup = Path::new(&rep.backup_dir).join("pages").join("notes.md");
+    assert_eq!(
+        std::fs::read_to_string(&backup).unwrap(),
+        planted,
+        "the ghost line stays recoverable from {}",
+        backup.display()
+    );
+}

@@ -36,6 +36,8 @@ The only thing a default run writes is its own stdout.
   See [`docs/cli.md`](cli.md#trash) for the command and what it declines.
 - **Unmaterialized ops** — node ids the op log touches that never landed in the tree, i.e. `Edit` / `SetProp` / `SetCollapsed` whose effect you will never see.
 - **Projection drift** — every page in the op log compared against its `.md` on disk: missing files, stale projections, missing sidecars.
+  A bare `key::` left by an older render of an empty value is a stale projection.
+  The empty value is already an op, so this is not content the log never saw, and `--repair` rewrites the page without that line.
 - **`.md` content that never reached the op log** — a page whose sidecar agrees with the bytes on disk (so it looks like a merely *stale* projection) but which holds lines that exist in no op.
   Reported with the count and one of the lines, and **`--repair` leaves it alone**.
   Re-rendering the tree over it would delete that content and rebuild the sidecar from the same render, so nothing afterwards could tell the page had ever held more.

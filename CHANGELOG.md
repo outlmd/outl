@@ -14,6 +14,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Deleting a page property no longer leaves a bare `key::` line in the `.md`.**
+  `outl page prop set hb foo=` stored an empty string.
+  `prop list` stopped showing `foo`, and `render` kept writing `foo::` with nothing after it.
+  `outl page prop delete <page> <key>` (MCP `outl_page_prop_delete`, batch op `page_prop_delete`) appends `Op::SetProp` with no value, which removes the key.
+  The projection skips a property whose value is empty or only whitespace, so an empty string already in the log stops appearing on disk.
+  `outl doctor` reports that leftover line as a stale projection, and `--repair` rewrites the page without it.
+
 - **The Android app says why when it cannot start, instead of closing on open.**
   When a device refuses the app's native library — the 16 KB page-size failure above, or an ABI the APK does not carry — the load error surfaced inside Tauri's own startup and killed the app with nothing on screen.
   The app now checks the library first and, if it did not load, shows a screen saying so, with the device's ABI and page size and a link to the issue tracker, and logs the same facts to logcat under `outl`.

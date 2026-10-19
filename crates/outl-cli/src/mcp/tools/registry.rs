@@ -434,6 +434,18 @@ pub fn list() -> Vec<Value> {
                 "required": ["page"]
             }),
         ),
+        tool_def(
+            "outl_page_prop_delete",
+            "Remove a page property. Writes SetProp with no value, so the key leaves the tree and the .md.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "page": { "type": "string" },
+                    "key": { "type": "string" }
+                },
+                "required": ["page", "key"]
+            }),
+        ),
         // Export
         tool_def(
             "outl_export_hugo",
@@ -468,7 +480,7 @@ pub fn list() -> Vec<Value> {
         // Batch
         tool_def(
             "outl_batch",
-            "Apply write ops in one session (stops on first error, reports `failed_at` + `applied`). Use for multi-step authoring so each op skips a round-trip. `op` is one of: page_create, page_update, page_delete, page_rename, block_append, block_append_tree, block_insert, block_update, block_move, block_delete, block_toggle_todo, daily_append, page_prop_set; each op's `args` mirror the matching `outl_<op>` tool.",
+            "Apply write ops in one session (stops on first error, reports `failed_at` + `applied`). Use for multi-step authoring so each op skips a round-trip. `op` is one of: page_create, page_update, page_delete, page_rename, block_append, block_append_tree, block_insert, block_update, block_move, block_delete, block_toggle_todo, daily_append, page_prop_set, page_prop_delete; each op's `args` mirror the matching `outl_<op>` tool.",
             json!({
                 "type": "object",
                 "properties": {

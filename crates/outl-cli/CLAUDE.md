@@ -233,7 +233,7 @@ Each handler returns a `serde_json::Value` so the same code path serves both the
   **No `trash empty`** — the only destroying operation here, so it belongs with `outl compact` (#110), and retention is a stated policy in [`docs/cli.md`](../../docs/cli.md#trash) rather than an inferred one.
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
-- `outl prop set|get|list`
+- `outl prop set|get|list|delete` (`delete` is `set_property(..., None)` through `commit_with`; an empty `set key=` is a stored value, not a delete)
 - `outl template list|apply|resolve|run` — template pages.
   `list` finds every page with a non-empty `template::` property.
   `apply` instantiates a structural template under a target block.

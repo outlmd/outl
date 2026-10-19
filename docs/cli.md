@@ -292,8 +292,12 @@ No client has a trash surface yet — it is CLI and MCP only, recorded as `Capab
 | `outl page prop set <page> <key>=<value>`        | `outl_page_prop_set` |
 | `outl page prop get <page> <key>`                | `outl_page_prop_get` |
 | `outl page prop list <page> [--json]`            | `outl_page_prop_list`|
+| `outl page prop delete <page> <key>`             | `outl_page_prop_delete`|
 
 Properties stay in the `key:: value` lines at the top of the page; the CLI never invents a new place to put metadata (see [docs/markdown-format.md](markdown-format.md)).
+`delete` removes the key: it appends `Op::SetProp` with no value, which is what the tree already treats as removal.
+`set key=` stores an empty string and does not remove the key.
+Either way the `.md` omits a value that is empty or only whitespace, so a bare `key::` line is not written back.
 
 ### Export
 
@@ -345,7 +349,7 @@ Input shape:
 }
 ```
 
-Supported `op` names: `page_create`, `page_update`, `page_delete`, `page_rename`, `block_append`, `block_append_tree`, `block_insert`, `block_update`, `block_move`, `block_delete`, `block_toggle_todo`, `daily_append`, `page_prop_set`.
+Supported `op` names: `page_create`, `page_update`, `page_delete`, `page_rename`, `block_append`, `block_append_tree`, `block_insert`, `block_update`, `block_move`, `block_delete`, `block_toggle_todo`, `daily_append`, `page_prop_set`, `page_prop_delete`.
 Each op's `args` mirror the matching standalone tool.
 
 **Semantics: stop-on-first-error.** When an op fails, earlier ops stay in the op log (they're already CRDT ops; we don't roll them back) and the response carries `failed_at`, `failed_op`, and `error` so the caller can decide what to do with the suffix that never ran.
@@ -694,7 +698,7 @@ Shipping today:
 - `outl query [--tag] [--not-tag] [--priority] [--not-priority] [--since=Nd] [--not-since] [--kind] [--not-kind] [--prop k[=v]] [--not-prop k[=v]]`
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
-- `outl page prop set|get|list`
+- `outl page prop set|get|list|delete`
 - `outl export hugo|md|json`
 - `outl template list|apply|resolve|run`
 - `outl batch` — stream `{ops: [...]}` from stdin (or `--ops=…`)

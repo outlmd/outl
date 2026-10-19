@@ -85,6 +85,7 @@ const MUTATING: &[&str] = &[
     "outl_daily_append",
     "outl_asset_add",
     "outl_page_prop_set",
+    "outl_page_prop_delete",
     "outl_batch",
     "outl_template_apply",
     "outl_trash_restore",
@@ -359,6 +360,11 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         "outl_page_prop_list" => {
             let page = require_str(args, "page")?.to_string();
             ctx.with_workspace(|wc| prop_cmd::list(wc, &page))
+        }
+        "outl_page_prop_delete" => {
+            let page = require_str(args, "page")?.to_string();
+            let key = require_str(args, "key")?.to_string();
+            ctx.with_workspace(|wc| prop_cmd::delete(wc, &page, &key))
         }
 
         // --- export ---
