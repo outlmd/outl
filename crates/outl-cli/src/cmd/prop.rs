@@ -76,7 +76,7 @@ pub fn run(cmd: &PropCommand, path: &Path) -> i32 {
             })
         }
         PropCommand::Get { page, key, json } => {
-            let result = ws::open(path).and_then(|ctx| get(&ctx, page, key));
+            let result = ws::open_read(path).and_then(|ctx| get(&ctx, page, key));
             emit(*json, result, |v| {
                 if let Some(val) = v.get("value") {
                     println!("{val}");
@@ -84,7 +84,7 @@ pub fn run(cmd: &PropCommand, path: &Path) -> i32 {
             })
         }
         PropCommand::List { page, json } => {
-            let result = ws::open(path).and_then(|ctx| list(&ctx, page));
+            let result = ws::open_read(path).and_then(|ctx| list(&ctx, page));
             emit(*json, result, |v| {
                 if let Some(props) = v.get("properties").and_then(Value::as_array) {
                     for p in props {

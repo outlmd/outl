@@ -447,6 +447,8 @@ It re-reads `.outl/peers.json` and rebuilds the transport when that file changes
 
 **Which flag to run permanently.**
 The watcher emits ops, so it takes the exclusive per-actor write lock, and any process that loses the race for the device actor gets a fresh ephemeral actor and its own `ops-<ulid>.jsonl`.
+A command that only reads (`outl workspace info`, `outl search`, `outl query`, and the other read subcommands) does not take that lock and does not mint.
+A command that appends still does.
 That is cheap for an occasional overlap and expensive for a daemon: `outl serve` running forever holds the device actor, so every later GUI or TUI launch mints one more op-log file.
 
 The sync half has no such cost — the transport writes peer ops to `ops-<peer>.jsonl` and uses your actor id only for the vector clock it offers.

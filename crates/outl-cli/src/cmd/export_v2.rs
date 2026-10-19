@@ -60,7 +60,7 @@ pub enum ExportCommand {
 pub fn run(cmd: &ExportCommand, path: &Path) -> i32 {
     match cmd {
         ExportCommand::Hugo { slug, out, json } => {
-            let result = ws::open(path).and_then(|ctx| hugo(&ctx, slug, out));
+            let result = ws::open_read(path).and_then(|ctx| hugo(&ctx, slug, out));
             emit(*json, result, |v| {
                 if let Some(p) = v.get("path").and_then(Value::as_str) {
                     println!("wrote {p}");
@@ -68,7 +68,7 @@ pub fn run(cmd: &ExportCommand, path: &Path) -> i32 {
             })
         }
         ExportCommand::Md { slug, json } => {
-            let result = ws::open(path).and_then(|ctx| md(&ctx, slug));
+            let result = ws::open_read(path).and_then(|ctx| md(&ctx, slug));
             emit(*json, result, |v| {
                 if let Some(s) = v.get("md").and_then(Value::as_str) {
                     println!("{s}");
@@ -76,7 +76,7 @@ pub fn run(cmd: &ExportCommand, path: &Path) -> i32 {
             })
         }
         ExportCommand::Json { slug, json } => {
-            let result = ws::open(path).and_then(|ctx| json_ast(&ctx, slug));
+            let result = ws::open_read(path).and_then(|ctx| json_ast(&ctx, slug));
             emit(*json, result, |v| {
                 let pretty = serde_json::to_string_pretty(v).unwrap_or_default();
                 println!("{pretty}");

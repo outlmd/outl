@@ -209,6 +209,28 @@ impl StorageRouter {
             s.resize_cache(cap);
         }
     }
+
+    /// Refuse later appends on the global log and every page shard.
+    ///
+    /// Page shards are registered after the global storage is opened,
+    /// so this has to run after that registration. Disallowing only
+    /// the global log would leave a shard able to create a file.
+    pub(crate) fn disallow_writes(&mut self) {
+        self.global.disallow_writes();
+        for storage in self.pages.values_mut() {
+            storage.disallow_writes();
+        }
+    }
+}
+
+impl super::Workspace {
+    /// Refuse later appends on the global log and every registered shard.
+    ///
+    /// A read-only open calls this after per-page shards are registered,
+    /// so none of them can create an `ops-<actor>.jsonl`.
+    pub fn disallow_local_writes(&mut self) {
+        self.router.disallow_writes();
+    }
 }
 
 #[cfg(test)]

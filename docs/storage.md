@@ -258,7 +258,9 @@ The rule also **disarms itself** — the legacy name is derived from the live on
 `.lock-<actor>` is deliberately out of scope.
 A lock is arbitration state, not cache: `ActorWriteLock` flocks that path, and removing one a live process holds lets the next process create a fresh inode, flock it, and write to the same `ops-<actor>.jsonl`.
 Every one of them is also 0 bytes, so there is no reclaim to weigh against that.
-`outl doctor` reports the **count** instead, because far more locks than op logs means the device has been minting ephemeral actors.
+`outl doctor` reports the actor-log count, and warns once the local write locks pass a threshold, because each actor is an entry in every sync handshake.
+Nothing removes the lock files.
+A read no longer adds one ([RFC 0298](rfcs/0298-read-opens-do-not-mint-actors.md)).
 
 #### The bulk write is buffered, and that is load-bearing
 

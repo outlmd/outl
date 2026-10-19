@@ -50,15 +50,15 @@ pub enum BacklinksCommand {
 pub fn run(cmd: &BacklinksCommand, path: &Path) -> i32 {
     match cmd {
         BacklinksCommand::Page { slug, json } => {
-            let result = ws::open(path).and_then(|ctx| page(&ctx, slug));
+            let result = ws::open_read(path).and_then(|ctx| page(&ctx, slug));
             emit(*json, result, print_page)
         }
         BacklinksCommand::Block { id, json } => {
-            let result = ws::open(path).and_then(|ctx| block(&ctx, id));
+            let result = ws::open_read(path).and_then(|ctx| block(&ctx, id));
             emit(*json, result, print_block)
         }
         BacklinksCommand::Embed { id_or_handle, json } => {
-            let result = ws::open(path).and_then(|ctx| embed(&ctx, id_or_handle));
+            let result = ws::open_read(path).and_then(|ctx| embed(&ctx, id_or_handle));
             emit(*json, result, print_embed)
         }
     }

@@ -35,7 +35,7 @@ const SNIPPET: usize = 72;
 
 /// `outl page history <slug>`.
 pub fn run_page(path: &Path, slug: &str, limit: usize, json_out: bool) -> i32 {
-    let result = ws::open(path).and_then(|ctx| {
+    let result = ws::open_read(path).and_then(|ctx| {
         let root = find_by_slug(&ctx.workspace, slug).ok_or_else(|| {
             ApiError::new(codes::PAGE_NOT_FOUND, format!("page `{slug}` not found"))
         })?;
@@ -55,7 +55,7 @@ pub fn run_page(path: &Path, slug: &str, limit: usize, json_out: bool) -> i32 {
 
 /// `outl block history <id>`.
 pub fn run_block(path: &Path, id: &str, limit: usize, json_out: bool) -> i32 {
-    let result = ws::open(path).and_then(|ctx| {
+    let result = ws::open_read(path).and_then(|ctx| {
         let node = super::block::parse_id(id)?;
         let mut events =
             block_timeline(&ctx.workspace, node).map_err(|e| ApiError::internal(e.to_string()))?;

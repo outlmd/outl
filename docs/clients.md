@@ -76,7 +76,8 @@ They arbitrate between processes on one machine and can never arbitrate between 
 
 ### What happens when the actor lock is contended
 
-The CLI and TUI mint a fresh ephemeral actor and write to a brand-new `ops-<ephemeral>.jsonl` (`outl_core::resolve_write_actor`).
+A CLI command that appends, and the TUI, mint a fresh ephemeral actor and write to a brand-new `ops-<ephemeral>.jsonl` (`outl_core::resolve_write_actor`).
+A CLI command that only reads opens through `outl_ws::open_read` and takes no per-actor lock, so contention does not mint an actor for it.
 **The GUI clients refuse the open instead**, and the difference is not an oversight.
 
 A GUI's `HlcGenerator` is built in `setup()`, before a workspace is picked, and every op it stamps carries that generator's actor for the life of the process.

@@ -14,6 +14,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A read no longer mints a write actor.**
+  `outl workspace info` beside a running `outl serve` took the per-actor write lock, lost it, and left a fresh `ops-<ulid>.jsonl` on every poll.
+  Each of those actors is an entry in every sync handshake and every snapshot cutoff, and nothing reclaims the identity.
+  A read now opens through `outl_ws::open_read`: no write lock, no new actor, and an append is refused.
+  `outl doctor` reports the actor-log count and warns once this device's write locks pass a threshold.
+  The files already on disk stay.
+  Rewriting an actor id would change the HLC tiebreak.
+  See [RFC 0298](docs/rfcs/0298-read-opens-do-not-mint-actors.md).
+
 - **Deleting a page property no longer leaves a bare `key::` line in the `.md`.**
   `outl page prop set hb foo=` stored an empty string.
   `prop list` stopped showing `foo`, and `render` kept writing `foo::` with nothing after it.

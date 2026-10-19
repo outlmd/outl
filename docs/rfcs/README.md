@@ -92,6 +92,7 @@ Silently changing pinned behaviour is the regression this process exists to catc
 | [0265](0265-index-sidecar-lifecycle.md) | A rename is a boundary crossing: 134MB of index sidecars nothing reads, still syncing | Draft | #110 |
 | [0266](0266-measure-before-you-believe.md) | The most dangerous stale fact is one that was true | Informational | — |
 | [0276](0276-mcp-content-only-replies.md) | An MCP reply carries its payload once, and an error is the exception | Accepted | PR #276 (#273) |
+| [0298](0298-read-opens-do-not-mint-actors.md) | A read does not mint a write actor | Accepted | #298 |
 | [0362](0362-journal-stream.md) | The journal is a stream of days, and each day keeps its own undo | Draft | PR #362 |
 | [0363](0363-ios-quick-capture.md) | Capture from outside the iOS app lands through an inbox the app drains | Accepted | #363 |
 

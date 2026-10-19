@@ -20,7 +20,7 @@ pub struct WorkspaceInfoArgs {
 
 /// Run `outl workspace info`.
 pub fn run(args: &WorkspaceInfoArgs, path: &Path) -> i32 {
-    let result = ws::open(path).map(|ctx| info(&ctx));
+    let result = ws::open_read(path).map(|ctx| info(&ctx));
     emit(args.json, result, print_info)
 }
 

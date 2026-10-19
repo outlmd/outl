@@ -415,6 +415,8 @@ If it deliberately skips a step — a bulk import that announces once at the end
 - Machine-shaped handlers always return `Result<Value, ApiError>`.
 - Mutating commands take the workspace lock through `ws::open`.
   Two `outl` processes can't race against `outl serve` or each other.
+- Read-only commands open through `ws::open_read`.
+  They take no per-actor write lock and mint no actor.
 - `anyhow::Result` on lifecycle commands (`init`, `serve`, `doctor`) is kept — those produce human errors and never JSON.
 
 ## What this crate does NOT do

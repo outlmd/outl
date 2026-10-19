@@ -57,7 +57,7 @@ pub struct SearchArgs {
 
 /// Run a `outl search` invocation.
 pub fn run(args: &SearchArgs, path: &Path) -> i32 {
-    let result = ws::open(path).and_then(|ctx| handler(&ctx, args));
+    let result = ws::open_read(path).and_then(|ctx| handler(&ctx, args));
     emit(args.json, result, print_results)
 }
 

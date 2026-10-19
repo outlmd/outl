@@ -463,7 +463,9 @@ The op log is append-only JSONL, so a file-level snapshot of a running container
 The image ships none, on purpose.
 Both obvious probes are actively harmful here:
 
-- `outl workspace info` takes the per-actor write lock, loses it to the running daemon, and mints a fresh ephemeral `ops-<ulid>.jsonl` — every 30 seconds, forever.
+- `outl workspace info` is a read.
+  It does not take the per-actor write lock and it does not mint an actor, so a poll beside `outl serve` does not leave a fresh `ops-<ulid>.jsonl` behind.
+  A command that appends still does, when it loses the lock to the daemon.
 - `outl peer status` binds an endpoint and fights the daemon for the device lease.
 
 Liveness is the process. `outl serve` exits non-zero when its watcher dies, so `restart: unless-stopped` covers the case a probe would have caught.
@@ -505,8 +507,11 @@ Correct and expected: the daemon is holding it. That message means "unknown", no
 Expected — see [It replicates the op log, not the `.md`](#it-replicates-the-op-log-not-the-md). `outl doctor --repair`.
 
 **A pile of `ops-<ulid>.jsonl` files.**
-Something else on that machine is opening the workspace and losing the write-actor race, or the `/home/outl` volume is not persisting.
-`outl doctor` names the ephemeral actors; check the volume first.
+Something on that machine is opening the workspace to write and losing the write-actor race, or the `/home/outl` volume is not persisting.
+A read (`outl workspace info`, `outl search`, `outl query`) does not add to the pile.
+`outl doctor` names the actor count and warns once the local write locks pass the threshold.
+The files already there stay: compaction does not retire an identity.
+Check the volume first.
 
 ---
 

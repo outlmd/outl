@@ -208,7 +208,9 @@ And the cost side does not argue for it either ([root `CLAUDE.md` invariant 11](
 The reclaim is a directory entry.
 Trading an arbitration failure for that is not a trade, and "they were in the same directory as the thing I was cleaning" is not an attribution.
 
-`outl doctor` reports the **count** instead, as `info`.
+`outl doctor` reports the count instead.
+Past a threshold the same line is a warning ([RFC 0298](0298-read-opens-do-not-mint-actors.md)); below it, it stays info.
+Nothing offers the locks for deletion.
 23 locks next to 20 op logs is a real signal.
 Each lock is an actor this device has written under, so a count well above the number of logs means the workspace has been minting ephemeral actors.
 
