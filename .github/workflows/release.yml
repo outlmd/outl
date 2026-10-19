@@ -1008,10 +1008,13 @@ jobs:
           dpkg-deb -x outl-desktop-linux-x86_64.deb "${WORK}/deb"
 
           # The rpm is packaged by a separate `tauri bundle` call, so read
-          # its payload too instead of trusting it matches the deb.
-          sudo apt-get install -y --no-install-recommends rpm2cpio
-          rpm2cpio "${GITHUB_WORKSPACE}/outl-desktop-linux-x86_64.rpm" \
-            | ( cd "${WORK}/rpm" && cpio -idm --quiet )
+          # its payload too instead of trusting it matches the deb. bsdtar,
+          # not rpm2cpio: rpm2cpio exits 1 without a word when the copied
+          # payload doesn't match the header's archive size, which is the
+          # case for the rpm Tauri writes.
+          sudo apt-get install -y --no-install-recommends libarchive-tools
+          bsdtar -xf outl-desktop-linux-x86_64.rpm -C "${WORK}/rpm"
+          test -s "${WORK}/rpm/usr/bin/outl-desktop"
 
           python3 scripts/check-artifact-stripped.py "${WORK}/appimage" "${WORK}/deb" "${WORK}/rpm"
 
