@@ -326,6 +326,8 @@ AGP strips the Rust `.so` on its way into the release APK with that NDK's `llvm-
 Debug builds keep the library's symbols through an `androidComponents` block scoped to the debug variant.
 The Tauri template's `packaging { jniLibs.keepDebugSymbols... }` inside `getByName("debug")` is not scoped at all: a build type has no `packaging`, so Kotlin resolves it on `android {}` and it kept the symbols in the release APK too.
 `scripts/check-artifact-stripped.py` reads the finished APK and is what turns that into a red job.
+It reads every `lib/<abi>/*.so` inside the archive, so the same pass also fails the APK when a library carries the name of a CI runner variable (`GITHUB_RUN_ID`, `RUNNER_TEMP`, `ACTIONS_RUNTIME`, `BLACKSMITH_`), which is a dependency's build script having snapshotted the runner's environment into the crate.
+That rule is separate from the strip rules and has its own escape hatch, `--allow-build-env`.
 Version comes from the workspace `Cargo.toml`, injected via `cargo tauri android build --config`.
 Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same trap as iOS, see [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
 

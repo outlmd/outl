@@ -65,9 +65,15 @@ finding one in a shipped binary means a build environment was embedded:
   * `GITHUB_RUN_ID`, `RUNNER_TEMP`, `ACTIONS_RUNTIME`: GitHub Actions
   * `BLACKSMITH_`: the Blacksmith runner prefix
 
-This rule has no opt-out flag on purpose.
+`--allow-build-env` downgrades that rule to a warning, for the same reason
+`--allow-symbols` exists: not every binary this script reads is one we built.
+The AppRun step hands it a sha-pinned prebuilt from `tauri-apps/binary-releases`,
+and "find the build script that snapshots env vars" is not an instruction
+anybody can follow there. No step passes it today. It is here so that a
+third-party binary tripping a marker costs one flag on one step, rather than a
+red release with no way through it.
 
-Usage: check-artifact-stripped.py [--allow-symbols] <artifact|dir>...
+Usage: check-artifact-stripped.py [--allow-symbols] [--allow-build-env] <artifact|dir>...
 """
 
 import os
@@ -431,7 +437,9 @@ def judge(name, blob, allow_symbols, results):
     results.setdefault("env_failures", []).extend(check_build_env(name, blob))
 
 
-USAGE = "usage: {} [--allow-symbols] <artifact|dir>..."
+USAGE = "usage: {} [--allow-symbols] [--allow-build-env] <artifact|dir>..."
+
+FLAGS = ("--allow-symbols", "--allow-build-env")
 
 
 def main():
@@ -443,8 +451,9 @@ def main():
         print(USAGE.format(sys.argv[0]))
         print(__doc__ or "")
         return
-    args = [a for a in flags if a != "--allow-symbols"]
+    args = [a for a in flags if a not in FLAGS]
     allow_symbols = "--allow-symbols" in flags
+    allow_build_env = "--allow-build-env" in flags
     if not args:
         sys.exit(USAGE.format(sys.argv[0]))
 
@@ -463,27 +472,34 @@ def main():
             "reported nothing because it read nothing, which is not a pass"
         )
 
-    if results["env_failures"]:
-        for line in results["env_failures"]:
-            print(f"::error::build environment in a published artifact: {line}")
+    # Every category is reported before any exit, and the exit names all of
+    # them. Exiting on the first used to hide the second: an artifact that was
+    # both unstripped and carrying its build environment reported only the
+    # strip, so the next release run was where the rest was learned.
+    level = "warning" if allow_build_env else "error"
+    for line in results["env_failures"]:
+        print(f"::{level}::build environment in a published artifact: {line}")
+    for line in results["failures"]:
+        print(f"::error::debug info in a published artifact: {line}")
 
+    reasons = []
     if results["failures"]:
-        for line in results["failures"]:
-            print(f"::error::debug info in a published artifact: {line}")
-        sys.exit(
+        reasons.append(
             "this artifact ships debug information to users; the strip step in "
             "release.yml did not run, or ran before the bundle it was meant to "
             "cover (see RFC 0377 section 5)"
         )
-
-    if results["env_failures"]:
-        sys.exit(
+    if results["env_failures"] and not allow_build_env:
+        reasons.append(
             "this artifact embeds the environment of the job that built it; "
             "find the build script that snapshots env vars and drop or patch it"
         )
+    if reasons:
+        sys.exit("\n".join(reasons))
 
     scope = "no DWARF" if allow_symbols else "no DWARF and no symbol table"
-    print(f"every binary checked carries {scope}, and no build environment")
+    env = "" if allow_build_env else ", and no build environment"
+    print(f"every binary checked carries {scope}{env}")
 
 
 if __name__ == "__main__":

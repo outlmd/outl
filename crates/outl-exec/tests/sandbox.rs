@@ -121,11 +121,26 @@ fn lua_keeps_the_language_itself() {
 /// `without_stdlib`, so this is expected to hold already — it is
 /// pinned so that enabling a stdlib feature later has to come past a
 /// failing test rather than past a reviewer.
+///
+/// `ctypes` is in the list because the windows build links it:
+/// `rustpython-vm` depends on `rustpython-host_env` unconditionally,
+/// and `Cargo.toml` turns that crate's `ctypes` feature on so its
+/// `wmi` module compiles. Reachability is held off by one condition
+/// nothing else asserts — the vm's own `host_env` feature stays off,
+/// so it registers no native module — and `ctypes` is `dlopen` inside
+/// a sandbox for untrusted fence bodies. A 0.6.x that moves
+/// registration out from behind that feature fails here.
 #[cfg(feature = "lang-python")]
 #[test]
 fn python_cannot_reach_the_host() {
     let rt = &outl_exec::runtimes::python::PythonRuntime;
-    for probe in ["import os", "import subprocess", "open('/etc/passwd')"] {
+    for probe in [
+        "import os",
+        "import subprocess",
+        "open('/etc/passwd')",
+        "import ctypes",
+        "import _ctypes",
+    ] {
         let out = rt
             .execute(probe, &ExecContext::default())
             .expect("infrastructure must not fail");

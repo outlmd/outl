@@ -82,6 +82,11 @@ A worker that finishes late hands its slot back, including by panicking (`Worker
 Without the cap, one `while (true) {}` fence under `auto-run::` spawned a fresh core-burning thread per page load.
 `runaway_workers_are_bounded` pins it, against a budget of its own so it cannot refuse runs in other tests.
 
+Each worker asks for a 16 MiB stack, not the 2 MiB default: RustPython 0.6 bootstraps importlib and the codec modules on every interpreter, and that recursion overflows 2 MiB (a `RecursionError` during init, then a panic).
+It is address space, not resident memory, and it is on the shared worker, so it applies to `js` and `lisp` too.
+The ceiling is one live worker plus `MAX_RUNAWAY_WORKERS` abandoned ones, so 80 MiB of reserved address space on top of the 64 MiB allocator cap.
+Removing `.stack_size` turns the whole `python` suite red, starting at `print_writes_stdout` — every test there runs through `with_timeout`, not `run_isolated`.
+
 The weak form is a deliberate trade, not an oversight: the alternative to a leaked thread is a frozen client.
 Before choosing it for a new runtime, check the interpreter for a cancellation point and record what you found.
 `sandbox`'s module doc holds that survey for the three above — including the one that looks like a cancellation point and is not: `steel`'s `with_interrupted` stores a flag the VM never reads.

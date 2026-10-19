@@ -45,7 +45,7 @@
 //! - **boa 0.22** (`js`) — `RuntimeLimits` caps loop iterations,
 //!   recursion depth and stack size; nothing per-instruction or
 //!   wall-clock, and `HostHooks` has no interrupt point.
-//! - **rustpython 0.5** (`python`) — `eval_breaker_tripped` is
+//! - **rustpython 0.6** (`python`) — `eval_breaker_tripped` is
 //!   `pub(crate)`, and the opcode trace hook only fires when a frame's
 //!   `f_trace_opcodes` is set from Python.
 //! - **steel 0.8.3** (`lisp`, opt-in, not in the default feature set).

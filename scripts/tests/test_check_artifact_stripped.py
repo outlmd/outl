@@ -14,6 +14,8 @@ import importlib.util
 import io
 import os
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -115,6 +117,67 @@ class BuildEnvTest(unittest.TestCase):
         self.assertEqual(results["failures"], [])
         self.assertEqual(len(results["env_failures"]), 1)
         self.assertIn("liboutl.so", results["env_failures"][0])
+
+
+class GateExitTest(unittest.TestCase):
+    """The verdict is only worth what the exit code does with it.
+
+    Everything above calls `walk` or `check_build_env` and reads the
+    `results` dict, so the whole of `main` — which categories are
+    reported, which ones end the job, what the success line claims —
+    was reachable by no test. Deleting the env branch left the suite
+    green and the gate printing "no build environment" over an
+    artifact that carried one. These run the script the way
+    `release.yml` does, as a process, and read its exit code.
+    """
+
+    STRIPPED = [(".text", SHT_PROGBITS, SHF_ALLOC | 0x4, 32)]
+    UNSTRIPPED = STRIPPED + [
+        (".debug_line", SHT_PROGBITS, 0, 64),
+        (".symtab", SHT_SYMTAB, 0, 48),
+    ]
+
+    def run_gate(self, blob, *flags):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = os.path.join(tmp, "outl")
+            with open(binary, "wb") as handle:
+                handle.write(blob)
+            return subprocess.run(
+                [sys.executable, SCRIPT, *flags, binary],
+                capture_output=True,
+                text=True,
+            )
+
+    def test_clean_binary_exits_zero(self):
+        done = self.run_gate(elf64(self.STRIPPED) + b"PATH=/usr/bin\0")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("no build environment", done.stdout)
+
+    def test_build_env_marker_exits_nonzero(self):
+        done = self.run_gate(elf64(self.STRIPPED) + b"RUNNER_TEMP=/tmp\0")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("embeds the environment of the job", done.stderr)
+
+    def test_allow_build_env_downgrades_to_a_warning(self):
+        done = self.run_gate(
+            elf64(self.STRIPPED) + b"RUNNER_TEMP=/tmp\0", "--allow-build-env"
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("::warning::", done.stdout)
+        self.assertNotIn("no build environment", done.stdout)
+
+    def test_an_artifact_that_trips_both_rules_is_told_both(self):
+        """Exiting on the first failure sent the reader back for a second
+        release run to find the other one."""
+        done = self.run_gate(elf64(self.UNSTRIPPED) + b"GITHUB_RUN_ID=1\0")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("ships debug information", done.stderr)
+        self.assertIn("embeds the environment of the job", done.stderr)
+
+    def test_no_binary_at_all_exits_nonzero(self):
+        done = self.run_gate(b"not a binary, and too short to inspect")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("read nothing", done.stderr)
 
 
 class ElfTest(unittest.TestCase):
