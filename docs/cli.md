@@ -293,11 +293,19 @@ No client has a trash surface yet — it is CLI and MCP only, recorded as `Capab
 | `outl page prop get <page> <key>`                | `outl_page_prop_get` |
 | `outl page prop list <page> [--json]`            | `outl_page_prop_list`|
 | `outl page prop delete <page> <key>`             | `outl_page_prop_delete`|
+| `outl block prop set <id> <key>=<value>`         | `outl_block_prop_set` |
+| `outl block prop get <id> <key>`                 | `outl_block_prop_get` |
+| `outl block prop list <id> [--json]`             | `outl_block_prop_list`|
+| `outl block prop delete <id> <key>`              | `outl_block_prop_delete` |
 
-Properties stay in the `key:: value` lines at the top of the page; the CLI never invents a new place to put metadata (see [docs/markdown-format.md](markdown-format.md)).
+Page properties stay in the `key:: value` lines at the top of the page; the CLI never invents a new place to put metadata (see [docs/markdown-format.md](markdown-format.md)).
 `delete` removes the key: it appends `Op::SetProp` with no value, which is what the tree already treats as removal.
 `set key=` stores an empty string and does not remove the key.
 Either way the `.md` omits a value that is empty or only whitespace, so a bare `key::` line is not written back.
+A block property is the same `key:: value` line indented under that block.
+`<id>` is the block id `block append` and `block get` return.
+`outl block prop delete`, and `set` with an empty value (`key=`), remove the key, so the rendered page does not keep a bare `key::` line.
+`list` returns every property on the block, alphabetical by key.
 
 ### Export
 
@@ -699,6 +707,7 @@ Shipping today:
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
 - `outl page prop set|get|list|delete`
+- `outl block prop set|get|list|delete`
 - `outl export hugo|md|json`
 - `outl template list|apply|resolve|run`
 - `outl batch` — stream `{ops: [...]}` from stdin (or `--ops=…`)
@@ -708,6 +717,5 @@ Shipping today:
 Still ahead:
 
 - Richer `outl query --raw='…'` DSL (today returns `INVALID_ARG`).
-- Per-page block-level property surface beyond the well-known keys the `prop list` probe enumerates.
 
 The order of landing matched the order of unlocking real workflows (scripts → LLM agents in Claude Code → Claude Desktop → blog publishing pipeline).

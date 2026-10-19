@@ -10,7 +10,7 @@ use super::tool_def;
 
 /// Every MCP tool we expose, with its JSON Schema input.
 pub fn list() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         // Page
         tool_def(
             "outl_page_get",
@@ -555,7 +555,9 @@ pub fn list() -> Vec<Value> {
                 "required": ["name", "page", "block"]
             }),
         ),
-    ]
+    ];
+    tools.extend(super::block_prop_schema::defs());
+    tools
 }
 
 #[cfg(test)]

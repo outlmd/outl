@@ -45,8 +45,8 @@ use serde_json::{json, Value};
 
 use crate::cmd::{
     asset as asset_cmd, backlinks as bl_cmd, batch as batch_cmd, block as block_cmd,
-    daily as daily_cmd, doctor as doctor_cmd, export_v2 as exp_cmd, page as page_cmd,
-    prop as prop_cmd, query as query_cmd, search as search_cmd, tag as tag_cmd,
+    block_prop as block_prop_cmd, daily as daily_cmd, doctor as doctor_cmd, export_v2 as exp_cmd,
+    page as page_cmd, prop as prop_cmd, query as query_cmd, search as search_cmd, tag as tag_cmd,
     template as tpl_cmd, trash as trash_cmd, workspace_info as wi_cmd,
 };
 use crate::mcp::protocol::JsonRpcError;
@@ -86,6 +86,8 @@ const MUTATING: &[&str] = &[
     "outl_asset_add",
     "outl_page_prop_set",
     "outl_page_prop_delete",
+    "outl_block_prop_set",
+    "outl_block_prop_delete",
     "outl_batch",
     "outl_template_apply",
     "outl_trash_restore",
@@ -365,6 +367,28 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
             let page = require_str(args, "page")?.to_string();
             let key = require_str(args, "key")?.to_string();
             ctx.with_workspace(|wc| prop_cmd::delete(wc, &page, &key))
+        }
+
+        // --- block prop ---
+        "outl_block_prop_set" => {
+            let id = require_str(args, "id")?.to_string();
+            let key = require_str(args, "key")?.to_string();
+            let value = require_str(args, "value")?.to_string();
+            ctx.with_workspace(|wc| block_prop_cmd::set_kv(wc, &id, &key, &value))
+        }
+        "outl_block_prop_get" => {
+            let id = require_str(args, "id")?.to_string();
+            let key = require_str(args, "key")?.to_string();
+            ctx.with_workspace(|wc| block_prop_cmd::get(wc, &id, &key))
+        }
+        "outl_block_prop_list" => {
+            let id = require_str(args, "id")?.to_string();
+            ctx.with_workspace(|wc| block_prop_cmd::list(wc, &id))
+        }
+        "outl_block_prop_delete" => {
+            let id = require_str(args, "id")?.to_string();
+            let key = require_str(args, "key")?.to_string();
+            ctx.with_workspace(|wc| block_prop_cmd::delete(wc, &id, &key))
         }
 
         // --- export ---

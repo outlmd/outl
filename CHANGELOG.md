@@ -5,6 +5,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **Block properties on the CLI and over MCP.**
+  `outl block prop set|get|list|delete` and the matching `outl_block_prop_*` tools read and write a block's `key:: value` lines through `outl_actions::set_property`.
+  `delete`, and `set` with an empty value, remove the key, so the rendered page does not keep a bare `key::` line.
+
 ### Changed
 
 - **The workspace builds with Rust 1.99.**

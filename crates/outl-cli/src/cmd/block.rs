@@ -16,7 +16,7 @@ use outl_actions::{
 };
 use outl_core::id::NodeId;
 
-use crate::human::{print_outline_node, todo_prefix};
+use super::block_print;
 use crate::output::{codes, emit, ApiError};
 use crate::ws::{self, WsCtx};
 
@@ -123,6 +123,11 @@ pub enum BlockCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Block-level property reads and writes (`key:: value` on this block).
+    Prop {
+        #[command(subcommand)]
+        sub: super::block_prop::BlockPropCommand,
+    },
     /// Return the block and its descendant subtree.
     Tree {
         /// Block id.
@@ -152,7 +157,7 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
     match cmd {
         BlockCommand::Get { id, json } => {
             let result = ws::open(path).and_then(|ctx| get(&ctx, id));
-            emit(*json, result, print_block)
+            emit(*json, result, block_print::print_block)
         }
         BlockCommand::Append {
             page,
@@ -162,7 +167,9 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
         } => {
             let result = ws::open(path)
                 .and_then(|mut ctx| append(&mut ctx, page.as_deref(), parent.as_deref(), text));
-            emit(*json, result, |v| print_block_created("appended", v))
+            emit(*json, result, |v| {
+                block_print::print_block_created("appended", v)
+            })
         }
         BlockCommand::AppendTree {
             page,
@@ -175,15 +182,19 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
                     append_tree_h(&mut ctx, page.as_deref(), parent.as_deref(), &spec)
                 })
             });
-            emit(*json, result, print_append_tree)
+            emit(*json, result, block_print::print_append_tree)
         }
         BlockCommand::Insert { after, text, json } => {
             let result = ws::open(path).and_then(|mut ctx| insert(&mut ctx, after, text));
-            emit(*json, result, |v| print_block_created("inserted", v))
+            emit(*json, result, |v| {
+                block_print::print_block_created("inserted", v)
+            })
         }
         BlockCommand::Update { id, text, json } => {
             let result = ws::open(path).and_then(|mut ctx| update(&mut ctx, id, text));
-            emit(*json, result, |v| print_block_simple("updated", v))
+            emit(*json, result, |v| {
+                block_print::print_block_simple("updated", v)
+            })
         }
         BlockCommand::Move {
             id,
@@ -193,7 +204,9 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
         } => {
             let result = ws::open(path)
                 .and_then(|mut ctx| move_block(&mut ctx, id, parent.as_deref(), after.as_deref()));
-            emit(*json, result, |v| print_block_simple("moved", v))
+            emit(*json, result, |v| {
+                block_print::print_block_simple("moved", v)
+            })
         }
         BlockCommand::Delete { id, confirm, json } => {
             if !*confirm {
@@ -204,15 +217,20 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
                 return emit::<Value, _>(*json, Err(err), |_| {});
             }
             let result = ws::open(path).and_then(|mut ctx| delete(&mut ctx, id));
-            emit(*json, result, |v| print_block_simple("deleted", v))
+            emit(*json, result, |v| {
+                block_print::print_block_simple("deleted", v)
+            })
         }
         BlockCommand::ToggleTodo { id, json } => {
             let result = ws::open(path).and_then(|mut ctx| toggle_todo(&mut ctx, id));
-            emit(*json, result, |v| print_block_simple("toggled", v))
+            emit(*json, result, |v| {
+                block_print::print_block_simple("toggled", v)
+            })
         }
+        BlockCommand::Prop { sub } => super::block_prop::run(sub, path),
         BlockCommand::Tree { id, json } => {
             let result = ws::open(path).and_then(|ctx| tree(&ctx, id));
-            emit(*json, result, print_block)
+            emit(*json, result, block_print::print_block)
         }
         BlockCommand::History { id, limit, json } => {
             super::history::run_block(path, id, *limit, *json)
@@ -554,51 +572,4 @@ fn write_enclosing_page(ctx: &mut WsCtx, node: NodeId) -> Result<Option<PageMeta
     // one for the projection and the steps around it.
     ctx.commit(page)?;
     Ok(meta)
-}
-
-// ---------------------------------------------------------------------------
-// Human formatters
-// ---------------------------------------------------------------------------
-
-fn print_block(v: &Value) {
-    let id = v.get("id").and_then(Value::as_str).unwrap_or("?");
-    let text = v.get("text").and_then(Value::as_str).unwrap_or("");
-    let todo = v.get("todo").and_then(Value::as_str);
-    println!("{id}");
-    println!("  {}{}", todo_prefix(todo), text);
-    if let Some(children) = v.get("children").and_then(Value::as_array) {
-        for child in children {
-            print_outline_node(child, 1);
-        }
-    }
-}
-
-fn print_block_created(verb: &str, v: &Value) {
-    let id = v.get("id").and_then(Value::as_str).unwrap_or("?");
-    let text = v.get("text").and_then(Value::as_str).unwrap_or("");
-    println!("{verb}: {id}  {text}");
-}
-
-fn print_block_simple(verb: &str, v: &Value) {
-    let id = v.get("id").and_then(Value::as_str).unwrap_or("?");
-    println!("{verb}: {id}");
-}
-
-fn print_append_tree(v: &Value) {
-    let parent = v.get("parent").and_then(Value::as_str).unwrap_or("?");
-    println!("appended tree under {parent}");
-    if let Some(tree) = v.get("tree") {
-        print_tree_outcome(tree, 1);
-    }
-}
-
-fn print_tree_outcome(node: &Value, depth: usize) {
-    let pad = "  ".repeat(depth);
-    let id = node.get("id").and_then(Value::as_str).unwrap_or("?");
-    println!("{pad}{id}");
-    if let Some(children) = node.get("children").and_then(Value::as_array) {
-        for child in children {
-            print_tree_outcome(child, depth + 1);
-        }
-    }
 }

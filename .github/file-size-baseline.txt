@@ -27,7 +27,6 @@
 980 crates/outl-actions/src/page.rs
 673 crates/outl-actions/src/sync.rs
 678 crates/outl-actions/tests/ref_extraction_divergence.rs
-604 crates/outl-cli/src/cmd/block.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
 713 crates/outl-config/src/schema.rs

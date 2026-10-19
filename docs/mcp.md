@@ -70,6 +70,12 @@ Full shape in [`docs/cli.md`](cli.md#commands-by-domain).
 Destructive tools (`outl_page_delete`, `outl_block_delete`) require `confirm: true` in the input.
 Without it they return a recoverable `CONFIRM_REQUIRED` error and the workspace is untouched.
 
+Block properties are `outl_block_prop_set`, `outl_block_prop_get`, `outl_block_prop_list`, and `outl_block_prop_delete`.
+`id` is the block id.
+`set` with an empty `value`, and `delete`, both remove the property, so the page's `.md` does not keep a bare `key::` line.
+`list` returns every property on the block.
+Neither needs `confirm`: the removal is an op, and the previous value is still in the log.
+
 For multi-block authoring, prefer the composite tools over a chain of single-op calls:
 
 - `outl_block_append_tree` — append a root block + its recursive children in one shot.

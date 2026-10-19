@@ -5,6 +5,8 @@ pub mod backlinks;
 pub mod backup;
 pub mod batch;
 pub mod block;
+pub mod block_print;
+pub mod block_prop;
 pub mod capture;
 pub mod compact;
 pub mod daily;

@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use crate::output::ApiError;
 
+mod block_prop_schema;
 mod dispatch;
 mod payload;
 mod registry;
