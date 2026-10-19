@@ -794,8 +794,9 @@ jobs:
         run: bun install
 
       - name: Build Linux bundles
-        # `tauri.conf.json` has `"targets": "all"`, so on Linux this
-        # produces AppImage + .deb + .rpm in target/release/bundle/.
+        # AppImage + .deb here, .rpm in the next step. `tauri.conf.json` has
+        # `"targets": "all"`, which on Linux would make all three in one go,
+        # but the rpm needs a different version string (see below).
         #
         # `RUSTFLAGS=-C strip=symbols` for the same reason as the macOS
         # desktop job: `tauri build` compiles and packages in one command, and
@@ -814,7 +815,40 @@ jobs:
         env:
           OUTL_SENTRY_DSN: ${{ secrets.OUTL_SENTRY_DSN_DESKTOP }}
           RUSTFLAGS: "-C strip=symbols"
-        run: bun run tauri build --features sentry
+        run: bun run tauri build --bundles deb,appimage --features sentry
+
+      # RPM reserves `-` in Version for the name-version-release separator,
+      # and `@tauri-apps/cli` 2.12 started enforcing it: every beta since
+      # the bun lockfile refresh died here on
+      #
+      #   > invalid version "0.12.0-beta.238": contains invalid character
+      #
+      # RPM's own `0.12.0~beta.238` is not semver, and Tauri refuses any
+      # config `version` that is not. So a pre-release is spelled the way
+      # Fedora's packaging guidelines spelled it before `~` existed: the base
+      # version, and the pre-release in a Release that starts with `0.`
+      # (`outl-0.12.0-0.beta.238`). That sorts before the GA's default
+      # Release `1`, so `dnf` treats the GA as the upgrade it is.
+      #
+      # `tauri bundle` packages the binary `tauri build` already produced
+      # rather than compiling again, so the rpm carries the same stripped
+      # `outl-desktop`, and that binary still reports `0.12.0-beta.N`. A GA
+      # version has no `-` and is bundled with the config as is.
+      - name: Build Linux rpm
+        working-directory: crates/outl-desktop
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          CONFIG=()
+          if [[ "${VERSION}" == *-* ]]; then
+            PRE="${VERSION#*-}"
+            RPM_CONFIG="{\"version\": \"${VERSION%%-*}\", \"bundle\": {\"linux\": {\"rpm\": {\"release\": \"0.${PRE//-/.}\"}}}}"
+            echo "rpm config: ${RPM_CONFIG}"
+            CONFIG=( --config "${RPM_CONFIG}" )
+          fi
+          bun run tauri bundle --bundles rpm --features sentry "${CONFIG[@]}"
 
       - name: Upload debug symbols to Sentry
         shell: bash
