@@ -47,10 +47,34 @@ fn main() -> Result<()> {
         init_tracing(cli.verbose);
     }
 
+    // `load_result`, not `load`: the crash-reporting gate below has to
+    // tell "the user said yes" apart from "we could not read the file",
+    // and `load` collapses both into defaults.
+    let loaded = outl_config::load_result();
+
+    // Crash reporting (RFC 0377). `init` returns `None` unless all four
+    // conditions hold, and `None` is the ordinary case: a build without
+    // `--features sentry` links no SDK at all, so a user who cloned this repo
+    // and ran it has no reporter to opt out of.
+    //
+    // The client name is the **surface that crashed, not the file that was
+    // executed**. `outl` with no subcommand *is* the TUI, so a report from it
+    // labelled `cli@…` would send triage to the wrong half of the codebase.
+    // The standalone `outl-tui` binary reports under the same name for the
+    // same reason.
+    //
+    // Bound to a named variable rather than `let _ =`: the guard flushes
+    // pending events when dropped, and `let _ =` drops it on this line — which
+    // compiles, runs, and reports nothing.
+    let _telemetry = outl_telemetry::init(
+        if is_tui { "tui" } else { "cli" },
+        loaded.telemetry_enabled(),
+    );
+
     // Resolve the journal/clock timezone once, before any subcommand
     // computes "today" (#107). Idempotent with the TUI's own init on the
     // no-subcommand path. No `[calendar] timezone` → OS local, as before.
-    outl_actions::clock::init(outl_config::load().calendar.timezone.as_deref());
+    outl_actions::clock::init(loaded.config.calendar.timezone.as_deref());
 
     match cli.command {
         None => {
@@ -127,6 +151,7 @@ fn main() -> Result<()> {
             cmd::backup::run(&p, &sub)
         }
         Some(Command::Theme { sub }) => cmd::theme::run(sub.as_ref()),
+        Some(Command::Telemetry { sub }) => cmd::telemetry::run(&sub),
         Some(Command::Import {
             format,
             src,

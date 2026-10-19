@@ -435,6 +435,32 @@ The two filters that make this safe:
 Mobile shares the same `SyncEngine` but does not need the `pending_reload` flag: every mutation is one atomic Tauri command, so there's no multi-keystroke window.
 Different policy, same engine.
 
+## Crash reporting
+
+`main.rs` starts the reporter before anything else and holds the guard for the
+process: `outl_telemetry::init("tui", outl_config::telemetry_enabled())`
+([RFC 0377](../../docs/rfcs/0377-crash-reporting.md)).
+
+Three things a change here has to keep:
+
+- **`init` lives in the binary, never in `run()`.** The `outl` binary calls
+  `outl_tui::run` after starting its own reporter, so initialising inside the
+  library would mean two `sentry::init` calls in one process on that path.
+- **`telemetry_enabled()`, not `load().telemetry.enabled`.** The flag defaults
+  to on, and `load` answers from defaults for a file it could not parse, so
+  the field read turns an unreadable `config.toml` into consent the user never
+  gave.
+- **The guard is bound to a named variable.** `let _ =` drops it on that line,
+  which compiles, runs, and reports nothing.
+
+This crate has **no** opt-out surface, and that is recorded rather than
+implied: `outl_shortcuts::capability_support` declares
+`CrashReportingOptOut` as `Missing` here (the nudge names `outl telemetry
+off`) and `CrashReportingDisclosure` as `Missing` too, because a terminal's
+first-run output is a contract with whatever reads the pipe. The `sentry`
+feature in this crate's `Cargo.toml` is what links the SDK, and no release job
+builds this binary — see the comment there.
+
 ## What this crate does NOT do
 
 - ❌ Mutate the op log directly — every change goes through `outl_md::reconcile_md`, which routes ops through `Workspace`.

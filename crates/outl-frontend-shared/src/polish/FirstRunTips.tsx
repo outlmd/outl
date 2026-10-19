@@ -1,15 +1,15 @@
 import { For, Show, createSignal } from "solid-js";
 
-import { dismissTips, firstRunTips, tipsDismissed, type TipClient } from "./firstRun";
+import { TIPS_KEY, dismissOnce, dismissedOnce, firstRunTips, type TipClient } from "./firstRun";
 
 /**
  * The empty-state tour. Renders nothing once dismissed; `onStart` is the
  * client's own "write the first block" action.
  */
 export function FirstRunTips(props: { client: TipClient; onStart?: () => void }) {
-  const [hidden, setHidden] = createSignal(tipsDismissed());
+  const [hidden, setHidden] = createSignal(dismissedOnce(TIPS_KEY));
   const close = () => {
-    dismissTips();
+    dismissOnce(TIPS_KEY);
     setHidden(true);
   };
   return (

@@ -44,6 +44,12 @@ on:
       # parity gates unrun on the change that could break them.
       - "crates/outl-shortcuts/**"
       - "crates/outl-theme/**"
+      # Both clients call `outl_telemetry::init` at the top of `run()` and
+      # read `[telemetry] enabled` through `outl-config`, so a change
+      # confined to either crate can break a client's boot or its Privacy
+      # section with no client job running (RFC 0377).
+      - "crates/outl-telemetry/**"
+      - "crates/outl-config/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "package.json"
@@ -65,6 +71,12 @@ on:
       # parity gates unrun on the change that could break them.
       - "crates/outl-shortcuts/**"
       - "crates/outl-theme/**"
+      # Both clients call `outl_telemetry::init` at the top of `run()` and
+      # read `[telemetry] enabled` through `outl-config`, so a change
+      # confined to either crate can break a client's boot or its Privacy
+      # section with no client job running (RFC 0377).
+      - "crates/outl-telemetry/**"
+      - "crates/outl-config/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "package.json"

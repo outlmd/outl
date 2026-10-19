@@ -3,7 +3,7 @@ import { createRoot, createSignal } from "solid-js";
 
 import presets from "../mock/presets.json";
 import { contrastRatio } from "./contrast";
-import { dismissTips, firstRunTips, isBlankOutline, tipsDismissed } from "./firstRun";
+import { TIPS_KEY, dismissOnce, dismissedOnce, firstRunTips, isBlankOutline } from "./firstRun";
 import { createFocusMode, FOCUS_KEY } from "./focus";
 import { createSettle } from "./settle";
 
@@ -89,9 +89,9 @@ describe("first-run tips", () => {
   });
   it("stays dismissed", () => {
     const s = memStore();
-    expect(tipsDismissed(s)).toBe(false);
-    dismissTips(s);
-    expect(tipsDismissed(s)).toBe(true);
+    expect(dismissedOnce(TIPS_KEY, s)).toBe(false);
+    dismissOnce(TIPS_KEY, s);
+    expect(dismissedOnce(TIPS_KEY, s)).toBe(true);
   });
 });
 

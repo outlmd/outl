@@ -16,6 +16,15 @@
      row does not jump when it enters edit mode, and so desktop and
      mobile rows share one rhythm (the size differs, the ratio does not). */
   --outl-block-leading: 1.5;
+
+  /* How far the crash-reporting strip sits off the bottom edge. The
+     default clears a desktop window, whose bottom is free (its chrome
+     capsules and batch toolbar are all `top-3`). Mobile overrides it in
+     its own `styles.css` to clear the floating `BottomBar`, which the
+     shared stylesheet has no way to know about. Not a colour, so
+     invariant 13 does not apply — `--outl-read-measure` above is the
+     same kind of knob. */
+  --outl-notice-offset: 16px;
 }
 
 /* Children of a block that was just unfolded slide in from the bullet. */
@@ -154,10 +163,63 @@ html[data-outl-focus="on"] .outl-row:not(:focus-within):not([data-editing="true"
   color: var(--color-outl-fg-dim);
 }
 
+/* The first-run crash-reporting strip (RFC 0377 section 6).
+
+   Bottom, not top: the top of both clients is chrome, and a strip that
+   covers the first bullet fails `UX.md` principle 6 in spirit even
+   though the caret still works. The positioned wrapper takes no pointer
+   events and the card takes them back, so the strip can never swallow a
+   click meant for the outline underneath — the desktop `ErrorToast`
+   construction.
+
+   `z-index: 40` puts it over mobile's `BottomBar` (30) and the
+   desktop's toolbars (20, 30), and under every sheet and overlay (50+),
+   so opening Settings to act on it covers it rather than fighting it. */
+.outl-crash-notice {
+  position: fixed;
+  inset-inline: 0;
+  bottom: var(--outl-notice-offset);
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  /* The wrapper spans the viewport; only the card is a pointer target. */
+  pointer-events: none;
+}
+.outl-crash-notice__card {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 34rem;
+  padding: 10px 12px;
+  border: 1px solid var(--color-outl-border);
+  border-radius: 12px;
+  background: var(--color-outl-bg-elev);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-outl-fg) 12%, transparent);
+  animation: outl-unfold var(--outl-motion-base) var(--outl-ease-out);
+}
+.outl-crash-notice__body {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-outl-fg);
+}
+.outl-crash-notice__dismiss {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-outl-accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .outl-unfold,
   .outl-sync-settle,
-  .outl-tips {
+  .outl-tips,
+  .outl-crash-notice__card {
     animation: none;
   }
   .outl-row,

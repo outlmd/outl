@@ -249,6 +249,21 @@ impl From<Settings> for Config {
                 enabled: s.reminders_enabled,
                 quiet_hours: Some(s.reminders_quiet_hours).filter(|q| !q.trim().is_empty()),
             },
+            // `[telemetry]` (the crash-reporting opt-out) is deliberately
+            // NOT modelled in the flat Settings. It follows the
+            // `backlinks_order` pattern instead: a dedicated
+            // `set_telemetry_enabled` command owns the write, and `save`
+            // restores the section from disk so a modal save can never
+            // clobber it. That is what makes this default harmless — it is
+            // cancelled by the restore line in
+            // `restore_unmodeled_sections`, and without that line every
+            // modal save would flip a user's opt-out back on, since the
+            // default here is `true`.
+            //
+            // Do NOT "fix" this by modelling the field and deleting the
+            // restore: a consent flag read at process start, before a
+            // workspace exists, has one writer on purpose.
+            telemetry: outl_config::TelemetryCfg::default(),
         }
     }
 }
@@ -311,6 +326,13 @@ fn restore_unmodeled_sections(cfg: &mut Config, on_disk: &Config) {
     // here would be a *silent* change to the user's safety net, and the
     // only way they'd find out is the day they needed it.
     cfg.backup = on_disk.backup.clone();
+    // `[telemetry]` is the crash-reporting opt-out, written by the
+    // dedicated `set_telemetry_enabled` command (same split as
+    // `backlinks_order` above). Restoring it is load-bearing for the same
+    // reason as `[backup]`, only sharper: the default is ON, so dropping
+    // to it would silently re-enable reporting for someone who turned it
+    // off, and the only way they would find out is in the Sentry inbox.
+    cfg.telemetry = on_disk.telemetry.clone();
 }
 
 /// Save the flat wire shape as `config.toml`. Same path
@@ -497,6 +519,9 @@ mod tests {
         on_disk.snapshot.enabled = false;
         on_disk.snapshot.op_threshold = 500;
         on_disk.storage.lru_cap = 5_000;
+        // The consent flag, and the one whose default is the opposite of
+        // what the user asked for.
+        on_disk.telemetry.enabled = false;
 
         let mut cfg: Config = Settings::fresh().into();
         assert_eq!(
@@ -520,6 +545,15 @@ mod tests {
             cfg.storage, on_disk.storage,
             "[storage] is unmodelled by Settings and must be restored from disk — \
              dropping it silently flips the op-log LRU cap back to the default"
+        );
+        assert_eq!(
+            cfg.telemetry, on_disk.telemetry,
+            "[telemetry] is the crash-reporting consent flag and must be restored \
+             from disk — `TelemetryCfg::default()` is ON, so dropping this line \
+             turns every unrelated Settings save into an opt-in the user never \
+             gave (RFC 0377). The comment above `restore_unmodeled_sections` says \
+             not to model the field instead; this assertion is what makes that \
+             comment fail loudly rather than quietly"
         );
     }
 }

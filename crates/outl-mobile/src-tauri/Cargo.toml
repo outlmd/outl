@@ -33,6 +33,12 @@ outl-sync-iroh = { workspace = true }
 outl-tauri-shared = { workspace = true }
 outl-config = { workspace = true }
 outl-theme = { workspace = true }
+# Crash reporting (RFC 0377). The dependency is unconditional; the *reporter*
+# is not. `outl-telemetry`'s own `sentry` feature is what links the SDK, and it
+# is off by default, so a build nobody passed `--features sentry` to contains
+# no reporter to switch on — that is condition 1, and it is why someone who
+# clones this repo and runs it has no Sentry in the binary at all.
+outl-telemetry = { workspace = true }
 # Was only a transitive dep (via outl-plugins / outl-tauri-shared) — declared
 # directly so mobile's own build checks its capability-parity column instead
 # of inheriting a declaration made on its behalf. See RFC 0253 and
@@ -110,3 +116,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 jni = "0.22"
 ndk-context = "0.1"
 rustls-platform-verifier = "0.7"
+
+[features]
+default = []
+# Links the Sentry SDK. Set only by the release pipeline. Leave it off and
+# `outl_telemetry::init` is a function that returns `None`.
+sentry = ["outl-telemetry/sentry"]

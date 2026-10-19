@@ -32,10 +32,19 @@ COPY . .
 #
 # The cache mounts make a rebuild incremental across `docker build` runs. They
 # are BuildKit-only; on a builder without it the build still works, just cold.
+#
+# The `strip` is load-bearing and belongs here rather than in `[profile.release]`.
+# RFC 0377 §5 took `strip = "symbols"` out of that profile so a crash report
+# arrives with function names instead of bare addresses, and the *release
+# pipeline* strips each artifact after uploading symbols. This image is not
+# that pipeline: it builds without `--features sentry`, so it has no reporter
+# and no use for symbols, and without this line it would carry ~12 MB of debug
+# info into a server image that `docker.yml` pushes on every non-PR push.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/build/target,sharing=locked \
     cargo build --release -p outl-cli --bin outl \
- && install -Dm755 target/release/outl /out/outl
+ && install -Dm755 target/release/outl /out/outl \
+ && strip /out/outl
 
 ########################################
 # Runtime

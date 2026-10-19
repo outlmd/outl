@@ -144,6 +144,23 @@ jobs:
         # matrix.
         run: cargo test --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared --all-targets
 
+      # The run above never compiles `scrub_event`, because the `sentry`
+      # feature is off by default (RFC 0377 condition 1) and that is the
+      # whole point of the default. The consequence is that the one
+      # function deciding what leaves a user's machine, and the seven
+      # tests pinning its allowlist, were dead code on every PR: the
+      # only build that turns the feature on is `release.yml`, which
+      # runs no tests. A `sentry` bump that adds an `Event` field would
+      # have shipped the field and the test that catches it would never
+      # have run.
+      - name: cargo test (crash-report scrubber)
+        run: cargo test -p outl-telemetry --features sentry --all-targets
+      # Same reason, and the crate's CLAUDE.md asks for both: the
+      # no-feature build is what every contributor gets, the feature
+      # build is what every user gets.
+      - name: cargo clippy (crash-report scrubber)
+        run: cargo clippy -p outl-telemetry --features sentry --all-targets -- -D warnings
+
   docs:
     name: cargo doc
     runs-on: blacksmith-4vcpu-ubuntu-2404

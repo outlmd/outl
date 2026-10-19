@@ -20,9 +20,36 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/haptics", () => ({ haptic: () => {} }));
 
+// Crash reporting is the one row here that talks to the backend, so the
+// suite supplies the config instead of a Tauri bridge. `saved` is what
+// the command persisted, which is also what the switch is allowed to
+// move to — the row never trusts its own optimistic guess.
+let savedReports = true;
+let setReportsThrows = false;
+let getReportsThrows = false;
+const setReportsCalls: boolean[] = [];
+
+vi.mock("@outl/shared/api/telemetry", () => ({
+  getTelemetryEnabled: async () => {
+    if (getReportsThrows) throw new Error("no config");
+    return savedReports;
+  },
+  setTelemetryEnabled: async (enabled: boolean) => {
+    setReportsCalls.push(enabled);
+    if (setReportsThrows) throw new Error("read-only config");
+    savedReports = enabled;
+    return savedReports;
+  },
+}));
+
 import { SettingsSheet } from "./SettingsSheet";
 
 let dispose: (() => void) | undefined;
+
+/** Let the sheet's `getTelemetryEnabled()` round-trip settle. */
+function settle(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
 
 function mount() {
   const host = document.createElement("div");
@@ -46,9 +73,25 @@ function devicesRow(): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined;
 }
 
-/** The sheet renders into a portal-less fixed overlay on `document.body`. */
-function lockRow(): HTMLButtonElement | null {
-  return document.body.querySelector<HTMLButtonElement>('[role="switch"]');
+/** A `role="switch"` row, found by its label.
+ *
+ *  **Not `querySelector('[role="switch"]')`.** That returned the first
+ *  switch in the DOM, so the three lock tests below silently followed
+ *  whatever row happened to be painted first — they stayed green while
+ *  testing the crash-reports toggle the moment it landed above or below
+ *  them. Same reason `devicesRow()` searches by text. */
+function switchRow(label: string): HTMLButtonElement | undefined {
+  return [...document.body.querySelectorAll('[role="switch"]')].find((b) =>
+    b.textContent?.includes(label),
+  ) as HTMLButtonElement | undefined;
+}
+
+function lockRow(): HTMLButtonElement | undefined {
+  return switchRow("Lock button order");
+}
+
+function reportsRow(): HTMLButtonElement | undefined {
+  return switchRow("Crash reports");
 }
 
 afterEach(() => {
@@ -58,13 +101,17 @@ afterEach(() => {
   dispose?.();
   dispose = undefined;
   document.body.innerHTML = "";
+  savedReports = true;
+  setReportsThrows = false;
+  getReportsThrows = false;
+  setReportsCalls.length = 0;
 });
 
 describe("SettingsSheet", () => {
   it("renders the toolbar lock row when open", () => {
     mount();
     const row = lockRow();
-    expect(row).not.toBeNull();
+    expect(row).toBeDefined();
     expect(row!.textContent).toContain("Lock button order");
     expect(row!.getAttribute("aria-checked")).toBe("false");
   });
@@ -109,5 +156,77 @@ describe("SettingsSheet", () => {
     const { onClose } = mount();
     devicesRow()!.click();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// Crash reporting is on by default and there is no `outl` binary on a
+// phone, so this row is the only opt-out a mobile user has (RFC 0377
+// section 7). A switch that looks right and writes nothing is therefore
+// not a UI nit.
+describe("SettingsSheet — crash reports", () => {
+  it("shows the shared copy and the state the config actually holds", async () => {
+    savedReports = false;
+    mount();
+    await settle();
+    const row = reportsRow();
+    expect(row).toBeDefined();
+    // The promise, not the sentence — the copy's one owner is
+    // `@outl/shared/onboarding`, pinned by its own test.
+    expect(row!.textContent?.toLowerCase()).toContain("never");
+    expect(row!.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("reads the default as on rather than assuming off", async () => {
+    mount();
+    await settle();
+    expect(reportsRow()!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("writes the flip and moves only after the write lands", async () => {
+    mount();
+    await settle();
+    reportsRow()!.click();
+    await settle();
+    expect(setReportsCalls).toEqual([false]);
+    expect(reportsRow()!.getAttribute("aria-checked")).toBe("false");
+    expect(savedReports).toBe(false);
+  });
+
+  // The failure this exists for: an optimistic flip leaves a switch
+  // reading "off" over a reporter that is still on.
+  it("leaves the switch where it was when the write fails", async () => {
+    setReportsThrows = true;
+    mount();
+    await settle();
+    reportsRow()!.click();
+    await settle();
+    expect(setReportsCalls).toEqual([false]);
+    expect(reportsRow()!.getAttribute("aria-checked")).toBe("true");
+    expect(reportsRow()!.textContent).toContain("could not read or save");
+  });
+
+  // Same rule for the read: the default is on, so falling back to it
+  // would tell someone who opted out that they had not.
+  it("refuses to guess, and to write, when it could not read the flag", async () => {
+    getReportsThrows = true;
+    mount();
+    await settle();
+    const row = reportsRow();
+    expect(row!.getAttribute("aria-checked")).toBe("false");
+    expect(row!.textContent).toContain("could not read or save");
+    row!.click();
+    await settle();
+    expect(setReportsCalls).toEqual([]);
+  });
+
+  // The lock row sits above this one; both are `role="switch"`, so a
+  // positional lookup would silently cross them.
+  it("is a different row from the toolbar lock", async () => {
+    mount();
+    await settle();
+    expect(reportsRow()).not.toBe(lockRow());
+    reportsRow()!.click();
+    await settle();
+    expect(lockRow()!.getAttribute("aria-checked")).toBe("false");
   });
 });

@@ -164,6 +164,12 @@
   --shadow-capsule: 0 4px 16px color-mix(in srgb, var(--color-outl-fg) 10%, transparent);
   --blur-chrome: 24px;
 
+  /* The crash-reporting strip (`@outl/shared/polish`) is `fixed` to the
+     bottom, where this client already floats `BottomBar`. Lift it clear
+     of that capsule plus the home indicator; the shared stylesheet
+     defaults to a desktop window, whose bottom edge is empty. */
+  --outl-notice-offset: calc(max(env(safe-area-inset-bottom), 12px) + 60px);
+
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;

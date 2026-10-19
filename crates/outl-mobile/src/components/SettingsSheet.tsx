@@ -7,6 +7,11 @@ import {
   orderedMiddleFromStore,
   unlockOrderInStore,
 } from "@outl/shared/toolbar";
+import {
+  getTelemetryEnabled,
+  setTelemetryEnabled,
+} from "@outl/shared/api/telemetry";
+import { CRASH_REPORTS_SETTING } from "@outl/shared/onboarding";
 
 import { diagramsMode, setDiagramsMode, type DiagramsMode } from "@outl/shared/diagram";
 
@@ -25,11 +30,26 @@ import { getEditorDiagrams, setEditorDiagrams } from "../lib/api";
  * as one of the family rather than a new kind of screen.
  *
  * One row is navigation (devices and pairing, which the desktop keeps
- * in Settings too). The toolbar lock is per-device UI state in
- * `localStorage`. Diagrams are also per-device, but they live in
- * `config.toml` (`[editor] diagrams`) so the desktop on this machine
- * sees the same choice. Neither goes through the op log (root
- * `CLAUDE.md` invariant 7).
+ * in Settings too). The toolbar rows are **per-device UI state in
+ * `localStorage`**: two devices disagreeing about their own toolbar
+ * layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7).
+ *
+ * **Two rows are not that, and both reach for a Tauri command.**
+ * Diagrams are per-device as well but live in `config.toml`
+ * (`[editor] diagrams`), so the desktop on this machine sees the same
+ * choice. Crash reports go further. The flag cannot be `localStorage`
+ * because nothing in the webview reads it: `outl-telemetry` reads
+ * `[telemetry] enabled` out of the global config at **process start**,
+ * before a workspace or a webview exists (RFC 0377 section 4). It is
+ * also consent rather than a preference, a property of the person,
+ * which is why it belongs in a file that follows them to their next
+ * device, and why the phone has to offer it at all: there is no `outl`
+ * binary on iOS, so this toggle is the only opt-out a mobile user has.
+ *
+ * The rule that did *not* change: the setting's logic is not in here.
+ * The flag's one writer is
+ * `outl_tauri_shared::commands::telemetry::set_telemetry_enabled`, and
+ * the words beside the toggle are `@outl/shared/onboarding`'s.
  */
 export function SettingsSheet(props: {
   open: boolean;
@@ -42,6 +62,12 @@ export function SettingsSheet(props: {
   const drag = createSheetDrag(() => props.onClose());
   const [locked, setLocked] = createSignal(false);
   const [resetDone, setResetDone] = createSignal(false);
+  /** `null` until the first read lands: the default is ON, so painting a
+   *  switch before we know would show "off" to nobody and "on" to
+   *  everyone, including someone who turned it off. */
+  const [reports, setReports] = createSignal<boolean | null>(null);
+  const [savingReports, setSavingReports] = createSignal(false);
+  const [reportsError, setReportsError] = createSignal(false);
   const [diagrams, setDiagrams] = createSignal<DiagramsMode>(diagramsMode());
 
   // Re-read on every open. `<Show>` gates the markup, not the
@@ -53,6 +79,12 @@ export function SettingsSheet(props: {
     if (!props.open) return;
     setLocked(isOrderLocked());
     setResetDone(false);
+    // Re-read on every open for the same reason the lock does, plus one:
+    // this value lives in a file another process writes (`outl
+    // telemetry off` on a paired desktop, a hand-edited `config.toml`),
+    // so a cached answer here can be wrong without anything in this
+    // client having changed it.
+    void loadReports();
     setDiagrams(diagramsMode());
     try {
       void getEditorDiagrams()
@@ -68,6 +100,40 @@ export function SettingsSheet(props: {
       // No host in a test. Leave the signal as it is.
     }
   });
+
+  async function loadReports() {
+    try {
+      setReports(await getTelemetryEnabled());
+      setReportsError(false);
+    } catch {
+      // Say "we could not read it" in the row rather than falling back
+      // to the default: the default is on, so a guess here tells
+      // someone who opted out that they did not.
+      setReports(null);
+      setReportsError(true);
+    }
+  }
+
+  /**
+   * Flip crash reporting, moving the switch only once the write returns.
+   *
+   * Same shape as `RemindersSheet`'s `saveSettings`, and the reason is
+   * sharper here: an optimistic flip that fails to save leaves a switch
+   * reading "off" over a reporter that is still on.
+   */
+  async function toggleReports() {
+    if (savingReports() || reports() === null) return;
+    setSavingReports(true);
+    haptic("light");
+    try {
+      setReports(await setTelemetryEnabled(!reports()));
+      setReportsError(false);
+    } catch {
+      setReportsError(true);
+    } finally {
+      setSavingReports(false);
+    }
+  }
 
   function onDiagramsChange(value: string) {
     const mode: DiagramsMode = value === "off" ? "off" : "pele";
@@ -220,7 +286,7 @@ export function SettingsSheet(props: {
                 ones you use, it just stops rearranging them.
               </span>
             </span>
-            <LockToggle on={locked()} />
+            <IosToggle on={locked()} />
           </button>
 
           <button
@@ -244,6 +310,46 @@ export function SettingsSheet(props: {
           <p class="border-t border-(--color-outl-border)/30 px-4 py-3 text-[12px] leading-snug text-(--color-outl-fg-dim)/80">
             Takes effect the next time the keyboard opens.
           </p>
+
+          <div class="px-4 pb-1 pt-3">
+            <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
+              Privacy
+            </span>
+          </div>
+
+          {/* Reporting is on by default and there is no `outl` binary on
+              this platform, so this row is the only opt-out a phone has
+              (RFC 0377 section 7). The copy is `@outl/shared`'s — the
+              desktop shows the identical sentences, and the same claim
+              goes to Apple and Google. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={reports() === true}
+            aria-label={CRASH_REPORTS_SETTING.title}
+            disabled={reports() === null || savingReports()}
+            onClick={() => void toggleReports()}
+            class="flex w-full items-center gap-3 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30 disabled:opacity-50"
+          >
+            <span class="min-w-0 flex-1">
+              <span class="block text-[16px] font-medium text-(--color-outl-fg)">
+                {CRASH_REPORTS_SETTING.title}
+              </span>
+              <span class="mt-0.5 block text-[13px] leading-snug text-(--color-outl-fg-dim)">
+                {/* One sentence for both directions, because both end
+                    the same way: this device does not know the flag's
+                    state. Claiming to know it is the failure the row
+                    exists to avoid. */}
+                <Show
+                  when={!reportsError()}
+                  fallback={CRASH_REPORTS_SETTING.unavailable}
+                >
+                  {CRASH_REPORTS_SETTING.body}
+                </Show>
+              </span>
+            </span>
+            <IosToggle on={reports() === true} />
+          </button>
         </div>
 
         <button
@@ -262,6 +368,10 @@ export function SettingsSheet(props: {
  *  the `role="switch"` semantics, so this is `aria-hidden` and never a
  *  second focus stop for the same control.
  *
+ *  Named for its shape rather than its first caller: it was `LockToggle`
+ *  while the toolbar lock was the only switch in the sheet, and crash
+ *  reports is the second.
+ *
  *  **Not named `Switch`**, which is a Solid control-flow component:
  *  `babel-preset-solid` auto-imports the built-in for that tag name even
  *  when the module declares its own, so `<Switch on={…} />` compiled to
@@ -269,7 +379,7 @@ export function SettingsSheet(props: {
  *  took down the whole sheet render — the gear opened nothing at all.
  *  Same goes for `For`, `Show`, `Match`, `Index`, `Dynamic`, `Portal`,
  *  `Suspense` and `ErrorBoundary`. */
-function LockToggle(props: { on: boolean }): JSX.Element {
+function IosToggle(props: { on: boolean }): JSX.Element {
   return (
     <span
       aria-hidden="true"

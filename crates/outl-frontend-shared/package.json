@@ -38,6 +38,7 @@
     "./api/capture": "./src/api/capture.ts",
     "./api/commands": "./src/api/commands.ts",
     "./api/overview": "./src/api/overview.ts",
+    "./api/telemetry": "./src/api/telemetry.ts",
     "./api/types": "./src/api/types.ts",
     "./api/trust": "./src/api/trust.ts",
     "./autocomplete": "./src/autocomplete/index.ts",

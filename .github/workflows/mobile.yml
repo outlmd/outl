@@ -21,6 +21,12 @@ on:
       - "crates/outl-frontend-shared/**"
       - "crates/outl-shortcuts/**"
       - "crates/outl-theme/**"
+      # Both clients call `outl_telemetry::init` at the top of `run()` and
+      # read `[telemetry] enabled` through `outl-config`, so a change
+      # confined to either crate can break a client's boot or its Privacy
+      # section with no client job running (RFC 0377).
+      - "crates/outl-telemetry/**"
+      - "crates/outl-config/**"
       - "package.json"
       - "bun.lock"
       - "Cargo.toml"
@@ -41,6 +47,12 @@ on:
       - "crates/outl-frontend-shared/**"
       - "crates/outl-shortcuts/**"
       - "crates/outl-theme/**"
+      # Both clients call `outl_telemetry::init` at the top of `run()` and
+      # read `[telemetry] enabled` through `outl-config`, so a change
+      # confined to either crate can break a client's boot or its Privacy
+      # section with no client job running (RFC 0377).
+      - "crates/outl-telemetry/**"
+      - "crates/outl-config/**"
       - "package.json"
       - "bun.lock"
       - "Cargo.toml"
@@ -246,6 +258,25 @@ jobs:
   # where the signing secrets live (same set TestFlight uses):
   # BUILD_CERTIFICATE_BASE64, P12_PASSWORD, MAC_KEYCHAIN_PASSWORD,
   # PROVISIONING_PROFILE_BASE64.
+  #
+  # Crash reporting (RFC 0377) adds two more, registered as
+  # *repository* secrets rather than environment ones — Settings →
+  # Secrets and variables → Actions:
+  #
+  #   OUTL_SENTRY_DSN_MOBILE   DSN of the `outl-mobile` Sentry project,
+  #                            shared with `release.yml`'s build_android
+  #   SENTRY_AUTH_TOKEN        token with `project:releases`, for the
+  #                            dSYM upload
+  #
+  # Repository scope because `release.yml`'s desktop and Android jobs
+  # need the same two and have no `environment:`; giving them one to
+  # reach a DSN would also hand them the Apple certificates above. This
+  # job reads repository secrets fine despite having an environment.
+  #
+  # **A build without either keeps working.** The DSN is read by
+  # `option_env!` at compile time, so unset means the reporter compiles
+  # to a no-op; the dSYM upload warns and continues. Nothing here gates
+  # on a secret being present, and nothing may start to.
   # ----------------------------------------------------------------
   ios-release:
     name: iOS device build (signed IPA artifact)
@@ -645,11 +676,19 @@ jobs:
         working-directory: crates/outl-mobile
         env:
           CI: "true"
+          # RFC 0377 conditions 1 and 2. The DSN is read by `option_env!` at
+          # compile time, so it has to be in cargo's environment here; an
+          # unset secret compiles to `None` and the reporter is a no-op, which
+          # is why no step gates on it. Repository secret, not an environment
+          # one — this job already has `environment: release` for the signing
+          # material, so it reaches both.
+          OUTL_SENTRY_DSN: ${{ secrets.OUTL_SENTRY_DSN_MOBILE }}
         run: |
           SHORT="${{ steps.meta.outputs.short_version }}"
           EXPORT_RC=0
           cargo tauri ios build \
             --export-method app-store-connect \
+            --features sentry \
             --config "{\"version\": \"$SHORT\"}" || EXPORT_RC=$?
           ARCHIVE="src-tauri/gen/apple/build/outl-mobile_iOS.xcarchive"
           if [[ ! -d "$ARCHIVE" ]]; then
@@ -825,6 +864,49 @@ jobs:
           fi
           echo "::notice::IPA carries CFBundleVersion=$ACTUAL_BUILD as expected"
 
+      # The dSYMs exist because the release configuration in the generated
+      # `project.pbxproj` sets `DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"`,
+      # so `xcodebuild archive` writes `outl.app.dSYM` into the archive. They
+      # have never left this runner: `ExportOptions.plist` asks for
+      # `uploadSymbols: true` with `destination: export`, which sends them
+      # nowhere, and the artifact below carried only the IPA.
+      #
+      # Best-effort like the other upload steps — Sentry being down must not
+      # hold a TestFlight build — but it says so when nothing goes up, because
+      # the alternative is discovering it from an unreadable crash months on.
+      - name: Upload dSYMs to Sentry
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: outl
+          SENTRY_PROJECT: outl-mobile
+        run: |
+          set -uo pipefail
+          DSYMS="crates/outl-mobile/src-tauri/gen/apple/build/outl-mobile_iOS.xcarchive/dSYMs"
+          if [[ ! -d "$DSYMS" ]]; then
+            echo "::warning::no dSYMs directory in the archive at $DSYMS — check that the release config still sets DEBUG_INFORMATION_FORMAT = dwarf-with-dsym; nothing uploaded"
+            exit 0
+          fi
+          ls -la "$DSYMS"
+          if [[ -z "${SENTRY_AUTH_TOKEN}" ]]; then
+            note="SENTRY_AUTH_TOKEN is unset, so no dSYMs were uploaded. A crash from this build will arrive in Sentry as bare addresses. The dSYMs are still in the outl-ios-dsyms artifact for 30 days."
+            echo "::warning::${note}"
+            # A warning and not a failure on purpose: the Sentry
+            # projects and this secret are set up by hand, so until
+            # that happens every release would fail on a feature that
+            # is not configured yet. It reaches the summary page so
+            # the state is visible without reading a step log.
+            echo "- symbols: ${note}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
+          fi
+          if ! npx --yes @sentry/cli@3.8.0 debug-files upload "$DSYMS"; then
+            note="sentry-cli failed to upload the dSYMs; the build continues, and they remain in the outl-ios-dsyms artifact for 30 days if this needs redoing by hand"
+            echo "::warning::${note}"
+            # Stays a warning, and this is the branch the "a release
+            # must not wait on Sentry" argument actually covers.
+            echo "- symbols: ${note}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi
+
       - name: Write build metadata (consumed by TestFlight)
         run: |
           META_DIR="$RUNNER_TEMP/ipa-bundle"
@@ -856,6 +938,42 @@ jobs:
           path: ${{ env.dir }}
           if-no-files-found: error
           retention-days: 30
+
+      # A second artifact, deliberately not folded into `outl-ios-release`.
+      # The archive dies with the runner, so without this the dSYMs exist
+      # nowhere once a best-effort upload fails — but `testflight.yml`
+      # downloads `outl-ios-release` whole, by name, on every ship, and
+      # debug info for a Rust binary is far larger than the IPA. Putting them
+      # in the same artifact would tax each TestFlight upload to keep a copy
+      # that upload never reads.
+      #
+      # `warn`, not `error`: the step above already warns when the archive has
+      # no dSYMs, and a missing debug companion must not fail a release.
+      - name: Upload dSYMs artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: outl-ios-dsyms
+          path: crates/outl-mobile/src-tauri/gen/apple/build/outl-mobile_iOS.xcarchive/dSYMs
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Same rule as the other published artifacts, read off the file that
+      # goes to Apple. Nothing in this job strips the app binary itself —
+      # `STRIP_INSTALLED_PRODUCT` during the archive and `stripSwiftSymbols`
+      # on export are what do, and neither is visible from here, which is
+      # exactly why this reads the IPA instead of asserting they ran.
+      #
+      # The debug map is the finding worth having: an unstripped Mach-O
+      # carries one entry per object file naming its path on this runner, so a
+      # failure here means both a fat binary and the runner's directory layout
+      # going to the App Store.
+      #
+      # Deliberately *after* the artifact upload. Failing here still blocks
+      # TestFlight (`testflight.yml` waits on this workflow succeeding), which
+      # is the point, but the IPA and its dSYMs stay downloadable so the
+      # failure can be inspected instead of rebuilt.
+      - name: Verify the IPA carries no debug info
+        run: python3 scripts/check-artifact-stripped.py "${{ steps.ipa.outputs.path }}"
 
       - name: Cleanup signing material
         if: always()

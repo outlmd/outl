@@ -10,7 +10,7 @@
  *
  * **The format is owned by Rust, not by this file.**
  * `RemindersCfg::quiet_window` + `parse_hhmm`
- * (`crates/outl-config/src/schema.rs`) decide what a quiet window is;
+ * (`crates/outl-config/src/schema/schedule.rs`) decide what a quiet window is;
  * everything here only has to agree with them, and
  * `quiet-hours.test.ts` pins that agreement row for row against the
  * Rust accept / reject lists. Drift in **either** direction costs the

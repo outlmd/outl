@@ -98,6 +98,17 @@ enabled = true
 # never dropped. Omit (or leave empty) for no quiet hours. A window
 # that wraps midnight is the normal case.
 quiet_hours = "22:00-07:00"
+
+[telemetry]
+# Whether this device sends a crash report when outl panics. On by
+# default: a reporter nobody turns on answers nothing, and the user
+# this exists for is the one who hits a crash and never files an
+# issue. What leaves the machine is an allowlist — client, version,
+# OS, architecture, panic location and a scrubbed panic message.
+# Never a workspace path, a page slug or block text. Set false to
+# send nothing. Device-local, like every preference here, but for a
+# different reason: consent belongs to you, not to the hardware.
+enabled = true
 ```
 
 > **Why `[calendar] timezone` exists at all:** [RFC 0107](rfcs/0107-page-identity.md) — the journal's date decides its slug, so "what day is it" is an identity question, not a display preference.
@@ -120,7 +131,7 @@ quiet_hours = "22:00-07:00"
 
 **Backwards compatibility:** a config with only `preset` set behaves exactly as it did before `preset_dark` and `mode` existed.
 `ThemeCfg` distinguishes that present legacy section from a wholly missing section: the former leaves `preset_dark` unset so `dark()` resolves to the explicit `preset`; the latter uses the new brand default pair, `outl-light` / `outl`.
-Pinned by `a_config_with_only_preset_behaves_exactly_as_before` (`crates/outl-config/src/schema.rs`).
+Pinned by `a_config_with_only_preset_behaves_exactly_as_before` (`crates/outl-config/src/schema/ui.rs`).
 
 **Both GUI clients now resolve the pair.**
 Desktop and mobile both call the shared `get_theme_config` command (`outl-tauri-shared::commands::theme`), which resolves `[theme]` server-side (`preset_dark` already falls back to `preset`).
@@ -196,6 +207,21 @@ See [theming.md](theming.md) for the look of each.
 
 Both are **device-local on purpose**: quiet hours are a property of *this* phone or laptop, not of the workspace.
 The rule itself and a snooze converge through the op log; see [reminders.md](reminders.md).
+
+#### `[telemetry]`
+
+> **Why reporting is on by default, and the four conditions an event has to clear:** [RFC 0377](rfcs/0377-crash-reporting.md).
+
+| Field | Type | Default | Read by | Effect |
+|---|---|---|---|---|
+| `enabled` | boolean | `true` | `outl-telemetry`, at process start on every client | Whether this device sends a crash report when outl panics. Defaults on because a reporter nobody turns on answers nothing — the user this exists for is the one who hits a crash and never files an issue. What leaves the machine is an allowlist: client name, version, OS, architecture, panic location (`file:line`, fixed at compile time) and a scrubbed panic message. Never a workspace path, a page slug, block text, a hostname or a username. Set `false` to send nothing. A file this parser cannot read also sends nothing: the clients ask `outl_config::telemetry_enabled`, which refuses to read consent out of a fallback, because this is the one field whose default is the opposite of what a user may have asked for. |
+
+This flag is the **third of four** conditions, and the other three are not yours to set.
+The `sentry` cargo feature is off by default and a compile-time `OUTL_SENTRY_DSN` has to be present, so a binary you built yourself links no reporter at all whatever this says; no client reports when `CI` or `GITHUB_ACTIONS` is set.
+
+It is **device-local**, like every preference here, but for a different reason than the rest.
+The others are rendering or delivery choices about *this* screen or *this* phone.
+This one is your consent, which belongs to you rather than to the hardware — so the fact that `~/.config` rides along with chezmoi, Migration Assistant and Time Machine works in your favour: turn reporting off on one machine and it is off on the next.
 
 #### `[backup]`
 

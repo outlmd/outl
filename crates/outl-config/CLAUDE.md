@@ -85,11 +85,14 @@ quiet_hours = "22:00-07:00"       # optional; a fire landing inside is pushed to
 [backup]
 enabled = true                    # default on; automatic local git snapshots of the workspace
 interval_minutes = 30             # floor between automatic snapshots, not a schedule
+
+[telemetry]
+enabled = true                    # default on; crash reports only, never note content
 ```
 
-Nine sections, each modelled as its own struct ([`WorkspaceCfg`], [`ThemeCfg`], [`EditorCfg`], [`CalendarCfg`], [`SyncConfig`], [`TuiCfg`], [`DisplayCfg`], [`AssetsCfg`], [`RemindersCfg`]).
+Ten sections, each modelled as its own struct ([`WorkspaceCfg`], [`ThemeCfg`], [`EditorCfg`], [`CalendarCfg`], [`SyncConfig`], [`TuiCfg`], [`DisplayCfg`], [`AssetsCfg`], [`RemindersCfg`], [`TelemetryCfg`]).
 `ThemeCfg` additionally carries a [`ThemeMode`] enum field (`mode`); see below.
-`RemindersCfg::enabled` defaults to **`true`**, the one non-`Default::default()` bool in the schema: `remind::` on a block is itself the opt-in, so defaulting off just made a written rule silently do nothing.
+`RemindersCfg::enabled` defaults to **`true`**, the first non-`Default::default()` bool in the schema: `remind::` on a block is itself the opt-in, so defaulting off just made a written rule silently do nothing.
 `RemindersCfg::quiet_window()` parses `"22:00-07:00"` into `(start, end)` minutes past midnight and returns `None` on anything unparseable, so a typo degrades to "no quiet hours" instead of failing the load.
 `CalendarCfg::timezone` is an optional IANA name resolved at boot by `outl_actions::clock::init`; missing/empty/unknown falls back to the OS local timezone (the previous behaviour).
 It exists for environments where the OS clock lies about the zone — containers and Chrome OS **Crostini** run in UTC regardless of the user's real timezone (issue #107).
@@ -110,6 +113,13 @@ That fallback is what keeps a pre-RFC-0022 config with only `preset` behaving by
 The failures a backup catches (a projection bug, a mis-aimed `outl import` over a populated workspace, a page deleted with the app then closed) are ones the user discovers *after* the window to enable a safety net has closed.
 It costs nothing on an unchanged workspace (no diff, no commit) and degrades to a `warn!` where there is no `git` on `PATH`.
 The engine is `outl_actions::backup`; this section only carries the preference.
+`TelemetryCfg::enabled` defaults to **`true`** — the third, and the only one whose reason is not about the feature working.
+It is the user's consent to crash reporting, read by `outl-telemetry` at process start, before a workspace exists (a crash during boot is the one most worth reporting and the one a workspace flag could never cover).
+It is also only the third of four conditions: the `sentry` cargo feature and a compile-time `OUTL_SENTRY_DSN` are the build's, so a locally-built binary links no SDK whatever this says.
+The replication that made `actor_id` device-local is the argument *for* keeping consent here — it belongs to the person, not the hardware.
+`tests/telemetry_off_survives_a_restart` lives here rather than beside the GUI writer for the reason that file's header gives: this crate owns `config_dir()`, so `$XDG_CONFIG_HOME` is all the isolation a test needs, while a test in `outl-tauri-shared` would write the developer's own consent flag.
+It is the only test in its file on purpose — `set_var` is process-wide and Cargo threads a file's tests.
+See [RFC 0377](../../docs/rfcs/0377-crash-reporting.md).
 `AssetsCfg::max_bytes` (default `100 * 1024 * 1024`, `0` = unbounded) is the upper bound on a single file `outl_actions::import_asset` copies into `<workspace>/assets/`; the directory itself is fixed by `outl-ws`'s layout, not configurable here.
 `#[serde(default)]` everywhere — a missing field falls back to the type's `Default`, so an older binary reading a newer config doesn't choke and a newer binary reading an older config doesn't blow up.
 
@@ -179,7 +189,16 @@ Pinned by `tests/concurrent_save.rs` (end to end) and `every_scratch_name_is_its
 
 ## Adding a field
 
-1. Add the field to the relevant struct in `src/schema.rs` with `#[serde(default)]` (or a per-type `Default` impl).
+1. Add the field to the relevant struct with `#[serde(default)]` (or a per-type `Default` impl).
+   `src/schema/` is one module per responsibility, not one per type:
+   - `ui.rs` — theme, display order, editor chrome
+   - `storage.rs` — workspace path, snapshot, op-log LRU cap, assets, backup
+   - `sync.rs` — transport, relay
+   - `schedule.rs` — timezone, reminders
+   - `telemetry.rs` — crash-report consent
+   - `src/tui.rs` — `[tui]`, outside `schema/` because it predates the split
+
+   A new **section** also gets a field on `Config` in `src/schema/mod.rs` and a row in the `pub use` facade there, which is what keeps `outl_config::<Cfg>` as the public path.
 2. Update the example in `src/lib.rs`'s module doc.
 3. Update `docs/config.md` — the user-facing schema table.
 4. Update `crates/outl-cli/CLAUDE.md` and/or `crates/outl-desktop/CLAUDE.md` and/or `crates/outl-tui/CLAUDE.md` if a new client now reads the field.

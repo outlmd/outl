@@ -23,5 +23,15 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Crash reporting (RFC 0377), in the binary rather than in `outl_tui::run`
+    // on purpose: `run` is also called by the `outl` binary, which has already
+    // started its own reporter by the time it gets there. Initialising inside
+    // the library would mean two `sentry::init` calls in one process on the
+    // `outl` path, with the second replacing the first's hub.
+    //
+    // Named binding, not `let _ =` — the guard flushes on drop.
+    let _telemetry = outl_telemetry::init("tui", outl_config::telemetry_enabled());
+
     outl_tui::run(&cli.path)
 }

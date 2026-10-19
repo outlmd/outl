@@ -324,6 +324,24 @@ It gates on the `clang` binary `cargo-ndk` will invoke, not on the exit code: a 
 Version comes from the workspace `Cargo.toml`, injected via `cargo tauri android build --config`.
 Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same trap as iOS, see [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
 
+### Play Console: Data Safety
+
+The Data Safety form is a Play Console answer, not a file in the repo, so nothing fails if it drifts from the app.
+Before the first Play submission, and again whenever what the app sends changes, fill it in to match [`privacy.md`](privacy.md) → Crash reports:
+
+| Question | Answer |
+|---|---|
+| Does the app collect or share user data? | Collects, does not share |
+| Data type | App info and performance → **Crash logs** |
+| Shared with third parties | **No** (Sentry processes the report for us, and a service provider acting on our behalf is not "sharing" under Play's definition) |
+| Linked to the user | **No**: no account, no device id, no persistent identifier |
+| Collection is optional | **Yes**: the user can turn it off in Settings, Privacy |
+| Purpose | App functionality |
+| Data encrypted in transit | Yes |
+| Way for users to request deletion | Not applicable, nothing is linked to a user; say so in the form |
+
+Crash reporting covers Rust panics only, not Kotlin exceptions ([RFC 0377](rfcs/0377-crash-reporting.md)), so the form must not claim broader coverage than the app has.
+
 ### The `.so` has to be linked for 16 KB pages
 
 Some Android devices page at 16 KB rather than 4 KB, and there `dlopen` refuses a library whose LOAD segments are aligned to 4 KB.

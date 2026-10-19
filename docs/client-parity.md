@@ -175,6 +175,8 @@ the drift this RFC exists to prevent.
 | `CaptureOutsideTheApp` | ⚠️ A line captured with `outl capture` lands the next time you start outl here — the desktop and phone apps pick one up while they're running. | ⚠️ Capturing from outside the app runs `outl capture "your line"` — wire it to a Shortcut, a macOS Service or a hotkey and it lands here on the next window focus. | ✅ |
 | `TaskList` | ❌ There's no task list here yet. Add a `query` code block with `status: open` to any page and it lists every open task in the workspace. | ❌ There's no task list here yet. Add a `query` code block with `status: open` to any page and it lists every open task in the workspace. | ✅ |
 | `DiagramRendering` | ❌ The terminal keeps a mermaid fence as source. Open the page in the desktop or mobile app to see the diagram. | ✅ | ✅ |
+| `CrashReportingOptOut` | ❌ Crash reporting is switched from the terminal here — run `outl telemetry off` to stop sending reports, or `outl telemetry status` to see where it stands. | ✅ | ✅ |
+| `CrashReportingDisclosure` | ❌ Crash reporting is on, and the terminal does not announce it the way the apps do — run `outl telemetry status` to see where it stands, or read the full list of what a report carries at outl.app/privacy. | ✅ | ✅ |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

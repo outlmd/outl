@@ -445,6 +445,21 @@ Live preview goes through the shared `installTheme`; Save installs the persisted
 `settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
 A new unmodeled config field omitted there will get silently dropped on the next modal save.
 
+### Privacy: the crash-reporting toggle writes outside Save
+
+`SettingsModal`'s **Privacy** section (RFC 0377) is the one row that does not live in `draft()`.
+`[telemetry] enabled` is not in the flat `Settings`, and `restore_unmodeled_sections` puts the section back from disk on every save.
+So routing it through Save would make the toggle inert, and dropping the restore would flip a user's opt-out back on with every unrelated save, because the default is `true`.
+It reads `getTelemetryEnabled()` on every open and writes `setTelemetryEnabled()` on change, the same split the backlinks direction button has.
+On open rather than `onMount`, because `AppShell` mounts this component for the app's lifetime and another process can write the flag while the window runs (`outl telemetry off` in a terminal).
+The switch moves only on the command's reply: an optimistic flip that fails to save leaves a checkbox reading "off" over a reporter that is still on.
+The words are `CRASH_REPORTS_SETTING` in `@outl/shared/onboarding`, never written here — mobile shows the identical sentences and the same claim goes to Apple.
+
+**This section is where a user *looks*; it is not where they are *told*.**
+Reporting is on by default, so nothing routes anybody through Settings and a disclosure that lives only here reaches only the curious.
+The proactive half is `<CrashReportsNotice />` from `@outl/shared/polish`, mounted by `AppShell` beside `<ErrorToast />` — shell level rather than above the outline, because it is a statement about the app and not about the page, and mounting it per page would re-run its dismissed check on every navigation.
+It never takes focus and never gates the reporter (RFC 0377 section 6).
+
 The actor id (one per device) lives next to it as `actor` — a plain ULID.
 Switching workspaces does not rotate it.
 

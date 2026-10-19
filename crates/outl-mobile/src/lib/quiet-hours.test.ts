@@ -62,7 +62,7 @@ describe("withQuietEnd", () => {
  * The parse rules are owned by Rust, not by this file.
  *
  * `outl_config::RemindersCfg::quiet_window` +`parse_hhmm`
- * (`crates/outl-config/src/schema.rs`) decide what a quiet window is;
+ * (`crates/outl-config/src/schema/schedule.rs`) decide what a quiet window is;
  * everything here only has to agree with them. Both directions of a
  * disagreement cost the user their setting:
  *
@@ -119,7 +119,7 @@ describe("agreement with the Rust owner", () => {
 
   it("mirrors the Rust reject list row for row", () => {
     // `unparseable_quiet_hours_is_ignored_not_fatal`
-    // (crates/outl-config/src/schema.rs). Keep the two lists equal.
+    // (crates/outl-config/src/schema/schedule.rs). Keep the two lists equal.
     for (const bad of ["22:00", "banana", "25:00-07:00", "22:00-22:00", ""]) {
       expect(splitQuietHours(bad)).toEqual(["", ""]);
     }
