@@ -84,7 +84,7 @@ pub fn run(cmd: &DailyCommand, path: &Path) -> i32 {
             })
         }
         DailyCommand::Range { from, to, json } => {
-            let result = ws::open(path).and_then(|ctx| range(&ctx, from, to));
+            let result = ws::open_read(path).and_then(|ctx| range(&ctx, from, to));
             emit(*json, result, |v| {
                 if let Some(items) = v.get("journals").and_then(Value::as_array) {
                     for j in items {

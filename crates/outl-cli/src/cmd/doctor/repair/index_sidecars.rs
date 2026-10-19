@@ -116,19 +116,35 @@ pub(in crate::cmd::doctor) fn announced_paths(drops: &[IndexSidecarDrop]) -> Vec
     drops.iter().map(|d| d.path.clone()).collect()
 }
 
-/// Say how many per-actor write locks `ops/` is carrying.
+/// Local `.lock-<actor>` files at or above this count are a warning.
 ///
-/// **Info, and never a deletion.** A `.lock-<actor>` is arbitration
-/// state, not cache: `ActorWriteLock` flocks that path, and removing one
-/// a live process holds lets the next process create a fresh inode, flock
-/// it, and write to the same `ops-<actor>.jsonl`. Every one of them is
-/// also 0 bytes, so there is no reclaim to weigh against that (root
+/// The device actor, a GUI, `outl serve` and the MCP server are four,
+/// and two overlapping CLI writes on top of that is still an ordinary
+/// machine. Eight is the pile issue #298 measured: about nine automated
+/// writers, and the locks are never deleted, so the count tracks every
+/// process that lost the race rather than how many are alive now.
+///
+/// The number lives here. User-facing docs say "past a threshold" and
+/// point at `outl doctor` rather than copying it.
+pub(in crate::cmd::doctor) const EPHEMERAL_ACTOR_WARN_AT: usize = 8;
+
+/// Say how many actors the log holds, and how many write locks this
+/// device has minted.
+///
+/// **Never a deletion.** A `.lock-<actor>` is arbitration state, not
+/// cache: `ActorWriteLock` flocks that path, and removing one a live
+/// process holds lets the next process create a fresh inode, flock it,
+/// and write to the same `ops-<actor>.jsonl`. Every one of them is also
+/// 0 bytes, so there is no reclaim to weigh against that (root
 /// `CLAUDE.md` invariant 11).
 ///
-/// It is still worth printing, because the *count* is a real signal: each
-/// lock is an actor this device has written under, so far more locks than
-/// op logs means the workspace has been minting ephemeral actors — the
-/// symptom a permanently-running process produces.
+/// The actor count is the `ops-*.jsonl` set, reported even when this
+/// device holds no lock for them — a peer's log has no `.lock-<actor>`
+/// here, and returning early on zero locks made that count invisible.
+/// The locks themselves are info below [`EPHEMERAL_ACTOR_WARN_AT`] and
+/// a warning at it. Comparing locks to logs does not catch the pile:
+/// the locks are never deleted, so a device that minted one actor per
+/// process sits at locks ≈ logs.
 pub(in crate::cmd::doctor) fn report_actor_locks(b: &mut Builder, ops_dir: &Path) {
     let Ok(read) = std::fs::read_dir(ops_dir) else {
         return;
@@ -142,14 +158,32 @@ pub(in crate::cmd::doctor) fn report_actor_locks(b: &mut Builder, ops_dir: &Path
             logs += 1;
         }
     }
-    if locks == 0 {
+    if locks == 0 && logs == 0 {
         return;
     }
-    b.info(format!(
-        "{locks} per-actor write lock file(s) next to {logs} op log(s). They are 0-byte \
-         arbitration state, not cache, so nothing removes them — but a count well above the \
-         number of op logs means this device has been minting ephemeral actors"
-    ));
+    let log_phrase = if logs == 1 {
+        "1 actor log".to_string()
+    } else {
+        format!("{logs} actor logs")
+    };
+    if locks == 0 {
+        b.info(format!(
+            "{log_phrase}. This device holds no write lock for them"
+        ));
+        return;
+    }
+    let msg = format!(
+        "{locks} per-actor write lock file(s) next to {log_phrase}. They are 0-byte \
+         arbitration state, not cache, so nothing removes them"
+    );
+    if locks >= EPHEMERAL_ACTOR_WARN_AT {
+        b.warn(format!(
+            "{msg} — {locks} is past the threshold where a busy machine explains them, \
+             so this device has been minting ephemeral actors"
+        ));
+    } else {
+        b.info(msg);
+    }
 }
 
 /// Drop the planned sidecars, re-asking the GC first.

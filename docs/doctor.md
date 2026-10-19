@@ -61,6 +61,15 @@ The only thing a default run writes is its own stdout.
 
 **Files on disk.**
 
+- **Actor count.**
+  Every `ops-*.jsonl` is an actor the log carries into every sync handshake and every snapshot cutoff.
+  Doctor reports that count even when this device holds no `.lock-<actor>` for them — a peer's log has no lock file here.
+  The lock files are reported too.
+  Past a threshold the line is a warning: this device has been minting an actor for each process that lost the write lock.
+  `--repair` does not delete a lock or an op log.
+  Rewriting an actor id would change the HLC tiebreak, so the files already on disk stay.
+  What stops growing is a read.
+  See [RFC 0298](rfcs/0298-read-opens-do-not-mint-actors.md).
 - `.md` ↔ `.outl` sidecar pairing, sidecar version, and sidecar block ids that are absent from the op log.
 - Orphaned sidecars (a `.outl` with no `.md` next to it).
 - Orphan `((blk-XXXXXX))` / `!((blk-XXXXXX))` references.

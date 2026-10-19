@@ -54,15 +54,22 @@ Two contracts hide behind that call, and they are the reason to use `outl-ws` in
 
 **Actor resolution.**
 Each process writes to its own `ops-<actor>.jsonl`.
-If your embedder opens a workspace while the desktop app is running, `resolve_write_actor` hands you an ephemeral actor and a fresh file — nobody ever appends to somebody else's log.
+If your embedder opens a workspace for writing while the desktop app is running, `resolve_write_actor` hands you an ephemeral actor and a fresh file — nobody ever appends to somebody else's log.
 `ctx.ephemeral_actor` tells you which case you got.
+
+A process that only reads should call `outl_ws::open_read` instead.
+It takes the shared workspace lock, reports the device actor, and mints nothing, including while another process holds the write lock.
+`commit` refuses, and so does an append that goes around it.
 
 **Snapshot policy.**
 `open()` defaults to the short-lived contract: snapshots are read at boot, never written, because a snapshot write from a transient process races with the long-lived app that owns the workspace.
 A resident embedder (a daemon that stays open) should opt in, or its boot cost on a large workspace regresses to full log replay:
 
 ```rust
-let opts = outl_ws::OpenOptions { write_snapshots: true };
+let opts = outl_ws::OpenOptions {
+    write_snapshots: true,
+    ..outl_ws::OpenOptions::default()
+};
 let mut ctx = outl_ws::open_with(path, opts)?;
 ```
 

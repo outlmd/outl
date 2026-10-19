@@ -20,9 +20,11 @@
 //! 2. **Which actor may this *process* write under?**
 //!    [`outl_core::resolve_write_actor`] takes the exclusive per-actor
 //!    flock; when another `outl` on this machine already holds it (TUI
-//!    running, MCP server proxy active, a peer CLI in flight) the
-//!    process gets an ephemeral actor and a fresh
+//!    running, MCP server proxy active, a peer CLI in flight) a
+//!    *writing* open gets an ephemeral actor and a fresh
 //!    `ops-<ephemeral>.jsonl`.
+//!    [`open_read`] does not ask. A read holds no per-actor lock and
+//!    mints no actor.
 //!
 //! The shared workspace lock itself accepts multiple concurrent openers.
 //! All readers merge every `ops-*.jsonl`, so peers see every write
@@ -39,8 +41,8 @@ use std::path::{Path, PathBuf};
 use outl_core::device::DeviceStore;
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::ActorId;
-use outl_core::storage::JsonlStorage;
-use outl_core::workspace::Workspace;
+use outl_core::storage::{JsonlStorage, StorageError};
+use outl_core::workspace::{Workspace, WorkspaceError};
 use outl_core::{resolve_write_actor, ActorWriteLock, WorkspaceLock};
 
 use outl_actions::{commit_page, ActionError, CommitHooks};
@@ -71,10 +73,11 @@ impl WsError {
     }
 }
 
-/// Per-open runtime context. The shared workspace lock plus an
-/// exclusive per-actor write lock are held for the whole lifetime of
-/// the context — two processes against the same workspace coexist as
-/// long as each one ends up writing under a distinct actor.
+/// Per-open runtime context. The shared workspace lock is held for the
+/// whole lifetime. A writing open also holds the exclusive per-actor
+/// write lock; a read ([`open_read`]) holds none, and [`WsCtx::commit`]
+/// refuses. Two writing processes coexist as long as each one ends up
+/// writing under a distinct actor.
 pub struct WsCtx {
     /// Workspace path layout (root, .outl/, pages/, journals/, …).
     /// Consumed by surfaces that need on-disk paths (doctor, export,
@@ -87,22 +90,28 @@ pub struct WsCtx {
     pub hlc: HlcGenerator,
     /// Workspace path on disk.
     pub root: PathBuf,
-    /// Actor id this process writes under. Equal to the device actor
-    /// ([`actor::resolve_device_actor`]) when this process is the
-    /// workspace's primary holder on this machine; a fresh
-    /// `ActorId::new()` when another `outl` (TUI, MCP server, peer
-    /// CLI) is already attached.
+    /// Actor id this process reports.
+    ///
+    /// On a writing open it is the device actor
+    /// ([`actor::resolve_device_actor`]) when this process holds that
+    /// lock, and a fresh `ActorId::new()` when another `outl` (TUI,
+    /// MCP server, peer CLI) already does. On a read it is always the
+    /// device actor: the id names what this device writes under, and
+    /// the read does not claim the lock.
     pub actor: ActorId,
-    /// Whether [`Self::actor`] is this device's actor (`false` signals
-    /// "ephemeral, this process spun a new ops jsonl"). Used by
-    /// diagnostics and doctor reporting.
+    /// Whether [`Self::actor`] was minted because the device actor's
+    /// lock was already held. Always `false` on a read.
     pub ephemeral_actor: bool,
     /// Hold the shared workspace lock for the lifetime of the context.
     #[allow(dead_code)]
     lock: WorkspaceLock,
-    /// Hold the exclusive per-actor write lock too.
-    #[allow(dead_code)]
-    actor_lock: ActorWriteLock,
+    /// Exclusive per-actor write lock, when this open may append.
+    ///
+    /// `None` on [`open_read`]: this process holds no actor it may
+    /// write, and [`Self::commit`] refuses before it mutates. The
+    /// `Option` is read; the lock itself is held by staying here
+    /// until drop.
+    actor_lock: Option<ActorWriteLock>,
 }
 
 impl WsCtx {
@@ -131,6 +140,19 @@ impl WsCtx {
     where
         F: FnOnce(&mut Workspace) -> Result<T, ActionError>,
     {
+        // A read holds no write lock. Refusing here, before
+        // `commit_page` runs the mutation, is what keeps the
+        // in-memory tree from moving on an open that cannot persist.
+        // `Workspace::apply` still refuses at storage if a caller
+        // goes around this method: that path mutates memory first,
+        // which is the existing storage-failure shape.
+        if self.actor_lock.is_none() {
+            return Err(ActionError::from(WorkspaceError::Storage(
+                StorageError::Backend(
+                    "read-only open holds no write actor and will not append".to_string(),
+                ),
+            )));
+        }
         let root = self.root.clone();
         let mut hooks = CtxCommit {
             root: &root,
@@ -174,9 +196,13 @@ impl CommitHooks for CtxCommit<'_> {
     }
 }
 
-/// Tuning knobs for [`open_with`]. The derived `Default` is the
-/// short-lived contract: snapshots are read, never written.
-#[derive(Debug, Clone, Copy, Default)]
+/// Tuning knobs for [`open_with`]. [`Default`] is the short-lived
+/// writing contract: snapshots are read, never written, and this
+/// process may append.
+///
+/// `Default` is hand-written. A derived `Default` would zero
+/// [`Self::writes`] and turn [`open`] into a read.
+#[derive(Debug, Clone, Copy)]
 pub struct OpenOptions {
     /// Whether this process may **write** boot snapshots.
     ///
@@ -187,6 +213,20 @@ pub struct OpenOptions {
     /// crate opts in, otherwise its boot/reload cost on a large
     /// workspace silently regresses to full log replay.
     pub write_snapshots: bool,
+    /// Whether this process may append ops.
+    ///
+    /// Defaults to `true`. [`open_read`] sets it `false`: no per-actor
+    /// write lock, no minted actor, and storage refuses an append.
+    pub writes: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self {
+            write_snapshots: false,
+            writes: true,
+        }
+    }
 }
 
 /// Open the workspace at `path` with the short-lived defaults
@@ -194,6 +234,28 @@ pub struct OpenOptions {
 /// boot failure (missing workspace, bad config, filesystem error).
 pub fn open(path: &Path) -> Result<WsCtx, WsError> {
     open_with(path, OpenOptions::default())
+}
+
+/// Open the workspace at `path` for reading.
+///
+/// Takes the shared workspace lock and resolves this device's actor.
+/// It does not take a per-actor write lock and it does not mint an
+/// actor, including while another process holds the device actor for
+/// the whole session. A poll such as `outl workspace info` beside
+/// `outl serve` used to leave a permanent `ops-<ulid>.jsonl` on every
+/// tick ([#298](https://github.com/outlmd/outl/issues/298)).
+///
+/// [`WsCtx::commit`] refuses, and storage refuses an append that goes
+/// around it. Slug repair is skipped: it can emit ops, and the next
+/// writing open still runs it.
+pub fn open_read(path: &Path) -> Result<WsCtx, WsError> {
+    open_with(
+        path,
+        OpenOptions {
+            write_snapshots: false,
+            writes: false,
+        },
+    )
 }
 
 /// Like [`open`], but the caller picks the [`OpenOptions`] — a
@@ -225,12 +287,20 @@ pub fn open_with(path: &Path, opts: OpenOptions) -> Result<WsCtx, WsError> {
 
     ensure_ops_dir(&paths).map_err(WsError::internal)?;
 
-    // Exclusive per-actor write lock: the device actor if available,
-    // ephemeral otherwise. This is the contract that lets multiple
-    // `outl` processes on ONE machine share the workspace safely.
-    let (actor_lock, actor) =
-        resolve_write_actor(&paths.ops, device_actor).map_err(WsError::internal)?;
-    let ephemeral_actor = actor != device_actor;
+    // A writing open takes the exclusive per-actor lock: the device
+    // actor if it is free, a fresh id otherwise. That mint is how
+    // several `outl` processes on one machine share the workspace,
+    // and it is also how a read used to leave an actor behind on
+    // every call. A read does not take the lock and does not mint.
+    // The actor it reports is still the device actor — readers merge
+    // every log, and the id is an identity, not a claim.
+    let (actor_lock, actor, ephemeral_actor) = if opts.writes {
+        let (lock, actor) =
+            resolve_write_actor(&paths.ops, device_actor).map_err(WsError::internal)?;
+        (Some(lock), actor, actor != device_actor)
+    } else {
+        (None, device_actor, false)
+    };
 
     let storage = JsonlStorage::open(paths.ops.clone(), actor).map_err(WsError::internal)?;
     let mut workspace =
@@ -263,6 +333,12 @@ pub fn open_with(path: &Path, opts: OpenOptions) -> Result<WsCtx, WsError> {
             workspace.set_snapshot_policy(false, 0);
         }
     }
+    if !opts.writes {
+        // After shard registration. Each shard is a fresh
+        // `JsonlStorage` opened with writes allowed; disallowing only
+        // the global log would leave a shard able to create a file.
+        workspace.disallow_local_writes();
+    }
     let hlc = HlcGenerator::new(actor);
     // Raise the fresh generator above every timestamp already on disk,
     // before anything below emits an op. A generator built by
@@ -289,10 +365,15 @@ pub fn open_with(path: &Path, opts: OpenOptions) -> Result<WsCtx, WsError> {
     // so this scan is noise next to it. If a huge workspace ever makes it show
     // up in a profile, gate it on a persisted "merged at op-count N" marker in
     // `.outl/` rather than paying the scan when nothing changed.
-    match outl_actions::merge_duplicate_slug_roots(&mut workspace, &hlc) {
-        Ok(0) => {}
-        Ok(n) => tracing::warn!("merged {n} duplicate slug root(s)"),
-        Err(e) => tracing::warn!("duplicate-slug-root repair: {e}"),
+    // Slug repair can emit ops. A read must not: it holds no write
+    // lock, and the actor it would write is one another process may
+    // be appending to. The next writing open still runs the repair.
+    if opts.writes {
+        match outl_actions::merge_duplicate_slug_roots(&mut workspace, &hlc) {
+            Ok(0) => {}
+            Ok(n) => tracing::warn!("merged {n} duplicate slug root(s)"),
+            Err(e) => tracing::warn!("duplicate-slug-root repair: {e}"),
+        }
     }
 
     Ok(WsCtx {

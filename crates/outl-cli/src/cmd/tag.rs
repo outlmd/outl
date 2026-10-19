@@ -42,11 +42,11 @@ pub enum TagCommand {
 pub fn run(cmd: &TagCommand, path: &Path) -> i32 {
     match cmd {
         TagCommand::List { json } => {
-            let result = ws::open(path).map(|ctx| list(&ctx));
+            let result = ws::open_read(path).map(|ctx| list(&ctx));
             emit(*json, result, print_tag_list)
         }
         TagCommand::Pages { tag, json } => {
-            let result = ws::open(path).map(|ctx| pages(&ctx, tag));
+            let result = ws::open_read(path).map(|ctx| pages(&ctx, tag));
             emit(*json, result, print_pages)
         }
     }

@@ -77,7 +77,7 @@ pub enum TemplateCommand {
 pub fn run(cmd: &TemplateCommand, path: &Path) -> i32 {
     match cmd {
         TemplateCommand::List { json } => {
-            let result = ws::open(path).and_then(|ctx| list(&ctx));
+            let result = ws::open_read(path).and_then(|ctx| list(&ctx));
             emit(*json, result, print_template_list)
         }
         TemplateCommand::Apply {
@@ -91,7 +91,7 @@ pub fn run(cmd: &TemplateCommand, path: &Path) -> i32 {
             emit(*json, result, print_template_apply)
         }
         TemplateCommand::Resolve { name, json } => {
-            let result = ws::open(path).and_then(|ctx| resolve(&ctx, name));
+            let result = ws::open_read(path).and_then(|ctx| resolve(&ctx, name));
             emit(*json, result, print_template_resolve)
         }
         TemplateCommand::Run {

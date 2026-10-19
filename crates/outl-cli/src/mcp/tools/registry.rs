@@ -402,7 +402,7 @@ pub fn list() -> Vec<Value> {
         // Page properties
         tool_def(
             "outl_page_prop_set",
-            "Set a page-level `key:: value` property.",
+            "Set a page-level `key:: value` property. An empty or whitespace-only value removes the key.",
             json!({
                 "type": "object",
                 "properties": {

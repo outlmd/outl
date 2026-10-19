@@ -49,7 +49,7 @@ pub enum TrashCommand {
 pub fn run(cmd: &TrashCommand, path: &Path) -> i32 {
     match cmd {
         TrashCommand::List { json } => {
-            let result = ws::open(path).and_then(|ctx| list(&ctx));
+            let result = ws::open_read(path).and_then(|ctx| list(&ctx));
             emit(*json, result, print_list)
         }
         TrashCommand::Restore { id, json } => {

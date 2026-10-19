@@ -78,6 +78,11 @@ pub struct JsonlStorage {
     /// Powers `ops_for_node` without scanning the whole file. Same
     /// cache semantics as `index`. RFC #137 Phase A.
     node_index: ActorNodeIndex,
+    /// When `false`, [`Self::append_ops_inner`] refuses before it
+    /// opens the `.jsonl`. A read-only open sets this after boot so
+    /// the reload can still refresh index sidecars, and an append
+    /// cannot create an actor file this process does not lock.
+    writes_allowed: bool,
 }
 
 impl JsonlStorage {
@@ -139,6 +144,7 @@ impl JsonlStorage {
             cache: RwLock::new(cache),
             index: ActorIndex::new(),
             node_index: ActorNodeIndex::new(),
+            writes_allowed: true,
         };
         storage.reload()?;
         Ok(storage)
@@ -397,6 +403,10 @@ impl Storage for JsonlStorage {
 
     fn append_ops(&mut self, ops: &[LogOp]) -> Result<(), StorageError> {
         self.append_ops_inner(ops)
+    }
+
+    fn disallow_writes(&mut self) {
+        self.writes_allowed = false;
     }
 
     fn ops_since(&self, ts: Hlc) -> Result<Vec<LogOp>, StorageError> {

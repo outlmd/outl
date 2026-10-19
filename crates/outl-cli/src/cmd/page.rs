@@ -140,7 +140,7 @@ pub enum PageCommand {
 pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
     match cmd {
         PageCommand::Get { slug, json } => {
-            let result = ws::open(path).and_then(|mut ctx| get(&mut ctx, slug));
+            let result = ws::open_read(path).and_then(|mut ctx| get(&mut ctx, slug));
             emit(*json, result, print_page_get)
         }
         PageCommand::Create {
@@ -204,7 +204,7 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
             })
         }
         PageCommand::List { filter, json } => {
-            let result = ws::open(path).and_then(|ctx| list(&ctx, filter.as_deref()));
+            let result = ws::open_read(path).and_then(|ctx| list(&ctx, filter.as_deref()));
             emit(*json, result, print_page_list)
         }
         PageCommand::Rename {
@@ -216,7 +216,7 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
             emit(*json, result, |v| print_page_meta("renamed", v))
         }
         PageCommand::Render { slug, json } => {
-            let result = ws::open(path).and_then(|ctx| render(&ctx, slug));
+            let result = ws::open_read(path).and_then(|ctx| render(&ctx, slug));
             emit(*json, result, |v| {
                 if let Some(md) = v.get("md").and_then(Value::as_str) {
                     println!("{md}");

@@ -150,6 +150,36 @@ Rules that follow:
 - ❌ Never put the machine id, or any other device-local value, on the sync surface.
   It is the opposite of invariant #7: state that must **diverge** per device must never travel.
 
+#### The write actor, and invariant 9's four questions
+
+The id in `ops-<actor>.jsonl`, and the `.lock-<actor>` that gates it, are the write actor.
+Issue #298 measured the pile: each one is an entry in every sync handshake and every snapshot cutoff, and nothing was reclaiming them.
+[RFC 0298](../../docs/rfcs/0298-read-opens-do-not-mint-actors.md).
+
+1. **Who can write it?**
+   The process holding `ActorWriteLock` for that id.
+   `resolve_write_actor` takes the device actor's lock and, when that lock is held, mints a new id and locks that.
+   A read does not.
+   `outl_ws::open_read` takes the shared workspace lock, reports the device actor, and calls `Workspace::disallow_local_writes` after per-page shards are registered.
+   `WsCtx::commit` refuses before it mutates.
+   Storage refuses an `append` that goes around it, before the `.jsonl` is created.
+2. **Who can read it?**
+   Every opener.
+   Readers merge every `ops-*.jsonl`.
+   The per-actor lock is not a read gate.
+3. **How does a test get its own copy?**
+   A `TempDir` workspace, and the device store redirected by `$OUTL_DEVICE_DIR` (the suite sets it in `.cargo/config.toml`; a test that wants a second device uses `DeviceStore::at`).
+   Never the developer's `~/.config/outl`.
+4. **What cleans it up?**
+   Nothing, and that stays acceptable only because the alternatives are worse.
+   Rewriting an actor id changes the HLC tiebreak, so concurrent ops that used to tie become ordered and convergence changes.
+   Compaction drops inert ops.
+   It does not drop identities.
+   A lock file is 0 bytes, and deleting one a live process holds lets a second process append to the same jsonl.
+   What bounds the *new* growth is that a read no longer mints.
+   `outl doctor` reports the actor-log count and warns when this device's write locks reach `EPHEMERAL_ACTOR_WARN_AT`.
+   Retiring an actor from the handshake once every peer's snapshot covers it, and bounding the writers that still mint, stay open on #298.
+
 **Full detail — the compare-and-swap publish, why `link(2)` and not `O_EXCL`, the GC's three-condition staleness rule and every reading it refuses, the TTL and lossy-record traps, and where migration lives: [`docs/device-store.md`](../../docs/device-store.md).**
 
 ### Snapshot dir has exactly one owner — the `Workspace`, keyed off `root`

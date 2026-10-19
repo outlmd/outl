@@ -156,7 +156,7 @@ pub enum BlockCommand {
 pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
     match cmd {
         BlockCommand::Get { id, json } => {
-            let result = ws::open(path).and_then(|ctx| get(&ctx, id));
+            let result = ws::open_read(path).and_then(|ctx| get(&ctx, id));
             emit(*json, result, block_print::print_block)
         }
         BlockCommand::Append {
@@ -229,7 +229,7 @@ pub fn run(cmd: &BlockCommand, path: &Path) -> i32 {
         }
         BlockCommand::Prop { sub } => super::block_prop::run(sub, path),
         BlockCommand::Tree { id, json } => {
-            let result = ws::open(path).and_then(|ctx| tree(&ctx, id));
+            let result = ws::open_read(path).and_then(|ctx| tree(&ctx, id));
             emit(*json, result, block_print::print_block)
         }
         BlockCommand::History { id, limit, json } => {

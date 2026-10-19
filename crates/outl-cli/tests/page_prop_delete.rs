@@ -1,6 +1,6 @@
 //! `outl page prop delete` removes the key from the op log and from
-//! the `.md`. `prop set key=` stores an empty string and must not
-//! leave a `key::` line either.
+//! the `.md`. A blank `prop set` (`foo=` or whitespace) is the same
+//! removal, so `prop get` is `PROP_NOT_FOUND` and the file has no `foo::`.
 
 use serde_json::Value;
 use std::process::Command;
@@ -77,19 +77,43 @@ fn delete_removes_the_property_from_the_log_and_the_markdown() {
 }
 
 #[test]
-fn setting_an_empty_value_does_not_write_a_bare_key_line() {
+fn setting_an_empty_value_clears_the_property() {
     let ws = init_workspace();
     let _ = ok(run(&ws, &["page", "create", "hb", "--json"]));
+    let _ = ok(run(
+        &ws,
+        &["page", "prop", "set", "hb", "foo=bar", "--json"],
+    ));
+    assert!(page_md(&ws, "hb").contains("foo:: bar"));
+
     let set = ok(run(&ws, &["page", "prop", "set", "hb", "foo=", "--json"]));
-    assert_eq!(set["data"]["value"], "");
+    assert_eq!(set["ok"], true);
     let md = page_md(&ws, "hb");
     assert!(
         !md.contains("foo::"),
-        "`prop set foo=` stores an empty string and must not emit a line:\n{md}"
+        "a blank set must not leave a line:\n{md}"
     );
+    let get = run(&ws, &["page", "prop", "get", "hb", "foo", "--json"]);
+    assert!(!get.status.success(), "a blank set removes the key");
+    let err: Value = serde_json::from_slice(&get.stdout).unwrap();
+    assert_eq!(err["error"]["code"], "PROP_NOT_FOUND");
 
-    let get = ok(run(&ws, &["page", "prop", "get", "hb", "foo", "--json"]));
-    assert_eq!(get["data"]["value"], "");
+    // The batch/MCP path does not trim before `set_kv`. Whitespace-only
+    // is still a clear.
+    let _ = ok(run(
+        &ws,
+        &["page", "prop", "set", "hb", "foo=kept", "--json"],
+    ));
+    let payload = r#"{"ops":[
+        {"op":"page_prop_set","args":{"page":"hb","key":"foo","value":"   "}}
+    ]}"#;
+    let env = ok(run(&ws, &["batch", "--ops", payload, "--json"]));
+    assert_eq!(env["data"]["applied"], 1);
+    assert!(!page_md(&ws, "hb").contains("foo::"));
+    let get = run(&ws, &["page", "prop", "get", "hb", "foo", "--json"]);
+    assert!(!get.status.success());
+    let err: Value = serde_json::from_slice(&get.stdout).unwrap();
+    assert_eq!(err["error"]["code"], "PROP_NOT_FOUND");
 }
 
 #[test]

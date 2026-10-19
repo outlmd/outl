@@ -158,4 +158,14 @@ pub trait Storage: Send + Sync {
     /// Implementations must be idempotent and safe to call from any
     /// point in the lifecycle.
     fn resize_cache(&mut self, _cap: usize) {}
+
+    /// Refuse later appends.
+    ///
+    /// Default no-op, which is what [`MemoryStorage`] wants: a test
+    /// double has no file to create. The only persistent backend,
+    /// [`JsonlStorage`], overrides it. A read-only workspace open
+    /// calls this after every shard is registered, so a later
+    /// `append` cannot create an `ops-<actor>.jsonl` for an actor
+    /// this process does not hold the write lock for.
+    fn disallow_writes(&mut self) {}
 }

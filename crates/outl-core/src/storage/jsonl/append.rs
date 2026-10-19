@@ -48,8 +48,20 @@ impl JsonlStorage {
             }
         }
         // Empty batch: nothing to write, no file to create, no fsync.
+        // This stays a no-op even after writes are disallowed — there
+        // is no actor file to refuse creating.
         if ops.is_empty() {
             return Ok(());
+        }
+        // A read-only open disallows writes after boot. Refuse before
+        // the `create(true)` open below, which is what would mint an
+        // `ops-<actor>.jsonl` for an actor this process does not hold
+        // the write lock for (issue #298).
+        if !self.writes_allowed {
+            return Err(StorageError::Backend(
+                "refusing to append: this storage was opened read-only and holds no write lock"
+                    .to_string(),
+            ));
         }
 
         // Serialize every line up front so a serialization failure aborts

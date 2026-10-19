@@ -58,9 +58,10 @@
 //! And the cost side does not argue for it either (root `CLAUDE.md`
 //! invariant 11): every one of those files is **0 bytes**. The reclaim is
 //! a directory entry. Trading an arbitration failure for that is not a
-//! trade. `outl doctor` reports the count instead, because a workspace
-//! with far more lock files than op logs is telling you something real —
-//! how many ephemeral actors it has minted.
+//! trade. `outl doctor` reports the actor-log count, and warns once the
+//! local write locks pass a threshold, because each actor is an entry
+//! in every sync handshake. A read no longer adds a lock. Nothing here
+//! deletes one.
 //!
 //! # Why deletion is safe here, and why the bar is still not zero
 //!

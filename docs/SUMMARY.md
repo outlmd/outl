@@ -100,6 +100,7 @@
   * [0265 — Index sidecar lifecycle: one owner, and a GC](rfcs/0265-index-sidecar-lifecycle.md)
   * [0266 — The most dangerous stale fact is one that was true](rfcs/0266-measure-before-you-believe.md)
   * [0276 — An MCP reply carries its payload once, and an error is the exception](rfcs/0276-mcp-content-only-replies.md)
+  * [0298 — A read does not mint a write actor](rfcs/0298-read-opens-do-not-mint-actors.md)
   * [0362: The journal is a stream of days, and each day keeps its own undo](rfcs/0362-journal-stream.md)
   * [0363: Capture from outside the iOS app lands through an inbox the app drains](rfcs/0363-ios-quick-capture.md)
   * [0377: Crash reporting that is on by default and cannot see your notes](rfcs/0377-crash-reporting.md)

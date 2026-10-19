@@ -81,7 +81,7 @@ pub struct QueryArgs {
 
 /// Run a `outl query` invocation.
 pub fn run(args: &QueryArgs, path: &Path) -> i32 {
-    let result = ws::open(path).and_then(|ctx| handler(&ctx, args));
+    let result = ws::open_read(path).and_then(|ctx| handler(&ctx, args));
     emit(args.json, result, |v| {
         if let Some(items) = v.get("results").and_then(Value::as_array) {
             for item in items {

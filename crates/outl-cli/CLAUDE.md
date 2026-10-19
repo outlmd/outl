@@ -241,7 +241,7 @@ Each handler returns a `serde_json::Value` so the same code path serves both the
   **No `trash empty`** — the only destroying operation here, so it belongs with `outl compact` (#110), and retention is a stated policy in [`docs/cli.md`](../../docs/cli.md#trash) rather than an inferred one.
 - `outl backlinks page|block|embed`
 - `outl tag list|pages`
-- `outl prop set|get|list|delete` (`delete` is `set_property(..., None)` through `commit_with`; an empty `set key=` is a stored value, not a delete)
+- `outl prop set|get|list|delete` (`delete`, and a blank `set key=`, are `set_property(..., None)` through `commit_with`)
 - `outl template list|apply|resolve|run` — template pages.
   `list` finds every page with a non-empty `template::` property.
   `apply` instantiates a structural template under a target block.
@@ -427,6 +427,8 @@ If it deliberately skips a step — a bulk import that announces once at the end
 - Machine-shaped handlers always return `Result<Value, ApiError>`.
 - Mutating commands take the workspace lock through `ws::open`.
   Two `outl` processes can't race against `outl serve` or each other.
+- Read-only commands open through `ws::open_read`.
+  They take no per-actor write lock and mint no actor.
 - `anyhow::Result` on lifecycle commands (`init`, `serve`, `doctor`) is kept — those produce human errors and never JSON.
 
 ## What this crate does NOT do

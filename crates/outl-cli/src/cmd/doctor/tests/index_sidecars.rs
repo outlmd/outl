@@ -182,3 +182,88 @@ fn actor_write_locks_are_counted_and_never_collected() {
     );
     assert!(orphan.exists(), "and it is still there afterwards");
 }
+
+/// Actor identity is the `ops-*.jsonl` set, not the lock files next to it.
+/// A workspace whose logs arrived from peers has no `.lock-<actor>` here,
+/// and the report still has to name how many actors the log holds.
+///
+/// Fails if the count goes back to "locks only, and nothing when there
+/// are none" — that is the proxy issue #298 called out.
+#[test]
+fn actor_logs_are_counted_when_this_device_holds_no_write_lock() {
+    let (_tmp, root, paths) = fresh();
+    std::fs::write(paths.ops.join("ops-01ARZ3NDEKTSV4RRFFQ69G5FAV.jsonl"), "")
+        .expect("write a peer log");
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "1 actor log"),
+        "the actor count is the logs, and it is reported with no local lock: {:?}",
+        messages(&report)
+    );
+    assert!(
+        !report.findings.iter().any(|f| {
+            matches!(f.severity, super::Severity::Warn) && f.message.contains("actor log")
+        }),
+        "one peer log is not proliferation: {:?}",
+        messages(&report)
+    );
+}
+
+/// A handful of locks is ordinary: the device actor, a GUI, `outl serve`,
+/// the MCP server. Past that the count is the pile issue #298 measured,
+/// and it has to be a warning — an info line in a clean report is how the
+/// doc's claim stayed false.
+#[test]
+fn a_pile_of_local_write_locks_is_a_warning() {
+    let (_tmp, root, paths) = fresh();
+    for _ in 0..8 {
+        let path = paths.ops.join(format!(".lock-{}", ulid::Ulid::generate()));
+        std::fs::write(&path, "").expect("write lock");
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        report.findings.iter().any(|f| {
+            matches!(f.severity, super::Severity::Warn)
+                && f.message.contains("per-actor write lock")
+                && f.message.contains("8")
+        }),
+        "eight local write locks is ephemeral proliferation: {:?}",
+        messages(&report)
+    );
+    assert!(
+        !report.repairable.iter().any(|l| l.contains(".lock-")),
+        "the warning does not offer to delete a lock: {:?}",
+        report.repairable
+    );
+}
+
+/// The boundary under the warning. Seven is still a busy machine, not a
+/// pile, and a warning on it would train the user to ignore the real one.
+#[test]
+fn fewer_write_locks_than_the_threshold_stay_a_note() {
+    let (_tmp, root, paths) = fresh();
+    for _ in 0..7 {
+        let path = paths.ops.join(format!(".lock-{}", ulid::Ulid::generate()));
+        std::fs::write(&path, "").expect("write lock");
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        report.findings.iter().any(|f| {
+            matches!(f.severity, super::Severity::Info)
+                && f.message.contains("per-actor write lock")
+        }),
+        "below the threshold the count is informational: {:?}",
+        messages(&report)
+    );
+    assert!(
+        !report.findings.iter().any(|f| {
+            matches!(f.severity, super::Severity::Warn)
+                && f.message.contains("per-actor write lock")
+        }),
+        "and it is not a warning: {:?}",
+        messages(&report)
+    );
+}
