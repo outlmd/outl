@@ -82,10 +82,8 @@ jobs:
       name: release
       url: https://appstoreconnect.apple.com/apps
 
-    env:
-      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-
+    # The App Store Connect IDs are set on each step that reads them
+    # rather than on the job, so no other step inherits them.
     steps:
       # Needed for `.github/scripts/testflight_set_whatsnew.py`
       # invoked later. The script is small and the checkout is cheap
@@ -180,6 +178,7 @@ jobs:
       - name: Install App Store Connect API key
         env:
           APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         run: |
           KEY_DIR="$HOME/.appstoreconnect/private_keys"
           mkdir -p "$KEY_DIR"
@@ -192,6 +191,9 @@ jobs:
 
       - name: Upload IPA to TestFlight
         shell: bash
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           # `xcrun altool --type ios` is known to return exit 0 even on
           # App Store Connect 4xx (e.g. duplicate CFBundleVersion). Capture
@@ -244,6 +246,8 @@ jobs:
 
       - name: Cleanup API key
         if: always()
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         run: |
           if [[ -n "$APP_STORE_CONNECT_KEY_ID" ]]; then
             rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"

@@ -83,9 +83,38 @@ def java_class(major=52):
 
 
 def verdict(path):
-    results = {"checked": [], "failures": []}
+    results = {"checked": [], "failures": [], "env_failures": []}
     check.walk(path, False, results)
     return results
+
+
+class BuildEnvTest(unittest.TestCase):
+    STRIPPED = [(".text", SHT_PROGBITS, SHF_ALLOC | 0x4, 32)]
+
+    def test_clean_binary_passes(self):
+        blob = elf64(self.STRIPPED) + b"PATH\0HOME\0"
+        self.assertEqual(check.check_build_env("outl", blob), [])
+
+    def test_each_marker_fails(self):
+        for marker in check.BUILD_ENV_MARKERS:
+            with self.subTest(marker=marker):
+                blob = elf64(self.STRIPPED) + marker + b"=123\0"
+                failures = check.check_build_env("outl", blob)
+                self.assertEqual(len(failures), 1)
+                self.assertIn(marker.decode(), failures[0])
+
+    def test_library_inside_apk_is_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            apk = os.path.join(tmp, "app.apk")
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr(
+                    "lib/arm64-v8a/liboutl.so",
+                    elf64(self.STRIPPED) + b"RUNNER_TEMP=/tmp\0",
+                )
+            results = verdict(apk)
+        self.assertEqual(results["failures"], [])
+        self.assertEqual(len(results["env_failures"]), 1)
+        self.assertIn("liboutl.so", results["env_failures"][0])
 
 
 class ElfTest(unittest.TestCase):

@@ -288,8 +288,9 @@ jobs:
        github.event.inputs.release_build == 'true')
     environment:
       name: release
-    env:
-      KEYCHAIN_PWD: ${{ secrets.MAC_KEYCHAIN_PASSWORD }}
+    # Secrets live on the step that reads them, never on the job: a job
+    # `env` is inherited by every build step, and anything a build script
+    # snapshots from its environment ends up in the artifact.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -445,6 +446,7 @@ jobs:
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PWD: ${{ secrets.MAC_KEYCHAIN_PASSWORD }}
         run: |
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
           CERT_PATH="$RUNNER_TEMP/cert.p12"

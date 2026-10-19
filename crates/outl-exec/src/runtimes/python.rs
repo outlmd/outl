@@ -35,7 +35,7 @@ impl Runtime for PythonRuntime {
         "python"
     }
 
-    /// Runs on a worker thread because RustPython 0.5 exposes no
+    /// Runs on a worker thread because RustPython 0.6 exposes no
     /// cancellation point: `eval_breaker_tripped` is `pub(crate)` and
     /// the opcode trace hook is gated behind a frame's
     /// `f_trace_opcodes`, set from Python. So the caller is released on

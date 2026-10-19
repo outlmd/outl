@@ -55,6 +55,18 @@ those are what we just uploaded.
 Finding no binary at all is a failure too. A check that passes because it
 looked at nothing is worse than no check: it reports the thing it did not do.
 
+The same pass also fails a binary that carries the CI job's environment.
+A dependency's build script that snapshots `std::env::vars()` into the
+crate it compiles bakes every variable of the runner into the binary, and
+nothing about the build looks wrong when it does. The names below are set
+on every job of the runners we use and never appear in our own source, so
+finding one in a shipped binary means a build environment was embedded:
+
+  * `GITHUB_RUN_ID`, `RUNNER_TEMP`, `ACTIONS_RUNTIME` — GitHub Actions
+  * `BLACKSMITH_` — the Blacksmith runner prefix
+
+This rule has no opt-out flag on purpose.
+
 Usage: check-artifact-stripped.py [--allow-symbols] <artifact|dir>...
 """
 
@@ -339,6 +351,24 @@ def inspect(name, blob, allow_symbols):
     return None
 
 
+# Variables every CI job carries. Matching the name is enough: a binary
+# that knows the name of a runner variable was built from a snapshot of it.
+BUILD_ENV_MARKERS = (
+    b"GITHUB_RUN_ID",
+    b"RUNNER_TEMP",
+    b"ACTIONS_RUNTIME",
+    b"BLACKSMITH_",
+)
+
+
+def check_build_env(name, blob):
+    return [
+        f"{name}: embeds the CI build environment ({marker.decode()} found)"
+        for marker in BUILD_ENV_MARKERS
+        if marker in blob
+    ]
+
+
 def is_debug_companion(path):
     lowered = path.lower()
     return any(part.endswith(DEBUG_COMPANIONS) for part in lowered.split("/"))
@@ -398,6 +428,7 @@ def judge(name, blob, allow_symbols, results):
     kind, failures = verdict
     results["checked"].append(f"{kind} {name} ({len(blob)} bytes)")
     results["failures"].extend(failures)
+    results.setdefault("env_failures", []).extend(check_build_env(name, blob))
 
 
 USAGE = "usage: {} [--allow-symbols] <artifact|dir>..."
@@ -417,7 +448,7 @@ def main():
     if not args:
         sys.exit(USAGE.format(sys.argv[0]))
 
-    results = {"checked": [], "failures": []}
+    results = {"checked": [], "failures": [], "env_failures": []}
     for path in args:
         if not os.path.exists(path):
             sys.exit(f"::error::no such artifact: {path}")
@@ -432,6 +463,10 @@ def main():
             "reported nothing because it read nothing, which is not a pass"
         )
 
+    if results["env_failures"]:
+        for line in results["env_failures"]:
+            print(f"::error::build environment in a published artifact: {line}")
+
     if results["failures"]:
         for line in results["failures"]:
             print(f"::error::debug info in a published artifact: {line}")
@@ -441,8 +476,14 @@ def main():
             "cover (see RFC 0377 section 5)"
         )
 
+    if results["env_failures"]:
+        sys.exit(
+            "this artifact embeds the environment of the job that built it; "
+            "find the build script that snapshots env vars and drop or patch it"
+        )
+
     scope = "no DWARF" if allow_symbols else "no DWARF and no symbol table"
-    print(f"every binary checked carries {scope}")
+    print(f"every binary checked carries {scope}, and no build environment")
 
 
 if __name__ == "__main__":
