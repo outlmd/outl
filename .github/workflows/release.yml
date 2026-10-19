@@ -999,7 +999,7 @@ jobs:
           set -euo pipefail
           WORK="${RUNNER_TEMP}/bundle-verify"
           rm -rf "${WORK}"
-          mkdir -p "${WORK}/appimage" "${WORK}/deb"
+          mkdir -p "${WORK}/appimage" "${WORK}/deb" "${WORK}/rpm"
 
           chmod +x outl-desktop-linux-x86_64.AppImage
           ( cd "${WORK}/appimage" \
@@ -1007,7 +1007,13 @@ jobs:
 
           dpkg-deb -x outl-desktop-linux-x86_64.deb "${WORK}/deb"
 
-          python3 scripts/check-artifact-stripped.py "${WORK}/appimage" "${WORK}/deb"
+          # The rpm is packaged by a separate `tauri bundle` call, so read
+          # its payload too instead of trusting it matches the deb.
+          sudo apt-get install -y --no-install-recommends rpm2cpio
+          rpm2cpio "${GITHUB_WORKSPACE}/outl-desktop-linux-x86_64.rpm" \
+            | ( cd "${WORK}/rpm" && cpio -idm --quiet )
+
+          python3 scripts/check-artifact-stripped.py "${WORK}/appimage" "${WORK}/deb" "${WORK}/rpm"
 
       - name: Upload bundles to draft release
         if: needs.prepare.outputs.dry_run != 'true'
