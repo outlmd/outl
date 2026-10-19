@@ -365,12 +365,12 @@ The gesture stays as the shortcut.
 
 Two rules govern what may go in it:
 
-- **Per-device UI state, in `localStorage`, unless the process itself has to read it.** Nothing about the toolbar goes through the op log — two devices disagreeing about their own layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7). `editor.diagrams` is also per-device, and it lives in `~/.config/outl/config.toml` so the desktop on this machine sees the same choice; the sheet reads and writes that one key through `get_editor_diagrams` / `set_editor_diagrams`. A preference that *is* workspace data belongs in `outl.toml`, not here.
-- **The setting's logic lives in `@outl/shared` or in a shared command, not in the sheet.** The toolbar lock is `@outl/shared/toolbar`'s `lock.ts`; the diagram switch is `@outl/shared/diagram`'s `diagramsMode`; this file only renders the row and calls them. A preference implemented inside the sheet is a preference the other bar can't honour.
+- **Per-device UI state, not workspace data, unless the process itself has to read it.** Nothing here goes through the op log: two devices disagreeing about their own toolbar layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7). The toolbar lock stays in `localStorage`. `editor.diagrams` is per-device too but lives in `~/.config/outl/config.toml`, so the desktop on this machine sees the same choice; the sheet reads and writes that key through `get_editor_diagrams` / `set_editor_diagrams`. A preference that *is* workspace data belongs in `outl.toml`, not here.
+- **The setting's logic lives in `@outl/shared` or in a shared command, not in the sheet.** The toolbar lock is `@outl/shared/toolbar`'s `lock.ts`, the diagram switch is `@outl/shared/diagram`'s `diagramsMode`; this file only renders the row and calls them. A preference implemented inside the sheet is a preference the other bar can't honour.
 
-**Crash reports is the exception to the first rule, and the first Tauri command this sheet calls** (RFC 0377; the file used to say it called none, which was a fact about what had landed rather than a rule).
+**Crash reports goes further than either, because it is consent rather than a preference** (RFC 0377).
 `localStorage` cannot hold it: `outl-telemetry` reads `[telemetry] enabled` out of the global config at **process start**, before a workspace or a webview exists.
-It is also consent rather than a layout preference — a property of the person, which is why it belongs in a config file that follows them to the next device.
+It is a property of the person, which is why it belongs in a config file that follows them to the next device.
 And the phone has to offer it at all: reporting is on by default and there is no `outl` binary on iOS, so this row is a mobile user's only opt-out (`Capability::CrashReportingOptOut`).
 The writer is `outl_tauri_shared::commands::telemetry::set_telemetry_enabled`, the wrappers are `@outl/shared/api/telemetry`, and the words are `CRASH_REPORTS_SETTING` in `@outl/shared/onboarding` — identical to the desktop's, because the same claim goes to Apple and Google.
 The switch moves only on the command's reply, like `RemindersSheet`'s; a read or write that fails says so in the row instead of falling back to the default, since the default is *on* and a guess would tell someone who opted out that they had not.

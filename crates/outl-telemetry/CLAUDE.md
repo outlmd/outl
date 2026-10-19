@@ -100,10 +100,12 @@ That distinction is the one thing `redact`'s pattern must get right, and it is w
 Six rules, and three of them exist because a review broke the first three.
 What they close, with the input that proved each one:
 
-- **Rule 0, `std` is also an author.** `core`'s slicing panics quote the string they failed on — measured on the pinned toolchain, `end byte index 16 is not a char boundary; it is inside 'ã' (bytes 15..17) of \`<the note>\``.
+- **Rule 0, `std` is also an author.** On **1.95** all three of `core`'s slicing panics quoted the string they failed on: `end byte index 16 is not a char boundary; it is inside 'ã' (bytes 15..17) of \`<the note>\``.
   `outl-md` slices block text by byte offset in `cursor.rs` and `wikilink.rs`, so an off-by-one on an accented line published the note.
-  The rule cuts at the quote and keeps the diagnosis.
   This file used to assume we were the only author of a panic message.
+  **1.99 stopped quoting**, which is the toolchain the workspace pins today, so the rule does not fire now.
+  It stays, and what triggers it is the quote rather than the marker — a message that carries no quote keeps its whole diagnostic (`a_slicing_panic_that_quotes_nothing_keeps_its_diagnosis`).
+  Keeping it costs one `contains` on a path where the process is already dying; dropping it costs noticing the next time somebody else's formatter starts echoing its input.
 - **Rule 3, a path does not end at a space.** Rules 1 and 2 stop at whitespace, and what follows is the rest of a home directory: `C:\Users\Joao Silva\AppData\…` left `Silva\AppData\Local\…`, and `~/Library/Application Support/outl/actors/<ULID>.json` left the actor id.
   The old note here called this acceptable "because the leaf carries the page title" — true, and beside the point, since the *middle* carries the username.
 - **Rule 5, the actor id.** The one identifier in outl that is stable per device, which is what the promise means by "nothing that ties two reports together".

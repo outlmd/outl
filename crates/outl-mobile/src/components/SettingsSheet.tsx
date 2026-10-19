@@ -31,25 +31,20 @@ import { getEditorDiagrams, setEditorDiagrams } from "../lib/api";
  *
  * One row is navigation (devices and pairing, which the desktop keeps
  * in Settings too). The toolbar rows are **per-device UI state in
- * `localStorage`**, not workspace data: none of it goes through the op
- * log, because two devices disagreeing about their own toolbar layout is
- * not a conflict to reconcile (root `CLAUDE.md` invariant 7).
- * Diagrams are also per-device, but they live in `config.toml`
- * (`[editor] diagrams`) so the desktop on this machine sees the same
- * choice.
+ * `localStorage`**: two devices disagreeing about their own toolbar
+ * layout is not a conflict to reconcile (root `CLAUDE.md` invariant 7).
  *
- * **Crash reports is the exception, and it is the first Tauri command
- * this sheet calls.** This file used to say the sheet called none, and
- * that was a property of what had landed here rather than a rule. The
- * reason the flag cannot be `localStorage` is that nothing in the
- * webview reads it: `outl-telemetry` reads `[telemetry] enabled` out of
- * the global config at **process start**, before a workspace — or a
- * webview — exists, so the consent has to be where the process can see
- * it (RFC 0377 section 4). It is also consent rather than a layout
- * preference: a property of the person, which is why it belongs in a
- * config file that follows them to their next device, and why the phone
- * has to offer it at all — there is no `outl` binary on iOS, so this
- * toggle is the only opt-out a mobile user has.
+ * **Two rows are not that, and both reach for a Tauri command.**
+ * Diagrams are per-device as well but live in `config.toml`
+ * (`[editor] diagrams`), so the desktop on this machine sees the same
+ * choice. Crash reports go further. The flag cannot be `localStorage`
+ * because nothing in the webview reads it: `outl-telemetry` reads
+ * `[telemetry] enabled` out of the global config at **process start**,
+ * before a workspace or a webview exists (RFC 0377 section 4). It is
+ * also consent rather than a preference, a property of the person,
+ * which is why it belongs in a file that follows them to their next
+ * device, and why the phone has to offer it at all: there is no `outl`
+ * binary on iOS, so this toggle is the only opt-out a mobile user has.
  *
  * The rule that did *not* change: the setting's logic is not in here.
  * The flag's one writer is
@@ -67,13 +62,13 @@ export function SettingsSheet(props: {
   const drag = createSheetDrag(() => props.onClose());
   const [locked, setLocked] = createSignal(false);
   const [resetDone, setResetDone] = createSignal(false);
-  const [diagrams, setDiagrams] = createSignal<DiagramsMode>(diagramsMode());
   /** `null` until the first read lands: the default is ON, so painting a
    *  switch before we know would show "off" to nobody and "on" to
    *  everyone, including someone who turned it off. */
   const [reports, setReports] = createSignal<boolean | null>(null);
   const [savingReports, setSavingReports] = createSignal(false);
   const [reportsError, setReportsError] = createSignal(false);
+  const [diagrams, setDiagrams] = createSignal<DiagramsMode>(diagramsMode());
 
   // Re-read on every open. `<Show>` gates the markup, not the
   // component: `Journal` mounts this once and toggles `open`, so a
@@ -84,6 +79,12 @@ export function SettingsSheet(props: {
     if (!props.open) return;
     setLocked(isOrderLocked());
     setResetDone(false);
+    // Re-read on every open for the same reason the lock does, plus one:
+    // this value lives in a file another process writes (`outl
+    // telemetry off` on a paired desktop, a hand-edited `config.toml`),
+    // so a cached answer here can be wrong without anything in this
+    // client having changed it.
+    void loadReports();
     setDiagrams(diagramsMode());
     try {
       void getEditorDiagrams()
@@ -94,28 +95,11 @@ export function SettingsSheet(props: {
         })
         .catch(() => {
           // The sheet still renders. The fence keeps the current mode.
-          // Re-read on every open for the same reason the lock does, plus one:
-    // this value lives in a file another process writes (`outl
-    // telemetry off` on a paired desktop, a hand-edited `config.toml`),
-    // so a cached answer here can be wrong without anything in this
-    // client having changed it.
-    void loadReports();
-  });
+        });
     } catch {
       // No host in a test. Leave the signal as it is.
     }
   });
-
-  function onDiagramsChange(value: string) {
-    const mode: DiagramsMode = value === "off" ? "off" : "pele";
-    setDiagrams(mode);
-    setDiagramsMode(mode);
-    try {
-      void setEditorDiagrams(mode).catch(() => {});
-    } catch {
-      // Same as the read: a missing host must not take the sheet down.
-    }
-  }
 
   async function loadReports() {
     try {
@@ -148,6 +132,17 @@ export function SettingsSheet(props: {
       setReportsError(true);
     } finally {
       setSavingReports(false);
+    }
+  }
+
+  function onDiagramsChange(value: string) {
+    const mode: DiagramsMode = value === "off" ? "off" : "pele";
+    setDiagrams(mode);
+    setDiagramsMode(mode);
+    try {
+      void setEditorDiagrams(mode).catch(() => {});
+    } catch {
+      // Same as the read: a missing host must not take the sheet down.
     }
   }
 

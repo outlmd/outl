@@ -61,8 +61,9 @@ pub const ID_MARKER: &str = "<id>";
 /// # Rule 0, and why `std` is an author of free-form strings
 ///
 /// This file used to assume the only author of a panic message was us. It is
-/// not: `str` slicing panics are formatted by `core`, and under the toolchain
-/// this repo pins they **quote the string being sliced**.
+/// not: `str` slicing panics are formatted by `core`, and on **1.95**, which
+/// this repo pinned when the rule was written, all three of them quoted the
+/// string being sliced.
 ///
 /// ```text
 /// end byte index 16 is not a char boundary; it is inside 'ã' (bytes 15..17)
@@ -72,7 +73,15 @@ pub const ID_MARKER: &str = "<id>";
 /// `outl-md` slices block text by byte offset in `cursor.rs`, `wikilink.rs`
 /// and four other files, so an off-by-one on an accented line — the exact bug
 /// crash reporting exists to catch — would have published up to 256 bytes of a
-/// note. Rule 0 cuts the quote off and keeps the diagnosis.
+/// note.
+///
+/// **1.99 does not quote any of the three**, so on today's toolchain this rule
+/// does not fire. It stays because the hazard is a property of somebody else's
+/// formatting, not of ours: the rule costs one `contains` on a path that only
+/// runs while a process is already dying, and the alternative is noticing the
+/// next time a message starts carrying its input. The quote is what triggers
+/// it, not the marker, so a toolchain that does not quote keeps its full
+/// diagnostic.
 ///
 /// # What still gets through, stated so it is not rediscovered from a report
 ///
@@ -116,23 +125,32 @@ pub fn redact(text: &str) -> String {
 /// untouched when no marker is present, which is every message we write
 /// ourselves.
 fn cut_quoted_string(text: &str) -> Cow<'_, str> {
-    let cut = QUOTING_PANICS
+    let Some(at) = QUOTING_PANICS
         .iter()
         .filter_map(|marker| text.find(marker).map(|at| at + marker.len()))
-        .min();
-    match cut {
-        Some(at) => Cow::Owned(format!("{} {TEXT_MARKER}", text[..at].trim_end())),
-        None => Cow::Borrowed(text),
+        .min()
+    else {
+        return Cow::Borrowed(text);
+    };
+    // The marker alone is not the trigger: the quote is. A toolchain that
+    // reports the same failure without quoting produces a message with
+    // nothing to hide, and cutting it there would throw away the half that
+    // says what went wrong for no gain at all.
+    if !text[at..].contains('`') {
+        return Cow::Borrowed(text);
     }
+    Cow::Owned(format!("{} {TEXT_MARKER}", text[..at].trim_end()))
 }
 
-/// The `core` messages that quote the string they failed on, measured against
-/// the pinned toolchain rather than taken from memory. Each is kept up to the
-/// end of the marker, so the sentence still reads.
+/// The `core` messages that have quoted the string they failed on, measured on
+/// 1.95 and re-measured on 1.99 rather than taken from memory. Each is kept up
+/// to the end of its marker, so the sentence still reads.
 ///
-/// A later toolchain reworded the first one to `… of string` and stopped
-/// quoting; this list is for the one we ship, and an extra marker that no
-/// longer fires costs nothing.
+/// On 1.99 all three report the same failures without the quote (`… of
+/// string`, `… for string of length N`, `byte range starts at …`), so none of
+/// them fires today. A marker that no longer matches costs nothing, and the
+/// quote check in `cut_quoted_string` is what keeps a non-quoting message
+/// intact.
 const QUOTING_PANICS: [&str; 3] = [
     "is not a char boundary",
     "is out of bounds of ",
@@ -306,6 +324,23 @@ mod tests {
             redact("begin > end (20 > 3) when slicing `reuniao com o paciente`"),
             "begin > end (20 > 3) when slicing <text>"
         );
+    }
+
+    /// The same three failures as reported by 1.99, which stopped quoting.
+    ///
+    /// Measured on the toolchain this repo pins, not assumed. These carry
+    /// nothing to hide, so rule 0 must leave the whole diagnostic standing —
+    /// the earlier version of the rule keyed on the marker alone and would
+    /// have cut all three down to `<text>` for no gain.
+    #[test]
+    fn a_slicing_panic_that_quotes_nothing_keeps_its_diagnosis() {
+        for msg in [
+            "end byte index 16 is not a char boundary; it is inside 'x' (bytes 15..17 of string)",
+            "end byte index 900 is out of bounds for string of length 27",
+            "byte range starts at 20 but ends at 3",
+        ] {
+            assert_eq!(redact(msg), msg, "a message with no quote must survive");
+        }
     }
 
     /// A Vec index panic reads similarly and quotes nothing, so rule 0 must
