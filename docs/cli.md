@@ -296,8 +296,8 @@ No client has a trash surface yet — it is CLI and MCP only, recorded as `Capab
 
 Properties stay in the `key:: value` lines at the top of the page; the CLI never invents a new place to put metadata (see [docs/markdown-format.md](markdown-format.md)).
 `delete` removes the key: it appends `Op::SetProp` with no value, which is what the tree already treats as removal.
-`set key=` stores an empty string and does not remove the key.
-Either way the `.md` omits a value that is empty or only whitespace, so a bare `key::` line is not written back.
+`set` with an empty or whitespace-only value does the same removal, so `prop get` returns `PROP_NOT_FOUND` and the `.md` has no `key::` line.
+The projection also skips an empty value an older log still holds, so a bare `key::` is not written back.
 
 ### Export
 

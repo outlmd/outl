@@ -15,10 +15,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ### Fixed
 
 - **Deleting a page property no longer leaves a bare `key::` line in the `.md`.**
-  `outl page prop set hb foo=` stored an empty string.
-  `prop list` stopped showing `foo`, and `render` kept writing `foo::` with nothing after it.
-  `outl page prop delete <page> <key>` (MCP `outl_page_prop_delete`, batch op `page_prop_delete`) appends `Op::SetProp` with no value, which removes the key.
-  The projection skips a property whose value is empty or only whitespace, so an empty string already in the log stops appearing on disk.
+  `outl page prop set hb foo=` stored an empty string, and `render` wrote that back as `foo::`.
+  `prop get` then returned `""` while the file had no line, so a reparse or a peer rebuilding from the `.md` dropped the key.
+  A blank value on `outl page prop set` (MCP `outl_page_prop_set`, batch `page_prop_set`) now removes the key, the same way `outl page prop delete` does: `Op::SetProp` with no value.
+  `prop get` afterwards returns `PROP_NOT_FOUND`.
+  The projection still skips an empty or whitespace-only value, so an older log that already holds `Text("")` stops appearing on disk.
   `outl doctor` reports that leftover line as a stale projection, and `--repair` rewrites the page without it.
 
 - **The Android app says why when it cannot start, instead of closing on open.**

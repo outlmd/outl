@@ -71,8 +71,12 @@ pub fn run(cmd: &PropCommand, path: &Path) -> i32 {
             let result = ws::open(path).and_then(|mut ctx| set(&mut ctx, page, assignment));
             emit(*json, result, |v| {
                 let key = v.get("key").and_then(Value::as_str).unwrap_or("?");
-                let val = v.get("value").and_then(Value::as_str).unwrap_or("?");
-                println!("set: {key} = {val}");
+                let val = v.get("value").and_then(Value::as_str).unwrap_or("");
+                if val.is_empty() {
+                    println!("deleted: {key}");
+                } else {
+                    println!("set: {key} = {val}");
+                }
             })
         }
         PropCommand::Get { page, key, json } => {
@@ -124,8 +128,21 @@ pub fn set(ctx: &mut WsCtx, page: &str, assignment: &str) -> Result<Value, ApiEr
 }
 
 /// Typed entry point — write `key = value` to `page` and reproject.
-/// Used by the MCP shim so we don't have to `format!("{k}={v}")`.
+/// Used by the MCP shim and by `page_prop_set` in a batch, so we don't
+/// have to `format!("{k}={v}")`.
+///
+/// An empty or whitespace-only value removes the key
+/// (`set_property(..., None)`), the same rule as `set_page_property`.
+/// Storing `Text("")` would leave the log and the `.md` disagreeing:
+/// `prop get` would return `""` while the projection omits the line,
+/// and a peer that rebuilds from the file would drop the key.
 pub fn set_kv(ctx: &mut WsCtx, page: &str, key: &str, value: &str) -> Result<Value, ApiError> {
+    let value = value.trim();
+    if value.is_empty() {
+        let mut cleared = delete(ctx, page, key)?;
+        cleared["value"] = json!("");
+        return Ok(cleared);
+    }
     let id = resolve_page(ctx, page)?;
     let hlc = ctx.hlc.clone();
     let owned = value.to_string();
@@ -138,10 +155,9 @@ pub fn set_kv(ctx: &mut WsCtx, page: &str, key: &str, value: &str) -> Result<Val
 /// Remove `key` from `page`.
 ///
 /// This is `Op::SetProp { value: None }`, which `do_op` already treats
-/// as removal. An empty string is a stored value, not a delete — that
-/// is what `set` writes, and the projection omits it. The op is
-/// appended even when this device does not currently hold the key, so
-/// a peer that set it later still converges.
+/// as removal. The op is appended even when this device does not
+/// currently hold the key, so a peer that set it later still converges.
+/// A blank `set_kv` calls this too.
 pub fn delete(ctx: &mut WsCtx, page: &str, key: &str) -> Result<Value, ApiError> {
     let key = outl_actions::property::normalize_key(key);
     if let Some(why) = outl_actions::property::key_rejection(&key) {
