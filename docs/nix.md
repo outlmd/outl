@@ -69,32 +69,37 @@ Its job is **configuration management**: it renders `~/.config/outl/config.toml`
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    home-manager.url = "github:nix-community/home-manager/release-25.05";
     outl.url = "github:outlmd/outl";
   };
 
-  outputs = { nixpkgs, outl, ... }: {
-    homeConfigurations.you = nixpkgs.legacyPackages.x86_64-linux.home.manager.config {
-      imports = [ outl.homeManagerModules.default ];
+  outputs = { nixpkgs, home-manager, outl, ... }: {
+    homeConfigurations.you = home-manager.lib.homeManagerConfiguration {
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      modules = [
+        outl.homeManagerModules.default
+        {
+          programs.outl = {
+            enable = true;
+            installDesktop = true;      # also put outl-desktop on the PATH
 
-      programs.outl = {
-        enable = true;
-        installDesktop = true;            # also put outl-desktop on the PATH
+            settings = {
+              theme.preset = "gruvbox";
+              editor.vimMode = true;
+              sync.transport = "iroh";
+              reminders.quietHours = "22:00-07:00";
+            };
 
-        settings = {
-          theme.preset = "gruvbox";
-          editor.vimMode = true;
-          sync.transport = "iroh";
-          reminders.quietHours = "22:00-07:00";
-        };
-
-        # Optional per-user background sync (Linux only):
-        services.sync = {
-          enable = true;
-          workspace = "/home/you/notes";
-        };
-      };
+            # Optional per-user background sync (Linux only):
+            services.sync = {
+              enable = true;
+              workspace = "/home/you/notes";
+            };
+          };
+        }
+      ];
     };
-  };
+}
 }
 ```
 
@@ -155,7 +160,7 @@ A client write will then detach the symlink again, so also set `xdg.configFile."
 
 > **Migrating a machine that already hit the conflict.**
 > If you were using this module before the `managed` default, your `~/.config/outl/config.toml` is already a stray regular file and the switch is failing with *"file exists and cannot be overridden"*.
-> The module already sets `force = true` on that target, so a `home-manager switch` now takes it back over; from then on the `managed` directive keeps it a symlink. (Drop the stray file by hand first only if you'd edited it.)
+> The module deliberately keeps Home Manager's collision guard on, so it will not silently clobber that file. Set `programs.outl.settings.managed = false` and `xdg.configFile."outl/config.toml".force = true`, then run `home-manager switch` to reclaim the target; afterwards set `managed = true` again so it stays a symlink. If you had edited the stray file by hand, move it aside first.
 
 
 ### Theme precedence

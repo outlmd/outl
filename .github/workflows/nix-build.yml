@@ -13,6 +13,8 @@ on:
       - 'hm-module.nix'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'package.json'
+      - 'bun.lock'
       - 'crates/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/nix-build.yml'
@@ -24,6 +26,8 @@ on:
       - 'hm-module.nix'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'package.json'
+      - 'bun.lock'
       - 'crates/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/nix-build.yml'
@@ -69,3 +73,10 @@ jobs:
 
       - name: Build outl-desktop
         run: nix build .#outl-desktop --print-build-logs
+
+      # `nix flake check --no-build` (above) only evaluates this check — it
+      # never builds the derivation, so its assertion that the generated
+      # config emits `managed = true` was never actually exercised. Build
+      # and run it.
+      - name: Check home-manager module emits managed config
+        run: nix build .#checks.${{ matrix.system }}.home-manager-module --print-build-logs

@@ -433,6 +433,19 @@ in
         }) s.extraConfig;
 
       configFile = tomlFormat.generate "outl-config" configData;
+      serveArgs = (lib.optionalString (!cfg.services.sync.watch) " --no-watch")
+        + (lib.optionalString (!cfg.services.sync.sync) " --no-sync");
+      # The workspace is passed through a wrapper script rather than on
+      # ExecStart: systemd expands `%` specifiers (e.g. `%H` -> $HOME) in
+      # the whole ExecStart line *before* the shell runs, and
+      # `escapeShellArg` does not suppress that, so a workspace path like
+      # `~/notes%H` would silently become a different directory. The
+      # wrapper's store path contains no `%`, and the workspace is
+      # shell-quoted inside it where the shell — not systemd — handles it.
+      outlServeScript = pkgs.writeShellScript "outl-serve" ''
+        exec "${cfg.package}/bin/outl" serve \
+          --workspace ${lib.escapeShellArg cfg.services.sync.workspace}${serveArgs}
+      '';
     in
     {
       # Packages are only built for Linux (see flake.nix). On other platforms
@@ -509,14 +522,15 @@ in
               Description = "outl background sync service";
               After = [ "network-online.target" ];
               Wants = [ "network-online.target" ];
+              # Restart the service when the generated config changes, so a
+              # `sync.transport` / `relay_url` edit takes effect on the next
+              # `home-manager switch` without a manual `systemctl restart`.
+              X-Restart-Triggers = [ configFile ];
             };
 
             Service = {
               Environment = [ "RUST_LOG=${cfg.services.sync.rustLog}" ];
-              ExecStart =
-                "${cfg.package}/bin/outl serve --workspace ${lib.escapeShellArg cfg.services.sync.workspace}"
-                + lib.optionalString (!cfg.services.sync.watch) " --no-watch"
-                + lib.optionalString (!cfg.services.sync.sync) " --no-sync";
+              ExecStart = "${outlServeScript}";
               Restart = "on-failure";
               RestartSec = "5s";
             };
