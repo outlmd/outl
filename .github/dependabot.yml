@@ -30,6 +30,7 @@ updates:
   # requirements (dependabot-core#14320), so the shared versions in
   # package.json `workspaces.catalog` (TypeScript, Vite, Vitest, Solid,
   # Tailwind, Tauri) still need a manual bump until that lands.
+  # Workspace members, including crates/outl-mobile, resolve from this lockfile.
   - package-ecosystem: "bun"
     directory: "/"
     schedule:
