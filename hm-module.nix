@@ -106,7 +106,7 @@ in
           managed = lib.mkOption {
             type = lib.types.bool;
             default = true;
-            description = lib.mdDoc ''
+            description = ''
               Whether home-manager owns `~/.config/outl/config.toml` outright.
 
               When true (the default) the generated config carries `managed =
@@ -140,7 +140,7 @@ in
             preset = lib.mkOption {
               type = lib.types.enum themePresets;
               default = "outl-light";
-              description = lib.mdDoc ''
+              description = ''
                 Theme palette preset — the light side of the light/dark pair.
                 Names match outl_theme::PRESETS.
 
@@ -165,7 +165,7 @@ in
               type = lib.types.nullOr (lib.types.enum themePresets);
               default = null;
               defaultText = lib.literalExpression "null  # follows preset";
-              description = lib.mdDoc ''
+              description = ''
                 Dark side of the pair — the preset the TUI actually renders
                 under `mode = "auto"` or `"dark"`. `null` (the default) makes
                 it follow `preset`, so a single `theme.preset` themes both the
@@ -185,7 +185,7 @@ in
                 "auto"
               ];
               default = "auto";
-              description = lib.mdDoc ''
+              description = ''
                 Which side of the pair to render. The TUI cannot read OS
                 appearance and treats `"auto"` as **dark** (renders
                 `presetDark`), so `"auto"` is a desktop setting as far as the

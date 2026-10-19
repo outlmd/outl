@@ -557,8 +557,46 @@ mod tests {
             "a managed config must never be rewritten"
         );
 
-        // Unmanaged: the same `save` now writes through the default path.
         std::env::remove_var("OUTL_CONFIG_MANAGED");
+
+        // The on-disk directive (what home-manager actually writes) must
+        // protect the file even with the env escape hatch unset: saving a
+        // caller-supplied unmanaged config over a `managed = true` file
+        // leaves the bytes untouched.
+        let managed_body = "managed = true\n# sentinel from nix\n";
+        fs::write(&path, managed_body).unwrap();
+        save(&Config::default()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            managed_body,
+            "an on-disk managed = true must survive an unmanaged save"
+        );
+
+        // On Unix the managed file is a symlink into the Nix store. The
+        // gate must leave that symlink in place — an atomic-rename save
+        // would replace it with a regular file and detach the next
+        // activation.
+        #[cfg(unix)]
+        {
+            let target = tmp.path().join("managed-config.toml");
+            fs::write(&target, managed_body).unwrap();
+            fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            save(&Config::default()).unwrap();
+            assert!(
+                fs::symlink_metadata(&path)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "a managed symlink must survive save"
+            );
+            assert_eq!(fs::read_link(&path).unwrap(), target);
+            assert_eq!(fs::read_to_string(&path).unwrap(), managed_body);
+            fs::remove_file(&path).unwrap();
+        }
+
+        // Unmanaged: the same `save` now writes through the default path.
+        fs::write(&path, "# unmanaged\n").unwrap();
         let cfg = Config {
             theme: ThemeCfg {
                 preset: "gruvbox".into(),

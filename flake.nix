@@ -123,12 +123,19 @@
               };
             };
 
+          # Normal derivation: the output path depends on src, so any
+          # frontend change forces a rebuild. A FOD would address the
+          # store by its declared outputHash (not src) and reuse the
+          # stale bundle after a source edit without running Vite.
+          # Nix content-addressing already gives the caching we want:
+          # outl-desktop rebuilds only when the frontend's store path
+          # changes, and that path changes only when frontend inputs
+          # (src, bun, nodejs) change — Rust edits never touch it.
           mkDesktopFrontend =
             {
               pname,
               version,
               src,
-              outputHash,
             }:
             pkgs.stdenv.mkDerivation {
               inherit pname version src;
@@ -137,13 +144,6 @@
                 bun
                 nodejs
               ];
-
-              # Fixed-output derivation: update hash when the frontend source
-              # changes. Run the build and copy the `got: sha256-...` value
-              # from the mismatch error into `outputHash`.
-              outputHashMode = "recursive";
-              outputHashAlgo = "sha256";
-              inherit outputHash;
 
               buildPhase = ''
                 export HOME=$TMPDIR
@@ -291,7 +291,6 @@
             pname = "outl-desktop-frontend";
             inherit version;
             src = projectSrc;
-            outputHash = "sha256-a8NkN5ES/xOruRZkksNECTjuazoPUxJgaUA1YBnwDXk=";
           };
 
           outlDesktop = mkOutlDesktop {
