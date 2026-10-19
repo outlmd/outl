@@ -76,8 +76,9 @@ use crate::commands::{
     plugin_settings_describe, plugin_sync_hooks, plugin_toolbar, plugin_transform,
     plugin_transformers, plugin_uninstall, previous_day, read_asset_data_url, redo_page,
     reload_workspace, resolve_page_labels, resolve_ref, search_blocks, search_pages,
-    search_persons, set_backlinks_order, set_block_collapsed, set_telemetry_enabled, split_block,
-    today_slug_cmd, toggle_pin, toggle_quote, toggle_todo, undo_page, workspace_stats,
+    search_persons, set_backlinks_order, set_block_collapsed, set_editor_diagrams,
+    set_telemetry_enabled, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
+    undo_page, workspace_stats,
 };
 // Registered on mobile for the first time by the shared command catalog
 // (`outl_tauri_shared::wrappers`): the bodies always existed, only the
