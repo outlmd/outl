@@ -75,7 +75,7 @@
             gdk-pixbuf
             glib
             dbus
-            openssl_3
+            openssl
             libsoup_3
             librsvg
             libappindicator-gtk3
@@ -139,6 +139,9 @@
             }:
             pkgs.stdenv.mkDerivation {
               inherit pname version src;
+              # `bun install` fetches npm tarballs at build time; the Nix
+              # sandbox blocks DNS by default.
+              allowNetworking = true;
 
               nativeBuildInputs = with pkgs; [
                 bun

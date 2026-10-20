@@ -66,12 +66,14 @@
 679 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
+636 crates/outl-config/src/lib.rs
 754 crates/outl-core/src/storage/jsonl/read.rs
 810 crates/outl-core/src/storage/jsonl/tests.rs
 877 crates/outl-core/src/workspace.rs
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
 921 crates/outl-desktop/src/components/OutlineView.tsx
+620 crates/outl-desktop/src-tauri/src/settings.rs
 831 crates/outl-frontend-shared/src/api/commands.ts
 710 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
