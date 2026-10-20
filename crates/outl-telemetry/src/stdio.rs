@@ -1,9 +1,9 @@
 //! Stderr writes that survive a closed pipe.
 //!
 //! Rust's runtime sets `SIGPIPE` to `SIG_IGN`, so a write to a closed stderr
-//! returns `EPIPE` (os error 32) instead of killing the process. The `print!`
-//! family then turns that error into `panic: failed printing to stderr`.
-//! A panic hook that prints the same way panics again, and the process aborts.
+//! returns `EPIPE` instead of killing the process. The `print!` family then
+//! turns that error into `panic: failed printing to stderr`. A panic hook
+//! that prints the same way panics again, and the process aborts.
 //!
 //! That is the desktop failure: `tracing-subscriber`'s fmt layer, with
 //! `log_internal_errors` left on, reports a failed write through `eprintln!`.
@@ -56,9 +56,34 @@ pub fn install_panic_hook() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         std::panic::set_hook(Box::new(|info| {
-            let _ = writeln!(io::stderr(), "{info}");
+            // Capture before locking stderr. A backtrace that itself writes
+            // to stderr must not deadlock on this lock.
+            let backtrace = std::backtrace::Backtrace::capture();
+            let mut err = io::stderr().lock();
+            let _ = write_panic(&mut err, info, &backtrace);
         }));
     });
+}
+
+/// Writes the panic the way the default hook does, and ignores a closed stderr.
+///
+/// The first line keeps the thread name. `Backtrace::capture` is a no-op
+/// unless `RUST_BACKTRACE` is set to something other than `0`, so the variable
+/// still decides whether a stack is printed. A disabled backtrace is not
+/// written: its `Display` is the words "disabled backtrace", which the default
+/// hook also omits.
+fn write_panic(
+    mut out: impl Write,
+    info: &std::panic::PanicHookInfo<'_>,
+    backtrace: &std::backtrace::Backtrace,
+) -> io::Result<()> {
+    let thread = std::thread::current();
+    let name = thread.name().unwrap_or("<unnamed>");
+    writeln!(out, "thread '{name}' {info}")?;
+    if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+        writeln!(out, "stack backtrace:\n{backtrace}")?;
+    }
+    Ok(())
 }
 
 fn absorb_broken_pipe(result: io::Result<usize>, len: usize) -> io::Result<usize> {
@@ -69,7 +94,11 @@ fn absorb_broken_pipe(result: io::Result<usize>, len: usize) -> io::Result<usize
 }
 
 fn is_broken_pipe(err: &io::Error) -> bool {
-    err.kind() == io::ErrorKind::BrokenPipe || err.raw_os_error() == Some(32)
+    // The kind is the whole check. Unix `EPIPE` (errno 32) and Windows
+    // `ERROR_BROKEN_PIPE` (109) / `ERROR_NO_DATA` (232) all arrive as
+    // `ErrorKind::BrokenPipe`. Windows error 32 is `ERROR_SHARING_VIOLATION`,
+    // and matching the number would hide a real sharing failure.
+    err.kind() == io::ErrorKind::BrokenPipe
 }
 
 #[cfg(test)]
@@ -84,9 +113,28 @@ mod tests {
     }
 
     #[test]
-    fn the_os_error_for_epipe_counts_too() {
-        let err = io::Error::from_raw_os_error(32);
-        assert!(is_broken_pipe(&err));
+    fn the_os_error_for_epipe_counts_because_its_kind_is_broken_pipe() {
+        // Unix EPIPE is 32 and std maps it to BrokenPipe. The same number on
+        // Windows is ERROR_SHARING_VIOLATION, which must pass through.
+        // ERROR_BROKEN_PIPE is 109 and ERROR_NO_DATA is 232; std maps both
+        // to BrokenPipe, so the kind check covers them without a raw code.
+        #[cfg(unix)]
+        {
+            let err = io::Error::from_raw_os_error(32);
+            assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+            assert!(is_broken_pipe(&err));
+        }
+        #[cfg(windows)]
+        {
+            let sharing = io::Error::from_raw_os_error(32);
+            assert_ne!(sharing.kind(), io::ErrorKind::BrokenPipe);
+            assert!(!is_broken_pipe(&sharing));
+            for code in [109, 232] {
+                let err = io::Error::from_raw_os_error(code);
+                assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "{code}");
+                assert!(is_broken_pipe(&err));
+            }
+        }
     }
 
     #[test]

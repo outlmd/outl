@@ -25,9 +25,13 @@ fn main() {
         child();
         return;
     }
+    if std::env::var_os("OUTL_PANIC_REPORT_CHILD").is_some() {
+        panic_report_child();
+        return;
+    }
 
     let exe = std::env::current_exe().expect("the test binary has a path");
-    let mut child = Command::new(exe)
+    let mut child = Command::new(&exe)
         .env("OUTL_CLOSED_STDERR_CHILD", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -70,6 +74,47 @@ fn main() {
         "closed stderr panicked the child: {status:?}\n{seen}{}",
         String::from_utf8_lossy(&tail)
     );
+
+    // Stderr stays open here. The hook has to name the thread and, when
+    // RUST_BACKTRACE is set, print the stack `Backtrace::capture` produced.
+    let mut report = Command::new(&exe)
+        .env("OUTL_PANIC_REPORT_CHILD", "1")
+        .env("RUST_BACKTRACE", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the panic-report child");
+    let mut reported = String::new();
+    report
+        .stderr
+        .take()
+        .expect("stderr is piped")
+        .read_to_string(&mut reported)
+        .expect("read the panic report");
+    let report_status = report.wait().expect("wait for the panic report");
+    assert!(
+        report_status.success(),
+        "panic report child failed: {report_status:?}\n{reported}"
+    );
+    assert!(
+        reported.contains("thread 'main'"),
+        "panic report dropped the thread name:\n{reported}"
+    );
+    assert!(
+        reported.contains("probe-backtrace"),
+        "panic report dropped the message:\n{reported}"
+    );
+    assert!(
+        reported.contains("stack backtrace:"),
+        "RUST_BACKTRACE=1 produced no stack:\n{reported}"
+    );
+}
+
+fn panic_report_child() {
+    let _guard = outl_telemetry::init("test", false);
+    let caught = std::panic::catch_unwind(|| panic!("probe-backtrace"));
+    assert!(caught.is_err(), "the probe panic was swallowed");
+    std::process::exit(0);
 }
 
 fn child() {

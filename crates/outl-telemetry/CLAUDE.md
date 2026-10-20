@@ -63,10 +63,13 @@ Only the early `return None` closes that.
 `init` installs the panic hook **before** that gate, including when the gate returns `None`.
 `sentry::init` takes the current hook and calls it after capturing the event.
 The hook this crate installs writes with `writeln!` and ignores the error, and it does not chain to the default hook — the default hook is `eprintln!`, which panics when stderr is closed and aborts the process.
+The line keeps the thread name, and `std::backtrace::Backtrace::capture` prints a stack only when `RUST_BACKTRACE` asks for one.
 A caller that installs its own hook afterwards (the TUI restores the terminal, then chains) must run **after** `init`, so it chains to this hook rather than being replaced by it.
 
 `lossy_stderr` is the writer for `tracing_subscriber::fmt().with_writer`.
-A broken pipe (`ErrorKind::BrokenPipe`, os error 32) is reported as a successful write.
+A broken pipe (`ErrorKind::BrokenPipe`) is reported as a successful write.
+That kind is Unix `EPIPE` and Windows `ERROR_BROKEN_PIPE` (109) / `ERROR_NO_DATA` (232).
+Windows error 32 is `ERROR_SHARING_VIOLATION`, so the check is the kind alone.
 Callers also set `.log_internal_errors(false)`: the fmt layer's own failure report is an `eprintln!`, which is the panic this writer exists to stop.
 
 ## Reading the scrubber
