@@ -22,7 +22,7 @@ label="$2"
 shift 2
 
 if [[ -z "${SENTRY_AUTH_TOKEN:-}" ]]; then
-  note="SENTRY_AUTH_TOKEN is unset, so no debug symbols were uploaded for ${label}. A panic from this build will arrive in Sentry as bare addresses. Add the SENTRY_AUTH_TOKEN repository secret (org outl, project outl, scope project:releases) to enable the upload."
+  note="SENTRY_AUTH_TOKEN is unset, so no debug symbols were uploaded for ${label}. A panic from this build will arrive in Sentry as bare addresses. The token is a secret of the release environment (org outl, project outl, scope project:releases), which these jobs select on main and on v* tags."
   echo "::warning::${note}"
   echo "- symbols: ${note}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 0

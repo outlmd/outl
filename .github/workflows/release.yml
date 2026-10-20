@@ -45,25 +45,35 @@ name: Release
 #      `update_tap` already needed for the same reason.
 #
 # ------------------------------------------------------------------
-# Crash-reporting secrets (RFC 0377). Register them under Settings →
-# Secrets and variables → Actions → *Repository* secrets, NOT under the
-# `release` environment:
+# Crash-reporting secrets (RFC 0377).
 #
-#   OUTL_SENTRY_DSN_CLI       DSN of the `outl-cli` Sentry project
-#   OUTL_SENTRY_DSN_DESKTOP   DSN baked into the desktop binary. Events
-#                             land in the `outl` project (issue ids OUTL-*)
-#                             with release `desktop@<version>`. Symbol upload
-#                             uses that project, not a separate `outl-desktop`.
-#   OUTL_SENTRY_DSN_MOBILE    DSN of the `outl-mobile` Sentry project
-#                             (also read by `mobile.yml`'s `ios-release`)
-#   SENTRY_AUTH_TOKEN         token with `project:releases`, for the
-#                             debug-symbol upload
+#   OUTL_SENTRY_DSN_CLI       repository secret. DSN of the `outl-cli`
+#                             Sentry project
+#   OUTL_SENTRY_DSN_DESKTOP   repository secret. DSN baked into the desktop
+#                             binary. Events land in the `outl` project
+#                             (issue ids OUTL-*) with release
+#                             `desktop@<version>`. Symbol upload uses that
+#                             project, not a separate `outl-desktop`.
+#   OUTL_SENTRY_DSN_MOBILE    repository secret. DSN of the `outl-mobile`
+#                             Sentry project (also read by `mobile.yml`'s
+#                             `ios-release`)
+#   SENTRY_AUTH_TOKEN         secret of the `release` environment, not a
+#                             repository secret. Scope `project:releases`.
+#                             The symbol-upload jobs (`build`,
+#                             `build_desktop`, `build_desktop_linux`,
+#                             `build_desktop_windows`, `build_android`)
+#                             select that environment on `main` and on `v*`
+#                             tags, which is the environment's deployment
+#                             branch policy. Any other ref leaves the token
+#                             empty, and the upload step warns and continues.
 #
-# Repository scope is the decision, not an oversight. `build_desktop*`
-# and `build_android` read no secret at all today, so reaching a DSN
-# through `environment: release` would also hand them the Apple signing
-# certificates that live there. A DSN is write-only and is not a signing
-# credential, so it does not justify widening who can read those.
+# The DSNs stay repository secrets: a DSN is write-only and is not a
+# signing credential. The token has no other home, so those jobs do take
+# `environment: release` on the refs the policy allows. That also makes
+# the Apple signing material in the same environment addressable; the
+# build steps do not read it. Selecting the environment on every ref
+# would reject a dry run from another branch before it compiled, because
+# the policy is `main` and `v*` only.
 #
 # **A build without these secrets keeps working, and that is a
 # requirement.** `outl-telemetry` reads the DSN through `option_env!` at
@@ -237,6 +247,8 @@ jobs:
       (needs.create_release.result == 'success' ||
        (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: ${{ matrix.os }}
+    # See the secrets block at the top: the token is in this environment.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'release' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -560,6 +572,8 @@ jobs:
       (needs.create_release.result == 'success' ||
        (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-6vcpu-macos-15
+    # See the secrets block at the top: the token is in this environment.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'release' || '' }}
     # Single universal dmg instead of a matrix split. Tauri 2's
     # `--target universal-apple-darwin` builds both aarch64 and
     # x86_64 binaries on the arm64 runner and `lipo`-merges them
@@ -754,6 +768,8 @@ jobs:
     # image gives the widest downstream compatibility. `ubuntu-latest`
     # (24.04) would raise the glibc floor and break older distros.
     runs-on: blacksmith-8vcpu-ubuntu-2204
+    # See the secrets block at the top: the token is in this environment.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1029,6 +1045,8 @@ jobs:
       (needs.create_release.result == 'success' ||
        (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-4vcpu-windows-2025
+    # See the secrets block at the top: the token is in this environment.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1181,6 +1199,8 @@ jobs:
       (needs.create_release.result == 'success' ||
        (needs.prepare.outputs.dry_run == 'true' && needs.create_release.result == 'skipped'))
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    # See the secrets block at the top: the token is in this environment.
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'release' || '' }}
     # Optimized (release-build) APK, debug-signed, attached to the GitHub
     # Release (no Google Play). Like iOS, the build is RELEASE (optimized);
     # only the *signature* is a throwaway debug key — a real upload
