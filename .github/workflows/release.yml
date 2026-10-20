@@ -70,10 +70,12 @@ name: Release
 # The DSNs stay repository secrets: a DSN is write-only and is not a
 # signing credential. The token has no other home, so those jobs do take
 # `environment: release` on the refs the policy allows. That also makes
-# the Apple signing material in the same environment addressable; the
-# build steps do not read it. Selecting the environment on every ref
-# would reject a dry run from another branch before it compiled, because
-# the policy is `main` and `v*` only.
+# the other secrets in that environment addressable:
+# `CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`, and the App Store Connect key.
+# No step added here reads them. `publish_crates` and `publish_npm`
+# already did, and they already selected this environment. Selecting
+# the environment on every ref would reject a dry run from another
+# branch before it compiled, because the policy is `main` and `v*` only.
 #
 # **A build without these secrets keeps working, and that is a
 # requirement.** `outl-telemetry` reads the DSN through `option_env!` at
