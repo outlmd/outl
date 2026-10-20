@@ -33,7 +33,7 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Does a table start at this line? (what lets the parser claim pasted rows as **one** block instead of one per row) | `outl_md::table::table_span` / `is_delimiter_row` | `crates/outl-md/src/table.rs` |
 | Write a table back as canonical markdown, every column padded to its widest cell — for where outl **creates** one (a tabular paste, the TUI's grid), never to reformat what the user typed | `outl_md::table::render_table` | `crates/outl-md/src/table.rs` |
 | Split one table row into cells (escape-aware: `\|` splits nothing), or resolve a cell for **display** (`\|` → `|`) | `outl_md::table::split_cells` / `unescape_cell` | `crates/outl-md/src/table.rs` |
-| Slugify a user-visible page name into a filesystem-safe slug (lowercase, folds Latin diacritics `á` → `a`, non-alphanumerics collapse to `-`; empty input → `UNTITLED_SLUG`) — never hand-roll an ASCII-only copy | `outl_md::slug::slugify` / `UNTITLED_SLUG` | `crates/outl-md/src/slug.rs` |
+| Slugify a user-visible page name into a filesystem-safe slug (NFC, lowercase, folds Latin diacritics `á` → `a`, keeps every other letter or digit so `[[你好]]` is `pages/你好.md`, non-alphanumerics collapse to `-`; capped at `MAX_SLUG_BYTES` with a digest suffix; empty input → `UNTITLED_SLUG`) — never hand-roll an ASCII-only copy | `outl_md::slug::slugify` / `UNTITLED_SLUG` / `MAX_SLUG_BYTES` | `crates/outl-md/src/slug.rs` |
 
 ---
 

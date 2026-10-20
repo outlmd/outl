@@ -294,7 +294,7 @@ pub fn page_id_from_slug(slug: &str) -> NodeId {
 /// trailing whitespace is also rejected because it silently breaks
 /// filename equality across iCloud / git / external editors.
 pub fn is_valid_slug(slug: &str) -> bool {
-    if slug.is_empty() || slug.len() > 255 {
+    if slug.is_empty() || slug.len() > outl_md::slug::MAX_SLUG_BYTES {
         return false;
     }
     if slug != slug.trim() {

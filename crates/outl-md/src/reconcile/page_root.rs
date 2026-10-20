@@ -17,18 +17,29 @@ use outl_core::id::NodeId;
 use outl_core::op::LogOp;
 use outl_core::workspace::{Workspace, WorkspaceError};
 use std::path::Path;
+use unicode_normalization::UnicodeNormalization;
 
-/// The page slug for `md_path` — the filename without extension.
+/// The page slug for `md_path` — the filename without extension,
+/// normalised to NFC.
 ///
 /// `to_string_lossy` keeps the slug non-empty even when the filename is
 /// not valid UTF-8 (replaces invalid sequences with U+FFFD). This is the
 /// same slug `ensure_page_root_in_tree` writes into the `page-slug`
 /// property, so seeding the page-root id from it here keeps the id and
 /// the slug property in agreement.
+///
+/// **NFC, for the same reason `slug::slugify` normalises.** The id is
+/// `sha256` over these bytes, so a stem that comes back decomposed —
+/// an HFS+ volume, a git checkout without `core.precomposeunicode`, an
+/// external editor — would mint a second page root for a page that
+/// already exists, and nothing merges two spellings of one name.
+/// Harmless while every slug was `[a-z0-9-]`, where NFC and NFD are
+/// the same bytes; load-bearing now that a page name keeps its own
+/// script.
 fn slug_from_md_path(md_path: &Path) -> String {
     md_path
         .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
+        .map(|s| s.to_string_lossy().nfc().collect())
         .unwrap_or_default()
 }
 
@@ -243,4 +254,32 @@ pub(super) fn sync_page_frontmatter(
         },
     })?;
     Ok(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decomposed_stem_names_the_same_page_as_a_composed_one() {
+        // `slug::slugify` normalises to NFC, so outl writes
+        // `pages/한글.md` composed. The stem can come back decomposed —
+        // an HFS+ volume, a git checkout without
+        // `core.precomposeunicode`, an external editor, a peer on
+        // another OS — and the page id is `sha256` over exactly these
+        // bytes.
+        //
+        // Without normalising here, that stem mints a *second* page
+        // root for a page that already exists, and nothing merges them:
+        // `find_by_slug` compares slug strings byte for byte, and so
+        // does `merge_duplicate_slug_roots`. The ref keeps editing the
+        // first root while the file's content lives under the second.
+        //
+        // Reachable only since page names stopped being `[a-z0-9-]`,
+        // where NFC and NFD are the same bytes.
+        let composed = Path::new("/w/pages/한글.md");
+        let decomposed = Path::new("/w/pages/\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}.md");
+        assert_eq!(slug_from_md_path(decomposed), "한글");
+        assert_eq!(page_id_from_stem(composed), page_id_from_stem(decomposed));
+    }
 }

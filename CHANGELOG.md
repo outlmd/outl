@@ -7,6 +7,29 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A page name written in Chinese, Japanese, Korean, Cyrillic or any other script got no page of its own.**
+  `[[你好]]` and `[[世界]]` opened the same page, `#中文` and `#笔记` landed on it too, and `[[Rust 笔记]]` opened `[[Rust]]`.
+  `slugify` kept ASCII letters and digits plus a fixed table of folded Latin letters, turned everything else into `-`, and fell back to `untitled` when nothing survived.
+  A page's NodeId derives from its slug, so this was never a filename clash.
+  Every such name was one node, which merged the content and the backlinks of all of them, and two devices each creating a different Chinese page wrote into that same node.
+  Latin letters the table has no entry for (`ł`, `ř`, `ş`, `ộ`) were dropped the same way, so distinct Polish, Czech, Turkish or Vietnamese names could collide too.
+  A letter or digit with no ASCII fold now keeps its own spelling, lowercased, so `[[你好]]` projects to `pages/你好.md`.
+  Emoji are not letters and still collapse, so `ship 🚀` is still `ship`.
+  The name is normalised to NFC first, because the slug decides the NodeId, and macOS hands back NFD while a Korean IME composes Hangul out of jamo.
+  Without that, one name spelled two ways would mint two pages that look identical on screen.
+  The normalisation runs in both directions: `reconcile`'s `slug_from_md_path` NFC-normalises the filename stem it derives a page id from, which was safe to skip while every slug was `[a-z0-9-]` and is load-bearing now, since a stem that comes back decomposed would mint a second page root for a page that already exists and nothing merges two spellings of one name.
+  `ẞ` (capital sharp s) folds to `s` for the same reason: the table held only its lowercase form, so the slug of a slug differed from the slug.
+  Lowercasing goes through uppercase, because a case-insensitive filesystem (APFS and NTFS, both by default) compares names by uppercasing them, and 21 groups of characters are each already lowercase, stay distinct under a plain `to_lowercase`, and share one uppercase form.
+  `µs latency` and `μs latency` (micro sign against Greek mu) were two pages, two ids, and one `.md` to hold both, so one silently overwrote the other. Same for `s`/`ſ`, `ς`/`σ`, the Turkish dotless `ı`, the Greek symbol variants and the Old Cyrillic letters.
+  Both properties are pinned over all 1,114,112 codepoints rather than over the cases anyone thought of, since `ẞ` is not a shape a hand-written test reaches.
+  Two names that differ only by an accent the fold table has no entry for are still two pages: `CAFÉ` and `cafe` are one, `ΛΟΓΟΣ` and `λόγος` are not. That is the table's Latin scope, not a case problem.
+  Keeping the characters made the 255-**byte** slug cap reachable, by a sentence a user would plausibly type: 255 bytes is 255 ASCII characters but only 85 CJK ones, and `open_or_create_by_ref` promises never to bubble `invalid …` back to a tap.
+  A slug over the cap is now cut on a character boundary with a digest of the whole slug appended, because truncating alone would put two long names on one node, which is this same bug in miniature.
+  The cut leaves room for the filename the slug becomes, which is not the slug: every write renames `.<slug>.outl.tmp` over its target, ten bytes longer. A slug filling the whole 255-byte component would commit a page to the op log that no device can ever project, which is worse than the refusal it replaced.
+  `outl plugin init` with such a name is still refused, and says what it needs: that slug becomes a reverse-DNS label in the plugin id, which accepts only `[a-z0-9-]`, and the refusal used to come for free from the name slugifying to `untitled`.
+  A page that has already merged into `untitled` still opens under the name it was given, through the resolution ladder's title match.
+  The content written into it cannot be split automatically: the merged blocks never recorded which of the names they were meant for.
+  [Issue #405](https://github.com/outlmd/outl/issues/405).
 - **An Android crash report did not say which build it came from.**
   The APK's `versionName` was the base version, so every beta of 0.13.0 reported `0.13.0`, and `versionCode` was Tauri's semver derivation, which ignores the prerelease and gave all of them `13000`.
   The reasoning was that the Release tag carries the beta string, which it does, except the tag stays on GitHub while the APK goes to a phone.

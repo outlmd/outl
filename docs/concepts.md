@@ -138,9 +138,12 @@ This is the **source of truth** — if your markdown gets corrupted, `outl docto
 `[[Avelino]]` → `pages/avelino.md`.
 The slug rule:
 
+- Normalise to NFC, so one name spelled two ways is one page on every device
 - Lowercase
 - Strip accents: `[[São Paulo]]` → `pages/sao-paulo.md`
+- Keep any other letter or digit: `[[你好]]` → `pages/你好.md`, `[[Проект]]` → `pages/проект.md`
 - Non-alphanumeric → `-`, collapsed
+- Over 255 bytes (85 CJK characters): cut on a character boundary and append a digest of the whole slug, so two long names stay two pages
 - Empty result → `untitled`
 
 The original name is preserved in `title::`.

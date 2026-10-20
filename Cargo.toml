@@ -121,6 +121,10 @@ iroh-mdns-address-lookup = "0.6"
 # Markdown
 comrak = { version = "0.52", default-features = false }
 emojis = "0.9"
+# NFC before slugifying a page name. The slug decides the page's NodeId,
+# so one name spelled two ways (macOS hands back NFD, a Korean IME
+# composes Hangul out of jamo) would otherwise mint two pages.
+unicode-normalization = "0.1"
 
 # TUI
 ratatui = "0.30"

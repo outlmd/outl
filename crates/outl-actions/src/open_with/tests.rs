@@ -265,8 +265,12 @@ fn the_journal_link_opens_the_page_it_names() {
     // that survives slugify this is trivially true; for one that does
     // not, `slug_for` gave the page a slug the title no longer derives,
     // and `resolve_or_create_by_name` tries `slugify(name)` before an
-    // exact title match, so `[[open-in/会議メモ]]` resolved to the
-    // namespace page `open-in` once that page existed.
+    // exact title match, so the link resolved to the namespace page
+    // `open-in` once that page existed.
+    //
+    // `会議メモ` survives slugify since #405, so it exercises the first
+    // arm here; `a_stem_that_slugifies_to_nothing_still_links_back`
+    // covers the second.
     let (mut ws, hlc) = ws();
     let dir = TempDir::new().unwrap();
     let ascii = write(&dir, "notes.md", "- one\n");
@@ -290,6 +294,44 @@ fn the_journal_link_opens_the_page_it_names() {
         let landed = crate::resolve::open_or_create_by_ref(&mut ws, &hlc, target).unwrap();
         assert_eq!(landed, expected, "`{line}` opened the wrong page");
     }
+}
+
+#[test]
+fn a_stem_that_slugifies_to_nothing_still_links_back() {
+    // `slug_for`'s fallback arm. `会議メモ` used to reach it and does
+    // not since #405, so without this the only test covering a page
+    // whose title no longer derives its slug stopped covering it —
+    // silently, by still passing.
+    let (mut ws, hlc) = ws();
+    let dir = TempDir::new().unwrap();
+    let path = write(&dir, "📝.md", "- note\n");
+
+    let target = resolve_target(&ws, &path).unwrap();
+    assert_eq!(target.title(), "open-in/📝", "the title keeps the name");
+    assert_ne!(
+        target.slug(),
+        outl_md::slug::slugify(OPEN_WITH_NAMESPACE),
+        "the slug must not be the namespace's own page",
+    );
+
+    let page = import(&mut ws, &hlc, &path);
+    // The namespace page existing is what used to make the link
+    // resolve to it instead.
+    crate::resolve::open_or_create_by_name(
+        &mut ws,
+        &hlc,
+        OPEN_WITH_NAMESPACE,
+        crate::page::PageKind::Page,
+    )
+    .unwrap();
+
+    let line = journal_lines(&ws).remove(0);
+    let target = line.trim_start_matches("[[").trim_end_matches("]]");
+    assert_eq!(
+        crate::resolve::open_or_create_by_ref(&mut ws, &hlc, target).unwrap(),
+        page,
+        "`{line}` opened the wrong page",
+    );
 }
 
 #[test]
@@ -445,11 +487,16 @@ fn an_empty_file_still_produces_a_page() {
 
 #[test]
 fn a_non_latin_file_name_never_lands_on_the_namespace_page() {
-    // `slugify` drops what it cannot fold to ASCII, so `open-in/会議メモ`
-    // collapses to bare `open-in` — the parent page. Importing there
-    // replaces the namespace index with one file's contents and hangs
-    // every later import under it. For someone who names files in
-    // their own script that is every file, not an edge case.
+    // `slugify` used to drop what it could not fold to ASCII, so
+    // `open-in/会議メモ` collapsed to bare `open-in` — the parent page.
+    // Importing there replaces the namespace index with one file's
+    // contents and hangs every later import under it, and for someone
+    // who names files in their own script that was every file.
+    //
+    // Fixed at the source in #405: the slug keeps the stem now. The
+    // test stays because it asks what the caller actually needs — this
+    // name gets its own page — and that has to hold whichever way
+    // `slug_for` arrives at it.
     let (mut ws, hlc) = ws();
     let dir = TempDir::new().unwrap();
     let path = write(&dir, "会議メモ.md", "- 議題\n");

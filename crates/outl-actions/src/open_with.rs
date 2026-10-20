@@ -317,9 +317,9 @@ pub fn import_into(
     }
     // The slug comes off the target, never re-derived from the title.
     // `resolve::open_or_create_by_name` would slugify again, which is how a
-    // non-ASCII stem reached the namespace page (see `slug_for`), and
-    // a second derivation of one fact is the bug shape this module
-    // already paid for once with `source::`.
+    // stem that slugifies to nothing reaches the namespace page (see
+    // `slug_for`), and a second derivation of one fact is the bug shape
+    // this module already paid for once with `source::`.
     let page = open_or_create(workspace, hlc, slug, title, PageKind::Page)?;
     crate::page::set_property(
         workspace,
@@ -340,8 +340,8 @@ pub fn import_into(
     // exact title match, so a page whose title no longer derives its
     // slug — exactly what `slug_for`'s fallback produces — is reached
     // by the slugified title instead, which for these pages is the
-    // namespace page. `[[open-in/会議メモ]]` would open `open-in`.
-    // The ASCII case keeps the readable title, because there the two
+    // namespace page. `[[open-in/📝]]` would open `open-in`.
+    // Every other case keeps the readable title, because there the two
     // agree.
     let link = if outl_md::slug::slugify(title) == *slug {
         title
@@ -359,16 +359,20 @@ pub fn import_into(
 /// The slug `title` projects to, refusing to land on the namespace's
 /// own page.
 ///
-/// `slugify` drops every character it cannot fold to ASCII, so a stem
-/// written in a non-Latin script — `会議メモ`, `Проект`, `📝` — folds
-/// away entirely and `open-in/<stem>` collapses to bare `open-in`.
-/// That is the **parent page**: importing there would replace the
-/// namespace index with one file's contents, and every later
-/// `open-in/<other>` would hang under it. For a user who names files
-/// in their own script that is not an edge case, it is every file.
+/// A stem that `slugify` leaves nothing of — `📝`, `...`, `___` —
+/// makes `open-in/<stem>` collapse to bare `open-in`. That is the
+/// **parent page**: importing there would replace the namespace index
+/// with one file's contents, and every later `open-in/<other>` would
+/// hang under it.
+///
+/// This used to be every file for a user who names them in their own
+/// script, because `slugify` dropped each character it could not fold
+/// to ASCII (issue #405). It keeps letters and digits now, so
+/// `会議メモ` and `Проект` project to themselves and only a stem built
+/// entirely of punctuation or emoji still reaches this fallback.
 ///
 /// The title keeps the original stem either way — only the slug falls
-/// back, so the page still reads as `open-in/会議メモ` in the UI while
+/// back, so the page still reads as `open-in/📝` in the UI while
 /// projecting to a filename that exists.
 fn slug_for(title: &str) -> String {
     let slug = outl_md::slug::slugify(title);

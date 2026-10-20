@@ -216,6 +216,53 @@ mod tests {
     }
 
     #[test]
+    fn two_names_in_another_script_get_two_pages() {
+        // Issue #405: `[[你好]]` and `[[世界]]` both slugified to
+        // `untitled`, and a page's NodeId derives from its slug, so the
+        // second ref opened the first page. Not a filename clash — one
+        // node, so the content and the backlinks of both names merged,
+        // on every client and between devices.
+        let (mut w, hlc) = ws();
+        let hello = open_or_create_by_ref(&mut w, &hlc, "你好").unwrap();
+        let world = open_or_create_by_ref(&mut w, &hlc, "世界").unwrap();
+        assert_ne!(hello, world);
+        assert_eq!(page_meta(&w, hello).unwrap().slug, "你好");
+        assert_eq!(page_meta(&w, world).unwrap().slug, "世界");
+    }
+
+    #[test]
+    fn a_mixed_script_name_does_not_open_its_latin_part() {
+        // Same issue, the half-collapse: `[[Rust 笔记]]` lost its stem
+        // and the `rust` that survived found the existing page.
+        let (mut w, hlc) = ws();
+        let rust = open_or_create_by_ref(&mut w, &hlc, "Rust").unwrap();
+        let notes = open_or_create_by_ref(&mut w, &hlc, "Rust 笔记").unwrap();
+        assert_ne!(rust, notes);
+        assert_eq!(page_meta(&w, notes).unwrap().slug, "rust-笔记");
+    }
+
+    #[test]
+    fn a_long_name_in_another_script_still_opens() {
+        // `is_valid_slug` caps a slug at 255 **bytes**, which is ~85 CJK
+        // characters, and `open_or_create_by_ref` promises never to
+        // bubble `invalid …` back to a tap. Before #405 a name like this
+        // collapsed to `untitled` and so could not reach the cap; keeping
+        // the characters is what makes it reachable, by a sentence a user
+        // would plausibly type.
+        let (mut w, hlc) = ws();
+        let long = "语".repeat(100);
+        let id = open_or_create_by_ref(&mut w, &hlc, &long).unwrap();
+        let meta = page_meta(&w, id).unwrap();
+        assert!(crate::page::is_valid_slug(&meta.slug));
+        assert_eq!(meta.title, long);
+        // And a different name that shares the first 85 characters is a
+        // different page — truncation alone would put them on one node,
+        // which is the #405 collision in miniature.
+        let other = format!("{}{}", "语".repeat(100), "别");
+        assert_ne!(open_or_create_by_ref(&mut w, &hlc, &other).unwrap(), id);
+    }
+
+    #[test]
     fn open_or_create_by_ref_matches_title_case_insensitively() {
         let (mut w, hlc) = ws();
         let created = open_or_create_by_name(&mut w, &hlc, "Ideas", PageKind::Page).unwrap();

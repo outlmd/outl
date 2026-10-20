@@ -141,6 +141,11 @@ Treat matching with the same paranoia as the CRDT.
   `pages_by_type(t)` filters pages by their `type::` property (case-insensitive), powering the `@` mention autocomplete that lists `type:: person` pages.
 - **Slugify** (`slug.rs`) — `[[Avelino]]` → `pages/avelino.md`.
   The user-facing name is preserved verbatim in the page's `title::` property.
+  Full rule: [`docs/concepts.md` → Slugs](../../docs/concepts.md#slugs).
+  **A letter or digit outside the fold table keeps its own spelling**, so `[[你好]]` is `pages/你好.md` — dropping them put every CJK, Cyrillic, Greek and Hangul name on one slug, and the page id derives from the slug ([issue #405](https://github.com/outlmd/outl/issues/405)).
+  Two consequences to keep in mind when touching this:
+  **the input is NFC-normalised**, because the slug decides the `NodeId` and one name spelled two ways would be two pages — `reconcile::page_root::slug_from_md_path` normalises the read-back direction for the same reason;
+  and **the output is capped below `MAX_SLUG_BYTES`**, leaving room for the `.<slug>.outl.tmp` the atomic write needs, with a digest of the whole slug appended so two long names stay two pages.
   **The `/` fold is load-bearing, not a limitation.**
   `[[os/linux]]` becomes `pages/os-linux.md` because a slug is a single path component (`outl_actions::page::is_valid_slug` rejects `/`), and the `/` survives in `title::`.
   That is exactly where page namespaces are read from (`outl_actions::namespace`, issue #275).

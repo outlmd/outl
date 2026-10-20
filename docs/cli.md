@@ -128,7 +128,7 @@ Affected blocks come back in `affected_refs` so the caller can decide whether to
 Pass `--content -` to read the JSON from stdin.
 The returned `content` array mirrors the input and carries the freshly minted block ids, so the caller can keep referencing them in follow-ups.
 
-`page create --slugify` treats the positional argument as a human name and derives the slug from it through the shared `outl_md::slugify` rule (lowercase, fold Latin accents, non-alphanumeric → `-`, collapse + trim).
+`page create --slugify` treats the positional argument as a human name and derives the slug from it through the shared `outl_md::slugify` rule (NFC, lowercase, fold Latin accents, keep any other letter or digit so `[[你好]]` is `pages/你好.md`, everything else → `-`, collapse + trim, cap at `MAX_SLUG_BYTES` with a digest suffix).
 It is opt-in and idempotent on an already-clean slug, so the default path — and the `outl_page_create` MCP tool — stay literal, keeping hierarchical slugs like `ai-agent/learning` verbatim.
 The flag exists so external clients (the Raycast extension's "New Page") can ask the user for a name only and let the one owner of the rule generate the slug, instead of re-implementing slugify.
 

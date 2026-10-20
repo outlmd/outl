@@ -442,7 +442,7 @@ The content split follows the paste pipeline, not a second rule: a bulleted `.md
 **The imported page is linked from today's journal.**
 A `[[open-in/<name>]]` block lands in the journal for the day the import happened, so the page has a trail: outl is journal-first, and a page reachable only by search is a page you forget you have.
 It is a ref, not plain text, so the page itself lists that entry under its backlinks.
-The ref names whichever of title or slug actually resolves: a ref is matched by slugified name before an exact title, so a page whose title no longer derives its slug (the non-ASCII fallback above) is linked by slug, or the link would open the `open-in` index instead.
+The ref names whichever of title or slug actually resolves: a ref is matched by slugified name before an exact title, so a page whose title no longer derives its slug (a stem of only punctuation or emoji, which falls back to `open-in-untitled`) is linked by slug, or the link would open the `open-in` index instead.
 Re-opening a file imports nothing and therefore writes no second entry, however many times you open it.
 
 | Client | How a file reaches it |
