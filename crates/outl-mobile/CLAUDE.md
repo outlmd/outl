@@ -524,11 +524,12 @@ Paint a fill with `bg-(--color-outl-accent)` and its text with `text-(--color-ou
 
 ## Logging (device console)
 
-`run()` in `src-tauri/src/lib.rs` installs a `tracing_subscriber` fmt subscriber writing to **stderr** as its very first step (before rustls / Tauri setup).
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`, for the same reason as the desktop: a closed stderr must not become `failed printing to stderr`.
 The `EnvFilter` defaults to `info,outl_sync_iroh=debug,iroh=info` and honors `RUST_LOG`.
 On iOS, stderr surfaces in `idevicesyslog` / Xcode.
 So the iroh P2P transport's `info!`/`warn!`/`debug!` lines (endpoint bound + node id, each connect attempt's target + outcome, "delta sync received N ops") are visible while debugging device↔device sync.
-Init uses `.try_init()` so a double-init can't panic.
+Init uses `set_global_default`, not `.try_init()`: `try_init` also claims the `log` slot, which `tauri-plugin-log` needs.
 See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) for what the transport logs.
 
 ## iCloud layout (opt-in destination)

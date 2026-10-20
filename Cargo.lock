@@ -6509,6 +6509,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "libc",
  "log",
  "notify",
  "notify-debouncer-full",
@@ -6614,6 +6615,7 @@ dependencies = [
  "chrono",
  "dirs",
  "jni 0.22.4",
+ "libc",
  "log",
  "objc2",
  "objc2-foundation",
@@ -6749,6 +6751,8 @@ dependencies = [
  "sentry",
  "serde_json",
  "toml 1.1.7+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

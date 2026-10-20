@@ -412,10 +412,13 @@ How the desktop hosts plugins — the effect layer, the toolbar and view surface
 
 ## Logging
 
-`run()` in `src-tauri/src/lib.rs` installs a `tracing_subscriber` fmt subscriber writing to **stderr** as its first step (before rustls / Tauri setup).
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.
+A closed stderr — a desktop launched with no terminal, whose pipe has gone away — must not panic.
+`eprintln!` turns `EPIPE` into `failed printing to stderr`, and the fmt layer's own error report is an `eprintln!`.
 The `EnvFilter` defaults to `info,outl_sync_iroh=debug,iroh=info` and honors `RUST_LOG`.
 Running `cargo tauri dev` from a terminal then shows the iroh P2P transport's `info!`/`warn!`/`debug!` lines (endpoint bound + node id, each connect attempt's target + outcome, "delta sync received N ops") so device↔device sync is debuggable.
-Init uses `.try_init()` so a double-init can't panic.
+Init uses `set_global_default`, not `.try_init()`: `try_init` also claims the `log` slot, which `tauri-plugin-log` needs.
 See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) for what the transport logs.
 
 ## Settings

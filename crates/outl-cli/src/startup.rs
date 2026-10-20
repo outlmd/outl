@@ -81,8 +81,15 @@ pub(crate) fn ensure_workspace_or_prompt(path: &Path) -> Result<()> {
     }
 
     use std::io::{BufRead, Write};
-    eprintln!("No outl workspace at {}.", path.display());
-    eprint!("Initialize a new workspace here? [y/N] ");
+    // `eprintln!` panics when stderr is closed. The prompt only runs on a
+    // terminal, where that is unlikely, and a failed write is still not a
+    // reason to abort the process.
+    let _ = writeln!(
+        std::io::stderr(),
+        "No outl workspace at {}.",
+        path.display()
+    );
+    let _ = write!(std::io::stderr(), "Initialize a new workspace here? [y/N] ");
     let _ = std::io::stderr().flush();
     let mut line = String::new();
     std::io::stdin()
@@ -124,6 +131,7 @@ pub(crate) fn init_tracing(verbosity: u8) {
         // Logs MUST go to stderr; stdout carries the JSON envelope
         // that scripts/tests parse. Without this, every `INFO` line
         // from `JsonlStorage::reload` corrupts the response.
-        .with_writer(std::io::stderr)
+        .with_writer(outl_telemetry::lossy_stderr)
+        .log_internal_errors(false)
         .try_init();
 }

@@ -77,6 +77,10 @@ tauri-plugin-notification = "2"
 # OS-wide quick capture chord (Cmd/Ctrl+Shift+Space) while outl is in the background.
 tauri-plugin-global-shortcut = "2"
 
+[target.'cfg(unix)'.dependencies]
+# `run` repeats SIG_IGN for SIGPIPE. Direct, not transitive: the call is ours.
+libc = { workspace = true }
+
 [features]
 default = []
 # Links the Sentry SDK. Set only by the release pipeline. Leave it off and

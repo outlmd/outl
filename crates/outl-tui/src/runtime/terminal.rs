@@ -18,8 +18,10 @@ pub(super) fn is_tty() -> bool {
 ///
 /// Without this, a panic mid-render leaves the user staring at a
 /// garbled terminal in raw mode with no cursor — they have to `reset`
-/// blind to recover. Calling this is idempotent in spirit (only the
-/// first call chains the real default hook).
+/// blind to recover. It chains to the hook already installed.
+/// `outl_telemetry::init` runs first and that hook is the one that
+/// writes the panic without panicking when stderr is closed; this one
+/// must not replace it.
 pub(super) fn install_panic_restore_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

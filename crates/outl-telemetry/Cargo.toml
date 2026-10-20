@@ -25,9 +25,17 @@ sentry = { workspace = true, optional = true }
 [dev-dependencies]
 proptest = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 # `tests/client_manifests.rs` reads the four client manifests to check that
 # none of them switches the reporter on by default. Parsed rather than
 # grepped: a textual check passes against `default = [ "sentry" ]` written
 # with different spacing, and this is the test standing between a `git clone`
 # and a reporter nobody asked for.
 toml = { workspace = true }
+
+# No libtest harness: the harness captures stdout, and this test has to speak
+# on the real stdout to the parent it spawns. See the file's module note.
+[[test]]
+name = "closed_stderr"
+harness = false
