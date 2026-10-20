@@ -139,8 +139,12 @@
             }:
             pkgs.stdenv.mkDerivation {
               inherit pname version src;
-              # `bun install` fetches npm tarballs at build time; the Nix
-              # sandbox blocks DNS by default.
+              # `bun install` fetches npm tarballs at build time, so the
+              # derivation needs outbound network. The nix-build workflow
+              # sets `sandbox = false` for the job because the strict/relaxed
+              # Nix sandbox has no /etc/resolv.conf and DNS fails even with
+              # this flag; a global sandbox mode also overrides any
+              # per-derivation sandbox setting.
               allowNetworking = true;
 
               nativeBuildInputs = with pkgs; [

@@ -64,6 +64,12 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             experimental-features = nix-command flakes
+            # The frontend derivation runs `bun install`, which fetches npm
+            # tarballs. Nix sandboxes have no /etc/resolv.conf, so DNS fails
+            # (relaxed and strict alike); a global sandbox mode also overrides
+            # the per-derivation setting. Run this job unsandboxed — runners
+            # are ephemeral and builds are already isolated from the cache.
+            sandbox = false
 
       - name: Verify flake
         run: nix flake check --no-build
