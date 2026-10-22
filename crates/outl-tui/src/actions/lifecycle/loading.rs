@@ -10,6 +10,8 @@
 use crate::outline_ops::flat_count;
 use crate::state::{App, Focus, ToastKind};
 use anyhow::{Context, Result};
+use outl_actions::refusal::Surface;
+use outl_actions::ProjectionRefusal;
 use outl_md::parse::parse;
 use outl_md::reconcile::reconcile_md;
 use std::fs;
@@ -93,6 +95,15 @@ impl App {
         // `peer_sync`.) Invalidating here rebuilt the index from every
         // `.md` on every page switch, inline.
         let path = self.current_path();
+        // Refresh the `.md` from the tree **before** reading it back.
+        //
+        // A peer's ops land in the op log, not in the `.md`, so without
+        // this the page renders whatever the projection held when it was
+        // last written — stale, or empty (issue #166). Every GUI open
+        // path has done this since; the TUI never did, which also made it
+        // the one client that could not tell the user when the refresh is
+        // *refused* (issue #292). Both are the same call.
+        self.refresh_md_from_tree();
         // A page that isn't on disk yet is legitimately empty; a page
         // we *can't read* is not. Treating the latter as `""` would
         // parse to an empty AST that the next commit renders straight
@@ -190,6 +201,50 @@ impl App {
         self.touch_recent(&path);
     }
 
+    /// Re-project the open page's `.md` when the tree has moved past
+    /// it, and record the one refusal the **user** has to hear about.
+    ///
+    /// `outl_actions::reproject_stale_md` owns both halves — the write
+    /// gate (root `CLAUDE.md` invariant 8) and the split between "this
+    /// page stopped syncing" and "retry later". The TUI only decides
+    /// where each one goes:
+    ///
+    /// - [`ProjectionRefusal::AheadOfLog`] → `md_ahead_of_log`, which
+    ///   the banner above the outline renders until a load clears it.
+    ///   The page still opens, showing exactly what is on disk: the
+    ///   guard withheld a *write*, so trading a stale page for no page
+    ///   would be the worse half of the deal.
+    /// - [`ProjectionRefusal::Retryable`] → a log line. An I/O error or
+    ///   an unreadable sidecar is picked up by the next open or the
+    ///   orphan scanner, and nagging about it would train the user past
+    ///   the banner that matters.
+    ///
+    /// Silent on a page the workspace has no node for. A page the user
+    /// just created is reconciled a moment later by
+    /// [`Self::ensure_view_file_exists`] / `open_page_slug`, and a page
+    /// whose `.md` arrived with no sidecar belongs to the orphan
+    /// scanner — neither is something to put on screen.
+    fn refresh_md_from_tree(&mut self) {
+        let Some(root) = self.workspace.root.clone() else {
+            return;
+        };
+        let slug = self.current_slug();
+        let Some(page_id) = outl_actions::find_by_slug(&self.workspace, &slug) else {
+            return;
+        };
+        let refusal = outl_actions::reproject_stale_md(&self.workspace, &root, page_id);
+        self.md_ahead_of_log = match refusal {
+            Some(ProjectionRefusal::AheadOfLog { lines, sample, .. }) => Some(
+                outl_actions::refusal::ahead_of_log_notice(Surface::Tui, lines, &sample),
+            ),
+            Some(ProjectionRefusal::Retryable(message)) => {
+                tracing::warn!("{}: re-projection failed: {message}", slug);
+                None
+            }
+            None => None,
+        };
+    }
+
     /// Move `path` to the front of the recent-paths LRU. Used by
     /// `load_current_no_autorun` so any view switch (journal, page,
     /// switch-overlay open) keeps the sidebar's `Recent` list in
@@ -209,6 +264,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::state::App;
+    use outl_core::storage::JsonlStorage;
     use outl_core::{ActorId, Workspace};
     use tempfile::TempDir;
 
@@ -217,6 +273,207 @@ mod tests {
             "{}.md",
             outl_actions::clock::today().format("%Y-%m-%d")
         ))
+    }
+
+    /// An app on a real workspace root, so the page-open re-projection
+    /// has somewhere to write. `Workspace::open_in_memory` has
+    /// `root: None`, which makes every assertion here vacuous.
+    fn app_with_root() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let storage = JsonlStorage::open(dir.path().join("ops"), actor).unwrap();
+        let ws =
+            Workspace::open_with_storage(actor, Box::new(storage), Some(dir.path().to_path_buf()))
+                .unwrap();
+        let app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// Give the open journal one real block and a faithful projection.
+    ///
+    /// The block matters: a sidecar whose every block carries `text: ""`
+    /// is read as pre-0.11 and cannot vouch for the file, so the guard
+    /// stands down and nothing would be refused. See
+    /// `outl_md::unlogged::sidecar_can_vouch_for`.
+    fn seed_projected_block(app: &mut App) {
+        let slug = app.current_slug();
+        let page = outl_actions::find_by_slug(&app.workspace, &slug).unwrap();
+        outl_actions::append_block(&mut app.workspace, &app.hlc, Some(page), Some("first"))
+            .unwrap();
+        outl_actions::apply_page_md_with_sidecar(&app.workspace, &app.workspace_root, page)
+            .unwrap();
+        app.load_current_no_autorun();
+    }
+
+    /// Append a line the op log never saw, and re-stamp the sidecar so
+    /// the hash gate calls those exact bytes faithful — the state
+    /// invariant 8 refuses to overwrite.
+    fn freeze_open_page(app: &mut App) -> std::path::PathBuf {
+        let md_path = app.current_path();
+        let mut md = std::fs::read_to_string(&md_path).unwrap();
+        md.push_str("- only ever on disk\n");
+        std::fs::write(&md_path, &md).unwrap();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sc.last_synced_hash = outl_md::sidecar::file_hash(&md);
+        outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+        // The in-memory AST is a revision behind the bytes we just
+        // wrote, and `load_current_no_autorun` flushes before it reads.
+        // Parsing them in keeps that flush a true no-op, so the page is
+        // still ahead of the log when the gate asks.
+        app.page = outl_md::parse::parse(&md);
+        md_path
+    }
+
+    /// The #292 bug: opening a page that has stopped syncing told the
+    /// user nothing. Reading it looked completely normal — the `.md` is
+    /// on disk and renders fine; what is missing is on the *other*
+    /// devices, which is why the machine you are sitting at has no way
+    /// to hint at it.
+    #[test]
+    fn opening_a_frozen_page_says_so() {
+        let (mut app, _dir) = app_with_root();
+        seed_projected_block(&mut app);
+        assert!(
+            app.md_ahead_of_log.is_none(),
+            "a healthy page must not be flagged before the freeze"
+        );
+
+        let md_path = freeze_open_page(&mut app);
+        app.load_current_no_autorun();
+
+        let notice = app
+            .md_ahead_of_log
+            .as_ref()
+            .expect("opening a frozen page must name the condition");
+        assert_eq!(
+            notice.command,
+            outl_actions::error::AHEAD_OF_LOG_RECOVERY_COMMAND
+        );
+        assert!(
+            notice.sample.contains("only ever on disk"),
+            "the notice must name what is at risk, got {:?}",
+            notice.sample
+        );
+        assert!(
+            notice.body.starts_with("1 line in"),
+            "the count comes from the guard, got {:?}",
+            notice.body
+        );
+        assert!(
+            std::fs::read_to_string(&md_path)
+                .unwrap()
+                .contains("only ever on disk"),
+            "the refused write must leave the bytes alone"
+        );
+    }
+
+    /// The page still opens, showing exactly what is on disk. The guard
+    /// withheld a *write*; trading a readable stale page for no page at
+    /// all would be the worse half of the deal, on the hottest path in
+    /// the client.
+    #[test]
+    fn a_frozen_page_still_opens_with_its_content() {
+        let (mut app, _dir) = app_with_root();
+        seed_projected_block(&mut app);
+        freeze_open_page(&mut app);
+
+        app.load_current_no_autorun();
+
+        let texts: Vec<&str> = app.page.blocks.iter().map(|b| b.text.as_str()).collect();
+        assert!(
+            texts.contains(&"first") && texts.contains(&"only ever on disk"),
+            "the frozen page must render its on-disk content: {texts:?}"
+        );
+        assert!(!app.load_failed, "a refused write is not a read failure");
+    }
+
+    /// The notice is cleared by the next load that gets a projection
+    /// through — i.e. the next open after the recovery ran. A banner
+    /// that outlives the condition trains the user past it.
+    #[test]
+    fn a_page_that_is_no_longer_frozen_clears_the_notice() {
+        let (mut app, _dir) = app_with_root();
+        seed_projected_block(&mut app);
+        freeze_open_page(&mut app);
+        app.load_current_no_autorun();
+        assert!(
+            app.md_ahead_of_log.is_some(),
+            "fixture must freeze the page"
+        );
+
+        // Stand in for `outl reconcile --ahead-of-log`, including the
+        // part that makes it a separate flag: a frozen page is
+        // hash-faithful, so `reconcile_md` short-circuits on the
+        // recorded hash and never looks at it. The recovery clears that
+        // hash first; without this the test asserts the wrong thing and
+        // passes for the wrong reason.
+        let md_path = app.current_path();
+        let sidecar_path = outl_md::sidecar::sidecar_path_for(&md_path);
+        let mut sc = outl_md::sidecar::read(&sidecar_path).unwrap();
+        sc.last_synced_hash.clear();
+        outl_md::sidecar::write(&sidecar_path, &sc).unwrap();
+        outl_md::reconcile::reconcile_md(&mut app.workspace, &app.hlc, &md_path, None).unwrap();
+        app.load_current_no_autorun();
+
+        assert!(
+            app.md_ahead_of_log.is_none(),
+            "a page whose lines reached the log must stop being flagged"
+        );
+    }
+
+    /// The other half of the same call, and a bug of its own: the TUI
+    /// never re-projected on open, so a peer's ops sat in the op log
+    /// while the page kept rendering the projection from before they
+    /// arrived (issue #166, fixed in the GUI clients only).
+    #[test]
+    fn opening_a_page_the_tree_outran_refreshes_the_md() {
+        let (mut app, _dir) = app_with_root();
+        seed_projected_block(&mut app);
+
+        // What a peer's ops look like locally: in the tree, not in the
+        // `.md`.
+        let slug = app.current_slug();
+        let page = outl_actions::find_by_slug(&app.workspace, &slug).unwrap();
+        outl_actions::append_block(&mut app.workspace, &app.hlc, Some(page), Some("synced-in"))
+            .unwrap();
+        let md_path = app.current_path();
+        assert!(!std::fs::read_to_string(&md_path)
+            .unwrap()
+            .contains("synced-in"));
+
+        app.load_current_no_autorun();
+
+        assert!(
+            std::fs::read_to_string(&md_path)
+                .unwrap()
+                .contains("synced-in"),
+            "opening the page must refresh its projection from the tree"
+        );
+        let texts: Vec<&str> = app.page.blocks.iter().map(|b| b.text.as_str()).collect();
+        assert!(
+            texts.contains(&"synced-in"),
+            "and the view must show it: {texts:?}"
+        );
+        assert!(app.md_ahead_of_log.is_none());
+    }
+
+    /// A page the workspace has no node for is not a refusal to report.
+    /// `find_by_slug` comes back empty for a page the user just typed
+    /// into existence, a split second before `open_page_slug` reconciles
+    /// it — putting a banner on that would flag every new page.
+    #[test]
+    fn a_page_the_tree_does_not_know_is_not_flagged() {
+        let (mut app, _dir) = app_with_root();
+        app.open_page_by_name("brand new").unwrap();
+        assert!(app.md_ahead_of_log.is_none());
     }
 
     /// Regression for the icon-style boot race: the parse-warning

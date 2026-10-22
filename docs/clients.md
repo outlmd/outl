@@ -186,14 +186,18 @@ A refusal is owed to whoever asked for the write, whether or not that asker draw
 | CLI | Every write subcommand that touches an existing page (`page update`, `block append`, `template apply`/`run`, ...) returns the same structured `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. `outl doctor` names the page, the line count and one sample outside any write attempt. `outl serve`'s `tree → .md` sweep discovers it with nobody asking: it names the page and the recovery on the first sweep that sees it and on every change to the set, never once per 30s tick, and says so once more when the set clears. `outl reconcile --ahead-of-log` is the recovery on all three. |
 | Desktop | `<PageAheadOfLogBanner client="desktop" />` above the outline, from `PageView.md_ahead_of_log`. Names the command to run in the workspace folder. |
 | Mobile | Same banner, `client="mobile"`. **There is no `outl` binary on iOS**, so the copy says to open the workspace on a computer instead of pointing at a terminal that doesn't exist. |
-| TUI | A status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). The TUI still does not call `apply_page_md_with_sidecar_if_stale` on its own page-open path, so a page that drifted ahead of the log with no local write attempt in between stays silent until the next write touches it. |
+| TUI | A persistent banner above the outline, from `App::md_ahead_of_log`: every page open runs `apply_page_md_with_sidecar_if_stale` (`load_current_no_autorun`), so a page that drifted ahead of the log is named on open, with no write attempt in between. Not a status-line message — the page stays frozen until the recovery runs, and a line that scrolls away is the same silence with a delay. Plus a status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). |
 | MCP | A structured tool refusal — `PAGE_MARKDOWN_AHEAD_OF_LOG` — naming the page, line count, sample, and the recovery command, instead of a generic failure. |
 <!-- END GENERATED: refusal-matrix -->
 
 Regenerate with `OUTL_UPDATE_CLIENTS_DOC=1 cargo test -p outl-actions refusal::`, pinned by `outl_actions::refusal::tests::the_clients_doc_matches_the_refusal_matrix` — never hand-edit the region between the markers.
 
-The user-facing wording on the GUI clients is owned by `@outl/shared/warnings::aheadOfLogNotice` (unit-tested), never written inline in a client.
-The MCP's wording has no shared owner across the Rust/TypeScript boundary — see the module doc on `crates/outl-cli/src/mcp/tools/dispatch.rs` for why, and what it does instead: it forwards `ActionError::PageMarkdownAheadOfLog`'s own `Display` verbatim rather than writing a second sentence.
+The wording has two owners and one pin between them, because the clients are split across a language boundary.
+`outl_actions::refusal::ahead_of_log_notice` is the Rust one — the TUI banner reads it, and it carries the per-surface recovery sentence (a phone has no `outl` binary; everything else is sitting in a shell).
+`@outl/shared/warnings::aheadOfLogNotice` is a **declared mirror** for the two GUI clients: a Solid component cannot call into that crate, and shipping seven prose strings over the IPC on every page open to avoid retyping two of them is not a trade worth making.
+What must not drift is pinned rather than trusted — `outl_actions::refusal::tests::the_shared_frontend_copy_says_the_same_thing` reads the TypeScript and compares the two facts a user acts on: the headline, and the command.
+Neither is ever written inline in a client.
+The MCP's wording is a third shape, and deliberately — see the module doc on `crates/outl-cli/src/mcp/tools/dispatch.rs`: it forwards `ActionError::PageMarkdownAheadOfLog`'s own `Display` verbatim rather than writing a second sentence.
 Both banners also warn against editing the page in the meantime: a local edit is safe: `ProjectionWriter` routes through `apply_page_md_with_sidecar_guarded`, which refuses to project over unlogged content exactly as the open path does. The `.md` simply stays behind until the lines are recorded.
 A refusal discovered after the mutation is persisted is not returned as a command failure: synchronous paths attach it to the successful `PageView`, while `ProjectionWriter` emits `projection-write-failed` with the same structured notice.
 Desktop and mobile feed either route into the existing sticky banner; other projection failures retain their original message and use the existing status/toast surface.
@@ -204,7 +208,12 @@ Before this banner existed the refusal only reached a backend log line, so the p
 **When the banner clears.**
 Only the open commands run the check, so a mutation reply can never carry the notice; a client that read it off every reply would clear the banner on the user's first edit, which is the action the banner warns against.
 `PageView.md_ahead_of_log_checked` marks the replies that *did* run it, and those are authoritative in both directions: the first checked reply with no notice (the next open or refresh of the page, after `outl reconcile --ahead-of-log` fixed it) clears the banner on both clients.
+The TUI needs no such flag — the check and the render are the same process, so `App::md_ahead_of_log` is rewritten by every load and a load whose re-projection succeeds clears it.
 A banner that outlives the condition is the mirror of the silence this section exists to end.
+
+**Focus mode does not hide it (TUI).**
+`z f` drops the header, the sidebar, the status bar and the parse-warning banner, because all four are chrome.
+This banner is not: asking for a distraction-free outline is not consent to be told nothing about a page that is saving nowhere else.
 
 ## Page history
 

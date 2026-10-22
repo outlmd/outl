@@ -147,6 +147,19 @@ During the #281 upgrade window (op log carrying a page's frontmatter fence as bu
 It is gone, and `tests/projection_writer_gates.rs` now pins both halves: every `pub fn` in `apply.rs` has a recorded verdict, and `guard.rs`'s doc names all six.
 Adding a writer without saying which side of the gate it is on fails there.
 
+## Refusals: who tells the user, and in what words
+
+`refusal.rs` is the catalog (one exhaustive `match` over `(Refusal, Surface)`, RFC 0255) **and**, since [#292](https://github.com/outlmd/outl/issues/292), the owner of the Rust-side wording: `ahead_of_log_notice(surface, lines, sample)`.
+
+`ProjectionRefusal` (in `journal/refresh.rs`) is the other half — the split between "this page has stopped converging and only a command fixes it" and "an I/O condition the next open retries out of". `reproject_stale_md` is the page-open call every client makes: it refreshes a `.md` the tree outran (issue #166) and classifies the refusal that can come back instead.
+
+Both exist because the policy had two homes and one of them was empty. `outl-tauri-shared::helpers::reproject_stale_md` held the classification, which the TUI cannot reach, so the TUI had no page-open check at all — opening a frozen page told the user nothing until they tried to write. That is the failure invariant 8's last paragraph names, moved into the client the maintainer daily-drives.
+
+Two rules:
+
+- **A client decides where a notice goes, never what it says.** A surface that writes its own sentence is a second copy of the fact, and the GUI clients already share one (`@outl/shared/warnings::aheadOfLogNotice`, a declared mirror — `the_shared_frontend_copy_says_the_same_thing` pins the headline and the command across the language boundary).
+- **The notice's counts come off the `ActionError`, never recounted.** The number the user reads has to be the number the guard refused on.
+
 ## The capture inbox
 
 `capture.rs` is both halves of RFC 0363: the writer a capture gesture calls, and the **only** path from an inbox into the op log.

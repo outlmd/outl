@@ -7,6 +7,31 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
+  Root `CLAUDE.md` invariant 8 refuses to overwrite a `.md` holding content that exists in no op, and that refusal freezes the page in *both* directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
+  The desktop and mobile render a banner for it.
+  The TUI never asked the question, so it had nothing to swallow — opening such a page and reading it looked completely normal, because the file is on disk and renders fine.
+  What is missing is on the *other* devices, which is exactly why the machine you are sitting at has no way to hint at it.
+  Every page open now runs `outl_actions::reproject_stale_md` and a frozen page gets a persistent banner above the outline naming the recovery command.
+  Not a status-line message and not a toast: nothing clears this condition on its own, so a line that scrolls away is the same silence with a delay.
+  It is also the one banner `z f` (focus mode) keeps, because wanting a distraction-free outline is not consent to be told nothing about a page that is saving nowhere else.
+  The page still opens and still shows what is on disk — the guard withheld a *write*, not the page.
+- **The TUI never refreshed a page's `.md` from the tree on open**, which is the other half of the same call.
+  A peer's ops land in the op log, not in the `.md`, so a synced-in block sat in the log while the page kept rendering the projection from before it arrived.
+  Issue #166 fixed this for the GUI clients in 2026; the TUI was never wired up.
+- **"1 line in this file were never recorded"** — the GUI banner's plural was baked into the sentence, so the one branch that cannot use it disagreed with itself.
+
+### Changed
+
+- **The classification behind that banner has one owner instead of one-and-a-half.**
+  `outl_actions::ProjectionRefusal` is the split between "this page has stopped converging and only a command fixes it" and "an I/O condition the next open retries out of"; `reproject_stale_md` is the page-open call every client makes.
+  It used to live in `outl-tauri-shared`, which the TUI cannot depend on — so the client with the hardest failure mode had no verdict at all.
+- **The wording behind it has a Rust owner too**: `outl_actions::refusal::ahead_of_log_notice`, including the per-surface recovery sentence (a phone has no `outl` binary; every other surface is sitting in a shell).
+  `@outl/shared`'s `aheadOfLogNotice` is now a declared mirror rather than the sole copy, and the two facts a user acts on — the headline and the command — are pinned across the language boundary instead of trusted.
+  `RECONCILE_COMMAND` in the TypeScript was a second spelling of `AHEAD_OF_LOG_RECOVERY_COMMAND` with nothing holding them equal.
+- **The TUI theme gained a `destructive` slot**, read from `Palette::destructive` — the field the GUI banner for this same condition was already painted from.
+  Two surfaces picking their own red for one fact is how a theme ends up meaning different things per client (invariant 13).
+
 - **A page name written in Chinese, Japanese, Korean, Cyrillic or any other script got no page of its own.**
   `[[你好]]` and `[[世界]]` opened the same page, `#中文` and `#笔记` landed on it too, and `[[Rust 笔记]]` opened `[[Rust]]`.
   `slugify` kept ASCII letters and digits plus a fixed table of folded Latin letters, turned everything else into `-`, and fell back to `untitled` when nothing survived.

@@ -13,6 +13,13 @@
  * `outl` binary at all. Inventing a mobile button that doesn't work
  * would be worse than saying so plainly.
  *
+ * This file is a **declared mirror** of `outl_actions::refusal::ahead_of_log_notice`,
+ * which every Rust surface (the TUI banner, the CLI, the MCP server) reads.
+ * A Solid component cannot call into that crate, and shipping seven prose
+ * strings over the IPC on every page open to avoid retyping two of them is
+ * not a trade worth making — so the headline and the command are pinned
+ * instead of trusted, by `the_shared_frontend_copy_says_the_same_thing`.
+ *
  * Background: root `CLAUDE.md` invariant 8, `docs/rfcs/0210-md-content-outside-op-log.md`.
  */
 
@@ -69,10 +76,11 @@ export function aheadOfLogNotice(
   client: AheadOfLogClient,
 ): AheadOfLogNotice {
   const count = info.lines === 1 ? "1 line" : `${info.lines} lines`;
+  const verb = info.lines === 1 ? "was" : "were";
   return {
     title: "This page isn't syncing",
     body:
-      `${count} in this file were never recorded by outl, so they exist only on this device. ` +
+      `${count} in this file ${verb} never recorded by outl, so they exist only on this device. ` +
       "Until that's fixed, changes from your other devices won't show up here either.",
     sample: info.sample,
     action:

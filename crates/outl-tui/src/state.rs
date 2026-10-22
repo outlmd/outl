@@ -605,6 +605,14 @@ pub(crate) struct App {
     /// behalf — they decide when to clean up.
     pub(crate) parse_warnings: Vec<outl_md::ParseWarning>,
 
+    /// Why the current page has stopped syncing, when it has — and the
+    /// words it is told in, from `outl_actions::refusal`.
+    ///
+    /// Written by every [`App::load_current_no_autorun`], so a load whose
+    /// re-projection succeeds clears it. Rendered persistently, and why
+    /// that matters: `view/ahead_of_log_banner.rs`.
+    pub(crate) md_ahead_of_log: Option<outl_actions::refusal::AheadOfLogNotice>,
+
     /// The current page's `.md` exists on disk but could not be read
     /// (permissions, a raw `EIO`, an iCloud placeholder whose bytes
     /// haven't downloaded yet, invalid UTF-8).

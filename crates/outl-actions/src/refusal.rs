@@ -175,13 +175,16 @@ pub fn refusal_support(refusal: Refusal) -> SurfaceSupport {
     match refusal {
         Refusal::PageMarkdownAheadOfLog => row!(
             Full(
-                "A status-line message wherever a TUI-initiated write re-projects the page \
-                 (template apply, `call:` code-block exec, mention-creation autocomplete) and \
-                 a toast when a peer-sync reload's re-projection declines \
-                 (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). The TUI still \
-                 does not call `apply_page_md_with_sidecar_if_stale` on its own page-open path, \
-                 so a page that drifted ahead of the log with no local write attempt in between \
-                 stays silent until the next write touches it."
+                "A persistent banner above the outline, from `App::md_ahead_of_log`: every \
+                 page open runs `apply_page_md_with_sidecar_if_stale` \
+                 (`load_current_no_autorun`), so a page that drifted ahead of the log is \
+                 named on open, with no write attempt in between. Not a status-line message \
+                 — the page stays frozen until the recovery runs, and a line that scrolls \
+                 away is the same silence with a delay. Plus a status-line message wherever \
+                 a TUI-initiated write re-projects the page (template apply, `call:` \
+                 code-block exec, mention-creation autocomplete) and a toast when a \
+                 peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, \
+                 `reload_workspace_from_disk`)."
             ),
             Full(
                 "`<PageAheadOfLogBanner client=\"desktop\" />` above the outline, from \
@@ -208,6 +211,82 @@ pub fn refusal_support(refusal: Refusal) -> SurfaceSupport {
                  line count, sample, and the recovery command, instead of a generic failure."
             )
         ),
+    }
+}
+
+/// What the user is told when a page has stopped syncing, in the words
+/// every **Rust** surface uses.
+///
+/// The TUI used to have nothing to say here at all, so there was no
+/// wording to own ([#292](https://github.com/outlmd/outl/issues/292)).
+/// Giving it one in `outl-tui` would have been the third copy of a
+/// sentence two clients already share, which is what invariant 12 is
+/// about — so the words live beside the catalog that declares who says
+/// them.
+///
+/// ## Why `@outl/shared` still has its own
+///
+/// `aheadOfLogNotice` in `crates/outl-frontend-shared/src/warnings/ahead-of-log.ts`
+/// is a **declared mirror**, not a fork: a Solid component cannot call
+/// into this crate, and sending seven prose strings over the IPC on
+/// every page open to avoid retyping two of them is not a trade worth
+/// making. What must not drift is pinned instead of trusted —
+/// `the_shared_frontend_copy_says_the_same_thing` reads that file and
+/// compares the two facts a user acts on: the headline, and the command.
+/// The banner's extra fields (`caution`, `path`) have no terminal
+/// equivalent and are deliberately not mirrored here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AheadOfLogNotice {
+    /// What is happening, in the user's terms.
+    pub title: &'static str,
+    /// Why, in one sentence, with no op-log vocabulary.
+    pub body: String,
+    /// One of the at-risk lines, verbatim from the `ActionError`.
+    pub sample: String,
+    /// What to do about it, ending in a colon — the command follows.
+    ///
+    /// Surface-specific, and honest about it: a phone has no `outl`
+    /// binary, so [`Surface::Mobile`] sends the user to a computer
+    /// instead of naming a command they cannot run.
+    pub action: &'static str,
+    /// The command `action` points at.
+    pub command: &'static str,
+}
+
+/// The notice for [`Refusal::PageMarkdownAheadOfLog`] on one surface.
+///
+/// `lines` and `sample` come straight off
+/// [`crate::ActionError::PageMarkdownAheadOfLog`] — a caller never
+/// recounts them, because the count the user reads has to be the count
+/// the guard refused on.
+pub fn ahead_of_log_notice(surface: Surface, lines: usize, sample: &str) -> AheadOfLogNotice {
+    // "1 line … were" is what the GUI banner shipped with; the plural
+    // was baked into the one branch that cannot use it.
+    let (count, verb) = if lines == 1 {
+        ("1 line".to_string(), "was")
+    } else {
+        (format!("{lines} lines"), "were")
+    };
+    AheadOfLogNotice {
+        title: "This page isn't syncing",
+        body: format!(
+            "{count} in this file {verb} never recorded by outl, so they exist only on \
+             this device. Until that's fixed, changes from your other devices won't \
+             show up here either."
+        ),
+        sample: sample.to_string(),
+        action: match surface {
+            // No `outl` binary on a phone. Naming one anyway is the
+            // failure the GUI copy already refused to ship.
+            Surface::Mobile => {
+                "Open this workspace on your computer and run this — there's nothing \
+                 to run from the phone:"
+            }
+            Surface::Tui | Surface::Desktop | Surface::Cli | Surface::Mcp => {
+                "To record them, run this in the workspace folder:"
+            }
+        },
+        command: crate::error::AHEAD_OF_LOG_RECOVERY_COMMAND,
     }
 }
 
@@ -268,6 +347,104 @@ mod tests {
             "the CLI row must say what the daemon does with a refusal it \
              discovers: {}",
             cli.text()
+        );
+    }
+
+    /// The TUI's own page-open path is what #292 closed. A row that
+    /// still describes the gap is a stale copy of the fact, and this
+    /// row is the one `docs/clients.md` prints — so the sentence a
+    /// reader trusts and the code it describes are pinned together.
+    #[test]
+    fn the_tui_row_accounts_for_the_page_open_path() {
+        let tui = refusal_support(Refusal::PageMarkdownAheadOfLog).tui;
+        assert!(
+            tui.text().contains("page open"),
+            "the TUI row must say what happens on page open: {}",
+            tui.text()
+        );
+        assert!(
+            !tui.text().contains("does not call"),
+            "the TUI row still describes the #292 gap as open: {}",
+            tui.text()
+        );
+    }
+
+    /// A notice that does not name the recovery is a notice that tells
+    /// the user they are stuck and nothing else.
+    #[test]
+    fn every_notice_names_the_recovery_command() {
+        for surface in Surface::ALL {
+            let n = ahead_of_log_notice(surface, 3, "- a line");
+            assert_eq!(
+                n.command,
+                crate::error::AHEAD_OF_LOG_RECOVERY_COMMAND,
+                "{surface:?} must point at the one recovery command"
+            );
+            assert!(
+                n.action.trim_end().ends_with(':'),
+                "{surface:?}'s action sentence must hand off to the command: {}",
+                n.action
+            );
+        }
+    }
+
+    /// The one legitimate per-surface difference. A phone has no `outl`
+    /// binary, and every other surface is sitting in a shell.
+    #[test]
+    fn only_the_phone_is_told_to_go_to_a_computer() {
+        for surface in Surface::ALL {
+            let action = ahead_of_log_notice(surface, 1, "- x").action;
+            let sends_elsewhere = action.contains("on your computer");
+            assert_eq!(
+                sends_elsewhere,
+                surface == Surface::Mobile,
+                "{surface:?} recovery wording is aimed at the wrong device: {action}"
+            );
+        }
+    }
+
+    /// `1 line` / `2 lines`, taken from the guard's own count. The
+    /// count the user reads has to be the count that was refused.
+    #[test]
+    fn the_body_counts_the_lines_it_was_given() {
+        assert!(ahead_of_log_notice(Surface::Tui, 1, "- x")
+            .body
+            .starts_with("1 line in"));
+        assert!(ahead_of_log_notice(Surface::Tui, 4, "- x")
+            .body
+            .starts_with("4 lines in"));
+    }
+
+    /// `@outl/shared`'s `aheadOfLogNotice` is a declared mirror of this
+    /// function, so the two facts a user acts on are compared rather
+    /// than trusted: the headline and the command. Everything else is
+    /// free to differ in density — a terminal banner is three rows, the
+    /// GUI banner is seven fields.
+    ///
+    /// Before this, `RECONCILE_COMMAND` was a second literal spelling
+    /// of `AHEAD_OF_LOG_RECOVERY_COMMAND` with nothing holding them
+    /// equal.
+    #[test]
+    fn the_shared_frontend_copy_says_the_same_thing() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../outl-frontend-shared/src/warnings/ahead-of-log.ts"
+        );
+        let ts =
+            std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+        let n = ahead_of_log_notice(Surface::Desktop, 2, "- x");
+
+        assert!(
+            ts.contains(&format!("\"{}\"", n.command)),
+            "{path} no longer spells the recovery command as {:?} — \
+             the GUI banner and every Rust surface would name different commands",
+            n.command
+        );
+        assert!(
+            ts.contains(n.title),
+            "{path} no longer carries the headline {:?} — the terminal and the \
+             GUI would describe the same frozen page differently",
+            n.title
         );
     }
 

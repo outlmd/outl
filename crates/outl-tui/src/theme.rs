@@ -110,6 +110,7 @@ fn theme_from_palette(name: &'static str, p: &Palette) -> Theme {
             .bg(hex_to_color(&p.status_visual_bg))
             .add_modifier(Modifier::BOLD),
         status_message: Style::default().fg(hex_to_color(&p.status_message_fg)),
+        destructive: Style::default().fg(hex_to_color(&p.destructive)),
         help_title: Style::default()
             .fg(hex_to_color(&p.help_title_fg))
             .add_modifier(Modifier::BOLD),
@@ -199,6 +200,17 @@ pub struct Theme {
     pub status_visual: Style,
     /// Transient status messages (saved, error...).
     pub status_message: Style,
+    /// Something the user cannot undo by waiting: a page that stopped
+    /// syncing, a delete confirmation.
+    ///
+    /// `Palette::destructive`, and the reason this is a slot rather
+    /// than a `Color::Red` literal is invariant 13 — the GUI banner for
+    /// the same condition is already painted from that field, and two
+    /// surfaces picking their own red for one fact is how a theme ends
+    /// up meaning different things per client. Distinct from
+    /// `status_message` (which carries `warn`): warn is "look at this",
+    /// destructive is "this does not fix itself".
+    pub destructive: Style,
     /// Section titles in the help popup.
     pub help_title: Style,
     /// Popup background (quick switcher, command palette, help).
@@ -363,6 +375,7 @@ pub fn default_dark() -> Theme {
             .bg(Color::Magenta)
             .add_modifier(Modifier::BOLD),
         status_message: Style::default().fg(Color::Yellow),
+        destructive: Style::default().fg(Color::Red),
         help_title: Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -438,6 +451,7 @@ pub fn light() -> Theme {
             .bg(Color::Magenta)
             .add_modifier(Modifier::BOLD),
         status_message: Style::default().fg(Color::Yellow),
+        destructive: Style::default().fg(Color::Red),
         help_title: Style::default()
             .fg(Color::Blue)
             .add_modifier(Modifier::BOLD),

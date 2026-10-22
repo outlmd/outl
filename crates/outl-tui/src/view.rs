@@ -3,6 +3,8 @@
 //! This file is the orchestrator — it composes the panels but delegates
 //! the actual painting to siblings:
 //!
+//! - `ahead_of_log_banner` — the page has stopped syncing (invariant
+//!   8's refusal, the one banner that outlives focus mode).
 //! - `overlays` — every modal popup (quick switcher, search, slash,
 //!   command bar, error, help, inline autocomplete).
 //! - `properties` — the `g p` property editor popup.
@@ -16,6 +18,7 @@
 //! Only `render_app` is callable from outside the module — the rest is
 //! `pub(crate)` for cross-file reuse inside `view/`.
 
+mod ahead_of_log_banner;
 mod backlinks;
 mod chrome;
 mod embed;
@@ -121,10 +124,15 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
     } else {
         warnings_banner::banner_height(app)
     };
+    // The ahead-of-log banner is NOT gated on focus mode. `z f` hides
+    // chrome; a page that has stopped syncing with every other device
+    // is not chrome, and hiding it is the failure #292 closed.
+    let frozen_h = ahead_of_log_banner::banner_height(app);
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(chrome_h),
+            Constraint::Length(frozen_h),
             Constraint::Length(banner_h),
             Constraint::Min(5),
             Constraint::Length(chrome_h),
@@ -133,12 +141,16 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
 
     chrome::render_header(f, outer[0], app);
 
+    // Above the parse-warning banner: this one says the page is not
+    // converging at all, which outranks "a line needed recovering".
+    ahead_of_log_banner::render_banner(f, outer[1], app);
+
     // Warning banner — collapses to zero height when `parse_warnings`
     // is empty (clean files), so this slot is invisible most of the
     // time.
-    warnings_banner::render_banner(f, outer[1], app);
+    warnings_banner::render_banner(f, outer[2], app);
 
-    let middle = outer[2];
+    let middle = outer[3];
 
     // Optional left sidebar: splits the middle row horizontally when
     // toggled on (`\` in Normal mode). Default off keeps the classic
@@ -254,5 +266,5 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
         f.render_stateful_widget(scrollbar, body_area, &mut sb_state);
     }
 
-    chrome::render_footer(f, outer[3], app);
+    chrome::render_footer(f, outer[4], app);
 }

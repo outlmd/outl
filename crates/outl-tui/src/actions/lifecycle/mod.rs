@@ -78,6 +78,7 @@ impl App {
             last_visual: None,
             status: String::new(),
             parse_warnings: Vec::new(),
+            md_ahead_of_log: None,
             load_failed: false,
             overlay: None,
             autocomplete: None,
