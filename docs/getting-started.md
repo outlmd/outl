@@ -63,6 +63,9 @@ Get-FileHash .\outl-desktop-windows-x86_64-setup.exe -Algorithm SHA256
 
 The installer is unsigned today, so SmartScreen shows "Windows protected your PC" on first run — **More info → Run anyway**.
 There is no `.msi`: WiX rejects a pre-release version whose identifier isn't numeric-only (`0.12.0-beta.201`), and every build on this channel is a beta.
+The installer downloads Microsoft's WebView2 bootstrapper when the runtime is not already there.
+That download needs a network, and it does not run again if the runtime is removed later or the program is started without the installer.
+In those cases outl shows a Windows message naming the Evergreen WebView2 runtime and where to download it, then exits.
 
 The CLI + TUI on Windows are the separate `outl-windows-x64.zip` asset on the same release.
 

@@ -412,7 +412,17 @@ How the desktop hosts plugins — the effect layer, the toolbar and view surface
 
 ## Logging
 
-`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+On Windows, `run()` asks `tauri::webview_version()` before `outl_telemetry::init`.
+`Err` is the same answer `tauri-runtime-wry` records as `webview_version().is_ok() == false`, which becomes `Error::WebviewRuntimeNotInstalled` while the main window is created, and `App::run` panics with `Failed to setup app: {e}`.
+That panic is a crash report.
+The release build already shows Tauri's own dialog and then panics anyway.
+`webview_boot::webview_boot` is the decision: `Err` is a Windows message naming the Evergreen WebView2 runtime and Microsoft's download page, then `process::exit(1)`.
+`Ok` leaves the rest of boot alone, including an empty version string, because Tauri's gate is `is_ok()` and a second reading of that `Result` is how the two answers drift.
+macOS and Linux do not call it.
+A failed WebKit probe on macOS is not a missing runtime, and Tauri still creates the webview there.
+The check is before `init` so the reporter is not running on the path that exists to avoid a report.
+
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then (after that Windows check) calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
 The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.
 A closed stderr — a desktop launched with no terminal, whose pipe has gone away — must not panic.
 `eprintln!` turns `EPIPE` into `failed printing to stderr`, and the fmt layer's own error report is an `eprintln!`.

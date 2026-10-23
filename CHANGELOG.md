@@ -7,6 +7,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Opening outl on a Windows PC with no WebView2 runtime crashed, and the crash was the only explanation.**
+  Tauri's setup panics with `Failed to setup app: runtime error: Could not find the webview runtime, make sure it is installed`, and that panic is what got filed.
+  The NSIS installer already tries to download the runtime.
+  That does not cover an offline or failed bootstrapper, a runtime removed later, or the program started without the installer.
+  Windows now asks the same question before the window is built.
+  A missing runtime shows a message naming the Evergreen WebView2 runtime and Microsoft's download page, then exits with status 1.
+  A PC that already has the runtime is unchanged, and so are macOS and Linux.
 - **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
   Root `CLAUDE.md` invariant 8 refuses to overwrite a `.md` holding content that exists in no op, and that refusal freezes the page in *both* directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
   The desktop and mobile render a banner for it.

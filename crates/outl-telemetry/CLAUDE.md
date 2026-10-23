@@ -219,7 +219,10 @@ Two things a caller must not change:
 - **`init` is called from the binary, not from `outl_tui::run`.**
   `run` is also called by the `outl` binary, which has already started its own reporter by then; initialising inside the library means two `sentry::init` calls in one process on that path.
 
-In both GUI clients `ignore_sigpipe()` is the first statement of `run()` and `init` is the second, before the `tracing` subscriber and before the rustls provider.
+In both GUI clients `ignore_sigpipe()` is the first statement of `run()`.
+On mobile, `init` is the second, before the `tracing` subscriber and before the rustls provider.
+On desktop, Windows asks `tauri::webview_version()` between those two: a missing WebView2 runtime is a message and `process::exit(1)`, and the reporter is not started on that path, because the failure it replaces is the setup panic Sentry was filing.
+Every other boot failure still happens after `init`.
 The signal disposition has to be set before any write; the reporter still has to be up before the crashes worth the most, which are the boot ones — the Android app that closed on open is what motivated this RFC, and a reporter installed after the failing call reports nothing.
 The subscriber writes through `lossy_stderr` with `log_internal_errors(false)`.
 The CLI's `init_tracing` does the same. The TUI's log file does not write to stderr, so it does not.

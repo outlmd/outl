@@ -29,6 +29,8 @@
 //! - `state` — `AppState`, wire types (`PageView`, `WorkspaceSummary`).
 //! - `helpers` — argument parsers, workspace-lock acquisition,
 //!   `finish_in_page` (the mutation funnel).
+//! - `webview_boot` — Windows WebView2 check before setup. A missing
+//!   runtime is a message and an exit, not a panic.
 //! - `open_with` — the OS "Open With → outl" gesture (macOS
 //!   `RunEvent::Opened`, `argv` elsewhere) turned into one import.
 //! - `workspace_open` — open / reconcile / boot opener primitives.
@@ -45,6 +47,7 @@ mod plugin_service;
 mod quick_capture;
 mod settings;
 mod state;
+mod webview_boot;
 mod workspace_open;
 
 use std::path::PathBuf;
@@ -169,6 +172,11 @@ pub fn run() {
     // the moment its log pipe goes away. The write path still has to tolerate
     // EPIPE — that is `outl_telemetry::lossy_stderr`, below.
     ignore_sigpipe();
+
+    // Windows only, before the crash reporter. A failed `webview_version()`
+    // is the setup panic; here it is a message and an exit.
+    #[cfg(windows)]
+    webview_boot::exit_if_runtime_missing(tauri::webview_version().map_err(|err| err.to_string()));
 
     // Crash reporting (RFC 0377) goes up next, before the subscriber and
     // before the crypto provider, because the crashes worth the most are the
