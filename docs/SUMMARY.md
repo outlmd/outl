@@ -3,6 +3,7 @@
 * [Welcome](README.md)
 * [Getting started](getting-started.md)
 * [Homebrew tap](homebrew.md)
+* [Scoop bucket (Windows)](scoop.md)
 * [Your first week with outl](tutorial.md)
 * [Why outl](why-outl.md)
 

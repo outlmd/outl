@@ -44,6 +44,14 @@ brew install outlmd/outl/outl-beta # TUI/CLI/MCP
 brew install --cask outl-desktop-beta # GUI
 ```
 
+```powershell
+# Windows via Scoop
+scoop bucket add outl https://github.com/outlmd/outl
+scoop install outl/outl-beta # TUI/CLI/MCP
+```
+
+Desktop app on Linux and Windows: AppImage / `.deb` / `.rpm` and an NSIS installer on every [release](https://github.com/outlmd/outl/releases), for `x86_64` and `aarch64` both.
+
 iOS beta on TestFlight: [join here](https://testflight.apple.com/join/P2GdWAMd). Point the TUI at the same iCloud Drive container _(`<container>/Documents/`)_ and both clients share a workspace.
 
 Android: a signed arm64 APK (`outl-android-arm64.apk`) rides every [release](https://github.com/outlmd/outl/releases).

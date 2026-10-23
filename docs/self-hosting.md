@@ -52,23 +52,19 @@ You do **not** need to clone the repo, install Rust, or build anything — one f
 |---|---|---|
 | A machine that stays awake — NAS, VPS, an old laptop in a closet | The whole point is a peer that is up when your others are not | — |
 | Docker with the Compose plugin on that machine | The image is how outl ships this | `docker compose version` |
-| That machine on **`linux/amd64`** | The published image is x86-64 only, see below | `docker info --format '{{.Architecture}}'` |
+| That machine on **`linux/amd64`** or **`linux/arm64`** | Both are published; `docker pull` picks the right one | `docker info --format '{{.Architecture}}'` |
 | A device that **already has your notes**, with the `outl` CLI | It hosts the pairing; the server joins it | `outl workspace info` |
 | Outbound internet on both | iroh dials peers and the relay; nothing dials *in* | — |
 
 No inbound firewall rule, no port forwarding, no domain, no TLS certificate.
 There is nothing to expose — see [Networking](#networking).
 
-> **On ARM — Apple Silicon, a Raspberry Pi, a Graviton or Ampere VPS — the pull fails.**
-> The image is built for `linux/amd64` only, and Docker's error says so in the least helpful way available:
+> **On ARM — Apple Silicon, a Raspberry Pi, a Graviton or Ampere VPS — just pull.**
+> Every tag is a manifest list carrying `linux/amd64` and `linux/arm64`, each built on a runner of that architecture, so `docker pull` resolves yours and no `platform:` line is needed. There is nothing to emulate and nothing to compile.
+>
+> This is new as of [issue #411](https://github.com/outlmd/outl/issues/411). Earlier tags — anything before `0.13.0`, including the `:dev` images published up to then and any `:sha-…` you may have pinned — are `amd64` only, and pulling one on ARM still fails with Docker's least helpful error:
 > `no matching manifest for linux/arm64/v8 in the manifest list entries`.
->
-> Two ways through, and the second is the better one on a machine that will run this for months:
->
-> - **Emulate**, by adding `platform: linux/amd64` next to `image:` in step 2. Works on Docker Desktop, at a real CPU cost for a process that is mostly idle anyway. On a Pi it needs `qemu-user-static` installed and is slow enough to be unpleasant.
-> - **Build it natively** on that machine — the `<details>` at the end of this quick start. The Dockerfile is architecture-agnostic; it is only the *published* image that is single-arch.
->
-> Native `arm64` images are not published yet because cross-building this dependency tree under QEMU turns a ten-minute CI job into an hour-plus one; doing it properly needs a second native runner and a manifest merge. If you are on ARM and want this, say so on the tracker — that is the signal the [workflow comment](../.github/workflows/docker.yml) is waiting for.
+> Re-pull a current tag, or build locally (the `<details>` at the end of this quick start); `platform: linux/amd64` next to `image:` still works too, through QEMU, and is the slow way.
 
 ### Step 1 — make a folder on the server
 
@@ -234,7 +230,7 @@ docker compose build
 The repo's `docker-compose.yml` already declares `build: .` and the same two volumes, so steps 4 through 8 are unchanged; run them from the clone instead of `~/outl-server`.
 Expect a cold build to take a while — it compiles the CLI from source, including `aws-lc-sys`.
 
-This is also the route on `arm64`: the build is native there, so it produces exactly the image the registry does not carry yet.
+On `arm64` this is no longer the only way in — the registry carries that architecture now — but it is still the way to run an image built from a commit that was never published.
 
 </details>
 
@@ -395,6 +391,18 @@ Pulling a prebuilt image from GHCR is what the quick start does; building from t
 > The rows above describe what each tag will follow once it exists — they are the naming scheme, not a list of what is on the registry today.
 
 The beta releases that `release.yml` publishes for every push to `main` do **not** get their own image — they are tagged by a workflow token, and GitHub does not fire workflows for those, by design. `:dev` is the equivalent, one image per push rather than one per tag.
+
+Every one of those tags is a **manifest list** over `linux/amd64` and `linux/arm64`, so the tag you pull is the same on both and the architecture is resolved by the daemon.
+`docker buildx imagetools inspect <tag>` prints the two entries; a tag showing one is a tag from before [#411](https://github.com/outlmd/outl/issues/411).
+
+Each list is also attested, so you can check it came out of this repo's workflow rather than taking the registry's word for it:
+
+```bash
+gh attestation verify oci://ghcr.io/outlmd/outl-server:dev --repo outlmd/outl
+```
+
+That verifies a Sigstore-signed SLSA provenance statement about the digest the tag resolves to, naming the workflow, the commit and the run that built it.
+Tags from before this shipped have no attestation and the command says so — which is the honest answer, not a failure of the image.
 
 ### Upgrading
 

@@ -1,0 +1,48 @@
+{
+  "##": [
+    "Scoop manifest, maintained by .github/workflows/release.yml.",
+    "Every push to main runs the release workflow, which rewrites `version` and",
+    "both `architecture.*.hash` values with jq — structure is edited by hand,",
+    "digests are not. Zeroed hashes are the bootstrap placeholders the first",
+    "release after this file landed replaces.",
+    "`$version` in a url is substituted by Scoop itself, so the urls never",
+    "need bumping; `scripts/check-release-assets.py` holds the architecture",
+    "blocks against the release build matrix."
+  ],
+  "version": "0.0.0",
+  "description": "Local-first outliner with CRDT sync: TUI, CLI and MCP server (beta channel, rebuilt on every push to main)",
+  "homepage": "https://outl.app",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-x64.zip",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "arm64": {
+      "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-arm64.zip",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "bin": "outl.exe",
+  "checkver": {
+    "url": "https://github.com/outlmd/outl/releases.atom",
+    "regex": "releases/tag/v([\\d.]+-beta\\.\\d+)"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-x64.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-arm64.zip"
+      }
+    },
+    "hash": {
+      "url": "$url.sha256"
+    }
+  },
+  "notes": [
+    "outl is on your PATH as `outl`. `outl --help` lists the commands; `outl init <dir>` scaffolds a workspace and `outl` with no arguments opens the TUI on today's journal.",
+    "This is the beta channel: it tracks every push to main. Pin a version with `scoop hold outl-beta` if you would rather upgrade on purpose."
+  ]
+}

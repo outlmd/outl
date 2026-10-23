@@ -47,3 +47,20 @@ jobs:
 
       - name: release strip check
         run: python3 scripts/tests/test_check_artifact_stripped.py
+
+      # `scripts/release_assets.py` is the list of what a release publishes
+      # and which assets are allowed to be missing. Five other places have to
+      # agree with it — the three build matrices, the `update_tap` loops, and
+      # the Homebrew formula, the cask and the Scoop manifest — and none of
+      # them can see the others. Every disagreement is silent at release
+      # time: a `sed` that matches no line exits 0, the tap bump finishes on
+      # `git diff --quiet`, and the first thing to notice is somebody's
+      # `brew install` or `scoop install` a release later.
+      #
+      # The same table decides whether a release publishes, so its own suite
+      # runs here too: a false pass there publishes a release that claims
+      # platforms it does not carry.
+      - name: release assets
+        run: |
+          python3 scripts/check-release-assets.py --manifest
+          python3 scripts/tests/test_check_release_assets.py

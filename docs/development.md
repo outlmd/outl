@@ -209,8 +209,59 @@ bun run tauri dev               # dev window with hot reload
 ```
 
 A release dmg is built only in CI (`release.yml`'s `build_desktop` job, universal `arm64 + x86_64`).
-Linux bundles come from `build_desktop_linux` (AppImage / deb / rpm) and the Windows installer from `build_desktop_windows` (NSIS `.exe`; **not** msi — WiX rejects the non-numeric pre-release identifier every beta carries).
+Linux bundles come from `build_desktop_linux` (AppImage / deb / rpm, one leg per architecture: `x86_64` and `aarch64`, each on a runner of that architecture) and the Windows installer from `build_desktop_windows` (NSIS `.exe`; **not** msi — WiX rejects the non-numeric pre-release identifier every beta carries).
 Local `bun run tauri build` is fine for smoke-testing your own arch.
+
+**The dmg's install window is artwork, and CI has to be told to apply it.**
+[`crates/outl-desktop/src-tauri/dmg/background.svg`](../crates/outl-desktop/src-tauri/dmg/background.svg) is the source of truth.
+`background.png` beside it (660x400, Tauri's default dmg window size) is what the bundler actually consumes, and `tauri.conf.json`'s `bundle.macOS.dmg` places the app and the `Applications` alias on it.
+Regenerate with `nix run nixpkgs#resvg -- background.svg background.png -w 660`.
+The card's fill is tuned to a specific luminance so that both system label colours clear WCAG AA on it, because the Finder draws those labels in a colour that flips with the OS appearance.
+That reasoning and its numbers live in the SVG's own comment; lightening or darkening the band under the labels breaks one appearance.
+
+Two things about it are silent, which is why they are written down:
+
+- **tauri-bundler turns the whole thing off under CI.**
+  It passes `--skip-jenkins` to its vendored `bundle_dmg.sh` whenever `CI == "true"`, and that flag skips the AppleScript applying the background and the icon positions.
+  The result is a stock window and no error.
+  `release.yml`'s dmg step sets `TAURI_BUNDLER_DMG_IGNORE_CI: "true"` to opt back in, and retries once without it if that AppleScript fails, because it drives the Finder over Apple Events and a runner can refuse it Automation permission.
+  The dmg is a `required` asset, so without that retry a background image could hold back the whole macOS release.
+- **Don't build a release dmg locally under a tiling window manager.**
+  The AppleScript sizes the Finder window, and the Finder then bakes whatever frame it ended up with into the dmg's `.DS_Store`.
+  AeroSpace (or any tiler) snaps that window first, so the snapped size is what ships.
+  CI has no window manager, so the configured size sticks there.
+
+There is no retina variant: `tauri-bundler` copies the single `background` file verbatim and has no `@2x` or `tiffutil` path, which is why the art is drawn with flat shapes and thick strokes.
+
+**`desktop.yml` has no `aarch64` leg, on purpose.**
+Its `check` job compiles the whole desktop tree on Linux, so a compile error reaches a PR there whatever the architecture; what is *specific* to `aarch64` is the bundling — the runner's webkit2gtk, linuxdeploy's `aarch64` AppImage tooling, the per-arch `AppRun` seed — and none of that is exercised by a `--no-bundle` debug build.
+The thing that does exercise it is `release.yml` dispatched with `dry_run: true`, which builds and verifies every artifact on the branch and publishes nothing.
+Run that on any PR touching the release pipeline; adding a second bundling leg to every desktop PR buys the same signal at a recurring cost.
+
+**Adding a platform starts in [`scripts/release_assets.py`](../scripts/release_assets.py).**
+That file is the list of what a release publishes: one entry per build-matrix leg, naming its assets, whether it is `required`, and which package manager points at it.
+Then the matrix leg in `release.yml`, its entries in `update_tap`'s loops, and the `url` / `sha256` / bottle anchors in the manifest that serves it.
+Every way those can disagree is silent at release time — a `sed` that matches no line exits 0, `update_tap` finishes on `git diff --quiet`, which only asks whether *something* changed — so somebody's `brew install` or `scoop install` is the first thing to notice, one release later.
+`scripts/check-release-assets.py --manifest` runs in `hygiene.yml` and fails on the mismatch instead; it parses rather than builds, so it takes a second and needs nothing installed.
+
+**A release publishes on what is on the draft, not on whether every job went green.**
+The gate used to be `needs.<job>.result == 'success'` per build job, which made each job a single point of failure for every other job's assets: one architecture's bundler, or one flaky runner, and a release with 25 finished artifacts published none of them.
+The repo's own workaround for `build_android` was the opposite extreme — absent from the conditions, so a missing APK published in silence, and the same shape produced a v0.12.0 draft with zero assets that nothing complained about.
+
+So `required` lives in that table and the pipeline reads it in three places:
+
+- a leg marked optional carries `continue-on-error: ${{ matrix.optional || false }}`, which keeps the workflow run from going red over a platform still in bring-up;
+- `publish_release` does not read job results at all, which is the part that actually keeps the release moving — a half-failed matrix reports whatever it reports to `needs`, and the gate never asks;
+- what it reads instead is the draft's asset list, against the table: a missing **required** asset fails the publish, and a missing optional one publishes with the gap named in that release's own notes and in the run summary;
+- `update_tap` moves a manifest only when every asset *that manifest* points at is present, because a manifest carrying a new version and the previous release's digest is a hash mismatch on install — worse than one still pointing at a release that exists.
+
+Promoting a platform out of bring-up is flipping `required` in the table, and that flip is the record that it has been green.
+Nothing about this is a reason to leave a platform optional: the gap is loud in three places, and a leg that keeps failing is a bug with a name.
+
+**Asset names use two architecture spellings, and both are deliberate.**
+The CLI / TUI tarballs are `outl-linux-x64` / `outl-linux-arm64` (and `outl-macos-x64` / `outl-macos-arm64`), the desktop bundles are `outl-desktop-linux-x86_64` / `outl-desktop-linux-aarch64`.
+The desktop set matches `uname -m` and Linux packaging convention, which is what a `.deb` / `.rpm` / AppImage user expects; the CLI set is older and is what the Homebrew anchors and every published release URL already say.
+A release asset URL does not redirect, so renaming either family breaks links that are already in the wild — the spellings stay split, and the docs name both.
 
 ```bash
 # from the repo root
@@ -683,12 +734,13 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
-| [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet) + `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
+| [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet), `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`), `scripts/tests/test_check_artifact_stripped.py` (the strip gate's own suite), and `scripts/check-release-assets.py --manifest` plus its suite (the three build matrices, `update_tap`'s loops, the Homebrew formula, the cask and the Scoop manifest all name the platforms `scripts/release_assets.py` names). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
 | [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-md`, plus weekly cron | Criterion (small/medium/large) on every PR; xlarge + CLI hyperfine on cron / manual dispatch. Artifacts retained 14–30 days. | No (informational) |
-| [`release.yml`](../.github/workflows/release.yml) | Push to `main` (beta), `v*` tag (GA), manual | Computes version from `Cargo.toml`, builds CLI + TUI matrix, builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm, Windows NSIS installer), drafts release, uploads assets, publishes, bumps Homebrew tap (`Formula/outl-beta.rb` + `Casks/outl-desktop-beta.rb`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
+| [`release.yml`](../.github/workflows/release.yml) | Push to `main` (beta), `v*` tag (GA), manual | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
 | [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully | Downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
+| [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. | No |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Cron | Garbage-collects stale beta tags. | n/a |
 
 ### Action pinning
@@ -699,7 +751,7 @@ To pin a new action, resolve the tag with `gh api repos/<owner>/<repo>/git/ref/t
 
 ### Runner sizing
 
-Every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`), never on GitHub-hosted ones.
+Every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`, with `-arm` appended for ARM64 Linux), never on GitHub-hosted ones.
 The one exception is `release.yml::publish_npm`, which runs on `ubuntu-24.04`: npm trusted publishing (OIDC) does not accept self-hosted runners yet, and Blacksmith registers as self-hosted.
 Moving it back to Blacksmith breaks the npm publish.
 Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted publishing) must stay configured as owner `outlmd`, repository `outl`, workflow `release.yml`, environment `release`, with publishing allowed.
@@ -724,6 +776,12 @@ Sizes as of the Blacksmith migration, from a full run of every workflow:
 | `ci.yml::docs`, `ci.yml::sync`, `bench.yml` | 4 vCPU | doc/proptest jobs already finish in ~100s; bench stays fixed so numbers remain comparable run over run |
 | `ci.yml::clippy`, `ci.yml::test (linux)`, `desktop.yml::check`, release builds | 8 vCPU | measured 71–76% average CPU on 4 vCPU with 2.6–4.7 GB of 16 GB used and zero OOM: CPU-bound, so more cores cut wall clock at roughly flat billing |
 | macOS jobs | 6 vCPU | smallest macOS tier Blacksmith offers |
+| `release.yml` Linux legs (CLI `x86_64`/`aarch64`, desktop `x86_64`/`aarch64`), `docker.yml` | 8 vCPU | same CPU-bound release build on either architecture; the ARM legs use the `-arm` suffix of the same SKU, billed at 0.625x |
+
+**The Linux release legs are pinned to `ubuntu-2204`, not `2404`, and that is not a cost decision.**
+A glibc-linked binary runs on the glibc it was built against or newer, never older, so the image the artifact is built on *is* its compatibility floor: 22.04 is glibc 2.35 (Debian 12, every supported Ubuntu LTS), 24.04 is 2.39 (and nothing older than itself).
+`build_desktop_linux` was pinned for this from the start and said so; the CLI leg was built on 24.04 until [#411](https://github.com/outlmd/outl/issues/411), which made `outl-linux-x64.tar.gz` die with `version GLIBC_2.38 not found` on exactly the distros where someone downloads a tarball instead of using a package manager.
+Bumping either to 24.04 raises that floor for everyone; do it on purpose, or not at all.
 
 **Check names must not contain the runner SKU.**
 Branch protection matches required checks by name, so `test (ubuntu-latest)` becoming `test (blacksmith-8vcpu-ubuntu-2404)` leaves `main` blocked on a check that will never report again.

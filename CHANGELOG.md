@@ -5,6 +5,42 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **ARM64 is a published platform on Linux and on Windows, for every artifact outl ships** ([#411](https://github.com/outlmd/outl/issues/411)).
+  Raspberry Pi 4 / 5, ARM laptops, Snapdragon X machines, Ampere and Graviton instances: the options before this were `cargo build --release` or an x86_64 build under emulation.
+  New assets: `outl-desktop-linux-aarch64.{AppImage,deb,rpm}`, `outl-desktop-windows-aarch64-setup.exe`, `outl-linux-arm64.tar.gz`, `outl-windows-arm64.zip`, each with its `.sha256`, plus a Homebrew `arm64_linux` bottle and `linux/arm64` on the server image.
+  The Linux halves build on native ARM runners.
+  The Windows half is cross-linked from the x64 runner, which was the better trade once two things were checked rather than assumed: `windows-2025` carries `VC.Tools.ARM64`, and `aws-lc-sys` — the one dependency here that compiles C — looks for the `clang-cl` this target needs on PATH and then inside the VS install, which that image ships.
+  A native Windows-on-ARM runner would have needed `bun` under x64 emulation for the frontend build.
+- **A Scoop bucket for Windows** ([#413](https://github.com/outlmd/outl/issues/413)): `scoop bucket add outl https://github.com/outlmd/outl && scoop install outl/outl-beta`.
+  Unprivileged, portable, on PATH, and one manifest serves `64bit` and native `arm64` — so the ARM64 build above has a package manager on the day it exists rather than being a zip someone has to find.
+  `bucket/outl-beta.json` lives in this repo, like the Homebrew tap, and `update_tap` rewrites it with `jq` on every release.
+  The desktop installer is deliberately not a Scoop package, and `docs/scoop.md` says why; winget is the next one worth doing and is still open on that issue.
+- **`brew install outl-beta` works on ARM64 Linux.**
+  `Formula/outl-beta.rb` grew an `on_linux do on_arm` block and an `arm64_linux` bottle; ARM64 Linux has been a Tier 1 Homebrew platform since 5.0.0.
+- **`ghcr.io/outlmd/outl-server` is multi-arch.**
+  Every tag is now a manifest list over `linux/amd64` and `linux/arm64`, so `docker compose pull` on a Pi or a Graviton box resolves the right image with no `platform:` line.
+  `docker.yml` builds each architecture on a runner of that architecture, pushes it by digest, and merges the digests into the tag.
+  The old workflow comment said arm64 was waiting for "somebody who actually needs it" and a native runner; both arrived.
+  Tags cut before this stay single-arch — a `:sha-…` you pinned does not become a manifest list retroactively.
+  The provenance moved rather than going away, and ended up better than it was: the per-architecture builds pass `provenance: false`, because the digest the merge needs has to be the image's and buildx would otherwise wrap each one in an index of image + attestation, which merges into an `unknown/unknown` entry in the list a user pulls.
+  So `merge` attests the finished manifest list through Sigstore instead — the digest `docker pull <tag>` actually resolves, signed, verifiable with `gh attestation verify oci://ghcr.io/outlmd/outl-server --repo outlmd/outl`, where `provenance: mode=min` only attached an unsigned in-toto statement per architecture.
+
+- **`scripts/release_assets.py` is the list of what a release publishes**, and `scripts/check-release-assets.py` holds everything else to it.
+  Six places have to name the same platforms — three build matrices, `update_tap`'s loops, the formula, the cask, the Scoop manifest — and none can see the others.
+  Every disagreement is silent: a `sed` that matches no line still exits 0, and the tap bump ends on `git diff --quiet`, which only asks whether *something* changed, so somebody's `brew install` is the first thing to notice, one release later with a hash mismatch.
+  `--manifest` runs in `hygiene.yml`, parses rather than builds, needs nothing installed; 28 cases in `scripts/tests/test_check_release_assets.py` each mutate one file the way a careless change would and assert the specific complaint, because a checker that passes because its parser broke is worse than no checker.
+
+- **The macOS installer window is branded.**
+  Opening the dmg gave you a stock Finder window: two icons on grey, nothing saying what the thing you just downloaded is.
+  It now opens on artwork built from the project logo, with the app and the `Applications` alias placed on a drop card below the lockup.
+  The card's fill is not a taste decision.
+  The Finder draws those two icon labels in the system label colour, which flips with the OS appearance, so the fill is tuned to the luminance where near-black and near-white score the same: 4.58:1 and 4.59:1, both clearing WCAG AA in both appearances, which nothing lighter or darker can do.
+  `crates/outl-desktop/src-tauri/dmg/background.svg` is the source and carries that reasoning; the PNG beside it is what the bundler consumes.
+  The non-obvious half is that `tauri-bundler` skips the AppleScript applying any of this whenever `CI == "true"`, silently, so the release workflow opts back in and falls back to one stock-window retry if the Finder refuses the Apple Events permission that script needs.
+  A background image is not allowed to hold back a `required` asset.
+
 ### Fixed
 
 - **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
@@ -20,9 +56,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   A peer's ops land in the op log, not in the `.md`, so a synced-in block sat in the log while the page kept rendering the projection from before it arrived.
   Issue #166 fixed this for the GUI clients in 2026; the TUI was never wired up.
 - **"1 line in this file were never recorded"** — the GUI banner's plural was baked into the sentence, so the one branch that cannot use it disagreed with itself.
+- **`outl-linux-x64.tar.gz` carried a glibc 2.39 floor it never needed**, so it died with `version GLIBC_2.38 not found` on Debian 12, Ubuntu 22.04 and RHEL 9 — the distros where someone downloads a tarball instead of using a package manager.
+  A glibc-linked binary runs on the glibc it was built against or newer, never older, so the runner image *is* the compatibility floor.
+  `build_desktop_linux` was pinned to Ubuntu 22.04 (glibc 2.35) for exactly this and said so in a comment; the CLI leg was on 24.04, which was an oversight rather than a decision.
+  Both Linux legs are on 22.04 now, and `docs/development.md` → Runner sizing owns the rule so the next bump is made on purpose.
+  The same floor applied to the Homebrew `x86_64_linux` bottle, which is the other thing that binary feeds.
 
 ### Changed
 
+- **A release publishes on what is on the draft, not on whether every job went green.**
+  The gate was `needs.<job>.result == 'success'` per build job, which made every job a single point of failure for every other job's assets: one architecture's bundler, or one flaky runner, and a release with 25 finished artifacts published none of them.
+  This repo's own workaround for the Android APK was the opposite extreme — absent from the conditions, so a missing APK published in silence, and the same shape produced a v0.12.0 draft with zero assets that nothing complained about.
+  Both are gone. `scripts/release_assets.py` says which assets a release must carry, and the pipeline reads it in three places: an optional leg carries `continue-on-error`, which keeps the run from going red; `publish_release` reads the draft's assets and no job results at all, failing on a missing required asset and publishing a missing optional one *with the gap named in that release's own notes and in the run summary*; `update_tap` moves a manifest only when every asset that manifest points at is present.
+  The middle one is the load-bearing part, and it is why the gate is written against assets rather than against `needs`: whatever conclusion a half-failed matrix reports, the question "is this release complete" has one honest answer and it is on the draft.
+  That last one is why a missing Windows `arm64` zip stops the Scoop bump but not the Homebrew one: a manifest with a new version and the previous release's digest is a hash mismatch at install time, which is worse than a manifest that still points at a release that exists.
+- **`build_desktop_windows` is one job with an architecture matrix too**, and both legs now pass `--target` explicitly.
+  The x64 leg built for the host and read `target/release/…`; keeping that while adding a cross-compiled `aarch64` leg would have meant two output layouts to keep straight in five steps, so both read `target/<triple>/release/…`.
+- **`build_desktop_linux` is one job with an architecture matrix**, not one job per architecture.
+  The alternative was a second 250-line copy of the AppRun seeding, the Sentry upload, the three bundlers, the rpm's release-string rewrite and the strip gate — five things that have to agree across architectures and would have been free to drift.
+  Both legs gate the release: a broken `aarch64` leg holds the macOS, Windows and x86_64 assets back too, because install docs that promise an architecture and a release that quietly omits it is the worse failure.
+  `release.yml` dispatched with `dry_run: true` is how a change to that job gets exercised before it can do that.
 - **The classification behind that banner has one owner instead of one-and-a-half.**
   `outl_actions::ProjectionRefusal` is the split between "this page has stopped converging and only a command fixes it" and "an I/O condition the next open retries out of"; `reproject_stale_md` is the page-open call every client makes.
   It used to live in `outl-tauri-shared`, which the TUI cannot depend on — so the client with the hardest failure mode had no verdict at all.

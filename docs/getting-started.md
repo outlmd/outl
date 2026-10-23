@@ -26,26 +26,43 @@ CLI and desktop coexist; they share the workspace on disk through the op log.
 
 See [Homebrew tap](homebrew.md) for the channel rules, how switching between GA and beta works, and the Gatekeeper details for the desktop cask.
 
+### Scoop (Windows)
+
+```powershell
+scoop bucket add outl https://github.com/outlmd/outl
+scoop install outl/outl-beta          # CLI + TUI + MCP server
+```
+
+Unprivileged, portable, and on PATH as `outl`.
+One manifest serves both `64bit` and native `arm64`, so the line is the same on an ARM laptop.
+See [Scoop bucket](scoop.md) for updates, pinning, and why the desktop app is not a Scoop package.
+
 ### Desktop app on Linux
 
 Homebrew doesn't ship GUI casks on Linux, so the desktop app is published as direct download assets on every [GitHub release](https://github.com/outlmd/outl/releases).
-Each release carries three formats for `x86_64`:
+Each release carries three formats, for `x86_64` and for `aarch64`:
 
 | Asset | Use it when |
 |-------|-------------|
-| `outl-desktop-linux-x86_64.AppImage` | Any distro, no install — `chmod +x` and run. The portable default. |
-| `outl-desktop-linux-x86_64.deb` | Debian / Ubuntu (`sudo apt install ./outl-desktop-linux-x86_64.deb`). |
-| `outl-desktop-linux-x86_64.rpm` | Fedora / RHEL (`sudo dnf install ./outl-desktop-linux-x86_64.rpm`). |
+| `outl-desktop-linux-<arch>.AppImage` | Any distro, no install — `chmod +x` and run. The portable default. |
+| `outl-desktop-linux-<arch>.deb` | Debian / Ubuntu (`sudo apt install ./outl-desktop-linux-<arch>.deb`). |
+| `outl-desktop-linux-<arch>.rpm` | Fedora / RHEL (`sudo dnf install ./outl-desktop-linux-<arch>.rpm`). |
+
+`<arch>` is what `uname -m` prints: `x86_64` on a PC, `aarch64` on a Raspberry Pi 4 / 5, an ARM laptop, or an ARM cloud instance.
 
 ```bash
 # AppImage — portable, no install
-curl -LO https://github.com/outlmd/outl/releases/latest/download/outl-desktop-linux-x86_64.AppImage
-chmod +x outl-desktop-linux-x86_64.AppImage
-./outl-desktop-linux-x86_64.AppImage
+ARCH=$(uname -m)
+curl -LO "https://github.com/outlmd/outl/releases/latest/download/outl-desktop-linux-${ARCH}.AppImage"
+chmod +x "outl-desktop-linux-${ARCH}.AppImage"
+"./outl-desktop-linux-${ARCH}.AppImage"
 ```
 
+Both architectures are built natively (no emulation) on Ubuntu 22.04, so the floor is **glibc 2.35**: Ubuntu 22.04+, Debian 12+ (Raspberry Pi OS bookworm included), Fedora 36+, RHEL 10+.
+A distro older than that is the one case where [building from source](#from-source) is the answer — `ldd --version` tells you which side of the line you are on.
+
 Every asset ships a matching `.sha256` sidecar.
-The CLI + TUI on Linux still install via Homebrew above.
+The CLI + TUI on Linux install via Homebrew above on both architectures (ARM64 Linux is a Tier 1 Homebrew platform), or as the `outl-linux-x64.tar.gz` / `outl-linux-arm64.tar.gz` asset on the same release if you'd rather not use a package manager.
 
 ### Desktop app on Windows
 
@@ -54,6 +71,7 @@ Homebrew doesn't run on Windows, so the desktop app ships as a direct download o
 | Asset | Use it when |
 |-------|-------------|
 | `outl-desktop-windows-x86_64-setup.exe` | Windows 10 / 11 on `x86_64`. NSIS installer — it pulls the WebView2 runtime if the machine doesn't already have it. |
+| `outl-desktop-windows-aarch64-setup.exe` | Windows 11 on ARM (Snapdragon X, Surface Pro ARM). Native ARM64 build, same installer shape. |
 
 ```powershell
 # verify the download before running it
@@ -64,7 +82,10 @@ Get-FileHash .\outl-desktop-windows-x86_64-setup.exe -Algorithm SHA256
 The installer is unsigned today, so SmartScreen shows "Windows protected your PC" on first run — **More info → Run anyway**.
 There is no `.msi`: WiX rejects a pre-release version whose identifier isn't numeric-only (`0.12.0-beta.201`), and every build on this channel is a beta.
 
-The CLI + TUI on Windows are the separate `outl-windows-x64.zip` asset on the same release.
+The CLI + TUI on Windows install through [Scoop](scoop.md), or as the `outl-windows-x64.zip` / `outl-windows-arm64.zip` asset on the same release.
+
+> The ARM64 Windows builds are the newest thing here and are marked optional in the release pipeline, which means a release can publish without them if that leg fails.
+> When that happens the release notes say so, in that release's own body — so if an `aarch64` asset is not on a release, read its notes rather than assuming the naming changed.
 
 ### From source
 
