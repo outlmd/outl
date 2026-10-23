@@ -269,3 +269,66 @@ fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
         backup.display()
     );
 }
+
+// ------------------------------------------------------ alias collisions
+
+/// Two pages claiming the same alias make `[[NYC]]` ambiguous. The
+/// resolver still picks a deterministic winner, but the doctor is the
+/// surface that tells the user the name resolves arbitrarily.
+#[test]
+fn shared_alias_names_both_claimants() {
+    let (_dir, root, _paths) = fresh();
+    let notes = seed_page(&root, "notes", &["hello"]);
+    let city = seed_page(&root, "city", &["world"]);
+
+    {
+        let mut ctx = crate::ws::open(&root).expect("open");
+        for page in [notes, city] {
+            outl_actions::set_property(
+                &mut ctx.workspace,
+                &ctx.hlc,
+                page,
+                outl_actions::page::ALIAS_KEY,
+                Some(outl_core::property::PropValue::Text("NYC".into())),
+            )
+            .expect("set alias");
+        }
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "alias \"nyc\" is claimed by 2 pages"),
+        "expected the collision line, got: {:#?}",
+        messages(&report)
+    );
+}
+
+/// Distinct aliases are a pass, stated so the check is visibly present
+/// once a workspace uses aliases at all.
+#[test]
+fn distinct_aliases_pass_with_a_count() {
+    let (_dir, root, _paths) = fresh();
+    let notes = seed_page(&root, "notes", &["hello"]);
+    let city = seed_page(&root, "city", &["world"]);
+
+    {
+        let mut ctx = crate::ws::open(&root).expect("open");
+        for (page, alias) in [(notes, "N. Y."), (city, "the city")] {
+            outl_actions::set_property(
+                &mut ctx.workspace,
+                &ctx.hlc,
+                page,
+                outl_actions::page::ALIAS_KEY,
+                Some(outl_core::property::PropValue::Text(alias.into())),
+            )
+            .expect("set alias");
+        }
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    assert!(
+        has(&report, "every alias name is unique"),
+        "expected the ok line, got: {:#?}",
+        messages(&report)
+    );
+}

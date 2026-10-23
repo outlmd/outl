@@ -63,6 +63,69 @@ pub(super) fn check_trash(b: &mut Builder, ws: &Workspace) {
     ));
 }
 
+/// Report names more than one page answers to through `alias::`.
+///
+/// `by_title` and the resolver ladder pick a deterministic winner for
+/// a shared name, but the choice is arbitrary from the user's side —
+/// the doctor is where that ambiguity becomes visible. Only names an
+/// alias contributed are considered: title-vs-title overlap predates
+/// aliases and resolves deterministically without a warning. Silent
+/// when no page declares aliases at all.
+pub(super) fn check_alias_collisions(b: &mut Builder, ws: &Workspace) {
+    use std::collections::BTreeMap;
+    let metas = outl_actions::page::list_all(ws);
+    if metas.iter().all(|m| m.aliases.is_empty()) {
+        return;
+    }
+    // Lowercased name → distinct owner slugs answering to it. Every
+    // name a page answers to counts as a claim (slug, title, alias);
+    // a collision is reported only when at least one claim came from
+    // an alias.
+    let mut claims: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut alias_backed: BTreeMap<String, bool> = BTreeMap::new();
+    for meta in &metas {
+        for (name, is_alias) in std::iter::once((meta.slug.as_str(), false))
+            .chain(std::iter::once((meta.title.as_str(), false)))
+            .chain(meta.aliases.iter().map(|a| (a.as_str(), true)))
+        {
+            let key = name.trim().to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            let owners = claims.entry(key.clone()).or_default();
+            if !owners.iter().any(|o| o == &meta.slug) {
+                owners.push(meta.slug.clone());
+            }
+            let flag = alias_backed.entry(key).or_insert(false);
+            *flag |= is_alias;
+        }
+    }
+    let collisions: Vec<(&String, &Vec<String>)> = claims
+        .iter()
+        .filter(|(name, owners)| owners.len() > 1 && *alias_backed.get(*name).unwrap_or(&false))
+        .collect();
+    if collisions.is_empty() {
+        let with_aliases = metas.iter().filter(|m| !m.aliases.is_empty()).count();
+        b.ok(format!(
+            "{with_aliases} page(s) declare aliases; every alias name is unique"
+        ));
+        return;
+    }
+    for (name, owners) in collisions.iter().take(MAX_LISTED) {
+        b.warn(format!(
+            "alias \"{name}\" is claimed by {} pages ({}) — refs resolve to the first match",
+            owners.len(),
+            owners.join(", ")
+        ));
+    }
+    if collisions.len() > MAX_LISTED {
+        b.warn(format!(
+            "  … and {} more ambiguous alias name(s)",
+            collisions.len() - MAX_LISTED
+        ));
+    }
+}
+
 /// Node ids the op log touches that are absent from the materialized
 /// tree.
 ///

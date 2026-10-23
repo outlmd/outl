@@ -223,6 +223,8 @@ export interface PageMeta {
    * `outl_md::index::PageEntry.page_type`.
    */
   page_type?: string | null;
+  /** `alias::` — alternative names matched beside the title; omitted when unset. Mirrors `outl_actions::PageMeta.aliases`. */
+  aliases?: string[];
 }
 
 /**

@@ -43,11 +43,15 @@ The filename is the [slug](#slugs); the human-visible name lives in the `title::
 
 ```markdown
 title:: Avelino
+alias:: Ave, TA
 type:: person
 
 - works on outl
 - can be reached at [[email]]
 ```
+
+A page can also answer to short or alternative names, listed comma-separated in the `alias::` property.
+Every name a page answers to — slug, title, each alias — resolves the same way: `[[ref]]`, `#tag`, `@mention`, and autocomplete all match case-insensitively against the title and the aliases.
 
 The `type::` property on a page is read by surfaces that filter pages by role.
 The canonical case is `type:: person`: every client opens a person picker on a word-initial `@` keystroke and lists only pages whose `type:: person` is set.
