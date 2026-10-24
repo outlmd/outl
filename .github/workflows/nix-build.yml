@@ -1,0 +1,88 @@
+name: Nix Build
+
+# Builds the flake packages on every change that can affect them. The flake is
+# self-building (no binary cache), so CI is the prebuilt signal for contributors.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'hm-module.nix'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'bun.lock'
+      - 'crates/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/nix-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'hm-module.nix'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'bun.lock'
+      - 'crates/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/nix-build.yml'
+
+concurrency:
+  group: nix-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    # Linux only: outl packages are built for Linux (see flake.nix). macOS
+    # users manage their config via home-manager but install outl themselves.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: linux
+            system: x86_64-linux
+          - os: ubuntu-24.04-arm
+            label: linux-aarch64
+            system: aarch64-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # The frontend derivation runs `bun install`, which fetches npm
+            # tarballs. Nix sandboxes have no /etc/resolv.conf, so DNS fails
+            # (relaxed and strict alike); a global sandbox mode also overrides
+            # the per-derivation setting. Run this job unsandboxed — runners
+            # are ephemeral and builds are already isolated from the cache.
+            sandbox = false
+
+      - name: Verify flake
+        run: nix flake check --no-build
+
+      - name: Build outl (CLI + TUI)
+        run: nix build .#outl --print-build-logs
+
+      - name: Build outl-desktop
+        run: nix build .#outl-desktop --print-build-logs
+
+      # `nix flake check --no-build` (above) only evaluates this check — it
+      # never builds the derivation, so its assertion that the generated
+      # config emits `managed = true` was never actually exercised. Build
+      # and run it.
+      - name: Check home-manager module emits managed config
+        run: nix build .#checks.${{ matrix.system }}.home-manager-module --print-build-logs
