@@ -484,8 +484,8 @@ A leaf block opens in its page with the cursor on it.
 
 ### Getting around on a phone
 
-The bottom bar is the phone's map: Journal, Search, Tasks and Pages, with a quick capture button in the
-middle.
+The bottom bar is the phone's map: Journal, Search, Tasks and Reminders, with a quick capture button in the middle.
+Search is the one door to pages, tasks and blocks, so there is no separate Pages tab.
 It sits within thumb reach and hides while the keyboard is up, because the keyboard toolbar owns that
 space during an edit.
 
@@ -502,7 +502,8 @@ Coming back to the app after 30 minutes, or on a new calendar day, lands on toda
 It never moves the user while a block is being edited, and it does nothing when today is already on
 screen.
 
-Tasks lists every open TODO and DOING across the workspace, grouped by page, with DOING first.
+Tasks lists the workspace's open TODO and DOING, grouped by page, with DOING first — the first 200,
+with the uncapped count beside them.
 Tapping one opens its page zoomed into that task.
 
 The header's gear opens the one surface on this client that shows **preferences** rather than workspace

@@ -7,6 +7,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **A task list on the desktop** ([#364](https://github.com/outlmd/outl/issues/364)).
+  `g t`, or `Cmd/Ctrl+Shift+L`, opens the workspace's open `TODO` / `DOING` blocks, grouped by page, journal days named the way the journal names them.
+  It lists the first 200 and shows the uncapped count beside them, so a workspace past the cap reads `200 of 1431 open` instead of looking complete.
+  Picking a row opens the page with the cursor on that block.
+  The desktop was the client with a reminders panel and no list of open work, and the phone already had one; it reads the same `list_open_tasks`.
+  Also in the palette: type "task list" in `Cmd+P`.
+  Credit to [@frigidplatypus](https://github.com/frigidplatypus), who pointed out that reminders belong next to tasks.
+  `Cmd/Ctrl+Shift+T` was the first choice and was refused: a terminal without the kitty protocol folds it onto the TUI's `Ctrl+T`, which toggles a TODO.
+- **One search box on the phone** ([#364](https://github.com/outlmd/outl/issues/364)).
+  The bottom bar's Search and Pages tabs opened the same sheet; the sheet now lists Pages, Tasks, Blocks and Actions in one pass, in the order the desktop's `Cmd+P` uses, and the `Pages | Blocks` switch is gone.
+  Credit to [@hugows](https://github.com/hugows) for the report.
+- **A Reminders tab on the phone's bottom bar** ([#364](https://github.com/outlmd/outl/issues/364)), in the slot the duplicate Search tab freed.
+  Credit to [@frigidplatypus](https://github.com/frigidplatypus).
 - **ARM64 is a published platform on Linux and on Windows, for every artifact outl ships** ([#411](https://github.com/outlmd/outl/issues/411)).
   Raspberry Pi 4 / 5, ARM laptops, Snapdragon X machines, Ampere and Graviton instances: the options before this were `cargo build --release` or an x86_64 build under emulation.
   New assets: `outl-desktop-linux-aarch64.{AppImage,deb,rpm}`, `outl-desktop-windows-aarch64-setup.exe`, `outl-linux-arm64.tar.gz`, `outl-windows-arm64.zip`, each with its `.sha256`, plus a Homebrew `arm64_linux` bottle and `linux/arm64` on the server image.
@@ -43,6 +56,21 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A bottom sheet on the phone could grow past the top of the screen, taking its own drag handle with it** ([#364](https://github.com/outlmd/outl/issues/364)).
+  A sheet is anchored to the bottom edge and its height is whatever its content needs, so content taller than the screen puts the first rows above the top edge with nothing to scroll them, and the handle up there too, so the sheet could not even be dragged shut.
+  Reported from a device for the long-press menu, with a photo.
+  The same shape was live in Settings, Reminders, Properties, Insert template, Plugins and the calendar.
+  Each is bounded by the viewport now and scrolls its rows.
+  Landscape is what made it certain rather than marginal: both platforms allow it, which halves the height and nearly doubles the width.
+  The calendar was the worst case, because its day cells are squares in seven columns, so width drives height: on a landscape iPhone the columns came to ~101pt and the grid alone to 627pt inside a 402pt viewport, with the month arrows and the first three weeks off-screen.
+  Its cells are capped at 28rem now, which is wider than any phone in portrait, so a date cell stays a date cell and portrait is untouched.
+  The weekday letters also had no column gap where the day cells did, so the two rows of seven drifted apart from each other across the week.
+  They share one grid now.
+- **A reminder on a block with no text showed up as "(empty block)", or as a bare row with nothing on it** ([#364](https://github.com/outlmd/outl/issues/364)).
+  Writing `remind:: 3pm` on a blank bullet is legitimate, and the reminder fires, but the Reminders list rendered it as a row that looked tappable and advertised nothing.
+  The row now reads "This reminder's block has no text yet. Write something in it and it will show up here.", on the desktop panel and the phone sheet alike, from one shared sentence.
+  It stays a button: on the desktop it opens the page with the cursor on the blank bullet, which is where you want to be when you are told to write in it.
+  Whitespace-only text counts as empty too.
 - **Opening outl on a Windows PC with no WebView2 runtime crashed, and the crash was the only explanation.**
   Tauri's setup panics with `Failed to setup app: runtime error: Could not find the webview runtime, make sure it is installed`, and that panic is what got filed.
   The NSIS installer already tries to download the runtime.

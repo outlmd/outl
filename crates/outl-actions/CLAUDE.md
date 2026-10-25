@@ -40,13 +40,17 @@ Functions **never**:
 
 - Touch storage directly.
   Storage is `Workspace::apply`'s responsibility.
-- Touch the filesystem outside of `journal::write_md_atomic`.
-  **Deliberate exception: `asset::import_asset` / `asset::resolve_asset_path`.**
-  An uploaded file's *bytes* are not workspace state.
-  A multi-MB PDF replayed through the CRDT would bloat every device's op log irreversibly, so the bytes never enter the op log and can't route through `write_md_atomic`, which is a `.md`-projection concern.
-  `import_asset` copies the file into `<root>/assets/<hash>.<ext>` directly (still atomic: tmp file + rename) and hands back the markdown link.
-  Only that **link** is workspace state, and it enters the op log the ordinary way, as an `Op::Edit` when the caller inserts it into a block.
-  Every other function in this crate stays filesystem-free outside the journal path — don't use this as precedent for a second exception without the same "bytes vs. state" argument.
+- Put bytes that are not workspace state into the op log.
+  An uploaded file, a capture inbox entry, a backup, a fired-reminder log: replaying a multi-MB PDF through the CRDT would bloat every device's op log irreversibly.
+  Those bytes go to disk directly and only a **link** or a derived fact becomes an `Op`, the ordinary way.
+  This crate does touch the filesystem, each time for a reason of its own:
+  - `.md` projection: `journal::write_md_atomic`, `ProjectionLock`, `history::restore_page_md`.
+  - non-op bytes: `asset::import_asset` (`<root>/assets/<hash>.<ext>`, tmp file + rename), `backup::*` (a git repo), `export_md`.
+  - local state files: `capture::write_capture` / `drain_captures` (inbox), `merges` (`.outl/state/*.json`), `reminders::fired` (`reminders-fired.json`).
+  - read-only: `open_with::read_source`.
+
+  Before adding a new filesystem user, answer "is this workspace state?".
+  If yes it is an `Op`; if no, say why it stays out of the log.
 - Hold per-client state (selections, modes, toasts, keymaps).
 - Round-trip through `.md` to reconstruct workspace state.
   The op log is the source of truth; `.md` is a projection.
@@ -126,7 +130,8 @@ Three rules that are not negotiable here:
 
 `NotFound` is not "this page has no `.md`".
 An undownloaded iCloud file answers `NotFound` too — the real name does not exist, only `.foo.md.icloud` does — and so does a `.md` that vanished from beside a live sidecar.
-`journal::guard::guard_absent_markdown` is the single owner of that distinction, and **both** writers ask it.
+`journal::guard::guard_absent_markdown` is the single owner of that distinction, and **two** writers ask it: `mutate_page_md` and `apply_page_md_with_sidecar_if_stale`.
+`apply_page_md_with_sidecar_guarded` does not, so an absent `.md` is written after a mutation.
 `mutate_page_md` would otherwise recreate the page as a single block;
 `apply_page_md_with_sidecar_if_stale` would otherwise write a file the arriving bytes collide with, unattended, on every `outl serve` sweep.
 The survey routes the same call into `PageProjectionState::MarkdownNotHereYet`, so the listing and the pass cannot reach different verdicts.
@@ -136,12 +141,12 @@ Both are correct and they are not interchangeable — see the `lines_removed_by`
 
 **A YAML frontmatter fence is a third case, on a second channel.**
 It rides `Op::SetProp` on the page root rather than a block's text ([`docs/markdown-frontmatter.md`](../../docs/markdown-frontmatter.md)), so a block list cannot answer for it and `content_lines_missing_from` skips the region.
-`guard::frontmatter_loss_error` asks `outl_md::unlogged::frontmatter_lines_missing_from` of the **render** instead, and both write gates run it.
+`guard::frontmatter_loss_error` asks `outl_md::unlogged::frontmatter_lines_missing_from` of the **render** instead, and both write gates run it (unlike `guard_absent_markdown`, which only `_if_stale` and `mutate_page_md` ask).
 `lines_removed_by` adds the same count, so the listing and the pass cannot disagree.
 Narrow on purpose: only a render carrying *no* fence counts as a loss, because a fence that merely differs is a peer edit, and refusing that would freeze the page.
 
 **Which writers ask, and which do not, is a test rather than a sentence.**
-`journal/apply.rs` holds six public writers and two of them are gates, and the module doc used to say "both write gates run all three" — true, and still read as a census.
+`journal/apply.rs` holds six public writers and two of them are gates, and the module doc used to say "both write gates run all three", which was false (`_guarded` never asks `guard_absent_markdown`) and still read as a census.
 `apply_page_md_with_sidecar_rendered` sat next to that sentence: public, exported, straight to `write_page_projection`, no guard, no caller anywhere in the repo.
 During the #281 upgrade window (op log carrying a page's frontmatter fence as bullets, render that does not) that call is the write that deletes the fence.
 It is gone, and `tests/projection_writer_gates.rs` now pins both halves: every `pub fn` in `apply.rs` has a recorded verdict, and `guard.rs`'s doc names all six.

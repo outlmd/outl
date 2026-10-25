@@ -70,8 +70,10 @@ use crate::page::{KIND_KEY, SLUG_KEY};
 ///
 /// Cost per page: one file read + hash, one sidecar JSON parse, and
 /// one O(1) tree lookup per sidecar block.
-/// The common case (every id present) short-circuits on the first
-/// check, so running this on boot next to the orphan scan is cheap.
+/// The common case (every id present) is the one that walks every
+/// block: `any` stops at the first *missing* id, so a healthy page
+/// pays all N lookups. They are O(1) each, which is what keeps running
+/// this on boot next to the orphan scan cheap.
 ///
 /// Files the orphan scan already flags (missing sidecar, stale hash)
 /// are deliberately **excluded** — `reconcile_md` owns those and its
@@ -139,8 +141,11 @@ fn is_desynced(ws: &Workspace, md_path: &Path) -> bool {
 
 /// Re-emit the ops a lost commit should have produced for `md_path`,
 /// recreating every sidecar block the tree has never seen — same id,
-/// same text, same block properties, positioned to preserve the
-/// `.md`'s sibling order relative to the blocks that do exist.
+/// same text, same block properties, appended after the parent's
+/// existing children and in `.md` order among themselves. Not the
+/// `.md`'s order against blocks that already exist: a recovered block
+/// that belongs above an existing sibling still lands below it. That
+/// is deliberate, and the reason is at the `left` binding below.
 ///
 /// Strictly additive (see the module docs): blocks already in the tree
 /// — including trashed ones — are never created, moved, or edited.

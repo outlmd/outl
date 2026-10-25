@@ -25,6 +25,8 @@ pub struct TrashEntry {
     pub node: NodeId,
     /// Where it sat immediately before the move to the trash, folded
     /// from the op log. See [`parent_at_deletion`].
+    /// Only the landing parent of a restorable entry: `None` for every
+    /// entry with a `refusal`, even when the origin is known.
     pub parent_at_deletion: Option<NodeId>,
     /// `Some(slug)` when the deleted node is a page root rather than a
     /// block. [`restore`] refuses these, so a listing that could not
@@ -51,9 +53,10 @@ pub struct TrashEntry {
 /// the mutation cannot disagree — a listing that decided "restorable"
 /// for itself would drift towards offering an action that then fails.
 ///
-/// Returning the landing parent rather than a bare verdict is what lets
-/// `restore` ask once: it used to call [`parent_at_deletion`] again
-/// afterwards, and `list` paid for the fold twice per entry.
+/// Returning the landing parent rather than a bare verdict lets `list`
+/// ask once per entry, and lets `restore` use the verdict as its target
+/// without a separate [`parent_at_deletion`] call.
+/// `restore` still asks twice overall, since `entry_for` asks again.
 fn landing_for(workspace: &Workspace, node: NodeId) -> Result<NodeId, ActionError> {
     if !crate::tree::is_trashed(workspace, node) {
         return Err(ActionError::NotTrashed(node.to_string()));
@@ -137,9 +140,11 @@ pub fn list(workspace: &Workspace) -> Vec<TrashEntry> {
         .map(|&node| entry_for(workspace, &children, node))
         .collect();
 
-    // By id, which is ULID, which sorts by creation time. Deliberately
-    // not by deletion time: that would need a second fold of the log per
-    // entry for an ordering nobody asked for.
+    // By id, for a stable order. Block ids are ULIDs, so they sort by
+    // creation time, but page roots carry slug-hash ids with no time
+    // order, so that holds only among blocks. Deliberately not by
+    // deletion time: that would need a second fold of the log per entry
+    // for an ordering nobody asked for.
     entries.sort_by_key(|entry| entry.node);
     entries
 }

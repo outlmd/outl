@@ -153,8 +153,14 @@ pub fn record(root: &Path, actor: ActorId, mut found: Vec<MergedEditDto>) {
     let Ok(mut book) = book().lock() else { return };
     let log = log_for(&mut book, root, actor);
     found.retain(|f| !log.iter().any(|e| e.id == f.id));
-    found.sort_by_key(|b| std::cmp::Reverse(b.at_ms));
     found.append(log);
+    // Sorted after the merge, not before. Sorting only the arriving
+    // batch and prepending it ordered the list by *detection*, so a
+    // peer edit that synced late sat above entries newer than itself —
+    // while the DTO shows `at_ms`, and this doc says newest first. It
+    // also decided the cap: the truncation dropped whatever happened to
+    // be last rather than the oldest entry.
+    found.sort_by_key(|b| std::cmp::Reverse(b.at_ms));
     found.truncate(MERGE_LOG_CAP);
     *log = found;
     save(root, actor, log);

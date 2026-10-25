@@ -20,7 +20,7 @@
 //! Importing twice into one page would duplicate every block, and
 //! overwriting the page would delete whatever the user wrote after the
 //! import. Neither is acceptable, so the page records where it came
-//! from in a `source::` property and this module **refuses to import
+//! from in a `page-source::` property and this module **refuses to import
 //! again** — [`resolve_target`] returns [`OpenWithTarget::Existing`]
 //! and the client just navigates there.
 //!
@@ -39,7 +39,7 @@
 //! That property is also what keeps two *different* files with the
 //! same name apart: `~/a/notes.md` and `~/b/notes.md` both want
 //! `open-in/notes`, and the second one gets `open-in/notes 2` rather
-//! than being merged into the first. Without `source::` the merge
+//! than being merged into the first. Without `page-source::` the merge
 //! would be silent, which is the failure mode this crate's invariants
 //! keep being written about.
 
@@ -119,18 +119,18 @@ pub enum OpenWithTarget {
     /// No page holds this file yet. The client creates it via
     /// [`import_into`].
     New {
-        /// Slug the page will project to (`slugify(title)`).
+        /// Slug the page will project to (`slug_for(title)`).
         slug: String,
         /// Namespaced title to create the page under.
         title: String,
-        /// The `source::` value this target was resolved against.
+        /// The `page-source::` value this target was resolved against.
         ///
         /// Carried rather than recomputed at import time, so the value
         /// written is byte-for-byte the one [`resolve_target`]
         /// compared. Recomputing it meant a file that vanished between
         /// the two calls fell back to the uncanonicalised path, and the
         /// next open then failed to match its own page and minted
-        /// `open-in/<stem> 2` — the exact duplicate `source::` exists
+        /// `open-in/<stem> 2` — the exact duplicate `page-source::` exists
         /// to prevent.
         source: String,
     },
@@ -215,7 +215,7 @@ pub fn read_source(path: &Path) -> Result<String, ActionError> {
 /// Decide where `path` should open, without mutating anything.
 ///
 /// Walks `open-in/<stem>`, `open-in/<stem> 2`, … until it finds either
-/// the page already holding this exact `source::` (→
+/// the page already holding this exact `page-source::` (→
 /// [`OpenWithTarget::Existing`]) or a free slug (→
 /// [`OpenWithTarget::New`]).
 pub fn resolve_target(workspace: &Workspace, path: &Path) -> Result<OpenWithTarget, ActionError> {
@@ -256,13 +256,13 @@ pub fn resolve_target(workspace: &Workspace, path: &Path) -> Result<OpenWithTarg
 ///
 /// Every mutation goes through the op log: the page root and its
 /// `slug::` / `kind::` / `title::` properties via
-/// [`open_or_create`], the `source::` marker via
+/// [`open_or_create`], the `page-source::` marker via
 /// [`crate::page::set_property`], and the content via
 /// [`paste_markdown`] — which is the same pipeline a clipboard paste
 /// uses, so a bulleted `.md` lands as an outline and prose lands as
 /// one block per non-blank line.
 ///
-/// Takes no path: the `source::` value rides on the target, so what is
+/// Takes no path: the `page-source::` value rides on the target, so what is
 /// written is what [`resolve_target`] matched against.
 ///
 /// # A `New` target is re-checked before anything is written
@@ -276,7 +276,7 @@ pub fn resolve_target(workspace: &Workspace, path: &Path) -> Result<OpenWithTarg
 /// resolved again here, on the workspace this call is actually
 /// mutating:
 ///
-/// - the page there carries **this** `source::` → the same file already
+/// - the page there carries **this** `page-source::` → the same file already
 ///   landed; behaves exactly like an [`OpenWithTarget::Existing`]
 ///   target (returns its page, writes nothing);
 /// - it carries a **different** one → [`ActionError::ExternalFileTargetTaken`].
@@ -319,7 +319,7 @@ pub fn import_into(
     // `resolve::open_or_create_by_name` would slugify again, which is how a
     // stem that slugifies to nothing reaches the namespace page (see
     // `slug_for`), and a second derivation of one fact is the bug shape
-    // this module already paid for once with `source::`.
+    // this module already paid for once with `page-source::`.
     let page = open_or_create(workspace, hlc, slug, title, PageKind::Page)?;
     crate::page::set_property(
         workspace,
@@ -399,7 +399,7 @@ fn file_stem(path: &Path) -> String {
     }
 }
 
-/// Canonical form of the source path, used as the `source::` value.
+/// Canonical form of the source path, used as the `page-source::` value.
 ///
 /// Canonicalised when the file is reachable so a symlink and its
 /// target do not read as two different sources; falls back to the path

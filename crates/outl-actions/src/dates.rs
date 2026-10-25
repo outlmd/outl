@@ -107,9 +107,14 @@ fn parse_relative_offset(arg: &str, today: NaiveDate) -> Option<NaiveDate> {
     let num_str = &rest[..rest.len() - last.len_utf8()];
     let n: i64 = num_str.parse().ok()?;
     let signed = sign * n;
+    // Checked, like the month branch below: `NaiveDate + TimeDelta`
+    // panics on overflow, and this parser is fed straight from the TUI's
+    // `/date`, so a typo with enough digits took the app down instead of
+    // being rejected. `try_days` catches the `TimeDelta` that cannot be
+    // built; `checked_add_signed` catches the date that cannot hold it.
     match last {
-        'd' => Some(today + Duration::days(signed)),
-        'w' => Some(today + Duration::weeks(signed)),
+        'd' => Duration::try_days(signed).and_then(|d| today.checked_add_signed(d)),
+        'w' => Duration::try_weeks(signed).and_then(|d| today.checked_add_signed(d)),
         'm' => {
             // Months need calendar-aware arithmetic — `chrono::Months`
             // clamps on overflow (Jan 31 + 1 month → Feb 28/29).
@@ -502,5 +507,22 @@ mod tests {
         // 2025-12-31 (Wed) is ISO week 1 of 2026 — `%G` (ISO year)
         // differs from `%Y` (calendar year) here. Confirms we used %G.
         assert_eq!(week_tag(d(2025, 12, 31)), "#2026-W01");
+    }
+
+    /// `NaiveDate + Duration` panics on overflow, and this parser is fed
+    /// straight from the TUI's `/date` command — so a typo with enough
+    /// digits took the app down rather than being rejected. The `m`
+    /// branch already used `checked_*`; `d` and `w` did not.
+    #[test]
+    fn an_absurd_offset_is_refused_rather_than_panicking() {
+        let today = d(2026, 10, 24);
+        for arg in [
+            "99999999999d",
+            "-99999999999d",
+            "99999999999w",
+            "999999999999999999m",
+        ] {
+            assert_eq!(parse_date_arg(arg, today), None, "{arg}");
+        }
     }
 }

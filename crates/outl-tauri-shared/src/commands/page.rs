@@ -6,7 +6,7 @@
 use outl_actions::{
     find_by_slug, journal_slug, journal_title, list_pages, next_journal_date,
     open_or_create_by_ref, open_today, page_meta as page_meta_action, previous_journal_date,
-    remove_page_projection, search_persons as action_search_persons, today, PageMeta,
+    remove_page_projection, search_persons as action_search_persons, today, PageKind, PageMeta,
 };
 
 use outl_md::index::WorkspaceIndex;
@@ -21,8 +21,52 @@ use crate::host::AppHost;
 use crate::offload;
 use crate::state::{BacklinksReply, BlockHit, PageView};
 
+/// Every page, in [`browse_order`].
+///
+/// Ordered here rather than per client: the phone's switcher browses
+/// this list and then shows its first 25, so an unordered reply meant
+/// the first screen was whatever slug sorted first — `1on1`, then four
+/// years of 2022 journals. The same defect `search_pages` had.
+///
+/// Safe for the other caller: the desktop sidebar re-sorts its pinned
+/// section with `localeCompare` and reads the rest through a map, so it
+/// never depended on the order it got.
 pub fn list_all_pages<S: AppHost>(state: &S) -> Result<Vec<PageMeta>, String> {
-    with_ws(state, |ws| Ok(list_pages(ws)))
+    with_ws(state, |ws| Ok(browse_order(list_pages(ws))))
+}
+
+/// The order an empty query browses in: journals newest first, then
+/// named pages A-to-Z.
+///
+/// This used to be "whatever `list_pages` happens to return", which is
+/// slug order — so opening the switcher on a real graph offered `1on1`
+/// and then four years of 2022 journals, with today nowhere in sight.
+/// The doc comment claimed "the most recent pages", which is how it
+/// survived: nothing disagreed with the code except reality.
+///
+/// There is no timestamp on [`PageMeta`] to sort by, and adding one is
+/// a wire change. Journal slugs are ISO dates, so a descending slug IS
+/// recency for the half of the workspace that has one; named pages get
+/// the alphabet, because nobody scans those by date.
+///
+/// Same rule as the task list (`commands::tasks`), deliberately: one
+/// answer to "what order do we show a mixed list of pages in".
+pub fn browse_order(mut pages: Vec<PageMeta>) -> Vec<PageMeta> {
+    pages.sort_by(|a, b| {
+        let named = |p: &PageMeta| u8::from(p.kind != PageKind::Journal);
+        named(a).cmp(&named(b)).then_with(|| {
+            if a.kind == PageKind::Journal {
+                b.slug.cmp(&a.slug)
+            } else {
+                // Lowercased, because a byte compare is not the
+                // alphabet: `Z` is 0x5A and `a` is 0x61, so every
+                // capitalised title would sort above every lowercase
+                // one and "Zebra" would land before "apple".
+                a.title.to_lowercase().cmp(&b.title.to_lowercase())
+            }
+        })
+    });
+    pages
 }
 
 /// Filter known pages by a case-insensitive substring match against
@@ -32,14 +76,13 @@ pub fn list_all_pages<S: AppHost>(state: &S) -> Result<Vec<PageMeta>, String> {
 /// Ranking, weakest filter to strongest: title or slug
 /// `starts_with(query)` outranks an interior match; exact equality
 /// (case-insensitive) ranks above prefix. Capped at 25 so the floating
-/// list stays cheap to render. An empty query returns the most recent
-/// pages (whatever order `list_pages` defaults to), trimmed to the cap.
+/// list stays cheap to render. An empty query is [`browse_order`].
 pub fn search_pages<S: AppHost>(state: &S, query: String) -> Result<Vec<PageMeta>, String> {
     with_ws(state, |ws| {
         let q = query.trim().to_lowercase();
         let pages = list_pages(ws);
         if q.is_empty() {
-            return Ok(pages.into_iter().take(25).collect());
+            return Ok(browse_order(pages).into_iter().take(25).collect());
         }
         let mut scored: Vec<(u8, PageMeta)> = pages
             .into_iter()

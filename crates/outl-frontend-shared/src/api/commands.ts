@@ -64,15 +64,15 @@ export interface BlockHit {
 // Page / journal navigation
 // ---------------------------------------------------------------------------
 
+/** Every page, uncapped, in browse order: journals newest, then A-Z. */
 export function listPages(): Promise<PageMeta[]> {
   return invoke<PageMeta[]>("list_all_pages");
 }
 
 /**
  * Fuzzy-search known pages by `query`. Empty query returns up to 25
- * pages in the workspace's natural order; non-empty filters by
- * case-insensitive substring on title and slug and ranks exact and
- * prefix matches first.
+ * in browse order (journals newest first, then names A-Z); non-empty
+ * filters case-insensitively on title and slug, exact then prefix.
  *
  * Used by the floating ref suggester that appears while the user
  * types inside `[[…]]`.

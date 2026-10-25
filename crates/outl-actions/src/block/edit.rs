@@ -14,7 +14,7 @@ use crate::error::ActionError;
 use crate::quote::toggle_quote as toggle_quote_prefix;
 use crate::todo::cycle_todo;
 
-use super::{ensure_in_tree, wrap};
+use super::{ensure_live, wrap};
 
 /// Replace the block's text with `new_text` verbatim.
 ///
@@ -31,7 +31,7 @@ pub fn edit_text(
     node: NodeId,
     new_text: &str,
 ) -> Result<(), ActionError> {
-    ensure_in_tree(workspace, node)?;
+    ensure_live(workspace, node)?;
 
     let update = workspace.build_text_replace_update(node, new_text);
     if update.is_empty() {
@@ -53,7 +53,7 @@ pub fn toggle_todo(
     hlc: &HlcGenerator,
     node: NodeId,
 ) -> Result<(), ActionError> {
-    ensure_in_tree(workspace, node)?;
+    ensure_live(workspace, node)?;
     let current = workspace.block_text(node).unwrap_or_default();
     let next = cycle_todo(&current);
     let update = workspace.build_text_replace_update(node, &next);
@@ -81,7 +81,7 @@ pub fn toggle_quote(
     hlc: &HlcGenerator,
     node: NodeId,
 ) -> Result<(), ActionError> {
-    ensure_in_tree(workspace, node)?;
+    ensure_live(workspace, node)?;
     let current = workspace.block_text(node).unwrap_or_default();
     let next = toggle_quote_prefix(&current);
     let update = workspace.build_text_replace_update(node, &next);
@@ -198,5 +198,44 @@ mod tests {
 
         edit_text(&mut ws, &hlc, n, "ship the feature").unwrap();
         assert_eq!(ws.block_text(n).as_deref(), Some("ship the feature"));
+    }
+
+    /// Invariant 6 keeps a deleted node's record, so `Tree::contains`
+    /// answers yes for a block a peer just trashed — and every edit path
+    /// used only that check. A keystroke then wrote into deleted content:
+    /// the op landed, the block stayed in the trash, and the user saw
+    /// nothing happen.
+    #[test]
+    fn a_trashed_block_refuses_edits() {
+        let (mut ws, hlc) = new_workspace();
+        let n = append_block(&mut ws, &hlc, None, Some("doomed")).unwrap();
+        crate::block::delete(&mut ws, &hlc, n).unwrap();
+
+        for res in [
+            edit_text(&mut ws, &hlc, n, "after the delete"),
+            toggle_todo(&mut ws, &hlc, n).map(|_| ()),
+            toggle_quote(&mut ws, &hlc, n).map(|_| ()),
+        ] {
+            assert!(
+                matches!(res, Err(ActionError::NotInTree(_))),
+                "a trashed block must refuse the edit, got {res:?}"
+            );
+        }
+    }
+
+    /// Deleting a parent trashes the subtree, and every descendant keeps
+    /// pointing at that parent rather than at the trash itself — so a
+    /// one-level check would still call the child live.
+    #[test]
+    fn a_block_under_a_trashed_parent_refuses_edits_too() {
+        let (mut ws, hlc) = new_workspace();
+        let parent = append_block(&mut ws, &hlc, None, Some("parent")).unwrap();
+        let child = append_block(&mut ws, &hlc, Some(parent), Some("child")).unwrap();
+        crate::block::delete(&mut ws, &hlc, parent).unwrap();
+
+        assert!(matches!(
+            edit_text(&mut ws, &hlc, child, "still here?"),
+            Err(ActionError::NotInTree(_))
+        ));
     }
 }

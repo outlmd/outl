@@ -14,9 +14,11 @@
 //!
 //! `apply_page_md_with_sidecar_guarded` and
 //! `apply_page_md_with_sidecar_if_stale` are the two **write gates**,
-//! and they run the same guards in the same order for opposite reasons;
-//! root `CLAUDE.md` invariant 8 is the contract both implement. Read
-//! `guard`'s module doc before touching either.
+//! and they implement root `CLAUDE.md` invariant 8 for opposite reasons.
+//! They do **not** run the same checks: both ask the unlogged-content
+//! and frontmatter-loss questions, but only `_if_stale` (and
+//! `mutate_page_md`) asks `guard_absent_markdown`. Read `guard`'s
+//! module doc before touching either.
 
 use std::path::{Path, PathBuf};
 

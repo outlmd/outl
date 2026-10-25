@@ -68,9 +68,9 @@ pub fn is_page_model_key(key: &str) -> bool {
 /// A property value as the `.md` dialect renders it, or `None` when it
 /// has no render syntax.
 ///
-/// `Text`, `PageRef` and `Tag` all render as their string form, and the
-/// parser reads `key:: [[x]]` / `key:: #x` back into the same shapes, so
-/// the round trip closes. `List` has none yet and is dropped.
+/// `Text`, `PageRef` and `Tag` all render as their string form. The
+/// `.md` parser only ever yields `Text`, so a `PageRef` or `Tag` comes
+/// back as `Text` with the same string. `List` has no syntax and is dropped.
 ///
 /// The single owner of that mapping. It exists because three callers
 /// need it — the page renderer, the block renderer, and the tree-derived

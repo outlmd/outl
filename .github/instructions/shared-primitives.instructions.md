@@ -131,6 +131,9 @@ Recently added — check these before writing a parallel reminder helper (catalo
 | Silence a reminder across every device | `outl_actions::snooze` / `snooze_until` (`Op::SnoozeRemind`) | `crates/outl-actions/src/reminders/mod.rs` |
 | Deliver what came due + the device-local fired log. In `outl-actions` because every client delivers, the TUI included | `outl_actions::take_due` | `crates/outl-actions/src/reminders/fired.rs` |
 | Format "in 3h" / bucket a reminder list for a GUI | `@outl/shared` `formatNextFire` / `groupReminders` | `crates/outl-frontend-shared/src/api/commands.ts` |
+| What a reminder row says when its block has no text of its own, and the predicate that decides. One sentence for both GUI clients | `@outl/shared/reminders` `EMPTY_REMINDER_NOTICE` / `reminderHasText` | `crates/outl-frontend-shared/src/reminders/index.ts` |
+| Section a task list by page — one heading per page, in order of first appearance; never re-ranks. Both clients had their own copy and both folded only adjacent rows | `@outl/shared/tasks` `groupTasksByPage` | `crates/outl-frontend-shared/src/tasks/index.ts` |
+| What a search box lists for a query, and in what order (pages, tasks, blocks, actions; `>` narrows to actions). Chord-aware action rows stay in `outl-desktop` | `@outl/shared/palette` `paletteResults` / `sectionOf` | `crates/outl-frontend-shared/src/palette/index.ts` |
 | **Mark a block DONE outright** (cancels its rule). Not `cycle_todo` — the cycle is `TODO → DOING → DONE`, so from an unmarked block one press lands on `TODO` and arms the nag | `outl_actions::todo::set_todo` | `crates/outl-actions/src/todo.rs` |
 | Rank the workspace's property keys by use (what to suggest when the user adds a property) | `outl_actions::property::known_keys` | `crates/outl-actions/src/property.rs` |
 | Read a page's own `key:: value` pairs, structural keys filtered out | `outl_actions::property::page_properties` | `crates/outl-actions/src/property.rs` |

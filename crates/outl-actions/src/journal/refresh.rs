@@ -28,7 +28,7 @@ use crate::error::ActionError;
 /// Why a page-open re-projection declined, split by **who has to hear
 /// it**.
 ///
-/// The split is the whole point. [`ActionError`] has forty-odd variants
+/// The split is the whole point. [`ActionError`] has about thirty variants
 /// and exactly one of them means "this page has stopped converging with
 /// your other devices until a command runs" — everything else here is
 /// an I/O condition the next open retries out of. A client that treats

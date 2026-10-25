@@ -36,7 +36,8 @@
 //!   *delivery* of the notification stays per-client (each OS has its
 //!   own scheduler); only the "what and when" is shared.
 //! - [`tasks`] and [`journal_days`]: the overview mobile's bottom bar
-//!   and week strip read: every open task, and which days hold text.
+//!   and week strip read: the open tasks (capped, with the uncapped
+//!   total), and which days hold text.
 //! - [`telemetry`] — read / write `[telemetry] enabled`, the
 //!   crash-reporting opt-out (RFC 0377). Pure config I/O, no workspace
 //!   access, and the **only** writer of that flag: the desktop's flat

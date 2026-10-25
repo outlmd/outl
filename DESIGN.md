@@ -630,6 +630,27 @@ much they admit about what is under them, not how high they float:
 The inset-card container string is byte-identical across its four, and each pairs with a detached
 `mx-3 rounded-2xl` action row below it, iOS action-sheet style.
 
+**Every shape is bounded by the screen, and its rows scroll.**
+A sheet is `position: fixed` against `bottom-0`, so its height is its content's and nothing scrolls it.
+Content taller than the viewport therefore puts the top of the card above the top edge, unreachable, and
+takes the grab handle with it, so the sheet cannot even be dragged shut.
+*How* it is bounded follows from where the shape puts the card.
+An inset card sits inside a transparent positioned wrapper, so the wrapper takes `max-h-dvh` plus a top
+safe-area padding, which costs nothing while the sheet is short.
+An edge-to-edge sheet *is* the card, so it takes `max-height: calc(100dvh - max(env(safe-area-inset-top),
+12px))` instead: a padding there would open a gap above the handle on every portrait phone, where nothing
+was wrong.
+A sheet pinned by both `top` and `bottom-0` is already bounded by the gap between them.
+`crates/outl-mobile/src/components/sheets.bounded.test.ts` holds the per-sheet table and fails on a new
+sheet that declares none of the three.
+
+Landscape is what makes this certain rather than marginal, since both platforms allow it, and it is also
+where a width-driven height bites.
+`Calendar`'s day cells are `aspect-square` in seven columns, so width drives height: a landscape iPhone
+made the columns ~101pt and the grid alone 627pt inside a 402pt viewport.
+Hence `max-w-[28rem]` on the grid, which is above every portrait phone's width, so a date cell stays a
+date cell without portrait changing at all.
+
 ### Case: deleting a hardcoded colour is not the same as restoring a working one
 
 RFC 0022 deleted a `prefers-color-scheme` block that carried the skeleton shimmer's two raw rgba values.
@@ -761,8 +782,9 @@ Three-pane chrome, mouse + keyboard. `AppShell` (the grid), `Sidebar` (page list
 `CodeFenceView`), `PageSections` (namespace rows), `InlineBacklinks`, `PropertyEditor`, `BatchToolbar`.
 
 Floating and full-pane surfaces: `Picker` (the quick switcher), `QuickCapture`, `HelpOverlay`,
-`SettingsModal`, `TimelinePanel` (page history), `RemindersPanel`, `PluginMarketplace`,
-`PluginEffectLayer`, `WorkspacePicker`, `Onboarding`, `TrustSection`.
+`SettingsModal`, `TimelinePanel` (page history), `RemindersPanel`, `TasksPanel` (the open-task
+list beside it), `PluginMarketplace`, `PluginEffectLayer`, `WorkspacePicker`, `Onboarding`,
+`TrustSection`.
 Status and transient: `StatusBar` (vim mode badge, transient message), `ErrorToast`,
 `SyncPanel` / `SyncIndicator`, `ChromeToggleBar`.
 
@@ -784,7 +806,7 @@ Bottom sheets, each reserving the safe-area inset: `CaptureSheet`, `TasksSheet`,
 `SettingsSheet` — the newest, and the only one holding preferences rather than workspace content, which is
 why it is the one with a navigation row (`Devices and sync`) handing off to `DevicesSheet`.
 Plus `Calendar`, `Onboarding`, `ConfirmDialog` / `JournalDeleteDialogs`, `Toast`, `SyncDot`,
-`BacklinksSection`, `PaletteActionRows`, `PluginFence` / `PluginViewOverlay`.
+`BacklinksSection`, `PluginFence` / `PluginViewOverlay`.
 
 The `Journal.*.ts` siblings beside `Journal.tsx` are extracted behaviour, not components — what they do
 belongs to [`UX.md`](UX.md), and nothing in them paints.
@@ -863,6 +885,36 @@ scrollbars and `<select>` popups follow the preset.
 **`mode = "auto"` resolves to the dark side on the TUI, always.** A terminal has no API for the OS
 appearance setting; probing (OSC 11, `COLORFGBG`) is wrong under tmux and unimplemented in several emulators.
 The TUI declares the gap rather than guessing — a permanent behaviour, recorded in `docs/client-parity.md`.
+
+## App icon
+
+One master, `assets/source-icon.png`, and one generator, `scripts/gen-icons.py`.
+Everything else under `assets/` is generated from it: the inset macOS master, the opaque square iOS and
+the App Store take, and the monochrome variant.
+
+The platforms do not want the same picture, which is the reason a generator exists rather than a copy.
+macOS draws app icons on a 1024 canvas where the tile occupies 824 and the rest is transparent margin, so
+every icon in the Dock shares a silhouette and an optical size.
+An icon that fills its canvas edge to edge is not bigger by mistake, it is drawn at the size its
+neighbours reserve for margin, and outl shipped exactly that until a user said so.
+Windows and Linux apply no mask and reserve no margin, where the same padding would make outl *smaller*
+than its neighbours, so the margin goes on the `.icns` alone and the `.ico` and loose PNGs stay full
+bleed.
+iOS and the App Store take an opaque square with no alpha channel at all, because the OS applies its own
+mask and an icon that arrives pre-rounded gets rounded twice.
+
+**The generated sets stay inside the client that ships them**, and the duplication is deliberate rather
+than unresolved.
+The two Tauri sets are byte-identical and `scripts/check-icons.py` fails in CI if they stop being, which
+is the guard the drift actually needed: before the generator, both crates carried the same sixteen
+filenames from different runs and all sixteen differed byte for byte, with nothing able to notice.
+A shared crate was considered and is the wrong scope — `outl-tauri-shared` is the *Tauri* backend, while
+these files are consumed by Xcode (`Assets.xcassets`), Gradle (`mipmap-*`), a web manifest
+(`outl-mobile/public/`) and the README, none of which can reference a Rust crate's directory.
+The masters already live one level broader than that, at the repo root, which is the scope that covers
+every consumer.
+Two copies of a generated artifact with a check on them is not two sources of truth; the master is, and
+there is one.
 
 ## Platform divergence, and why each one exists
 

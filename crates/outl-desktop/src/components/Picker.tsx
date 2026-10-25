@@ -17,7 +17,7 @@ import type { PageView } from "@outl/shared/api/types";
 import { findBlock } from "@outl/shared/outline";
 import { PageGlyph, SearchIcon } from "@outl/shared/icons";
 
-import { listShortcutBindings } from "../lib/api";
+import { listShortcutBindings, type Action, type Chord } from "../lib/api";
 import { formatSequence } from "../lib/chord-format";
 import {
   BLOCK_QUERY_MIN,
@@ -53,7 +53,7 @@ export function Picker(props: {
   handlers: ActionHandlers | null;
 }) {
   const [query, setQuery] = createSignal("");
-  const [results, setResults] = createSignal<PaletteItem[]>([]);
+  const [results, setResults] = createSignal<PaletteItem<Chord>[]>([]);
   const [highlight, setHighlight] = createSignal(0);
 
   let inputRef: HTMLInputElement | undefined;
@@ -83,14 +83,14 @@ export function Picker(props: {
       // A slower, older query must not overwrite a newer one.
       if (q !== query()) return;
       const actions = paletteActions(bindings, (k) => Boolean(props.handlers?.[k]));
-      setResults(paletteResults({ query: q, pages, blocks: [], actions }));
+      setResults(paletteResults<Chord>({ query: q, pages, blocks: [], actions }).items);
       setHighlight(0);
       if (commandsOnly || q.trim().length < BLOCK_QUERY_MIN) return;
       blockTimer = setTimeout(() => {
         searchBlocks(q.trim())
           .then((blocks) => {
             if (q !== query()) return;
-            setResults(paletteResults({ query: q, pages, blocks, actions }));
+            setResults(paletteResults<Chord>({ query: q, pages, blocks, actions }).items);
           })
           .catch((e) => setAppState("lastError", e instanceof Error ? e.message : String(e)));
       }, BLOCK_DEBOUNCE_MS);
@@ -115,11 +115,11 @@ export function Picker(props: {
     }
   }
 
-  async function choose(item: PaletteItem) {
+  async function choose(item: PaletteItem<Chord>) {
     if (item.kind === "page") return pick(item.page.slug);
     if (item.kind === "action") {
       close();
-      await props.handlers?.[item.action]?.();
+      await props.handlers?.[item.action as Action["kind"]]?.();
       return;
     }
     try {
@@ -282,7 +282,7 @@ export function Picker(props: {
   );
 }
 
-function PaletteRow(props: { item: PaletteItem }) {
+function PaletteRow(props: { item: PaletteItem<Chord> }) {
   const item = props.item;
   if (item.kind === "page") {
     return (

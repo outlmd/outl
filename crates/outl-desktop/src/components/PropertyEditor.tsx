@@ -254,16 +254,16 @@ export function PropertyEditor(props: PropertyEditorProps): JSX.Element {
 
   return (
     <div
-      class={`mt-0.5 flex-wrap items-center gap-1 ${
+      class={`flex-wrap items-center gap-1 ${
         chips().length > 0 || adding() || props.addAffordance === "always"
-          ? "flex"
-          : // Nothing to show at rest. `hidden` (not a faded row) because
-            // an always-rendered empty row costs ~18px on EVERY block:
-            // a 200-block page would scroll an extra screenful for a
-            // control nobody is reaching for. The `+` still appears on
-            // block hover, and the keyboard path (`Cmd+Shift+P`) never
-            // depended on seeing it.
-            "hidden group-hover:flex"
+          ? "mt-0.5 flex"
+          : // A hover affordance must not move the page: `hidden` ->
+            // `flex` added 18pt to the block and pushed every row below
+            // it down. Anchored to the end of the row's first line
+            // instead — `BlockRow` is `relative` and already positions
+            // two controls this way — with its own background, since a
+            // long first line runs under it. Pinned by the tests.
+            "absolute top-[3px] right-6 z-10 hidden rounded bg-(--color-outl-bg-elev) group-hover:flex"
       }`}
       onClick={(e) => {
         // The row underneath selects / edits the block. Anything in

@@ -67,12 +67,57 @@ fn wrap(hlc: &HlcGenerator, op: Op) -> LogOp {
     }
 }
 
-/// Reject an action whose target node is no longer in the materialised
-/// tree (e.g. a peer trashed it between the client's read and write).
+/// Reject an action whose target node has no record in the tree at all.
+///
+/// **This does not mean "alive".** Invariant 6 makes delete a
+/// `Move(node, TRASH_ROOT)`, so a trashed node keeps its record and
+/// answers `contains` — which is exactly what lets `trash::restore`
+/// move one back out. Paths that must not touch deleted content want
+/// [`ensure_live`] instead.
 fn ensure_in_tree(workspace: &Workspace, node: NodeId) -> Result<(), ActionError> {
     if workspace.tree().contains(node) {
         Ok(())
     } else {
         Err(ActionError::NotInTree(node.to_string()))
     }
+}
+
+/// Reject an action whose target is gone *or* sitting in the trash.
+///
+/// A peer's delete arrives as a move under `TRASH_ROOT`, and the node
+/// keeps its record, so `contains` still says yes. Editing then wrote
+/// into deleted content, and `create_after` on a trashed anchor built
+/// the new block **under the trash**, where the user never saw the
+/// keystroke land.
+///
+/// Returns `NotInTree`, deliberately the same error: the stale-anchor
+/// fallback in [`create_after_or_append`](siblings::create_after_or_append)
+/// keys on it, so a trashed anchor now appends to the page instead of
+/// disappearing.
+fn ensure_live(workspace: &Workspace, node: NodeId) -> Result<(), ActionError> {
+    ensure_in_tree(workspace, node)?;
+    if in_trash(workspace, node) {
+        return Err(ActionError::NotInTree(node.to_string()));
+    }
+    Ok(())
+}
+
+/// Whether `node` sits anywhere under `TRASH_ROOT`.
+///
+/// Walks parents rather than checking one level: deleting a parent
+/// trashes its whole subtree, and every descendant keeps pointing at
+/// the parent. Bounded because a corrupt log must not hang a keystroke.
+fn in_trash(workspace: &Workspace, node: NodeId) -> bool {
+    let tree = workspace.tree();
+    let trash = NodeId::trash();
+    let mut at = node;
+    for _ in 0..1024 {
+        match tree.parent(at) {
+            Some(p) if p == trash => return true,
+            Some(p) if p == NodeId::root() => return false,
+            Some(p) => at = p,
+            None => return false,
+        }
+    }
+    false
 }

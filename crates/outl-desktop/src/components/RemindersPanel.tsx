@@ -29,10 +29,11 @@ import {
   snoozeReminder,
   markBlockDone,
 } from "@outl/shared/api/commands";
+import { EMPTY_REMINDER_NOTICE, reminderHasText } from "@outl/shared/reminders";
 import type { PageView, Reminder } from "@outl/shared/api/types";
 
 import { appState, setAppState } from "../lib/store";
-import { rovingKeydown } from "../lib/keyboard-reach";
+import { focusFirstRowOnOpen, rovingKeydown } from "../lib/keyboard-reach";
 
 export interface RemindersPanelDeps {
   applyView: (view: PageView) => void;
@@ -64,6 +65,11 @@ export function RemindersPanel(props: RemindersPanelDeps) {
   // backend owns resolution and we only render its labels.
   const [presets] = createResource(open, snoozePresets);
   const [busy, setBusy] = createSignal<string | null>(null);
+
+  // Arrow navigation needs focus inside the list first; `TasksPanel`
+  // lands it through the same helper, which owns both of its rules.
+  let list: HTMLDivElement | undefined;
+  focusFirstRowOnOpen(() => appState.remindersOpen, reminders, () => list, "[data-reminder-row]");
 
   async function withRow(id: string, run: () => Promise<unknown>) {
     setBusy(id);
@@ -135,7 +141,7 @@ export function RemindersPanel(props: RemindersPanelDeps) {
             </p>
           </Show>
 
-          <div class="max-h-[64vh] overflow-y-auto px-5 py-3" onKeyDown={(e) => rovingKeydown(e, "vertical")}>
+          <div ref={list} class="max-h-[64vh] overflow-y-auto px-5 py-3" onKeyDown={(e) => rovingKeydown(e, "vertical")}>
             <Show
               when={(reminders() ?? []).length > 0}
               fallback={
@@ -160,10 +166,15 @@ export function RemindersPanel(props: RemindersPanelDeps) {
                           <div class="min-w-0 flex-1">
                             <button
                               type="button"
-                              class="block w-full truncate text-left text-sm hover:underline"
+                              data-reminder-row
+                              class="block w-full text-left text-sm hover:underline"
+                              classList={{
+                                truncate: reminderHasText(r),
+                                "italic opacity-60": !reminderHasText(r),
+                              }}
                               onClick={() => void jumpTo(r)}
                             >
-                              {r.text || "(empty block)"}
+                              {reminderHasText(r) ? r.text : EMPTY_REMINDER_NOTICE}
                             </button>
                             <div class="mt-0.5 flex gap-2 text-xs opacity-60">
                               <span>{r.page_title}</span>

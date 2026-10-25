@@ -1,8 +1,8 @@
 //! Pre-computed backlinks index.
 //!
-//! [`crate::backlinks::backlinks_for_page`] walks the **whole
-//! workspace** on every call (`O(blocks)`, materializing each source
-//! block's subtree), so a client that recomputes it per page-open pays
+//! [`crate::backlinks::backlinks_for_page`] builds a one-shot index of
+//! the **whole workspace** on every call (`O(blocks)`, shallow source
+//! blocks only), so a client that recomputes it per page-open pays
 //! that scan every time. This module builds the same result **once**
 //! into an inverted index (`target key -> referencing blocks`) so a
 //! page's backlinks become an `O(refs-of-the-page)` lookup, and the

@@ -131,8 +131,9 @@ pub enum Capability {
     /// drain cannot have the capability, however many gestures the OS
     /// offers.
     CaptureOutsideTheApp,
-    /// One list of every open task (`TODO` / `DOING`) across the
-    /// workspace, each row opening its block.
+    /// One list of the workspace's open tasks (`TODO` / `DOING`), each
+    /// row opening its block — the first 200, with the uncapped count
+    /// shown beside them.
     ///
     /// A ` ```query ` block with `status: open` answers the same
     /// question on every client, inside a page; this is whether the

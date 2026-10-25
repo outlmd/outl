@@ -247,6 +247,12 @@ export interface AppStateShape {
    */
   remindersOpen: boolean;
   /**
+   * Task list open state. `g t` (Normal) or `Cmd/Ctrl+Shift+L` toggles.
+   * The workspace's open `TODO` / `DOING` blocks, by page — the first
+   * 200, with the uncapped count shown beside them.
+   */
+  tasksOpen: boolean;
+  /**
    * Page-history panel open state. Opened from the `⏱` button in the
    * page header. Read-only: it lists what the op log says happened to
    * this page, including blocks that were deleted out of it.
@@ -310,6 +316,7 @@ const [state, setState] = createStore<AppStateShape>({
   marketplaceOpen: false,
   helpOpen: false,
   remindersOpen: false,
+  tasksOpen: false,
   timelineOpen: false,
   focusBlockId: null,
   dropTargetBlockId: null,

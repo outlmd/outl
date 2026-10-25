@@ -99,7 +99,8 @@ Pairing is **not** reimplemented — `Onboarding` renders the real `<SyncPanel /
 ### Sync status dot (always-visible)
 
 `<SyncIndicator />` sits in the top-right capsule of `<ChromeToggleBar />`, right before Settings, so the mesh state is glanceable without opening Settings.
-The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, settings, same icons and order. The sidebar toggle (no mobile twin) sits alone top-left, and the sidebar pads its top so the capsule never covers search; the page header (`OutlineView`) pads its own top the same way, so the eyebrow's attach and history icons clear the right capsule. Keep the two bars in the same order when adding a control.
+The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, settings, same icons and order, except reminders: mobile moved it to its bottom bar's Reminders tab (#364) and has no header button for it, so there is no mobile twin to match there.
+The sidebar toggle (no mobile twin) sits alone top-left, and the sidebar pads its top so the capsule never covers search; the page header (`OutlineView`) pads its own top the same way, so the eyebrow's attach and history icons clear the right capsule. Keep the two bars in the same order when adding a control.
 The dot's tooltip shows the reachability state and when this window last saw a sync land (a finished pass or a `peer-ops-changed`).
 Green = at least one iroh peer reachable, orange = none, dim = first probe still running, spinner while a sync pass runs.
 Clicking syncs now (`syncNow()` then `reloadWorkspace()`, same pass as the Sync panel's Refresh); clicks during a pass are ignored.
@@ -404,6 +405,16 @@ In a `call:<name>` fence, `CodeFenceView`'s `CALL:<NAME>` chip links to the temp
 `<RemindersPanel />` lists them, `set_block_remind` authors a rule, and `<AppShell />` polls `deliver_due_reminders` every 30s.
 Panel wiring, the chord choices and the `[reminders] enabled` default: [`docs/reminders.md`](../../docs/reminders.md#desktop-outl-desktop).
 The one rule that matters here: **nothing about when a reminder fires is computed in the frontend** — the instants come from `outl_actions::reminders`, the labels from `@outl/shared`.
+
+## Task list — `TasksPanel.tsx`
+
+`<TasksPanel />` is the workspace's open `TODO` / `DOING` blocks, grouped by page, over `list_open_tasks` (the command the phone's Tasks tab already read).
+That command caps the rows at `TASK_LIMIT` (200) and reports the uncapped total, so the header reads `200 of 1431 open` rather than looking complete; the tail is not reachable from the panel.
+It is built the way `RemindersPanel` is: mounted for the app's life, every `createResource` gated on `appState.tasksOpen`, `rovingKeydown` for arrows, `Esc` to close.
+Open with `g t` or `Cmd/Ctrl+Shift+L` (`OpenTaskList`); it is also in the `Cmd+P` palette.
+The task list is no longer mobile-only: `Capability::TaskList` is `Full` here, and only the TUI keeps the `query`-block nudge.
+Order and grouping are the backend's, and nothing here ranks.
+A row opens through `openPageBySlug`, selects the block, and zooms into it when it has children, the same rule a block hit in the picker follows.
 
 ## Plugins
 

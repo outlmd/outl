@@ -255,7 +255,8 @@ What the TUI can't do is deliver while it's closed, since a terminal session has
 |---|---|---|---|
 | Add a reminder to the selected block | `g r` (writes `remind:: 9am`; reports the existing rule instead of overwriting) | `Cmd+R`, or `g r` in Normal | long-press the block → **Remind me…** |
 | "Nag me" preset (`remind:: now every 1h until DONE`) | `g R` (overwrites — escalating is explicit) | `g R` in Normal | — |
-| Open the reminders list | `g n` | `Cmd+Shift+R` / `Ctrl+Shift+R` | bell icon in the header |
+| Open the reminders list | `g n` | `Cmd+Shift+R` / `Ctrl+Shift+R` | Reminders tab in the bottom bar |
+| Open the task list (open `TODO` / `DOING`, by page — the first 200, with the uncapped count shown) | — (`query` block with `status: open`; `g t` lands on today's journal) | `g t`, or `Cmd+Shift+L` / `Ctrl+Shift+L` | Tasks tab |
 | In the list: open the reminder's page | `Enter` | `Enter` / click the row | tap the row |
 | Snooze the selected block 1h, without opening the list | `g s` | `g s` in Normal | the chips in the sheet (no chord surface) |
 | In the list: snooze 1h | `s` | the `1h` / `tomorrow` / `next week` buttons | the `1h` / `Tomorrow` / `Next week` chips |

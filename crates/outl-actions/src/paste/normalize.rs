@@ -328,10 +328,9 @@ fn strip_pair(s: &str, open: &str, close: &str, should_strip: impl Fn(&str) -> b
 /// single space. Preserves the leading indent so the parser's
 /// indent-based hierarchy isn't garbled by a strip in the body.
 ///
-/// Trailing spaces survive on purpose: the body of `normalize_external_syntax`
-/// is also fed to plain-text paste (`splice into block at caret`),
-/// and a user who pasted `"BRAVE "` (with a trailing space) expects
-/// that space to land in the splice.
+/// Trailing spaces survive on purpose: a line that ends in a space
+/// (`"BRAVE "`) keeps it, so normalisation never trims the user's text
+/// beyond what the conversion itself requires.
 fn collapse_inner_spaces(line: String) -> String {
     let indent_len = line.chars().take_while(|c| *c == ' ').count();
     if line.len() == indent_len {

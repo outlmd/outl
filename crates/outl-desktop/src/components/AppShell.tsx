@@ -37,7 +37,7 @@ import type { DeepLinkNavigate } from "../lib/events";
 import { installShortcuts, type ActionHandlers } from "../lib/shortcuts";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { buildHandlers } from "../lib/action-handlers";
-import { installRegionKeys } from "../lib/keyboard-reach";
+import { followSelection, installRegionKeys } from "../lib/keyboard-reach";
 import { BatchToolbar } from "./BatchToolbar";
 import { Sidebar } from "./Sidebar";
 import { OutlineView } from "./OutlineView";
@@ -49,6 +49,7 @@ import { PluginEffectLayer } from "./PluginEffectLayer";
 import { SettingsModal } from "./SettingsModal";
 import { HelpOverlay } from "./HelpOverlay";
 import { RemindersPanel } from "./RemindersPanel";
+import { TasksPanel } from "./TasksPanel";
 import { TimelinePanel } from "./TimelinePanel";
 import { deliverDueReminders } from "@outl/shared/api/commands";
 
@@ -256,6 +257,7 @@ export function AppShell() {
 
   // F6 cycles sidebar / outline / chrome, Esc returns to the outline.
   onMount(() => onCleanup(installRegionKeys()));
+  followSelection(() => appState.selectedBlockId);
 
   onMount(async () => {
     // Subscribe BEFORE draining. `take_pending_open_file` is what tells
@@ -408,6 +410,7 @@ export function AppShell() {
       <SettingsModal />
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
+      <TasksPanel applyView={applyView} setError={setError} />
       <TimelinePanel setError={setError} applyView={applyView} />
       <PluginEffectLayer />
       {/* Shell level, not above the outline: it is a statement about the

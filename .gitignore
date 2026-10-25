@@ -79,3 +79,7 @@ docs/app-store-*
 .lsp/
 .clj-kondo/
 .envrc
+
+# Written by .claude/skills/run-desktop/battery: the last state the
+# layout battery passed against. Local, never shared.
+.claude/.ux-battery-stamp

@@ -174,6 +174,11 @@ pub enum Action {
     /// `remind::`, grouped by next fire. TUI overlay, desktop modal,
     /// mobile tab.
     OpenReminders,
+    /// Open the task list: the workspace's open `TODO` / `DOING`
+    /// blocks, grouped by page — the first 200, with the uncapped
+    /// count shown. Desktop modal, mobile Tasks tab.
+    /// The TUI answers the same question with a `query` block.
+    OpenTaskList,
     /// Snooze the selected reminder by one hour
     /// (`Op::SnoozeRemind`, so it silences every device).
     SnoozeReminder,
@@ -350,6 +355,7 @@ impl Action {
         Action::InsertRemind,
         Action::InsertRemindNag,
         Action::OpenReminders,
+        Action::OpenTaskList,
         Action::SnoozeReminder,
         Action::AddProperty,
         Action::OpenProperties,
@@ -447,6 +453,7 @@ mod all_tests {
             Action::InsertRemind => "InsertRemind",
             Action::InsertRemindNag => "InsertRemindNag",
             Action::OpenReminders => "OpenReminders",
+            Action::OpenTaskList => "OpenTaskList",
             Action::SnoozeReminder => "SnoozeReminder",
             Action::AddProperty => "AddProperty",
             Action::OpenProperties => "OpenProperties",
@@ -489,14 +496,14 @@ mod all_tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_81,
-            "Action::ALL has {} entries but the enum has {EXPECTED_81} variants \
-             — add the new variant to Action::ALL (and bump EXPECTED_81)",
+            EXPECTED_82,
+            "Action::ALL has {} entries but the enum has {EXPECTED_82} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_82)",
             names.len(),
         );
     }
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_81: usize = 81;
+    const EXPECTED_82: usize = 82;
 }

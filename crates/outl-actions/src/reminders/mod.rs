@@ -33,7 +33,7 @@ pub mod fired;
 pub mod scan;
 pub mod schedule;
 
-use chrono::{Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{Duration, Local, NaiveDateTime, TimeZone, Utc};
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::NodeId;
 use outl_core::op::{LogOp, Op};
@@ -155,7 +155,49 @@ pub fn snooze_until(
     node: NodeId,
     at: NaiveDateTime,
 ) -> Result<(), ActionError> {
-    snooze(workspace, hlc, node, local_naive_to_epoch_ms(at))
+    match snooze_target(at) {
+        Some(ms) => snooze(workspace, hlc, node, Some(ms)),
+        // Never fall through to `snooze(None)`: that is "resume now",
+        // so a snooze the clock could not place would have *cancelled*
+        // the snooze and let the reminder fire immediately. Leaving the
+        // existing state alone is the conservative failure.
+        None => Ok(()),
+    }
+}
+
+/// The instant a "snooze until `at`" should actually land on.
+///
+/// Usually [`local_naive_to_epoch_ms`]. The exception is the hour a
+/// spring-forward skips: that wall time never happens, so the
+/// conversion yields `None`, and a snooze aimed into it has to go
+/// *somewhere later* — never earlier, and never nowhere. Steps forward
+/// to the first wall time that does exist.
+///
+/// Bounded because the walk must terminate on a timezone with a
+/// transition this code has not met; no real transition is anywhere
+/// near three hours.
+fn snooze_target(at: NaiveDateTime) -> Option<u64> {
+    first_existing(at, local_naive_to_epoch_ms)
+}
+
+/// Walk `at` forward until `convert` can place it.
+///
+/// Split from [`snooze_target`] so the walk is testable: the timezone
+/// is process-global and set once, so a test cannot summon a real DST
+/// gap without racing every other test in the binary.
+fn first_existing(
+    at: NaiveDateTime,
+    convert: impl Fn(NaiveDateTime) -> Option<u64>,
+) -> Option<u64> {
+    let step = Duration::try_minutes(15)?;
+    let mut probe = at;
+    for _ in 0..=12 {
+        if let Some(ms) = convert(probe) {
+            return Some(ms);
+        }
+        probe = probe.checked_add_signed(step)?;
+    }
+    None
 }
 
 /// Local wall clock → Unix epoch milliseconds, resolved in the
@@ -237,5 +279,49 @@ mod tests {
             .expect("valid time");
         let ms = local_naive_to_epoch_ms(at).expect("representable");
         assert_eq!(epoch_ms_to_local_naive(ms), Some(at));
+    }
+
+    /// A snooze aimed at the hour a spring-forward skips used to reach
+    /// `snooze(None)`, which is the "resume now" path — so "Snooze 1h"
+    /// in that hour *cancelled* the snooze and the reminder fired at
+    /// once. It must land later instead, never earlier and never
+    /// nowhere.
+    #[test]
+    fn a_snooze_into_a_dst_gap_lands_after_it() {
+        let at = NaiveDate::from_ymd_opt(2026, 3, 29)
+            .expect("valid date")
+            .and_hms_opt(1, 30, 0)
+            .expect("valid time");
+        let gap_end = at + Duration::try_minutes(30).expect("representable");
+        // Stands in for a zone where 01:00–01:59 does not exist.
+        let convert =
+            |t: NaiveDateTime| (t >= gap_end).then_some(t.and_utc().timestamp_millis() as u64);
+
+        let got = first_existing(at, convert).expect("a later instant exists");
+        assert_eq!(got, gap_end.and_utc().timestamp_millis() as u64);
+    }
+
+    /// The ordinary case must not be nudged by the walk.
+    #[test]
+    fn a_snooze_the_clock_can_place_is_left_alone() {
+        let at = NaiveDate::from_ymd_opt(2026, 6, 1)
+            .expect("valid date")
+            .and_hms_opt(9, 0, 0)
+            .expect("valid time");
+        let convert = |t: NaiveDateTime| Some(t.and_utc().timestamp_millis() as u64);
+        assert_eq!(
+            first_existing(at, convert),
+            Some(at.and_utc().timestamp_millis() as u64)
+        );
+    }
+
+    /// A zone the walk cannot satisfy must give up rather than loop.
+    #[test]
+    fn an_unplaceable_time_gives_up_instead_of_spinning() {
+        let at = NaiveDate::from_ymd_opt(2026, 6, 1)
+            .expect("valid date")
+            .and_hms_opt(9, 0, 0)
+            .expect("valid time");
+        assert_eq!(first_existing(at, |_| None), None);
     }
 }

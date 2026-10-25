@@ -23,7 +23,7 @@ use crate::error::ActionError;
 use crate::tree::{next_sibling, position_after, position_before};
 
 use super::create::{append_block, create_with_position};
-use super::{ensure_in_tree, wrap};
+use super::{ensure_live, wrap};
 
 /// Insert a new sibling immediately after `after`, sharing the same
 /// parent.
@@ -33,7 +33,7 @@ pub fn create_after(
     after: NodeId,
     text: Option<&str>,
 ) -> Result<NodeId, ActionError> {
-    ensure_in_tree(workspace, after)?;
+    ensure_live(workspace, after)?;
     let parent = workspace
         .tree()
         .parent(after)
@@ -92,7 +92,7 @@ pub fn create_before(
     before: NodeId,
     text: Option<&str>,
 ) -> Result<NodeId, ActionError> {
-    ensure_in_tree(workspace, before)?;
+    ensure_live(workspace, before)?;
     let parent = workspace
         .tree()
         .parent(before)
@@ -342,5 +342,27 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
         assert_eq!(order, vec![new_id, a, b, c]);
+    }
+
+    /// The stale-anchor fallback exists for exactly this: a peer deleted
+    /// the block the user was standing on between their read and their
+    /// Enter. It keyed on `NotInTree`, which a trashed anchor does not
+    /// raise — invariant 6 keeps its record — so the new block was built
+    /// as a sibling **inside the trash**, and the keystroke vanished.
+    #[test]
+    fn a_trashed_anchor_appends_to_the_page_instead_of_the_trash() {
+        let (mut ws, hlc) = new_workspace();
+        let page = crate::block::append_block(&mut ws, &hlc, None, Some("page")).unwrap();
+        let anchor = crate::block::append_block(&mut ws, &hlc, Some(page), Some("anchor")).unwrap();
+        crate::block::delete(&mut ws, &hlc, anchor).unwrap();
+
+        let made = create_after_or_append(&mut ws, &hlc, page, anchor, Some("new")).unwrap();
+
+        assert_eq!(
+            ws.tree().parent(made),
+            Some(page),
+            "the new block belongs to the page the user was looking at"
+        );
+        assert_ne!(ws.tree().parent(made), Some(outl_core::id::NodeId::trash()));
     }
 }

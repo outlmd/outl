@@ -64,9 +64,12 @@ fn walk_subtree(node: &OutlineNode, stack: &mut Vec<usize>, out: &mut Vec<Vec<us
 /// it parses the page's `.md`, walks `ParsedPage.blocks` in DFS, and
 /// addresses the target block by its position in that walk. The
 /// outline projected from the workspace tree (via [`project_outline`])
-/// preserves the same order, so the two stay in sync as long as the
-/// `.md` and the op log are reconciled (they always are after a
-/// mutation through `outl-actions`).
+/// preserves the same order, so the two agree **only while the `.md`
+/// and the op log are reconciled** — which is not automatic. A GUI
+/// commit queues the projection rather than writing it, peer ops reach
+/// the tree with the file untouched, and invariant 8 can refuse the
+/// write. A caller resolving this index against a file must reconcile
+/// first; [`crate::exec`] does.
 ///
 /// Returns `None` when the id isn't in the outline (foreign page,
 /// stale call, deleted block). Callers should surface that as a soft

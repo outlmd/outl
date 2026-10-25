@@ -19,8 +19,9 @@ import { SyncIndicator } from "./SyncIndicator";
  */
 /** Stroke icon in the mobile top bar's style: 24-unit viewBox, round
  *  caps, `currentColor` so it follows the button's active/hover state.
- *  The paths are the same ones `JournalChrome.tsx` draws, so the two
- *  clients read as one app. */
+ *  The paths match the shared icons (`@outl/shared/icons`) and the
+ *  phone's bottom bar, so the clients read as one app. Kept local
+ *  because the shared `Svg` is stroke 1.75 and this is 16px at 2. */
 function Icon(props: { children: JSX.Element }) {
   return (
     <svg
@@ -167,12 +168,13 @@ function PluginToolbarButton(props: { entry: ToolbarButtonEntry }) {
  * Window chrome, laid out like the mobile top bar (`JournalChrome.tsx`).
  *
  * Top-right capsule, same icons in the same order as the phone: fold
- * all, unfold all, plugin toolbar buttons, reminders, plugins, the sync
- * dot, settings. Settings sits last, the sync dot right before it, so a
- * user moving between the two clients finds every control where their
- * hand expects it.
+ * all, unfold all, plugin toolbar buttons, plugins, the sync dot,
+ * settings. Settings sits last, the sync dot right before it, so a user
+ * moving between the two clients finds every control where their hand
+ * expects it. Reminders sits after the toolbar buttons here; the phone
+ * moved it to its bottom bar (#364), so it has no header twin.
  *
- * The only control without a mobile twin is the sidebar toggle (the
+ * The only other control without a mobile twin is the sidebar toggle (the
  * phone has no sidebar). It gets its own small capsule in the top-left
  * corner, where the mobile back capsule sits, so it stays reachable
  * after the sidebar is hidden. The shortcuts-help toggle is gone from

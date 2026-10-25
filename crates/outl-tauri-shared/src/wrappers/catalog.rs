@@ -577,8 +577,8 @@ macro_rules! timeline_commands {
     };
 }
 
-/// The overview mobile's bottom bar and week strip read: every open
-/// task, and which journal days hold text.
+/// The overview mobile's bottom bar and week strip read: the open
+/// tasks (capped, with the uncapped total) and which days hold text.
 #[macro_export]
 macro_rules! overview_commands {
     ($state:ty) => {

@@ -148,6 +148,20 @@ pub fn run_code_block(
         });
     }
 
+    // The index below is derived from the **tree**, and
+    // `run_block_at_index` resolves it against the **`.md` on disk**,
+    // by position, with no check that the two name the same block. So
+    // the two have to agree before the index is computed, and "they
+    // always do after a mutation" was never true: a GUI commit only
+    // *queues* the projection, a peer's ops land in the tree with the
+    // file untouched, and invariant 8 can refuse the write outright.
+    // Running against a stale file does not fail — it runs a different
+    // fence, which for `python` or `js` is somebody else's code.
+    //
+    // Refreshing here is the same call every page-open path makes, and
+    // a refusal propagates: an out-of-sync page must not execute.
+    crate::journal::apply_page_md_with_sidecar_if_stale(workspace, storage_root, page_id)?;
+
     let outline = project_outline(workspace, page_id);
     let flat_idx = flat_index_for_block(&outline, block_id)
         .ok_or_else(|| ActionError::NotInTree(block_id.to_string()))?;

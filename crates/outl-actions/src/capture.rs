@@ -353,7 +353,16 @@ pub fn land_capture(
         // capture file reaches a second device through a `file`
         // transport (see [`inbox_in_workspace`]). Re-asserting on
         // divergence would let that second drain overwrite the edit.
-        // Empty is the one state only the torn write produces.
+        //
+        // Empty is not unambiguous either, and the ambiguity is
+        // accepted rather than unnoticed: a user who clears the block on
+        // purpose leaves the same state the torn write does, so a second
+        // device draining the same file writes the line back once. The
+        // trade is deliberate. A resurrected capture is visible and one
+        // keystroke to delete again; the other way round loses a line
+        // that exists in no op and no file, after telling the user it
+        // landed. Separating the two needs a marker for "landed, then
+        // emptied", which is a format change, not a condition.
         if workspace.block_text(block).unwrap_or_default().is_empty() {
             edit_text(workspace, hlc, block, &line)?;
         }

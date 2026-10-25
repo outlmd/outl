@@ -316,6 +316,7 @@ pub fn support(action: Action) -> ClientSupport {
             Missing("The nag preset isn't on mobile — add a reminder, then edit the rule.")
         ),
         Action::OpenReminders => row!(Full, Full, Full),
+        Action::OpenTaskList => row!(Missing(crate::capability_support::NO_TASK_LIST), Full, Full),
         Action::SnoozeReminder => row!(Full, Full, Full),
 
         // ── properties ───────────────────────────────────────────
@@ -508,6 +509,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_task_list_has_a_verdict_for_every_client() {
+        let s = support(Action::OpenTaskList);
+        assert!(matches!(s.get(Client::Desktop), Support::Full));
+        assert!(matches!(s.get(Client::Mobile), Support::Full));
+        assert!(matches!(s.get(Client::Tui), Support::Missing(_)));
+    }
+
+    #[test]
     fn every_client_declares_support_for_every_action() {
         // The `match` in `support` is exhaustive, so this cannot fail
         // for a missing arm — it fails for a missing *variant* in
@@ -519,7 +528,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 81, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 82, "Action::ALL changed size");
     }
 
     #[test]

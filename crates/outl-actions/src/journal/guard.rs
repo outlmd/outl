@@ -24,31 +24,45 @@
 //! ## Who asks, and who does not
 //!
 //! `super::apply` holds six public writers, and **two of them are
-//! gates** — this is the census, because the sentence it replaces ("both
-//! write gates run all three") was true and still read as one. A writer
-//! the doc does not name is a writer a reader assumes is one of the ones
-//! it does, and that is how `apply_page_md_with_sidecar_rendered`
+//! gates** — this is the census. It replaces a sentence ("both write
+//! gates run all three") that was **false**: only one gate asks the
+//! third question. A writer the doc does not name is a writer a reader
+//! assumes is one of the ones it does, and that is how
+//! `apply_page_md_with_sidecar_rendered`
 //! shipped public, exported and guard-free next to this paragraph, with
 //! no caller in the repo: during the #281 upgrade window — an op log
 //! carrying a page's frontmatter fence as bullets, a render that does
 //! not — that call is the write that deletes the fence.
 //!
-//! The gates, which run all three checks:
+//! The gates, and which checks each one runs:
 //!
 //! - `apply_page_md_with_sidecar_guarded` — after a mutation. Step 5 of
 //!   `crate::commit::commit_page`. It writes *because there is a real
-//!   mutation to project*, so it refuses only what would delete bytes.
+//!   mutation to project*, so it refuses only what would delete bytes:
+//!   [`unlogged_content_error`] and [`frontmatter_loss_error`], plus
+//!   `PageSidecarUnreadable` when the sidecar cannot be read. It does
+//!   **not** ask [`guard_absent_markdown`]: an absent `.md` reads as
+//!   "nothing on disk to lose" and is written, including an iCloud
+//!   placeholder or a `.md` that vanished beside a live sidecar.
 //! - `apply_page_md_with_sidecar_if_stale` — before a read, and on
 //!   `outl serve`'s sweep. It writes *only to catch a `.md` up with the
-//!   tree*, so it also declines every state it cannot vouch for.
+//!   tree*, so it runs all three and also declines every state it
+//!   cannot vouch for.
+//!
+//! The absent-markdown question is asked by `apply_page_md_with_sidecar_if_stale`
+//! and by `super::mutate::mutate_page_md`, and by nothing else.
 //!
 //! And the writers that ask nothing, each because its caller has already
 //! established there is nothing on disk to lose:
 //!
 //! - `apply_page_md` — renders to a `.md` with no sidecar at all, so
 //!   there is no reference to ask. No caller in the repo.
-//! - `apply_page_md_with_sidecar` — the unconditional projection. Test
-//!   fixtures only; every production path takes a gate.
+//! - `apply_page_md_with_sidecar` — the unconditional projection. Not
+//!   test-only: `desync::recover` calls it after its own
+//!   `text_diverged` check, `outl-import` after a fresh import,
+//!   `outl init` on pages it just seeded, and `outl doctor --repair`
+//!   after confirming the render matches the disk hash and backing the
+//!   file up. Each does its own vetting instead of taking a gate.
 //! - `apply_page_md_with_sidecar_if_absent` — writes only when the `.md`
 //!   is absent. It does **not** ask `guard_absent_markdown`, so it can
 //!   still write over bytes that are merely not downloaded yet; the

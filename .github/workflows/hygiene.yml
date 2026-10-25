@@ -45,6 +45,15 @@ jobs:
       - name: docs index
         run: ./scripts/check-docs-index.sh
 
+      # An icon has no test and no compiler. The desktop and the mobile
+      # crate each carried a sixteen-file Tauri set under the same names,
+      # generated at different times, and every one of the sixteen
+      # differed byte for byte — noticed by a user, not by CI. Also asks
+      # whether an iOS slot grew an alpha channel, which App Store
+      # Connect rejects after the build rather than during it.
+      - name: icons
+        run: python3 scripts/check-icons.py
+
       - name: release strip check
         run: python3 scripts/tests/test_check_artifact_stripped.py
 

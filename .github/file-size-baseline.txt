@@ -22,14 +22,29 @@
 #     node scans and the TUI render path runs every frame, so
 #     uncached that was a per-frame cost on a 64k-node workspace.
 #
-# Neither argument generalises. A third raise makes its own case.
+#   outl-actions/src/sync.rs  673 -> 683
+#     A stop flag for FileSyncTransport. Its polling thread owned the
+#     Sender it was handed, so dropping the Receiver never ended it on
+#     a quiet workspace. The desktop is who that cost: a workspace swap
+#     replaces the transport, so every swap left a two-second poller
+#     running for the life of the process, and shutdown was a no-op
+#     comment claiming otherwise. The ten lines are the field, the
+#     clone into the thread, the per-tick check and the store.
+#     Splitting a 673-line file to land a leak fix is the larger
+#     change, not the smaller one.
+#
+#     (No backticks in this block: the heredoc below is deliberately
+#     unquoted so it can interpolate THRESHOLD, which means a backtick
+#     here runs as a command and silently empties the words around it.)
+#
+# None of these arguments generalises. A further raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
 980 crates/outl-actions/src/page.rs
-673 crates/outl-actions/src/sync.rs
+683 crates/outl-actions/src/sync.rs
 678 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
-768 crates/outl-core/src/storage/jsonl/read.rs
+754 crates/outl-core/src/storage/jsonl/read.rs
 810 crates/outl-core/src/storage/jsonl/tests.rs
 877 crates/outl-core/src/workspace.rs
 725 crates/outl-core/src/workspace/batch.rs
@@ -42,20 +57,19 @@
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1957 crates/outl-mobile/src/components/Journal.tsx
+1823 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 640 crates/outl-plugins/src/host_tests.rs
 776 crates/outl-shortcuts/src/defaults.rs
-693 crates/outl-shortcuts/src/support.rs
-868 crates/outl-sync-iroh/src/engine.rs
+702 crates/outl-shortcuts/src/support.rs
 763 crates/outl-sync-iroh/src/engine_pairing.rs
 736 crates/outl-sync-iroh/src/engine_sync.rs
+868 crates/outl-sync-iroh/src/engine.rs
 1245 crates/outl-sync-iroh/src/pairing.rs
 1022 crates/outl-sync-iroh/src/peers.rs
 821 crates/outl-sync-iroh/tests/chaos.rs
 956 crates/outl-sync-iroh/tests/integration.rs
 1210 crates/outl-sync-iroh/tests/regression.rs
-681 crates/outl-theme/src/presets.rs
 738 crates/outl-tui/src/actions/autocomplete.rs
 924 crates/outl-tui/src/actions/overlay.rs
 985 crates/outl-tui/src/actions/plugins.rs

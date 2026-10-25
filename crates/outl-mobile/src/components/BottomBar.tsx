@@ -1,14 +1,14 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import {
+  BellIcon,
   CalendarIcon,
   CheckSquareIcon,
-  PageIcon,
   PlusIcon,
   SearchIcon,
 } from "@outl/shared/icons";
 
-export type BottomTab = "journal" | "search" | "tasks" | "pages";
+export type BottomTab = "journal" | "search" | "tasks" | "reminders";
 
 /**
  * The app's four places plus capture, always one thumb away.
@@ -35,7 +35,7 @@ export function BottomBar(props: {
   ];
   const right: Tab[] = [
     { id: "tasks", label: "Tasks", icon: () => <CheckSquareIcon size={22} /> },
-    { id: "pages", label: "Pages", icon: () => <PageIcon size={22} /> },
+    { id: "reminders", label: "Reminders", icon: () => <BellIcon size={22} /> },
   ];
   const item = (t: Tab) => (
     <button

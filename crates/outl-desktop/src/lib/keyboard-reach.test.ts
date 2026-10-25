@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRoot, createSignal } from "solid-js";
 
-import { cycleRegion, installRegionKeys, rovingKeydown } from "./keyboard-reach";
+import {
+  cycleRegion,
+  followSelection,
+  installRegionKeys,
+  rovingKeydown,
+} from "./keyboard-reach";
 
 function html(s: string) {
   document.body.innerHTML = s;
@@ -113,5 +119,79 @@ describe("rovingKeydown in panels and forms", () => {
     c.focus();
     c.dispatchEvent(key("ArrowDown"));
     expect(document.activeElement?.id).toBe("s");
+  });
+});
+
+describe("followSelection", () => {
+  /**
+   * Moving the cursor has to move the page with it. Without this, `j`
+   * walked the selection off the bottom and kept going: on an 80-row
+   * page, 60 presses left the view on row 1 with the cursor ~55 rows
+   * below the fold, so pressing `j` looked like it did nothing.
+   *
+   * `scrollIntoView` is a stub in the test DOM, so these pin the call
+   * rather than the pixels. The lab battery measures the real scroll,
+   * and it also covers the "row not rendered" path: a unit test for
+   * that cannot fail here, because the throw would happen inside the
+   * microtask and never reach an assertion.
+   */
+  let calls: Array<ScrollIntoViewOptions | boolean | undefined>;
+  let dispose: (() => void) | undefined;
+
+  beforeEach(() => {
+    calls = [];
+    Element.prototype.scrollIntoView = function (opts?) {
+      calls.push(opts);
+    };
+  });
+
+  afterEach(() => {
+    dispose?.();
+    dispose = undefined;
+    document.body.innerHTML = "";
+  });
+
+  function mount(selected: () => string | null) {
+    dispose = createRoot((d) => {
+      followSelection(selected);
+      return d;
+    });
+  }
+
+  const flush = () => new Promise((r) => queueMicrotask(() => r(null)));
+
+  it("brings the newly selected block into view", async () => {
+    html(`<div data-block-id="a"></div><div data-block-id="b"></div>`);
+    const [id, setId] = createSignal<string | null>("a");
+    mount(id);
+    await flush();
+    calls = [];
+
+    setId("b");
+    await flush();
+    expect(calls).toHaveLength(1);
+    // `nearest`, never `center`: centring on every keypress makes the
+    // page lurch under someone stepping one row at a time.
+    expect(calls[0]).toEqual({ block: "nearest" });
+  });
+
+  it("follows every move, not just the first", async () => {
+    html(
+      `<div data-block-id="a"></div><div data-block-id="b"></div>` +
+        `<div data-block-id="c"></div>`,
+    );
+    const [id, setId] = createSignal<string | null>("a");
+    mount(id);
+    await flush();
+    calls = [];
+
+    setId("b");
+    await flush();
+    setId("c");
+    await flush();
+    // One per move. A version that read the id once and never again
+    // would scroll to the first row and leave the cursor behind — the
+    // defect this exists to catch.
+    expect(calls).toHaveLength(2);
   });
 });

@@ -222,6 +222,7 @@ export type Action =
   | { kind: "InsertRemind" }
   | { kind: "InsertRemindNag" }
   | { kind: "OpenReminders" }
+  | { kind: "OpenTaskList" }
   | { kind: "SnoozeReminder" }
   // Properties (`key:: value`) — the generic door `remind::` chords
   // are one special case of. `TogglePin` is TUI-only; it is listed so

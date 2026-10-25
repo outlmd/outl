@@ -9,8 +9,9 @@
 //!
 //! ## What gets converted to outl syntax on the way in
 //!
-//! `paste_markdown` runs the raw clipboard text through
-//! [`normalize::normalize_external_syntax`] before parsing it. The
+//! `paste_markdown` runs the clipboard text through
+//! [`normalize::normalize_external_syntax`] before parsing it, but only
+//! on the outline/table path. Plain text never goes through it. The
 //! conversions cover the most common syntaxes the user might copy
 //! from:
 //!
@@ -22,7 +23,7 @@
 //! | `- [x] foo` / `- [X] foo` | `- DONE foo` | GitHub / CommonMark |
 //! | `{{embed: ((blk-XXXXXX))}}` | `!((blk-XXXXXX))` | Roam |
 //! | `{{[[query]]: foo}}` | `{{query: foo}}` | Roam |
-//! | `^^highlight^^` | (stripped) | Roam |
+//! | `^^highlight^^` | `==highlight==` (unbalanced `^^` stays verbatim) | Roam |
 //! | `{{video: url}}` and other unknown `{{…}}` | (stripped) | various |
 //! | `id:: 01HXY…` (alone on a line) | (line dropped) | Logseq |
 //! | 4-space indent | 2-space indent | Roam/Notion export |
@@ -73,7 +74,7 @@
 //!    rewrite on paste.
 //! 7. **Mirror the heuristic in JS** when the change affects
 //!    bullet detection. `looks_like_outline` lives both in this
-//!    crate and in `crates/outl-mobile/src/lib/paste.ts`; the JS
+//!    crate and in `crates/outl-frontend-shared/src/paste/index.ts`; the JS
 //!    copy gates the Tauri round-trip on the client. They must
 //!    stay in lockstep.
 
@@ -128,12 +129,13 @@ pub struct PasteOutcome {
     /// New text of the host block when `AtCaret` was used and the
     /// host's text changed. `None` for the other anchors.
     pub host_text: Option<String>,
-    /// Number of *outline* root-level bullets the user pasted, after
-    /// normalisation and parsing. UI clients show this to confirm
-    /// "pasted N blocks" — it counts what the heuristic actually
-    /// detected, not blocks created.
+    /// Number of root-level blocks the paste created from structure it
+    /// detected: root bullets (after normalisation and parsing) on the
+    /// outline/table path, or one per paragraph on the multi-paragraph
+    /// plain-text path. UI clients show this to confirm "pasted N
+    /// blocks".
     ///
-    /// **Always zero on the plain-text fallback path**, even when
+    /// **Zero on the single-paragraph plain-text fallback**, even when
     /// the anchor (AfterBlock / AsLastChildOf) caused one literal
     /// block to be created: that block exists only because the
     /// caller asked us where to drop the raw text, not because the
@@ -146,11 +148,13 @@ pub struct PasteOutcome {
 ///
 /// `raw` is the clipboard contents verbatim. The function:
 ///
-/// 1. Normalises external syntax to outl (see module docs).
-/// 2. Detects whether the result is an outline (any line starting
-///    with `- `). If not, falls back to "plain text" behaviour
-///    appropriate for the anchor.
-/// 3. Parses the normalised text via `outl_md::parse::parse`.
+/// 1. Converts tab-separated rows to a markdown table.
+/// 2. Detects, on the raw text, whether it is an outline or table
+///    (any line starting with `- `). If not, falls back to "plain
+///    text" behaviour appropriate for the anchor: one block per
+///    non-blank line when there are several, else a verbatim splice.
+/// 3. Otherwise normalises external syntax to outl (see module docs)
+///    and parses it via `outl_md::parse::parse_fragment`.
 /// 4. Materialises blocks through [`crate::block::append_tree`] /
 ///    [`crate::block::create_after`].
 /// 5. Re-applies block properties via `Op::SetProp`.
@@ -203,8 +207,9 @@ fn paste_markdown_inner(
         // Plain text (no bullets). If it has two or more blank-line
         // separated paragraphs, graft one block per paragraph so a
         // pasted chat reply lands as a readable outline instead of one
-        // wall-of-text block. Soft line breaks (single `\n`) stay inside
-        // their paragraph's block. A single paragraph (a URL, a snippet,
+        // wall-of-text block. `split_paragraphs` makes one block per
+        // non-blank line, so a single `\n` also starts a new block.
+        // A single paragraph (a URL, a snippet,
         // one line) keeps the verbatim splice — never fragment that.
         let paragraphs = split_paragraphs(raw);
         if paragraphs.len() > 1 {

@@ -1,4 +1,5 @@
-//! Every open task in the workspace, as one list.
+//! The workspace's open tasks, as one list — the first [`TASK_LIMIT`]
+//! of them, with the uncapped `total` beside them.
 //!
 //! "What do I still have to do" was answerable only by writing a
 //! ` ```query ` block with `status: open` on some page. Mobile now has a
@@ -54,15 +55,20 @@ pub async fn list_open_tasks<S: AppHost>(state: &S) -> Result<OpenTasks, String>
     let root = state.storage_root()?;
     crate::offload::run("list_open_tasks", move || {
         let index = WorkspaceIndex::build(&root);
-        Ok(collect_open_tasks(index.iter_blocks(), TASK_LIMIT))
+        Ok(collect_open_tasks(index.iter_blocks(), &index, TASK_LIMIT))
     })
     .await
 }
 
 /// The selection and ordering behind [`list_open_tasks`], split out so
 /// it can be tested without a workspace on disk.
+///
+/// `pages` is only read for `PageEntry::is_journal` — the one existing
+/// owner of "is this slug a journal", so the ranking below cannot
+/// disagree with the rest of the app about what a journal is.
 pub fn collect_open_tasks<'a>(
     blocks: impl Iterator<Item = &'a BlockEntry>,
+    pages: &WorkspaceIndex,
     limit: usize,
 ) -> OpenTasks {
     let mut open: Vec<(TodoState, &BlockEntry, &str)> = blocks
@@ -71,13 +77,29 @@ pub fn collect_open_tasks<'a>(
             _ => None,
         })
         .collect();
-    // Journal slugs are ISO dates, so a descending slug puts the latest
-    // day first. Named pages follow; nobody scans those by recency.
+    // Started tasks first, then journals, then named pages. Journal
+    // slugs are ISO dates, so a *descending* slug puts the latest day
+    // first; named pages are alphabetical, because nobody scans those by
+    // recency and reverse alphabetical is not an order anyone asked for.
+    //
+    // The two need separate arms: one descending comparison for both
+    // puts every letter-initial slug above every ISO date (`i` is 0x69,
+    // `2` is 0x32), so journals landed last and named pages came back
+    // Z-to-A.
+    let journal = |slug: &str| pages.by_slug(slug).is_some_and(|p| p.is_journal);
     open.sort_by(|(sa, a, _), (sb, b, _)| {
         let started = |s: &TodoState| u8::from(*s != TodoState::Doing);
+        let (ja, jb) = (journal(&a.source_slug), journal(&b.source_slug));
         started(sa)
             .cmp(&started(sb))
-            .then_with(|| b.source_slug.cmp(&a.source_slug))
+            .then_with(|| u8::from(!ja).cmp(&u8::from(!jb)))
+            .then_with(|| {
+                if ja && jb {
+                    b.source_slug.cmp(&a.source_slug)
+                } else {
+                    a.source_slug.cmp(&b.source_slug)
+                }
+            })
             .then_with(|| a.source_block_path.cmp(&b.source_block_path))
     });
     let total = open.len();
@@ -103,6 +125,26 @@ pub fn collect_open_tasks<'a>(
 mod tests {
     use super::*;
     use outl_core::id::NodeId;
+    use outl_md::index::PageEntry;
+
+    /// The page-kind signal the ordering reads, built by hand so the
+    /// test needs no workspace on disk. `is_journal` is the only field
+    /// `collect_open_tasks` looks at.
+    fn pages(entries: &[(&str, bool)]) -> WorkspaceIndex {
+        let mut idx = WorkspaceIndex::default();
+        for (slug, is_journal) in entries {
+            idx.insert_page(PageEntry {
+                path: format!("{slug}.md").into(),
+                slug: (*slug).to_string(),
+                title: (*slug).to_string(),
+                icon: None,
+                is_journal: *is_journal,
+                pinned: false,
+                page_type: None,
+            });
+        }
+        idx
+    }
 
     fn block(slug: &str, path: &[usize], text: &str) -> BlockEntry {
         BlockEntry {
@@ -118,8 +160,17 @@ mod tests {
         }
     }
 
+    /// **`1on1-with-mario` is load-bearing, not decoration.** `slugify`
+    /// keeps digits, so a page called "1on1 with Mario" really slugs to
+    /// that — and `'1'` (0x31) sorts *below* `'2'` (0x32), which every
+    /// ISO journal slug starts with. A named page whose slug begins with
+    /// a letter would be ordered correctly by the ascending tiebreak
+    /// alone, so the journal-first arm could be deleted with every test
+    /// still green. Replacing this slug with `archive` re-opens that
+    /// hole: on a journal-first product, every `1on1`, `2026-review` and
+    /// `0-inbox` page would outrank today.
     #[test]
-    fn keeps_open_tasks_and_orders_started_then_latest_day() {
+    fn keeps_open_tasks_and_orders_started_then_latest_day_then_pages() {
         let blocks = [
             block("2026-10-10", &[0], "TODO older day"),
             block("2026-10-12", &[1], "TODO second on today"),
@@ -127,8 +178,18 @@ mod tests {
             block("2026-10-11", &[0], "DONE finished"),
             block("2026-10-09", &[2], "DOING started a while ago"),
             block("inbox", &[0], "plain text, not a task"),
+            block("inbox", &[1], "TODO on a named page"),
+            block("1on1-with-mario", &[0], "TODO on 1on1"),
         ];
-        let out = collect_open_tasks(blocks.iter(), 10);
+        let index = pages(&[
+            ("2026-10-09", true),
+            ("2026-10-10", true),
+            ("2026-10-11", true),
+            ("2026-10-12", true),
+            ("inbox", false),
+            ("1on1-with-mario", false),
+        ]);
+        let out = collect_open_tasks(blocks.iter(), &index, 10);
         let texts: Vec<_> = out.tasks.iter().map(|t| t.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -137,9 +198,11 @@ mod tests {
                 "first on today",
                 "second on today",
                 "older day",
+                "on 1on1",
+                "on a named page",
             ]
         );
-        assert_eq!(out.total, 4);
+        assert_eq!(out.total, 6);
         assert_eq!(out.tasks[0].status, "doing");
         assert_eq!(out.tasks[1].status, "todo");
     }
@@ -147,8 +210,23 @@ mod tests {
     #[test]
     fn the_total_survives_the_cap() {
         let blocks: Vec<_> = (0..5).map(|i| block("inbox", &[i], "TODO x")).collect();
-        let out = collect_open_tasks(blocks.iter(), 2);
+        let index = pages(&[("inbox", false)]);
+        let out = collect_open_tasks(blocks.iter(), &index, 2);
         assert_eq!(out.tasks.len(), 2);
         assert_eq!(out.total, 5);
+    }
+
+    /// Being started crosses the journal / named-page split: a `DOING`
+    /// on a named page is still the thing the user is in the middle of.
+    #[test]
+    fn started_outranks_the_journal_first_rule() {
+        let blocks = [
+            block("2026-10-12", &[0], "TODO today"),
+            block("inbox", &[0], "DOING started on a named page"),
+        ];
+        let index = pages(&[("2026-10-12", true), ("inbox", false)]);
+        let out = collect_open_tasks(blocks.iter(), &index, 10);
+        let texts: Vec<_> = out.tasks.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(texts, ["started on a named page", "today"]);
     }
 }

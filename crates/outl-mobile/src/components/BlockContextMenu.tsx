@@ -61,8 +61,14 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex flex-col"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex max-h-dvh flex-col"
         style={{
+          // Anchored to the bottom with no ceiling, the card simply grew
+          // upward: a block with every action enabled ran past the top of
+          // the screen and the first row sat under the status bar, out of
+          // reach. The list scrolls instead, and the top inset keeps the
+          // first row clear of the notch rather than merely on screen.
+          "padding-top": "max(env(safe-area-inset-top), 12px)",
           "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
@@ -72,7 +78,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Actions card */}
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
+        <div class="mx-3 mb-2 flex min-h-0 flex-col overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           {/* Grab handle integrated at the top of the card so the
               gesture target stays close to the user's thumb. */}
           <span
@@ -90,6 +96,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
               class="mx-auto block h-1 w-10 rounded-full bg-(--color-outl-border)"
             />
           </span>
+          <div class="ios-scroll min-h-0 flex-1 overflow-y-auto">
           <For each={props.actions}>
             {(action) => (
               <Show when={action.enabled?.() ?? true}>
@@ -120,6 +127,7 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
               </Show>
             )}
           </For>
+          </div>
         </div>
         {/* Cancel pill — separated by a gap, classic iOS action sheet
             convention. Always white text on a slightly different bg

@@ -93,8 +93,8 @@ fn is_suggestable_key(key: &str) -> bool {
 
 /// Clean up what a user typed into a property key.
 ///
-/// Strips the trailing `::` (the dialect's separator, which the user
-/// sees as part of the key everywhere it is written) and trims. That
+/// Strips any trailing run of `:` (so the dialect's `::` separator, which
+/// the user sees as part of the key, and a single-colon slip) and trims. That
 /// is all: a key is otherwise taken literally, because an existing
 /// key is edited and deleted through the same string.
 ///

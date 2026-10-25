@@ -13,15 +13,14 @@ use outl_md::sidecar::{file_hash, Sidecar, SidecarBlock};
 use crate::outline::ChildrenIndex;
 
 /// Construct a sidecar that lines up with the `.md` we just rendered
-/// from the workspace. Walks the page subtree in DFS preorder — the
-/// same order [`super::render::render_page_md`] emits — so every
-/// block's index in the walk maps 1:1 to its line in the `.md`.
+/// from the workspace. Walks the page subtree in DFS preorder, the
+/// order [`super::render::render_page_md`] emits, so block N here is
+/// block N in the `.md`.
+/// `SidecarBlock::line` is that ordinal, not a file line, and nothing reads it.
 ///
-/// **That 1:1 is why the walk order here is not a detail.** It resolves
-/// children through the same [`ChildrenIndex`] the renderer uses, built
-/// by `crate::tree::children_index`, so the two orders cannot drift: a
-/// sidecar row that names a different block than the line above it
-/// mis-assigns every id below the divergence on the next reconcile.
+/// **That shared order is not a detail.**
+/// Children come from the same [`ChildrenIndex`] the renderer uses, so the two cannot drift.
+/// A sidecar row naming a different block than its line mis-assigns every id below it on the next reconcile.
 pub(super) fn build_sidecar(workspace: &Workspace, page_root: NodeId, md: &str) -> Sidecar {
     let mut blocks: Vec<SidecarBlock> = Vec::new();
     let mut line = 1usize;

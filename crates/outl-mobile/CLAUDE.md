@@ -400,7 +400,7 @@ Toolbar behaviour it controls (lock, reset, and why the row now only reshuffles 
 
 ## Reminders (`remind::`)
 
-The header bell opens `<RemindersSheet />`, a block long-press authors a rule via `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
+The bottom bar's Reminders tab opens `<RemindersSheet />` (the header has no bell any more), a block long-press authors a rule via `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
 Sheet wiring, why authoring is a prompt instead of a native time picker, and why both device-local settings live in the sheet: [`docs/reminders.md`](../../docs/reminders.md#mobile-outl-mobile).
 The one rule that matters here: **the schedule is never computed in TS** — `groupReminders` / `formatNextFire` only format what `outl_actions::reminders` decided.
 

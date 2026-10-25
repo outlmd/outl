@@ -16,7 +16,7 @@ use crate::error::ActionError;
 use crate::text::split_at_char;
 
 use super::edit::edit_text;
-use super::ensure_in_tree;
+use super::ensure_live;
 use super::siblings::create_after;
 
 /// Split `node` at `char_offset`: the text up to the offset stays in
@@ -54,7 +54,7 @@ pub fn split_block(
     node: NodeId,
     char_offset: usize,
 ) -> Result<NodeId, ActionError> {
-    ensure_in_tree(workspace, node)?;
+    ensure_live(workspace, node)?;
 
     let text = workspace.block_text(node).unwrap_or_default();
     let (head, tail) = split_at_char(&text, char_offset);
