@@ -783,6 +783,13 @@ A glibc-linked binary runs on the glibc it was built against or newer, never old
 `build_desktop_linux` was pinned for this from the start and said so; the CLI leg was built on 24.04 until [#411](https://github.com/outlmd/outl/issues/411), which made `outl-linux-x64.tar.gz` die with `version GLIBC_2.38 not found` on exactly the distros where someone downloads a tarball instead of using a package manager.
 Bumping either to 24.04 raises that floor for everyone; do it on purpose, or not at all.
 
+**The Windows ARM64 desktop leg is a cross-compile, and the target is installed with `rustup target add`.**
+`build_desktop_windows` runs on the x64 `windows-2025` image, which already has stable for `x86_64-pc-windows-msvc` plus the MSVC ARM64 linker.
+`dtolnay/rust-toolchain`'s `targets:` input runs `rustup toolchain install stable --target <triple>`, and on a toolchain the image already has, that does not install the extra target.
+The job then died in `tauri build` with the target not installed, so `outl-desktop-windows-aarch64-setup.exe` never landed on a release.
+`rustup target add` installs it on the toolchain `rust-toolchain.toml` selects.
+The CLI matrix on the same image already did, which is why `outl-windows-arm64.zip` shipped and the installer did not.
+
 **Check names must not contain the runner SKU.**
 Branch protection matches required checks by name, so `test (ubuntu-latest)` becoming `test (blacksmith-8vcpu-ubuntu-2404)` leaves `main` blocked on a check that will never report again.
 Matrix jobs therefore carry a stable `label` (`linux`, `macos`, `macOS arm64`, …) and the SKU lives only in `matrix.os`.

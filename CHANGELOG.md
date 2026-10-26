@@ -56,6 +56,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The Windows ARM64 desktop installer was announced and never built.**
+  `build desktop Windows (aarch64)` failed on every release since the platform was added, with `Target aarch64-pc-windows-msvc is not installed (installed targets: x86_64-pc-windows-msvc)`.
+  The job asked `dtolnay/rust-toolchain` for that target.
+  The runner already has stable for the host, and that action's `targets:` input updates the host toolchain without adding the cross target.
+  The CLI zip for the same triple shipped, because that job runs `rustup target add`.
+  The desktop job does that now, so the next release attaches `outl-desktop-windows-aarch64-setup.exe`.
 - **Two things the screenshots for [#417](https://github.com/outlmd/outl/pull/417) found, both in paint rather than in logic.**
   The desktop's `+ prop` affordance is a bare `+` where it floats over a block's first line.
   It is absolutely positioned at the right edge, so the word it spelled covered the last word of any line that reached there, which on a wide window is most of them.

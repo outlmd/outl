@@ -1262,9 +1262,25 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          targets: ${{ matrix.target }}
+        # Plain `rustup target add` instead of `dtolnay/rust-toolchain`,
+        # for the same reason as the macOS desktop job. This image already
+        # has stable for `x86_64-pc-windows-msvc`. The action's `targets:`
+        # input runs `rustup toolchain install stable --target <triple>`,
+        # and that command updates the host toolchain without installing
+        # the cross target. `tauri build --target aarch64-pc-windows-msvc`
+        # then stops with the target not installed, which is why this leg
+        # has never produced an installer.
+        #
+        # `rustup target add` installs the triple on the toolchain
+        # `rust-toolchain.toml` selects, which is the one the build uses.
+        # The CLI `build` job on this same image already ships
+        # `outl-windows-arm64.zip` that way. The x64 leg's host triple is
+        # already present, so the add there changes nothing.
+        shell: bash
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+          rustup target list --installed
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
