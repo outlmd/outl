@@ -281,7 +281,7 @@ pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) 
         .properties_of(node)
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
@@ -303,7 +303,7 @@ fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> O
         .properties_of(node)
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
@@ -480,14 +480,13 @@ fn outline_from_parsed(
         .iter()
         .map(|child| outline_from_parsed(child, iter))
         .collect();
-    // Sort alphabetically so this disk-driven path matches what
-    // `project_outline` (workspace-driven) produces. The two surfaces
-    // would otherwise disagree on the order properties show up in,
-    // visible when a block renders both inside its own page (parse
-    // order) and as a backlink elsewhere (workspace order). See the
-    // `OutlineNode.properties` doc-comment.
+    // The one place an authoring order exists — the parsed `.md` keeps
+    // the sequence the user typed — and it is dropped on purpose, so a
+    // block renders the same inside its own page (this path) and as a
+    // backlink elsewhere (the workspace path, which has no order to
+    // keep). `crate::tree::sort_in_presentation_order` owns the rule.
     let mut properties = block.properties.clone();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     // `collapsed` is overlaid by the caller using the workspace as the
     // source of truth (`Op::SetCollapsed` lives in the op log). The

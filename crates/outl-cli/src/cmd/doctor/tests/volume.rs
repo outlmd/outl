@@ -9,35 +9,6 @@
 
 use super::*;
 
-/// Seed a page with `total` blocks, project it, then delete `to_delete`
-/// of them from the tree **without** re-projecting.
-///
-/// That is the shape re-projection is for — the log moved on, the `.md`
-/// is behind — and also the shape that removes content when the repair
-/// runs. Returns the `.md` path and the text of one deleted block, which
-/// is the witness for "was anything written".
-fn page_with_deleted_blocks(root: &Path, total: usize, to_delete: usize) -> (PathBuf, String) {
-    let texts: Vec<String> = (0..total).map(|i| format!("line number {i}")).collect();
-    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-    let page = seed_page(root, "notes", &refs);
-
-    let mut ctx = crate::ws::open(root).expect("open");
-    let doomed: Vec<outl_core::id::NodeId> = outl_actions::children_of(&ctx.workspace, page)
-        .into_iter()
-        .map(|(id, _)| id)
-        .take(to_delete)
-        .collect();
-    for node in doomed {
-        outl_actions::delete(&mut ctx.workspace, &ctx.hlc, node).expect("delete block");
-    }
-    drop(ctx);
-
-    (
-        root.join("pages").join("notes.md"),
-        texts[to_delete - 1].clone(),
-    )
-}
-
 /// **The one the issue is about.**
 ///
 /// Matching and re-projection both scaled silently: `--repair` printed

@@ -264,15 +264,19 @@ bun --filter @outl/shared test     # just this library
 bun --filter outl-mobile test      # mobile (consumes this library)
 ```
 
-## `api/commands.ts` is split, and the import path is not
+## `api/commands.ts` and `api/types.ts` are split, their import paths are not
 
-`commands.ts` grew past the repo's 600-line file ratchet, so peers,
-plugins and reminders moved into `commands-peers.ts` /
-`commands-plugins.ts` / `commands-reminders.ts`. `commands.ts`
-re-exports all three, so **`@outl/shared/api/commands` stays the single
-import path** and no call site changed. Add a new wrapper to whichever
-file owns that area, and re-export it — a second import path is the
-drift this library exists to prevent.
+Both outgrew the 600-line ratchet, and both answered it by moving a
+cohesive group into a sibling and re-exporting it, so
+`@outl/shared/api/commands` and `@outl/shared/api/types` stay the single
+import paths: `commands-{peers,plugins,reminders}.ts`, and
+`{tokens,table,plugins,peers}.ts`. Add a wrapper or DTO to whichever file
+owns that area and re-export it — a second import path is the drift this
+library exists to prevent.
+
+**A split DTO file also goes in `ts_parser::MIRROR_FILES`**
+(`outl-tauri-shared/tests/`): the pins read those files concatenated, so
+a declaration in a file that list omits is invisible, never reported.
 
 ## When you're done editing
 

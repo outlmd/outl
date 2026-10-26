@@ -26,6 +26,18 @@ pub struct WorkspaceSummary {
     /// `true` when a workspace is loaded; `false` while the picker is
     /// still up or the background opener is in flight.
     pub ready: bool,
+    /// Whether [`Self::ops`] is the whole log.
+    ///
+    /// `ops` is `Workspace::log().len()`, the **resident** log, and a
+    /// workspace that booted from a snapshot replays only the delta above
+    /// the cutoff. Printing that as a total is not a rounding error: on a
+    /// real workspace it is 332 against 228,943, on the one number a user
+    /// reads to ask how big their graph is, and it reads as data loss.
+    ///
+    /// Same verdict, from the same source, as `outl workspace info`'s
+    /// `ops_complete` and `outl_actions::activity`'s `DeviceActivity`
+    /// `complete`. A client that renders `ops` renders this beside it.
+    pub ops_complete: bool,
 }
 
 /// Reply shape for every "open page / open journal" command. Bundles

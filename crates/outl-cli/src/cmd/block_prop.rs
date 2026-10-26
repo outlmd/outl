@@ -25,6 +25,7 @@ use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 
 use super::block::parse_id;
+use super::prop::stringify;
 use crate::output::{codes, emit, ApiError};
 use crate::ws::{self, WsCtx};
 
@@ -155,7 +156,8 @@ pub fn get(ctx: &WsCtx, id: &str, key: &str) -> Result<Value, ApiError> {
     }
 }
 
-/// List every property on a block, alphabetical by key.
+/// List every property on a block, in the order every outl surface
+/// shows them (`outl_actions::tree::sort_in_presentation_order`).
 ///
 /// The tree exposes [`outl_core::tree::Tree::properties_of`], so this
 /// is the block's real set — not a probe of well-known keys.
@@ -167,7 +169,7 @@ pub fn list(ctx: &WsCtx, id: &str) -> Result<Value, ApiError> {
         .properties_of(node)
         .map(|(key, value)| (key.to_string(), stringify(value)))
         .collect();
-    props.sort_by(|a, b| a.0.cmp(&b.0));
+    outl_actions::tree::sort_in_presentation_order(&mut props);
     Ok(json!({
         "id": id,
         "properties": props
@@ -265,11 +267,4 @@ fn prepare_key(raw: &str) -> Result<String, ApiError> {
         return Err(ApiError::new(codes::INVALID_ARG, why));
     }
     Ok(key)
-}
-
-fn stringify(value: &PropValue) -> String {
-    match value {
-        PropValue::Text(s) | PropValue::PageRef(s) | PropValue::Tag(s) => s.clone(),
-        PropValue::List(items) => items.iter().map(stringify).collect::<Vec<_>>().join(", "),
-    }
 }

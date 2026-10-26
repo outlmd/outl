@@ -488,6 +488,17 @@ SIGTERM and SIGINT both shut down cleanly, releasing the endpoint lease.
 That release matters: a lease left held by a killed process locks every outl process on the device out of an endpoint.
 
 
+### `outl workspace info`
+
+A summary: root, actor, page and journal counts, op count, tree nodes.
+
+**`ops` counts the resident op log, which is not always the whole log.**
+A workspace that boots from a snapshot replays only the ops above the cutoff, so that is what the count covers.
+When it does, the output says so (`ops: 332 since the last snapshot`) and the JSON carries `ops_complete: false`.
+A partial count presented as a total reads as data loss — it printed `ops: 332` for a graph whose `ops/` holds 228,943 — so the label is part of the answer, not a footnote.
+
+`outl doctor` is where the exact figure lives: it parses every `.jsonl` because integrity is its job, and making a summary command parse the whole log to print one number is a cost this command has no reason to pay.
+
 ### `outl doctor`
 
 The integrity check you run before trusting a migration, and after any sync weirdness.
