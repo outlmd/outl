@@ -2129,27 +2129,40 @@ jobs:
 
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
-        # Same throwaway sed pass as the build jobs: rewrites every literal
-        # `version = "<base>"` in the root manifest — `workspace.package`
-        # AND the internal `workspace.dependencies` entries — so the
-        # published crates depend on each other at the exact release
-        # version. Crate manifests inherit and need no patching.
+        # Same throwaway sed as the build jobs: rewrites every literal
+        # `version = "<base>"` in the root manifest, both
+        # `workspace.package` and the internal `workspace.dependencies`
+        # entries. Crate manifests inherit and need no patching.
+        #
+        # The sed alone is not an exact pin. Cargo treats
+        # `version = "0.13.0-beta.N"` as a caret, and a caret on a
+        # prerelease also matches the stable release of that number,
+        # which sorts higher. `cargo publish` then verifies against the
+        # stable already on crates.io (outl-actions 0.13.0-beta.270
+        # compiled `outl-md` 0.13.0 and missed `MAX_SLUG_BYTES`).
+        # `pin_workspace_deps.py` rewrites only the path deps to
+        # `=<version>` after the sed, so the next crate in the loop
+        # resolves the version this job just published.
         run: |
           BASE='${{ needs.prepare.outputs.base }}'
           VERSION='${{ needs.prepare.outputs.version }}'
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
+          python3 scripts/pin_workspace_deps.py "${VERSION}" Cargo.toml
 
       - name: Publish (idempotent, dependency order)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        # One `-p` at a time in dependency order — cargo waits for each
+        # One `-p` at a time in dependency order. cargo waits for each
         # publish to land in the sparse index before the next crate's
-        # verify build resolves it. The crates.io pre-check makes re-runs
-        # safe: a published version is immutable and republishing is a
-        # hard error, so a half-published run resumes where it stopped
-        # instead of dying on the crate that already made it.
+        # verify build resolves it. The `=` pin above means that resolve
+        # can only select this release's version, so the wait is what
+        # makes the next crate compile against the API this commit added.
+        # The crates.io pre-check makes re-runs safe: a published version
+        # is immutable and republishing is a hard error, so a
+        # half-published run resumes where it stopped instead of dying
+        # on the crate that already made it.
         run: |
           set -euo pipefail
           for crate in outl-core outl-md outl-exec outl-actions outl-ws; do

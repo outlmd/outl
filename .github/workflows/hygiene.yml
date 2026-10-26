@@ -73,3 +73,10 @@ jobs:
         run: |
           python3 scripts/check-release-assets.py --manifest
           python3 scripts/tests/test_check_release_assets.py
+
+      # The crates.io publish rewrites path deps to a caret. A caret on a
+      # prerelease also matches the stable of that number, so the verify
+      # build compiles against the release already on crates.io. This
+      # suite fails if the pin script or the publish job stops doing that.
+      - name: publish dep pin
+        run: python3 scripts/tests/test_pin_workspace_deps.py

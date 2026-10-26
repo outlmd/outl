@@ -894,6 +894,13 @@ Every other crate in the workspace carries `publish = false`; flipping one later
 
 SemVer keeps consumers safe: a plain `outl-core = "0.11"` requirement never resolves a `-beta.N` prerelease, so crates.io consumers only see GA versions unless they opt in with a `"0.11.0-beta"`-style requirement.
 
+The crates depend on each other with an exact `=` requirement, written by [`scripts/pin_workspace_deps.py`](../scripts/pin_workspace_deps.py) after the version rewrite.
+A caret on `0.13.0-beta.N` also matches the stable `0.13.0`, and cargo picks the stable because a release sorts above its prereleases.
+`cargo publish` verifies against that resolution, so a beta would build against the stable already on crates.io and miss any API added since the tag.
+The publish loop stays in dependency order (`outl-core`, `outl-md`, `outl-exec`, `outl-actions`, `outl-ws`).
+The exact pin is what makes the next crate's verify select the version this job just published.
+cargo waits for that version to show up in the sparse index before starting the next crate.
+
 The job is idempotent (it checks crates.io before each publish, so re-runs resume instead of failing) and self-gating (`cargo publish` verifies each crate by building it).
 It authenticates with the `CARGO_REGISTRY_TOKEN` secret in the `release` environment.
 
