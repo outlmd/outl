@@ -39,4 +39,43 @@ ignore = [
     # Unsound (not vulnerabilities), no fixed release reachable yet:
     { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsound, via Tauri's gtk3 chain on Linux desktop; no glib 0.20+ release reachable while Tauri is on gtk3 (Dependabot alert #33)" },
     { id = "RUSTSEC-2026-0255", reason = "sized-chunks unsound on panic, via im-rc in steel-core; only in the non-default lang-lisp feature" },
+    # The zstd family, published 2026-10-26. Thirteen entries, and the reason is
+    # one claim, so check the claim rather than the count.
+    #
+    # `cargo tree -i` gives these exactly one parent: `wasmtime-internal-cache`,
+    # wasmtime's on-disk cache of compiled modules, which compresses what it
+    # stores. **outl never turns that cache on.** `wasm::engine::make_engine`
+    # builds a `Config::new()` and sets fuel, epoch interruption, opt level,
+    # multi-memory and bulk-memory; caching is opt-in in wasmtime
+    # (`Config::cache*`) and nothing here calls it, so no code path in any outl
+    # binary reaches zstd. That is the whole argument, and it is one grep away
+    # from being re-checked: a cache setter appearing in `engine.rs` invalidates
+    # every line below.
+    #
+    # Note what the argument is NOT. It is not "this is behind an opt-in
+    # feature": `lang-rust = ["wasm"]` is in `outl-exec`'s default set, and the
+    # CLI, the TUI and the desktop all take default features, so this code is
+    # linked into shipped binaries. What is absent is the call, not the crate.
+    #
+    # Clearing them needs zstd >= 0.14.3 and zstd-safe >= 8.2.0, and wasmtime
+    # picks those versions, not us. Re-check on every wasmtime bump; drop the
+    # lines that stop firing.
+    #
+    # `zstd-sys` is deliberately not on this list. Its RUSTSEC-2026-0410 was
+    # patched in 2.1.2, which is semver-reachable, so the lockfile was bumped
+    # instead of ignored. An entry here means "no reachable fix", never "we did
+    # not look".
+    { id = "RUSTSEC-2026-0391", reason = "zstd data leak between streams on a reused context, via wasmtime-internal-cache; needs zstd 0.14.3, which wasmtime pins away" },
+    { id = "RUSTSEC-2026-0395", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0396", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0397", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0399", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0400", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0401", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0402", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd-safe Seekable::decompress sets a Vec length past capacity, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0404", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0405", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    { id = "RUSTSEC-2026-0406", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
 ]
