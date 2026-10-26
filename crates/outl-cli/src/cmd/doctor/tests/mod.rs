@@ -100,6 +100,44 @@ fn append_bytes(path: &Path, bytes: &[u8]) {
     f.write_all(bytes).expect("append");
 }
 
+/// Seed a page with `total` blocks, project it, then delete `to_delete`
+/// of them from the tree **without** re-projecting.
+///
+/// That is the shape re-projection is for — the log moved on, the `.md`
+/// is behind — and also the shape that removes content when the repair
+/// runs. Returns the `.md` path and the text of one deleted block, which
+/// is the witness for "was anything written".
+///
+/// Shared from here rather than from `volume.rs` because two checks need
+/// the same shape for different reasons: the volume guard asks how much
+/// a repair may remove, and `tree.rs` asks whether a removing page is
+/// still named individually once the harmless ones are grouped.
+pub(super) fn page_with_deleted_blocks(
+    root: &Path,
+    total: usize,
+    to_delete: usize,
+) -> (PathBuf, String) {
+    let texts: Vec<String> = (0..total).map(|i| format!("line number {i}")).collect();
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let page = seed_page(root, "notes", &refs);
+
+    let mut ctx = crate::ws::open(root).expect("open");
+    let doomed: Vec<outl_core::id::NodeId> = outl_actions::children_of(&ctx.workspace, page)
+        .into_iter()
+        .map(|(id, _)| id)
+        .take(to_delete)
+        .collect();
+    for node in doomed {
+        outl_actions::delete(&mut ctx.workspace, &ctx.hlc, node).expect("delete block");
+    }
+    drop(ctx);
+
+    (
+        root.join("pages").join("notes.md"),
+        texts[to_delete - 1].clone(),
+    )
+}
+
 fn messages(report: &DoctorReport) -> Vec<String> {
     report.findings.iter().map(|f| f.message.clone()).collect()
 }

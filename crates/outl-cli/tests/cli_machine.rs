@@ -392,20 +392,6 @@ fn asset_add_page_and_daily_are_mutually_exclusive() {
 }
 
 #[test]
-fn workspace_info_returns_summary() {
-    let ws = init_workspace();
-    let info = ok(outl()
-        .args(["--workspace"])
-        .arg(ws.path())
-        .args(["workspace", "info", "--json"])
-        .output()
-        .unwrap());
-    assert!(info["data"]["root"].is_string());
-    assert!(info["data"]["actor"].is_string());
-    assert!(info["data"]["ops"].is_number());
-}
-
-#[test]
 fn trash_list_then_restore_brings_the_block_back() {
     // Invariant 6 keeps a deleted block in the op log. Until `outl
     // trash` existed, "preserves history" bought the user nothing they

@@ -60,6 +60,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **`outl page prop list` listed the wrong properties, in both directions.**
+  It probed a hardcoded list of nine "well-known" keys instead of reading the page, so a page carrying `alpha::`, `due::`, `owner::` and `zeta::` listed **none** of them — and it listed `page-slug` / `page-kind`, which define the page and which `outl page prop set` refuses, inviting an edit that would rewrite the page's identity on the next projection.
+  The comment justifying the probe said the tree exposed no per-node property iterator; it has for a long time, and the sibling `outl block prop list` was already using it.
+  Both the CLI command and the `outl_page_prop_list` MCP tool now ask `outl_actions::property::page_properties`, which was already the owner of that question.
+  Found by reading this command's output next to `outl page render`'s while checking the property-order work below.
+
 - **The Windows ARM64 desktop installer was announced and never built.**
   `build desktop Windows (aarch64)` failed on every release since the platform was added, with `Target aarch64-pc-windows-msvc is not installed (installed targets: x86_64-pc-windows-msvc)`.
   The job asked `dtolnay/rust-toolchain` for that target.
@@ -105,6 +111,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Not a status-line message and not a toast: nothing clears this condition on its own, so a line that scrolls away is the same silence with a delay.
   It is also the one banner `z f` (focus mode) keeps, because wanting a distraction-free outline is not consent to be told nothing about a page that is saving nowhere else.
   The page still opens and still shows what is on disk — the guard withheld a *write*, not the page.
+- **The desktop status bar reported a snapshot-boot op count as the whole log.**
+  `ops` is `Workspace::log().len()`, the **resident** log, and a workspace that booted from a snapshot replays only the delta above the cutoff.
+  `outl workspace info` started labelling that in this release; the status bar kept printing the bare number, so the same workspace read `332 ops` in one window and `332 since the last snapshot` in the terminal — and on a graph whose `ops/` holds 228,943, the unlabelled version reads as data loss.
+  `WorkspaceSummary` carries `ops_complete` now, from the same `Workspace::booted_from_snapshot` the CLI and `device_activity` ask, so the three cannot describe one log three ways.
+  A reply with no flag still reads as complete, so an older backend is not retro-labelled as partial.
 - **The TUI never refreshed a page's `.md` from the tree on open**, which is the other half of the same call.
   A peer's ops land in the op log, not in the `.md`, so a synced-in block sat in the log while the page kept rendering the projection from before it arrived.
   Issue #166 fixed this for the GUI clients in 2026; the TUI was never wired up.
@@ -116,6 +127,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The same floor applied to the Homebrew `x86_64_linux` bottle, which is the other thing that binary feeds.
 
 ### Changed
+
+- **Property order has one owner, and it is written down** ([#285](https://github.com/outlmd/outl/issues/285)).
+  outl renders `key:: value` lines alphabetically, reorders a hand-sorted file on the next projection, and that was never documented anywhere — the behaviour lived in eight copy-pasted `sort_by` calls, three of which explained the reason in their own words and disagreed.
+  `outl_actions::tree::sort_in_presentation_order` is the one owner now; every surface calls it (the `.md` renderer, the outline DTO each GUI reads, the parsed outline the from-disk readers build, a backlink row's shallow leaf, the tree-derived index, the clipboard, `outl page prop list` and `outl block prop list`), and [`docs/markdown-format.md` → Property order](docs/markdown-format.md#property-order) says what the order is and why declaration order is not recoverable: `Op::SetProp` carries no slot, so the nearest thing available is each op's HLC, which is the order properties were last *edited* — a peer fixing one typo would reshuffle the block on every device.
+  A ninth copy fails `crates/outl-actions/tests/property_order_owner.rs`.
+  Nothing a user sees changed; what changed is that it can now be changed, or argued with, in one place.
+- **`outl doctor` counts the stale pages that lose nothing instead of printing one line each** ([#286](https://github.com/outlmd/outl/issues/286)).
+  A 2,865-page workspace bulk-edited outside outl reported 908 warnings, 840 of them the same sentence with a different path, and the two findings that mattered were somewhere in the middle of it.
+  Those 840 are now one line with the count and five example paths.
+  **A stale page whose re-projection would remove content still gets its own line with its own line count, always** — that is the page with something to decide, and the asymmetry is the design rather than a threshold (`a_page_that_loses_content_is_named_even_while_the_harmless_ones_are_counted`).
+  The human listing also caps the repairable items and the completed repair actions at 20 and says how many it withheld; `--json` still carries every one.
+  A **skipped** repair action is never capped: a refusal the user does not hear about is the silence the refusal exists to prevent.
+- **`outl workspace info` no longer reports a partial op count as a total.**
+  It printed `ops: 332` for a workspace whose `ops/` holds 228,943, because a snapshot boot replays only the delta above the cutoff and that is what `Workspace::log()` holds.
+  Three orders of magnitude, on the command a user runs to ask how big their graph is, reads as data loss.
+  The count is still the resident one (parsing 134 MB to print one number is `outl doctor`'s job, not a summary's), but it now says `ops: 332 since the last snapshot` and the JSON carries `ops_complete: false`.
+  `outl_actions::activity` had already written that rule for `DeviceActivity::complete`; this command was breaking it.
 
 - **A release publishes on what is on the draft, not on whether every job went green.**
   The gate was `needs.<job>.result == 'success'` per build job, which made every job a single point of failure for every other job's assets: one architecture's bundler, or one flaky runner, and a release with 25 finished artifacts published none of them.

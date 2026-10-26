@@ -88,9 +88,42 @@ pub(crate) fn renderable_prop_value(value: &PropValue) -> Option<String> {
     }
 }
 
+/// Put a block's or page's properties in the order every surface shows
+/// them: **alphabetical by key**.
+///
+/// The single owner of that order, and it needs one because the order
+/// has no other home. Properties live in [`outl_core::tree::Tree`]'s
+/// `HashMap<(NodeId, String), PropValue>`, whose iteration order is
+/// seeded per process, so a projection that imposes no order renders
+/// different bytes from the same op log on every boot. The `.md` is what
+/// the user reads, diffs and commits (root `CLAUDE.md` invariant 2), so
+/// "same content, different bytes" is a whole-workspace diff — measured
+/// on a real 2,865-page workspace as **840 pages reported stale by
+/// `outl doctor`**, 85 % of them differing in nothing but this order
+/// ([issue #285](https://github.com/outlmd/outl/issues/285)).
+///
+/// **Alphabetical is a decision, not a fallback, because declaration
+/// order is not recoverable.** `Op::SetProp` carries `(node, key,
+/// value)` and no slot, so the sequence a user typed reaches the log
+/// only as each op's HLC — which is the order the properties were last
+/// *edited*, so a peer fixing one typo would reorder the page. Deriving
+/// presentation from it means a new op field, and `undo_op` has to be
+/// that field's exact inverse (`outl-core/CLAUDE.md` invariant 6) while
+/// the prior order is not in the op. Paying a CRDT field for the order of
+/// formatting lines is the trade this rejects; the user-facing half of
+/// the decision is [`docs/markdown-format.md` → Property
+/// order](../../../../docs/markdown-format.md#property-order).
+///
+/// Eight callers kept their own copy of this `sort_by` — one of them in
+/// another crate — so "what order do properties render in" had eight
+/// answers that happened to agree. `tests/property_order_owner.rs` is
+/// the ratchet that stops a ninth.
+pub fn sort_in_presentation_order(properties: &mut [(String, String)]) {
+    properties.sort_by(|a, b| a.0.cmp(&b.0));
+}
+
 /// Textual properties of `node`, minus the page model's book-keeping
-/// ([`is_page_model_key`]), alphabetically sorted by key so the output is
-/// stable across runs.
+/// ([`is_page_model_key`]), in [`sort_in_presentation_order`].
 ///
 /// Only `PropValue::Text` survives — `PageRef` / `Tag` / `List` shapes
 /// have no `.md` render syntax and are dropped silently. The single
@@ -107,7 +140,7 @@ pub(crate) fn text_properties_of(workspace: &Workspace, node: NodeId) -> Vec<(St
             _ => None,
         })
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    sort_in_presentation_order(&mut properties);
     properties
 }
 
@@ -142,6 +175,54 @@ mod tests {
         for key in ["title", "icon", "pinned", "page", "frontmatter"] {
             assert!(!is_page_model_key(key), "{key} is the user's");
         }
+    }
+
+    /// Declaration order is not what renders. The op log carries the
+    /// order these were *written* in and the output does not follow it,
+    /// which is the decision `sort_in_presentation_order` documents —
+    /// the alternative reorders a page whenever a peer fixes one typo.
+    #[test]
+    fn properties_render_alphabetically_whatever_order_they_were_written_in() {
+        let (mut ws, hlc) = workspace();
+        let page =
+            open_or_create(&mut ws, &hlc, "ord", "ord", PageKind::Page).expect("page is created");
+        for key in ["zeta", "alpha", "mid"] {
+            set_property(
+                &mut ws,
+                &hlc,
+                page,
+                key,
+                Some(PropValue::Text(format!("v-{key}"))),
+            )
+            .expect("property is set");
+        }
+
+        let keys: Vec<String> = text_properties_of(&ws, page)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(keys, ["alpha", "mid", "zeta"]);
+    }
+
+    /// The whole reason the order is imposed rather than inherited: the
+    /// tree's property map is a `HashMap` whose iteration order is
+    /// seeded per process, so without this the same op log renders
+    /// different bytes on every boot and every page reads as stale.
+    #[test]
+    fn the_order_does_not_depend_on_the_hash_maps_iteration() {
+        let mut properties: Vec<(String, String)> = (0..64)
+            .map(|i| (format!("k{i:02}"), String::new()))
+            .collect();
+        properties.reverse();
+
+        let mut once = properties.clone();
+        sort_in_presentation_order(&mut once);
+        let mut again = properties;
+        again.rotate_left(17);
+        sort_in_presentation_order(&mut again);
+
+        assert_eq!(once, again);
+        assert!(once.windows(2).all(|w| w[0].0 < w[1].0));
     }
 
     /// Hiding the fence also hides it from the page's history, and that is

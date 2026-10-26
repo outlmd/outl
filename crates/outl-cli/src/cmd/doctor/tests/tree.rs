@@ -113,9 +113,16 @@ fn a_stale_md_is_flagged_and_repair_reprojects_it_with_a_backup() {
     assert!(!before.contains("second"));
 
     let report = collect(&root, false).expect("doctor runs");
+    // An appended block is the zero-removal case, so the finding is the
+    // grouped one and the page is named in the plan rather than twice.
     assert!(
-        has(&report, "stale projection"),
+        has(&report, "1 page(s) hold a stale `.md` projection"),
         "expected the drift warning, got: {:#?}",
+        messages(&report)
+    );
+    assert!(
+        has(&report, "notes.md"),
+        "a grouped finding still has to name the page at this size: {:#?}",
         messages(&report)
     );
     assert!(
@@ -238,14 +245,26 @@ fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
 
     let report = collect(&root, false).expect("doctor runs");
     assert!(
-        has(&report, "stale projection"),
+        has(&report, "1 page(s) hold a stale `.md` projection"),
         "a ghost `foo::` is stale projection, got: {:#?}",
         messages(&report)
     );
+    // A property line is not block content, so this page carries no
+    // removal — which is exactly what puts it in the grouped finding
+    // instead of being named with a line count.
     assert!(
-        has(&report, "removes 0 content line"),
-        "a property line is not block content, got: {:#?}",
+        !has(&report, "content line(s) from disk"),
+        "a property line is not block content, so nothing may report a \
+         removal: {:#?}",
         messages(&report)
+    );
+    assert!(
+        report
+            .repairable
+            .iter()
+            .any(|r| r.contains("adds or reorders only, removes nothing")),
+        "the plan still has to state the cost per page: {:?}",
+        report.repairable
     );
     assert!(
         !has(&report, "exist in no op"),
@@ -330,5 +349,89 @@ fn distinct_aliases_pass_with_a_count() {
         has(&report, "every alias name is unique"),
         "expected the ok line, got: {:#?}",
         messages(&report)
+    );
+}
+
+/// **The asymmetry the grouping rests on.**
+///
+/// A stale page whose re-projection removes content is a page the user
+/// has to decide about, so it keeps its own line with its own count. A
+/// stale page that only reorders a property is a page with nothing to
+/// decide, so it is counted. Collapsing both would hide the only one
+/// that matters inside a number; collapsing neither is what made a
+/// report with two real findings print 908 warnings
+/// ([#286](https://github.com/outlmd/outl/issues/286)).
+///
+/// This is the test to read before widening the grouping.
+#[test]
+fn a_page_that_loses_content_is_named_even_while_the_harmless_ones_are_counted() {
+    let (_dir, root, _paths) = fresh();
+    // Removes 2 lines. Small enough to stay under the volume ceiling, so
+    // the finding is the per-page one and not the refusal.
+    let (losing, _witness) = page_with_deleted_blocks(&root, 6, 2);
+
+    // A second page that is stale with nothing to lose: an appended block
+    // the `.md` has not seen.
+    let clean = seed_page(&root, "clean", &["first"]);
+    {
+        let mut ctx = crate::ws::open(&root).expect("open");
+        outl_actions::append_block(&mut ctx.workspace, &ctx.hlc, Some(clean), Some("second"))
+            .expect("append");
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    let found = messages(&report);
+
+    assert!(
+        found
+            .iter()
+            .any(|m| m.contains(&losing.display().to_string())
+                && m.contains("removes 2 content line(s) from disk")),
+        "the page that loses content must be named with its count: {found:#?}"
+    );
+    assert!(
+        has(&report, "1 page(s) hold a stale `.md` projection"),
+        "the harmless page must be counted, not named: {found:#?}"
+    );
+    assert!(
+        !found
+            .iter()
+            .any(|m| m.contains("2 page(s) hold a stale `.md` projection")),
+        "the grouped count must cover only the pages that lose nothing: {found:#?}"
+    );
+}
+
+/// A grouped finding that only counts is a dead end: the user cannot
+/// tell a systemic rewrite from one odd page, and has nowhere to look.
+/// Up to `STALE_SAMPLE` paths ride along, and past that the line says
+/// how many it withheld and where the rest are.
+#[test]
+fn a_grouped_finding_names_what_it_can_and_says_how_much_it_withheld() {
+    let (_dir, root, _paths) = fresh();
+    for i in 0..8 {
+        let page = seed_page(&root, &format!("p{i}"), &["first"]);
+        let mut ctx = crate::ws::open(&root).expect("open");
+        outl_actions::append_block(&mut ctx.workspace, &ctx.hlc, Some(page), Some("second"))
+            .expect("append");
+    }
+
+    let report = collect(&root, false).expect("doctor runs");
+    let grouped = messages(&report)
+        .into_iter()
+        .find(|m| m.contains("hold a stale `.md` projection"))
+        .expect("the grouped finding");
+
+    assert!(
+        grouped.contains("8 page(s)"),
+        "the count has to be the real one: {grouped}"
+    );
+    assert_eq!(
+        grouped.matches("pages/p").count(),
+        5,
+        "five paths ride along so the user can recognise the pattern: {grouped}"
+    );
+    assert!(
+        grouped.contains("and 3 more; `--json` lists every one"),
+        "a withheld remainder has to say where to find it: {grouped}"
     );
 }

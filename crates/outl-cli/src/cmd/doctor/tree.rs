@@ -167,6 +167,39 @@ pub(super) fn check_unmaterialized_ops(
     }
 }
 
+/// How many paths a grouped finding names before it falls back to a
+/// count.
+///
+/// Five is enough to recognise a pattern ("oh, those are all journals")
+/// and few enough that the line still reads as one finding. A grouped
+/// line for five or fewer pages therefore names every one of them, so
+/// the collapse costs nothing at the scale where a user would have read
+/// the whole list anyway.
+const STALE_SAMPLE: usize = 5;
+
+/// `, e.g. a.md, b.md (and 835 more; \`--json\` lists every one)` — the
+/// tail a grouped finding carries so it points somewhere instead of only
+/// counting. The second half is not decoration: the human listing is
+/// capped (`print.rs`), so for a page past that cap this tail is the only
+/// pointer the user gets.
+///
+/// A bare count is a dead end: the user cannot tell a systemic rewrite
+/// from one odd page, and has nowhere to look. `--json` carries the full
+/// list (every stale page is in `repairable` by construction), so this
+/// only has to be enough to start.
+fn sample_suffix(sample: &[String], total: usize) -> String {
+    if sample.is_empty() {
+        return String::new();
+    }
+    let rest = total.saturating_sub(sample.len());
+    let more = if rest > 0 {
+        format!(" (and {rest} more; `--json` lists every one)")
+    } else {
+        String::new()
+    };
+    format!(", e.g. {}{more}", sample.join(", "))
+}
+
 /// Compare every page in the tree against its `.md` projection, and
 /// record what `--repair` may safely act on.
 ///
@@ -208,6 +241,8 @@ pub(super) fn check_projections(
     let mut ahead = 0usize;
     let mut ahead_lines = 0usize;
     let mut removed_lines = 0usize;
+    let mut stale_clean = 0usize;
+    let mut stale_clean_sample: Vec<String> = Vec::new();
 
     for page in survey_page_projections(ws, root, log_damaged) {
         let path = page.path;
@@ -295,11 +330,25 @@ pub(super) fn check_projections(
                 // `--repair` printing `708 fixed` after the fact is exactly
                 // how 1,426 lines went unnoticed (RFC 0210).
                 removed_lines += lines_removed;
-                b.warn(format!(
-                    "{}: `.md` is a stale projection — the op log renders different content \
-                     (re-projecting removes {lines_removed} content line(s) from disk)",
-                    path.display()
-                ));
+                if lines_removed > 0 {
+                    // Named individually, always, however many there are.
+                    // This is the page where the user has something to
+                    // decide, and a count cannot carry that. The pages
+                    // that remove nothing are counted instead, and the
+                    // asymmetry is the design: a count is enough when
+                    // there is nothing to decide, and never enough when
+                    // there is.
+                    b.warn(format!(
+                        "{}: `.md` is a stale projection — the op log renders different content \
+                         (re-projecting removes {lines_removed} content line(s) from disk)",
+                        path.display()
+                    ));
+                } else {
+                    stale_clean += 1;
+                    if stale_clean_sample.len() < STALE_SAMPLE {
+                        stale_clean_sample.push(path.display().to_string());
+                    }
+                }
                 plan.reproject.push(PageWrite {
                     page_root: page.page_root,
                     path,
@@ -314,6 +363,30 @@ pub(super) fn check_projections(
             "{ahead} page(s) hold {ahead_lines} line(s) of content that reached the `.md` but \
              never the op log — they do not sync to other devices, and `--repair` leaves them \
              alone. `outl reconcile --ahead-of-log` is what brings them into the log"
+        ));
+    }
+
+    if stale_clean > 0 {
+        // One line for the whole set, because every page in it carries the
+        // same verdict and the same action, and 840 copies of one sentence
+        // is how a report with two real findings reads as a broken
+        // workspace ([#286](https://github.com/outlmd/outl/issues/286)).
+        // Measured on a 2,865-page workspace: 908 warnings, 840 of them
+        // this exact sentence with a different path.
+        //
+        // A stale page is in `plan.reproject` by construction, so
+        // `repairable` carries every path and `--json` prints all of them.
+        // **The human listing does not**: `print.rs` caps it at `LIST_CAP`,
+        // so from the 21st page on, this one line plus `sample_suffix` is
+        // the whole human-readable account of that page. That is what the
+        // `(and N more; \`--json\` lists every one)` tail exists to say, and
+        // it is why "repairable names them anyway" is not an argument for
+        // widening this grouping — check that cap before you do.
+        b.warn(format!(
+            "{stale_clean} page(s) hold a stale `.md` projection that re-projects without \
+             removing anything — usually a property reordered or whitespace normalised. \
+             `outl doctor --repair` rewrites them{}",
+            sample_suffix(&stale_clean_sample, stale_clean)
         ));
     }
 

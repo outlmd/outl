@@ -151,6 +151,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
+            ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
             blocks: 0,
@@ -158,6 +159,10 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: state.hlc.actor().to_string(),
             storage_root,
             ready: false,
+            // No workspace, so nothing was withheld: zero is the whole
+            // count. Labelling it partial would hedge about a number that
+            // is exact.
+            ops_complete: true,
         },
     }
 }
