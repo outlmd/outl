@@ -135,3 +135,35 @@ fn siblings_share_the_same_ancestor_prefix() {
     assert_eq!(crumbs_of(&mut w, &hlc, &a.to_string()), branch);
     assert_eq!(crumbs_of(&mut w, &hlc, &b.to_string()), branch);
 }
+
+#[test]
+fn alias_mention_lands_in_the_pages_backlinks() {
+    // `alias:: Big Apple, NYC` on the New York page: a block holding
+    // `[[NYC]]` must surface under that page's backlinks, not only
+    // under the title spelling (issue #302). `keys_for_page` emits the
+    // alias as a Ref and a slug Tag exactly like the title.
+    let (mut w, hlc) = ws();
+    let page = open_or_create(&mut w, &hlc, "new-york", "New York", PageKind::Page).unwrap();
+    outl_actions::page::set_property(
+        &mut w,
+        &hlc,
+        page,
+        outl_actions::page::ALIAS_KEY,
+        Some(outl_core::property::PropValue::Text(
+            "Big Apple, NYC".into(),
+        )),
+    )
+    .unwrap();
+    let other = open_or_create(&mut w, &hlc, "notes", "Notes", PageKind::Page).unwrap();
+    let _ = append_block(
+        &mut w,
+        &hlc,
+        Some(other),
+        Some("see [[NYC]] and [[Big Apple]]"),
+    );
+
+    let meta = page_meta(&w, page).unwrap();
+    let bl = backlinks_for_page(&w, root(), &meta);
+    assert_eq!(bl.len(), 1, "one block mentions both aliases");
+    assert!(bl[0].source_block.text.contains("[[NYC]]"));
+}

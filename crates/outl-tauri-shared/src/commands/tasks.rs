@@ -141,6 +141,7 @@ mod tests {
                 is_journal: *is_journal,
                 pinned: false,
                 page_type: None,
+                aliases: Vec::new(),
             });
         }
         idx

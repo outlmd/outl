@@ -14,6 +14,7 @@ fn page(slug: &str, title: &str, kind: PageKind) -> PageMeta {
         icon: None,
         pinned: false,
         page_type: None,
+        aliases: Vec::new(),
     }
 }
 

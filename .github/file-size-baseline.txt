@@ -39,9 +39,9 @@
 #
 # None of these arguments generalises. A further raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
-980 crates/outl-actions/src/page.rs
+990 crates/outl-actions/src/page.rs
 683 crates/outl-actions/src/sync.rs
-678 crates/outl-actions/tests/ref_extraction_divergence.rs
+679 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 626 crates/outl-cli/src/cmd/page.rs
 754 crates/outl-core/src/storage/jsonl/read.rs
@@ -52,7 +52,7 @@
 942 crates/outl-desktop/src/components/OutlineView.tsx
 1038 crates/outl-desktop/src/lib/action-handlers.ts
 872 crates/outl-frontend-shared/src/api/commands.ts
-672 crates/outl-frontend-shared/src/api/types.ts
+674 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
@@ -70,7 +70,7 @@
 821 crates/outl-sync-iroh/tests/chaos.rs
 956 crates/outl-sync-iroh/tests/integration.rs
 1210 crates/outl-sync-iroh/tests/regression.rs
-738 crates/outl-tui/src/actions/autocomplete.rs
+741 crates/outl-tui/src/actions/autocomplete.rs
 924 crates/outl-tui/src/actions/overlay.rs
 985 crates/outl-tui/src/actions/plugins.rs
 620 crates/outl-tui/src/actions/properties.rs

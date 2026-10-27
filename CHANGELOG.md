@@ -53,6 +53,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `crates/outl-desktop/src-tauri/dmg/background.svg` is the source and carries that reasoning; the PNG beside it is what the bundler consumes.
   The non-obvious half is that `tauri-bundler` skips the AppleScript applying any of this whenever `CI == "true"`, silently, so the release workflow opts back in and falls back to one stock-window retry if the Finder refuses the Apple Events permission that script needs.
   A background image is not allowed to hold back a `required` asset.
+- **`alias::` — a page answers to short or alternative names.**
+  A page had exactly one human name: its `title::`. Long titles make dense refs — `[[São Paulo]]` typed next to `[[SP]]` from the other half of a vault is two names for one page, and outl only recognised the long one ([#302](https://github.com/outlmd/outl/issues/302)).
+  A page property `alias:: Big Apple, NYC` now lists extra names, comma-separated. Every resolution surface matches them beside the title: `[[NYC]]` opens the New York page, `#nyc` and `@NYC` land there too, its backlinks collect all three spellings, and autocomplete finds it from any of them. The aliases ride the title's paths — one case-insensitive comparison in the resolver ladder, one `title → slug` map in the workspace index — so no client changes anything to benefit (RFC 0107).
+  `outl doctor` reports alias names claimed by more than one page, so the shared spelling is visible instead of silently resolving to whichever match comes first.
 
 ### Fixed
 

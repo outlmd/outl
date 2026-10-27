@@ -132,6 +132,7 @@ UI-agnostic; both TUI and mobile consume them.
 | Reverse refs to a block / iterate / search | `WorkspaceIndex::block_refs_to` / `iter_blocks` / `search_block_text` / `block_count` / `block_index` (borrow the inner `BlockIndex`) | `crates/outl-md/src/index.rs` |
 | Stand-alone block-level index (when you don't need the page facade) | `outl_md::BlockIndex` + `BlockEntry` + `BlockReference` | `crates/outl-md/src/block_index/` |
 | `PageEntry` DTO returned by `WorkspaceIndex` lookups | `outl_md::PageEntry` | `crates/outl-md/src/index.rs` |
+| Split a comma-separated page-property value (`alias::`, and the template `params::` list) into trimmed, non-empty entries — never hand-roll a second comma splitter | `outl_md::parse_alias_list` | `crates/outl-md/src/index.rs` |
 
 ---
 

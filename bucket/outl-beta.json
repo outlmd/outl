@@ -9,18 +9,18 @@
     "need bumping; `scripts/check-release-assets.py` holds the architecture",
     "blocks against the release build matrix."
   ],
-  "version": "0.13.0-beta.270",
+  "version": "0.13.0-beta.273",
   "description": "Local-first outliner with CRDT sync: TUI, CLI and MCP server (beta channel, rebuilt on every push to main)",
   "homepage": "https://outl.app",
   "license": "MIT",
   "architecture": {
     "64bit": {
       "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-x64.zip",
-      "hash": "5f7e6561cd3c12f848ad4d4eabd615ee48afb8928580511f942532925846d670"
+      "hash": "8824d7943c8985350068c4ef026cd79862867b5700c7cbd10cfaa3cac7e3a231"
     },
     "arm64": {
       "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-arm64.zip",
-      "hash": "ef33ac915388ec63e015a790279a9d9f04152ec760bcf94f4bdc6c89d2f731f3"
+      "hash": "42733e6b1d04042313dd5905564c86186f97ff68f699b694df4ba6755c38815c"
     }
   },
   "bin": "outl.exe",

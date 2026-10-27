@@ -89,6 +89,7 @@ mod tests {
                 icon: None,
                 pinned: false,
                 page_type: None,
+                aliases: Vec::new(),
             }),
             source_block: OutlineNode {
                 id: block_id.to_string(),

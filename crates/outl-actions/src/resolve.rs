@@ -103,9 +103,10 @@ pub fn open_or_create_by_ref(
 /// 2. **Slugified match → existing page**. So `avelino/outl` finds
 ///    the page stored as `avelino-outl` even when the user typed the
 ///    ref before the page existed.
-/// 3. **Case-insensitive title match → existing page**. So
+/// 3. **Case-insensitive title or alias match → existing page**. So
 ///    `Thiago Avelino` matches a pre-existing page whose user-typed
-///    title was `Thiago Avelino` even before the slug got computed.
+///    title was `Thiago Avelino` even before the slug got computed,
+///    and an `alias::` name resolves like the title.
 /// 4. **Create via [`open_or_create_by_name`]** with the typed string
 ///    as the title (slugified internally, [`PageKind::Page`]).
 ///
@@ -147,10 +148,21 @@ pub(crate) fn resolve_or_create_by_name(
     // (see `open_with::import_into`). Fixing it here needs a cheap
     // title index first, not a reordering.
     let lower = name.to_lowercase();
-    if let Some(existing) = list_all(workspace)
-        .into_iter()
+    // Titles win over aliases: a page whose `title::` is `Foo` must keep
+    // `[[Foo]]` even when another page claims `alias:: Foo`. One pass in
+    // slug order would let the alias page steal the ref, breaking links
+    // that resolve today. So materialize the list once, match titles
+    // first, then fall back to aliases only if no title claimed the name.
+    let pages = list_all(workspace);
+    let existing = pages
+        .iter()
         .find(|p| p.title.to_lowercase() == lower)
-    {
+        .or_else(|| {
+            pages
+                .iter()
+                .find(|p| p.aliases.iter().any(|a| a.to_lowercase() == lower))
+        });
+    if let Some(existing) = existing {
         use std::str::FromStr;
         if let Ok(id) = ulid::Ulid::from_str(&existing.id) {
             return Ok(NodeId(id));
@@ -286,6 +298,51 @@ mod tests {
         // same node (idempotent on the slugified form, not the raw input).
         let second = open_or_create_by_name(&mut w, &hlc, "avelino/outl", PageKind::Page).unwrap();
         assert_eq!(id, second);
+    }
+
+    #[test]
+    fn open_or_create_by_ref_matches_alias_case_insensitively() {
+        // `alias:: Big Apple, NYC` on the New York page: a typed
+        // `[[NYC]]` must reach that page instead of minting a second
+        // one titled "NYC" — the whole point of the property (issue
+        // #302). Comparison rides the title's case-insensitive arm.
+        let (mut w, hlc) = ws();
+        let created = open_or_create_by_name(&mut w, &hlc, "New York", PageKind::Page).unwrap();
+        crate::page::set_property(
+            &mut w,
+            &hlc,
+            created,
+            crate::page::ALIAS_KEY,
+            Some(outl_core::property::PropValue::Text(
+                "Big Apple, NYC".into(),
+            )),
+        )
+        .unwrap();
+        let resolved = open_or_create_by_ref(&mut w, &hlc, "NYC").unwrap();
+        assert_eq!(created, resolved);
+    }
+
+    #[test]
+    fn alias_does_not_steal_a_ref_from_a_page_titled_the_same() {
+        // Review regression: a page whose `title::` is `NYC` must keep
+        // `[[NYC]]` even when another page claims `alias:: NYC`. One
+        // pass in slug order let the alias page steal the ref. The
+        // two-pass match (titles first) keeps the title page winning.
+        let (mut w, hlc) = ws();
+        let titled = open_or_create_by_name(&mut w, &hlc, "NYC", PageKind::Page).unwrap();
+        let aliaser = open_or_create_by_name(&mut w, &hlc, "Big Apple", PageKind::Page).unwrap();
+        crate::page::set_property(
+            &mut w,
+            &hlc,
+            aliaser,
+            crate::page::ALIAS_KEY,
+            Some(outl_core::property::PropValue::Text("NYC".into())),
+        )
+        .unwrap();
+        // The title page wins the ref, not the alias claimant.
+        let resolved = open_or_create_by_ref(&mut w, &hlc, "NYC").unwrap();
+        assert_eq!(resolved, titled);
+        assert_ne!(resolved, aliaser);
     }
 
     // Person-typed resolution (`@` mentions, `type:: person` marking)

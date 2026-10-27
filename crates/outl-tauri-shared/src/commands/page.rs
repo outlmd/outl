@@ -70,13 +70,15 @@ pub fn browse_order(mut pages: Vec<PageMeta>) -> Vec<PageMeta> {
 }
 
 /// Filter known pages by a case-insensitive substring match against
-/// title + slug. Powers the quick switcher and the `[[…]]` ref
-/// suggester.
+/// title + slug + every `alias::` name. Powers the quick switcher and
+/// the `[[…]]` ref suggester.
 ///
-/// Ranking, weakest filter to strongest: title or slug
-/// `starts_with(query)` outranks an interior match; exact equality
-/// (case-insensitive) ranks above prefix. Capped at 25 so the floating
-/// list stays cheap to render. An empty query is [`browse_order`].
+/// Ranking, weakest filter to strongest: a `starts_with(query)` on any
+/// of those names outranks an interior match; exact equality
+/// (case-insensitive) ranks above prefix. A page scores its best name,
+/// so an alias match never ranks a page lower than its title would.
+/// Capped at 25 so the floating list stays cheap to render. An empty
+/// query is [`browse_order`].
 pub fn search_pages<S: AppHost>(state: &S, query: String) -> Result<Vec<PageMeta>, String> {
     with_ws(state, |ws| {
         let q = query.trim().to_lowercase();
@@ -89,15 +91,24 @@ pub fn search_pages<S: AppHost>(state: &S, query: String) -> Result<Vec<PageMeta
             .filter_map(|p| {
                 let title = p.title.to_lowercase();
                 let slug = p.slug.to_lowercase();
-                let score = if title == q || slug == q {
-                    0
-                } else if title.starts_with(&q) || slug.starts_with(&q) {
-                    1
-                } else if title.contains(&q) || slug.contains(&q) {
-                    2
-                } else {
+                let names = std::iter::once(title)
+                    .chain(std::iter::once(slug))
+                    .chain(p.aliases.iter().map(|a| a.to_lowercase()));
+                let score = names.fold(3u8, |best, n| {
+                    let s = if n == q {
+                        0
+                    } else if n.starts_with(&q) {
+                        1
+                    } else if n.contains(&q) {
+                        2
+                    } else {
+                        3
+                    };
+                    best.min(s)
+                });
+                if score == 3 {
                     return None;
-                };
+                }
                 Some((score, p))
             })
             .collect();
