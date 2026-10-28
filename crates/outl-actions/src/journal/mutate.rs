@@ -24,13 +24,24 @@ use crate::page::PageMeta;
 /// Apply a pure-AST mutation to a page's `.md`, then rewrite both the
 /// `.md` and its sidecar.
 ///
-/// **This is the path mobile mutations should take.** The workspace
-/// op log isn't on the hot edit path here — we read the `.md` as the
-/// source of truth, mutate the parsed AST, render it back, and rebuild
-/// the sidecar by content-hash-matching the new blocks against the
-/// previous sidecar so unchanged blocks keep their `NodeId`. Anything
-/// the closure inserts gets a fresh ULID. Peers reading the resulting
-/// `.md` + `.outl` see consistent ids.
+/// **This path bypasses the op log**, which no other action here does.
+/// Root `CLAUDE.md` invariant 1 makes the log the source of truth, so a
+/// mutation that lands only here exists on this disk and nowhere else:
+/// it reaches no other device, and `outl recover` cannot bring it back,
+/// because there is no op to recover. **Embedders writing a page want
+/// [`crate::commit_page`]**, which routes the change through the log and
+/// then projects it.
+///
+/// It stays public because this crate is published and removing a `pub
+/// fn` is a breaking change, not because it is a supported write path.
+/// No caller in this repo uses it outside tests.
+///
+/// What it does: read the `.md` as the source of truth, mutate the
+/// parsed AST, render it back, and rebuild the sidecar by
+/// content-hash-matching the new blocks against the previous sidecar so
+/// unchanged blocks keep their `NodeId`. Anything the closure inserts
+/// gets a fresh ULID. Peers reading the resulting `.md` + `.outl` see
+/// consistent ids.
 ///
 /// The closure receives a map `NodeId -> block_path` derived from the
 /// sidecar so callers can translate the ids the frontend passes in

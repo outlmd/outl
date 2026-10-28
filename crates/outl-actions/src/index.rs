@@ -99,7 +99,7 @@ use crate::backlinks_index::build_children_index;
 use crate::journal::page_md_path;
 use crate::outline::ChildrenIndex;
 use crate::page::{canonical_root_for_slug, page_meta, PageKind, PageMeta};
-use crate::tree::renderable_prop_value;
+use crate::tree::{renderable_prop_value, sort_in_presentation_order};
 
 /// `node → its renderable properties`, built in one scan.
 ///
@@ -132,7 +132,7 @@ fn build_properties_index(workspace: &Workspace) -> PropertiesIndex {
             .push((key.to_string(), text));
     }
     for props in grouped.values_mut() {
-        props.sort_by(|a, b| a.0.cmp(&b.0));
+        sort_in_presentation_order(props);
     }
     grouped
 }
@@ -226,8 +226,8 @@ fn canonical_pages(workspace: &Workspace, children: &ChildrenIndex) -> Vec<(Node
 
 /// Translate a [`PageMeta`] into the index's [`PageEntry`].
 ///
-/// The two structs describe the same four page-level facts (title,
-/// icon, pinned, type) because one was written against the tree and
+/// The two structs describe the same page-level facts (title, icon,
+/// pinned, type, alias) because one was written against the tree and
 /// the other against the `.md`. This function is the seam where that
 /// duplication is paid off; collapsing them into one type is tracked
 /// separately so this change stays reviewable.
@@ -240,6 +240,7 @@ fn page_entry(meta: &PageMeta, path: &Path) -> PageEntry {
         is_journal: matches!(meta.kind, PageKind::Journal),
         pinned: meta.pinned,
         page_type: meta.page_type.clone(),
+        aliases: meta.aliases.clone(),
     }
 }
 

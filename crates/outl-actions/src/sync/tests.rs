@@ -322,3 +322,24 @@ fn a_reload_lifts_the_clock_above_a_peer_op_stamped_ahead_of_our_wall_clock() {
          window back over every newer entry"
     );
 }
+
+/// The polling thread owns the `Sender` it was handed, so dropping the
+/// Receiver does not end it: `send` only fails once a peer file changes,
+/// and on a quiet workspace that never happens. `shutdown` was a no-op,
+/// so every workspace re-open left another two-second poller running for
+/// the life of the process.
+#[test]
+fn shutdown_stops_the_polling_thread() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let transport = FileSyncTransport::default();
+    transport.start(dir.path().to_path_buf(), outl_core::id::ActorId::new(), tx);
+
+    transport.shutdown();
+    drop(rx);
+
+    assert!(
+        transport.stop.load(std::sync::atomic::Ordering::Relaxed),
+        "shutdown must raise the flag the thread watches"
+    );
+}

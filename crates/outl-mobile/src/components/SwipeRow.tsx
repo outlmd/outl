@@ -90,8 +90,18 @@ export function SwipeRow(props: SwipeRowProps): JSX.Element {
 
   return (
     <div class="relative overflow-hidden">
+      {/* `inset-y-px`, not `inset-y-0`. A row lands on a fractional y
+          (162.4 and 223.4 are real values off a journal page), and a
+          background is rasterised per element, so this panel and the
+          opaque row that covers it rounded to different device pixels:
+          a 1px line of red ran along the top and bottom of every row's
+          right 96px, at rest, on every block in the outline. Inset by a
+          point, the panel is strictly inside whatever the cover rounds
+          to, so no rounding can expose it. Painting the colour on the
+          clipping parent instead does NOT fix this — it only widens the
+          same leak to the full row. */}
       <div
-        class="absolute inset-y-0 right-0 flex items-center justify-end bg-(--color-outl-destructive) px-5 text-[15px] font-semibold text-(--color-outl-destructive-fg)"
+        class="absolute inset-y-px right-0 flex items-center justify-end bg-(--color-outl-destructive) px-5 text-[15px] font-semibold text-(--color-outl-destructive-fg)"
         style={{ width: `${threshold()}px` }}
       >
         {props.leftActionLabel ?? "Delete"}

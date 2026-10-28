@@ -29,6 +29,8 @@
 //! - `state` — `AppState`, wire types (`PageView`, `WorkspaceSummary`).
 //! - `helpers` — argument parsers, workspace-lock acquisition,
 //!   `finish_in_page` (the mutation funnel).
+//! - `webview_boot` — Windows WebView2 check before setup. A missing
+//!   runtime is a message and an exit, not a panic.
 //! - `open_with` — the OS "Open With → outl" gesture (macOS
 //!   `RunEvent::Opened`, `argv` elsewhere) turned into one import.
 //! - `workspace_open` — open / reconcile / boot opener primitives.
@@ -39,11 +41,13 @@ mod commands;
 mod fs_watcher;
 mod helpers;
 mod iroh_sync;
+mod log_target;
 mod open_with;
 mod plugin_service;
 mod quick_capture;
 mod settings;
 mod state;
+mod webview_boot;
 mod workspace_open;
 
 use std::path::PathBuf;
@@ -144,9 +148,37 @@ fn dispatch_deep_link(app: &tauri::AppHandle, raw: &str) {
     }
 }
 
+/// Repeat Rust's `SIG_IGN` for `SIGPIPE` so a library cannot restore the
+/// default and kill a GUI on the next write to a closed pipe.
+#[cfg(unix)]
+fn ignore_sigpipe() {
+    // SAFETY: `signal` is async-signal-safe. `SIG_IGN` is a valid disposition
+    // and does not run user code. The return value is the previous disposition;
+    // `SIG_ERR` is the only failure, and leaving the runtime's existing
+    // `SIG_IGN` in place is the outcome we already wanted.
+    unsafe {
+        let _ = libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+}
+
+#[cfg(not(unix))]
+fn ignore_sigpipe() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Crash reporting (RFC 0377) goes up FIRST, before the subscriber and
+    // Before anything that writes. Rust already ignores SIGPIPE; a library
+    // that restores the default disposition would turn the next write to a
+    // closed pipe into a kill, which a GUI launched with no terminal hits
+    // the moment its log pipe goes away. The write path still has to tolerate
+    // EPIPE — that is `outl_telemetry::lossy_stderr`, below.
+    ignore_sigpipe();
+
+    // Windows only, before the crash reporter. A failed `webview_version()`
+    // is the setup panic; here it is a message and an exit.
+    #[cfg(windows)]
+    webview_boot::exit_if_runtime_missing(tauri::webview_version().map_err(|err| err.to_string()));
+
+    // Crash reporting (RFC 0377) goes up next, before the subscriber and
     // before the crypto provider, because the crashes worth the most are the
     // ones during boot — the Android app that closed on open is what motivated
     // this, and a reporter installed after the failing call reports nothing.
@@ -178,7 +210,13 @@ pub fn run() {
                 tracing_subscriber::EnvFilter::new("info,outl_sync_iroh=debug,iroh=info")
             }),
         )
-        .with_writer(std::io::stderr)
+        // `std::io::stderr` plus the fmt layer's default `log_internal_errors`
+        // panics when the pipe is closed: the layer reports the failed write
+        // with `eprintln!`, and that macro turns EPIPE into
+        // `failed printing to stderr`. A desktop with no terminal hits this
+        // on the first log line.
+        .with_writer(outl_telemetry::lossy_stderr)
+        .log_internal_errors(false)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 
@@ -215,8 +253,9 @@ pub fn run() {
         }))
         // Unified logging (React-Native-style): the frontend logs via
         // `@tauri-apps/plugin-log` + `attachConsole()`, and everything lands on
-        // three targets — Stdout (the terminal running `cargo tauri dev`), the
-        // Webview console, and a rotating file in the OS log dir
+        // three targets — stdout (the terminal running `cargo tauri dev`; a
+        // closed pipe is ignored, see `log_target`), the Webview console,
+        // and a rotating file in the OS log dir
         // (`~/Library/Logs/<bundle>/` on macOS, `%APPDATA%/<bundle>/` on
         // Windows, `~/.config/<bundle>/` on Linux). This owns the `log` crate
         // slot (see the tracing note above); our own `tracing::` events still go
@@ -225,7 +264,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    log_target::stdout_target(),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                         file_name: None,

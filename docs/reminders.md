@@ -124,7 +124,7 @@ The OS asks for notification permission on the first actual fire, not when you f
 |---|---|---|---|
 | **TUI** | `g n` overlay | `g r`, `g R` | OSC 9 notification + a toast, while the TUI is open |
 | **Desktop** | `Cmd/Ctrl+Shift+R` panel | `Cmd+R`, `g r` / `g R` in Normal | OS notification while the app runs |
-| **Mobile** | bell icon in the header | long-press a block → *Remind me…* | iOS notification while the app runs |
+| **Mobile** | Reminders tab in the bottom bar | long-press a block → *Remind me…* | iOS notification while the app runs |
 
 Editing a rule after you write it: click (desktop) or tap (mobile) the `⏰` chip under the block, or `:prop remind <rule>` in the TUI.
 An empty value clears the rule, which is how you stop a block nagging without deleting it.
@@ -191,6 +191,10 @@ The schedule math is never here — see [For contributors](#for-contributors) be
 Grouping labels and the "in 3h" column come from `@outl/shared` (`groupReminders` / `formatNextFire`) — the same functions the mobile sheet uses — and the instants behind them come from `outl_actions::reminders` in Rust.
 **Nothing about when a reminder fires is computed in the frontend.**
 
+A row is a button that opens the reminder's page, and on the desktop also selects the block.
+A block with no text of its own (`remind:: 3pm` on an empty bullet, or a bare `TODO`) keeps that button, labelled with `EMPTY_REMINDER_NOTICE` from `@outl/shared/reminders` instead of a title, so both clients say the same sentence and the row still takes you to the blank bullet.
+A deleted block never gets here: the scan drops anything with no enclosing page.
+
 Delivery is driven from `<AppShell />`, on the poll cadence declared in [Background delivery](#background-delivery--what-ships-today); it calls `deliver_due_reminders` and turns the shared "what's due" answer into an OS banner via `tauri-plugin-notification`.
 The Rust side keeps the device-local fired log, so polling twice never double-buzzes and a laptop that was asleep owes one banner, not a backlog.
 `[reminders] enabled` (Settings modal) defaults to **on**: `remind::` on a block is already the opt-in, and a device with no rules never fires, so defaulting off only bought the user a rule that silently did nothing.
@@ -200,7 +204,7 @@ macOS asks for permission on the first actual fire.
 
 ### Mobile (`outl-mobile`)
 
-The header bell opens `<RemindersSheet />` — every block with a `remind::`, grouped Today / Tomorrow / This week / Later / Done, with 1h / Tomorrow / Next week snooze chips per row.
+The bottom bar's Reminders tab opens `<RemindersSheet />` — every block with a `remind::`, grouped Today / Tomorrow / This week / Later / Done, with 1h / Tomorrow / Next week snooze chips per row.
 Long-pressing a block offers **Remind me…**, which prompts for the rule in its own syntax and writes it via `set_block_remind`.
 A prompt rather than a native time picker on purpose: the rule language is richer than a clock (`3pm every 1h until DONE`), and a picker that can only express the anchor would quietly hide the repeat.
 The picker is a follow-up, not a substitute.

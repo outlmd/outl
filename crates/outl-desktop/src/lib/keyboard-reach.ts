@@ -11,6 +11,8 @@
  * Text fields are skipped on purpose: arrows there move the caret.
  */
 
+import { createEffect, type Resource } from "solid-js";
+
 const FOCUSABLE =
   'button:not([disabled]), a[href], [role="button"]:not([aria-disabled="true"]), [tabindex]:not([tabindex="-1"]), input, select, textarea';
 
@@ -57,6 +59,73 @@ export function rovingKeydown(
   else to = (at + (e.key === next ? 1 : -1) + items.length) % items.length;
   e.preventDefault();
   items[to].focus();
+}
+
+/**
+ * Land focus on a list's first row once per open, when the rows arrive.
+ *
+ * {@link rovingKeydown} only moves focus that is already inside the
+ * list, so something has to put it there first. Two rules make that
+ * subtle enough to own in one place, both learned from the panels that
+ * call this:
+ *
+ * - **Once per open, not once per fetch.** Every mutation in a panel
+ *   refetches, and a rule keyed on the data throws the user back to the
+ *   top each time.
+ * - **Not while loading.** On a reopen the resource still holds the
+ *   previous open's rows until the fresh fetch lands, and focus landed
+ *   on one of those is lost the moment they are replaced.
+ *
+ * Call it from the component body: it owns a `createEffect`, so it needs
+ * a Solid owner. The row is resolved inside a microtask, after render.
+ */
+export function focusFirstRowOnOpen<T>(
+  open: () => boolean,
+  rows: Resource<T>,
+  list: () => HTMLElement | undefined,
+  rowSelector: string,
+): void {
+  let focused = false;
+  createEffect(() => {
+    if (!open()) focused = false;
+    else if (!focused && !rows.loading && rows()) {
+      focused = true;
+      queueMicrotask(() => list()?.querySelector<HTMLElement>(rowSelector)?.focus());
+    }
+  });
+}
+
+/**
+ * Keep the keyboard cursor on screen.
+ *
+ * `j` / `k` moved the selection and nothing moved the page with it, so
+ * the cursor walked off the bottom and kept going: on an 80-row page,
+ * 60 presses left the view still showing row 1 with the selection
+ * ~55 rows below the fold. Pressing `j` then looks like it does
+ * nothing, which reads as "navigation is skipping". vim scrolls its
+ * buffer for exactly this reason. `zz` (`CenterViewport`) was the only
+ * way back, and a key has to be known about before it can be pressed.
+ *
+ * `block: "nearest"` is deliberate: centring on every keypress makes
+ * the page lurch under someone stepping one row at a time, and nearest
+ * does nothing at all while the row is already visible — so this is
+ * inert for the common case and only acts at the edges.
+ *
+ * Keyed on the id rather than wired into the two movement handlers, so
+ * every path that moves the cursor inherits it: `g g`, `G`, a search
+ * hit, a jump out of a panel.
+ */
+export function followSelection(selected: () => string | null): void {
+  createEffect(() => {
+    const id = selected();
+    if (!id) return;
+    // The row may be rendering in this same tick.
+    queueMicrotask(() => {
+      document
+        .querySelector<HTMLElement>(`[data-block-id="${id}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  });
 }
 
 function regions(): HTMLElement[] {

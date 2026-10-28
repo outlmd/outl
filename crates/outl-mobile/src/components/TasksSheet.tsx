@@ -1,16 +1,21 @@
 import { For, Show, createMemo, createResource } from "solid-js";
 import { listOpenTasks, type TaskHit } from "@outl/shared/api/overview";
 import { journalHeading } from "@outl/shared/journal";
+import { groupTasksByPage } from "@outl/shared/tasks";
 
 import { createSheetDrag } from "../lib/sheet-drag";
 
 /**
- * Every open task in the workspace, grouped by the page it lives on.
+ * The workspace's open tasks, grouped by the page they live on — the
+ * first 200, with the uncapped total in the header ("200 of 1431
+ * open").
  *
  * The list is the backend's (`list_open_tasks`), so what counts as a
- * task here is what draws a checkbox everywhere else. Tapping a row
- * opens its page zoomed into that block; checking it off happens
- * there, on the row itself, where the context is.
+ * task here is what draws a checkbox everywhere else, and the
+ * sectioning is `groupTasksByPage` (`@outl/shared/tasks`), shared with
+ * the desktop panel. Tapping a row opens its page zoomed into that
+ * block; checking it off happens there, on the row itself, where the
+ * context is.
  */
 export function TasksSheet(props: {
   open: boolean;
@@ -22,15 +27,7 @@ export function TasksSheet(props: {
     () => props.open || null,
     () => listOpenTasks().catch(() => ({ total: 0, tasks: [] as TaskHit[] })),
   );
-  const groups = createMemo(() => {
-    const out: { slug: string; tasks: TaskHit[] }[] = [];
-    for (const t of data()?.tasks ?? []) {
-      const last = out[out.length - 1];
-      if (last?.slug === t.source_slug) last.tasks.push(t);
-      else out.push({ slug: t.source_slug, tasks: [t] });
-    }
-    return out;
-  });
+  const groups = createMemo(() => groupTasksByPage(data()?.tasks ?? []));
   const label = (slug: string) => {
     const h = journalHeading(slug, props.todaySlug);
     return h ? `${h.title}, ${h.date}` : slug;

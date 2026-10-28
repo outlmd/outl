@@ -182,8 +182,14 @@ export function SettingsSheet(props: {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex flex-col"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex max-h-dvh flex-col"
         style={{
+          // Bottom-anchored with no ceiling, this card is a fixed stack
+          // of eleven rows: on a short phone, or at a larger text size,
+          // the top of it — Sync, Devices, and the drag handle with them
+          // — grows off the screen, leaving no way to scroll back to it.
+          // Same shape as the long-press menu had.
+          "padding-top": "max(env(safe-area-inset-top), 12px)",
           "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
@@ -192,7 +198,7 @@ export function SettingsSheet(props: {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
+        <div class="mx-3 mb-2 flex min-h-0 flex-col overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -209,6 +215,7 @@ export function SettingsSheet(props: {
             />
           </span>
 
+          <div class="ios-scroll min-h-0 flex-1 overflow-y-auto">
           <div class="px-4 pb-1 pt-1">
             <span class="text-[13px] font-semibold uppercase tracking-wide text-(--color-outl-fg-dim)">
               Sync
@@ -350,6 +357,7 @@ export function SettingsSheet(props: {
             </span>
             <IosToggle on={reports() === true} />
           </button>
+          </div>
         </div>
 
         <button

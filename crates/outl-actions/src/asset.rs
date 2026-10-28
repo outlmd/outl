@@ -114,10 +114,25 @@ pub fn import_asset(
     } else {
         max_bytes.saturating_add(1)
     };
+    let file = std::fs::File::open(source)?;
+    // Ask the filesystem for the size instead of inferring it from the
+    // capped read below. That read stops at `max_bytes + 1`, so the
+    // length it yields is the cap for *every* oversized file, and an
+    // error whose whole job is "by how much" said "by one byte" for a
+    // four-gigabyte video. A `stat` is not a read: the reason the blob
+    // is never loaded still holds.
+    if max_bytes > 0 {
+        let size = file.metadata()?.len();
+        if size > max_bytes {
+            return Err(ActionError::AssetTooLarge {
+                size,
+                limit: max_bytes,
+            });
+        }
+    }
     let mut bytes = Vec::new();
-    std::fs::File::open(source)?
-        .take(read_limit)
-        .read_to_end(&mut bytes)?;
+    // Still capped: the file can grow between the stat and the read.
+    file.take(read_limit).read_to_end(&mut bytes)?;
 
     let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("");
     let display_name = source
@@ -437,9 +452,19 @@ mod tests {
         let src = tempdir().unwrap();
         let file = write_source(src.path(), "big.bin", &[0u8; 100]);
         let err = import_asset(ws.path(), &file, 10).unwrap_err();
-        // The read stops at the cap, so `size` is `limit + 1` (over), not
-        // the true 100 — we deliberately don't read the whole blob.
-        assert!(matches!(err, ActionError::AssetTooLarge { limit: 10, .. }));
+        // The real size, not the cap: the message exists to say by how
+        // much, and it used to report `limit + 1` for every file however
+        // large. The blob is still never read — this comes from a stat.
+        assert!(
+            matches!(
+                err,
+                ActionError::AssetTooLarge {
+                    size: 100,
+                    limit: 10
+                }
+            ),
+            "{err:?}"
+        );
         // Nothing was copied.
         assert!(
             !assets_dir(ws.path()).exists()

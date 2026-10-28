@@ -51,7 +51,6 @@ function mount(
         onUnfoldAll={noop}
         onRefresh={onRefresh}
         onRunToolbarButton={noop}
-        onOpenReminders={noop}
         onOpenPlugins={noop}
         onOpenDevices={onOpenDevices}
         onOpenSettings={noop}
@@ -101,6 +100,13 @@ describe("JournalChrome title while the first page opens", () => {
     const { host } = mount();
 
     expect(host.querySelector("h1")?.textContent).toBe("");
+  });
+});
+
+describe("JournalChrome reminders", () => {
+  it("has no reminders bell in the header", () => {
+    const { host } = mount();
+    expect(host.querySelector('[aria-label="Reminders"]')).toBeNull();
   });
 });
 

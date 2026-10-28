@@ -8,7 +8,7 @@ use outl_md::parse::{OutlineNode, ParsedPage};
 use outl_md::render::render;
 
 use crate::outline::ChildrenIndex;
-use crate::tree::{is_page_model_key, renderable_prop_value};
+use crate::tree::{is_page_model_key, renderable_prop_value, sort_in_presentation_order};
 
 /// Renderable properties of the nodes in one projection, grouped by the
 /// node carrying them and alpha-sorted per node — exactly the shape a
@@ -89,13 +89,11 @@ fn subtree_properties(workspace: &Workspace, ids: &[NodeId]) -> PropertiesByNode
             .or_default()
             .push((key.to_string(), text));
     }
-    // Alpha-sorted so the rendered `.md` is stable across runs: the
-    // property map is a `HashMap`, whose iteration order is seeded per
-    // process. The renderer doesn't care about order; users reading a
-    // diff do. Keys are unique per node, so there are no ties and the
-    // order is fully determined.
+    // Order comes from `crate::tree::sort_in_presentation_order`, which
+    // owns why it is alphabetical and what the `HashMap`'s per-process
+    // seed costs a reader of the `.md` diff.
     for props in grouped.values_mut() {
-        props.sort_by(|a, b| a.0.cmp(&b.0));
+        sort_in_presentation_order(props);
     }
     grouped
 }

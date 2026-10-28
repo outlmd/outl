@@ -37,13 +37,10 @@ pub const PARAMS_KEY: &str = "params";
 pub const JOURNAL_TEMPLATE_NAME: &str = "journal";
 
 /// Parse a comma-separated `params::` property value into a list of
-/// trimmed, non-empty parameter names.
+/// trimmed, non-empty parameter names. Same shape the `alias::` page
+/// property uses; the splitter lives once in `outl_md`.
 pub(crate) fn parse_param_list(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect()
+    outl_md::parse_alias_list(value)
 }
 
 pub mod call;

@@ -210,7 +210,11 @@ impl ServerCtx {
                         }
                     })
                     .ok();
-                outl_actions::FileSyncTransport.start(wc.root.clone(), wc.actor, tx.clone());
+                outl_actions::FileSyncTransport::default().start(
+                    wc.root.clone(),
+                    wc.actor,
+                    tx.clone(),
+                );
                 state.peer_ready_tx = Some(tx.clone());
                 tx
             }

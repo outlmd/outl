@@ -24,7 +24,7 @@
       "@tauri-apps/plugin-os": "^2.3.2",
       "@types/node": "^26.2.0",
       "@vitest/ui": "^4.1.10",
-      "happy-dom": "^20.11.2",
+      "happy-dom": "^21.0.4",
       "solid-js": "^1.9.14",
       "tailwindcss": "^4.3.3",
       "typescript": "^7.0.2",

@@ -158,9 +158,29 @@ fn dispatch_deep_link(app: &tauri::AppHandle, raw: &str) {
     }
 }
 
+/// Repeat Rust's `SIG_IGN` for `SIGPIPE` so a library cannot restore the
+/// default and kill the process on the next write to a closed pipe.
+#[cfg(unix)]
+fn ignore_sigpipe() {
+    // SAFETY: `signal` is async-signal-safe. `SIG_IGN` is a valid disposition
+    // and does not run user code. `SIG_ERR` is the only failure, and leaving
+    // the runtime's existing `SIG_IGN` in place is the outcome we already wanted.
+    unsafe {
+        let _ = libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+}
+
+#[cfg(not(unix))]
+fn ignore_sigpipe() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Crash reporting (RFC 0377) goes up FIRST, before the subscriber and
+    // Same reason as the desktop: a library that restores SIGPIPE's default
+    // disposition kills the process on the next write to a closed pipe.
+    // `lossy_stderr` is what keeps the write itself from panicking.
+    ignore_sigpipe();
+
+    // Crash reporting (RFC 0377) goes up next, before the subscriber and
     // before the crypto provider, because the crashes worth the most are the
     // ones during boot — the Android app that closed on open is what motivated
     // this, and a reporter installed after the failing call reports nothing.
@@ -192,7 +212,8 @@ pub fn run() {
                 tracing_subscriber::EnvFilter::new("info,outl_sync_iroh=debug,iroh=info")
             }),
         )
-        .with_writer(std::io::stderr)
+        .with_writer(outl_telemetry::lossy_stderr)
+        .log_internal_errors(false)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 

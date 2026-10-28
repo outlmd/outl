@@ -202,7 +202,7 @@ export function PluginSheet(props: {
                   class="w-full rounded-lg bg-(--color-outl-border)/30 px-3 py-2 text-[15px] text-(--color-outl-fg) outline-none"
                 />
               </div>
-              <div class="ios-scroll max-h-[58vh] overflow-y-auto">
+              <div class="ios-scroll max-h-[58vh] min-h-0 flex-1 overflow-y-auto">
                 <For each={filtered()}>
                   {(i) => (
                     <div class="border-t border-(--color-outl-border)/40 px-5 py-3">
@@ -296,7 +296,7 @@ export function PluginSheet(props: {
 
             {/* Commands */}
             <Show when={tab() === "commands"}>
-              <div class="ios-scroll max-h-[62vh] overflow-y-auto">
+              <div class="ios-scroll max-h-[62vh] min-h-0 flex-1 overflow-y-auto">
                 <For each={commands()}>
                   {(cmd) => (
                     <button

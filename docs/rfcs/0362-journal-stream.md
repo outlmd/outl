@@ -9,6 +9,7 @@
 | **Reference doc** | none yet; `UX.md` principle 5 (view state is local) and `crates/outl-desktop/CLAUDE.md` once built |
 | **Invariant** | root `CLAUDE.md` invariant 7 (state that must converge goes through the op log), by staying out of it: everything here is local view state |
 | **Guarded by** | none yet, this is a Draft. The tests the implementation owes are listed under "How it cannot regress" |
+| **Field report** | [hugows on #364](https://github.com/outlmd/outl/issues/364#issuecomment-6199037945), who reads a daily stream in Reflect and reported travelling to the wrong day by accident. Three of the rules under "What we chose" are his |
 
 ## Why
 
@@ -32,6 +33,13 @@ A **journal stream** on the desktop: today, then the previous N days that have c
 
 - **One owner for the stream:** a `JournalStream` component and a `journalStream` slice of the store holding an ordered list of day views, each `{ page, outline }`. `appState.page` stays the *focused* day, so everything that reads it today keeps working.
 - **Focus moves the page.** Selecting or editing a block in a day makes that day the focused page. `Cmd+[` / `Cmd+]` scroll to the neighbouring day instead of replacing the view.
+- **Scrolling never moves focus.**
+  Focus moves on a caret or a click, and on `Cmd+[` / `Cmd+]`, which are explicit.
+  A day drifting into view is not a decision the user made, and treating it as one is what makes a stream lose track of which day it is writing to.
+- **The focused day is named on screen at all times**, never inferred from where the caret happens to be.
+  A cue that only appears once two days are visible is a cue that arrives after the mistake.
+- **The stream is opt-in**, and one day per screen stays the default on every client.
+  A user who never turns it on never meets any of the failure modes below.
 - **Undo stays per day.** `Cmd+Z` undoes on the focused day, because that is what `undo_page` already does and what a user editing yesterday expects. There is no stream-wide undo.
 - **Vim motions stop at a day's edge.** `j` on the last block of today does not jump into yesterday. Crossing days is `Cmd+[` / `Cmd+]`, as now.
 - **Days load lazily.** The stream asks for the next day when the previous one scrolls into view. Empty days are skipped, which needs a backend list of journal slugs with content (a new read-only command, no Op).
@@ -53,7 +61,13 @@ A **journal stream** on the desktop: today, then the previous N days that have c
 What gets worse:
 
 - **Memory and first paint.** Several outlines are mounted instead of one. Days must load lazily and unmount when far off screen, or a long scroll on a big workspace reproduces the boot problems RFC 0128 fixed.
-- **Where the keyboard goes is less obvious.** With one page, every key acted on it. With a stream, a key acts on the focused day, which the user has to see. The focused day needs a visible cue.
+- **Where the keyboard goes is less obvious**, and this is the stream's primary risk, not a polish item.
+  With one page, every key acted on it.
+  With a stream, a key acts on the focused day.
+  hugows, who reads a daily stream in Reflect every day, reports the failure directly: the journal view is "too free", and he travels to the wrong day by accident all the time.
+  That is a field report about this exact design, from someone living in it, which is why the three rules above are requirements and not cues.
+  The phone already answers the same risk and shows what the answer costs: its day swipe is confined to the week strip (`WeekStrip.tsx`), because rows below it swipe sideways for their own actions.
+  The stream owes the desktop an equivalent, and it does not have one yet.
 - **Undo surprises.** Edit today, click into yesterday, press `Cmd+Z`: nothing happens to today. That is correct per day and still surprising. The cue above has to make it legible.
 - **Sync arriving for an unfocused day** has to re-render that day without stealing focus or scroll. Today a peer change refreshes the one page you look at.
 
@@ -70,6 +84,8 @@ Owed by the implementation PR, none exist yet:
    - `vim_j_on_the_last_block_of_a_day_stays_in_that_day`.
    - `a_peer_change_to_an_unfocused_day_keeps_focus_and_scroll`.
    - `days_far_off_screen_unmount`, with a block count bound so memory cannot grow with scroll length.
+   - `scrolling_a_day_into_view_does_not_move_focus`.
+   - `the_stream_is_off_until_turned_on`.
 
 ## Trust you can see
 

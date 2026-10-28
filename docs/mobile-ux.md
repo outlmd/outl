@@ -10,6 +10,21 @@ Platform plumbing has its own homes: [`docs/ios-platform.md`](ios-platform.md), 
 Anything visual — colours, tokens, spacing, components — is specified in [`DESIGN.md`](../DESIGN.md).
 The behaviour rules these sections are instances of — the interaction patterns, the voice a nudge has to pass, which state converges — are in [`UX.md`](../UX.md).
 
+## Bottom bar
+
+Four places and a capture button: Journal, Search, Tasks, Reminders.
+
+- **Journal** jumps to today.
+- **Search** opens the one search box over pages, tasks and blocks (issue #364). There is no separate Pages tab.
+- **Tasks** opens the task list.
+- **Reminders** opens the reminders sheet.
+- **+** in the middle writes to today's journal, wherever you are.
+
+Reminders is a tab because it had only a header glyph and a palette entry, and a glyph is not a name.
+Tapping a tab closes the other sheets.
+The sheets cover the bar, so the lit tab is only visible for Journal.
+The bar hides while a block is edited or a range is selected, because the keyboard toolbar owns that space.
+
 ## Opening a ref that may not exist yet
 
 `[[avelino/outl]]`, `[[2026-06-04]]`, `#code-review`, picker entries — every "tap a ref → see a page" path on the frontend goes through **one** Tauri command, `open_ref(target)`, which wraps `outl_actions::page::open_or_create_by_ref`.
@@ -23,6 +38,18 @@ What used to be wrong: the frontend split the journal-vs-page decision with `/^\
 Every **ref-click** code path on the frontend (`handleRefClick`, `handleTagClick`) must call `openRef` so the decision tree is single-sourced.
 
 `resolve_ref` survives for autocomplete previews ("this ref will land on `<page>`") but is **not** the navigation entry point — for that, always call `openRef`.
+
+## Search sheet — what one box lists, and when it asks the backend
+
+Pages, Tasks, Blocks and Actions in one pass, ordered by `@outl/shared/palette`; a leading `>` narrows to Actions.
+Each section opens at three rows with the rest behind its "N more", **except Pages with an empty query**, which opens at 25.
+With no query that list is the whole graph in slug order rather than a ranking, so three rows showed three pages from whatever sorts first.
+ISO journal days sort last, so a journal-heavy workspace opened on 2019 and nothing recent was reachable without typing.
+25 is the cap the ranked path already uses.
+
+Both backends are debounced at 150 ms off one timer: `search_blocks` rebuilds the workspace index from disk per call, and `search_pages` rebuilds every `PageMeta` under the workspace lock before it scores anything.
+An empty query loads immediately, since there are no keystrokes behind it to coalesce.
+Blocks additionally wait for the query to reach `BLOCK_QUERY_MIN`.
 
 ## Page switcher — long-press to delete
 

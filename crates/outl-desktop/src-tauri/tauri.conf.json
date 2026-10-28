@@ -57,7 +57,24 @@
         "role": "Viewer",
         "rank": "Alternate"
       }
-    ]
+    ],
+    "macOS": {
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 165,
+          "y": 222
+        },
+        "applicationFolderPosition": {
+          "x": 495,
+          "y": 222
+        }
+      }
+    }
   },
   "plugins": {
     "deep-link": {

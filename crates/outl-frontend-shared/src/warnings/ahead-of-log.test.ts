@@ -61,8 +61,12 @@ describe("aheadOfLogNotice", () => {
     expect(caution).not.toMatch(/copy anything you need|will overwrite those/i);
   });
 
-  it("uses the singular for a single line", () => {
-    expect(aheadOfLogNotice({ ...info, lines: 1 }, "desktop").body).toContain("1 line in this file");
+  it("uses the singular for a single line, verb included", () => {
+    // The plural was baked into the sentence, so the one branch that
+    // cannot use it read "1 line in this file were never recorded".
+    const one = aheadOfLogNotice({ ...info, lines: 1 }, "desktop").body;
+    expect(one).toContain("1 line in this file was never recorded");
+    expect(aheadOfLogNotice(info, "desktop").body).toContain("12 lines in this file were");
   });
 
   it("carries the file path so the user can go look at it", () => {

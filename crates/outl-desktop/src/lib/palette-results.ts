@@ -1,41 +1,29 @@
 /**
- * What the Cmd+K / Cmd+P palette lists for a query. Pure, so the
- * ranking is testable without a DOM or a backend.
- *
- * One box finds three kinds of thing, in this order:
- *
- * - **pages**, ranked by the backend's `search_pages` (exact, prefix,
- *   substring), so the palette and `[[` autocomplete agree;
- * - **tasks**, the `search_blocks` hits that carry a task marker
- *   (`TODO`, `DOING`, `DONE`, or a checkbox), read with the same
- *   `taskState` the bullet toggle uses, listed before plain blocks
- *   because "find that todo" is the commonest reason to search;
- * - **blocks**, the rest of the hits, once the query is long enough to
- *   mean something (a single letter matches half the workspace);
- * - **actions**, from the shortcut catalog, each with its chord, so the
- *   palette doubles as the place you learn the keys. Actions with no
- *   chord at all ({@link CHORDLESS_ACTIONS}) are listed by name only.
- *
- * A leading `>` narrows the list to actions, the convention most
- * editors use. That is what `:` and Cmd+K in Normal mode open with.
+ * What the Cmd+K / Cmd+P palette lists for a query. The ranking (pages,
+ * tasks, blocks, actions, and the `>` command prefix) is owned by
+ * `@outl/shared/palette`; this file builds the action rows from the
+ * shortcut catalog, each with its chord, so the palette doubles as the
+ * place you learn the keys. Actions with no chord at all
+ * ({@link CHORDLESS_ACTIONS}) are listed by name only.
  */
-import type { BlockHit } from "@outl/shared/api/commands";
-import type { PageMeta } from "@outl/shared/api/types";
-import { taskState } from "@outl/shared/outline";
+import {
+  BLOCK_QUERY_MIN,
+  COMMAND_PREFIX,
+  paletteResults,
+  sectionOf,
+  type PaletteActionRow,
+  type PaletteItem,
+  type PaletteLimits,
+  type PaletteSection,
+} from "@outl/shared/palette";
 
 import { MOD_META, type Action, type Binding, type Chord } from "./api";
 
-export type PaletteItem =
-  | { kind: "page"; page: PageMeta }
-  | { kind: "block"; hit: BlockHit }
-  | { kind: "task"; hit: BlockHit; state: "todo" | "doing" | "done" }
-  | { kind: "action"; action: Action["kind"]; label: string; chord: Chord[] | null };
-
-export const COMMAND_PREFIX = ">";
-/** Blocks start showing at this many characters. */
-export const BLOCK_QUERY_MIN = 2;
-
-const LIMITS = { pages: 8, tasks: 5, blocks: 6, actions: 5 } as const;
+// The ranking lives in `@outl/shared/palette` so the phone's search sheet
+// lists the same things in the same order. What stays here is the part
+// that needs chords, which the phone has none of.
+export { BLOCK_QUERY_MIN, COMMAND_PREFIX, paletteResults, sectionOf };
+export type { PaletteActionRow, PaletteItem, PaletteLimits, PaletteSection };
 
 /**
  * Actions the palette lists although no chord reaches them: things you
@@ -65,8 +53,8 @@ export function paletteActions(
   bindings: Binding[],
   handled: (kind: Action["kind"]) => boolean,
   mac: boolean = isMac(),
-): Extract<PaletteItem, { kind: "action" }>[] {
-  const seen = new Map<Action["kind"], Extract<PaletteItem, { kind: "action" }>>();
+): PaletteActionRow<Chord>[] {
+  const seen = new Map<Action["kind"], PaletteActionRow<Chord>>();
   const usesMeta = (c: Chord[]) => c.some((k) => (k.mods & MOD_META) !== 0);
   for (const b of bindings) {
     const kind = b.action.kind;
@@ -85,45 +73,6 @@ export function paletteActions(
     }
   }
   return [...seen.values()];
-}
-
-function matches(label: string, q: string): boolean {
-  return label.toLowerCase().includes(q);
-}
-
-export function paletteResults(input: {
-  query: string;
-  pages: PageMeta[];
-  blocks: BlockHit[];
-  actions: Extract<PaletteItem, { kind: "action" }>[];
-}): PaletteItem[] {
-  const raw = input.query.trim();
-  if (raw.startsWith(COMMAND_PREFIX)) {
-    const q = raw.slice(COMMAND_PREFIX.length).trim().toLowerCase();
-    return input.actions.filter((a) => matches(a.label, q));
-  }
-  const q = raw.toLowerCase();
-  const pages: PaletteItem[] = input.pages
-    .slice(0, LIMITS.pages)
-    .map((page) => ({ kind: "page", page }));
-  if (!q) return pages;
-  const tasks: PaletteItem[] = [];
-  const blocks: PaletteItem[] = [];
-  if (q.length >= BLOCK_QUERY_MIN) {
-    for (const hit of input.blocks) {
-      const state = taskState(hit.text);
-      if (state && tasks.length < LIMITS.tasks) tasks.push({ kind: "task", hit, state });
-      else if (!state && blocks.length < LIMITS.blocks) blocks.push({ kind: "block", hit });
-    }
-  }
-  const actions = input.actions.filter((a) => matches(a.label, q)).slice(0, LIMITS.actions);
-  return [...pages, ...tasks, ...blocks, ...actions];
-}
-
-/** Section heading for an item, used to draw a label when it changes. */
-export function sectionOf(item: PaletteItem): string {
-  const names = { page: "Pages", task: "Tasks", block: "Blocks", action: "Actions" } as const;
-  return names[item.kind];
 }
 
 /** Whether the webview runs on macOS, where Cmd is the platform modifier. */

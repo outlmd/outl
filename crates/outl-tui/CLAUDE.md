@@ -283,6 +283,49 @@ Launch only: nothing here watches the folder, so a capture made while the TUI is
 Recorded as `Partial` on the TUI column of `Capability::CaptureOutsideTheApp`.
 The tests at the bottom of that file cover all three: the capture lands *and* its `.md` is written, an all-unreadable inbox still reports, an empty one says nothing.
 
+## A page that stopped syncing
+
+Every page open runs `outl_actions::reproject_stale_md` from
+`load_current_no_autorun`, which does two jobs with one call:
+
+- **refreshes the `.md` from the tree** when a peer's ops outran the
+  projection. The TUI did not do this, so a synced-in block sat in the op
+  log while the page kept rendering the projection from before it arrived
+  (issue #166, fixed in the GUI clients only);
+- **classifies the refusal** that can come back instead. Root
+  `CLAUDE.md` invariant 8 forbids overwriting a `.md` holding content
+  that exists in no op, and that refusal freezes the page in *both*
+  directions until `outl reconcile --ahead-of-log` runs.
+
+The split between "the user must hear this" and "retry later" is
+`outl_actions::ProjectionRefusal`, not a `match` here — the Tauri
+backend asks the same question on its own open path and the two must not
+reach different verdicts.
+
+Four contracts, each of which was the alternative:
+
+- **The notice is persistent.** `App::md_ahead_of_log` drives a banner
+  above the outline (`view/ahead_of_log_banner.rs`), not a status-line
+  message and not a toast. Nothing clears this condition on its own, so
+  a message that scrolls away is the same silence with a delay
+  ([#292](https://github.com/outlmd/outl/issues/292)).
+- **It survives focus mode.** `z f` drops the header, the sidebar, the
+  status bar and the parse-warning banner, because those are chrome.
+  This is not: wanting a distraction-free outline is not consent to be
+  told nothing about a page that is saving nowhere else.
+- **Every word comes from `outl_actions::refusal::ahead_of_log_notice`.**
+  A sentence written here would be the third copy of one the desktop and
+  mobile already share.
+- **The page still opens.** The guard withheld a *write*; the `.md` on
+  disk is readable, so the outline shows exactly what is on disk.
+  Turning the refusal into an error would trade a stale page for no page
+  at all, on the hottest path in the client.
+
+A retryable failure (I/O, permissions, an unreadable sidecar) is a
+`tracing::warn!` and nothing else. The next open or the orphan scanner
+picks it up, and nagging about it trains the user past the banner that
+matters.
+
 ## Persistence model
 
 Editing is **AST-first**: edits mutate an in-memory `ParsedPage`.
@@ -385,6 +428,7 @@ src/
 │   ├── wrap.rs          # width-aware word wrap of styled spans (push_wrapped)
 │   ├── overlays.rs      # every modal popup
 │   ├── properties.rs    # the `g p` property editor popup
+│   ├── ahead_of_log_banner.rs # red banner above the outline when the open page has stopped syncing (invariant 8); the one banner focus mode keeps
 │   ├── warnings_banner.rs # yellow banner above the outline when the current page has ParseWarnings
 │   ├── backlinks.rs     # inline backlinks section (below outline, ─ rule)
 │   └── namespace.rs     # nested-pages section (below backlinks, ─ rule); read-only, no cursor

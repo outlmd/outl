@@ -104,6 +104,7 @@ export function Calendar(props: CalendarProps) {
       <div
         class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150"
         style={{
+          "max-height": "calc(100dvh - max(env(safe-area-inset-top), 12px))",
           "padding-bottom": "env(safe-area-inset-bottom)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
@@ -180,11 +181,11 @@ export function Calendar(props: CalendarProps) {
           </button>
         </div>
 
-        <div class="grid grid-cols-7 px-3 pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dim)">
+        <div class="mx-auto grid w-full max-w-[28rem] grid-cols-7 gap-1 px-3 pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dim)">
           <For each={DAY_LABELS}>{(d) => <div>{d}</div>}</For>
         </div>
 
-        <div class="grid grid-cols-7 gap-1 px-3 pb-5">
+        <div class="ios-scroll mx-auto grid min-h-0 w-full max-w-[28rem] flex-1 grid-cols-7 gap-1 overflow-y-auto px-3 pb-5">
           <For each={days()}>
             {(cell) => {
               if (!cell) return <div class="aspect-square" />;

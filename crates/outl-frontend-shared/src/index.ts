@@ -7,6 +7,7 @@ export * from "./markdown";
 export * from "./namespace";
 export * from "./onboarding";
 export * from "./outline";
+export * from "./palette";
 export * from "./paste";
 export * from "./autocomplete";
 export * from "./warnings";

@@ -280,6 +280,7 @@ fn collect_internal(
     match &workspace {
         Some(ws) => {
             tree::check_trash(&mut b, ws);
+            tree::check_alias_collisions(&mut b, ws);
             tree::check_unmaterialized_ops(&mut b, ws, &known_node_ids);
             let projection =
                 tree::check_projections(&mut b, ws, &paths.root, health.is_compromised());

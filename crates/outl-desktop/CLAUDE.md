@@ -99,7 +99,8 @@ Pairing is **not** reimplemented — `Onboarding` renders the real `<SyncPanel /
 ### Sync status dot (always-visible)
 
 `<SyncIndicator />` sits in the top-right capsule of `<ChromeToggleBar />`, right before Settings, so the mesh state is glanceable without opening Settings.
-The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, settings, same icons and order. The sidebar toggle (no mobile twin) sits alone top-left, and the sidebar pads its top so the capsule never covers search; the page header (`OutlineView`) pads its own top the same way, so the eyebrow's attach and history icons clear the right capsule. Keep the two bars in the same order when adding a control.
+The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, settings, same icons and order, except reminders: mobile moved it to its bottom bar's Reminders tab (#364) and has no header button for it, so there is no mobile twin to match there.
+The sidebar toggle (no mobile twin) sits alone top-left, and the sidebar pads its top so the capsule never covers search; the page header (`OutlineView`) pads its own top the same way, so the eyebrow's attach and history icons clear the right capsule. Keep the two bars in the same order when adding a control.
 The dot's tooltip shows the reachability state and when this window last saw a sync land (a finished pass or a `peer-ops-changed`).
 Green = at least one iroh peer reachable, orange = none, dim = first probe still running, spinner while a sync pass runs.
 Clicking syncs now (`syncNow()` then `reloadWorkspace()`, same pass as the Sync panel's Refresh); clicks during a pass are ignored.
@@ -405,6 +406,16 @@ In a `call:<name>` fence, `CodeFenceView`'s `CALL:<NAME>` chip links to the temp
 Panel wiring, the chord choices and the `[reminders] enabled` default: [`docs/reminders.md`](../../docs/reminders.md#desktop-outl-desktop).
 The one rule that matters here: **nothing about when a reminder fires is computed in the frontend** — the instants come from `outl_actions::reminders`, the labels from `@outl/shared`.
 
+## Task list — `TasksPanel.tsx`
+
+`<TasksPanel />` is the workspace's open `TODO` / `DOING` blocks, grouped by page, over `list_open_tasks` (the command the phone's Tasks tab already read).
+That command caps the rows at `TASK_LIMIT` (200) and reports the uncapped total, so the header reads `200 of 1431 open` rather than looking complete; the tail is not reachable from the panel.
+It is built the way `RemindersPanel` is: mounted for the app's life, every `createResource` gated on `appState.tasksOpen`, `rovingKeydown` for arrows, `Esc` to close.
+Open with `g t` or `Cmd/Ctrl+Shift+L` (`OpenTaskList`); it is also in the `Cmd+P` palette.
+The task list is no longer mobile-only: `Capability::TaskList` is `Full` here, and only the TUI keeps the `query`-block nudge.
+Order and grouping are the backend's, and nothing here ranks.
+A row opens through `openPageBySlug`, selects the block, and zooms into it when it has children, the same rule a block hit in the picker follows.
+
 ## Plugins
 
 How the desktop hosts plugins — the effect layer, the toolbar and view surfaces:
@@ -412,10 +423,23 @@ How the desktop hosts plugins — the effect layer, the toolbar and view surface
 
 ## Logging
 
-`run()` in `src-tauri/src/lib.rs` installs a `tracing_subscriber` fmt subscriber writing to **stderr** as its first step (before rustls / Tauri setup).
+On Windows, `run()` asks `tauri::webview_version()` before `outl_telemetry::init`.
+`Err` is the same answer `tauri-runtime-wry` records as `webview_version().is_ok() == false`, which becomes `Error::WebviewRuntimeNotInstalled` while the main window is created, and `App::run` panics with `Failed to setup app: {e}`.
+That panic is a crash report.
+The release build already shows Tauri's own dialog and then panics anyway.
+`webview_boot::webview_boot` is the decision: `Err` is a Windows message naming the Evergreen WebView2 runtime and Microsoft's download page, then `process::exit(1)`.
+`Ok` leaves the rest of boot alone, including an empty version string, because Tauri's gate is `is_ok()` and a second reading of that `Result` is how the two answers drift.
+macOS and Linux do not call it.
+A failed WebKit probe on macOS is not a missing runtime, and Tauri still creates the webview there.
+The check is before `init` so the reporter is not running on the path that exists to avoid a report.
+
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then (after that Windows check) calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.
+A closed stderr — a desktop launched with no terminal, whose pipe has gone away — must not panic.
+`eprintln!` turns `EPIPE` into `failed printing to stderr`, and the fmt layer's own error report is an `eprintln!`.
 The `EnvFilter` defaults to `info,outl_sync_iroh=debug,iroh=info` and honors `RUST_LOG`.
 Running `cargo tauri dev` from a terminal then shows the iroh P2P transport's `info!`/`warn!`/`debug!` lines (endpoint bound + node id, each connect attempt's target + outcome, "delta sync received N ops") so device↔device sync is debuggable.
-Init uses `.try_init()` so a double-init can't panic.
+Init uses `set_global_default`, not `.try_init()`: `try_init` also claims the `log` slot, which `tauri-plugin-log` needs.
 See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) for what the transport logs.
 
 ## Settings

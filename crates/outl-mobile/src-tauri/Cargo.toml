@@ -92,6 +92,10 @@ tracing-subscriber = { workspace = true }
 yrs = { workspace = true }
 tauri-plugin-notification = "2"
 
+[target.'cfg(unix)'.dependencies]
+# `run` repeats SIG_IGN for SIGPIPE. Direct, not transitive: the call is ours.
+libc = { workspace = true }
+
 # Barcode / QR scanner — mobile-only (Android + iOS). The primary
 # mobile pairing flow is "scan the host's QR ticket", so the scanner is
 # the camera entry point into `peerPairJoin`. Desktop has no camera path,

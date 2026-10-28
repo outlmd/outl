@@ -113,7 +113,22 @@ if [ "${1:-}" = "--update" ]; then
 #     node scans and the TUI render path runs every frame, so
 #     uncached that was a per-frame cost on a 64k-node workspace.
 #
-# Neither argument generalises. A third raise makes its own case.
+#   outl-actions/src/sync.rs  673 -> 683
+#     A stop flag for FileSyncTransport. Its polling thread owned the
+#     Sender it was handed, so dropping the Receiver never ended it on
+#     a quiet workspace. The desktop is who that cost: a workspace swap
+#     replaces the transport, so every swap left a two-second poller
+#     running for the life of the process, and shutdown was a no-op
+#     comment claiming otherwise. The ten lines are the field, the
+#     clone into the thread, the per-tick check and the store.
+#     Splitting a 673-line file to land a leak fix is the larger
+#     change, not the smaller one.
+#
+#     (No backticks in this block: the heredoc below is deliberately
+#     unquoted so it can interpolate THRESHOLD, which means a backtick
+#     here runs as a command and silently empties the words around it.)
+#
+# None of these arguments generalises. A further raise makes its own case.
 HEADER
     printf '%s\n' "$scanned" | oversized
   } > "$tmp"

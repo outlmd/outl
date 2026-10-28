@@ -357,6 +357,25 @@ That rule is separate from the strip rules and has its own escape hatch, `--allo
 Version comes from the workspace `Cargo.toml`, injected via `cargo tauri android build --config`.
 Tauri's mobile path does not fall back to `Cargo.toml` on its own — the same trap as iOS, see [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
 
+**The APK carries the full version, `-beta.N` included.**
+`versionName` is the string an OEM crash handler, a bug report and `adb shell dumpsys package` quote back.
+It used to be the base version, on the reasoning that the Release tag carries the beta string.
+The tag stays on GitHub; the APK goes to a phone.
+Every beta of 0.13.0 therefore reported `versionName=0.13.0`, and [issue #401](https://github.com/outlmd/outl/issues/401) arrived as a `SIGABRT` from `Version='0.13.0'`, a range of builds that straddled the fix the reporter needed.
+Pinning it down took the tombstone and `llvm-nm`, below.
+The Rust side was already honest: `outl-telemetry` builds the Sentry release from `CARGO_PKG_VERSION`, which CI patches to the full string, so this only brings the manifest in line with Sentry.
+
+`versionCode` is `github.run_number`, the same counter that names `beta.N`, so beta.261 ships `versionCode=261` and the two cannot disagree.
+Tauri's own derivation is `major*1e6 + minor*1e3 + patch`, which ignores the prerelease and gave every 0.13.0 beta `13000`.
+The new numbers start below that `13000`, which matters only for an in-place update, and there is no such thing here.
+Each release is signed with a throwaway debug key, so installing over an older APK already fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+The move to a real upload key ([#171](https://github.com/outlmd/outl/issues/171)) is one more signature change and one more uninstall.
+Nothing in the app or the frontend reads either field; the consumers are the OEM crash handler, `pm dump`, and a future Play upload.
+
+For an APK older than beta.261 `versionName` only says `0.13.0`, and the fallback is the tombstone's `pc`.
+Match it against `llvm-nm --dynamic lib/arm64-v8a/liboutl_mobile_lib.so` from each candidate APK: `pc` is the address inside the library, and the frame's `+N` gives the symbol's own address.
+That is how #401 was placed on beta.256, from `Rust_onCreate+96` at `pc 0xfeee88` (so the symbol sits at `0xfeee28`).
+
 ### Play Console: Data Safety
 
 The Data Safety form is a Play Console answer, not a file in the repo, so nothing fails if it drifts from the app.

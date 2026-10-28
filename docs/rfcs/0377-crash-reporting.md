@@ -472,7 +472,7 @@ It is named here so the next reader does not arrive at `C617.1` by way of Sentry
 - Two Sentry projects (desktop, mobile) plus one for the CLI, under the `outl` org
 - "Prevent Storing of IP Addresses" enabled on each
 - Data retention set to the shortest the plan allows
-- `SENTRY_DSN_*` and `SENTRY_AUTH_TOKEN` added as repository secrets
+- `SENTRY_DSN_*` added as repository secrets. `SENTRY_AUTH_TOKEN` (scope `project:releases`) lives in the `release` environment, which is what the symbol-upload jobs select
 - App Store Connect → App Privacy updated to declare Crash Data **and** Other Diagnostic Data before the next submission
 - Play Console → Data Safety updated likewise
 - `outl.app/privacy` republished from `docs/privacy.md` **after** the two settings above are in place, and **before** the release that ships this — the page claims the IP is not stored, which only the project setting makes true

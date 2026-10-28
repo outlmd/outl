@@ -106,9 +106,9 @@ pub enum SyncProgress {
         total: u64,
     },
     /// Ingested `count` ops the peer had that this device lacked. `nodes`
-    /// carries the (capped) distinct block ids touched so the UI can name the
-    /// pages that changed — empty on a bulk pass (the initial pair), where
-    /// naming every page is meaningless.
+    /// carries the touched block ids, capped at `NODE_REPORT_CAP` (64) — a
+    /// cap, not a switch: nothing detects a bulk pass, so the initial pair
+    /// reports 64 ids, never none. Compare `count` against the cap.
     ReceivedOps {
         /// Peer's short node id.
         peer: String,
@@ -228,7 +228,10 @@ pub trait SyncTransport: Send + Sync + 'static {
 /// Detection: polls `ops/` every 2 s for peer file changes.
 /// Delivery: no-op — iCloud Drive / Syncthing / shared FS carries the bytes.
 #[derive(Debug, Clone, Default)]
-pub struct FileSyncTransport;
+pub struct FileSyncTransport {
+    /// Raised by `shutdown`, watched by the poller; shared across clones.
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl SyncTransport for FileSyncTransport {
     fn start(
@@ -239,12 +242,16 @@ impl SyncTransport for FileSyncTransport {
     ) {
         // Build a temporary engine just for snapshot polling.
         let engine = SyncEngine::new(workspace_root, actor);
+        let stop = std::sync::Arc::clone(&self.stop);
         std::thread::Builder::new()
             .name("outl-file-sync".into())
             .spawn(move || {
                 let mut last = engine.snapshot_peers();
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(2));
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
                     let current = engine.snapshot_peers();
                     if current != last {
                         last = current;
@@ -263,7 +270,10 @@ impl SyncTransport for FileSyncTransport {
     }
 
     fn shutdown(&self) {
-        // The polling thread exits when the mpsc Sender is dropped by the caller.
+        // Needed by the desktop, whose workspace swap replaces the
+        // transport. The TUI's poller and the MCP server's die with their
+        // process, so building one inline and dropping it is right there.
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

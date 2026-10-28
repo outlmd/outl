@@ -72,6 +72,10 @@ pub fn move_under(
     node: NodeId,
     new_parent: NodeId,
 ) -> Result<(), ActionError> {
+    // `ensure_in_tree`, not `ensure_live`: `trash::restore` is a
+    // `move_under` out of the trash, so a node sitting there has to be
+    // a legal source here. The destination is checked the same way
+    // because `delete` aims one at `TRASH_ROOT` through `move_to`.
     ensure_in_tree(workspace, node)?;
     ensure_in_tree(workspace, new_parent)?;
     let pos = position_for_new_last_child(workspace, new_parent);

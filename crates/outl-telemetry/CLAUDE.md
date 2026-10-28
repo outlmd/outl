@@ -5,10 +5,14 @@ Spec: [RFC 0377](../../docs/rfcs/0377-crash-reporting.md).
 
 ## What this crate owns
 
-Two decisions, and nothing else:
+Three decisions, and nothing else:
 
 1. **Whether anything is sent at all** — `init`, `suppressed_by_ci`, and the private `report_target` gate.
 2. **What a sent event may contain** — `redact` (one string) and `scrub_event` (one event).
+3. **A closed stderr does not abort the process** — `install_panic_hook` and `lossy_stderr`.
+
+The third one lives here because the panic integration and the tracing subscriber both end in a print, and a print that panics is the event Sentry then records.
+Each binary doing it itself is four chances to leave `eprintln!` on that path.
 
 It owns those two so they have **one owner and one test suite**, for the same reason `outl_md::unlogged::sidecar_can_vouch_for` and `Filter::Not` do.
 Two copies of a safety predicate drift, and the direction a scrubber drifts is always toward sending more.
@@ -55,6 +59,18 @@ With `dsn: None` it adopts `SENTRY_DSN` from the env, so anybody could repoint t
 
 Only the early `return None` closes that.
 `init` therefore resolves the gate **before** the SDK is touched, and `start` is never reached without a DSN.
+
+`init` installs the panic hook **before** that gate, including when the gate returns `None`.
+`sentry::init` takes the current hook and calls it after capturing the event.
+The hook this crate installs writes with `writeln!` and ignores the error, and it does not chain to the default hook — the default hook is `eprintln!`, which panics when stderr is closed and aborts the process.
+The line keeps the thread name, and `std::backtrace::Backtrace::capture` prints a stack only when `RUST_BACKTRACE` asks for one.
+A caller that installs its own hook afterwards (the TUI restores the terminal, then chains) must run **after** `init`, so it chains to this hook rather than being replaced by it.
+
+`lossy_stderr` is the writer for `tracing_subscriber::fmt().with_writer`.
+A broken pipe (`ErrorKind::BrokenPipe`) is reported as a successful write.
+That kind is Unix `EPIPE` and Windows `ERROR_BROKEN_PIPE` (109) / `ERROR_NO_DATA` (232).
+Windows error 32 is `ERROR_SHARING_VIOLATION`, so the check is the kind alone.
+Callers also set `.log_internal_errors(false)`: the fmt layer's own failure report is an `eprintln!`, which is the panic this writer exists to stop.
 
 ## Reading the scrubber
 
@@ -174,6 +190,11 @@ They are the gate.
 - `the_scrubber_writes_the_os_and_the_arch` and `an_incoming_os_context_is_replaced_not_merged` — the two halves of the one field we write.
   The second is what makes the write safe: the fixture arrives with a path sitting in `os.name`, shaped like what the `contexts` integration would produce, and none of it may survive.
   Without it, "the scrubber writes the OS" would also pass against an implementation that wrote the OS and left the rest of the map alone.
+- `a_closed_stderr_does_not_panic` (`tests/closed_stderr.rs`) — spawns this test binary with stderr piped, drops the read end, then logs and panics.
+  Exit 0 is the assertion. A printer panic exits 101; a hook that panics again aborts, and `catch_unwind` hides neither.
+  The file has no libtest harness because the harness would capture the pipe the parent is reading.
+- `a_broken_pipe_counts_as_a_finished_write`, `the_os_error_for_epipe_counts_too`, `any_other_write_error_is_returned` — the writer, without a process.
+  A closed pipe is absorbed. A permission error is not, so the writer is not a sink that hides every failure.
 - `the_panic_itself_survives_the_scrubber` and `a_debug_image_keeps_its_id_and_loses_its_path` — the over-scrubbing direction.
   An empty event is not a safe event, it is a useless one.
 - `the_fixture_really_populates_everything` — guards the guard: if the fixture stops populating a field, the key-set test starts passing for the wrong reason.
@@ -198,7 +219,13 @@ Two things a caller must not change:
 - **`init` is called from the binary, not from `outl_tui::run`.**
   `run` is also called by the `outl` binary, which has already started its own reporter by then; initialising inside the library means two `sentry::init` calls in one process on that path.
 
-In both GUI clients it is the **first** statement of `run()`, before the `tracing` subscriber and before the rustls provider. The crashes worth the most are the boot ones — the Android app that closed on open is what motivated this RFC, and a reporter installed after the failing call reports nothing.
+In both GUI clients `ignore_sigpipe()` is the first statement of `run()`.
+On mobile, `init` is the second, before the `tracing` subscriber and before the rustls provider.
+On desktop, Windows asks `tauri::webview_version()` between those two: a missing WebView2 runtime is a message and `process::exit(1)`, and the reporter is not started on that path, because the failure it replaces is the setup panic Sentry was filing.
+Every other boot failure still happens after `init`.
+The signal disposition has to be set before any write; the reporter still has to be up before the crashes worth the most, which are the boot ones — the Android app that closed on open is what motivated this RFC, and a reporter installed after the failing call reports nothing.
+The subscriber writes through `lossy_stderr` with `log_internal_errors(false)`.
+The CLI's `init_tracing` does the same. The TUI's log file does not write to stderr, so it does not.
 
 ## Open work (not in this crate)
 

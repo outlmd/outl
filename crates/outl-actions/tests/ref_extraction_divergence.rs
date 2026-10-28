@@ -431,6 +431,7 @@ mod corpus {
                     icon: None,
                     pinned: false,
                     page_type: None,
+                    aliases: Vec::new(),
                 });
             }
         }

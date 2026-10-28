@@ -151,6 +151,10 @@ The haptics stay on that side on purpose — a buzz is feedback for a *decision*
   Presentational only — neither knows what a tap means.
 - **`BlockTextarea.tsx`** — `EditableTextarea`.
   Its own file because the rules in it are about iOS text input, not about outlines: `beforeinput` rather than `keydown` (WKWebView emits no reliable per-character key events) and `parkCaret` twice around every programmatic `value =`.
+  **The third rule is that nothing writes `ta.value` while an IME composes** ([#399](https://github.com/outlmd/outl/issues/399)).
+  WebKit reports `selectionStart` at the start of the marked run, so pair completion read `[[` plus the pinyin as an unclosed ref and appended a second `]]`.
+  Writing a different string then commits that run as plain text, which is how `nihao` typed inside `[[]]` became `[[]]nihao]]niha]]nih]]ni]]n]]`.
+  `BlockTextarea.test.tsx` pins all three handlers, including the one that needs no guard, and the handlers carry the reasoning and what the guard costs.
 
 **A prop this component accepts must reach the recursive call, and `BlockRow.recursion.test.ts` is what makes that fail.**
 Two were declared and never forwarded, and both were invisible: optional props, so omitting them compiles.
@@ -396,7 +400,7 @@ Toolbar behaviour it controls (lock, reset, and why the row now only reshuffles 
 
 ## Reminders (`remind::`)
 
-The header bell opens `<RemindersSheet />`, a block long-press authors a rule via `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
+The bottom bar's Reminders tab opens `<RemindersSheet />` (the header has no bell any more), a block long-press authors a rule via `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
 Sheet wiring, why authoring is a prompt instead of a native time picker, and why both device-local settings live in the sheet: [`docs/reminders.md`](../../docs/reminders.md#mobile-outl-mobile).
 The one rule that matters here: **the schedule is never computed in TS** — `groupReminders` / `formatNextFire` only format what `outl_actions::reminders` decided.
 
@@ -520,11 +524,12 @@ Paint a fill with `bg-(--color-outl-accent)` and its text with `text-(--color-ou
 
 ## Logging (device console)
 
-`run()` in `src-tauri/src/lib.rs` installs a `tracing_subscriber` fmt subscriber writing to **stderr** as its very first step (before rustls / Tauri setup).
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`, for the same reason as the desktop: a closed stderr must not become `failed printing to stderr`.
 The `EnvFilter` defaults to `info,outl_sync_iroh=debug,iroh=info` and honors `RUST_LOG`.
 On iOS, stderr surfaces in `idevicesyslog` / Xcode.
 So the iroh P2P transport's `info!`/`warn!`/`debug!` lines (endpoint bound + node id, each connect attempt's target + outcome, "delta sync received N ops") are visible while debugging device↔device sync.
-Init uses `.try_init()` so a double-init can't panic.
+Init uses `set_global_default`, not `.try_init()`: `try_init` also claims the `log` slot, which `tauri-plugin-log` needs.
 See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) for what the transport logs.
 
 ## iCloud layout (opt-in destination)

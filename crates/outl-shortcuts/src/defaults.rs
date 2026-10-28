@@ -17,6 +17,7 @@ mod capture;
 mod chords;
 mod focus;
 mod overlay;
+mod tasks;
 
 use chords::{
     ch, ctrl, ctrl_key, key, meta, meta_key, pair, pair_shift_second, shift, shift_ch,
@@ -769,8 +770,7 @@ pub fn default_bindings() -> Vec<Binding> {
             "Move range down (Ctrl+Shift+Down)",
         ),
     ];
-    rows.extend(overlay::bindings());
-    rows.extend(capture::bindings());
-    rows.extend(focus::bindings());
+    rows.extend(overlay::bindings().into_iter().chain(capture::bindings()));
+    rows.extend(focus::bindings().into_iter().chain(tasks::bindings()));
     rows
 }

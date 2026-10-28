@@ -39,6 +39,7 @@ pub(crate) mod apply;
 mod guard;
 mod mutate;
 mod paths;
+mod refresh;
 mod render;
 mod sidecar;
 mod survey;
@@ -55,6 +56,7 @@ pub use apply::{
 pub use guard::{content_lines_missing_from, sidecar_can_answer, sidecar_can_vouch_for};
 pub use mutate::mutate_page_md;
 pub use paths::{journals_dir, page_md_path, pages_dir, remove_page_projection, write_md_atomic};
+pub use refresh::{reproject_stale_md, ProjectionRefusal};
 pub use render::{render_block_md, render_page_md};
 pub use survey::{
     reproject_stale_pages, survey_page_projections, PageProjection, PageProjectionState,

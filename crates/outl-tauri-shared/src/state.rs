@@ -26,6 +26,18 @@ pub struct WorkspaceSummary {
     /// `true` when a workspace is loaded; `false` while the picker is
     /// still up or the background opener is in flight.
     pub ready: bool,
+    /// Whether [`Self::ops`] is the whole log.
+    ///
+    /// `ops` is `Workspace::log().len()`, the **resident** log, and a
+    /// workspace that booted from a snapshot replays only the delta above
+    /// the cutoff. Printing that as a total is not a rounding error: on a
+    /// real workspace it is 332 against 228,943, on the one number a user
+    /// reads to ask how big their graph is, and it reads as data loss.
+    ///
+    /// Same verdict, from the same source, as `outl workspace info`'s
+    /// `ops_complete` and `outl_actions::activity`'s `DeviceActivity`
+    /// `complete`. A client that renders `ops` renders this beside it.
+    pub ops_complete: bool,
 }
 
 /// Reply shape for every "open page / open journal" command. Bundles
@@ -203,19 +215,27 @@ impl ProjectionWriteFailed {
 }
 
 impl MdAheadOfLog {
+    /// The wire shape of [`outl_actions::ProjectionRefusal::AheadOfLog`],
+    /// or `None` for every other failure.
+    ///
+    /// Delegates rather than re-matching: the TUI asks the same question
+    /// on its own open path and cannot reach this crate, so the classifier
+    /// lives in `outl-actions` and this is the DTO projection of it
+    /// ([#292](https://github.com/outlmd/outl/issues/292)).
     pub(crate) fn from_error(error: &ActionError) -> Option<Self> {
-        match error {
-            ActionError::PageMarkdownAheadOfLog {
-                path,
-                lines,
-                sample,
-            } => Some(Self {
-                path: path.clone(),
-                lines: *lines,
-                sample: sample.clone(),
-            }),
-            _ => None,
-        }
+        let outl_actions::ProjectionRefusal::AheadOfLog {
+            path,
+            lines,
+            sample,
+        } = outl_actions::ProjectionRefusal::from_error(error)
+        else {
+            return None;
+        };
+        Some(Self {
+            path,
+            lines,
+            sample,
+        })
     }
 }
 

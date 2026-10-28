@@ -284,8 +284,9 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex flex-col"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex max-h-dvh flex-col"
         style={{
+          "padding-top": "max(env(safe-area-inset-top), 12px)",
           "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
@@ -294,7 +295,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
+        <div class="mx-3 mb-2 flex min-h-0 flex-col overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -347,7 +348,7 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
             </div>
           </Show>
 
-          <div class="max-h-[55vh] overflow-y-auto">
+          <div class="ios-scroll max-h-[55vh] min-h-0 flex-1 overflow-y-auto">
             {/* ── List ──────────────────────────────────────────── */}
             <Show when={mode().kind === "list"}>
               <button

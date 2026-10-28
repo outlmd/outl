@@ -35,6 +35,7 @@ fn index_with(blocks: &[Block], root: &Path) -> (WorkspaceIndex, Vec<NodeId>) {
         is_journal: false,
         pinned: false,
         page_type: None,
+        aliases: Vec::new(),
     });
     let nodes: Vec<IdentifiedNode> = blocks
         .iter()

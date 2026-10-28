@@ -273,6 +273,24 @@ const KNOWN_DIVERGENCES: &[Divergence] = &[
         harm: Harm::Destructive,
         note: "Same path as `Ctrl+Z`. The TUI redoes with `Ctrl+R`.",
     },
+    Divergence {
+        chord: "g t",
+        mode: Mode::Normal,
+        catalog: Action::OpenTaskList,
+        tui_does: "`g` is pending, `t` matches no chord arm and falls through to the bare \
+              `t` arm: jumps to today's journal",
+        harm: Harm::Different,
+        note: "support.rs records the TUI as Missing; the nudge points at a `query` block.",
+    },
+    Divergence {
+        chord: "Ctrl+Shift+l",
+        mode: Mode::Global,
+        catalog: Action::OpenTaskList,
+        tui_does: "moves the cursor right on a terminal without the kitty protocol \
+              (collapses to `Ctrl+L`); nothing on a terminal with it",
+        harm: Harm::Different,
+        note: "Not `T`: that collapses onto the TODO toggle. See `defaults/tasks.rs`.",
+    },
 ];
 
 /// Every other terminal-reachable `Normal` / `Global` binding: the
@@ -387,7 +405,7 @@ fn the_divergence_list_has_not_silently_shrunk() {
     // one is a single keystroke. Pin the shape of the list.
     assert_eq!(
         KNOWN_DIVERGENCES.len(),
-        20,
+        22,
         "the known-divergence list changed size — if a divergence was genuinely \
          resolved, move the chord to AGREED and update this count in the same edit",
     );

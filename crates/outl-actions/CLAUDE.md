@@ -40,13 +40,17 @@ Functions **never**:
 
 - Touch storage directly.
   Storage is `Workspace::apply`'s responsibility.
-- Touch the filesystem outside of `journal::write_md_atomic`.
-  **Deliberate exception: `asset::import_asset` / `asset::resolve_asset_path`.**
-  An uploaded file's *bytes* are not workspace state.
-  A multi-MB PDF replayed through the CRDT would bloat every device's op log irreversibly, so the bytes never enter the op log and can't route through `write_md_atomic`, which is a `.md`-projection concern.
-  `import_asset` copies the file into `<root>/assets/<hash>.<ext>` directly (still atomic: tmp file + rename) and hands back the markdown link.
-  Only that **link** is workspace state, and it enters the op log the ordinary way, as an `Op::Edit` when the caller inserts it into a block.
-  Every other function in this crate stays filesystem-free outside the journal path — don't use this as precedent for a second exception without the same "bytes vs. state" argument.
+- Put bytes that are not workspace state into the op log.
+  An uploaded file, a capture inbox entry, a backup, a fired-reminder log: replaying a multi-MB PDF through the CRDT would bloat every device's op log irreversibly.
+  Those bytes go to disk directly and only a **link** or a derived fact becomes an `Op`, the ordinary way.
+  This crate does touch the filesystem, each time for a reason of its own:
+  - `.md` projection: `journal::write_md_atomic`, `ProjectionLock`, `history::restore_page_md`.
+  - non-op bytes: `asset::import_asset` (`<root>/assets/<hash>.<ext>`, tmp file + rename), `backup::*` (a git repo), `export_md`.
+  - local state files: `capture::write_capture` / `drain_captures` (inbox), `merges` (`.outl/state/*.json`), `reminders::fired` (`reminders-fired.json`).
+  - read-only: `open_with::read_source`.
+
+  Before adding a new filesystem user, answer "is this workspace state?".
+  If yes it is an `Op`; if no, say why it stays out of the log.
 - Hold per-client state (selections, modes, toasts, keymaps).
 - Round-trip through `.md` to reconstruct workspace state.
   The op log is the source of truth; `.md` is a projection.
@@ -126,7 +130,8 @@ Three rules that are not negotiable here:
 
 `NotFound` is not "this page has no `.md`".
 An undownloaded iCloud file answers `NotFound` too — the real name does not exist, only `.foo.md.icloud` does — and so does a `.md` that vanished from beside a live sidecar.
-`journal::guard::guard_absent_markdown` is the single owner of that distinction, and **both** writers ask it.
+`journal::guard::guard_absent_markdown` is the single owner of that distinction, and **two** writers ask it: `mutate_page_md` and `apply_page_md_with_sidecar_if_stale`.
+`apply_page_md_with_sidecar_guarded` does not, so an absent `.md` is written after a mutation.
 `mutate_page_md` would otherwise recreate the page as a single block;
 `apply_page_md_with_sidecar_if_stale` would otherwise write a file the arriving bytes collide with, unattended, on every `outl serve` sweep.
 The survey routes the same call into `PageProjectionState::MarkdownNotHereYet`, so the listing and the pass cannot reach different verdicts.
@@ -136,16 +141,29 @@ Both are correct and they are not interchangeable — see the `lines_removed_by`
 
 **A YAML frontmatter fence is a third case, on a second channel.**
 It rides `Op::SetProp` on the page root rather than a block's text ([`docs/markdown-frontmatter.md`](../../docs/markdown-frontmatter.md)), so a block list cannot answer for it and `content_lines_missing_from` skips the region.
-`guard::frontmatter_loss_error` asks `outl_md::unlogged::frontmatter_lines_missing_from` of the **render** instead, and both write gates run it.
+`guard::frontmatter_loss_error` asks `outl_md::unlogged::frontmatter_lines_missing_from` of the **render** instead, and both write gates run it (unlike `guard_absent_markdown`, which only `_if_stale` and `mutate_page_md` ask).
 `lines_removed_by` adds the same count, so the listing and the pass cannot disagree.
 Narrow on purpose: only a render carrying *no* fence counts as a loss, because a fence that merely differs is a peer edit, and refusing that would freeze the page.
 
 **Which writers ask, and which do not, is a test rather than a sentence.**
-`journal/apply.rs` holds six public writers and two of them are gates, and the module doc used to say "both write gates run all three" — true, and still read as a census.
+`journal/apply.rs` holds six public writers and two of them are gates, and the module doc used to say "both write gates run all three", which was false (`_guarded` never asks `guard_absent_markdown`) and still read as a census.
 `apply_page_md_with_sidecar_rendered` sat next to that sentence: public, exported, straight to `write_page_projection`, no guard, no caller anywhere in the repo.
 During the #281 upgrade window (op log carrying a page's frontmatter fence as bullets, render that does not) that call is the write that deletes the fence.
 It is gone, and `tests/projection_writer_gates.rs` now pins both halves: every `pub fn` in `apply.rs` has a recorded verdict, and `guard.rs`'s doc names all six.
 Adding a writer without saying which side of the gate it is on fails there.
+
+## Refusals: who tells the user, and in what words
+
+`refusal.rs` is the catalog (one exhaustive `match` over `(Refusal, Surface)`, RFC 0255) **and**, since [#292](https://github.com/outlmd/outl/issues/292), the owner of the Rust-side wording: `ahead_of_log_notice(surface, lines, sample)`.
+
+`ProjectionRefusal` (in `journal/refresh.rs`) is the other half — the split between "this page has stopped converging and only a command fixes it" and "an I/O condition the next open retries out of". `reproject_stale_md` is the page-open call every client makes: it refreshes a `.md` the tree outran (issue #166) and classifies the refusal that can come back instead.
+
+Both exist because the policy had two homes and one of them was empty. `outl-tauri-shared::helpers::reproject_stale_md` held the classification, which the TUI cannot reach, so the TUI had no page-open check at all — opening a frozen page told the user nothing until they tried to write. That is the failure invariant 8's last paragraph names, moved into the client the maintainer daily-drives.
+
+Two rules:
+
+- **A client decides where a notice goes, never what it says.** A surface that writes its own sentence is a second copy of the fact, and the GUI clients already share one (`@outl/shared/warnings::aheadOfLogNotice`, a declared mirror — `the_shared_frontend_copy_says_the_same_thing` pins the headline and the command across the language boundary).
+- **The notice's counts come off the `ActionError`, never recounted.** The number the user reads has to be the number the guard refused on.
 
 ## The capture inbox
 
@@ -243,7 +261,8 @@ User-facing contract: [`docs/clients.md` → Opening a file from the OS](../../d
 Four decisions worth not re-litigating:
 
 - **The namespace is a title, never a slug.** `slugify` folds the `/`, so the page projects to `pages/open-in-<stem>.md` while `open-in` becomes a real parent page (same mechanism as [Page namespaces](#page-namespaces)).
-  **`import_into` calls `page::open_or_create` with the slug `slug_for` already resolved, never `resolve::open_or_create_by_name`.** The by-name path re-slugifies the title, and that is precisely how a non-ASCII stem (`会議メモ`) reached the namespace page: it folds to nothing, `open-in/<stem>` collapses to bare `open-in`, and the import lands on the parent. `slug_for` refuses that collision; going back through the by-name helper undoes it. Pinned by `a_non_latin_file_name_never_lands_on_the_namespace_page`.
+  **`import_into` calls `page::open_or_create` with the slug `slug_for` already resolved, never `resolve::open_or_create_by_name`.** The by-name path re-slugifies the title, and that is precisely how a stem that slugifies to nothing (`📝`, `...`) reaches the namespace page: `open-in/<stem>` collapses to bare `open-in`, and the import lands on the parent. `slug_for` refuses that collision; going back through the by-name helper undoes it. Pinned by `a_stem_that_slugifies_to_nothing_still_links_back`.
+  This used to be *every* file for a user who names them in their own script, because `slugify` dropped each character it could not fold to ASCII ([issue #405](https://github.com/outlmd/outl/issues/405)). It keeps letters and digits now, so `会議メモ` projects to itself and only punctuation or emoji still reach the fallback — which is why the test that covered this path needed a replacement rather than an update: `a_non_latin_file_name_never_lands_on_the_namespace_page` still passes and no longer exercises it.
 - **Re-opening a file does not import again.** The page carries `page-source::` (the canonicalised absolute path), and `resolve_target` returns `OpenWithTarget::Existing` when it matches. That key is in `tree::is_page_model_key`, so it **never reaches the `.md`** — the value is the user's directory structure, and `outl export hugo` copies unknown properties straight into published front matter. Hiding it costs nothing, because the check reads the op log and `outl_md::diff` only emits `SetProp` for properties the `.md` actually has. A second import would duplicate every block; overwriting would delete whatever the user wrote after the first import. Neither is acceptable, so the client navigates instead.
   The same property is what stops two *different* files named `notes.md` from being merged into one page — the second becomes `open-in/notes 2`.
   **The value is carried on `OpenWithTarget::New`, never recomputed at import time.** It used to be derived twice — once to match against, once to write — and a file that moved between the two made `canonicalize` fail on the second, so the page recorded the uncanonicalised path while the match had used the canonical one. The next open then failed to recognise its own page and minted `open-in/notes 2`: the duplicate the property exists to prevent, produced by the property itself. Pinned by `the_recorded_source_survives_the_file_moving_mid_import`.

@@ -34,6 +34,7 @@ outl-actions = "0.11"
 
 A `"0.11.0-beta"`-style requirement rides the betas cut from `main`.
 The whole workspace shares one version, so keep the crates pinned to the same requirement.
+The published crates depend on each other at that exact version (`=0.13.0`), so two of them at different versions will not resolve.
 
 ## Opening a workspace
 

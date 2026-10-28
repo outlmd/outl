@@ -12,7 +12,7 @@
 ///
 /// This is the canonical detector that gates the tree-conversion
 /// pipeline. Mobile mirrors it in TypeScript
-/// (`crates/outl-mobile/src/lib/paste.ts::looksLikeOutline`) so the
+/// (`crates/outl-frontend-shared/src/paste/index.ts::looksLikeOutline`) so the
 /// client can avoid a Tauri round-trip when the user pastes plain
 /// text. The two implementations **must stay in lockstep** — if you
 /// extend this to recognise `*` bullets, ordered lists, or anything

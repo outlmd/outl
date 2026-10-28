@@ -45,5 +45,38 @@ jobs:
       - name: docs index
         run: ./scripts/check-docs-index.sh
 
+      # An icon has no test and no compiler. The desktop and the mobile
+      # crate each carried a sixteen-file Tauri set under the same names,
+      # generated at different times, and every one of the sixteen
+      # differed byte for byte — noticed by a user, not by CI. Also asks
+      # whether an iOS slot grew an alpha channel, which App Store
+      # Connect rejects after the build rather than during it.
+      - name: icons
+        run: python3 scripts/check-icons.py
+
       - name: release strip check
         run: python3 scripts/tests/test_check_artifact_stripped.py
+
+      # `scripts/release_assets.py` is the list of what a release publishes
+      # and which assets are allowed to be missing. Five other places have to
+      # agree with it — the three build matrices, the `update_tap` loops, and
+      # the Homebrew formula, the cask and the Scoop manifest — and none of
+      # them can see the others. Every disagreement is silent at release
+      # time: a `sed` that matches no line exits 0, the tap bump finishes on
+      # `git diff --quiet`, and the first thing to notice is somebody's
+      # `brew install` or `scoop install` a release later.
+      #
+      # The same table decides whether a release publishes, so its own suite
+      # runs here too: a false pass there publishes a release that claims
+      # platforms it does not carry.
+      - name: release assets
+        run: |
+          python3 scripts/check-release-assets.py --manifest
+          python3 scripts/tests/test_check_release_assets.py
+
+      # The crates.io publish rewrites path deps to a caret. A caret on a
+      # prerelease also matches the stable of that number, so the verify
+      # build compiles against the release already on crates.io. This
+      # suite fails if the pin script or the publish job stops doing that.
+      - name: publish dep pin
+        run: python3 scripts/tests/test_pin_workspace_deps.py

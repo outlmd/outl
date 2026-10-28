@@ -17,6 +17,9 @@ use crate::Capability;
 
 use Support::{Full, Missing, NotApplicable, Partial};
 
+// Shared with `support.rs`'s `OpenTaskList` row; the rest of `why` stays private.
+pub(crate) use why::NO_TASK_LIST;
+
 /// Reasons repeated across rows, named once so a re-wording lands on
 /// every row at once instead of some.
 mod why {
@@ -141,8 +144,8 @@ mod why {
         "There's no one-click capture here. Press Cmd+J to open today's journal, then add the \
          block at the end. The quick switcher (Cmd+P) takes you back.";
 
-    /// Only mobile has a Tasks tab. The query block answers the same
-    /// question inside any page, so the nudge points there.
+    /// Only the TUI lacks a task list now. The query block answers the
+    /// same question inside any page, so the nudge points there.
     pub const NO_TASK_LIST: &str =
         "There's no task list here yet. Add a `query` code block with `status: open` to any page \
          and it lists every open task in the workspace.";
@@ -401,12 +404,10 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Partial(why::DESKTOP_CAPTURE_HAS_NO_SYSTEM_GESTURE),
             mobile: Full,
         },
-        // Mobile: the bottom bar's Tasks tab (`TasksSheet.tsx`) over
-        // `list_open_tasks`. The command is registered on the desktop
-        // too; the gap there is the surface, not the data.
+        // Mobile `TasksSheet.tsx`, desktop `TasksPanel.tsx`; both read `list_open_tasks`.
         Capability::TaskList => ClientSupport {
             tui: Missing(why::NO_TASK_LIST),
-            desktop: Missing(why::NO_TASK_LIST),
+            desktop: Full,
             mobile: Full,
         },
         // Desktop `CodeFenceView` and mobile `BlockBody` both render a
@@ -493,6 +494,14 @@ pub(crate) fn capability_parity_table_markdown() -> String {
 mod tests {
     use super::*;
     use crate::support::Client;
+
+    #[test]
+    fn the_desktop_has_a_task_list() {
+        assert!(matches!(
+            capability_support(Capability::TaskList).desktop,
+            Support::Full
+        ));
+    }
 
     #[test]
     fn every_client_declares_support_for_every_capability() {

@@ -143,8 +143,22 @@ export function EditableTextarea(props: {
       }}
       onInput={(e) => {
         const ta = e.currentTarget;
+        // Pair completion sits out an IME composition (issue #399).
+        // Mid-composition WebKit reports `selectionStart` at the start
+        // of the marked run, so `[[` plus the pinyin reads as an
+        // unclosed ref, and writing a closer back commits that run as
+        // plain text — the keyboard then restarts a composition at the
+        // parked caret, once per keystroke. Only a *different* string
+        // does that, which is why the draft re-binding is harmless on
+        // every other keystroke. The event that ends a composition
+        // counts too: some WebKit builds report it with `isComposing`
+        // already false, caret still at the start. Nothing is lost by
+        // sitting out, since `autoPairBracket` closed the pair on the
+        // keystroke itself (the desktop never calls this at all).
+        const composing =
+          e.isComposing || e.inputType === "insertCompositionText";
         const caret = ta.selectionStart ?? ta.value.length;
-        const completion = autoClosePair(ta.value, caret);
+        const completion = composing ? null : autoClosePair(ta.value, caret);
         if (completion) {
           // Same caret-reset trap as Backspace above. The user just
           // typed the second `[` (or `(`) and we appended the

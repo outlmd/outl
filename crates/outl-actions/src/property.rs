@@ -93,8 +93,8 @@ fn is_suggestable_key(key: &str) -> bool {
 
 /// Clean up what a user typed into a property key.
 ///
-/// Strips the trailing `::` (the dialect's separator, which the user
-/// sees as part of the key everywhere it is written) and trims. That
+/// Strips any trailing run of `:` (so the dialect's `::` separator, which
+/// the user sees as part of the key, and a single-colon slip) and trims. That
 /// is all: a key is otherwise taken literally, because an existing
 /// key is edited and deleted through the same string.
 ///
@@ -135,7 +135,8 @@ pub fn key_rejection(key: &str) -> Option<String> {
 }
 
 /// A page's user-facing properties (`icon::`, `type::`, `title::`, …),
-/// alpha-sorted, with the structural keys removed.
+/// in [`crate::tree::sort_in_presentation_order`], with the structural
+/// keys removed.
 ///
 /// Same shape as `OutlineNode.properties`, so a client can hand both
 /// to the same editor component.
@@ -153,7 +154,7 @@ pub fn page_properties(
         .filter(|(k, _)| !crate::tree::is_page_model_key(k))
         .map(|(k, v)| (k.to_string(), crate::outline::prop_value_to_string(v)))
         .collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut out);
     out
 }
 

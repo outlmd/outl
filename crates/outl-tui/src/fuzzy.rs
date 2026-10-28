@@ -101,6 +101,16 @@ pub fn fuzzy_score(query: &str, haystack: &str) -> Option<i32> {
     fuzzy_match(query, haystack).map(|m| m.score)
 }
 
+/// Best score across a page's names: its primary display name plus any
+/// `alias::` alternatives (issue #302). Aliases score beside the title
+/// so `NYC` finds "New York" in every candidate list.
+pub fn best_score(query: &str, primary: &str, aliases: &[String]) -> Option<i32> {
+    std::iter::once(primary)
+        .chain(aliases.iter().map(String::as_str))
+        .filter_map(|name| fuzzy_score(query, name))
+        .max()
+}
+
 fn char_equal_ci(a: char, b: char) -> bool {
     a == b || a.to_lowercase().eq(b.to_lowercase())
 }

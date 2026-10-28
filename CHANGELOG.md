@@ -5,8 +5,205 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **A task list on the desktop** ([#364](https://github.com/outlmd/outl/issues/364)).
+  `g t`, or `Cmd/Ctrl+Shift+L`, opens the workspace's open `TODO` / `DOING` blocks, grouped by page, journal days named the way the journal names them.
+  It lists the first 200 and shows the uncapped count beside them, so a workspace past the cap reads `200 of 1431 open` instead of looking complete.
+  Picking a row opens the page with the cursor on that block.
+  The desktop was the client with a reminders panel and no list of open work, and the phone already had one; it reads the same `list_open_tasks`.
+  Also in the palette: type "task list" in `Cmd+P`.
+  Credit to [@frigidplatypus](https://github.com/frigidplatypus), who pointed out that reminders belong next to tasks.
+  `Cmd/Ctrl+Shift+T` was the first choice and was refused: a terminal without the kitty protocol folds it onto the TUI's `Ctrl+T`, which toggles a TODO.
+- **One search box on the phone** ([#364](https://github.com/outlmd/outl/issues/364)).
+  The bottom bar's Search and Pages tabs opened the same sheet; the sheet now lists Pages, Tasks, Blocks and Actions in one pass, in the order the desktop's `Cmd+P` uses, and the `Pages | Blocks` switch is gone.
+  Credit to [@hugows](https://github.com/hugows) for the report.
+- **A Reminders tab on the phone's bottom bar** ([#364](https://github.com/outlmd/outl/issues/364)), in the slot the duplicate Search tab freed.
+  Credit to [@frigidplatypus](https://github.com/frigidplatypus).
+- **ARM64 is a published platform on Linux and on Windows, for every artifact outl ships** ([#411](https://github.com/outlmd/outl/issues/411)).
+  Raspberry Pi 4 / 5, ARM laptops, Snapdragon X machines, Ampere and Graviton instances: the options before this were `cargo build --release` or an x86_64 build under emulation.
+  New assets: `outl-desktop-linux-aarch64.{AppImage,deb,rpm}`, `outl-desktop-windows-aarch64-setup.exe`, `outl-linux-arm64.tar.gz`, `outl-windows-arm64.zip`, each with its `.sha256`, plus a Homebrew `arm64_linux` bottle and `linux/arm64` on the server image.
+  The Linux halves build on native ARM runners.
+  The Windows half is cross-linked from the x64 runner, which was the better trade once two things were checked rather than assumed: `windows-2025` carries `VC.Tools.ARM64`, and `aws-lc-sys` — the one dependency here that compiles C — looks for the `clang-cl` this target needs on PATH and then inside the VS install, which that image ships.
+  A native Windows-on-ARM runner would have needed `bun` under x64 emulation for the frontend build.
+- **A Scoop bucket for Windows** ([#413](https://github.com/outlmd/outl/issues/413)): `scoop bucket add outl https://github.com/outlmd/outl && scoop install outl/outl-beta`.
+  Unprivileged, portable, on PATH, and one manifest serves `64bit` and native `arm64` — so the ARM64 build above has a package manager on the day it exists rather than being a zip someone has to find.
+  `bucket/outl-beta.json` lives in this repo, like the Homebrew tap, and `update_tap` rewrites it with `jq` on every release.
+  The desktop installer is deliberately not a Scoop package, and `docs/scoop.md` says why; winget is the next one worth doing and is still open on that issue.
+- **`brew install outl-beta` works on ARM64 Linux.**
+  `Formula/outl-beta.rb` grew an `on_linux do on_arm` block and an `arm64_linux` bottle; ARM64 Linux has been a Tier 1 Homebrew platform since 5.0.0.
+- **`ghcr.io/outlmd/outl-server` is multi-arch.**
+  Every tag is now a manifest list over `linux/amd64` and `linux/arm64`, so `docker compose pull` on a Pi or a Graviton box resolves the right image with no `platform:` line.
+  `docker.yml` builds each architecture on a runner of that architecture, pushes it by digest, and merges the digests into the tag.
+  The old workflow comment said arm64 was waiting for "somebody who actually needs it" and a native runner; both arrived.
+  Tags cut before this stay single-arch — a `:sha-…` you pinned does not become a manifest list retroactively.
+  The provenance moved rather than going away, and ended up better than it was: the per-architecture builds pass `provenance: false`, because the digest the merge needs has to be the image's and buildx would otherwise wrap each one in an index of image + attestation, which merges into an `unknown/unknown` entry in the list a user pulls.
+  So `merge` attests the finished manifest list through Sigstore instead — the digest `docker pull <tag>` actually resolves, signed, verifiable with `gh attestation verify oci://ghcr.io/outlmd/outl-server --repo outlmd/outl`, where `provenance: mode=min` only attached an unsigned in-toto statement per architecture.
+
+- **`scripts/release_assets.py` is the list of what a release publishes**, and `scripts/check-release-assets.py` holds everything else to it.
+  Six places have to name the same platforms — three build matrices, `update_tap`'s loops, the formula, the cask, the Scoop manifest — and none can see the others.
+  Every disagreement is silent: a `sed` that matches no line still exits 0, and the tap bump ends on `git diff --quiet`, which only asks whether *something* changed, so somebody's `brew install` is the first thing to notice, one release later with a hash mismatch.
+  `--manifest` runs in `hygiene.yml`, parses rather than builds, needs nothing installed; 28 cases in `scripts/tests/test_check_release_assets.py` each mutate one file the way a careless change would and assert the specific complaint, because a checker that passes because its parser broke is worse than no checker.
+
+- **The macOS installer window is branded.**
+  Opening the dmg gave you a stock Finder window: two icons on grey, nothing saying what the thing you just downloaded is.
+  It now opens on artwork built from the project logo, with the app and the `Applications` alias placed on a drop card below the lockup.
+  The card's fill is not a taste decision.
+  The Finder draws those two icon labels in the system label colour, which flips with the OS appearance, so the fill is tuned to the luminance where near-black and near-white score the same: 4.58:1 and 4.59:1, both clearing WCAG AA in both appearances, which nothing lighter or darker can do.
+  `crates/outl-desktop/src-tauri/dmg/background.svg` is the source and carries that reasoning; the PNG beside it is what the bundler consumes.
+  The non-obvious half is that `tauri-bundler` skips the AppleScript applying any of this whenever `CI == "true"`, silently, so the release workflow opts back in and falls back to one stock-window retry if the Finder refuses the Apple Events permission that script needs.
+  A background image is not allowed to hold back a `required` asset.
+- **`alias::` — a page answers to short or alternative names.**
+  A page had exactly one human name: its `title::`. Long titles make dense refs — `[[São Paulo]]` typed next to `[[SP]]` from the other half of a vault is two names for one page, and outl only recognised the long one ([#302](https://github.com/outlmd/outl/issues/302)).
+  A page property `alias:: Big Apple, NYC` now lists extra names, comma-separated. Every resolution surface matches them beside the title: `[[NYC]]` opens the New York page, `#nyc` and `@NYC` land there too, its backlinks collect all three spellings, and autocomplete finds it from any of them. The aliases ride the title's paths — one case-insensitive comparison in the resolver ladder, one `title → slug` map in the workspace index — so no client changes anything to benefit (RFC 0107).
+  `outl doctor` reports alias names claimed by more than one page, so the shared spelling is visible instead of silently resolving to whichever match comes first.
+
 ### Fixed
 
+- **`outl page prop list` listed the wrong properties, in both directions.**
+  It probed a hardcoded list of nine "well-known" keys instead of reading the page, so a page carrying `alpha::`, `due::`, `owner::` and `zeta::` listed **none** of them — and it listed `page-slug` / `page-kind`, which define the page and which `outl page prop set` refuses, inviting an edit that would rewrite the page's identity on the next projection.
+  The comment justifying the probe said the tree exposed no per-node property iterator; it has for a long time, and the sibling `outl block prop list` was already using it.
+  Both the CLI command and the `outl_page_prop_list` MCP tool now ask `outl_actions::property::page_properties`, which was already the owner of that question.
+  Found by reading this command's output next to `outl page render`'s while checking the property-order work below.
+
+- **The Windows ARM64 desktop installer was announced and never built.**
+  `build desktop Windows (aarch64)` failed on every release since the platform was added, with `Target aarch64-pc-windows-msvc is not installed (installed targets: x86_64-pc-windows-msvc)`.
+  The job asked `dtolnay/rust-toolchain` for that target.
+  The runner already has stable for the host, and that action's `targets:` input updates the host toolchain without adding the cross target.
+  The CLI zip for the same triple shipped, because that job runs `rustup target add`.
+  The desktop job does that now, so the next release attaches `outl-desktop-windows-aarch64-setup.exe`.
+- **Two things the screenshots for [#417](https://github.com/outlmd/outl/pull/417) found, both in paint rather than in logic.**
+  The desktop's `+ prop` affordance is a bare `+` where it floats over a block's first line.
+  It is absolutely positioned at the right edge, so the word it spelled covered the last word of any line that reached there, which on a wide window is most of them.
+  Measured: 49.1pt of cover down to 19.6pt, and the `aria-label` and the tooltip carried the meaning the whole time.
+  The page header keeps `+ prop`, because there it sits in the flow with a row to itself.
+  On the phone, the swipe-to-delete panel is inset by a point instead of filling the row's height.
+  A row lands on a fractional y, and a background is rasterised per element, so the panel and the opaque row covering it rounded to different device pixels: a 1px line of red ran along the top and bottom of every row's right edge, at rest, on every block in the outline.
+  Painting the colour on the clipping parent instead looks like the tidier fix and measures worse, widening the same leak to the full row.
+- **A bottom sheet on the phone could grow past the top of the screen, taking its own drag handle with it** ([#364](https://github.com/outlmd/outl/issues/364)).
+  A sheet is anchored to the bottom edge and its height is whatever its content needs, so content taller than the screen puts the first rows above the top edge with nothing to scroll them, and the handle up there too, so the sheet could not even be dragged shut.
+  Reported from a device for the long-press menu, with a photo.
+  The same shape was live in Settings, Reminders, Properties, Insert template, Plugins and the calendar.
+  Each is bounded by the viewport now and scrolls its rows.
+  Landscape is what made it certain rather than marginal: both platforms allow it, which halves the height and nearly doubles the width.
+  The calendar was the worst case, because its day cells are squares in seven columns, so width drives height: on a landscape iPhone the columns came to ~101pt and the grid alone to 627pt inside a 402pt viewport, with the month arrows and the first three weeks off-screen.
+  Its cells are capped at 28rem now, which is wider than any phone in portrait, so a date cell stays a date cell and portrait is untouched.
+  The weekday letters also had no column gap where the day cells did, so the two rows of seven drifted apart from each other across the week.
+  They share one grid now.
+- **A reminder on a block with no text showed up as "(empty block)", or as a bare row with nothing on it** ([#364](https://github.com/outlmd/outl/issues/364)).
+  Writing `remind:: 3pm` on a blank bullet is legitimate, and the reminder fires, but the Reminders list rendered it as a row that looked tappable and advertised nothing.
+  The row now reads "This reminder's block has no text yet. Write something in it and it will show up here.", on the desktop panel and the phone sheet alike, from one shared sentence.
+  It stays a button: on the desktop it opens the page with the cursor on the blank bullet, which is where you want to be when you are told to write in it.
+  Whitespace-only text counts as empty too.
+- **Opening outl on a Windows PC with no WebView2 runtime crashed, and the crash was the only explanation.**
+  Tauri's setup panics with `Failed to setup app: runtime error: Could not find the webview runtime, make sure it is installed`, and that panic is what got filed.
+  The NSIS installer already tries to download the runtime.
+  That does not cover an offline or failed bootstrapper, a runtime removed later, or the program started without the installer.
+  Windows now asks the same question before the window is built.
+  A missing runtime shows a message naming the Evergreen WebView2 runtime and Microsoft's download page, then exits with status 1.
+  A PC that already has the runtime is unchanged, and so are macOS and Linux.
+- **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
+  Root `CLAUDE.md` invariant 8 refuses to overwrite a `.md` holding content that exists in no op, and that refusal freezes the page in *both* directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
+  The desktop and mobile render a banner for it.
+  The TUI never asked the question, so it had nothing to swallow — opening such a page and reading it looked completely normal, because the file is on disk and renders fine.
+  What is missing is on the *other* devices, which is exactly why the machine you are sitting at has no way to hint at it.
+  Every page open now runs `outl_actions::reproject_stale_md` and a frozen page gets a persistent banner above the outline naming the recovery command.
+  Not a status-line message and not a toast: nothing clears this condition on its own, so a line that scrolls away is the same silence with a delay.
+  It is also the one banner `z f` (focus mode) keeps, because wanting a distraction-free outline is not consent to be told nothing about a page that is saving nowhere else.
+  The page still opens and still shows what is on disk — the guard withheld a *write*, not the page.
+- **The desktop status bar reported a snapshot-boot op count as the whole log.**
+  `ops` is `Workspace::log().len()`, the **resident** log, and a workspace that booted from a snapshot replays only the delta above the cutoff.
+  `outl workspace info` started labelling that in this release; the status bar kept printing the bare number, so the same workspace read `332 ops` in one window and `332 since the last snapshot` in the terminal — and on a graph whose `ops/` holds 228,943, the unlabelled version reads as data loss.
+  `WorkspaceSummary` carries `ops_complete` now, from the same `Workspace::booted_from_snapshot` the CLI and `device_activity` ask, so the three cannot describe one log three ways.
+  A reply with no flag still reads as complete, so an older backend is not retro-labelled as partial.
+- **The TUI never refreshed a page's `.md` from the tree on open**, which is the other half of the same call.
+  A peer's ops land in the op log, not in the `.md`, so a synced-in block sat in the log while the page kept rendering the projection from before it arrived.
+  Issue #166 fixed this for the GUI clients in 2026; the TUI was never wired up.
+- **"1 line in this file were never recorded"** — the GUI banner's plural was baked into the sentence, so the one branch that cannot use it disagreed with itself.
+- **`outl-linux-x64.tar.gz` carried a glibc 2.39 floor it never needed**, so it died with `version GLIBC_2.38 not found` on Debian 12, Ubuntu 22.04 and RHEL 9 — the distros where someone downloads a tarball instead of using a package manager.
+  A glibc-linked binary runs on the glibc it was built against or newer, never older, so the runner image *is* the compatibility floor.
+  `build_desktop_linux` was pinned to Ubuntu 22.04 (glibc 2.35) for exactly this and said so in a comment; the CLI leg was on 24.04, which was an oversight rather than a decision.
+  Both Linux legs are on 22.04 now, and `docs/development.md` → Runner sizing owns the rule so the next bump is made on purpose.
+  The same floor applied to the Homebrew `x86_64_linux` bottle, which is the other thing that binary feeds.
+
+### Changed
+
+- **Property order has one owner, and it is written down** ([#285](https://github.com/outlmd/outl/issues/285)).
+  outl renders `key:: value` lines alphabetically, reorders a hand-sorted file on the next projection, and that was never documented anywhere — the behaviour lived in eight copy-pasted `sort_by` calls, three of which explained the reason in their own words and disagreed.
+  `outl_actions::tree::sort_in_presentation_order` is the one owner now; every surface calls it (the `.md` renderer, the outline DTO each GUI reads, the parsed outline the from-disk readers build, a backlink row's shallow leaf, the tree-derived index, the clipboard, `outl page prop list` and `outl block prop list`), and [`docs/markdown-format.md` → Property order](docs/markdown-format.md#property-order) says what the order is and why declaration order is not recoverable: `Op::SetProp` carries no slot, so the nearest thing available is each op's HLC, which is the order properties were last *edited* — a peer fixing one typo would reshuffle the block on every device.
+  A ninth copy fails `crates/outl-actions/tests/property_order_owner.rs`.
+  Nothing a user sees changed; what changed is that it can now be changed, or argued with, in one place.
+- **`outl doctor` counts the stale pages that lose nothing instead of printing one line each** ([#286](https://github.com/outlmd/outl/issues/286)).
+  A 2,865-page workspace bulk-edited outside outl reported 908 warnings, 840 of them the same sentence with a different path, and the two findings that mattered were somewhere in the middle of it.
+  Those 840 are now one line with the count and five example paths.
+  **A stale page whose re-projection would remove content still gets its own line with its own line count, always** — that is the page with something to decide, and the asymmetry is the design rather than a threshold (`a_page_that_loses_content_is_named_even_while_the_harmless_ones_are_counted`).
+  The human listing also caps the repairable items and the completed repair actions at 20 and says how many it withheld; `--json` still carries every one.
+  A **skipped** repair action is never capped: a refusal the user does not hear about is the silence the refusal exists to prevent.
+- **`outl workspace info` no longer reports a partial op count as a total.**
+  It printed `ops: 332` for a workspace whose `ops/` holds 228,943, because a snapshot boot replays only the delta above the cutoff and that is what `Workspace::log()` holds.
+  Three orders of magnitude, on the command a user runs to ask how big their graph is, reads as data loss.
+  The count is still the resident one (parsing 134 MB to print one number is `outl doctor`'s job, not a summary's), but it now says `ops: 332 since the last snapshot` and the JSON carries `ops_complete: false`.
+  `outl_actions::activity` had already written that rule for `DeviceActivity::complete`; this command was breaking it.
+
+- **A release publishes on what is on the draft, not on whether every job went green.**
+  The gate was `needs.<job>.result == 'success'` per build job, which made every job a single point of failure for every other job's assets: one architecture's bundler, or one flaky runner, and a release with 25 finished artifacts published none of them.
+  This repo's own workaround for the Android APK was the opposite extreme — absent from the conditions, so a missing APK published in silence, and the same shape produced a v0.12.0 draft with zero assets that nothing complained about.
+  Both are gone. `scripts/release_assets.py` says which assets a release must carry, and the pipeline reads it in three places: an optional leg carries `continue-on-error`, which keeps the run from going red; `publish_release` reads the draft's assets and no job results at all, failing on a missing required asset and publishing a missing optional one *with the gap named in that release's own notes and in the run summary*; `update_tap` moves a manifest only when every asset that manifest points at is present.
+  The middle one is the load-bearing part, and it is why the gate is written against assets rather than against `needs`: whatever conclusion a half-failed matrix reports, the question "is this release complete" has one honest answer and it is on the draft.
+  That last one is why a missing Windows `arm64` zip stops the Scoop bump but not the Homebrew one: a manifest with a new version and the previous release's digest is a hash mismatch at install time, which is worse than a manifest that still points at a release that exists.
+- **`build_desktop_windows` is one job with an architecture matrix too**, and both legs now pass `--target` explicitly.
+  The x64 leg built for the host and read `target/release/…`; keeping that while adding a cross-compiled `aarch64` leg would have meant two output layouts to keep straight in five steps, so both read `target/<triple>/release/…`.
+- **`build_desktop_linux` is one job with an architecture matrix**, not one job per architecture.
+  The alternative was a second 250-line copy of the AppRun seeding, the Sentry upload, the three bundlers, the rpm's release-string rewrite and the strip gate — five things that have to agree across architectures and would have been free to drift.
+  Both legs gate the release: a broken `aarch64` leg holds the macOS, Windows and x86_64 assets back too, because install docs that promise an architecture and a release that quietly omits it is the worse failure.
+  `release.yml` dispatched with `dry_run: true` is how a change to that job gets exercised before it can do that.
+- **The classification behind that banner has one owner instead of one-and-a-half.**
+  `outl_actions::ProjectionRefusal` is the split between "this page has stopped converging and only a command fixes it" and "an I/O condition the next open retries out of"; `reproject_stale_md` is the page-open call every client makes.
+  It used to live in `outl-tauri-shared`, which the TUI cannot depend on — so the client with the hardest failure mode had no verdict at all.
+- **The wording behind it has a Rust owner too**: `outl_actions::refusal::ahead_of_log_notice`, including the per-surface recovery sentence (a phone has no `outl` binary; every other surface is sitting in a shell).
+  `@outl/shared`'s `aheadOfLogNotice` is now a declared mirror rather than the sole copy, and the two facts a user acts on — the headline and the command — are pinned across the language boundary instead of trusted.
+  `RECONCILE_COMMAND` in the TypeScript was a second spelling of `AHEAD_OF_LOG_RECOVERY_COMMAND` with nothing holding them equal.
+- **The TUI theme gained a `destructive` slot**, read from `Palette::destructive` — the field the GUI banner for this same condition was already painted from.
+  Two surfaces picking their own red for one fact is how a theme ends up meaning different things per client (invariant 13).
+
+- **A page name written in Chinese, Japanese, Korean, Cyrillic or any other script got no page of its own.**
+  `[[你好]]` and `[[世界]]` opened the same page, `#中文` and `#笔记` landed on it too, and `[[Rust 笔记]]` opened `[[Rust]]`.
+  `slugify` kept ASCII letters and digits plus a fixed table of folded Latin letters, turned everything else into `-`, and fell back to `untitled` when nothing survived.
+  A page's NodeId derives from its slug, so this was never a filename clash.
+  Every such name was one node, which merged the content and the backlinks of all of them, and two devices each creating a different Chinese page wrote into that same node.
+  Latin letters the table has no entry for (`ł`, `ř`, `ş`, `ộ`) were dropped the same way, so distinct Polish, Czech, Turkish or Vietnamese names could collide too.
+  A letter or digit with no ASCII fold now keeps its own spelling, lowercased, so `[[你好]]` projects to `pages/你好.md`.
+  Emoji are not letters and still collapse, so `ship 🚀` is still `ship`.
+  The name is normalised to NFC first, because the slug decides the NodeId, and macOS hands back NFD while a Korean IME composes Hangul out of jamo.
+  Without that, one name spelled two ways would mint two pages that look identical on screen.
+  The normalisation runs in both directions: `reconcile`'s `slug_from_md_path` NFC-normalises the filename stem it derives a page id from, which was safe to skip while every slug was `[a-z0-9-]` and is load-bearing now, since a stem that comes back decomposed would mint a second page root for a page that already exists and nothing merges two spellings of one name.
+  `ẞ` (capital sharp s) folds to `s` for the same reason: the table held only its lowercase form, so the slug of a slug differed from the slug.
+  Lowercasing goes through uppercase, because a case-insensitive filesystem (APFS and NTFS, both by default) compares names by uppercasing them, and 21 groups of characters are each already lowercase, stay distinct under a plain `to_lowercase`, and share one uppercase form.
+  `µs latency` and `μs latency` (micro sign against Greek mu) were two pages, two ids, and one `.md` to hold both, so one silently overwrote the other. Same for `s`/`ſ`, `ς`/`σ`, the Turkish dotless `ı`, the Greek symbol variants and the Old Cyrillic letters.
+  Both properties are pinned over all 1,114,112 codepoints rather than over the cases anyone thought of, since `ẞ` is not a shape a hand-written test reaches.
+  Two names that differ only by an accent the fold table has no entry for are still two pages: `CAFÉ` and `cafe` are one, `ΛΟΓΟΣ` and `λόγος` are not. That is the table's Latin scope, not a case problem.
+  Keeping the characters made the 255-**byte** slug cap reachable, by a sentence a user would plausibly type: 255 bytes is 255 ASCII characters but only 85 CJK ones, and `open_or_create_by_ref` promises never to bubble `invalid …` back to a tap.
+  A slug over the cap is now cut on a character boundary with a digest of the whole slug appended, because truncating alone would put two long names on one node, which is this same bug in miniature.
+  The cut leaves room for the filename the slug becomes, which is not the slug: every write renames `.<slug>.outl.tmp` over its target, ten bytes longer. A slug filling the whole 255-byte component would commit a page to the op log that no device can ever project, which is worse than the refusal it replaced.
+  `outl plugin init` with such a name is still refused, and says what it needs: that slug becomes a reverse-DNS label in the plugin id, which accepts only `[a-z0-9-]`, and the refusal used to come for free from the name slugifying to `untitled`.
+  A page that has already merged into `untitled` still opens under the name it was given, through the resolution ladder's title match.
+  The content written into it cannot be split automatically: the merged blocks never recorded which of the names they were meant for.
+  [Issue #405](https://github.com/outlmd/outl/issues/405).
+- **An Android crash report did not say which build it came from.**
+  The APK's `versionName` was the base version, so every beta of 0.13.0 reported `0.13.0`, and `versionCode` was Tauri's semver derivation, which ignores the prerelease and gave all of them `13000`.
+  The reasoning was that the Release tag carries the beta string, which it does, except the tag stays on GitHub while the APK goes to a phone.
+  [Issue #401](https://github.com/outlmd/outl/issues/401) arrived as a `SIGABRT` from `Version='0.13.0'`, a range of builds that straddled the `ndk_context` fix the reporter needed.
+  Identifying it meant matching the tombstone's symbol address against the `.so` inside each published APK until one lined up (beta.256).
+  The APK now carries the full version, `-beta.N` included, and `versionCode` is the run number that names the beta, so beta.261 ships `versionCode=261`.
+  This only brings the manifest in line with Sentry, whose release already came from `CARGO_PKG_VERSION` and already had the beta.
+- **Typing with a Chinese, Japanese or Korean keyboard inside `[[…]]` corrupted the block on iOS.**
+  Five pinyin keystrokes in an empty page ref left `[[]]nihao]]niha]]nih]]ni]]n]]` in the block, one `]]` per keystroke, with the pinyin stranded behind as plain text.
+  The same keyboard outside a ref was fine, which is what made this look like a ref bug instead of an input one.
+  Those keyboards type into *marked* text, and WebKit reports the caret at the **start** of that run while the `input` event fires.
+  The two characters left of it were therefore the `[[` typed before the keyboard was switched and the two on the right were the pinyin, which reads exactly like an unclosed ref, so pair completion appended a second `]]`.
+  Assigning that new value then committed the marked run as plain text, the keyboard restarted a composition at the parked caret, and the next keystroke did it again.
+  Pair completion now sits out any composition, including the event that ends one, and `((…))` is covered by the same guard.
+  Skipping it costs nothing, because the pair is already closed on the keystroke itself, which is why the desktop has never run it.
 - **The Android app closed on open on every device, and the 16 KB page-size fix was hiding it.**
   `liboutl_mobile_lib.so` loaded correctly and the process aborted a moment later inside `Rust_onCreate`, so the symptom read exactly like the 16 KB bug fixed in 0.12.0-beta.227: an icon that flashes and closes.
   It was a second defect standing behind the first, unrelated to it, present since the Android app first ran, and reproducible on a 4 KB-page emulator.

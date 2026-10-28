@@ -15,6 +15,7 @@ outl takes the parts of [Roam Research][roam] and [Logseq][logseq] that work —
 |----------------|------|
 | Install and try outl in a minute | [Getting started](getting-started.md) |
 | Install via Homebrew (GA or beta) | [Homebrew tap](homebrew.md) |
+| Install on Windows via Scoop | [Scoop bucket](scoop.md) |
 | Understand the pitch vs. Roam/Logseq | [Why outl](why-outl.md) |
 | Know *exactly* how sync works | [Sync, done right](sync.md) |
 | Run an *optional* always-on peer on hardware you own | [Self-hosting](self-hosting.md) |

@@ -26,6 +26,13 @@ name: Docker image
 # profile into the `outlmd` org once already, and a hardcoded owner is exactly
 # the sort of thing that survives a move and then publishes to the wrong place.
 #
+# Both `linux/amd64` and `linux/arm64` are published, as one manifest list per
+# tag, so `docker pull` resolves the right one with no `--platform` flag. Each
+# architecture builds on a runner of that architecture and is pushed by digest;
+# a final job merges the digests into the tag. QEMU is not involved — emulating
+# a release build of this dependency tree took an hour-plus, which is why the
+# arm64 half waited for a native ARM runner instead of shipping emulated.
+#
 # See docs/self-hosting.md for what the image is and how it is meant to run.
 
 on:
@@ -53,10 +60,129 @@ concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
+# One owner for the image name: the matrix pushes by digest under it and the
+# merge job tags it. Two spellings of this string is how half a manifest list
+# ends up under a name nobody pulls.
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/outl-server
+
 jobs:
-  publish:
-    name: build and publish
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+  build:
+    name: build ${{ matrix.slug }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: amd64
+            platform: linux/amd64
+            runner: blacksmith-8vcpu-ubuntu-2404
+          - slug: arm64
+            platform: linux/arm64
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # A pull request from a fork carries no write token, and pushing from one
+      # would be a supply-chain hole regardless. Those runs build and stop.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Labels only. The tags are decided once, in `merge` — they belong to
+      # the manifest list, not to the per-architecture images, which are
+      # pushed by digest and carry no tag at all.
+      - name: Compute labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+
+      # `platforms:` names one architecture and the runner already is that
+      # architecture, so this is a native build: no QEMU, no binfmt setup step.
+      #
+      # On a push, `push-by-digest=true` publishes the image with no tag and
+      # returns its digest, which `merge` assembles into the tag. On a pull
+      # request there is nothing to push to, so the output is `cacheonly`:
+      # the Dockerfile still has to build, which is what the PR trigger is for.
+      #
+      # `provenance: false` because the digest this step returns has to be the
+      # image's. With attestations on, buildx pushes an index wrapping the
+      # image plus its attestation manifest, and feeding that to
+      # `imagetools create` puts an `unknown/unknown` entry in the final list.
+      # The provenance is not dropped, it moves: `merge` attests the finished
+      # manifest list, which is the digest a user actually pulls.
+      - name: Build
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The repository, with no tag: `push-by-digest` publishes under
+          # the name and returns a digest instead of moving a tag. On the
+          # `cacheonly` (pull request) path nothing is pushed and this is
+          # unused.
+          tags: ${{ env.IMAGE }}
+          provenance: false
+          outputs: >-
+            ${{ github.event_name != 'pull_request'
+                && 'type=image,push-by-digest=true,name-canonical=true,push=true'
+                || 'type=cacheonly' }}
+          cache-from: type=gha,scope=docker-${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.slug }}
+
+      # The digest travels to `merge` as a file named after it: artifact names
+      # are immutable per run, so each leg uploads its own and `merge` globs
+      # them back together.
+      - name: Export the digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DIGEST}" ]]; then
+            echo "::error::the build pushed no digest for ${PLATFORM}"
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - name: Upload the digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: publish manifest list
+    needs: build
+    # `id-token` mints the OIDC token Sigstore signs with, `attestations`
+    # writes the attestation. The workflow-level `packages: write` does not
+    # cover either, and a job that declares `permissions` replaces the
+    # workflow's set rather than adding to it — hence all four here.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    # Not `!cancelled()`: a tag that resolves to one architecture is worse
+    # than a tag that does not exist yet, because `docker pull` on the other
+    # architecture then fails with `no matching manifest` and looks like a
+    # platform we never built. Both legs land, or the tag stays where it was.
+    if: github.event_name != 'pull_request'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,13 +224,17 @@ jobs:
             echo "${TAG} trails ${HIGHEST} — no :latest"
           fi
 
+      - name: Download the digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # A pull request from a fork carries no write token, and pushing from one
-      # would be a supply-chain hole regardless. Those runs build and stop.
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -115,7 +245,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/outl-server
+          images: ${{ env.IMAGE }}
           flavor: latest=${{ steps.latest.outputs.value }}
           tags: |
             type=raw,value=dev,enable={{is_default_branch}}
@@ -123,18 +253,62 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
-      - name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      # One manifest list per tag, pointing at the digests the matrix pushed.
+      # The count is checked first: `imagetools create` is perfectly happy to
+      # publish a one-entry list, and that is the failure this whole job shape
+      # exists to avoid.
+      - name: Create and push the manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DIGESTS=( * )
+          if [[ ${#DIGESTS[@]} -ne 2 ]]; then
+            echo "::error::expected 2 per-architecture digests (amd64, arm64), found ${#DIGESTS[@]}: ${DIGESTS[*]:-none}"
+            exit 1
+          fi
+          REFS=()
+          for d in "${DIGESTS[@]}"; do
+            REFS+=( "${IMAGE}@sha256:${d}" )
+          done
+          TAGS=()
+          while IFS= read -r tag; do
+            TAGS+=( --tag "${tag}" )
+          done < <(jq -r '.tags[]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
+          docker buildx imagetools create "${TAGS[@]}" "${REFS[@]}"
+
+      # Reads the list that was just published rather than trusting the push:
+      # prints one line per architecture, so a missing platform is visible in
+      # the log of the run that caused it. The digest it reports is the one
+      # `docker pull <tag>` resolves, and the one the attestation below is
+      # about.
+      - name: Inspect the published list
+        id: list
+        run: |
+          set -euo pipefail
+          FIRST=$(jq -cr '.tags[0]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")
+          docker buildx imagetools inspect "${FIRST}"
+          DIGEST=$(docker buildx imagetools inspect "${FIRST}" --format '{{json .Manifest.Digest}}' | jq -r .)
+          case "${DIGEST}" in
+            sha256:*) ;;
+            *) echo "::error::could not read the manifest list digest (got '${DIGEST}')"; exit 1 ;;
+          esac
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "::notice::published ${FIRST} as ${DIGEST}"
+
+      # SLSA provenance for the list, signed through Sigstore and stored in
+      # the registry next to it, so `gh attestation verify oci://<image> --repo
+      # <repo>` works for anyone pulling. This is the attestation the
+      # per-architecture builds could not carry: buildx would have wrapped
+      # each image in an index of its own, and merging two of those is what
+      # leaves an `unknown/unknown` platform in the list a user pulls.
+      #
+      # Attesting the list instead covers the artifact that is actually
+      # pulled, and signs it rather than only attaching an unsigned in-toto
+      # statement the way `provenance: mode=min` did.
+      - name: Attest the manifest list
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          context: .
-          # linux/amd64 only. A cross-built arm64 image would go through QEMU,
-          # and emulating a full release build of this dependency tree turns a
-          # ten-minute job into an hour-plus one. Adding arm64 properly means a
-          # second native runner and a manifest merge — worth doing when
-          # somebody actually needs it, not before.
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.list.outputs.digest }}
+          push-to-registry: true

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@outl/shared/api/commands", () => ({
   listPages: () => Promise.resolve([{ slug: "alpha", title: "Alpha", kind: "page" }]),
+  searchPages: () => Promise.resolve([{ slug: "alpha", title: "Alpha", kind: "page" }]),
   deletePage: vi.fn(),
   searchBlocks: () => Promise.resolve([]),
   togglePin: vi.fn(),
@@ -70,4 +71,5 @@ describe("PageSwitcher actions", () => {
     await flush();
     expect(host.querySelector('[data-action="SyncNow"]')).not.toBeNull();
   });
+
 });

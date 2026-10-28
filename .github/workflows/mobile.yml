@@ -259,19 +259,20 @@ jobs:
   # BUILD_CERTIFICATE_BASE64, P12_PASSWORD, MAC_KEYCHAIN_PASSWORD,
   # PROVISIONING_PROFILE_BASE64.
   #
-  # Crash reporting (RFC 0377) adds two more, registered as
-  # *repository* secrets rather than environment ones — Settings →
-  # Secrets and variables → Actions:
+  # Crash reporting (RFC 0377) adds two more:
   #
-  #   OUTL_SENTRY_DSN_MOBILE   DSN of the `outl-mobile` Sentry project,
-  #                            shared with `release.yml`'s build_android
-  #   SENTRY_AUTH_TOKEN        token with `project:releases`, for the
-  #                            dSYM upload
-  #
-  # Repository scope because `release.yml`'s desktop and Android jobs
-  # need the same two and have no `environment:`; giving them one to
-  # reach a DSN would also hand them the Apple certificates above. This
-  # job reads repository secrets fine despite having an environment.
+  #   OUTL_SENTRY_DSN_MOBILE   repository secret. DSN of the `outl-mobile`
+  #                            Sentry project, shared with `release.yml`'s
+  #                            build_android
+  #   SENTRY_AUTH_TOKEN        secret of the `release` environment, not a
+  #                            repository secret. Scope `project:releases`,
+  #                            for the dSYM upload. This job already selects
+  #                            that environment, so the token is visible here.
+  #                            `release.yml` selects it on `main` and `v*`
+  #                            tags for the same reason. The DSN stays a
+  #                            repository secret: it is write-only, and it
+  #                            is not a reason to hand a job the Apple
+  #                            certificates above.
   #
   # **A build without either keeps working.** The DSN is read by
   # `option_env!` at compile time, so unset means the reporter compiles

@@ -1,4 +1,26 @@
 //! `outl workspace info` — workspace summary (path, actor, counts).
+//!
+//! **`ops` counts the resident log, which is not always the whole log.**
+//! A workspace that booted from a snapshot replays only the delta above
+//! the cutoff, so `Workspace::log()` holds that delta and nothing below
+//! it. Printing it as `ops: 332` for a workspace whose `ops/` holds
+//! 228,943 is not a rounding error — it is three orders of magnitude,
+//! on the one command a user runs to ask how big their graph is, and it
+//! reads as data loss.
+//!
+//! `outl_actions::activity` already wrote the rule this broke: a partial
+//! count is never presented as a total, it is labelled "since the last
+//! snapshot". `ops_complete` carries that verdict here, from
+//! `Workspace::booted_from_snapshot`, so the human line and the JSON say
+//! the same thing.
+//!
+//! It stays a resident count rather than becoming a true one on purpose.
+//! The real total needs `Storage::all_ops()` — the doctor pays that
+//! (a full parse of every `.jsonl`) because integrity is its job, and
+//! making a summary command parse 134 MB to print one number is a cost
+//! this command has no reason to pay. `outl doctor` is where the exact
+//! figure lives, and the label now points at the difference instead of
+//! hiding it.
 
 use std::path::Path;
 
@@ -45,6 +67,9 @@ pub fn info(ctx: &WsCtx) -> Value {
         "pages": regular,
         "journals": journals,
         "ops": ctx.workspace.log().len(),
+        // False means `ops` covers only what was replayed above the
+        // snapshot cutoff. See this module's doc.
+        "ops_complete": !ctx.workspace.booted_from_snapshot(),
         "tree_nodes": ctx.workspace.tree().node_count(),
     })
 }
@@ -55,6 +80,12 @@ fn print_info(v: &Value) {
     let pages = v.get("pages").and_then(Value::as_u64).unwrap_or(0);
     let journals = v.get("journals").and_then(Value::as_u64).unwrap_or(0);
     let ops = v.get("ops").and_then(Value::as_u64).unwrap_or(0);
+    // Absent reads as complete: an older payload had no such field, and
+    // a missing flag must not turn a full count into a hedge.
+    let ops_complete = v
+        .get("ops_complete")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let ephemeral = v
         .get("ephemeral_actor")
         .and_then(Value::as_bool)
@@ -67,5 +98,9 @@ fn print_info(v: &Value) {
     }
     println!("pages:    {pages}");
     println!("journals: {journals}");
-    println!("ops:      {ops}");
+    if ops_complete {
+        println!("ops:      {ops}");
+    } else {
+        println!("ops:      {ops} since the last snapshot — `outl doctor` counts the whole log");
+    }
 }

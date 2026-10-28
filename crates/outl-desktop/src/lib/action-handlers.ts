@@ -126,6 +126,14 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     return fv ? fv.root.children : appState.outline;
   }
 
+  /** Pop one level of zoom, to the parent crumb or all the way out. */
+  function zoomOut() {
+    const id = appState.focusBlockId;
+    if (!id) return;
+    const crumbs = focusSubtree(appState.outline, id)?.breadcrumb ?? [];
+    setAppState("focusBlockId", crumbs[crumbs.length - 1]?.id ?? null);
+  }
+
   /** Find a block in the outline by id; deep search. */
   function lookupBlock(id: string): BlockNode | null {
     const walk = (bs: BlockNode[]): BlockNode | null => {
@@ -302,6 +310,7 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     OpenReminders: () => {
       setAppState("remindersOpen", !appState.remindersOpen);
     },
+    OpenTaskList: () => setAppState("tasksOpen", !appState.tasksOpen),
     InsertRemind: async () => {
       const page = appState.page?.id;
       const block = appState.selectedBlockId;
@@ -405,7 +414,6 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       }
       const cur = appState.selectedBlockId;
       const nav = navBlocks();
-      const list = flattenVisible(nav);
       const next = nextVisibleId(cur, nav);
       const atLast = cur !== null && next === cur;
       if (atLast && backlinkIds.length > 0) {
@@ -414,9 +422,6 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
         setAppState("selectedBacklinkBlockId", backlinkIds[0]);
         return;
       }
-      console.info(
-        `[shortcuts] SelectionDown cur=${cur} → ${next} (idx ${list.indexOf(cur ?? "")} → ${list.indexOf(next ?? "")} of ${list.length})`,
-      );
       if (next) setAppState("selectedBlockId", next);
     },
     SelectionUp: () => {
@@ -439,12 +444,16 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
       }
       const cur = appState.selectedBlockId;
       const nav = navBlocks();
-      const list = flattenVisible(nav);
       const prev = previousVisibleId(cur, nav);
-      console.info(
-        `[shortcuts] SelectionUp cur=${cur} → ${prev} (idx ${list.indexOf(cur ?? "")} → ${list.indexOf(prev ?? "")} of ${list.length})`,
-      );
-      if (prev) setAppState("selectedBlockId", prev);
+      if (prev) {
+        setAppState("selectedBlockId", prev);
+        return;
+      }
+      // Only when the zoom holds nothing: `z i` on a childless block
+      // shows an empty page, so every movement key goes quiet and `z o`
+      // was the only way out. At the top of a zoom that HAS rows `prev`
+      // is null too, and escaping there would eject a reader mid-read.
+      if (appState.focusBlockId && flattenVisible(nav).length === 0) zoomOut();
     },
 
     // ── enter Insert (i / Shift+I / a / A / Enter) ───────────────
@@ -721,12 +730,10 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     // handler (which commits + flips `editingBlockId` to null), so
     // the user is back in Normal mode without a second key.
     ExitInsert: () => {
-      if (appState.timelineOpen) {
-        setAppState("timelineOpen", false);
-        return;
-      }
-      if (appState.remindersOpen) {
-        setAppState("remindersOpen", false);
+      // The three read-only panels, innermost first; one Esc closes one.
+      const panel = (["timelineOpen", "remindersOpen", "tasksOpen"] as const).find((k) => appState[k]);
+      if (panel) {
+        setAppState(panel, false);
         return;
       }
       if (appState.helpOpen) {
@@ -898,14 +905,7 @@ export function buildHandlers(deps: DesktopHandlerDeps): ActionHandlers {
     // so zooming out exits to the full page. A stale focus (block gone)
     // also exits.
     ZoomOut: () => {
-      const id = appState.focusBlockId;
-      if (!id) return;
-      const fv = focusSubtree(appState.outline, id);
-      if (fv && fv.breadcrumb.length > 0) {
-        setAppState("focusBlockId", fv.breadcrumb[fv.breadcrumb.length - 1].id);
-      } else {
-        setAppState("focusBlockId", null);
-      }
+      zoomOut();
     },
 
     // ── Viewport (zz) ────────────────────────────────────────────

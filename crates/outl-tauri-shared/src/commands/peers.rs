@@ -1,9 +1,14 @@
 //! Peer / device management command bodies.
 //!
-//! These are the only bodies that bypass the workspace lock: the peer
-//! list is sync-transport state, not workspace state, so they read and
-//! edit `<workspace>/.outl/peers.json` directly via
+//! These bypass the workspace lock, because the peer list is
+//! sync-transport state rather than workspace state: they read and edit
+//! `<workspace>/.outl/peers.json` directly via
 //! `outl_sync_iroh::PeersStore`.
+//!
+//! Not the only module that skips it — `asset`, `exec`, `telemetry` and
+//! `page_backlinks` each say so for their own reasons. This one is
+//! distinctive in *what* it touches instead: a file beside the
+//! workspace that the workspace model knows nothing about.
 //!
 //! **Pairing stays client-side.** `outl_peer_pair_host` returns a
 //! `PairedPeerDto` on the desktop but the raw ticket `String` on mobile

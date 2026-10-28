@@ -119,7 +119,7 @@ impl Backlink {
 pub struct BacklinkCrumb {
     /// Node id of the ancestor block.
     pub id: String,
-    /// Ancestor block's text, TODO/DONE prefix stripped, single line.
+    /// Ancestor block's text, TODO/DONE prefix stripped. Full block text, so it may span lines.
     pub text: String,
 }
 
@@ -134,11 +134,11 @@ where
 }
 
 /// Every block in the workspace that mentions `target` — either as a
-/// literal `[[target]]` substring or as a `#tag` token whose slug
+/// `[[target]]` token or as a `#tag` token whose slug
 /// form equals `target`'s slug form.
 ///
-/// `[[target]]` is matched literally — pass the page's slug AND title
-/// separately if you want to catch both forms. Tags go through
+/// `[[target]]` is matched as an inline token, not a substring (see
+/// [`crate::mentions`]), against the page's slug or title. Tags go through
 /// `outl_md::slug::slugify` on both sides, mirroring how a tag click
 /// resolves its page (`open_or_create_by_name`), so `#Avelino` counts
 /// as a mention of the page whose slug is `avelino`. `root` is the

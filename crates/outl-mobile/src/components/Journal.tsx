@@ -143,7 +143,6 @@ import { CaptureSheet } from "./CaptureSheet";
 import { JournalEmptyPage, JournalLoadFailed, JournalStartWriting } from "./JournalEmpty";
 import { isBlankOutline } from "@outl/shared/polish";
 import { JournalZoomBar } from "./JournalZoomBar";
-import type { SwitcherMode } from "./PageSwitcher";
 import { createDayNav } from "./Journal.day-nav";
 import { createCapture } from "./Journal.capture";
 import type { TaskHit } from "@outl/shared/api/overview";
@@ -364,20 +363,20 @@ export function Journal() {
     setView(v);
   }
 
-  /**
-   * Open the page a reminder is on and scroll its block into view, for
-   * the notification tap. Scroll, not zoom: zooming would hide the rest
-   * of a page the user did not choose to narrow. Best effort; landing on
-   * the right page is the part that matters.
-   */
+  /** Open the page a reminder is on and show its block, for the
+   *  notification tap. Scrolling is preferred over zooming: zooming
+   *  narrows a page the user did not ask to narrow. */
   async function navigateToBlock(slug: string, blockId: string) {
     const v = await openPageBySlug(slug);
     applyView(v);
-    // One frame, so the outline the block lives in has rendered.
+    // One frame, so the outline has rendered. A block under a collapsed
+    // ancestor has no node, and `?.` made that a silent no-op: the page
+    // opened with the reminder's block nowhere on it. Zoom always renders.
     requestAnimationFrame(() => {
-      document
-        .querySelector(`[data-block-id="${CSS.escape(blockId)}"]`)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      const sel = `[data-block-id="${CSS.escape(blockId)}"]`;
+      const el = document.querySelector(sel);
+      if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      else setFocusBlockId(blockId);
     });
   }
 
@@ -487,7 +486,6 @@ export function Journal() {
     withError,
     notify: (text) => setError(text),
   });
-  const [switcherMode, setSwitcherMode] = createSignal<SwitcherMode>("pages");
   const [tasksOpen, setTasksOpen] = createSignal(false);
   const [captureOpen, setCaptureOpen] = createSignal(false);
 
@@ -1337,17 +1335,15 @@ export function Journal() {
   /** Which bottom bar tab is lit: the open sheet, else Journal on a day. */
   function activeTab(): BottomTab | null {
     if (tasksOpen()) return "tasks";
-    if (switcherOpen()) return switcherMode() === "blocks" ? "search" : "pages";
-    return view()?.page.kind === "journal" ? "journal" : null;
+    if (remindersOpen()) return "reminders";
+    return switcherOpen() ? "search" : view()?.page.kind === "journal" ? "journal" : null;
   }
 
   function handleTab(tab: BottomTab) {
     haptic("light");
     setTasksOpen(tab === "tasks");
-    if (tab === "search" || tab === "pages") {
-      setSwitcherMode(tab === "search" ? "blocks" : "pages");
-      setSwitcherOpen(true);
-    } else setSwitcherOpen(false);
+    setRemindersOpen(tab === "reminders");
+    setSwitcherOpen(tab === "search");
     if (tab === "journal") void dayNav.jumpToday();
   }
 
@@ -1446,7 +1442,6 @@ export function Journal() {
         onUnfoldAll={handleUnfoldAll}
         onRefresh={handleRefresh}
         onRunToolbarButton={(btn) => void runToolbarButton(btn)}
-        onOpenReminders={() => setRemindersOpen(true)}
         onOpenPlugins={() => setPluginsOpen(true)}
         onOpenDevices={() => setDevicesOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -1660,7 +1655,6 @@ export function Journal() {
         onClose={() => setSwitcherOpen(false)}
         onPick={handlePickPage}
         onJumpToBlock={handleJumpToBlock}
-        initialMode={switcherMode()}
         onAction={(a) => paletteHandlers()[a]()}
       />
 

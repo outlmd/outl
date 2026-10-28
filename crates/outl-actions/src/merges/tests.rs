@@ -144,3 +144,18 @@ fn each_device_keeps_its_own_file_and_a_corrupt_one_starts_empty() {
     restart(&root);
     assert!(list(&root, ME).is_empty());
 }
+
+/// The log is read as "newest first" by its doc and by the panel that
+/// renders `at_ms`. `record` used to sort only the arriving batch and
+/// prepend it, which orders by *detection* instead: a peer edit that
+/// synced late landed above entries newer than itself.
+#[test]
+fn a_late_arriving_older_edit_sorts_below_the_newer_ones() {
+    let root = fresh_root("late-arrival");
+    record(&root, ME, vec![entry(50), entry(40)]);
+    // Syncs now, but happened before both of the above.
+    record(&root, ME, vec![entry(10)]);
+
+    let times: Vec<u64> = list(&root, ME).iter().map(|e| e.at_ms).collect();
+    assert_eq!(times, [50, 40, 10], "newest first, by when it happened");
+}

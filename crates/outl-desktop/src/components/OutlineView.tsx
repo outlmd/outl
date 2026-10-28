@@ -895,7 +895,7 @@ export function OutlineView() {
         </div>
       </header>
 
-      <div class="min-w-0 flex-1 overflow-y-auto px-12 pt-1 pb-6">
+      <div class="outl-cursor-room min-w-0 flex-1 overflow-y-auto px-12 pt-1 pb-6">
         <div class="outl-reading mx-auto w-full max-w-3xl">
           <PageAheadOfLogBanner info={appState.mdAheadOfLog} client="desktop" />
           <ParseWarningsBanner warnings={appState.parseWarnings} />

@@ -336,6 +336,16 @@ describe("withCreateNewPersonCandidate", () => {
     expect(result).toBe(list);
   });
 
+  it("matches an existing person by alias name, not only by title", () => {
+    const list = [{ ...person("avelino", "Avelino"), aliases: ["Ave", "TA"] }];
+    expect(withCreateNewPersonCandidate(list, "ave")).toBe(list);
+  });
+
+  it("still appends when the alias list misses the query", () => {
+    const list = [{ ...person("avelino", "Avelino"), aliases: ["TA"] }];
+    expect(withCreateNewPersonCandidate(list, "vini")).toHaveLength(2);
+  });
+
   it("returns the input verbatim when the query is empty", () => {
     const list = [person("avelino", "Avelino")];
     expect(withCreateNewPersonCandidate(list, "")).toBe(list);

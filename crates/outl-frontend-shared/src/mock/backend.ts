@@ -110,7 +110,7 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
 
   const handlers: Record<string, Handler> = {
     current_workspace: () => settings.last_workspace,
-    workspace_stats: () => ({ blocks: [...ws.walk()].length, ops: 0, actor: "mock", storage_root: settings.last_workspace, ready: true }),
+    workspace_stats: () => ({ blocks: [...ws.walk()].length, ops: 0, actor: "mock", storage_root: settings.last_workspace, ready: true, ops_complete: true }),
     get_settings: () => settings,
     update_settings: (a) => Object.assign(settings, a.next),
     get_theme_config: () => ({ preset: settings.theme, preset_dark: settings.theme_dark, mode: settings.theme_mode }),

@@ -100,11 +100,11 @@ pub(crate) fn mentions_of(text: &str, from_template: Option<&str>) -> Vec<Target
 /// The keys a page looks itself up under — the lookup-side mirror of
 /// [`mentions_of`], matching what `backlinks_for_page` used to scan for.
 ///
-/// For each target string (slug, title, and the `@`-alias forms for a
-/// person page) the page is found under both the literal `Ref` and the
-/// `Tag` slug, exactly like the old `TargetMatcher::refs`. A template
-/// page additionally looks itself up under its callable name and its
-/// own slug (provenance).
+/// For each target string (slug, title, every `alias::` name, and the
+/// `@`-alias forms for a person page) the page is found under both the
+/// literal `Ref` and the `Tag` slug, exactly like the old
+/// `TargetMatcher::refs`. A template page additionally looks itself
+/// up under its callable name and its own slug (provenance).
 pub(crate) fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<TargetKey> {
     let mut keys: Vec<TargetKey> = Vec::new();
     let mut add_target = |t: &str| {
@@ -115,10 +115,16 @@ pub(crate) fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<Targe
     if meta.title != meta.slug {
         add_target(&meta.title);
     }
+    for alias in &meta.aliases {
+        add_target(alias);
+    }
     if meta.page_type.as_deref() == Some(crate::person::PERSON_TYPE) {
         add_target(&format!("@{}", meta.slug));
         if meta.title != meta.slug {
             add_target(&format!("@{}", meta.title));
+        }
+        for alias in &meta.aliases {
+            add_target(&format!("@{}", alias));
         }
     }
     if let Some(name) = template_name_of(workspace, meta) {

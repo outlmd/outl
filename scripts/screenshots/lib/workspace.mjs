@@ -51,22 +51,16 @@ function cli(outl, ws, args) {
 /** Queries the shots type into a search box; answered from `outl search`. */
 export const SEARCHES = ["sync"];
 
-// `outl page prop list` leaves some keys out (owner::, type::), so take
-// the keys from the page header the CLI wrote and read each one back
-// through `outl page prop get`.
+// `outl page prop list` owns which keys a page exposes and in what order
+// (`outl_actions::property::page_properties` -> `sort_in_presentation_order`),
+// so a shot shows the same set, in the same order, as every client. It
+// used to probe a hardcoded key list and miss the page's real properties,
+// which is what the header-scraping workaround here was for. Re-deriving
+// the order in JS is also how a copy of that sort gets in behind the
+// ratchet, which only scans `.rs`: `localeCompare` gives `alpha, Beta`
+// where the backend gives `Beta, alpha`.
 function pageProperties(outl, ws, meta) {
-  const dir = meta.kind === "journal" ? "journals" : "pages";
-  const md = readFileSync(join(ws, dir, `${meta.slug}.md`), "utf8");
-  const keys = [];
-  for (const line of md.split("\n")) {
-    const m = /^([A-Za-z][\w-]*):: /.exec(line);
-    if (!m) break;
-    keys.push(m[1]);
-  }
-  return keys
-    .filter((k) => k !== "page-slug" && k !== "page-kind")
-    .map((k) => [k, cli(outl, ws, ["page", "prop", "get", meta.slug, k]).value])
-    .sort((a, b) => a[0].localeCompare(b[0]));
+  return cli(outl, ws, ["page", "prop", "list", meta.slug]).properties.map((p) => [p.key, p.value]);
 }
 
 export function dumpFixture({ outl, ws, today = new Date() }) {

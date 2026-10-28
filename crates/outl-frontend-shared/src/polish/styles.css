@@ -25,6 +25,55 @@
      invariant 13 does not apply — `--outl-read-measure` above is the
      same kind of knob. */
   --outl-notice-offset: 16px;
+
+  /* How much room a scrolling region leaves at its bottom so the
+     crash-reporting strip does not sit on top of the last rows.
+     Zero by default: the strip is dismissed for good on most devices,
+     and reserving space for something that is not there is dead space
+     on every page. `:root:has()` below turns it on only while the
+     strip is actually mounted. */
+  --outl-notice-clearance: 0px;
+
+  /* How much page stays on screen beyond the keyboard cursor, the way
+     vim's `scrolloff` does. Without it `scrollIntoView` scrolls the
+     minimum and parks the row flush against the edge, clipped, with
+     nothing after it — so moving down reads as "the scroll is not
+     following" even though it is. */
+  --outl-cursor-room: 4rem;
+}
+
+/* The strip is `position: fixed`, so the content behind it keeps
+   scrolling underneath. On a short page that is invisible — the window
+   bottom really is free, which is what the offset comment above
+   assumed. On a page long enough to scroll it is not: the last rows end
+   up behind the card, and a keyboard cursor can park there too, since
+   `scrollIntoView({block:"nearest"})` stops at the container edge and
+   knows nothing about a fixed overlay.
+   The height is a constant because CSS cannot measure the card; it
+   covers the three-line copy the strip ships with, plus its offset. */
+:root:has(.outl-crash-notice) {
+  --outl-notice-clearance: 6rem;
+}
+
+
+/* Put this on a scrolling region the keyboard moves a cursor through.
+   It does two jobs, both about the edges:
+
+   - keeps `--outl-cursor-room` of context past the cursor, so a row
+     scrolled into view is never the last thing visible;
+   - adds the strip's clearance at the bottom, so neither the cursor
+     nor the final rows can end up behind a `position: fixed` card. */
+.outl-cursor-room {
+  padding-bottom: calc(var(--outl-notice-clearance) + var(--outl-read-block-gap, 0px));
+}
+
+/* Declared on the ROWS rather than as `scroll-padding` on the scrolling
+   region. Both express the same thing and either would be defensible;
+   `scroll-margin` on the element `scrollIntoView` is called with is the
+   form with the least room for disagreement between engines. */
+.outl-cursor-room [data-block-id] {
+  scroll-margin-block: var(--outl-cursor-room)
+    calc(var(--outl-cursor-room) + var(--outl-notice-clearance));
 }
 
 /* Children of a block that was just unfolded slide in from the bullet. */

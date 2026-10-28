@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ACTION_LIMIT, MOBILE_ACTIONS, isCommandQuery, matchActions } from "./palette-actions";
+import { MOBILE_ACTIONS } from "./palette-actions";
 
 describe("mobile palette actions", () => {
-  it("lists nothing for an empty query, so the switcher opens on pages", () => {
-    expect(matchActions("")).toEqual([]);
+  it("are chordless rows, so the shared ranker can list them", () => {
+    for (const row of MOBILE_ACTIONS) {
+      expect(row.kind).toBe("action");
+      expect(row.chord).toBeNull();
+    }
   });
 
-  it("a bare > lists every action", () => {
-    expect(matchActions(">")).toHaveLength(MOBILE_ACTIONS.length);
-    expect(isCommandQuery("  >set")).toBe(true);
-  });
-
-  it("matches labels and keywords, case insensitive", () => {
-    expect(matchActions("REMIND").map((a) => a.action)).toEqual(["OpenReminders"]);
-    expect(matchActions("> pending").map((a) => a.action)).toEqual(["OpenDevices"]);
-  });
-
-  it("caps a plain query and leaves > uncapped", () => {
-    expect(matchActions("o").length).toBeLessThanOrEqual(ACTION_LIMIT);
-    expect(matchActions(">o").length).toBeGreaterThan(ACTION_LIMIT);
+  it("names every action once", () => {
+    const names = MOBILE_ACTIONS.map((a) => a.action);
+    expect(new Set(names).size).toBe(names.length);
   });
 });

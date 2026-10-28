@@ -41,6 +41,14 @@ export interface PairCompletion {
  * present-on-the-right) — pair completion only fires when the right
  * side starts with something other than the matching closer, so we
  * never end up with `]]]]`.
+ *
+ * **Never run this over a caret an IME is composing at** (issue #399).
+ * Browsers report that caret at the *start* of the marked run, so `[[`
+ * plus the marked text reads as an unclosed ref, and the caller's write
+ * then commits the run as plain text. Callers on `input` skip
+ * `isComposing` / `insertCompositionText` events; the `[[` flow does
+ * not depend on them, since {@link autoPairBracket} already closed the
+ * pair in `beforeinput`.
  */
 export function autoClosePair(
   value: string,
@@ -449,7 +457,14 @@ export function withCreateNewPersonCandidate<T extends PageMetaLike>(
 ): T[] {
   const trimmed = query.trim();
   if (trimmed.length === 0) return list;
-  if (list.some((p) => p.title.toLowerCase() === trimmed.toLowerCase())) {
+  const lower = trimmed.toLowerCase();
+  if (
+    list.some(
+      (p) =>
+        p.title.toLowerCase() === lower ||
+        (p.aliases ?? []).some((a) => a.toLowerCase() === lower),
+    )
+  ) {
     return list;
   }
   const synthetic = {
@@ -473,6 +488,7 @@ export interface PageMetaLike {
   title: string;
   kind: "page" | "journal";
   page_type?: string | null;
+  aliases?: string[];
 }
 
 /**

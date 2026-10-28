@@ -1,0 +1,29 @@
+# The surfaces whose defects are only visible once painted. One path
+# per line; blank lines and `#` comments ignored.
+#
+# Read by BOTH the Stop hook (to decide whether to ask for a battery
+# run) and the battery itself (to stamp what it proved). One list, so
+# the two cannot disagree about what counts.
+#
+# The row stack: everything that decides a block's own box, which is
+# what a reflow moves.
+crates/outl-desktop/src/components/OutlineView.tsx
+crates/outl-desktop/src/components/BlockRow.tsx
+crates/outl-desktop/src/components/BlockBody.tsx
+crates/outl-desktop/src/components/BlockMarkers.tsx
+crates/outl-desktop/src/components/PropertyEditor.tsx
+crates/outl-desktop/src/components/PageSections.tsx
+# Overlays that mount over the outline, where a mis-sized or
+# mis-anchored panel shifts what is underneath.
+crates/outl-desktop/src/components/Picker.tsx
+crates/outl-desktop/src/components/RemindersPanel.tsx
+crates/outl-desktop/src/components/TasksPanel.tsx
+crates/outl-desktop/src/components/TimelinePanel.tsx
+crates/outl-desktop/src/components/HelpOverlay.tsx
+crates/outl-desktop/src/components/SettingsModal.tsx
+crates/outl-desktop/src/components/ChromeToggleBar.tsx
+# The stylesheet, which can move any of the above from a distance.
+crates/outl-desktop/src/styles.css
+# The shared markdown renderers: the desktop paints every block with
+# them, so a change there lands in every row at once.
+crates/outl-frontend-shared/src/markdown

@@ -64,9 +64,12 @@ fn walk_subtree(node: &OutlineNode, stack: &mut Vec<usize>, out: &mut Vec<Vec<us
 /// it parses the page's `.md`, walks `ParsedPage.blocks` in DFS, and
 /// addresses the target block by its position in that walk. The
 /// outline projected from the workspace tree (via [`project_outline`])
-/// preserves the same order, so the two stay in sync as long as the
-/// `.md` and the op log are reconciled (they always are after a
-/// mutation through `outl-actions`).
+/// preserves the same order, so the two agree **only while the `.md`
+/// and the op log are reconciled** — which is not automatic. A GUI
+/// commit queues the projection rather than writing it, peer ops reach
+/// the tree with the file untouched, and invariant 8 can refuse the
+/// write. A caller resolving this index against a file must reconcile
+/// first; [`crate::exec`] does.
 ///
 /// Returns `None` when the id isn't in the outline (foreign page,
 /// stale call, deleted block). Callers should surface that as a soft
@@ -278,7 +281,7 @@ pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) 
         .properties_of(node)
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
@@ -300,7 +303,7 @@ fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> O
         .properties_of(node)
         .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
         .collect();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
@@ -477,14 +480,13 @@ fn outline_from_parsed(
         .iter()
         .map(|child| outline_from_parsed(child, iter))
         .collect();
-    // Sort alphabetically so this disk-driven path matches what
-    // `project_outline` (workspace-driven) produces. The two surfaces
-    // would otherwise disagree on the order properties show up in,
-    // visible when a block renders both inside its own page (parse
-    // order) and as a backlink elsewhere (workspace order). See the
-    // `OutlineNode.properties` doc-comment.
+    // The one place an authoring order exists — the parsed `.md` keeps
+    // the sequence the user typed — and it is dropped on purpose, so a
+    // block renders the same inside its own page (this path) and as a
+    // backlink elsewhere (the workspace path, which has no order to
+    // keep). `crate::tree::sort_in_presentation_order` owns the rule.
     let mut properties = block.properties.clone();
-    properties.sort_by(|a, b| a.0.cmp(&b.0));
+    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     // `collapsed` is overlaid by the caller using the workspace as the
     // source of truth (`Op::SetCollapsed` lives in the op log). The

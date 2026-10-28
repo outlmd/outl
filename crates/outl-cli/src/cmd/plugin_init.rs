@@ -18,6 +18,18 @@ pub fn run(name: &str, id: Option<&str>, dir: Option<&Path>) -> Result<()> {
     // almost certainly a typo'd name, so keep the loud error unless the
     // user literally asked for "untitled".
     let slug = slugify(name);
+    // `slugify` keeps a letter or digit from any script, and this slug
+    // becomes a reverse-DNS label in the plugin id and a name in
+    // `package.json` — `outl_plugins::manifest::validate_id` accepts
+    // only `[a-z0-9-]` and npm has its own rules. Both refuse at load
+    // or install, long after the scaffold was written, so ask here.
+    // Free before page names stopped being ASCII, which is why this
+    // asked only about the fallback.
+    if !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        bail!(
+            "`{name}` needs ASCII letters or digits: a plugin id and package name accept only [a-z0-9-]. Pass --id and a directory to use this name anyway"
+        );
+    }
     if slug == UNTITLED_SLUG && !name.trim().eq_ignore_ascii_case(UNTITLED_SLUG) {
         bail!("`{name}` has no usable letters/digits for a directory name");
     }
@@ -222,6 +234,27 @@ mod tests {
         let dir = tmp.path().join("p");
         let err = run("!!!", None, Some(&dir)).unwrap_err();
         assert!(err.to_string().contains("no usable letters/digits"));
+    }
+
+    #[test]
+    fn a_name_that_slugifies_to_no_ascii_is_rejected_here() {
+        // The scaffold's id is `com.example.<slug>` and
+        // `outl_plugins::manifest::validate_id` requires every
+        // reverse-DNS label to be `[a-z0-9-]`; `package.json`'s name
+        // has its own npm rules. This guard used to catch such a name
+        // for free, because anything outside the fold table slugified
+        // to `untitled`. It keeps its own script now, so the refusal
+        // has to ask for what this command actually needs — otherwise
+        // `outl plugin init 中文插件` writes a scaffold that only fails
+        // later, at load, with an opaque manifest error.
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("p");
+        let err = run("中文插件", None, Some(&dir)).unwrap_err();
+        assert!(
+            err.to_string().contains("needs ASCII letters or digits"),
+            "got: {err}"
+        );
+        assert!(!dir.exists(), "refused, so nothing was scaffolded");
     }
 
     #[test]

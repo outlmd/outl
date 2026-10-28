@@ -20,6 +20,10 @@ brew install outl-beta     # beta channel — every push to main
 
 The custom-URL form (`brew tap <name> <url>`) tells Homebrew to use this repo as the tap directly, without the usual `homebrew-<name>` naming convention.
 
+Four platforms are covered, one pre-built binary each: macOS `arm64` and `x86_64`, Linux `x86_64` and `arm64`.
+ARM64 Linux has been a Tier 1 Homebrew platform since 5.0.0, and the binary is built on a native ARM runner rather than emulated.
+The Linux binaries are built on Ubuntu 22.04, so they need glibc 2.35 or newer — the same floor Homebrew's own Linux bottles carry.
+
 > **Tapped `avelino/outl` before?** The repo moved to the `outlmd` org, and a tap name is not a redirect — Homebrew keeps pulling from the old clone under the old name. Re-tap once:
 >
 > ```bash
@@ -103,14 +107,20 @@ The `livecheck` block in the cask points Homebrew at the GitHub releases feed, s
 ## How updates happen
 
 The release workflow ([`/.github/workflows/release.yml`](../.github/workflows/release.yml)) has an `update_tap` job that runs after `publish_release` succeeds on a prerelease.
-It does four things:
+It does five things:
 
 1. Checks out `main`.
-2. Downloads every `.sha256` sidecar from the GitHub release (CLI tarballs **and** desktop dmgs).
-3. Uses `sed` to bump the version + sha lines in both files in place:
-   - **`Formula/outl-beta.rb`** — `version` plus three `sha256` lines tagged `# anchor: macos-arm64`, `# anchor: macos-x64`, `# anchor: linux-x64`.
+2. Downloads every `.sha256` sidecar from the GitHub release (CLI tarballs, the desktop dmg, the Windows zips).
+3. Asks, per manifest, whether it may advance: **only when every asset that manifest points at is on the release.**
+   A manifest carrying a new `version` and a previous release's digest is a SHA256 mismatch at install time, which is worse than one still pointing at a release that exists.
+   So a release missing the Linux `aarch64` tarball leaves the formula alone (loudly, in the run summary) while the cask still moves, and the next release picks it up.
+   `scripts/release_assets.py` owns which assets each manifest points at.
+4. Uses `sed` to bump the version + sha lines in each file it may touch:
+   - **`Formula/outl-beta.rb`** — `version` plus four download `sha256` lines tagged `# anchor: macos-arm64`, `# anchor: macos-x64`, `# anchor: linux-x64`, `# anchor: linux-arm64`, and the four matching `# anchor: bottle-*` lines.
+     The two loops in the job are keyed by those names, so a `build` matrix leg added without its anchors bumps nothing — and `git diff --quiet` only sees that *something* changed, so nothing goes red.
    - **`Casks/outl-desktop-beta.rb`** — `version` plus one `sha256` line tagged `# anchor: macos` (universal dmg, both architectures in the same file).
-4. Commits the bumped formula + cask back to `main` with `[skip ci]` in the message — that prevents the commit from re-triggering the release workflow itself.
+   - **`bucket/outl-beta.json`** — the [Scoop manifest](scoop.md), rewritten with `jq` rather than `sed`: it is JSON, so there is a parser for it and no anchors are needed.
+5. Commits whatever moved back to `main` with `[skip ci]` in the message — that prevents the commit from re-triggering the release workflow itself.
 
 The version comes from the `prepare` job, which reads `workspace.package.version` out of `Cargo.toml` and appends `-beta.<run_number>`.
 So the only source of truth for the base version is `Cargo.toml`; nothing is hardcoded in the formula.
@@ -141,11 +151,11 @@ Any new job added upstream needs the same guard, or it inherits the same silence
 Usually means someone re-uploaded an asset on the GitHub release.
 Re-trigger the failed release via `workflow_dispatch` and `update_tap` will re-render with the current SHAs.
 
-**A manual edit on `Formula/*.rb` got overwritten** — by design.
-The job templates the whole file on every release.
-If you need to change the formula structure (add a platform, change the test, etc), edit the heredoc in `release.yml`.
-The next release picks it up.
+**A manual edit on `Formula/*.rb` got bumped over** — partly by design.
+The job rewrites the `version`, the bottle `root_url` and every `# anchor:`ed digest in place; it does **not** template the file, so structure (platform blocks, `test do`, `conflicts_with`) is edited here and survives.
+Adding a platform therefore takes four edits in one PR: the entry in [`scripts/release_assets.py`](../scripts/release_assets.py), the matrix leg in `release.yml`, its two entries in that workflow's `update_tap` loops, and the `url` / `sha256` / bottle anchors here.
+`scripts/check-release-assets.py --manifest` (run by `hygiene.yml`) fails when those disagree, which is the one failure mode none of the files can see on its own.
 
-**Renaming the binary or adding a second binary** — `bin.install "outl"` in the heredoc only ships the `outl` executable.
+**Renaming the binary or adding a second binary** — `bin.install "outl"` ships the `outl` executable only.
 If/when outl grows additional binaries (e.g.
-`outl-tui` as a separate binary), update the heredoc accordingly.
+`outl-tui` as a separate binary), add them to that line and to the `Stage artifact` step in `release.yml`, which is what puts files in the tarball.

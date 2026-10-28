@@ -1,6 +1,7 @@
 /**
- * What mobile's bottom bar and week strip read: every open task in the
- * workspace, and which journal days hold text. Mirrors
+ * What mobile's bottom bar and week strip read: the workspace's open
+ * tasks (the first 200, with the uncapped `total` beside them), and
+ * which journal days hold text. Mirrors
  * `outl_tauri_shared::commands::{tasks, journal_days}`.
  */
 

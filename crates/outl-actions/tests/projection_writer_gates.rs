@@ -57,13 +57,27 @@ const WRITERS: &[(&str, Gate, &str)] = &[
     (
         "apply_page_md_with_sidecar",
         Gate::Ungated,
-        "unconditional projection. Test-only today: every production path \
-         goes through the guarded one",
+        "unconditional projection, and NOT test-only: `desync`, the \
+         importer, `outl init` and `doctor --repair` each call it after \
+         vetting the page themselves instead of taking a gate",
     ),
     (
         "apply_page_md_with_sidecar_guarded",
         Gate::Guarded,
-        "the post-mutation gate — step 5 of `commit_page`",
+        "the post-mutation gate — step 5 of `commit_page`. Asks two of \
+         the three: `unlogged_content_error` and `frontmatter_loss_error`, \
+         plus its own refusal on a sidecar it cannot read. It does NOT ask \
+         `guard_absent_markdown`, and that is the asymmetry worth stating, \
+         because reading the list without it looks like the hole this table \
+         exists to catch. An absent `.md` here means the user just mutated \
+         a page whose file is gone, and the tree is what they edited, so \
+         refusing would make a hand-deleted `.md` unsaveable forever. On a \
+         READ path the same absence means the opposite — the bytes exist on \
+         another device and have not arrived — which is why `_if_stale` \
+         asks and this one does not. The placeholder case is not reached by \
+         that question anyway: an undownloaded file fails to read, and a \
+         read error that is not `NotFound` is returned, never treated as \
+         absent",
     ),
     (
         "apply_page_md_with_sidecar_if_absent",

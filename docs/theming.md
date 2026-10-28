@@ -128,7 +128,8 @@ If you add a new field to `Theme`, **every preset must set it** — the compiler
 | `border` | Panel borders |
 | `hint` | Footer hint text |
 | `status_normal` / `status_insert` / `status_visual` | Mode badges |
-| `status_message` | Transient status messages |
+| `status_message` | Transient status messages (the palette's `warn` — "look at this") |
+| `destructive` | Something waiting will not fix: the "this page isn't syncing" banner, delete confirmations (the palette's `destructive`) |
 | `help_title` | Section titles in the help popup, overlay titles |
 | `popup_bg` | Background color for overlays |
 | `list_selected` | Highlighted entry in popups (quick switcher, search) |

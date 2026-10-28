@@ -465,7 +465,8 @@ fn scan_pages<T>(
             Verdict::Unjudged(why) => scan.skipped.push((meta.slug.clone(), why)),
         }
     }
-    scan.skipped.sort_by(|a, b| a.0.cmp(&b.0));
+    scan.skipped
+        .sort_by(|(a_slug, _), (b_slug, _)| a_slug.cmp(b_slug));
     scan
 }
 

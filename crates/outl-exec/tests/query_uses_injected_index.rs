@@ -34,6 +34,7 @@ fn index_with_one_todo(root: &Path) -> (WorkspaceIndex, NodeId) {
         is_journal: false,
         pinned: false,
         page_type: None,
+        aliases: Vec::new(),
     });
     let id = NodeId::new();
     let blocks = vec![IdentifiedNode {

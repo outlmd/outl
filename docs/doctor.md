@@ -38,6 +38,12 @@ The only thing a default run writes is its own stdout.
 - **Projection drift** — every page in the op log compared against its `.md` on disk: missing files, stale projections, missing sidecars.
   A bare `key::` left by an older render of an empty value is a stale projection.
   The empty value is already an op, so this is not content the log never saw, and `--repair` rewrites the page without that line.
+
+  **Stale pages that lose nothing are counted, not listed.**
+  A re-projection that only reorders properties or normalises whitespace has nothing for you to decide, and a workspace bulk-edited outside outl can have hundreds of them — 840 on one real 2,865-page graph, each printing the same sentence with a different path, which buried the two findings that mattered.
+  So they arrive as one line with the count and a handful of example paths.
+  A stale page whose re-projection would **remove** content keeps its own line with its own line count, always, however many there are; that is the page you have to read, and a number cannot carry it.
+  `--json` lists every path either way (see [`--json`](#--json) below).
 - **`.md` content that never reached the op log** — a page whose sidecar agrees with the bytes on disk (so it looks like a merely *stale* projection) but which holds lines that exist in no op.
   Reported with the count and one of the lines, and **`--repair` leaves it alone**.
   Re-rendering the tree over it would delete that content and rebuild the sidecar from the same render, so nothing afterwards could tell the page had ever held more.
@@ -108,7 +114,8 @@ The only thing a default run writes is its own stdout.
 
 ## `--repair`
 
-Applies **only** the fixes that cannot lose data, and prints exactly what it will do before doing it (the same list a read-only run shows under `N repairable item(s)`).
+Applies **only** the fixes that cannot lose data, and prints what it will do before doing it: the same list a read-only run shows under `N repairable item(s)`, capped the same way (see [`--json`](#--json) below).
+Past that cap the plan is only visible in full under `--json`, and the order decides what the cap drops — page re-projections are listed first and the prunes last, so a workspace with hundreds of stale pages prints no prune at all.
 
 | Fix | Why it is safe |
 |-----|----------------|
@@ -199,6 +206,7 @@ Device-store records are the one thing that has no path relative to the workspac
 
 Those generations are pruned at the end of each `--repair` run, because they are otherwise permanent.
 A prune is a repairable item like any other: it is listed under `N repairable item(s)` on a read-only run, and a `--repair` whose *only* work is a prune still runs.
+It is listed **last**, after every page re-projection, so on a workspace with more repairable items than the human listing prints it appears only under `--json` — withheld by the cap, never absent from the plan.
 That is the case the pruning exists for — a workspace with nothing wrong with it is exactly the one that would otherwise keep every generation forever.
 `.outl/` is dot-prefixed, so iCloud drops it and iroh never ships it — but Syncthing, Dropbox and a shared volume all replicate it, and every generation is a full copy of every `.md` that run touched.
 A generation has to fail **both** guards before it goes — older than 14 days *and* outside the 10 newest — and each prune is reported as its own action.
@@ -215,4 +223,9 @@ That includes the `.outl/orphans.log` rows described above, which is why they ar
 Emits the standard envelope.
 `data` carries `workspace`, `actor`, `op_count`, `error_count`, `warn_count`, plus `findings[]` (each `{severity, message}`, severity being `ok` / `info` / `warn` / `error`) and `repairable[]` (what `--repair` would do).
 Only after an actual `--repair` run, `data.repair` is present with `backup_dir`, `actions[]`, `repaired`, and `failed`.
+
+**The human listing is capped at 20 items per list; `--json` is not.**
+A pass over hundreds of pages prints the first 20 repairable items and says how many it withheld, and `--repair` does the same for the actions it completed.
+Use `--json` when you want the full list.
+Two things are never capped: a `findings[]` entry at `error` severity, and a repair action that was **skipped** — a refusal you did not hear about is the failure mode the refusal exists to prevent.
 

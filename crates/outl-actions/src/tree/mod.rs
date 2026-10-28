@@ -3,7 +3,10 @@
 //! Nothing here applies an op. Four concerns, one owner each:
 //!
 //! - `props` — which of a node's properties are the user's and which
-//!   are page-model book-keeping, and how a value renders.
+//!   are page-model book-keeping, how a value renders, and the order
+//!   they are shown in (alphabetical; the op log carries no order, so
+//!   somebody has to decide and eight callers used to each decide the
+//!   same thing separately).
 //! - `children` — the canonical sibling order (the `NodeId` tiebreak is
 //!   convergence-critical, not tidiness) and the two ways to ask for a
 //!   parent's children: one lookup, or an index for a whole walk.
@@ -23,7 +26,7 @@ pub(crate) use children::{
 };
 pub use children::{children_of, next_sibling, ChildrenIndex};
 pub use position::{position_after, position_before, position_for_new_last_child};
-pub use props::is_page_model_key;
+pub use props::{is_page_model_key, sort_in_presentation_order};
 pub(crate) use props::{renderable_prop_value, text_properties_of};
 pub(crate) use traverse::is_under;
 pub use traverse::{enclosing_page_id, is_trashed, page_slug_of, walk_subtree};

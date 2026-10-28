@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Shipped |
-| **Issue** | [#107](https://github.com/outlmd/outl/issues/107), [#195](https://github.com/outlmd/outl/issues/195), [#50](https://github.com/outlmd/outl/issues/50), [#88](https://github.com/outlmd/outl/issues/88) |
+| **Issue** | [#107](https://github.com/outlmd/outl/issues/107), [#195](https://github.com/outlmd/outl/issues/195), [#50](https://github.com/outlmd/outl/issues/50), [#88](https://github.com/outlmd/outl/issues/88), [#302](https://github.com/outlmd/outl/issues/302) |
 | **PR** | — |
 | **Date** | 2026-08-06 |
 | **Reference doc** | [concepts.md § Slugs](../concepts.md#slugs), [config.md](../config.md) |
@@ -63,7 +63,7 @@ Neither is allowed to run on the other's input.
 
 **Human-typed names go through one resolution ladder.**
 `outl_actions::resolve::open_or_create_by_name` slugifies for disk and keeps the typed string as the title, so `[[avelino/outl]]` creates `pages/avelino-outl.md` titled `avelino/outl` and opens it in the same tap.
-`resolve_or_create_by_name` is the shared `pub(crate)` ladder underneath: literal slug, then slugified form, then case-insensitive title, then create.
+`resolve_or_create_by_name` is the shared `pub(crate)` ladder underneath: literal slug, then slugified form, then case-insensitive title or `alias::` name, then create.
 `open_or_create_by_ref` is the one owner of the full "user tapped a ref" decision tree, including the date and `@`-mention branches.
 `person::ensure_person_by_name` reuses the same ladder rather than keeping a second opinion.
 
@@ -77,6 +77,17 @@ A journal never gets a `title::` property at all, because `journal_title == slug
 `page_meta` reads the title through a most-specific-first ladder: the `title::` property, then the root node's text, then the slug as a last resort so a title is never blank.
 That ladder is what fixed #88 for every client at once, since `page_meta` is the single owner of `PageMeta`.
 
+
+**A page also answers to its `alias::` names, and they ride the title's path.**
+Issue #302 added a fourth spelling: `alias:: Big Apple, NYC` on the New York page, so `[[NYC]]` opens it.
+Aliases are not a fourth identity — they are extra keys for the title identity, and the ladder treats them exactly like the title: case-insensitive comparison inside the same `list_all` walk, and the same `title → slug` map in `WorkspaceIndex` with one row per alias.
+No second lookup method, no second index: `by_title` answers for titles and aliases alike, so a client that resolves refs today resolves aliases without changing.
+Backlinks get the same treatment — `keys_for_page` emits a `Ref` and a `Tag` key for each alias, and a person page additionally gets the `@`-prefixed forms — so `[[NYC]]` lands in the New York page's backlinks without the alias ever touching the log as anything but the `alias::` property itself.
+
+The name space gets smaller, so collisions get louder.
+Two pages claiming `NYC` still resolve deterministically (the ladder's first match wins, in `list_all` order), which is the same behaviour two titles sharing a spelling already has.
+What is new is `outl doctor`'s alias check: it names every spelling more than one page claims through an `alias::`, because that is the case where the user opted into sharing a name and should see who holds it.
+Title-vs-title overlap stays silent — it predates aliases, resolves deterministically, and warning on it would spam workspaces that already rely on the deterministic pick.
 **Two repair passes, because prevention does not reach workspaces already broken.**
 `page_repair_titles::repair_doubled_journal_titles` clears any journal root whose text is its own slug repeated two or more times, through `edit_text` — an `Op`, so the fix converges to every device instead of being applied per machine.
 `page::merge_duplicate_slug_roots` handles the split-brain case where more than one root claims a slug: it re-parents every child under the canonical root and trashes the emptied duplicates, all through `Op`s, and is idempotent.

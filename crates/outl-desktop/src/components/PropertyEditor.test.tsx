@@ -325,3 +325,98 @@ describe("value is a page ref, not free text", () => {
     expect(host.querySelector('[role="option"]')).toBeNull();
   });
 });
+
+describe("the hover affordance does not move the page", () => {
+  /**
+   * A block with no properties shows `+ prop` only on hover. That row
+   * used to go `hidden` -> `flex`, which added ~18pt of height to the
+   * block and pushed every row below it down — measured at exactly
+   * 18pt, and at the boundary between two rows it flickered, because
+   * the shift moved the next row out from under the pointer.
+   *
+   * So the at-rest row is positioned, not laid out. These pin the
+   * mechanism rather than the look: a row that participates in flow
+   * is the defect, whatever it is styled like.
+   */
+  const row = (host: HTMLElement) =>
+    host.firstElementChild as HTMLElement;
+
+  it("keeps the empty row out of flow", async () => {
+    knownPropertyKeys.mockResolvedValue([]);
+    const host = mount(() => (
+      <PropertyEditor properties={[]} onCommit={vi.fn()} />
+    ));
+    await flush();
+
+    expect(row(host).className).toContain("absolute");
+    // `mt-*` on an absolutely positioned row would be dead styling;
+    // on a flow row it is the gap that pushed the page down.
+    expect(row(host).className).not.toContain("mt-");
+  });
+
+  it("lays the row out normally once it has chips to show", async () => {
+    knownPropertyKeys.mockResolvedValue([]);
+    const host = mount(() => (
+      <PropertyEditor properties={PROPS} onCommit={vi.fn()} />
+    ));
+    await flush();
+
+    // Chips are content, not an affordance: they belong under the
+    // block, in flow, and they are there whether or not you hover.
+    expect(row(host).className).not.toContain("absolute");
+    expect(row(host).className).not.toContain("group-hover:");
+  });
+
+  it("keeps a host-requested permanent affordance in flow", async () => {
+    knownPropertyKeys.mockResolvedValue([]);
+    const host = mount(() => (
+      <PropertyEditor
+        properties={[]}
+        addAffordance="always"
+        onCommit={vi.fn()}
+      />
+    ));
+    await flush();
+
+    expect(row(host).className).not.toContain("absolute");
+  });
+});
+
+/**
+ * The hover affordance paints over the block's first line, so its width
+ * is not cosmetic: at "+ prop" it hid the last word of any line that
+ * reached the right edge, which on a wide window is most of them. The
+ * page header renders the same button in flow with a row to itself and
+ * keeps the noun. The meaning lives in the label and the tooltip either
+ * way, which is why the short spelling is allowed to be a bare glyph.
+ */
+describe("the add affordance is as wide as its placement allows", () => {
+  it("spells the noun where it sits in the flow", async () => {
+    knownPropertyKeys.mockResolvedValue([]);
+    const host = mount(() => (
+      <PropertyEditor
+        properties={[]}
+        onCommit={vi.fn()}
+        addAffordance="always"
+      />
+    ));
+    await flush();
+
+    expect(byLabel(host, "Add property").textContent?.trim()).toBe("+ prop");
+  });
+
+  it("shrinks to a glyph where it covers the block's text", async () => {
+    knownPropertyKeys.mockResolvedValue([]);
+    const host = mount(() => (
+      <PropertyEditor properties={[]} onCommit={vi.fn()} />
+    ));
+    await flush();
+
+    const add = byLabel(host, "Add property");
+    expect(add.textContent?.trim()).toBe("+");
+    // Dropping the word is only acceptable because these two carry it.
+    expect(add.getAttribute("aria-label")).toBe("Add property");
+    expect(add.getAttribute("title")).toContain("Add a property");
+  });
+});
+

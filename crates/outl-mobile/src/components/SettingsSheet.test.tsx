@@ -230,3 +230,39 @@ describe("SettingsSheet — crash reports", () => {
     expect(lockRow()!.getAttribute("aria-checked")).toBe("false");
   });
 });
+
+describe("the settings sheet fits the screen", () => {
+  /**
+   * Bottom-anchored with no ceiling, this card is a fixed stack of
+   * eleven rows. On a short phone, or at a larger text size, its top —
+   * Sync, Devices, and the drag handle with them — grows off the screen
+   * and nothing scrolls back to it. The long-press menu shipped the
+   * identical defect and was reported from a device with a photo.
+   *
+   * These pin the shape rather than any measurement, because the height
+   * depends on the device and no test here has one.
+   */
+  const sheet = () =>
+    document.body.querySelector<HTMLElement>(".outl-sheet-up")!;
+
+  it("bounds the sheet by the viewport", () => {
+    mount();
+    expect(sheet().className).toContain("max-h-dvh");
+  });
+
+  it("scrolls the rows", () => {
+    mount();
+    const scroller = sheet().querySelector<HTMLElement>(".overflow-y-auto");
+    expect(scroller).not.toBeNull();
+    // The settings rows live inside it, not beside it.
+    expect(scroller!.textContent).toContain("Sync");
+  });
+
+  it("keeps the grab handle and Done out of the scrolling region", () => {
+    mount();
+    const scroller = sheet().querySelector<HTMLElement>(".overflow-y-auto")!;
+    // The way out must not scroll away with the content.
+    expect(scroller.querySelector('[aria-label="Drag to close"]')).toBeNull();
+    expect(scroller.textContent).not.toContain("Done");
+  });
+});

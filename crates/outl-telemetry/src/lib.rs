@@ -35,7 +35,10 @@
 #![forbid(unsafe_code)]
 
 mod redact;
+mod stdio;
+
 pub use redact::{redact, FILE_MARKER, ID_MARKER, PATH_MARKER, TEXT_MARKER};
+pub use stdio::{install_panic_hook, lossy_stderr, LossyStderr};
 
 #[cfg(feature = "sentry")]
 mod scrub;
@@ -76,6 +79,12 @@ pub struct Guard;
 /// build, a third party's build, an opted-out user, an `OUTL_TELEMETRY=0`
 /// invocation and a CI run all look like.
 pub fn init(client: &str, enabled: bool) -> Option<Guard> {
+    // Before the gate, and therefore before `sentry::init` on the path that
+    // reaches it. The panic integration chains to whatever hook is installed
+    // now. Installing afterwards would chain to the default `eprintln!` hook,
+    // which is the panic this hook exists to stop. A closed gate still needs
+    // it: a developer build panics the same way, and reports nothing.
+    install_panic_hook();
     let suppressed = suppressed_by_ci() || silenced_by_env();
     let dsn = report_target(DSN, enabled, suppressed)?;
     start(dsn, client)

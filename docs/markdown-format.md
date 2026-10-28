@@ -329,6 +329,42 @@ A line in the form `key:: value` *as a child of an outline item* is a block prop
 `priority::` and `owner::` are properties of `objective`, not children.
 The third line (`- this is a regular child block`) is a real child.
 
+#### Property order
+
+outl writes properties **alphabetically by key**, on a page header and on a block, and reorders them on the next projection.
+So this, typed in this order:
+
+```
+- objective
+  owner:: [[avelino]]
+  due:: 2026-11-30
+  priority:: high
+```
+
+comes back as:
+
+```
+- objective
+  due:: 2026-11-30
+  owner:: [[avelino]]
+  priority:: high
+```
+
+The parser accepts any order and never loses a line — only the sequence moves, and only when outl rewrites the file.
+
+**Why outl does not keep the order you typed.**
+The op log is the source of truth (invariant 1) and `Op::SetProp` carries `(node, key, value)` with no position, so the order is simply not in it.
+The nearest thing available is each op's HLC, which is the order the properties were last *edited* — under that rule, a peer fixing one typo would reshuffle the whole block, on every device.
+Recording a real position means a new op field, and the CRDT requires `undo_op` to be its exact inverse while the previous order is not in the op (`outl-core`'s invariant 6).
+That is a permanent cost in the sync layer, paid for the order of formatting lines, so outl picks the one order that is stable everywhere instead.
+
+**What this means for you.**
+A hand-reordered file reads back fine and stays that way until outl next writes the page (an edit from any client, a peer's ops arriving, `outl serve`, `outl doctor --repair`).
+If your `.md` files are in git, it is worth running `outl doctor --repair` once after a bulk external edit so the reordering lands in one commit instead of leaking into the next hundred.
+
+One owner, in code: `outl_actions::tree::sort_in_presentation_order`.
+Every surface that shows properties calls it — the `.md` renderer, the outline DTO every GUI client reads, the outline parsed back from disk, a backlink row, the workspace index, the clipboard, `outl page prop list` and `outl block prop list` — so the order never depends on which one you are looking at.
+
 #### `remind::` — the one property the parser validates
 
 Every other `key:: value` is opaque to the parser. `remind::` is not: it carries a notification rule with its own grammar, so the parser checks it as it reads.

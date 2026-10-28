@@ -188,17 +188,21 @@ pub fn get(ctx: &WsCtx, page: &str, key: &str) -> Result<Value, ApiError> {
 
 /// List every property on a page.
 ///
-/// The tree map does not expose a per-node property iterator yet, so
-/// we probe a list of well-known keys. Extend [`well_known_property_keys`]
-/// when a new surface lands.
+/// `outl_actions::property::page_properties` is the owner: the page's
+/// real property set, minus the page model's book-keeping
+/// (`outl_actions::tree::is_page_model_key`), in
+/// `sort_in_presentation_order`.
+///
+/// It used to probe a hardcoded list of nine "well-known" keys, which
+/// got both halves wrong at once: a page's actual properties were all
+/// absent, and `page-slug` / `page-kind` were listed — the two keys
+/// `is_page_model_key` exists to hide, because `outl page prop set`
+/// refuses them and showing them invites an edit that rewrites the
+/// page's identity on the next projection. Both directions are pinned
+/// by `page_prop_list_shows_the_users_properties_and_hides_the_page_model`.
 pub fn list(ctx: &WsCtx, page: &str) -> Result<Value, ApiError> {
     let id = resolve_page(ctx, page)?;
-    let mut props: Vec<(String, String)> = Vec::new();
-    for key in well_known_property_keys() {
-        if let Some(value) = ctx.workspace.tree().property(id, key) {
-            props.push((key.to_string(), stringify(value)));
-        }
-    }
+    let props = outl_actions::property::page_properties(&ctx.workspace, id);
     Ok(json!({
         "page": page,
         "properties": props
@@ -217,27 +221,24 @@ fn resolve_page(ctx: &WsCtx, slug: &str) -> Result<NodeId, ApiError> {
         .ok_or_else(|| ApiError::new(codes::PAGE_NOT_FOUND, format!("page `{slug}` not found")))
 }
 
-fn stringify(value: &PropValue) -> String {
+/// A property value as this binary prints it, shared with
+/// [`super::block_prop`] so `outl page prop get` and `outl block prop
+/// get` cannot read the same stored value two ways.
+///
+/// **Not** `outl_actions::outline::prop_value_to_string`, which joins a
+/// `List` with a space instead of `", "`. Both are reachable from *this*
+/// command — `get` renders through here, `list` through
+/// [`outl_actions::property::page_properties`], which uses that one — so
+/// the two are not merely neighbours, they answer for the same stored
+/// value on two subcommands. Nothing in the binary constructs a `List`
+/// today, so they agree on every reachable value; the separator is pinned
+/// by `crates/outl-actions/tests/render_properties_characterization.rs`,
+/// and collapsing them would change that rendering rather than dedupe it.
+/// Which separator is right is the query DSL's call, and merging these two
+/// is that decision, not a cleanup.
+pub(super) fn stringify(value: &PropValue) -> String {
     match value {
         PropValue::Text(s) | PropValue::PageRef(s) | PropValue::Tag(s) => s.clone(),
         PropValue::List(items) => items.iter().map(stringify).collect::<Vec<_>>().join(", "),
     }
-}
-
-/// Property keys we know the workspace surface uses. We can't iterate
-/// the whole property map directly from the tree today, so the `list`
-/// subcommand probes this list — extend it when a new well-known key
-/// lands.
-fn well_known_property_keys() -> &'static [&'static str] {
-    &[
-        "title",
-        "icon",
-        "tags",
-        "priority",
-        "status",
-        "auto-run",
-        "pinned",
-        "page-slug",
-        "page-kind",
-    ]
 }

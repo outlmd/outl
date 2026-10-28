@@ -1,5 +1,6 @@
 import { For, JSX, Show, createEffect, createSignal } from "solid-js";
 
+import { EMPTY_REMINDER_NOTICE, reminderHasText } from "@outl/shared/reminders";
 import type { PageView, Reminder } from "@outl/shared/api/types";
 import {
   clearReminderSnooze,
@@ -173,8 +174,9 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
         onClick={props.onClose}
       />
       <div
-        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex flex-col"
+        class="outl-sheet-up fixed inset-x-0 bottom-0 z-[55] flex max-h-dvh flex-col"
         style={{
+          "padding-top": "max(env(safe-area-inset-top), 12px)",
           "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
@@ -183,7 +185,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="mx-3 mb-2 overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
+        <div class="mx-3 mb-2 flex min-h-0 flex-col overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)/95 shadow-[var(--shadow-capsule)] backdrop-blur-2xl">
           <span
             class="block py-2"
             style={{ "touch-action": "none" }}
@@ -275,7 +277,7 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
             </div>
           </Show>
 
-          <div class="max-h-[60vh] overflow-y-auto">
+          <div class="ios-scroll max-h-[60vh] min-h-0 flex-1 overflow-y-auto">
             <For each={groupReminders(reminders())}>
               {(group) => (
                 <>
@@ -293,15 +295,22 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
                           class="flex w-full items-baseline gap-2 text-left"
                           onClick={() => void jumpTo(r)}
                         >
-                          <span class="min-w-0 flex-1 truncate text-[16px] text-(--color-outl-fg)">
-                            {r.text || "(empty block)"}
+                          <span
+                            class="min-w-0 flex-1 text-[16px] text-(--color-outl-fg)"
+                            classList={{
+                              truncate: reminderHasText(r),
+                              "italic text-(--color-outl-fg-dim)": !reminderHasText(r),
+                            }}
+                          >
+                            {reminderHasText(r) ? r.text : EMPTY_REMINDER_NOTICE}
                           </span>
                           {/* Overdue reads very differently from
                               upcoming; every task app paints it. */}
                           <span
                             class="shrink-0 text-[12px]"
                             classList={{
-                              "text-red-500 font-medium": r.urgency === "overdue",
+                              "text-(--color-outl-destructive) font-medium":
+                                r.urgency === "overdue",
                               "text-(--color-outl-fg-dim)":
                                 r.urgency !== "overdue",
                             }}

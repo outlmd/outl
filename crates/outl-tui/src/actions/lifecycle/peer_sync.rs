@@ -114,7 +114,7 @@ impl App {
         // The poller filters out our own `ops-<actor>.jsonl`, so a local
         // save never self-triggers; reopen is idempotent, so the occasional
         // overlap with an iroh signal just confirms convergence.
-        outl_actions::FileSyncTransport.start(
+        outl_actions::FileSyncTransport::default().start(
             self.workspace_root.clone(),
             self.hlc.actor(),
             tx.clone(),

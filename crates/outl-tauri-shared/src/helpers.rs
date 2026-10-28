@@ -11,10 +11,9 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use outl_actions::{
-    apply_page_md_with_sidecar_guarded, apply_page_md_with_sidecar_if_stale, commit_page,
-    date_from_slug, page_meta as page_meta_action, project_outline,
-    read_page_outline_with_workspace, render_page_md, ActionError, CommitHooks, HistoryStacks,
-    PageOutline,
+    apply_page_md_with_sidecar_guarded, commit_page, date_from_slug, page_meta as page_meta_action,
+    project_outline, read_page_outline_with_workspace, render_page_md, ActionError, CommitHooks,
+    HistoryStacks, PageOutline, ProjectionRefusal,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
@@ -203,6 +202,13 @@ pub struct ReprojectOutcome {
 ///   local, retryable condition the next open or the orphan scanner
 ///   picks up; it stays a log line.
 ///
+/// The split itself is [`outl_actions::ProjectionRefusal`], not this
+/// function: the TUI needs the same verdict on its own open path and
+/// cannot depend on this crate ([#292]). What is left here is the DTO
+/// and the log line.
+///
+/// [#292]: https://github.com/outlmd/outl/issues/292
+///
 /// Never fails the open. The page opens either way — the guard withheld
 /// a *write*, and the `.md` on disk is still perfectly readable. Turning
 /// this into an error would trade a stale page for no page at all, on
@@ -215,30 +221,33 @@ pub fn reproject_stale_md(
     page_id: NodeId,
     context: &str,
 ) -> ReprojectOutcome {
-    let Err(e) = apply_page_md_with_sidecar_if_stale(workspace, storage_root, page_id) else {
+    let Some(refusal) = outl_actions::reproject_stale_md(workspace, storage_root, page_id) else {
         return ReprojectOutcome::default();
     };
-    warn!("{context}: reproject stale .md failed: {e}");
-    match md_ahead_of_log(&e) {
-        Some(ahead) => ReprojectOutcome {
-            ahead_of_log: Some(ahead),
-            other_error: None,
-        },
-        None => ReprojectOutcome {
-            ahead_of_log: None,
-            other_error: Some(e.to_string()),
-        },
+    match refusal {
+        ProjectionRefusal::AheadOfLog {
+            path,
+            lines,
+            sample,
+        } => {
+            warn!("{context}: reproject stale .md refused: {path} is ahead of the log");
+            ReprojectOutcome {
+                ahead_of_log: Some(MdAheadOfLog {
+                    path,
+                    lines,
+                    sample,
+                }),
+                other_error: None,
+            }
+        }
+        ProjectionRefusal::Retryable(message) => {
+            warn!("{context}: reproject stale .md failed: {message}");
+            ReprojectOutcome {
+                ahead_of_log: None,
+                other_error: Some(message),
+            }
+        }
     }
-}
-
-/// Project the one [`ActionError`] variant the user must see onto its
-/// wire shape; every other variant maps to `None`.
-///
-/// Split from [`reproject_stale_md`] so the classification is testable
-/// without a workspace on disk — it is the piece that decides whether
-/// anything reaches the screen at all.
-fn md_ahead_of_log(err: &ActionError) -> Option<MdAheadOfLog> {
-    MdAheadOfLog::from_error(err)
 }
 
 /// Apply a workspace mutation `f` and project the result back to
@@ -438,7 +447,8 @@ pub fn invalidate_changed_history(
 
 #[cfg(test)]
 mod tests {
-    use super::{invalidate_changed_history, md_ahead_of_log};
+    use super::invalidate_changed_history;
+    use crate::state::MdAheadOfLog;
     use outl_actions::{
         append_block, open_or_create_page as open_or_create, render_page_md, ActionError, PageKind,
     };
@@ -454,7 +464,7 @@ mod tests {
             lines: 12,
             sample: "\"restarted the ingest worker\"".into(),
         };
-        let info = md_ahead_of_log(&err).expect("this is the variant the user must see");
+        let info = MdAheadOfLog::from_error(&err).expect("this is the variant the user must see");
         assert_eq!(info.lines, 12);
         assert_eq!(info.path, "/w/pages/infra.md");
         assert!(info.sample.contains("ingest worker"));
@@ -466,7 +476,7 @@ mod tests {
         // learn to ignore, and then the one that means "this page is not
         // syncing" goes unread too. Only the refusal gets the surface.
         let err = ActionError::NotInTree("01ABC".into());
-        assert!(md_ahead_of_log(&err).is_none());
+        assert!(MdAheadOfLog::from_error(&err).is_none());
     }
 
     /// Build a workspace with two pages (`alpha`, `beta`), each with a
