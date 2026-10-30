@@ -613,11 +613,10 @@ pub(crate) fn render_template_picker(
                 .border_style(app.theme.border)
                 .style(app.theme.popup_style()),
         )
-        .scroll(if tp.selected > 5 {
-            (0, (tp.selected - 5) as u16)
-        } else {
-            (0, 0)
-        });
+        .scroll((
+            scroll_to_keep_visible(tp.selected, outer[1].height.saturating_sub(2) as usize),
+            0,
+        ));
     f.render_widget(list, outer[1]);
 }
 
@@ -681,12 +680,32 @@ pub(crate) fn render_reminders(
                 ))
                 .style(app.theme.popup_style()),
         )
-        .scroll(if state.selected > 5 {
-            (0, (state.selected - 5) as u16)
-        } else {
-            (0, 0)
-        });
+        .scroll((
+            scroll_to_keep_visible(state.selected, area.height.saturating_sub(2) as usize),
+            0,
+        ));
     f.render_widget(list, area);
+}
+
+/// Vertical scroll offset that keeps row `selected` inside a viewport
+/// `visible` rows tall.
+///
+/// Two overlays passed `(0, selected - 5)` to `Paragraph::scroll`,
+/// whose tuple is `(Vertical, Horizontal)` — so they scrolled
+/// **sideways**, sliding the text out of the card while the selected
+/// row stayed below the bottom edge
+/// ([#445](https://github.com/outlmd/outl/issues/445)).
+///
+/// The `- 5` was a second bug: the offset has to come from the
+/// viewport height, or a tall popup scrolls while there is still room
+/// and a short one does not scroll enough.
+fn scroll_to_keep_visible(selected: usize, visible: usize) -> u16 {
+    if visible == 0 {
+        return 0;
+    }
+    // Smallest offset that puts `selected` on the last visible row,
+    // and zero while it already fits.
+    u16::try_from(selected.saturating_sub(visible - 1)).unwrap_or(u16::MAX)
 }
 
 /// Clip `s` to `max` display columns, appending `…` when it had to cut.
@@ -1093,74 +1112,4 @@ fn help_tab_body(tab: usize, theme: &Theme, icons: &crate::icons::IconSet) -> Ve
 }
 
 #[cfg(test)]
-mod help_coverage_tests {
-    //! The help popup is a hand-curated list, not generated from
-    //! `outl-shortcuts`. That buys a layout worded for the terminal
-    //! and costs the guarantee that a new chord shows up on its own:
-    //! `g r` / `g R` / `g n` / `g s` shipped working and undiscoverable
-    //! because nobody edited this file.
-    //!
-    //! These pin the reminder rows. The chord *spelling* is guarded
-    //! separately against the catalog in `input/normal.rs`, so between
-    //! the two a re-spelled or a dropped chord fails a test.
-
-    use super::help_tab_body;
-    use crate::theme::default_theme;
-
-    fn normal_help() -> String {
-        let theme = default_theme();
-        help_tab_body(0, &theme, &crate::icons::IconSet::default())
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    #[test]
-    fn every_reminder_chord_is_listed() {
-        let help = normal_help();
-        for chord in ["g r", "g R", "g n", "g s"] {
-            assert!(
-                help.contains(chord),
-                "`{chord}` works but isn't in the help; the popup is \
-                 hand-written, so adding a chord means editing it too"
-            );
-        }
-    }
-
-    #[test]
-    fn the_property_editor_and_its_keys_are_listed() {
-        // `g p` used to mean "pin"; the re-spelling only pays off if
-        // both the new chord and the moved one are findable here.
-        // And an overlay whose inner keys aren't documented is a
-        // list the user can open and not operate.
-        let help = normal_help();
-        for chord in ["g p", "g P", "dd delete", "Tab completes"] {
-            assert!(
-                help.contains(chord),
-                "`{chord}` works but isn't in the help; the popup is \
-                 hand-written, so adding a chord means editing it too"
-            );
-        }
-    }
-
-    #[test]
-    fn the_help_says_how_to_edit_a_rule() {
-        // `g r` writes a starter rule the user almost always tunes.
-        // Without this line the only way to find `:prop` is the toast
-        // that scrolls away.
-        assert!(normal_help().contains(":prop remind"));
-    }
-
-    #[test]
-    fn the_first_tab_is_the_one_these_chords_live_on() {
-        // `normal_help()` hardcodes tab 0; if the tab order ever
-        // changes these assertions would silently test the wrong list.
-        assert_eq!(super::HELP_TABS.first().copied(), Some("Normal"));
-    }
-}
+mod tests;
