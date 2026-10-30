@@ -228,6 +228,17 @@ TUI-specific contracts worth remembering:
   The earlier "cursor rows pass width `0`" workaround was the actual #99 regression: the selected block stayed on one overflowing line and only wrapped once the cursor left it (`viewing mode won't wrap until I navigate away`).
   `text_width == 0` is still the "don't wrap" sentinel, but only headless renders pass it now.
 
+## Overlay list scrolling
+
+`view/overlays.rs`'s `scroll_to_keep_visible(selected, visible)` is the one owner of a list popup's vertical offset, and both the template picker and the reminders list call it.
+
+Two bugs it replaced, in one expression:
+
+- **`Paragraph::scroll` takes `(Vertical, Horizontal)`.** Both overlays passed `(0, selected - 5)`, so they scrolled **sideways**: rows slid out of the card while the selected row stayed below the bottom edge ([#445](https://github.com/outlmd/outl/issues/445)). `ratatui-widgets`' own doc flags the order as the exception to the crate's convention, which is how two call sites got it wrong and three others (the slash palette, plugin settings) got it right.
+- **The offset has to come from the viewport height.** `selected > 5` scrolled a 20-row popup that had room to spare, and under-scrolled a 3-row one. The offset is now the smallest that puts `selected` on the last visible row, zero while it already fits.
+
+`u16::try_from(...).unwrap_or(u16::MAX)` rather than `as u16`, so a list longer than 65,535 rows clamps instead of wrapping to the top.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
