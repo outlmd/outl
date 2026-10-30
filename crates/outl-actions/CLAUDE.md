@@ -331,6 +331,18 @@ A local `match` re-spelling the markers is the second owner that goes stale the 
 UIs that surface state separately (mobile checkbox) must reattach the prefix before calling `edit_text`; helper `rawTextWithTodo` on the mobile side does this.
 The historical "auto-preserve prefix" behaviour was removed because it made `TODO`/`DONE` impossible to delete from the editor.
 
+## Open tasks (`tasks`)
+
+`collect_open_tasks(blocks, pages, limit)` is the single owner of **"what do I still have to do"**, with `OpenTasks` / `TaskHit` / `TASK_LIMIT`.
+
+**The ordering is the product decision, and no client re-derives it**: started tasks first, then journals newest-first, then named pages alphabetically, each page in outline order. Journals and named pages need separate comparison arms — one descending slug compare for both sorts every letter-initial slug above every ISO date (`i` is 0x69, `2` is 0x32), which put journals last and named pages Z-to-A. Journal-ness is `PageEntry::is_journal`, asked of the same index the blocks came from, so it cannot disagree with the rest of the app about what a journal is.
+
+It lived in `outl-tauri-shared` until [#454](https://github.com/outlmd/outl/issues/454). That crate is the Tauri backend, so the TUI cannot depend on it, and `Capability::TaskList` was `Missing` there for a reason about crate layout rather than about the terminal. Third time this move was the answer: `take_due` came down for the TUI's OSC 9 delivery, and `ProjectionRefusal` came down in [#292](https://github.com/outlmd/outl/issues/292) because the client with the hardest failure mode had no verdict at all.
+
+What stayed on the Tauri side is the half that needs Tauri: the `AppHost` lookup and the offload, since the index build reads and parses every `.md`.
+
+`crates/outl-tui/tests/task_list_reachable.rs` fails to **compile** if it goes back behind that edge.
+
 ## What this crate does NOT own
 
 - **UI state.**
