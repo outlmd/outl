@@ -28,7 +28,15 @@ Four ways to pick, in precedence order:
    mode = "auto"
    ```
    The desktop's Settings modal writes here, so changing the theme there propagates to the next `outl-tui` launch automatically.
-4. **Default** — the `outl-light` / `outl` brand pair when nothing is configured.
+4. **Default** — the `outl-light` / `outl` brand pair when nothing is configured, **unless the terminal does not accept 24-bit colour**, in which case the TUI falls back to the ANSI-based `default-dark` instead ([#453](https://github.com/outlmd/outl/issues/453)).
+
+   Every preset but `default-dark` and `light` maps each palette field through `Color::Rgb`, so an unconfigured launch used to emit 24-bit SGR whatever the terminal could render: approximated on a 256-colour tmux without `Tc`, and potentially unreadable on a plain `xterm` or `TERM=linux`.
+
+   The signals are `COLORTERM` in (`truecolor`, `24bit`) and a terminfo direct-colour `TERM` entry (`*-direct`, `*-direct16`, `*-direct256`). Both are widely set, which is what separates this from the OS appearance setting — that one has no reliable terminal answer, which is why `mode = "auto"` is pinned to dark rather than probed.
+
+   **This applies to level 4 only.** A preset you named with `--theme`, in the per-workspace config, or in the global config is an explicit choice and is honoured as-is: ask for `dracula` on a 256-colour terminal and you get `dracula`. Overriding an explicit request would be the bigger surprise.
+
+   A terminal that supports 24-bit colour and sets neither signal gets the ANSI preset, which renders correctly. The opposite default renders wrong, so absence is read as "no".
 
 Names are case- and separator-insensitive.
 `dracula`, `Dracula`, `DRACULA`, `Solarized Dark`, `solarized_dark`, `solarized-dark` all resolve to the same theme.

@@ -373,6 +373,18 @@ It does that because this crate mutates an in-memory AST and derives ops from th
 **New code here should call `commit_page` rather than extending `save_page_with`.**
 Adding a sixth step to the hand-written sequence deepens the divergence the issue exists to close, and the shared pipeline already has the ordering right.
 
+## Truecolor: absent means ANSI
+
+`runtime::preset::supports_truecolor(colorterm, term)` is pure over the two environment variables, and `fallback_for(truecolor)` picks what an **unconfigured** launch gets: the brand preset when 24-bit is available, `theme::default_dark()` when it is not ([#453](https://github.com/outlmd/outl/issues/453)).
+
+Three contracts:
+
+- **Level 4 only.** `--theme`, the per-workspace `[theme] preset` and the global config are explicit user choices and stay untouched. A user who asked for `dracula` on a 256-colour terminal gets `dracula`; second-guessing an explicit request is the bigger surprise, and `docs/theming.md` owns that precedence.
+- **Absence reads as "no".** A truecolor terminal that sets neither signal gets the ANSI preset, which renders correctly. The reverse default renders wrong, so the asymmetry is deliberate.
+- **This is not the `auto` mode question.** That one is pinned to dark because a terminal has no reliable way to read the OS appearance setting and probing (OSC 11, `COLORFGBG`) is unreliable under tmux. Truecolor has two widely-set signals, which is why it gets detected instead of declared.
+
+`COLORTERM` / `TERM` are read in `fallback_theme()` and nowhere else in the module, so the decision stays testable without touching the process environment.
+
 ## Theme mode: `auto` means dark here
 
 `runtime::preset::resolve_preset_name(&ThemeCfg) -> &str` decides which side of the `[theme] preset` / `preset_dark` pair the global-config fallback resolves to: `Light` → `preset`, `Dark` and `Auto` → `ThemeCfg::dark()`.
