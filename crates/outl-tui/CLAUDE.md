@@ -228,6 +228,21 @@ TUI-specific contracts worth remembering:
   The earlier "cursor rows pass width `0`" workaround was the actual #99 regression: the selected block stayed on one overflowing line and only wrapped once the cursor left it (`viewing mode won't wrap until I navigate away`).
   `text_width == 0` is still the "don't wrap" sentinel, but only headless renders pass it now.
 
+### Toasts size to their message
+
+`view/toasts.rs` cards are bottom-right, newest on top, and **grow vertically** up to `MAX_BODY_LINES` (4) body rows.
+
+Three contracts:
+
+- **The card height is derived, not constant.** The stack walk tracks the bottom edge and subtracts each card's own height, because a fixed `TOAST_HEIGHT` is what made a long message unrenderable in the first place ([#435](https://github.com/outlmd/outl/issues/435)).
+  A one-row card inside 50 cells cut `reconcile failed: {e}` at the border with no ellipsis, so the path or errno — the only part worth reading — was the part dropped.
+- **`wrap_message` is word-based with a hard-break fallback**, since the errors this channel carries are mostly paths with no spaces to break on.
+  It is pure and tested on its own, and a render-path test (`a_long_error_reaches_the_screen_instead_of_stopping_at_the_border`) pins that `render_toasts` actually calls it: the pure tests pass either way, so dropping the call would otherwise go unnoticed.
+  That test asserts on the message's **tail**, because a 50-cell card already showed the first ~45 columns.
+- **`overlays::truncate` is not reused for the elided row.** It answers "is this longer than `max`"; the question here is "was anything dropped", and a row landing exactly on `width` still has to carry the `…` or a clipped error reads as a complete one.
+
+The icon sits on the first row and continuations indent to the text column, so a wrapped error reads as one message rather than four.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
