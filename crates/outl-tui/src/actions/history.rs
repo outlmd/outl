@@ -7,7 +7,8 @@
 
 use crate::outline_ops::flat_count;
 use crate::state::{App, HistorySnapshot, MAX_HISTORY};
-use std::path::Path;
+use outl_md::parse::ParsedPage;
+use std::path::{Path, PathBuf};
 
 impl App {
     /// Push the current page state onto the undo stack. Clears the redo
@@ -20,6 +21,38 @@ impl App {
             view_path: self.current_path(),
         };
         self.undo.push(snap);
+        if self.undo.len() > MAX_HISTORY {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Push a snapshot of `page` as it stood at `path`, for a mutation
+    /// landing in a file that is **not** the one on screen.
+    ///
+    /// The cross-page sibling of [`App::snapshot_for_undo`]. A
+    /// backlinks-panel op writes to the referencing page, so the
+    /// snapshot carries *that* path and [`App::top_applies_here`]
+    /// therefore only lets it be restored once the user opens it.
+    ///
+    /// That guard is what makes this safe to record at all. The
+    /// previous rationale for recording nothing was that "undo in this
+    /// view shouldn't silently flip TODOs in a different file", which
+    /// was true while a popped snapshot was applied blind
+    /// ([#431](https://github.com/outlmd/outl/issues/431)).
+    ///
+    /// `selected` and `cursor_col` are zeroed rather than inherited:
+    /// they index the page on screen, which is not this one.
+    /// `restore_snapshot` clamps both, so landing on the first block is
+    /// the honest answer to "where was the cursor" for a page the user
+    /// was not looking at.
+    pub(crate) fn snapshot_page_for_undo(&mut self, path: PathBuf, page: ParsedPage) {
+        self.undo.push(HistorySnapshot {
+            page,
+            selected: 0,
+            cursor_col: 0,
+            view_path: path,
+        });
         if self.undo.len() > MAX_HISTORY {
             self.undo.remove(0);
         }
