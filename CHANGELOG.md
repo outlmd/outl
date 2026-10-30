@@ -72,6 +72,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The runner already has stable for the host, and that action's `targets:` input updates the host toolchain without adding the cross target.
   The CLI zip for the same triple shipped, because that job runs `rustup target add`.
   The desktop job does that now, so the next release attaches `outl-desktop-windows-aarch64-setup.exe`.
+
+- **A yank in the TUI no longer vanishes on a bare X11 session** ([#472](https://github.com/outlmd/outl/issues/472)).
+  On X11 the selection owner serves the clipboard, and the owner was a `Clipboard` built fresh for every yank and dropped right after `set_text` returned `Ok`.
+  With a window manager and no clipboard manager the text was gone while the status line still read `yanked N block(s) → clipboard`: `xclip -o -selection clipboard` failed with `target STRING not available`.
+  The TUI now keeps one handle for as long as it runs, and drops it after a failed write so the next yank reconnects.
+  The text still ends with the process on such a session, which `docs/tui.md` says; Wayland, macOS and X11 with a clipboard manager keep it after quit.
+  `yy` fills `CLIPBOARD` only, so a terminal that pastes the `PRIMARY` selection (urxvt on Shift+Insert) still does not see it.
 - **Two things the screenshots for [#417](https://github.com/outlmd/outl/pull/417) found, both in paint rather than in logic.**
   The desktop's `+ prop` affordance is a bare `+` where it floats over a block's first line.
   It is absolutely positioned at the right edge, so the word it spelled covered the last word of any line that reached there, which on a wide window is most of them.

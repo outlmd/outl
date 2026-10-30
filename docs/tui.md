@@ -29,6 +29,9 @@ Two paths are tried in order:
 
 The status line reads `yanked N block(s) → clipboard` on success and `yanked N block(s) (clipboard unavailable)` when both paths fail.
 
+On a bare X11 session (no desktop environment, no clipboard manager) the TUI itself serves the clipboard, so a yank can be pasted elsewhere only while the TUI is running; quitting drops it.
+Wayland, macOS and X11 with a clipboard manager keep the text after quit.
+
 Pasting the yanked markdown in another app reconstructs the same bullet structure.
 Pasting back into outl uses `p` (with formatting) or `P` (without formatting) — see [Paste from clipboard](#paste-from-clipboard) below.
 
