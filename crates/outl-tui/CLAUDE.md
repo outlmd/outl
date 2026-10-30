@@ -228,6 +228,22 @@ TUI-specific contracts worth remembering:
   The earlier "cursor rows pass width `0`" workaround was the actual #99 regression: the selected block stayed on one overflowing line and only wrapped once the cursor left it (`viewing mode won't wrap until I navigate away`).
   `text_width == 0` is still the "don't wrap" sentinel, but only headless renders pass it now.
 
+## Empty states
+
+Two screens rendered nothing where they had something to say ([#448](https://github.com/outlmd/outl/issues/448)).
+
+- **`view/outline.rs`'s `starter_hint`** draws one line under the lone bullet of a brand-new page.
+  Journal-first means the product's first screen is today's journal, and a fresh one is seeded with a single empty bullet (`actions/lifecycle/loading.rs`), so a new install opened on a box titled `Outline` holding `- ` and naming no key — while every overlay in this crate already had considered empty copy.
+  It is **one line, not a modal**: the desktop's two-step first run does not translate here, where the shell is itself a surface and `outl init` already prints.
+  Gated on exactly one blank block and suppressed in Insert, so it cannot shift a row under the caret.
+  It is not a `block_starts` entry — there is no block there to click.
+- **`view/backlinks.rs`'s `empty_section_notice`** distinguishes "no backlinks" from "not known yet".
+  The section returned nothing while the background index was still building, so on a large workspace that was indistinguishable from a page with zero backlinks for seconds.
+  `App::has_pending_backlink_index` already answered it and no view asked.
+  The `show_backlinks` toggle wins over both, so `B` off still means no section.
+
+Both decisions are pure and tested on their own, **plus** a render-path test each, because the pure tests pass whether or not the renderer calls them. [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) owns the general rule for the second one: work landing after the first paint shows its own placeholder in its own section.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
