@@ -491,6 +491,9 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Undo bounded**: 200 most recent snapshots.
   Older edits drop off the front.
   Each snapshot remembers selection + cursor so undo lands you where you were.
+- **Search is index-backed**: `/search` filters the in-memory block index a background worker builds, so typing does not re-read the workspace.
+  It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
+  On a cold start there is a short window while that index builds; the header shows a spinner during it.
 - **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
 - **Slugified filenames**: `[[Avelino]]` lives in `pages/avelino.md` with `title:: Avelino` set automatically on first open.
 
