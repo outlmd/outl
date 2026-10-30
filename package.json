@@ -19,7 +19,7 @@
     "catalog": {
       "@tailwindcss/vite": "^4.3.3",
       "@tauri-apps/api": "^2.11.1",
-      "@tauri-apps/cli": "^2.11.4",
+      "@tauri-apps/cli": "^2.12.4",
       "@tauri-apps/plugin-opener": "^2.5.4",
       "@tauri-apps/plugin-os": "^2.3.2",
       "@types/node": "^26.2.0",
@@ -28,7 +28,7 @@
       "solid-js": "^1.9.14",
       "tailwindcss": "^4.3.3",
       "typescript": "^7.0.2",
-      "vite": "^8.2.1",
+      "vite": "^8.3.5",
       "vite-plugin-solid": "^2.11.14",
       "vitest": "^4.1.10"
     }
