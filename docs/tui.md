@@ -495,6 +495,8 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Undo is per page, and pressing it elsewhere costs nothing**: a snapshot can only be applied to the page it was taken on, so `u` on a different page says `no undo for this page` and leaves the history alone.
   It used to discard the entry it could not apply, so a few presses after navigating away silently emptied the stack ([#430](https://github.com/outlmd/outl/issues/430)).
   Go back to the page and the edits are still there.
+- **Toasts show the whole error**: a toast card grows to up to four rows to fit its message, and adds `…` when even that is not enough.
+  They used to be one row inside a 50-column card, so a long `reconcile failed: …` lost the path at the border with nothing to indicate it had been cut ([#435](https://github.com/outlmd/outl/issues/435)).
 - **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
 - **A brand-new page tells you where to start**: a page whose only block is empty shows `press i to write · ? for keys` under the bullet, and the line goes away as soon as there is anything on the page or you start typing ([#448](https://github.com/outlmd/outl/issues/448)).
 - **The backlinks section says when it is still indexing**: on a cold start the panel reads `Backlinks · indexing…` instead of rendering nothing, so a page that is still loading is distinguishable from one with no backlinks.
