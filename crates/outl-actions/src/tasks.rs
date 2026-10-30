@@ -57,7 +57,7 @@ pub struct OpenTasks {
     pub tasks: Vec<TaskHit>,
 }
 
-/// The selection and ordering behind [`list_open_tasks`], split out so
+/// The selection and ordering behind `list_open_tasks`, split out so
 /// it can be tested without a workspace on disk.
 ///
 /// `pages` is only read for `PageEntry::is_journal` — the one existing
