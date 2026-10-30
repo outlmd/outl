@@ -455,8 +455,8 @@ pub(crate) struct SearchHit {
     pub(crate) md_path: PathBuf,
     /// Snippet around the match.
     pub(crate) snippet: String,
-    /// Block index inside the parsed page (DFS preorder).
-    pub(crate) block_index: usize,
+    /// DFS path to the block, resolved after the page loads (#449).
+    pub(crate) block_path: Vec<usize>,
     /// Fuzzy score for ranking.
     pub(crate) score: i32,
 }
