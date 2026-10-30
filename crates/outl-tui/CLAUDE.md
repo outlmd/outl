@@ -105,6 +105,29 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   `move_{up,down}_visual_range` drag the whole selection among its siblings — mirror of the single-block `Alt`+arrows in Normal (the plain arrows extend the range, so `Alt` is what separates reorder from grow).
   They loop `move_{up,down}_at_path` (`lo→hi` for up, `hi→lo` for down) and follow the selection one row; if the leading block can't move (already first/last sibling) the op aborts before the rest of the range scrambles against itself.
 
+### Undo / redo (`u` / `Ctrl+R`)
+
+`actions/history.rs` keeps two bounded `Vec<HistorySnapshot>` stacks, each snapshot a whole-page `ParsedPage` clone plus the `view_path` it came from.
+
+One contract, and it was the alternative:
+
+- **Ask whether the top snapshot applies here *before* touching either stack.**
+  `restore_snapshot` takes its snapshot by value and refuses one belonging to another view, so the pop that used to precede it destroyed the entry ([#430](https://github.com/outlmd/outl/issues/430)).
+  `redo` had the same shape, and gained a snapshot of a page nothing had undone.
+  Nothing clears these stacks on navigation, so repeated presses on the wrong page drained the user's history with a status line that said `skipped`.
+  `top_applies_here` is the single owner of that question; both callers ask it, and the pop is `expect`-safe behind it.
+  The regression net is `undo_on_another_page_keeps_the_snapshot`, `repeated_undo_on_another_page_never_drains_the_stack`, `redo_on_another_page_keeps_the_snapshot`, plus `undo_on_its_own_page_still_consumes_the_snapshot` so the guard cannot pass by blocking everything.
+
+- **A cross-page op snapshots the page it changes, not the page on screen.**
+  `snapshot_page_for_undo(path, page)` is the sibling of `snapshot_for_undo`, and `apply_to_backlink_source` calls it once for all seven structural ops reachable from the backlinks panel; `toggle_todo_backlink` calls it on its own path.
+  The snapshot carries the *source* page's path, so `top_applies_here` only lets it be restored once the user opens that page — pressing `u` while still on the referencing page reports `no undo for this page` and keeps it.
+  This is why the guard above had to land first ([#431](https://github.com/outlmd/outl/issues/431) depends on [#430](https://github.com/outlmd/outl/issues/430)).
+  `toggle_todo_backlink` used to document the opposite ("undo in this view shouldn't silently flip TODOs in a different file"), which was correct while a popped snapshot was applied blind.
+  That is root `CLAUDE.md` invariant 10 item 4: the exemption outlived its premise.
+  `selected` / `cursor_col` are zeroed, because they index a page the user was not looking at.
+
+**Still not covered**: `commit_insert` on an `EditTarget::SourcePage` records nothing and is the last instance of the old reasoning. Neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
+
 ### Properties (`g p`)
 
 `g p` opens the property editor for the selected block (`actions/properties.rs` + `view/properties.rs`, keys routed by `input/overlay.rs::handle_properties_key`).
