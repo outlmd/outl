@@ -75,6 +75,5 @@
 985 crates/outl-tui/src/actions/plugins.rs
 620 crates/outl-tui/src/actions/properties.rs
 661 crates/outl-tui/src/input/normal.rs
-645 crates/outl-tui/src/input/overlay.rs
 989 crates/outl-tui/src/state.rs
 1166 crates/outl-tui/src/view/overlays.rs
