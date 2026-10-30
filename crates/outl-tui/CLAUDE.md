@@ -118,7 +118,15 @@ One contract, and it was the alternative:
   `top_applies_here` is the single owner of that question; both callers ask it, and the pop is `expect`-safe behind it.
   The regression net is `undo_on_another_page_keeps_the_snapshot`, `repeated_undo_on_another_page_never_drains_the_stack`, `redo_on_another_page_keeps_the_snapshot`, plus `undo_on_its_own_page_still_consumes_the_snapshot` so the guard cannot pass by blocking everything.
 
-**Not covered here**: a cross-page delete (the backlinks panel) never reaches these stacks at all, which is [#431](https://github.com/outlmd/outl/issues/431), and neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
+- **A cross-page op snapshots the page it changes, not the page on screen.**
+  `snapshot_page_for_undo(path, page)` is the sibling of `snapshot_for_undo`, and `apply_to_backlink_source` calls it once for all seven structural ops reachable from the backlinks panel; `toggle_todo_backlink` calls it on its own path.
+  The snapshot carries the *source* page's path, so `top_applies_here` only lets it be restored once the user opens that page — pressing `u` while still on the referencing page reports `no undo for this page` and keeps it.
+  This is why the guard above had to land first ([#431](https://github.com/outlmd/outl/issues/431) depends on [#430](https://github.com/outlmd/outl/issues/430)).
+  `toggle_todo_backlink` used to document the opposite ("undo in this view shouldn't silently flip TODOs in a different file"), which was correct while a popped snapshot was applied blind.
+  That is root `CLAUDE.md` invariant 10 item 4: the exemption outlived its premise.
+  `selected` / `cursor_col` are zeroed, because they index a page the user was not looking at.
+
+**Still not covered**: `commit_insert` on an `EditTarget::SourcePage` records nothing and is the last instance of the old reasoning. Neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
 
 ### Properties (`g p`)
 
