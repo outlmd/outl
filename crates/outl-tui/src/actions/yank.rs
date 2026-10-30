@@ -11,6 +11,24 @@ use base64::Engine as _;
 use crate::outline_ops::{index_for_path, node_at_path, path_for_index};
 use crate::state::{App, Mode, View};
 
+/// Process-wide `arboard` handle used for every write.
+///
+/// On X11 there is no system clipboard buffer: the selection *owner*
+/// serves the contents to whoever asks. `arboard` runs that server in a
+/// background thread tied to the `Clipboard` instance, and dropping the
+/// last instance hands the data to a clipboard manager only if one is
+/// running — otherwise the contents are gone. A fresh `Clipboard` per
+/// yank therefore loses the text immediately on a bare X11 session (no
+/// desktop environment, no clipboard manager) even though `set_text`
+/// returned `Ok`. Keeping one instance alive for the whole process keeps
+/// the TUI the selection owner while it runs, or until something else
+/// takes the selection over. The contents do not outlive the process on a
+/// bare X11 session.
+///
+/// Reads (`actions/paste.rs`) don't need this: they only ask the current
+/// owner.
+static CLIPBOARD: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+
 /// Best-effort copy of `text` to the OS clipboard.
 ///
 /// Returns `true` on success. Failures (no display server, missing
@@ -18,9 +36,25 @@ use crate::state::{App, Mode, View};
 /// — the caller still has `last_yanked_ref` + status as the fallback
 /// surface. We never panic over clipboard plumbing.
 fn copy_to_os_clipboard(text: &str) -> bool {
-    arboard::Clipboard::new()
-        .and_then(|mut c| c.set_text(text.to_string()))
-        .is_ok()
+    let Ok(mut guard) = CLIPBOARD.lock() else {
+        return false;
+    };
+    if guard.is_none() {
+        // Retried on every call while it fails, so a display that shows
+        // up later (or a headless run) behaves exactly as before.
+        *guard = arboard::Clipboard::new().ok();
+    }
+    let ok = guard
+        .as_mut()
+        .is_some_and(|c| c.set_text(text.to_string()).is_ok());
+    if !ok {
+        // A dead display connection (X server restart, dropped SSH
+        // forwarding) would otherwise fail every later yank. Dropping the
+        // handle makes the next call reconnect, as a fresh `Clipboard`
+        // per yank used to.
+        *guard = None;
+    }
+    ok
 }
 
 /// Emit an OSC 52 clipboard escape on stdout.
