@@ -105,6 +105,21 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   `move_{up,down}_visual_range` drag the whole selection among its siblings — mirror of the single-block `Alt`+arrows in Normal (the plain arrows extend the range, so `Alt` is what separates reorder from grow).
   They loop `move_{up,down}_at_path` (`lo→hi` for up, `hi→lo` for down) and follow the selection one row; if the leading block can't move (already first/last sibling) the op aborts before the rest of the range scrambles against itself.
 
+### Undo / redo (`u` / `Ctrl+R`)
+
+`actions/history.rs` keeps two bounded `Vec<HistorySnapshot>` stacks, each snapshot a whole-page `ParsedPage` clone plus the `view_path` it came from.
+
+One contract, and it was the alternative:
+
+- **Ask whether the top snapshot applies here *before* touching either stack.**
+  `restore_snapshot` takes its snapshot by value and refuses one belonging to another view, so the pop that used to precede it destroyed the entry ([#430](https://github.com/outlmd/outl/issues/430)).
+  `redo` had the same shape, and gained a snapshot of a page nothing had undone.
+  Nothing clears these stacks on navigation, so repeated presses on the wrong page drained the user's history with a status line that said `skipped`.
+  `top_applies_here` is the single owner of that question; both callers ask it, and the pop is `expect`-safe behind it.
+  The regression net is `undo_on_another_page_keeps_the_snapshot`, `repeated_undo_on_another_page_never_drains_the_stack`, `redo_on_another_page_keeps_the_snapshot`, plus `undo_on_its_own_page_still_consumes_the_snapshot` so the guard cannot pass by blocking everything.
+
+**Not covered here**: a cross-page delete (the backlinks panel) never reaches these stacks at all, which is [#431](https://github.com/outlmd/outl/issues/431), and neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
+
 ### Properties (`g p`)
 
 `g p` opens the property editor for the selected block (`actions/properties.rs` + `view/properties.rs`, keys routed by `input/overlay.rs::handle_properties_key`).
