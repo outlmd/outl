@@ -16,13 +16,19 @@ The mobile app doesn't expose a keyboard surface (touch + on-screen keyboard); t
 > The catalog and those match arms can disagree without anything failing to compile.
 > Treat a TUI cell below as documentation of the `match`, not of the catalog.
 >
-> **They do disagree, on 17 chords, 6 of them destructive.**
+> **They do disagree, on 22 chords, 6 of them destructive.**
 > `Ctrl+X` is `CutBlock` in the catalog and deletes a character in the TUI.
 > `Ctrl+Shift+R` is `OpenReminders` in the catalog and redoes in the TUI.
 > `Ctrl+Z` is `Undo` in the catalog and arms the `z` fold chord in the TUI, two keystrokes from a silent content edit.
 > The full list is `crates/outl-shortcuts/tests/tui_catalog_divergence.rs`, which pins both halves: the catalog rows through `lookup`, the TUI arms by reading `input/normal.rs`.
 > Which side is right is a product decision nobody has made yet, so the list is pinned rather than resolved — a new divergence, or a change to a listed one, fails the test.
 > The reminder chords keep their own pins in `reminder_chord_tests` (`outl-tui/src/input/normal.rs`); those rows agree.
+>
+> **And 31 TUI chords are missing from the tables below entirely**, because they are bound in `input/normal.rs` and were never added to the catalog these tables are generated from.
+> Among them: `h` / `l` / `w` / `b` / `0` / `$` / `G` / `g g` for cursor and block movement, `y y` to yank, `/` for the slash menu, `n` / `N` to walk search hits, `Ctrl+D` / `Ctrl+U` for half-page scroll, `Alt+↑` / `Alt+↓` to move a block, `Ctrl+S` to force a save and `Ctrl+L` to reload.
+> They work; they are just not listed here.
+> `Ctrl+B` (backlinks) and `Ctrl+E` (sidebar) are the exception that proves the point — this document publishes both by hand further down, while the generated tables cannot see them.
+> `crates/outl-shortcuts/tests/tui_only_chords.rs` is the declared list, and it fails if one of them is added to the catalog without this note being updated.
 
 If a row below disagrees with what you observe in the app, **the code is right and this doc is stale** — file an issue or fix the row.
 
