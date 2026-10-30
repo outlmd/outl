@@ -491,6 +491,8 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Undo bounded**: 200 most recent snapshots.
   Older edits drop off the front.
   Each snapshot remembers selection + cursor so undo lands you where you were.
+- **Toasts show the whole error**: a toast card grows to up to four rows to fit its message, and adds `…` when even that is not enough.
+  They used to be one row inside a 50-column card, so a long `reconcile failed: …` lost the path at the border with nothing to indicate it had been cut ([#435](https://github.com/outlmd/outl/issues/435)).
 - **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
 - **Slugified filenames**: `[[Avelino]]` lives in `pages/avelino.md` with `title:: Avelino` set automatically on first open.
 
