@@ -158,6 +158,7 @@ unsafe extern "system" {
 }
 
 /// Process status for a webview that never finished creating.
+#[cfg(windows)]
 pub(crate) const WEBVIEW_CREATE_FAILED_EXIT_CODE: i32 = 1;
 
 /// Bounded attempts at creating the main webview before giving up. A COM
@@ -170,6 +171,7 @@ pub(crate) const WEBVIEW_CREATE_MAX_ATTEMPTS: u32 = 3;
 
 /// Delay between attempts. Long enough to let a timed-out COM call settle,
 /// short enough that three attempts don't read as a hang.
+#[cfg(windows)]
 pub(crate) const WEBVIEW_CREATE_RETRY_DELAY_MS: u64 = 500;
 
 /// What to do with `attempt`'s failed webview creation.
