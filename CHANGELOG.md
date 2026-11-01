@@ -102,6 +102,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Windows now asks the same question before the window is built.
   A missing runtime shows a message naming the Evergreen WebView2 runtime and Microsoft's download page, then exits with status 1.
   A PC that already has the runtime is unchanged, and so are macOS and Linux.
+- **Opening outl on Windows could still crash with the runtime installed, if WebView2 timed out creating its environment** ([OUTL-4](https://outl.sentry.io/issues/OUTL-4)).
+  `App::run` created the window from `tauri.conf.json` with no retry, so a transient `WindowsError(... ERROR_TIMEOUT ...)` — the kind boot-time contention (antivirus scan, a cold profile, a slow disk) produces — panicked the same way a missing runtime used to.
+  Windows now creates its window itself, retrying up to three times before falling back to a message box naming the WebView2 download, then exiting with status 1 instead of panicking.
+  A PC where webview creation already succeeds is unchanged, and so are macOS and Linux.
 - **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
   Root `CLAUDE.md` invariant 8 refuses to overwrite a `.md` holding content that exists in no op, and that refusal freezes the page in *both* directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
   The desktop and mobile render a banner for it.

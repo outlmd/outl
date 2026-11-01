@@ -29,8 +29,7 @@
 //! - `state` — `AppState`, wire types (`PageView`, `WorkspaceSummary`).
 //! - `helpers` — argument parsers, workspace-lock acquisition,
 //!   `finish_in_page` (the mutation funnel).
-//! - `webview_boot` — Windows WebView2 check before setup. A missing
-//!   runtime is a message and an exit, not a panic.
+//! - `webview_boot` — Windows WebView2 checks: exit on missing runtime, retry a window that fails to create (OUTL-4).
 //! - `open_with` — the OS "Open With → outl" gesture (macOS
 //!   `RunEvent::Opened`, `argv` elsewhere) turned into one import.
 //! - `workspace_open` — open / reconcile / boot opener primitives.
@@ -299,6 +298,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(quick_capture::plugin())
         .setup(|app| -> Result<(), Box<dyn std::error::Error>> {
+            #[cfg(windows)]
+            webview_boot::open_main_window(app.handle());
             quick_capture::register(app.handle());
             // Local-only state (the per-device `actor` ULID and the
             // `config.toml`) lives at `~/.config/outl/` — the XDG
