@@ -253,16 +253,44 @@ pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 pub(crate) trait LeftoverMainWindow {
     /// Whether "main" is currently registered.
     fn is_registered(&self) -> bool;
-    /// Tears "main" down. Only called when [`is_registered`](Self::is_registered) answered `true`.
-    fn destroy(&self);
+    /// Asks for "main" to be torn down. Only called when
+    /// [`is_registered`](Self::is_registered) answered `true`.
+    ///
+    /// Tauri's `destroy()` only *queues* the teardown: the label leaves the
+    /// window manager when the event loop processes it, so `Ok` here does
+    /// not mean the label is free.
+    fn destroy(&self) -> Result<(), String>;
 }
 
-/// Clears whatever `handle` reports as a leftover "main" window, if any.
+/// Whether the "main" label is free for the next `build()`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LeftoverState {
+    /// Nothing registered under "main": safe to build.
+    Clear,
+    /// Teardown was requested (or failed) and "main" is still registered.
+    /// Building now would only fail with `WindowLabelAlreadyExists`.
+    StillRegistered { reason: String },
+}
+
+/// Clears whatever `handle` reports as a leftover "main" window, if any, and
+/// re-checks the label afterwards instead of assuming `destroy` freed it.
 /// Called before every attempt in [`open_main_window`], including the
 /// first, where it is always a no-op — the cost is one map lookup.
-pub(crate) fn clear_leftover_main_window(handle: &impl LeftoverMainWindow) {
+pub(crate) fn clear_leftover_main_window(handle: &impl LeftoverMainWindow) -> LeftoverState {
+    if !handle.is_registered() {
+        return LeftoverState::Clear;
+    }
+    if let Err(err) = handle.destroy() {
+        return LeftoverState::StillRegistered {
+            reason: format!("could not tear down the previous window: {err}"),
+        };
+    }
     if handle.is_registered() {
-        handle.destroy();
+        LeftoverState::StillRegistered {
+            reason: "the previous window is still being torn down".to_string(),
+        }
+    } else {
+        LeftoverState::Clear
     }
 }
 
@@ -273,9 +301,10 @@ impl LeftoverMainWindow for tauri::AppHandle {
         tauri::Manager::get_webview_window(self, MAIN_WINDOW_LABEL).is_some()
     }
 
-    fn destroy(&self) {
-        if let Some(window) = tauri::Manager::get_webview_window(self, MAIN_WINDOW_LABEL) {
-            let _ = window.destroy();
+    fn destroy(&self) -> Result<(), String> {
+        match tauri::Manager::get_webview_window(self, MAIN_WINDOW_LABEL) {
+            Some(window) => window.destroy().map_err(|err| err.to_string()),
+            None => Ok(()),
         }
     }
 }
@@ -284,15 +313,24 @@ impl LeftoverMainWindow for tauri::AppHandle {
 /// present-but-not-yet-ready WebView2 runtime instead of letting `App::run`
 /// hit it with no retry (OUTL-4). `tauri.windows.conf.json` sets "main"'s
 /// `create: false` so `App::run` does not also try to create it.
+///
+/// A leftover "main" whose label is still registered is counted as a failed
+/// attempt without calling `build()`: the loop runs inside `setup`, before
+/// the event loop that would process a queued teardown, so building into it
+/// would only collide. The label is re-checked after each delay; if it never
+/// frees, the attempts run out into the same message-and-exit, never a panic.
 #[cfg(windows)]
 pub(crate) fn open_main_window(app: &tauri::AppHandle) {
     let mut attempt: u32 = 0;
     loop {
         attempt += 1;
-        clear_leftover_main_window(app);
-        match build_main_window(app) {
-            Ok(_) => return,
-            Err(err) => match webview_create_decision(attempt, &err.to_string()) {
+        let result = match clear_leftover_main_window(app) {
+            LeftoverState::Clear => build_main_window(app).map_err(|err| err.to_string()),
+            LeftoverState::StillRegistered { reason } => Err(reason),
+        };
+        match result {
+            Ok(()) => return,
+            Err(err) => match webview_create_decision(attempt, &err) {
                 WebviewCreateStep::Retry => {
                     std::thread::sleep(std::time::Duration::from_millis(
                         WEBVIEW_CREATE_RETRY_DELAY_MS,
@@ -428,9 +466,24 @@ mod tests {
         ));
     }
 
+    /// Mirrors Tauri: `destroy` only queues teardown unless `sync_unregister`
+    /// is set, and can be told to fail outright.
     struct FakeMainWindow {
         registered: std::cell::Cell<bool>,
         destroy_calls: std::cell::Cell<u32>,
+        sync_unregister: bool,
+        destroy_error: Option<String>,
+    }
+
+    impl FakeMainWindow {
+        fn new(registered: bool, sync_unregister: bool) -> Self {
+            Self {
+                registered: std::cell::Cell::new(registered),
+                destroy_calls: std::cell::Cell::new(0),
+                sync_unregister,
+                destroy_error: None,
+            }
+        }
     }
 
     impl LeftoverMainWindow for FakeMainWindow {
@@ -438,32 +491,58 @@ mod tests {
             self.registered.get()
         }
 
-        fn destroy(&self) {
+        fn destroy(&self) -> Result<(), String> {
             self.destroy_calls.set(self.destroy_calls.get() + 1);
-            self.registered.set(false);
+            if let Some(err) = &self.destroy_error {
+                return Err(err.clone());
+            }
+            if self.sync_unregister {
+                self.registered.set(false);
+            }
+            Ok(())
         }
     }
 
     #[test]
     fn a_leftover_main_window_gets_destroyed() {
-        let fake = FakeMainWindow {
-            registered: std::cell::Cell::new(true),
-            destroy_calls: std::cell::Cell::new(0),
-        };
-        clear_leftover_main_window(&fake);
+        let fake = FakeMainWindow::new(true, true);
+        assert_eq!(clear_leftover_main_window(&fake), LeftoverState::Clear);
         assert_eq!(fake.destroy_calls.get(), 1);
-        assert!(!fake.is_registered());
+    }
+
+    /// Tauri's real `destroy()` queues the teardown; the label stays
+    /// registered until the event loop runs. That must not read as clear.
+    #[test]
+    fn a_deferred_teardown_is_not_reported_as_clear() {
+        let fake = FakeMainWindow::new(true, false);
+        assert!(matches!(
+            clear_leftover_main_window(&fake),
+            LeftoverState::StillRegistered { .. }
+        ));
+        assert_eq!(fake.destroy_calls.get(), 1);
+        // Once the event loop has processed it, the next check is clear
+        // without another destroy.
+        fake.registered.set(false);
+        assert_eq!(clear_leftover_main_window(&fake), LeftoverState::Clear);
+        assert_eq!(fake.destroy_calls.get(), 1);
+    }
+
+    #[test]
+    fn a_failed_teardown_is_reported_with_its_error() {
+        let mut fake = FakeMainWindow::new(true, true);
+        fake.destroy_error = Some("boom".to_string());
+        match clear_leftover_main_window(&fake) {
+            LeftoverState::StillRegistered { reason } => assert!(reason.contains("boom")),
+            LeftoverState::Clear => panic!("a failed teardown must not read as clear"),
+        }
     }
 
     /// The common case, every first attempt: nothing to clear, so this must
     /// not call `destroy` and must not need a live `tauri::AppHandle` to say so.
     #[test]
     fn no_leftover_main_window_is_left_alone() {
-        let fake = FakeMainWindow {
-            registered: std::cell::Cell::new(false),
-            destroy_calls: std::cell::Cell::new(0),
-        };
-        clear_leftover_main_window(&fake);
+        let fake = FakeMainWindow::new(false, true);
+        assert_eq!(clear_leftover_main_window(&fake), LeftoverState::Clear);
         assert_eq!(fake.destroy_calls.get(), 0);
     }
 

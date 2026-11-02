@@ -445,6 +445,7 @@ It retries a failed `build()` up to `WEBVIEW_CREATE_MAX_ATTEMPTS` times before f
 Before every attempt, `clear_leftover_main_window` tears down any "main" window/webview a previous attempt left registered.
 Reading `tauri`/`tauri-runtime-wry` 2.12.1's source (see the module doc comment), a controller-creation failure does not actually leave one behind today, since the window-manager map insert only runs on the runtime's success path.
 The guard removes the dependency on that staying true across a `tauri`/`wry` bump.
+Tauri's `destroy()` only queues the teardown, and the loop runs inside `setup` before the event loop could process it, so the guard re-checks the label after `destroy()` and counts a still-registered (or failed-to-destroy) leftover as a failed attempt instead of calling `build()` into a `WindowLabelAlreadyExists` collision.
 It is written against a `LeftoverMainWindow` trait rather than `tauri::AppHandle` directly, so the decision of whether to call `destroy()` is unit-tested without a running Tauri app.
 
 `run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then (after that Windows check) calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
