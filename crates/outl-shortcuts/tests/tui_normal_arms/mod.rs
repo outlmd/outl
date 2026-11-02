@@ -162,7 +162,7 @@ fn the_tui_normal_key_arms_have_not_moved() {
     // Two assertions rather than one so the failure names which half
     // moved; the message is the same either way because the required
     // response is the same.
-    const WHY: &str = "\n\noutl-tui's Normal-mode key arms changed. This file records 17 chords \
+    const WHY: &str = "\n\noutl-tui's Normal-mode key arms changed. This file records 22 chords \
         where the TUI and this catalog already disagree (6 of them destructive), and that list \
         is only true for the arms it was written against. Re-check the chords you touched \
         against KNOWN_DIVERGENCES / AGREED above, then update this snapshot in the same commit. \
