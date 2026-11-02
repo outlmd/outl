@@ -435,11 +435,17 @@ The check is before `init` so the reporter is not running on the path that exist
 
 A *present* runtime can still fail to hand Tauri a controller (OUTL-4).
 A COM timeout (`WindowsError(... ERROR_TIMEOUT ...)`) while `App::run` auto-created the configured window had no retry, panicking with `Failed to setup app: {e}` the same way the missing-runtime case did.
-`tauri.windows.conf.json` empties `app.windows` on Windows only (platform configs replace the array wholesale, so macOS/Linux are untouched).
-`setup` creates the window itself via `webview_boot::open_main_window`.
-It retries a failed `WebviewWindowBuilder::build()` up to `WEBVIEW_CREATE_MAX_ATTEMPTS` times before falling back to the same message-box-and-exit `tell_and_exit` the missing-runtime case uses.
+`tauri.windows.conf.json` carries the same "main" entry as `tauri.conf.json`, plus `"create": false` (`WindowConfig::create`).
+That makes `App::run` parse the window without also building it, so macOS/Linux stay untouched (platform configs still merge as a JSON merge patch, and an array value replaces the base's wholesale).
+`setup` creates the window itself via `webview_boot::open_main_window`, which builds it with `WebviewWindowBuilder::from_config` against the same `app.config().app.windows` entry Windows skipped.
+There is no second, hand-maintained copy of the title/size/resizable properties.
+`the_windows_config_matches_the_base_config_entry_except_create` (in `webview_boot.rs`'s tests, runs on every platform) pins the two config files to actually describe the same window aside from `create`.
+It retries a failed `build()` up to `WEBVIEW_CREATE_MAX_ATTEMPTS` times before falling back to the same message-box-and-exit `tell_and_exit` the missing-runtime case uses.
 `webview_create_decision` is the pure retry/give-up call, tested without a Windows machine the same way `webview_boot` is.
-Keep `build_main_window`'s window properties in sync with `tauri.conf.json`'s `app.windows` entry by hand — the Windows override means that entry is no longer what Windows actually uses.
+Before every attempt, `clear_leftover_main_window` tears down any "main" window/webview a previous attempt left registered.
+Reading `tauri`/`tauri-runtime-wry` 2.12.1's source (see the module doc comment), a controller-creation failure does not actually leave one behind today, since the window-manager map insert only runs on the runtime's success path.
+The guard removes the dependency on that staying true across a `tauri`/`wry` bump.
+It is written against a `LeftoverMainWindow` trait rather than `tauri::AppHandle` directly, so the decision of whether to call `destroy()` is unit-tested without a running Tauri app.
 
 `run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then (after that Windows check) calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
 The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.

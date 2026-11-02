@@ -31,16 +31,42 @@
 //! same place the missing-runtime panic above fires from, and that path has
 //! no retry.
 //!
-//! `tauri.windows.conf.json` empties `app.windows` on Windows only (platform
-//! configs replace the array wholesale, so this does not touch macOS/Linux),
-//! and [`open_main_window`] creates the window itself from inside `setup`
-//! (the officially documented place to do this — `tauri`'s own docs build a
-//! window there), where a `tauri::Result` is ours to inspect instead of
-//! `App::run`'s. [`webview_create_decision`] is the retry/give-up call: a
-//! bounded number of attempts for a timing failure that boot-time contention
-//! (antivirus scan, a cold profile, a slow disk) can clear on its own, then
-//! the same message-box-and-exit `tell_and_exit` the missing-runtime case
-//! uses, never a panic.
+//! `tauri.windows.conf.json` carries the same "main" entry as `tauri.conf.json`,
+//! plus `"create": false` (`WindowConfig::create`, default `true` — see
+//! `tauri-utils` 2.10.x `config.rs`), so `App::run` parses the window but does
+//! not build it. Platform configs merge as a JSON merge patch
+//! (`json_patch::merge`, RFC 7396): a patch array value replaces the base's
+//! wholesale rather than merging element-by-element, so the Windows file
+//! fully restates the entry instead of overriding one field of it — this
+//! does not touch macOS/Linux, which never read `tauri.windows.conf.json`.
+//! [`open_main_window`] builds "main" itself from inside `setup` (the
+//! officially documented place to do this — `tauri`'s own docs build a
+//! window there) via `WebviewWindowBuilder::from_config`, reading the same
+//! config entry Windows skipped, so the two files describe one window
+//! instead of needing to be hand-kept in sync. A `tauri::Result` is ours to
+//! inspect there instead of `App::run`'s. [`webview_create_decision`] is the
+//! retry/give-up call: a bounded number of attempts for a timing failure
+//! that boot-time contention (antivirus scan, a cold profile, a slow disk)
+//! can clear on its own, then the same message-box-and-exit `tell_and_exit`
+//! the missing-runtime case uses, never a panic.
+//!
+//! ## Does a failed attempt leave "main" registered for the retry?
+//!
+//! No, not in `tauri`/`tauri-runtime-wry` 2.12.1 (the pinned version):
+//! `WindowManager::attach_window` — the call that inserts "main" into the
+//! map `get_webview_window`/`WindowLabelAlreadyExists` both read — only runs
+//! inside the `.map()` on `RuntimeOrDispatch::create_window`'s `Ok` arm
+//! (`tauri::window::mod.rs`). A controller-creation timeout (OUTL-4) makes
+//! `tauri_runtime_wry::create_webview` return `Err` from inside
+//! `create_window`'s free function, before that `Ok` arm, so "main" is never
+//! attached and a retry's `WebviewWindowBuilder::from_config` does not
+//! collide with it. The native platform window `create_window` built first
+//! is a local that goes out of scope on that early return, and dropping it is what
+//! closes the OS window; it never reaches the `Arc` that would keep it
+//! alive. [`clear_leftover_main_window`] exists anyway: relying on that
+//! being true forever is a second opinion about an internal detail one
+//! `tauri`/`wry` bump can change, and checking costs nothing when, as
+//! today, there is nothing to clear.
 
 #![cfg_attr(not(any(windows, test)), allow(dead_code))]
 
@@ -213,15 +239,57 @@ pub(crate) fn webview_create_failed_message(error: &str) -> String {
     )
 }
 
+/// Label both `tauri.conf.json` and `tauri.windows.conf.json` give the one
+/// window this app creates. [`build_main_window`] looks the config entry up
+/// by this label instead of a positional index.
+pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Whatever can report and clear a leftover "main" window/webview from a
+/// previous attempt. The module docs on "does a failed attempt leave 'main'
+/// registered" say no for the failure this module retries on, in the
+/// `tauri`/`wry` version pinned today — this exists to not depend on that
+/// staying true. A trait instead of a bare function so a test can supply a
+/// fake and run without a `tauri::AppHandle`.
+pub(crate) trait LeftoverMainWindow {
+    /// Whether "main" is currently registered.
+    fn is_registered(&self) -> bool;
+    /// Tears "main" down. Only called when [`is_registered`](Self::is_registered) answered `true`.
+    fn destroy(&self);
+}
+
+/// Clears whatever `handle` reports as a leftover "main" window, if any.
+/// Called before every attempt in [`open_main_window`], including the
+/// first, where it is always a no-op — the cost is one map lookup.
+pub(crate) fn clear_leftover_main_window(handle: &impl LeftoverMainWindow) {
+    if handle.is_registered() {
+        handle.destroy();
+    }
+}
+
+/// [`LeftoverMainWindow`] over a real app handle.
+#[cfg(windows)]
+impl LeftoverMainWindow for tauri::AppHandle {
+    fn is_registered(&self) -> bool {
+        tauri::Manager::get_webview_window(self, MAIN_WINDOW_LABEL).is_some()
+    }
+
+    fn destroy(&self) {
+        if let Some(window) = tauri::Manager::get_webview_window(self, MAIN_WINDOW_LABEL) {
+            let _ = window.destroy();
+        }
+    }
+}
+
 /// Windows entry from `setup`: create the main window ourselves, retrying a
 /// present-but-not-yet-ready WebView2 runtime instead of letting `App::run`
-/// hit it with no retry (OUTL-4). `tauri.windows.conf.json` empties
-/// `app.windows` so `App::run` does not also try to create "main".
+/// hit it with no retry (OUTL-4). `tauri.windows.conf.json` sets "main"'s
+/// `create: false` so `App::run` does not also try to create it.
 #[cfg(windows)]
 pub(crate) fn open_main_window(app: &tauri::AppHandle) {
     let mut attempt: u32 = 0;
     loop {
         attempt += 1;
+        clear_leftover_main_window(app);
         match build_main_window(app) {
             Ok(_) => return,
             Err(err) => match webview_create_decision(attempt, &err.to_string()) {
@@ -238,19 +306,32 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Mirrors the single window `tauri.conf.json`'s `app.windows` declares.
-/// Windows reads `tauri.windows.conf.json` instead (array replacement, not
-/// merge — see that file), so this is the only place these properties live
-/// for this platform; keep the two in sync by hand.
+/// Builds "main" from the config entry Windows parses but does not
+/// auto-create (`tauri.windows.conf.json`'s `create: false`), so this is
+/// the only place "main" is actually built on Windows, and its properties
+/// come from the one config both platforms' files describe — nothing here
+/// hardcodes title/size that could drift from `tauri.conf.json`.
 #[cfg(windows)]
 fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
-        .title("outl")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(800.0, 600.0)
-        .resizable(true)
-        .build()?;
+    let config = main_window_config(app)?;
+    tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
     Ok(())
+}
+
+/// Looks "main" up in `app.config().app.windows` by label. `tauri.conf.json`
+/// and `tauri.windows.conf.json` are pinned to both carry it by
+/// `the_windows_config_matches_the_base_config_entry` below, so this should
+/// never miss outside a config edit that dropped the entry — `WindowNotFound`
+/// is the same error `tauri` itself uses for an unresolvable window label.
+#[cfg(windows)]
+fn main_window_config(app: &tauri::AppHandle) -> tauri::Result<tauri::utils::config::WindowConfig> {
+    tauri::Manager::config(app)
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW_LABEL)
+        .cloned()
+        .ok_or(tauri::Error::WindowNotFound)
 }
 
 #[cfg(test)]
@@ -345,5 +426,90 @@ mod tests {
             webview_create_decision(WEBVIEW_CREATE_MAX_ATTEMPTS, "some other webview2 failure"),
             WebviewCreateStep::GiveUp { .. }
         ));
+    }
+
+    struct FakeMainWindow {
+        registered: std::cell::Cell<bool>,
+        destroy_calls: std::cell::Cell<u32>,
+    }
+
+    impl LeftoverMainWindow for FakeMainWindow {
+        fn is_registered(&self) -> bool {
+            self.registered.get()
+        }
+
+        fn destroy(&self) {
+            self.destroy_calls.set(self.destroy_calls.get() + 1);
+            self.registered.set(false);
+        }
+    }
+
+    #[test]
+    fn a_leftover_main_window_gets_destroyed() {
+        let fake = FakeMainWindow {
+            registered: std::cell::Cell::new(true),
+            destroy_calls: std::cell::Cell::new(0),
+        };
+        clear_leftover_main_window(&fake);
+        assert_eq!(fake.destroy_calls.get(), 1);
+        assert!(!fake.is_registered());
+    }
+
+    /// The common case, every first attempt: nothing to clear, so this must
+    /// not call `destroy` and must not need a live `tauri::AppHandle` to say so.
+    #[test]
+    fn no_leftover_main_window_is_left_alone() {
+        let fake = FakeMainWindow {
+            registered: std::cell::Cell::new(false),
+            destroy_calls: std::cell::Cell::new(0),
+        };
+        clear_leftover_main_window(&fake);
+        assert_eq!(fake.destroy_calls.get(), 0);
+    }
+
+    const BASE_CONFIG: &str = include_str!("../tauri.conf.json");
+    const WINDOWS_CONFIG: &str = include_str!("../tauri.windows.conf.json");
+
+    /// Platform configs merge as a JSON merge patch (RFC 7396): a patch's
+    /// array value replaces the base's wholesale, so
+    /// `tauri.windows.conf.json`'s "main" entry is not a diff against
+    /// `tauri.conf.json`'s, it is a full restatement of it. This pins the
+    /// two to actually agree — the thing `build_main_window` depends on,
+    /// since it builds from whichever config entry Windows parsed, not
+    /// from hardcoded properties kept in sync by hand.
+    #[test]
+    fn the_windows_config_matches_the_base_config_entry_except_create() {
+        let base: serde_json::Value =
+            serde_json::from_str(BASE_CONFIG).expect("tauri.conf.json must parse");
+        let windows: serde_json::Value =
+            serde_json::from_str(WINDOWS_CONFIG).expect("tauri.windows.conf.json must parse");
+
+        let base_main = base["app"]["windows"]
+            .as_array()
+            .and_then(|windows| windows.iter().find(|w| w["label"] == MAIN_WINDOW_LABEL))
+            .expect("tauri.conf.json must declare a \"main\" window");
+
+        let windows_main = windows["app"]["windows"]
+            .as_array()
+            .and_then(|windows| windows.iter().find(|w| w["label"] == MAIN_WINDOW_LABEL))
+            .expect("tauri.windows.conf.json must declare a \"main\" window");
+
+        assert_eq!(
+            windows_main.get("create"),
+            Some(&serde_json::Value::Bool(false)),
+            "tauri.windows.conf.json's \"main\" must set create: false, \
+             so App::run parses it without also building it"
+        );
+
+        let mut windows_main_without_create = windows_main.clone();
+        windows_main_without_create
+            .as_object_mut()
+            .expect("a window config entry must be a JSON object")
+            .remove("create");
+
+        assert_eq!(
+            &windows_main_without_create, base_main,
+            "tauri.windows.conf.json's \"main\" must match tauri.conf.json's, aside from create"
+        );
     }
 }
