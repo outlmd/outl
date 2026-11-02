@@ -45,7 +45,7 @@
 //! opens a peer's `ops-*.jsonl` read-only to replay it, so the first
 //! cut's path-only filter saw that open/close as a peer write, re-ran
 //! `peer-ops-changed`, and the frontend reloaded and re-read the file
-//! forever — the same symptom as the `.md` loop above, triggered by
+//! forever: the same symptom as the `.md` loop above, triggered by
 //! reading instead of writing. `event_kind_is_interesting` drops every
 //! `Access` kind except `Close(Write)` (`CLOSE_WRITE`, which only
 //! fires when the file was actually modified before closing), so a
