@@ -36,6 +36,20 @@
 //! Inside `ops/` we still ignore our own `ops-<own_actor>.jsonl`
 //! (a `Workspace::apply` write that we already know about) and
 //! lock / temp files that flap during write windows.
+//!
+//! ## A second feedback loop: read-only access events (Linux, #474)
+//!
+//! `notify`'s inotify backend also reports pure reads: opening a file
+//! surfaces `Access(Open(..))`, and closing one without having
+//! written to it surfaces `Access(Close(Read))`. `reload_workspace`
+//! opens a peer's `ops-*.jsonl` read-only to replay it, so the first
+//! cut's path-only filter saw that open/close as a peer write, re-ran
+//! `peer-ops-changed`, and the frontend reloaded and re-read the file
+//! forever: the same symptom as the `.md` loop above, triggered by
+//! reading instead of writing. `event_kind_is_interesting` drops every
+//! `Access` kind except `Close(Write)` (`CLOSE_WRITE`, which only
+//! fires when the file was actually modified before closing), so a
+//! real completed write still emits while a replay's read never does.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -104,10 +118,28 @@ fn events_should_emit(
     own_ops_file: &str,
 ) -> bool {
     events.iter().any(|ev| {
-        ev.paths
-            .iter()
-            .any(|p| path_is_interesting(p, own_ops_file))
+        event_kind_is_interesting(&ev.kind)
+            && ev
+                .paths
+                .iter()
+                .any(|p| path_is_interesting(p, own_ops_file))
     })
+}
+
+/// `true` unless `kind` is a pure read. `notify`'s inotify backend
+/// reports opening and closing a file even when nobody wrote to it
+/// (see the module doc's "read-only access events" section), and
+/// `reload_workspace` does exactly that when it replays a peer's
+/// ops file. `Access(Close(Write))` is the one access kind that
+/// signals an actual write happened before the close, so it stays
+/// interesting; every other `Access` kind is a read artefact.
+fn event_kind_is_interesting(kind: &notify::EventKind) -> bool {
+    use notify::event::{AccessKind, AccessMode};
+    match kind {
+        notify::EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+        notify::EventKind::Access(_) => false,
+        _ => true,
+    }
 }
 
 /// `true` when `path` is a peer's `ops-*.jsonl` write (and not a
@@ -168,7 +200,9 @@ mod tests {
     //! caught by `cargo test` lands long before a user notices a
     //! window stop responding from a feedback loop.
     use super::*;
-    use notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
+    use notify::event::{
+        AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind,
+    };
     use notify::Event;
     use notify_debouncer_full::DebouncedEvent;
     use std::time::Instant;
@@ -319,6 +353,65 @@ mod tests {
     #[test]
     fn empty_batch_does_not_emit() {
         assert!(!events_should_emit(&[], OWN));
+    }
+
+    // ── Linux inotify access events (issue #474) ────────────────────
+
+    #[test]
+    fn peer_access_open_does_not_emit() {
+        // `reload_workspace` opens a peer's ops file read-only to
+        // replay it. On Linux that open() itself is reported by
+        // inotify as Access(Open), which must not read as a peer
+        // write, or every reload re-triggers itself forever.
+        let events = vec![debounced(
+            EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            "/ws/ops/ops-01HPEER000000000000000000.jsonl",
+        )];
+        assert!(!events_should_emit(&events, OWN));
+    }
+
+    #[test]
+    fn peer_access_close_read_does_not_emit() {
+        // CLOSE_NOWRITE: the file was closed without being modified,
+        // i.e. a pure read. Same loop as the open() case above.
+        let events = vec![debounced(
+            EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            "/ws/ops/ops-01HPEER000000000000000000.jsonl",
+        )];
+        assert!(!events_should_emit(&events, OWN));
+    }
+
+    #[test]
+    fn peer_access_close_write_still_emits() {
+        // CLOSE_WRITE: the file was modified before being closed, a
+        // real completed write from the peer or sync layer, not our
+        // own reload reading it back.
+        let events = vec![debounced(
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            "/ws/ops/ops-01HPEER000000000000000000.jsonl",
+        )];
+        assert!(events_should_emit(&events, OWN));
+    }
+
+    #[test]
+    fn batch_with_a_peer_modify_data_emits() {
+        let events = vec![debounced(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            "/ws/ops/ops-01HPEER000000000000000000.jsonl",
+        )];
+        assert!(events_should_emit(&events, OWN));
+    }
+
+    #[test]
+    fn own_ops_file_access_open_does_not_emit() {
+        // Belt and suspenders: our own file is already filtered by
+        // path, but it must stay filtered once access events are
+        // read-interesting for peer files too.
+        let events = vec![debounced(
+            EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            format!("/ws/ops/{OWN}"),
+        )];
+        assert!(!events_should_emit(&events, OWN));
     }
 
     // ── watched_root_label ──────────────────────────────────────────
