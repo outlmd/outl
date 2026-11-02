@@ -388,4 +388,23 @@ mod search_source_tests {
         let second = search_for(&mut app, "findme");
         assert_eq!(first, second, "hit order changed after a rebuild");
     }
+
+    #[test]
+    fn an_open_query_refilters_when_the_index_lands() {
+        // Typed before the background build finished: zero hits. The
+        // swap must re-run the query without the user editing it.
+        let (mut app, dir) = app_with_an_index();
+        app.index = WorkspaceIndex::default();
+        assert!(search_for(&mut app, "findme").is_empty());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(WorkspaceIndex::build(dir.path())).unwrap();
+        app.index_rx = Some(rx);
+        assert!(app.poll_index_updates());
+
+        match &app.overlay {
+            Some(Overlay::Search(s)) => assert_eq!(s.hits.len(), 2),
+            other => panic!("expected the search overlay, got {other:?}"),
+        }
+    }
 }

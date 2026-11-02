@@ -69,6 +69,9 @@ impl App {
             Ok(idx) => {
                 self.index = idx;
                 self.index_rx = None;
+                // A query typed while the build was in flight was
+                // filtered against the old index; re-run it.
+                self.refresh_search();
                 true
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => false,
