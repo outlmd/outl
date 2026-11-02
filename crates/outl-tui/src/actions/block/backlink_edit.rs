@@ -83,9 +83,16 @@ impl App {
         // routes through here, so recording it once covers all of them
         // instead of seven call sites each remembering to
         // ([#431](https://github.com/outlmd/outl/issues/431)).
-        self.snapshot_page_for_undo(source_path.clone(), source_page.clone());
+        // Recorded only if the op changed the page: a boundary no-op
+        // (moving the first sibling up) must not clear redo or bury
+        // the displayed page's history under a foreign entry.
+        let before = source_page.clone();
 
         f(&mut source_page, &mut abs_path);
+
+        if source_page != before {
+            self.snapshot_page_for_undo(source_path.clone(), before);
+        }
 
         // Rewrite focus.sub_path from the post-op absolute path. If
         // the op pushed the focused block out of the backlink's
@@ -282,5 +289,27 @@ mod tests {
         );
         assert_eq!(app.status, "no undo for this page");
         assert!(app.undo.iter().any(|s| s.view_path == source));
+    }
+
+    #[test]
+    fn a_boundary_no_op_leaves_both_history_stacks_unchanged() {
+        // The backlink's block is the source page's first sibling, so
+        // moving it up changes nothing and must record nothing.
+        let (mut app, _d, source) = workspace_with_a_backlink();
+        app.redo.push(crate::state::HistorySnapshot {
+            page: Default::default(),
+            selected: 0,
+            cursor_col: 0,
+            view_path: source,
+        });
+        let undo_before: Vec<_> = app.undo.iter().map(|s| s.view_path.clone()).collect();
+        let redo_before: Vec<_> = app.redo.iter().map(|s| s.view_path.clone()).collect();
+
+        app.move_block_up();
+
+        let undo_after: Vec<_> = app.undo.iter().map(|s| s.view_path.clone()).collect();
+        let redo_after: Vec<_> = app.redo.iter().map(|s| s.view_path.clone()).collect();
+        assert_eq!(undo_after, undo_before);
+        assert_eq!(redo_after, redo_before);
     }
 }
