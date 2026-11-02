@@ -225,6 +225,8 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         config_warning,
     );
 
+    crate::actions::yank::release_os_clipboard();
+
     if enhanced_keys {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     }

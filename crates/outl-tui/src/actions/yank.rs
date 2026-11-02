@@ -25,9 +25,22 @@ use crate::state::{App, Mode, View};
 /// takes the selection over. The contents do not outlive the process on a
 /// bare X11 session.
 ///
+/// A `static` is never dropped, so that handover would never run on its
+/// own: `release_os_clipboard` is what triggers it at shutdown.
+///
 /// Reads (`actions/paste.rs`) don't need this: they only ask the current
 /// owner.
 static CLIPBOARD: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+
+/// Drop the process-wide handle so `arboard` offers the last yank to a
+/// running clipboard manager. Call it once the event loop has ended.
+///
+/// Waits at most 100 ms for the manager. A panic or a fatal signal never
+/// reaches this, so the handover is skipped there.
+pub(crate) fn release_os_clipboard() {
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = None;
+}
 
 /// Best-effort copy of `text` to the OS clipboard.
 ///
@@ -36,9 +49,9 @@ static CLIPBOARD: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mute
 /// — the caller still has `last_yanked_ref` + status as the fallback
 /// surface. We never panic over clipboard plumbing.
 fn copy_to_os_clipboard(text: &str) -> bool {
-    let Ok(mut guard) = CLIPBOARD.lock() else {
-        return false;
-    };
+    // A poisoned lock still guards a usable `Option`, and giving up on it
+    // would disable this path for the rest of the session.
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         // Retried on every call while it fails, so a display that shows
         // up later (or a headless run) behaves exactly as before.

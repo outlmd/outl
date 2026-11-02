@@ -77,7 +77,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   On X11 the selection owner serves the clipboard, and the owner was a `Clipboard` built fresh for every yank and dropped right after `set_text` returned `Ok`.
   With a window manager and no clipboard manager the text was gone while the status line still read `yanked N block(s) → clipboard`: `xclip -o -selection clipboard` failed with `target STRING not available`.
   The TUI now keeps one handle for as long as it runs, and drops it after a failed write so the next yank reconnects.
-  The text still ends with the process on such a session, which `docs/tui.md` says; Wayland, macOS and X11 with a clipboard manager keep it after quit.
+  It also drops the handle when the event loop ends, because a `static` is never dropped and `arboard` hands the selection to a clipboard manager only in `Drop`.
+  The text still ends with the process on such a session, which `docs/tui.md` says; with a clipboard manager a normal quit keeps it, and macOS keeps it regardless.
   `yy` fills `CLIPBOARD` only, so a terminal that pastes the `PRIMARY` selection (urxvt on Shift+Insert) still does not see it.
 - **Two things the screenshots for [#417](https://github.com/outlmd/outl/pull/417) found, both in paint rather than in logic.**
   The desktop's `+ prop` affordance is a bare `+` where it floats over a block's first line.
