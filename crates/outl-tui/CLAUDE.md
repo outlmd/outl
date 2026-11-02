@@ -152,6 +152,12 @@ TUI-specific contracts worth remembering:
   Cursor at the start empties the head and pushes the whole line down into the sibling — "open an empty block above".
   The Insert-mode commit path also drains `pending_reload` (peer-ops poller held it back during the edit).
 - **`Backspace` on an empty block deletes the block** and moves selection to the previous one — the only structural mutation that can happen from Insert.
+- **A `Char` arm that writes text asks `input::is_typed_text(key.modifiers)` first.**
+  crossterm reports `Ctrl+W` as `Char('w')` plus `CONTROL`, so an arm matching `Char(ch)` and inserting it turns the whole readline set (`Ctrl+A/E/W/U/K/B/F`) into literal letters in the block ([#429](https://github.com/outlmd/outl/issues/429)).
+  Six arms write text and all six ask: the Insert text arm plus the five overlay query handlers in `input/overlay.rs`.
+  The predicate is an **allowlist** (`SHIFT` only), so a modifier this crate has not seen yet reads as a chord rather than as text: guessing wrong that way drops a keystroke the user can see, guessing wrong the other way edits their notes.
+  It is deliberately placed *below* the modifier-specific arms (`Ctrl+T`, `Ctrl+Enter`), which still match first.
+  A rejected chord currently falls through to `_ => {}` and says nothing, which is [#436](https://github.com/outlmd/outl/issues/436), not this.
 - **Autocomplete triggers** are pure trigger-detection inside the buffer (`[[`, `#`, `((`, `/`); they own the keystream while their popup is open.
   See `actions/autocomplete.rs` for the trigger detector contract.
 - **Drag-and-drop file upload (`actions/paste.rs`).**

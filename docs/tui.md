@@ -178,6 +178,7 @@ Esc commits (writes back to the `.md`), Enter commits + creates a new block.
 | `Shift+Enter` | Soft newline — only on terminals that speak the kitty keyboard protocol |
 | `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (stays in Insert, caret follows the text; `Ctrl+T` works on terminals that collapse `Ctrl+Enter`) |
 | `Tab` / `Shift-Tab` | Indent / outdent (stays in Insert) |
+| other `Ctrl`/`Alt` chords | Ignored, never typed as text. `Ctrl+A/E/W/U/K/B/F` used to insert their bare letter into the block ([#429](https://github.com/outlmd/outl/issues/429)); readline editing inside a block is not implemented, so they do nothing today |
 | `Backspace` on empty | Delete block, move to previous |
 | `Left` at column 0 | Spill into the previous block (cursor at end) |
 | `Right` at end of block | Spill into the next block (cursor at start) |

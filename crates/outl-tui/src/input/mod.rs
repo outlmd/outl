@@ -37,6 +37,7 @@
 //! submodule can `use super::*`.
 
 use crate::state::{App, EditTarget, Focus, Mode};
+use crossterm::event::KeyModifiers;
 
 mod chord_adapter;
 mod insert;
@@ -101,6 +102,21 @@ pub(super) fn cross_block_step(app: &mut App, delta: i32) {
     app.enter_insert(crate::actions::block::InsertCursor::AtCursor);
 }
 
+/// Is a `KeyCode::Char` carrying these modifiers a character the user
+/// meant to type, rather than a chord this client does not handle?
+///
+/// Every `Char` arm that writes into text has to ask. crossterm
+/// reports `Ctrl+W` as `Char('w')` plus [`KeyModifiers::CONTROL`], so
+/// an arm that matches `Char(ch)` and inserts it turns the whole
+/// readline set into literal letters.
+pub(super) fn is_typed_text(mods: KeyModifiers) -> bool {
+    // An allowlist, so a modifier this crate has not seen yet is read
+    // as a chord rather than as text. Getting that default wrong writes
+    // into the user's block; getting it wrong the other way drops a
+    // keystroke, which they can see.
+    mods.difference(KeyModifiers::SHIFT).is_empty()
+}
+
 /// Is `cursor` (char index) sitting inside an *open* fenced code block?
 ///
 /// "Open" here is from the *Enter-key perspective*: would pressing
@@ -127,7 +143,42 @@ pub(super) fn cursor_inside_open_fence(text: &str, cursor: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::cursor_inside_open_fence;
+    use super::{cursor_inside_open_fence, is_typed_text};
+    use crossterm::event::KeyModifiers;
+
+    #[test]
+    fn plain_typing_is_text() {
+        assert!(is_typed_text(KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn shift_is_text_so_capitals_still_type() {
+        assert!(is_typed_text(KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn a_control_chord_is_not_text() {
+        // `Ctrl+W` arrives as `Char('w')` + CONTROL. Treating it as
+        // text is issue #429: the readline set lands in the block.
+        assert!(!is_typed_text(KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn an_alt_chord_is_not_text() {
+        // Alt is Meta in a terminal, and this crate already binds
+        // `Alt+Enter` and `Alt+Up`/`Alt+Down`.
+        assert!(!is_typed_text(KeyModifiers::ALT));
+    }
+
+    #[test]
+    fn a_super_chord_is_not_text() {
+        assert!(!is_typed_text(KeyModifiers::SUPER));
+    }
+
+    #[test]
+    fn control_plus_shift_is_not_text() {
+        assert!(!is_typed_text(KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+    }
 
     #[test]
     fn empty_buffer_is_not_inside_fence() {

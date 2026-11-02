@@ -13,7 +13,7 @@ use crate::state::{App, Mode};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{cross_block_nav_eligible, cross_block_step, cursor_inside_open_fence};
+use super::{cross_block_nav_eligible, cross_block_step, cursor_inside_open_fence, is_typed_text};
 
 pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
     // Autocomplete intercepts navigation/Enter/Esc.
@@ -218,7 +218,7 @@ pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 buffer.move_end();
             }
         }
-        KeyCode::Char(ch) => {
+        KeyCode::Char(ch) if is_typed_text(key.modifiers) => {
             if let Mode::Insert { buffer, .. } = &mut app.mode {
                 match ch {
                     '(' => buffer.insert_pair('(', ')'),
@@ -234,4 +234,102 @@ pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
     // token. Cheap because page count is small.
     app.maybe_update_autocomplete();
     Ok(())
+}
+
+#[cfg(test)]
+mod modifier_guard_tests {
+    //! A `Ctrl`-chord must not be typed into the block being edited.
+    //!
+    //! `Ctrl+W` arrives as `Char('w')` plus CONTROL (issue #429), and
+    //! this is the most-typed-in surface in the client, so an
+    //! unguarded arm corrupts the user's text on the muscle memory
+    //! every terminal user has.
+
+    use super::handle_insert_key;
+    use crate::actions::block::InsertCursor;
+    use crate::state::{App, Mode};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use outl_core::{ActorId, Workspace};
+    use tempfile::TempDir;
+
+    fn app_editing_a_block() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let mut app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        app.page.blocks.clear();
+        app.page.blocks.push(outl_md::parse::OutlineNode {
+            text: "ship it".to_string(),
+            children: vec![],
+            properties: vec![],
+        });
+        app.flat_len = 1;
+        app.selected = 0;
+        // Park the caret past the last character so a typed char
+        // appends, which keeps the assertions below readable.
+        app.cursor_col = "ship it".chars().count();
+        app.enter_insert(InsertCursor::AtCursor);
+        (app, dir)
+    }
+
+    fn buffer_text(app: &App) -> String {
+        match &app.mode {
+            Mode::Insert { buffer, .. } => buffer.as_string(),
+            other => panic!("expected Insert mode, got {other:?}"),
+        }
+    }
+
+    fn chord(app: &mut App, c: char, mods: KeyModifiers) {
+        handle_insert_key(app, KeyEvent::new(KeyCode::Char(c), mods)).unwrap();
+    }
+
+    #[test]
+    fn ctrl_w_does_not_land_in_the_block() {
+        let (mut app, _d) = app_editing_a_block();
+        chord(&mut app, 'w', KeyModifiers::CONTROL);
+        assert_eq!(
+            buffer_text(&app),
+            "ship it",
+            "Ctrl+W wrote into the block instead of being read as a chord"
+        );
+    }
+
+    #[test]
+    fn the_whole_readline_set_stays_out_of_the_block() {
+        let (mut app, _d) = app_editing_a_block();
+        for c in ['a', 'e', 'w', 'u', 'k', 'b', 'f'] {
+            chord(&mut app, c, KeyModifiers::CONTROL);
+        }
+        assert_eq!(buffer_text(&app), "ship it");
+    }
+
+    #[test]
+    fn ordinary_typing_still_reaches_the_block() {
+        let (mut app, _d) = app_editing_a_block();
+        chord(&mut app, '!', KeyModifiers::NONE);
+        chord(&mut app, 'A', KeyModifiers::SHIFT);
+        assert_eq!(
+            buffer_text(&app),
+            "ship it!A",
+            "the guard must not swallow ordinary typing"
+        );
+    }
+
+    #[test]
+    fn ctrl_t_still_cycles_todo_because_its_arm_comes_first() {
+        let (mut app, _d) = app_editing_a_block();
+        chord(&mut app, 't', KeyModifiers::CONTROL);
+        assert_eq!(
+            buffer_text(&app),
+            "TODO ship it",
+            "the guard must not shadow the Ctrl+T arm above it"
+        );
+    }
 }
