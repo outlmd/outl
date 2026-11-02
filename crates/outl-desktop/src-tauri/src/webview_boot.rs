@@ -19,6 +19,28 @@
 //!
 //! The decision is therefore unused on those targets outside tests.
 //! It stays in this crate so the tests do not need a Windows machine.
+//!
+//! ## A present runtime whose webview still fails to create (OUTL-4)
+//!
+//! A present WebView2 runtime can still fail to hand Tauri a controller:
+//! `WebView2Error(Windows): Any webview2_com::Error (WebView2 COM call
+//! failure)` (wry's own error catalog) covers this, and the observed crash
+//! carried `WindowsError(... ERROR_TIMEOUT ...)` — the environment/controller
+//! creation timed out, not a missing install. `tauri.conf.json`'s `app.windows`
+//! array is normally created automatically inside `App::run`, which is the
+//! same place the missing-runtime panic above fires from, and that path has
+//! no retry.
+//!
+//! `tauri.windows.conf.json` empties `app.windows` on Windows only (platform
+//! configs replace the array wholesale, so this does not touch macOS/Linux),
+//! and [`open_main_window`] creates the window itself from inside `setup`
+//! (the officially documented place to do this — `tauri`'s own docs build a
+//! window there), where a `tauri::Result` is ours to inspect instead of
+//! `App::run`'s. [`webview_create_decision`] is the retry/give-up call: a
+//! bounded number of attempts for a timing failure that boot-time contention
+//! (antivirus scan, a cold profile, a slow disk) can clear on its own, then
+//! the same message-box-and-exit `tell_and_exit` the missing-runtime case
+//! uses, never a panic.
 
 #![cfg_attr(not(any(windows, test)), allow(dead_code))]
 
@@ -135,6 +157,102 @@ unsafe extern "system" {
     ) -> i32;
 }
 
+/// Process status for a webview that never finished creating.
+#[cfg(windows)]
+pub(crate) const WEBVIEW_CREATE_FAILED_EXIT_CODE: i32 = 1;
+
+/// Bounded attempts at creating the main webview before giving up. A COM
+/// timeout during `CoreWebView2Environment`/`Controller` creation is the
+/// observed failure (OUTL-4) and boot-time contention — antivirus scan, a
+/// cold user profile, a slow disk — is the kind of thing a short wait clears.
+/// Retrying forever would hang the launch instead of crashing it, which is
+/// not an improvement.
+pub(crate) const WEBVIEW_CREATE_MAX_ATTEMPTS: u32 = 3;
+
+/// Delay between attempts. Long enough to let a timed-out COM call settle,
+/// short enough that three attempts don't read as a hang.
+#[cfg(windows)]
+pub(crate) const WEBVIEW_CREATE_RETRY_DELAY_MS: u64 = 500;
+
+/// What to do with `attempt`'s failed webview creation.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use]
+pub(crate) enum WebviewCreateStep {
+    /// Below the cap: wait and try again.
+    Retry,
+    /// At the cap: show `message` and exit. Do not try again, do not panic.
+    GiveUp { message: String },
+}
+
+/// `attempt` is the attempt number that just failed with `error` (1-based).
+/// Below [`WEBVIEW_CREATE_MAX_ATTEMPTS`] this always retries — the error text
+/// is not consulted to tell a timeout apart from anything else, the same
+/// stance [`webview_boot`] takes on the missing-runtime error: a library
+/// upgrade can reword a message, and a second reading of this result is how
+/// that reading and `App::run`'s drift.
+pub(crate) fn webview_create_decision(attempt: u32, error: &str) -> WebviewCreateStep {
+    if attempt < WEBVIEW_CREATE_MAX_ATTEMPTS {
+        WebviewCreateStep::Retry
+    } else {
+        WebviewCreateStep::GiveUp {
+            message: webview_create_failed_message(error),
+        }
+    }
+}
+
+pub(crate) fn webview_create_failed_message(error: &str) -> String {
+    format!(
+        "outl could not open its window after {WEBVIEW_CREATE_MAX_ATTEMPTS} attempts.\n\
+         \n\
+         Windows reported: {error}\n\
+         \n\
+         Close other apps and try opening outl again. If this keeps happening,\n\
+         reinstalling the Microsoft Edge WebView2 Runtime can help:\n\
+         \n\
+         {EVERGREEN_WEBVIEW2_URL}"
+    )
+}
+
+/// Windows entry from `setup`: create the main window ourselves, retrying a
+/// present-but-not-yet-ready WebView2 runtime instead of letting `App::run`
+/// hit it with no retry (OUTL-4). `tauri.windows.conf.json` empties
+/// `app.windows` so `App::run` does not also try to create "main".
+#[cfg(windows)]
+pub(crate) fn open_main_window(app: &tauri::AppHandle) {
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match build_main_window(app) {
+            Ok(_) => return,
+            Err(err) => match webview_create_decision(attempt, &err.to_string()) {
+                WebviewCreateStep::Retry => {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        WEBVIEW_CREATE_RETRY_DELAY_MS,
+                    ));
+                }
+                WebviewCreateStep::GiveUp { message } => {
+                    tell_and_exit(&message, WEBVIEW_CREATE_FAILED_EXIT_CODE);
+                }
+            },
+        }
+    }
+}
+
+/// Mirrors the single window `tauri.conf.json`'s `app.windows` declares.
+/// Windows reads `tauri.windows.conf.json` instead (array replacement, not
+/// merge — see that file), so this is the only place these properties live
+/// for this platform; keep the two in sync by hand.
+#[cfg(windows)]
+fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("outl")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .build()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +300,50 @@ mod tests {
     fn an_empty_version_string_still_starts_the_app() {
         let decision = webview_boot(Ok(String::new()));
         assert_eq!(decision, WebviewBoot::Continue);
+    }
+
+    #[test]
+    fn a_timed_out_attempt_below_the_cap_retries() {
+        for attempt in 1..WEBVIEW_CREATE_MAX_ATTEMPTS {
+            let decision = webview_create_decision(attempt, "ERROR_TIMEOUT");
+            assert_eq!(
+                decision,
+                WebviewCreateStep::Retry,
+                "attempt {attempt} should still retry"
+            );
+        }
+    }
+
+    #[test]
+    fn hitting_the_cap_gives_up_instead_of_retrying_forever() {
+        let decision = webview_create_decision(
+            WEBVIEW_CREATE_MAX_ATTEMPTS,
+            "WindowsError(Error { code: HRESULT(0x800705B4), message: \
+             \"This operation returned because the timeout period expired.\" })",
+        );
+        match decision {
+            WebviewCreateStep::GiveUp { message } => {
+                assert!(message.contains("outl could not open its window"));
+                assert!(message.contains("HRESULT(0x800705B4)"));
+                assert!(message.contains(EVERGREEN_WEBVIEW2_URL));
+                assert!(!message.contains("panic"));
+            }
+            WebviewCreateStep::Retry => panic!("the attempt cap must stop retrying"),
+        }
+    }
+
+    /// The decision never consults the error text — a non-timeout failure
+    /// gets the exact same bounded retry, matching `webview_boot`'s stance
+    /// that reading the error itself is a second opinion that can drift.
+    #[test]
+    fn a_non_timeout_error_follows_the_same_bounded_retry() {
+        assert_eq!(
+            webview_create_decision(1, "some other webview2 failure"),
+            WebviewCreateStep::Retry
+        );
+        assert!(matches!(
+            webview_create_decision(WEBVIEW_CREATE_MAX_ATTEMPTS, "some other webview2 failure"),
+            WebviewCreateStep::GiveUp { .. }
+        ));
     }
 }

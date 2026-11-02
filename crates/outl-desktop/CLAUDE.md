@@ -433,6 +433,14 @@ macOS and Linux do not call it.
 A failed WebKit probe on macOS is not a missing runtime, and Tauri still creates the webview there.
 The check is before `init` so the reporter is not running on the path that exists to avoid a report.
 
+A *present* runtime can still fail to hand Tauri a controller (OUTL-4).
+A COM timeout (`WindowsError(... ERROR_TIMEOUT ...)`) while `App::run` auto-created the configured window had no retry, panicking with `Failed to setup app: {e}` the same way the missing-runtime case did.
+`tauri.windows.conf.json` empties `app.windows` on Windows only (platform configs replace the array wholesale, so macOS/Linux are untouched).
+`setup` creates the window itself via `webview_boot::open_main_window`.
+It retries a failed `WebviewWindowBuilder::build()` up to `WEBVIEW_CREATE_MAX_ATTEMPTS` times before falling back to the same message-box-and-exit `tell_and_exit` the missing-runtime case uses.
+`webview_create_decision` is the pure retry/give-up call, tested without a Windows machine the same way `webview_boot` is.
+Keep `build_main_window`'s window properties in sync with `tauri.conf.json`'s `app.windows` entry by hand — the Windows override means that entry is no longer what Windows actually uses.
+
 `run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then (after that Windows check) calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
 The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.
 A closed stderr — a desktop launched with no terminal, whose pipe has gone away — must not panic.
