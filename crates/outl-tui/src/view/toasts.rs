@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Border rows a card always spends (top + bottom).
 const CARD_BORDERS: u16 = 2;
@@ -55,14 +55,20 @@ pub(crate) fn render_toasts(f: &mut ratatui::Frame<'_>, full: Rect, app: &App) {
         let text_width = (width as usize)
             .saturating_sub(CARD_BORDERS as usize)
             .saturating_sub(gutter);
-        let rows = wrap_message(&toast.message, text_width, MAX_BODY_LINES);
+        // Cap the row budget by what is left above this card, so a
+        // short pane elides the message instead of dropping the toast.
+        let room = bottom
+            .saturating_sub(full.y)
+            .saturating_sub(2 * CARD_BORDERS) as usize;
+        let budget = MAX_BODY_LINES.min(room);
+        if budget == 0 {
+            break;
+        }
+        let rows = wrap_message(&toast.message, text_width, budget);
         if rows.is_empty() {
             continue;
         }
         let height = CARD_BORDERS + rows.len() as u16;
-        if bottom < full.y + CARD_BORDERS + height {
-            break;
-        }
 
         let area = Rect {
             x: right_x,
@@ -132,28 +138,38 @@ fn wrap_message(msg: &str, width: usize, max_lines: usize) -> Vec<String> {
     let mut rows: Vec<String> = Vec::new();
     let mut current = String::new();
 
+    // Every budget here is in terminal cells, not chars: a CJK path
+    // is half as many chars as cells and would otherwise be clipped
+    // by `Paragraph` with no ellipsis.
     for word in msg.split_whitespace() {
-        if word.chars().count() > width {
+        let word_w = word.width();
+        if word_w > width {
             // A token wider than the card: break it hard rather than
             // overflow the border. Error messages here are mostly
             // paths, which have no spaces to break on.
             if !current.is_empty() {
                 rows.push(std::mem::take(&mut current));
             }
-            let mut chars = word.chars().peekable();
-            while chars.peek().is_some() {
-                let chunk: String = chars.by_ref().take(width).collect();
-                rows.push(chunk);
+            let mut chunk = String::new();
+            let mut chunk_w = 0;
+            for ch in word.chars() {
+                let w = ch.width().unwrap_or(0);
+                if chunk_w + w > width && !chunk.is_empty() {
+                    rows.push(std::mem::take(&mut chunk));
+                    chunk_w = 0;
+                }
+                chunk.push(ch);
+                chunk_w += w;
             }
             // Keep the trailing chunk open so the next word can share
             // its row.
-            current = rows.pop().unwrap_or_default();
+            current = chunk;
             continue;
         }
         let needed = if current.is_empty() {
-            word.chars().count()
+            word_w
         } else {
-            current.chars().count() + 1 + word.chars().count()
+            current.width() + 1 + word_w
         };
         if needed > width {
             rows.push(std::mem::take(&mut current));
@@ -172,7 +188,17 @@ fn wrap_message(msg: &str, width: usize, max_lines: usize) -> Vec<String> {
     if rows.len() > max_lines {
         rows.truncate(max_lines);
         if let Some(last) = rows.last_mut() {
-            let mut elided: String = last.chars().take(width.saturating_sub(1)).collect();
+            let budget = width.saturating_sub(1);
+            let mut elided = String::new();
+            let mut used = 0;
+            for ch in last.chars() {
+                let w = ch.width().unwrap_or(0);
+                if used + w > budget {
+                    break;
+                }
+                elided.push(ch);
+                used += w;
+            }
             elided.push('\u{2026}');
             *last = elided;
         }
@@ -213,6 +239,10 @@ mod tests {
     /// `render_toasts` calls it, so this is what actually pins the fix:
     /// drop the call and the cause stops reaching the screen.
     fn painted_with_toast(message: &str) -> String {
+        painted_with_toast_on(message, 90, 30)
+    }
+
+    fn painted_with_toast_on(message: &str, w: u16, h: u16) -> String {
         let dir = TempDir::new().unwrap();
         let actor = ActorId::new();
         let ws = Workspace::open_in_memory(actor).unwrap();
@@ -225,7 +255,7 @@ mod tests {
         )
         .unwrap();
         app.toast(ToastKind::Error, message);
-        let mut terminal = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
             .draw(|f| crate::view::render_app(f, &mut app))
             .unwrap();
@@ -252,6 +282,36 @@ mod tests {
         assert!(
             screen.contains("device is full"),
             "the tail of the error never reached the screen: {screen}"
+        );
+    }
+
+    #[test]
+    fn a_short_terminal_elides_the_error_instead_of_dropping_the_toast() {
+        let screen = painted_with_toast_on(
+            "reconcile failed: cannot write /Users/a/outl/pages/deeply-nested-page.md because the device is full",
+            90,
+            10,
+        );
+        assert!(
+            screen.contains("reconcile failed"),
+            "toast vanished: {screen}"
+        );
+        assert!(screen.contains('\u{2026}'), "the cut must say so: {screen}");
+    }
+
+    #[test]
+    fn wide_characters_are_measured_in_cells() {
+        use unicode_width::UnicodeWidthStr;
+        let path = format!("/tmp/{}.md", "界".repeat(30));
+        let rows = wrap_message(&path, 45, 4);
+        for r in &rows {
+            assert!(r.width() <= 45, "row over width: {r:?}");
+        }
+        assert!(rows.concat().ends_with(".md"), "tail lost: {rows:?}");
+        let cut = wrap_message(&path, 45, 1);
+        assert!(
+            cut[0].width() <= 45 && cut[0].ends_with('\u{2026}'),
+            "{cut:?}"
         );
     }
 
