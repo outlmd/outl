@@ -24,10 +24,16 @@ Task checkboxes (`☐`/`◐`/`☑`), calendar day dots, and scrollbar symbols st
 Every yank (`yy` / `Y` in Normal, `y` in Visual) writes clean canonical outl markdown to the OS clipboard.
 Two paths are tried in order:
 
-1. **`arboard`** — direct X11 / Wayland / macOS clipboard API.
+1. **`arboard`** — direct X11 / macOS clipboard API, through XWayland on a Wayland session.
 2. **OSC 52** — a terminal escape sequence (`\x1b]52;c;<base64>\x07`) that reaches the clipboard over SSH, inside tmux, and in Chrome OS Crostini where `arboard` has no display server.
 
 The status line reads `yanked N block(s) → clipboard` on success and `yanked N block(s) (clipboard unavailable)` when both paths fail.
+
+On X11 the TUI itself serves the clipboard, so on a bare session (no desktop environment, no clipboard manager) a yank can be pasted elsewhere only while the TUI is running; quitting drops it.
+With a clipboard manager, a normal quit hands the last yank over.
+A crash, a kill or a closed terminal window skips that handover, so the text then survives only if the manager had already copied it.
+A Wayland session reaches the clipboard through XWayland and behaves the same.
+macOS keeps the text after quit.
 
 Pasting the yanked markdown in another app reconstructs the same bullet structure.
 Pasting back into outl uses `p` (with formatting) or `P` (without formatting) — see [Paste from clipboard](#paste-from-clipboard) below.

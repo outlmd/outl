@@ -58,8 +58,14 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   Status flips to `yanked … (clipboard unavailable)` on headless / no-display environments — the in-app yank register still works.
 - **`yy` / `Y` / Visual `y` write to the OS clipboard.**
   Every yank writes clean canonical outl markdown to the OS clipboard via two paths in `actions/yank.rs`:
-  1. `arboard` — direct X11 / Wayland / macOS clipboard API (requires a display server).
+  1. `arboard` — direct X11 / macOS clipboard API (requires a display server).
+     Built without its `wayland-data-control` feature, so a Wayland session goes through XWayland.
   2. OSC 52 escape sequence (`\x1b]52;c;<base64>\x07`) — works over SSH, inside tmux, and in Chrome OS Crostini where `arboard` has no display server to talk to.
+  The `arboard` handle is one process-wide `static` (`CLIPBOARD` in `actions/yank.rs`), not a `Clipboard` per yank.
+  On X11 the handle *is* the selection owner, so dropping it right after `set_text` lost the text on sessions without a clipboard manager.
+  A failed `set_text` drops the cached handle so the next yank reconnects (dead display connection).
+  `run_with_theme_override` calls `release_os_clipboard` when the event loop ends, because a `static` is never dropped and `arboard` hands the selection to a clipboard manager only in `Drop`.
+  A panic or a fatal signal skips it; the panic hook must not take that lock, since the panic may have happened while it was held.
   The status line reads `yanked N block(s) → clipboard` on success and `yanked N block(s) (clipboard unavailable)` when both paths fail.
   The yank register is always populated regardless.
 - **`p` / `P` are OS clipboard paste, not yank-register paste.**
