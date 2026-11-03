@@ -276,6 +276,22 @@ Two screens rendered nothing where they had something to say ([#448](https://git
 
 Both decisions are pure and tested on their own, **plus** a render-path test each, because the pure tests pass whether or not the renderer calls them. [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) owns the general rule for the second one: work landing after the first paint shows its own placeholder in its own section.
 
+## Workspace search reads the index
+
+`refresh_search` (`actions/overlay.rs`) filters `App::index`, which `spawn_index_rebuild` builds once over the whole workspace on a worker thread.
+
+It used to walk `pages/` and `journals/`, read every `.md` and re-parse it **per keystroke**, on the event loop ([#449](https://github.com/outlmd/outl/issues/449)).
+
+Three contracts:
+
+- **`BlockIndex::search_text` is deliberately not the source.** It matches by substring; this box and the `((` autocomplete both fuzzy-match, so reusing it would have traded match quality for the speed. `iter_blocks` is the same data with `crate::fuzzy::fuzzy_score` kept on top.
+- **`iter_blocks` is explicitly unordered**, so the sort settles ties on `md_path` then `block_path`. Without that the hit list reshuffles between index rebuilds; pinned by `the_hit_order_is_stable_across_rebuilds`.
+- **`SearchHit` carries `block_path`, not a flat index**, and `jump_to_search_hit` resolves it with `index_for_path` *after* `load_current`. A flat preorder index cannot come from the block index, and it goes stale when the page changed between the search and the jump.
+
+`the_search_reads_the_index_not_the_filesystem` deletes `pages/` after indexing: a filesystem-backed search returns nothing from there, so the test fails if the source regresses.
+
+**Not a bug, and worth not re-filing**: `max_depth(1)` in `WorkspaceIndex::build` is correct. `slugify` folds `/` away, so `[[os/linux]]` is `pages/os-linux.md` — the namespace is a slug convention and `pages/` is flat. Measured: zero subdirectories under `pages/` on a 2,874-page workspace.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
