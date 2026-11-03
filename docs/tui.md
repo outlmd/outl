@@ -495,6 +495,9 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Undo is per page, and pressing it elsewhere costs nothing**: a snapshot can only be applied to the page it was taken on, so `u` on a different page says `no undo for this page` and leaves the history alone.
   It used to discard the entry it could not apply, so a few presses after navigating away silently emptied the stack ([#430](https://github.com/outlmd/outl/issues/430)).
   Go back to the page and the edits are still there.
+- **Editing through the backlinks panel is undoable on the page it changed**: a delete, indent, move or TODO flip applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
+  Press `u` on the referencing page and nothing happens (`no undo for this page`); open the source page and `u` takes it back.
+  These ops used to leave no undo entry at all ([#431](https://github.com/outlmd/outl/issues/431)).
 - **Search is index-backed**: `/search` filters the in-memory block index a background worker builds, so typing does not re-read the workspace.
   It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
   On a cold start there is a short window while that index builds; the header shows a spinner during it.
