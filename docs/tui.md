@@ -495,6 +495,8 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Undo is per page, and pressing it elsewhere costs nothing**: a snapshot can only be applied to the page it was taken on, so `u` on a different page says `no undo for this page` and leaves the history alone.
   It used to discard the entry it could not apply, so a few presses after navigating away silently emptied the stack ([#430](https://github.com/outlmd/outl/issues/430)).
   Go back to the page and the edits are still there.
+- **Toasts show the whole error**: a toast card grows to up to four rows to fit its message, and adds `…` when even that is not enough.
+  They used to be one row inside a 50-column card, so a long `reconcile failed: …` lost the path at the border with nothing to indicate it had been cut ([#435](https://github.com/outlmd/outl/issues/435)).
 - **Editing through the backlinks panel is undoable on the page it changed**: a delete, indent, move or TODO flip applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
   Press `u` on the referencing page and nothing happens (`no undo for this page`); open the source page and `u` takes it back.
   These ops used to leave no undo entry at all ([#431](https://github.com/outlmd/outl/issues/431)).
