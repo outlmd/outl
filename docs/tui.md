@@ -498,7 +498,12 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
 - **Editing through the backlinks panel is undoable on the page it changed**: a delete, indent, move or TODO flip applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
   Press `u` on the referencing page and nothing happens (`no undo for this page`); open the source page and `u` takes it back.
   These ops used to leave no undo entry at all ([#431](https://github.com/outlmd/outl/issues/431)).
+- **Search is index-backed**: `/search` filters the in-memory block index a background worker builds, so typing does not re-read the workspace.
+  It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
+  On a cold start there is a short window while that index builds; the header shows a spinner during it.
 - **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
+- **A brand-new page tells you where to start**: a page whose only block is empty shows `press i to write · ? for keys` under the bullet, and the line goes away as soon as there is anything on the page or you start typing ([#448](https://github.com/outlmd/outl/issues/448)).
+- **The backlinks section says when it is still indexing**: on a cold start the panel reads `Backlinks · indexing…` instead of rendering nothing, so a page that is still loading is distinguishable from one with no backlinks.
 - **Slugified filenames**: `[[Avelino]]` lives in `pages/avelino.md` with `title:: Avelino` set automatically on first open.
 
 ## Code-block execution

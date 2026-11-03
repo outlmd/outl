@@ -1,5 +1,16 @@
 {
   "app": {
-    "windows": []
+    "windows": [
+      {
+        "title": "outl",
+        "label": "main",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "create": false
+      }
+    ]
   }
 }

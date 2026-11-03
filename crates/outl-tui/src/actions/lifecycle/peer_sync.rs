@@ -314,6 +314,9 @@ impl App {
         // Peer ops landed; the backlink index is stale. Rebuild it
         // off-thread so the reload stays snappy.
         self.spawn_backlink_index_rebuild();
+        // The search index reads the same pages; peer edits leave it
+        // stale until rebuilt.
+        self.spawn_index_rebuild();
         self.load_current_no_autorun();
     }
 

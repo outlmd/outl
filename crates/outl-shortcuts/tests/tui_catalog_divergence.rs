@@ -10,7 +10,7 @@
 //! `match key.code { … }`, and `outl-tui/src/input/chord_adapter.rs`
 //! exists to match *plugin* chords and nothing else. So the two
 //! halves can disagree about what a key does without anything failing
-//! to compile — and they do, on 17 chords, 6 of which mutate the
+//! to compile — and they do, on 22 chords, 6 of which mutate the
 //! user's content, the op log, or end the session.
 //!
 //! Root `CLAUDE.md` invariant 12 says a capability difference with no

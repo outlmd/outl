@@ -14,7 +14,7 @@
 class OutlBeta < Formula
   desc "Local-first outliner with CRDT sync (beta channel — every push to main)"
   homepage "https://outl.app"
-  version "0.13.0-beta.277"
+  version "0.13.0-beta.286"
   license "MIT"
 
   # We ship pre-built binaries and compile nothing here, but a formula
@@ -30,28 +30,28 @@ class OutlBeta < Formula
   # older releases, so one `ventura` tag per arch covers every macOS
   # from 13 upwards — no runner on the newest macOS required.
   bottle do
-    root_url "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.277" # anchor: bottle-root-url
-    sha256 cellar: :any_skip_relocation, arm64_ventura: "8e85aa2a8e828c854dec00ca573dcb5cd0a8f35077713456213b155bc8658412" # anchor: bottle-macos-arm64
-    sha256 cellar: :any_skip_relocation, ventura:       "fc09cb225bf5fbc2f8043cfc43f85261b5cde255e9c02d4da7c944b1076ec9c1" # anchor: bottle-macos-x64
-    sha256 cellar: :any_skip_relocation, arm64_linux:   "744d65bcdbd08e26aa07e92c81912289eb02dbbb70f54b08757db6fd30d6688e" # anchor: bottle-linux-arm64
-    sha256 cellar: :any_skip_relocation, x86_64_linux:  "16595d582ca0a0eeab6f8c783d37a5f4743891dad3be895245544d002374f548" # anchor: bottle-linux-x64
+    root_url "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.286" # anchor: bottle-root-url
+    sha256 cellar: :any_skip_relocation, arm64_ventura: "21c3abb385b903351b120eb64c2482e44d99def418cf95d8a52ee4f6c7cbfd34" # anchor: bottle-macos-arm64
+    sha256 cellar: :any_skip_relocation, ventura:       "03ef8160339a2486a4033136f30b97cd3d932490c7f5911372b0bc21aecc68d8" # anchor: bottle-macos-x64
+    sha256 cellar: :any_skip_relocation, arm64_linux:   "f81d759372dfabef1329062f41ebebd4163a98094ba9ad57839a7532c2c9bc35" # anchor: bottle-linux-arm64
+    sha256 cellar: :any_skip_relocation, x86_64_linux:  "6c84029240b0c1dbc5bae384fa1bfb66dfa16cf165e8c45cf29e92eb07e996a5" # anchor: bottle-linux-x64
   end
 
   on_macos do
     on_arm do
       url "https://github.com/outlmd/outl/releases/download/v#{version}/outl-macos-arm64.tar.gz"
-      sha256 "505d1125e73c2990e1d133624211f33fbb1f8579cdb7915fc38f78aee984b5b7" # anchor: macos-arm64
+      sha256 "19d4c9946b67b0ca24dced57a77fd494acd0fcb63c839fda4997be9b9857d28b" # anchor: macos-arm64
     end
     on_intel do
       url "https://github.com/outlmd/outl/releases/download/v#{version}/outl-macos-x64.tar.gz"
-      sha256 "5d2b7acf5434c9fe1cc8b59f713de00510a52134c256ef0ab7f40dd88bc291da" # anchor: macos-x64
+      sha256 "9a7179eaa7e7faa2e7ff1efd57d1b3c870d3ba6fc7ba4db6a30fc6247d68e22a" # anchor: macos-x64
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/outlmd/outl/releases/download/v#{version}/outl-linux-x64.tar.gz"
-      sha256 "a721a065029b9a44f5037952ba4a98c03cb0844a2dbbfa443857aed44c47120c" # anchor: linux-x64
+      sha256 "9c3165d4bdbfd113f9a799113828406f807cbb645e99b6dcf05a9afe20986a68" # anchor: linux-x64
     end
     # ARM64 Linux is a Tier 1 Homebrew platform since 5.0.0, and the
     # binary is built natively (`blacksmith-8vcpu-ubuntu-2204-arm`), not
@@ -60,7 +60,7 @@ class OutlBeta < Formula
     # here started out.
     on_arm do
       url "https://github.com/outlmd/outl/releases/download/v#{version}/outl-linux-arm64.tar.gz"
-      sha256 "d3a53e233455ee8077abfde8522c582ec968f04787b6429fea2599f7a27f0da7" # anchor: linux-arm64
+      sha256 "a300ddf588f774b82037292996b3e5c0f9b11898a61e469680ccddc835a95637" # anchor: linux-arm64
     end
   end
 

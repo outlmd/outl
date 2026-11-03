@@ -90,6 +90,7 @@ pub mod reminders;
 pub mod resolve;
 pub mod storage_scope;
 pub mod sync;
+pub mod tasks;
 pub mod template;
 mod text;
 pub mod timeline;

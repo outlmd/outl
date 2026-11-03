@@ -16,6 +16,29 @@ use ratatui::text::{Line, Span};
 
 use crate::view::row_chrome::{push_body_indent, push_property_row, FoldMarker};
 
+/// The one-line hint a brand-new page shows under its empty bullet.
+///
+/// `None` once there is anything to read, or while the user is already
+/// typing.
+///
+/// Journal-first means the first screen of the product is today's
+/// journal, and a fresh one is seeded with a single empty bullet
+/// (`actions/lifecycle/loading.rs`). So a new install opened on a box
+/// titled `Outline` containing `- ` and named no key at all
+/// ([#448](https://github.com/outlmd/outl/issues/448)) — while every
+/// overlay in the crate had considered empty copy.
+///
+/// Not a modal or a wizard: the desktop's two-step first run does not
+/// translate to a terminal, where the shell is itself a surface and
+/// `outl init` already prints. One line that names the two keys that
+/// get you unstuck is the terminal-shaped answer.
+fn starter_hint(block_count: usize, first_is_blank: bool, in_insert: bool) -> Option<&'static str> {
+    if block_count != 1 || !first_is_blank || in_insert {
+        return None;
+    }
+    Some("  press i to write · ? for keys")
+}
+
 /// Render the outline into a flat list of `Line`s for ratatui, and
 /// report the visual line index where the *selected* block's bullet
 /// row landed. The caller uses that index to keep the selection
@@ -74,6 +97,17 @@ pub(crate) fn render_outline(
             );
         }
     }
+    // A brand-new page otherwise renders as a lone `- ` that names no
+    // key. Appended after the rows so it sits under the bullet, and
+    // it is not a `block_starts` entry: there is no block to click.
+    if let Some(hint) = starter_hint(
+        p.blocks.len(),
+        p.blocks.first().is_some_and(|b| b.text.trim().is_empty()),
+        matches!(app.mode, Mode::Insert { .. }),
+    ) {
+        out.push(Line::from(Span::styled(hint, app.theme.hint)));
+    }
+
     (out, selected_line, block_starts)
 }
 
@@ -460,3 +494,105 @@ enum CursorStyle {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod starter_hint_tests {
+    use super::starter_hint;
+    use crate::state::App;
+    use outl_core::{ActorId, Workspace};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use tempfile::TempDir;
+
+    /// The real render path. The pure tests below pass whether or not
+    /// `render_outline` calls `starter_hint`, so this is what pins it.
+    fn painted(blocks: Vec<&str>) -> String {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let mut app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        app.page.blocks = blocks
+            .into_iter()
+            .map(|t| outl_md::parse::OutlineNode {
+                text: t.to_string(),
+                children: vec![],
+                properties: vec![],
+            })
+            .collect();
+        app.flat_len = app.page.blocks.len();
+        app.selected = 0;
+        let mut terminal = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        terminal
+            .draw(|f| crate::view::render_app(f, &mut app))
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn a_fresh_journal_paints_the_hint() {
+        let screen = painted(vec![""]);
+        assert!(
+            screen.contains("press i to write"),
+            "the starting screen named no key: {screen}"
+        );
+    }
+
+    #[test]
+    fn a_page_with_a_block_paints_no_hint() {
+        let screen = painted(vec!["ship it"]);
+        assert!(
+            !screen.contains("press i to write"),
+            "the hint outstayed its welcome: {screen}"
+        );
+    }
+
+    #[test]
+    fn a_fresh_page_names_the_keys_that_unstick_you() {
+        let hint = starter_hint(1, true, false).expect("a fresh page must say something");
+        assert!(
+            hint.contains('i'),
+            "the hint must name the edit key: {hint:?}"
+        );
+        assert!(hint.contains('?'), "the hint must name help: {hint:?}");
+    }
+
+    #[test]
+    fn a_page_with_content_shows_no_hint() {
+        assert_eq!(starter_hint(1, false, false), None);
+        assert_eq!(starter_hint(4, false, false), None);
+    }
+
+    #[test]
+    fn more_than_one_block_shows_no_hint() {
+        // Even if the first is blank: the user has clearly started.
+        assert_eq!(starter_hint(3, true, false), None);
+    }
+
+    #[test]
+    fn typing_dismisses_the_hint() {
+        // They found `i`. Telling them to press it is noise, and the
+        // row would shift under the caret.
+        assert_eq!(starter_hint(1, true, true), None);
+    }
+
+    #[test]
+    fn a_page_with_no_blocks_at_all_shows_no_hint() {
+        // `save()` always re-adds a bullet, so this is a transient
+        // state rather than a screen anyone sees; guarded so the
+        // predicate cannot underflow into it.
+        assert_eq!(starter_hint(0, true, false), None);
+    }
+}

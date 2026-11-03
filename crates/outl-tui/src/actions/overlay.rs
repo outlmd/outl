@@ -11,7 +11,6 @@ use crate::state::{
     TemplatePickerState, View,
 };
 use anyhow::Result;
-use outl_md::parse::OutlineNode;
 use std::path::{Path, PathBuf};
 
 impl App {
@@ -169,6 +168,21 @@ impl App {
         }));
     }
 
+    /// Re-filter the workspace search from the block index.
+    ///
+    /// Reads `App::index`, which a background worker builds over the
+    /// whole workspace (`spawn_index_rebuild`). It used to walk
+    /// `pages/` and `journals/` with `max_depth(1)`, read every `.md`
+    /// and re-parse it, on **every keystroke**
+    /// ([#449](https://github.com/outlmd/outl/issues/449)) — thousands
+    /// of reads and full parses per character on a real graph, on the
+    /// event-loop thread.
+    ///
+    /// `BlockIndex::search_text` is deliberately not used: it matches
+    /// by substring, and both this box and the `((` autocomplete
+    /// fuzzy-match today. Reusing it would have traded the match
+    /// quality for the speed. `iter_blocks` is the same source it
+    /// reads, with `fuzzy_score` kept on top.
     pub(crate) fn refresh_search(&mut self) {
         let Some(Overlay::Search(ref state)) = self.overlay else {
             return;
@@ -180,63 +194,33 @@ impl App {
             }
             return;
         }
-        // Scan all .md files in pages/ and journals/. For each block,
-        // run fuzzy match; keep top 30 hits by score.
-        let mut hits = Vec::new();
-        for dir in ["pages", "journals"] {
-            let base = self.workspace_root.join(dir);
-            if !base.is_dir() {
-                continue;
-            }
-            for entry in walkdir::WalkDir::new(&base).max_depth(1) {
-                let Ok(entry) = entry else {
-                    continue;
-                };
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                if entry.path().extension().and_then(|x| x.to_str()) != Some("md") {
-                    continue;
-                }
-                if entry.file_name().to_string_lossy().starts_with('.') {
-                    continue;
-                }
-                let Ok(text) = std::fs::read_to_string(entry.path()) else {
-                    continue;
-                };
-                let parsed = outl_md::parse::parse(&text);
-                let page_label = parsed
-                    .properties
-                    .iter()
-                    .find(|(k, _)| k == "title")
-                    .map(|(_, v)| v.clone())
-                    .or_else(|| {
-                        entry
-                            .path()
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .map(String::from)
-                    })
-                    .unwrap_or_default();
-                let page_icon = parsed
-                    .properties
-                    .iter()
-                    .find(|(k, _)| k == "icon")
-                    .map(|(_, v)| v.trim().to_string())
-                    .filter(|s| !s.is_empty());
-                let mut block_idx = 0usize;
-                collect_block_hits(
-                    &parsed.blocks,
-                    &mut block_idx,
-                    entry.path(),
-                    &page_label,
-                    page_icon.as_deref(),
-                    &query,
-                    &mut hits,
-                );
-            }
-        }
-        hits.sort_by_key(|b| std::cmp::Reverse(b.score));
+
+        let mut hits: Vec<SearchHit> = self
+            .index
+            .iter_blocks()
+            .filter_map(|b| {
+                let score = crate::fuzzy::fuzzy_score(&query, &b.text)?;
+                let page = self.index.by_slug(&b.source_slug);
+                Some(SearchHit {
+                    page_label: page
+                        .map(|p| p.title.clone())
+                        .unwrap_or_else(|| b.source_slug.clone()),
+                    page_icon: page.and_then(|p| p.icon.clone()),
+                    md_path: b.source_path.clone(),
+                    snippet: truncate_for_snippet(&b.text, 80),
+                    block_path: b.source_block_path.clone(),
+                    score,
+                })
+            })
+            .collect();
+        // Ties broken by path then position so the list is stable
+        // across rebuilds; `iter_blocks` is explicitly unordered.
+        hits.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.md_path.cmp(&b.md_path))
+                .then_with(|| a.block_path.cmp(&b.block_path))
+        });
         hits.truncate(30);
         if let Some(Overlay::Search(ref mut s)) = self.overlay {
             s.hits = hits;
@@ -274,10 +258,15 @@ impl App {
         } else {
             self.view = View::Page(h.md_path.clone());
         }
-        self.selected = h.block_index;
         self.cursor_col = 0;
         self.ensure_view_file_exists()?;
         self.load_current();
+        // Resolved *after* the load: the path is only meaningful
+        // against the page now in memory, and a flat index captured at
+        // search time goes stale when the page changed in between.
+        self.selected = outl_md::outline_ops::index_for_path(&self.page.blocks, &h.block_path)
+            .unwrap_or(0)
+            .min(self.flat_len.saturating_sub(1));
         Ok(())
     }
 
@@ -610,40 +599,6 @@ impl App {
     // when wiring a new trigger.
 }
 
-/// Recursively walk an outline scoring each block's text against `query`.
-pub(crate) fn collect_block_hits(
-    blocks: &[OutlineNode],
-    cursor: &mut usize,
-    md_path: &Path,
-    page_label: &str,
-    page_icon: Option<&str>,
-    query: &str,
-    hits: &mut Vec<SearchHit>,
-) {
-    for b in blocks {
-        if let Some(score) = crate::fuzzy::fuzzy_score(query, &b.text) {
-            hits.push(SearchHit {
-                page_label: page_label.to_string(),
-                page_icon: page_icon.map(String::from),
-                md_path: md_path.to_path_buf(),
-                snippet: truncate_for_snippet(&b.text, 80),
-                block_index: *cursor,
-                score,
-            });
-        }
-        *cursor += 1;
-        collect_block_hits(
-            &b.children,
-            cursor,
-            md_path,
-            page_label,
-            page_icon,
-            query,
-            hits,
-        );
-    }
-}
-
 pub(crate) fn truncate_for_snippet(s: &str, max_chars: usize) -> String {
     let trimmed = s.trim();
     if trimmed.chars().count() <= max_chars {
@@ -669,256 +624,4 @@ pub(crate) fn read_page_title(md: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::state::{App, Overlay, QuickSwitchState, SwitchCandidate, SwitchKind};
-    use outl_core::id::ActorId;
-    use outl_core::workspace::Workspace;
-    use tempfile::TempDir;
-
-    fn page(label: &str) -> SwitchCandidate {
-        SwitchCandidate {
-            label: label.to_string(),
-            key: label.to_string(),
-            kind: SwitchKind::Page,
-            score: 0,
-        }
-    }
-
-    fn test_app() -> (App, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let actor = ActorId::new();
-        let ws = Workspace::open_in_memory(actor).unwrap();
-        let app = App::new_for_tests(
-            dir.path().to_path_buf(),
-            ws,
-            actor,
-            crate::theme::default_theme(),
-            false,
-        )
-        .unwrap();
-        (app, dir)
-    }
-
-    /// Regression: deleting query characters must restore candidates an
-    /// earlier, longer query had filtered out. The bug was that
-    /// `refresh_quick_switch` narrowed `candidates` in place, destroying
-    /// the source set, so backspacing could never bring matches back.
-    #[test]
-    fn quick_switch_widens_when_query_shrinks() {
-        let (mut app, _dir) = test_app();
-        let all = vec![page("foo"), page("food"), page("bar")];
-        app.overlay = Some(Overlay::QuickSwitch(QuickSwitchState {
-            query: String::new(),
-            all_candidates: all.clone(),
-            candidates: all,
-            selected: 0,
-            preview_cache: std::cell::RefCell::new(None),
-        }));
-
-        // Type "food": only the "food" page survives.
-        if let Some(Overlay::QuickSwitch(ref mut qs)) = app.overlay {
-            qs.query = "food".into();
-        }
-        app.refresh_quick_switch();
-        let after_food: Vec<String> = match &app.overlay {
-            Some(Overlay::QuickSwitch(qs)) => {
-                qs.candidates.iter().map(|c| c.label.clone()).collect()
-            }
-            _ => unreachable!(),
-        };
-        assert_eq!(after_food, vec!["food".to_string()]);
-
-        // Backspace down to "foo": both "foo" and "food" must come back.
-        if let Some(Overlay::QuickSwitch(ref mut qs)) = app.overlay {
-            qs.query = "foo".into();
-        }
-        app.refresh_quick_switch();
-        let mut after_foo: Vec<String> = match &app.overlay {
-            Some(Overlay::QuickSwitch(qs)) => {
-                qs.candidates.iter().map(|c| c.label.clone()).collect()
-            }
-            _ => unreachable!(),
-        };
-        after_foo.sort();
-        assert_eq!(
-            after_foo,
-            vec!["foo".to_string(), "food".to_string()],
-            "shrinking the query must restore candidates the longer query dropped"
-        );
-    }
-
-    // `detect_trigger_mention_*` tests live in
-    // `actions::autocomplete::tests` (same module as the function).
-
-    // ---------------------------------------------------------------
-    // Slash palette navigation — cross-category regression
-    // ---------------------------------------------------------------
-
-    /// Helper: open the slash palette, set the query, refresh, and
-    /// return the list of command names in visual (paint) order.
-    fn slash_visual_names(app: &mut App, query: &str) -> Vec<String> {
-        app.open_slash();
-        if !query.is_empty() {
-            if let Some(Overlay::Slash(ref mut s)) = app.overlay {
-                s.query = query.to_string();
-            }
-            app.refresh_slash();
-        }
-        let candidates = match &app.overlay {
-            Some(Overlay::Slash(s)) => s.candidates.clone(),
-            _ => unreachable!(),
-        };
-        let order = crate::view::overlays::visual_order(&candidates);
-        order
-            .into_iter()
-            .map(|i| candidates[i].name.clone())
-            .collect()
-    }
-
-    /// `slash_select_next` must walk items in the same order that the
-    /// renderer paints them (category-first), not in raw `s.candidates`
-    /// order. Repro: query `t` matches commands from at least three
-    /// categories (Actions, Settings, Dates & time); without the fix
-    /// the highlighted row jumped instead of moving to the next
-    /// visible item.
-    #[test]
-    fn slash_nav_follows_visual_order_under_filter() {
-        let (mut app, _dir) = test_app();
-        let visual = slash_visual_names(&mut app, "t");
-        // Must have matched something across categories — sanity check.
-        assert!(
-            visual.len() >= 2,
-            "expected multiple matches for 't', got {visual:?}"
-        );
-
-        // Re-open with the same query, then walk with slash_select_next
-        // and verify each step lands on the next item in visual order.
-        app.open_slash();
-        if let Some(Overlay::Slash(ref mut s)) = app.overlay {
-            s.query = "t".to_string();
-        }
-        app.refresh_slash();
-
-        // The initial selection must be the first item in visual order.
-        let initial_selected = match &app.overlay {
-            Some(Overlay::Slash(s)) => s.selected,
-            _ => unreachable!(),
-        };
-        let candidates = match &app.overlay {
-            Some(Overlay::Slash(s)) => s.candidates.clone(),
-            _ => unreachable!(),
-        };
-        let order = crate::view::overlays::visual_order(&candidates);
-        assert_eq!(
-            initial_selected, order[0],
-            "initial selection must be first in visual order"
-        );
-
-        // Walk forward through the whole list and confirm every step
-        // matches the next position in `visual_order`, never jumping.
-        let mut walked: Vec<String> = vec![candidates[initial_selected].name.clone()];
-        for _ in 1..order.len() {
-            app.slash_select_next();
-            let sel = match &app.overlay {
-                Some(Overlay::Slash(s)) => s.selected,
-                _ => unreachable!(),
-            };
-            let cands = match &app.overlay {
-                Some(Overlay::Slash(s)) => s.candidates.clone(),
-                _ => unreachable!(),
-            };
-            let cur_order = crate::view::overlays::visual_order(&cands);
-            let pos = cur_order
-                .iter()
-                .position(|&i| i == sel)
-                .expect("selected must be in visual_order");
-            assert_eq!(
-                walked.len(),
-                pos,
-                "after {} next-presses, selection should be at visual position {}, got {pos}",
-                walked.len(),
-                walked.len()
-            );
-            walked.push(cands[sel].name.clone());
-        }
-        // Walked names must equal the visual order computed upfront.
-        assert_eq!(walked, visual, "walked sequence must match visual order");
-    }
-
-    /// `slash_select_prev` mirrors `slash_select_next` and must never
-    /// jump past the first item in visual order.
-    #[test]
-    fn slash_nav_prev_clamps_at_first_visual_item() {
-        let (mut app, _dir) = test_app();
-        app.open_slash();
-        // No filter — full list.
-        let first_visual_idx = {
-            let candidates = match &app.overlay {
-                Some(Overlay::Slash(s)) => s.candidates.clone(),
-                _ => unreachable!(),
-            };
-            crate::view::overlays::visual_order(&candidates)[0]
-        };
-        // Start is already at first; pressing prev must stay there.
-        app.slash_select_prev();
-        let sel = match &app.overlay {
-            Some(Overlay::Slash(s)) => s.selected,
-            _ => unreachable!(),
-        };
-        assert_eq!(
-            sel, first_visual_idx,
-            "prev at the first item must not move"
-        );
-    }
-
-    /// Query-empty palette: `open_slash` + `slash_select_next` walking
-    /// the whole list must cover every registered command exactly once,
-    /// in canonical category order (Actions → Navigation → Search →
-    /// Settings → Dates & time).
-    #[test]
-    fn slash_nav_empty_query_covers_all_commands_in_category_order() {
-        let (mut app, _dir) = test_app();
-        app.open_slash();
-        let candidates = match &app.overlay {
-            Some(Overlay::Slash(s)) => s.candidates.clone(),
-            _ => unreachable!(),
-        };
-        let order = crate::view::overlays::visual_order(&candidates);
-        // Walk every item.
-        let mut walked_names: Vec<String> = {
-            let sel = match &app.overlay {
-                Some(Overlay::Slash(s)) => s.selected,
-                _ => unreachable!(),
-            };
-            vec![candidates[sel].name.clone()]
-        };
-        for _ in 1..order.len() {
-            app.slash_select_next();
-            let sel = match &app.overlay {
-                Some(Overlay::Slash(s)) => s.selected,
-                _ => unreachable!(),
-            };
-            walked_names.push(candidates[sel].name.clone());
-        }
-        // Deduplicate to check all commands were visited.
-        let mut sorted_walked = walked_names.clone();
-        sorted_walked.sort();
-        sorted_walked.dedup();
-        let mut sorted_expected: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
-        sorted_expected.sort();
-        assert_eq!(
-            sorted_walked, sorted_expected,
-            "walking the full list must visit every command exactly once"
-        );
-        // Category order must be non-decreasing.
-        let cat_orders: Vec<u8> = walked_names
-            .iter()
-            .map(|n| crate::view::overlays::category_order_for(n))
-            .collect();
-        let is_non_decreasing = cat_orders.windows(2).all(|w| w[0] <= w[1]);
-        assert!(
-            is_non_decreasing,
-            "category order must be non-decreasing while walking; got {cat_orders:?}"
-        );
-    }
-}
+mod tests;

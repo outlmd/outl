@@ -27,6 +27,25 @@ fn same_trail(a: &[BacklinkCrumb], b: &[BacklinkCrumb]) -> bool {
 
 /// Render the inline backlinks section.
 ///
+/// What the backlinks section should say when it has no rows.
+///
+/// `None` means draw nothing at all. `Some(text)` means draw the
+/// section with that line in place of the rows, because the reason
+/// there are none is "not known yet" rather than "there are none".
+///
+/// The two were indistinguishable: the section returned nothing while
+/// the background index was still building, so on a large workspace
+/// "still loading" and "this page has no backlinks" looked identical
+/// for seconds ([#448](https://github.com/outlmd/outl/issues/448)).
+/// `App::has_pending_backlink_index` already answered the question and
+/// no view asked it.
+fn empty_section_notice(shown: bool, has_rows: bool, index_pending: bool) -> Option<&'static str> {
+    if !shown || has_rows || !index_pending {
+        return None;
+    }
+    Some(" Backlinks · indexing…")
+}
+
 /// Returns `(lines, selected_line)`. `selected_line` is the index in
 /// the returned `Vec<Line>` of the bullet row of the focused backlink
 /// block, or `None` when focus is on the outline. `inner_width` is the
@@ -44,7 +63,21 @@ pub(crate) fn render_backlinks_inline(
     }
     let backlinks = app.backlinks_for_current();
     if backlinks.is_empty() {
-        return (Vec::new(), None);
+        // Zero rows has two causes, and they used to render the same.
+        let Some(notice) =
+            empty_section_notice(app.show_backlinks, false, app.has_pending_backlink_index())
+        else {
+            return (Vec::new(), None);
+        };
+        let rule = "─".repeat(inner_width.max(1) as usize);
+        return (
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(rule, app.theme.border)),
+                Line::from(Span::styled(notice, app.theme.dim)),
+            ],
+            None,
+        );
     }
 
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -416,5 +449,38 @@ mod tests {
             rows.concat().contains("lazy dog"),
             "the tail of the value was dropped: {rows:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod empty_section_tests {
+    use super::empty_section_notice;
+
+    #[test]
+    fn a_page_with_backlinks_gets_no_notice() {
+        assert_eq!(empty_section_notice(true, true, false), None);
+        assert_eq!(empty_section_notice(true, true, true), None);
+    }
+
+    #[test]
+    fn a_page_with_none_and_a_settled_index_gets_no_notice() {
+        // Genuinely zero backlinks: the section stays absent, which is
+        // the pre-existing behaviour and the right one.
+        assert_eq!(empty_section_notice(true, false, false), None);
+    }
+
+    #[test]
+    fn a_still_building_index_says_so_instead_of_nothing() {
+        assert!(
+            empty_section_notice(true, false, true).is_some(),
+            "a pending index must be distinguishable from zero backlinks"
+        );
+    }
+
+    #[test]
+    fn the_toggle_wins_over_everything() {
+        // `B` off means the user asked for no section at all.
+        assert_eq!(empty_section_notice(false, false, true), None);
+        assert_eq!(empty_section_notice(false, true, true), None);
     }
 }

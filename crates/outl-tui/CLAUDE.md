@@ -257,6 +257,49 @@ TUI-specific contracts worth remembering:
   The earlier "cursor rows pass width `0`" workaround was the actual #99 regression: the selected block stayed on one overflowing line and only wrapped once the cursor left it (`viewing mode won't wrap until I navigate away`).
   `text_width == 0` is still the "don't wrap" sentinel, but only headless renders pass it now.
 
+## Overlay list scrolling
+
+`view/overlays.rs`'s `scroll_to_keep_visible(selected, visible)` is the one owner of a list popup's vertical offset, and both the template picker and the reminders list call it.
+
+Two bugs it replaced, in one expression:
+
+- **`Paragraph::scroll` takes `(Vertical, Horizontal)`.** Both overlays passed `(0, selected - 5)`, so they scrolled **sideways**: rows slid out of the card while the selected row stayed below the bottom edge ([#445](https://github.com/outlmd/outl/issues/445)). `ratatui-widgets`' own doc flags the order as the exception to the crate's convention, which is how two call sites got it wrong and three others (the slash palette, plugin settings) got it right.
+- **The offset has to come from the viewport height.** `selected > 5` scrolled a 20-row popup that had room to spare, and under-scrolled a 3-row one. The offset is now the smallest that puts `selected` on the last visible row, zero while it already fits.
+
+`u16::try_from(...).unwrap_or(u16::MAX)` rather than `as u16`, so a list longer than 65,535 rows clamps instead of wrapping to the top.
+
+## Empty states
+
+Two screens rendered nothing where they had something to say ([#448](https://github.com/outlmd/outl/issues/448)).
+
+- **`view/outline.rs`'s `starter_hint`** draws one line under the lone bullet of a brand-new page.
+  Journal-first means the product's first screen is today's journal, and a fresh one is seeded with a single empty bullet (`actions/lifecycle/loading.rs`), so a new install opened on a box titled `Outline` holding `- ` and naming no key — while every overlay in this crate already had considered empty copy.
+  It is **one line, not a modal**: the desktop's two-step first run does not translate here, where the shell is itself a surface and `outl init` already prints.
+  Gated on exactly one blank block and suppressed in Insert, so it cannot shift a row under the caret.
+  It is not a `block_starts` entry — there is no block there to click.
+- **`view/backlinks.rs`'s `empty_section_notice`** distinguishes "no backlinks" from "not known yet".
+  The section returned nothing while the background index was still building, so on a large workspace that was indistinguishable from a page with zero backlinks for seconds.
+  `App::has_pending_backlink_index` already answered it and no view asked.
+  The `show_backlinks` toggle wins over both, so `B` off still means no section.
+
+Both decisions are pure and tested on their own, **plus** a render-path test each, because the pure tests pass whether or not the renderer calls them. [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) owns the general rule for the second one: work landing after the first paint shows its own placeholder in its own section.
+
+## Workspace search reads the index
+
+`refresh_search` (`actions/overlay.rs`) filters `App::index`, which `spawn_index_rebuild` builds once over the whole workspace on a worker thread.
+
+It used to walk `pages/` and `journals/`, read every `.md` and re-parse it **per keystroke**, on the event loop ([#449](https://github.com/outlmd/outl/issues/449)).
+
+Three contracts:
+
+- **`BlockIndex::search_text` is deliberately not the source.** It matches by substring; this box and the `((` autocomplete both fuzzy-match, so reusing it would have traded match quality for the speed. `iter_blocks` is the same data with `crate::fuzzy::fuzzy_score` kept on top.
+- **`iter_blocks` is explicitly unordered**, so the sort settles ties on `md_path` then `block_path`. Without that the hit list reshuffles between index rebuilds; pinned by `the_hit_order_is_stable_across_rebuilds`.
+- **`SearchHit` carries `block_path`, not a flat index**, and `jump_to_search_hit` resolves it with `index_for_path` *after* `load_current`. A flat preorder index cannot come from the block index, and it goes stale when the page changed between the search and the jump.
+
+`the_search_reads_the_index_not_the_filesystem` deletes `pages/` after indexing: a filesystem-backed search returns nothing from there, so the test fails if the source regresses.
+
+**Not a bug, and worth not re-filing**: `max_depth(1)` in `WorkspaceIndex::build` is correct. `slugify` folds `/` away, so `[[os/linux]]` is `pages/os-linux.md` — the namespace is a slug convention and `pages/` is flat. Measured: zero subdirectories under `pages/` on a 2,874-page workspace.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
@@ -401,6 +444,18 @@ It does that because this crate mutates an in-memory AST and derives ops from th
 
 **New code here should call `commit_page` rather than extending `save_page_with`.**
 Adding a sixth step to the hand-written sequence deepens the divergence the issue exists to close, and the shared pipeline already has the ordering right.
+
+## Truecolor: absent means ANSI
+
+`runtime::preset::supports_truecolor(colorterm, term)` is pure over the two environment variables, and `fallback_for(truecolor)` picks what an **unconfigured** launch gets: the brand preset when 24-bit is available, `theme::default_dark()` when it is not ([#453](https://github.com/outlmd/outl/issues/453)).
+
+Three contracts:
+
+- **Level 4 only.** `--theme`, the per-workspace `[theme] preset` and the global config are explicit user choices and stay untouched. A user who asked for `dracula` on a 256-colour terminal gets `dracula`; second-guessing an explicit request is the bigger surprise, and `docs/theming.md` owns that precedence.
+- **Absence reads as "no".** A truecolor terminal that sets neither signal gets the ANSI preset, which renders correctly. The reverse default renders wrong, so the asymmetry is deliberate.
+- **This is not the `auto` mode question.** That one is pinned to dark because a terminal has no reliable way to read the OS appearance setting and probing (OSC 11, `COLORFGBG`) is unreliable under tmux. Truecolor has two widely-set signals, which is why it gets detected instead of declared.
+
+`COLORTERM` / `TERM` are read in `fallback_theme()` and nowhere else in the module, so the decision stays testable without touching the process environment.
 
 ## Theme mode: `auto` means dark here
 

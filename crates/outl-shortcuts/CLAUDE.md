@@ -79,7 +79,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > So the catalog and the TUI's arms can disagree without failing to compile.
   > `docs/shortcuts.md` claimed both clients called `lookup` for months.
   >
-  > **They do disagree, on 17 chords, 6 of which mutate content, the op log, or the session.**
+  > **They do disagree, on 22 chords, 6 of which mutate content, the op log, or the session.**
   > `Ctrl+X` is `CutBlock` here and deletes a character there; `Ctrl+Shift+R` is `OpenReminders` here and redoes there; `Ctrl+Z` is `Undo` here and arms the `z` fold chord there, two keystrokes from a silent edit.
   > `tests/tui_catalog_divergence.rs` owns that list.
   > It pins **both** halves — the catalog rows through `lookup`, the TUI's arm patterns by reading `input/normal.rs`.
@@ -87,6 +87,13 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > It is deliberately **not** a fix: which side is right is a product decision, and a pinned divergence is the invariant-12-compliant state until someone makes it.
   > `reminder_chord_tests` keeps its own pins on chords that agree; those also appear in that test's `AGREED` table.
   >
+  >
+  > **And 31 chords go the other way**: bound in `input/normal.rs`, absent from this catalog entirely, so `docs/shortcuts.md`'s generated halves and the desktop help overlay cannot see them.
+  > `h`, `l`, `w`, `b`, `0`, `$`, `G`, `g g`, `y y`, `/`, `n`, `Ctrl+D`, `Ctrl+U`, `Ctrl+B`, `Ctrl+E`, `Ctrl+S`, `Ctrl+L`, `Alt+↑/↓` and the rest.
+  > `Ctrl+B` and `Ctrl+E` are the sharp pair: `docs/shortcuts.md` publishes both as TUI chords today.
+  > `TUI_ONLY` in `tests/tui_only_chords.rs` declares them, and `every_tui_only_chord_is_absent_from_the_catalog` fails when one lands in `defaults.rs` — so the list cannot outlive the gap it records ([#441](https://github.com/outlmd/outl/issues/441)).
+  > It caught a wrong row on its first run: `Home` is in the catalog as `OpenToday` and was already a `KNOWN_DIVERGENCES` entry, even though the TUI shares one arm between `0` and `Home`.
+  > Migrating the 31 into the catalog is [#293](https://github.com/outlmd/outl/issues/293), not this gate: each needs an `Action` variant, and `support()` is exhaustive, so every addition is also three per-client verdicts.
   > The test covers `Normal` / `Global` chords a terminal can deliver (no `META` — crossterm never emits it).
   > For `Insert` / `Visual` / `Overlay`, grep `input/` yourself; the build will not do it for you.
 - ❌ User-level overrides (rebinding `i` to `a`).
