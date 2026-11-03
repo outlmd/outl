@@ -118,7 +118,15 @@ One contract, and it was the alternative:
   `top_applies_here` is the single owner of that question; both callers ask it, and the pop is `expect`-safe behind it.
   The regression net is `undo_on_another_page_keeps_the_snapshot`, `repeated_undo_on_another_page_never_drains_the_stack`, `redo_on_another_page_keeps_the_snapshot`, plus `undo_on_its_own_page_still_consumes_the_snapshot` so the guard cannot pass by blocking everything.
 
-**Not covered here**: a cross-page delete (the backlinks panel) never reaches these stacks at all, which is [#431](https://github.com/outlmd/outl/issues/431), and neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
+- **A cross-page op snapshots the page it changes, not the page on screen.**
+  `snapshot_page_for_undo(path, page)` is the sibling of `snapshot_for_undo`, and `apply_to_backlink_source` calls it once for all seven structural ops reachable from the backlinks panel; `toggle_todo_backlink` calls it on its own path.
+  The snapshot carries the *source* page's path, so `top_applies_here` only lets it be restored once the user opens that page — pressing `u` while still on the referencing page reports `no undo for this page` and keeps it.
+  This is why the guard above had to land first ([#431](https://github.com/outlmd/outl/issues/431) depends on [#430](https://github.com/outlmd/outl/issues/430)).
+  `toggle_todo_backlink` used to document the opposite ("undo in this view shouldn't silently flip TODOs in a different file"), which was correct while a popped snapshot was applied blind.
+  That is root `CLAUDE.md` invariant 10 item 4: the exemption outlived its premise.
+  `selected` / `cursor_col` are zeroed, because they index a page the user was not looking at.
+
+**Still not covered**: `commit_insert` on an `EditTarget::SourcePage` records nothing and is the last instance of the old reasoning. Neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
 
 ### Properties (`g p`)
 
@@ -291,6 +299,22 @@ Three contracts:
 
 The icon sits on the first row and continuations indent to the text column, so a wrapped error reads as one message rather than four.
 
+## Workspace search reads the index
+
+`refresh_search` (`actions/overlay.rs`) filters `App::index`, which `spawn_index_rebuild` builds once over the whole workspace on a worker thread.
+
+It used to walk `pages/` and `journals/`, read every `.md` and re-parse it **per keystroke**, on the event loop ([#449](https://github.com/outlmd/outl/issues/449)).
+
+Three contracts:
+
+- **`BlockIndex::search_text` is deliberately not the source.** It matches by substring; this box and the `((` autocomplete both fuzzy-match, so reusing it would have traded match quality for the speed. `iter_blocks` is the same data with `crate::fuzzy::fuzzy_score` kept on top.
+- **`iter_blocks` is explicitly unordered**, so the sort settles ties on `md_path` then `block_path`. Without that the hit list reshuffles between index rebuilds; pinned by `the_hit_order_is_stable_across_rebuilds`.
+- **`SearchHit` carries `block_path`, not a flat index**, and `jump_to_search_hit` resolves it with `index_for_path` *after* `load_current`. A flat preorder index cannot come from the block index, and it goes stale when the page changed between the search and the jump.
+
+`the_search_reads_the_index_not_the_filesystem` deletes `pages/` after indexing: a filesystem-backed search returns nothing from there, so the test fails if the source regresses.
+
+**Not a bug, and worth not re-filing**: `max_depth(1)` in `WorkspaceIndex::build` is correct. `slugify` folds `/` away, so `[[os/linux]]` is `pages/os-linux.md` — the namespace is a slug convention and `pages/` is flat. Measured: zero subdirectories under `pages/` on a 2,874-page workspace.
+
 ## Reuse across UI surfaces (Tauri, mobile)
 
 The TUI is **the first UI surface**, not the only one.
@@ -435,6 +459,18 @@ It does that because this crate mutates an in-memory AST and derives ops from th
 
 **New code here should call `commit_page` rather than extending `save_page_with`.**
 Adding a sixth step to the hand-written sequence deepens the divergence the issue exists to close, and the shared pipeline already has the ordering right.
+
+## Truecolor: absent means ANSI
+
+`runtime::preset::supports_truecolor(colorterm, term)` is pure over the two environment variables, and `fallback_for(truecolor)` picks what an **unconfigured** launch gets: the brand preset when 24-bit is available, `theme::default_dark()` when it is not ([#453](https://github.com/outlmd/outl/issues/453)).
+
+Three contracts:
+
+- **Level 4 only.** `--theme`, the per-workspace `[theme] preset` and the global config are explicit user choices and stay untouched. A user who asked for `dracula` on a 256-colour terminal gets `dracula`; second-guessing an explicit request is the bigger surprise, and `docs/theming.md` owns that precedence.
+- **Absence reads as "no".** A truecolor terminal that sets neither signal gets the ANSI preset, which renders correctly. The reverse default renders wrong, so the asymmetry is deliberate.
+- **This is not the `auto` mode question.** That one is pinned to dark because a terminal has no reliable way to read the OS appearance setting and probing (OSC 11, `COLORFGBG`) is unreliable under tmux. Truecolor has two widely-set signals, which is why it gets detected instead of declared.
+
+`COLORTERM` / `TERM` are read in `fallback_theme()` and nowhere else in the module, so the decision stays testable without touching the process environment.
 
 ## Theme mode: `auto` means dark here
 

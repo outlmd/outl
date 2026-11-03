@@ -106,6 +106,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `App::run` created the window from `tauri.conf.json` with no retry, so a transient `WindowsError(... ERROR_TIMEOUT ...)` — the kind boot-time contention (antivirus scan, a cold profile, a slow disk) produces — panicked the same way a missing runtime used to.
   Windows now creates its window itself, retrying up to three times before falling back to a message box naming the WebView2 download, then exiting with status 1 instead of panicking.
   A PC where webview creation already succeeds is unchanged, and so are macOS and Linux.
+  Follow-up on that retry ([OUTL-4](https://outl.sentry.io/issues/OUTL-4), [#478](https://github.com/outlmd/outl/pull/478)): each attempt now clears any leftover "main" window from the previous try before building again, so a failure mode that leaves one registered cannot turn the retry into a second, immediate `WindowLabelAlreadyExists` failure.
+  `build_main_window` also stopped hand-duplicating the window's title/size/resizable properties — it now builds from the same `tauri.conf.json` window entry Windows' config file marks `create: false`, so the two files cannot drift the way a hardcoded copy could.
 - **A page that had stopped syncing said nothing in the TUI until you tried to write to it.**
   Root `CLAUDE.md` invariant 8 refuses to overwrite a `.md` holding content that exists in no op, and that refusal freezes the page in *both* directions until `outl reconcile --ahead-of-log` runs: those lines never reach another device, and a peer's edits never reach this `.md`.
   The desktop and mobile render a banner for it.
