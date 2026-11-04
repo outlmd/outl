@@ -117,17 +117,56 @@ jobs:
   test:
     name: test (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    # The matrix is built per event, not fixed, because the macOS leg is
+    # the single most expensive thing this repo runs and on a pull
+    # request it was not buying anything.
+    #
+    # Measured over July–October 2026, 403 runs where both legs reached a
+    # conclusion: the macOS leg caught **zero** failures the Linux leg did
+    # not. It failed alone twice, in September, and neither was a platform
+    # defect — `block_text_is_indexed_not_scanned` (a cost ratio whose
+    # bound sat inside the noise band) and
+    # `the_cycle_dense_generator_rejects_far_more_moves_than_the_shared_one`
+    # (a meta-test over a sampled distribution). Both were recalibrated at
+    # the time (085303b6, 8f64fa4b) and October ran 254 of these with no
+    # macOS-only failure at all. The opposite happened once: Linux failed
+    # where macOS passed.
+    #
+    # That is the expected result rather than a surprise, because the two
+    # legs run the same crates. `--exclude outl-mobile --exclude
+    # outl-desktop --exclude outl-tauri-shared` leaves exactly one piece
+    # of macOS-specific code in the set under test: `platform_host_id` in
+    # `outl-core/src/device/host.rs`, which shells out to `ioreg`. Every
+    # other `cfg` in those crates selects iOS, which this runner is not.
+    #
+    # The cost of asking anyway: 2,672 macOS minutes in October 2026 on
+    # pull requests alone, $213.76 of a $699.92 gross bill. macOS bills at
+    # 5x Linux per minute here and 6 vCPU is the smallest SKU offered, so
+    # there is no cheaper tier to drop to — only a cheaper cadence.
+    #
+    # So `main` still runs it on every push, and a PR does not. The window
+    # a macOS-only defect can live in is one merge, and `test (macos)` on
+    # the merge commit is what closes it.
+    #
+    # What this does NOT cover, and did not cover before: APFS is
+    # case-insensitive and ext4 is not, so a slug collision is a real
+    # macOS-only failure mode that no test in this workspace exercises
+    # today. If that worries you, the fix is a test for it, not 12.8
+    # minutes of macOS per pull request. Tracked in `docs/development.md`.
+    #
+    # The leg's `label` (not its `os`) still names the check, so the macOS
+    # check is `test (macos)` on the runs that have one — unchanged, and
+    # simply absent on a PR.
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # 8 vCPU: measured 76% average CPU and 4.7 GB of 16 GB on
-          # 4 vCPU — the same CPU-bound / memory-idle shape as clippy.
-          - os: blacksmith-8vcpu-ubuntu-2404
-            label: linux
-          # 6 vCPU is the smallest macOS SKU Blacksmith offers.
-          - os: blacksmith-6vcpu-macos-15
-            label: macos
+        # 8 vCPU on Linux: measured 76% average CPU and 4.7 GB of 16 GB
+        # on 4 vCPU — the same CPU-bound / memory-idle shape as clippy.
+        # 6 vCPU is the smallest macOS SKU Blacksmith offers.
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux"}]'
+          || '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux"},{"os":"blacksmith-6vcpu-macos-15","label":"macos"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install toolchain

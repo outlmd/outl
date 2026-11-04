@@ -11,7 +11,7 @@ brew tap outlmd/outl https://github.com/outlmd/outl
 brew trust outlmd/outl             # one-time: Homebrew 4.x requires it for third-party taps
 
 # CLI + TUI (Linux + macOS)
-brew install outl-beta              # latest beta — every push to main
+brew install outl-beta              # latest beta — cut nightly from main
 # brew install outl                 # latest GA (when the first one ships)
 
 # Desktop app (macOS only, dmg)

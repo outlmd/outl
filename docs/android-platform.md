@@ -332,7 +332,7 @@ The job is best-effort: `publish_release` waits for it but does not require its 
 **What best-effort costs, which took three releases to notice.**
 The draft flips to published with or without the APK, and a published release is immutable, so "Re-run failed jobs" on the Android job arrives too late to attach anything.
 It used to answer with a bare `HTTP 422: Cannot upload assets to an immutable release`, which reads like a token problem; the upload step now checks `isDraft` first and says what it actually means.
-The only route to an APK on the release is a new beta, and since a push to `main` cuts one, that is usually the next commit.
+The only route to an APK on the release is a new beta, so it is the next nightly — or a manual `release.yml` dispatch if you do not want to wait.
 
 Worse, a job's implicit `success()` reads the whole ancestor tree rather than its direct `needs`, so a failed Android build also skipped `update_tap` — through a `publish_release` that had succeeded.
 v0.12.0-beta.207 shipped that way and left `Formula/outl-beta.rb` on `.206`, so `brew upgrade outl-beta` served the previous binary and nothing went red.

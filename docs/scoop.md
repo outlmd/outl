@@ -12,7 +12,7 @@ That puts `outl.exe` on your PATH, unprivileged, under `~\scoop\apps\outl-beta\`
 
 | Path | What it ships |
 |---|---|
-| [`/bucket/outl-beta.json`](../bucket/outl-beta.json) | Beta CLI / TUI / MCP server, rebuilt on every push to `main`. |
+| [`/bucket/outl-beta.json`](../bucket/outl-beta.json) | Beta CLI / TUI / MCP server, rebuilt nightly when `main` moved. |
 
 Both architectures are served from one manifest: `64bit` is the x64 build, `arm64` is a native ARM64 binary rather than an x64 one under emulation.
 Scoop picks the one matching the machine, so the install line is the same either way.
@@ -27,12 +27,12 @@ scoop update outl-beta
 `scoop status` shows when a newer beta has landed.
 The manifest carries a `checkver` block pointing at the repo's releases feed, which is also what Scoop's own update tooling reads.
 
-The beta channel tracks **every push to `main`**, so `scoop update` is a frequent event.
+The beta channel is cut **nightly, on the nights `main` moved**, so `scoop update` is worth running about once a day.
 `scoop hold outl-beta` pins the installed version until you `scoop unhold` it.
 
 ## Why `outl-beta` and not `outl`
 
-Same channel split as [the Homebrew tap](homebrew.md): `outl-beta` is cut from every push to `main`, and the GA manifest lands with the first non-prerelease tag.
+Same channel split as [the Homebrew tap](homebrew.md): `outl-beta` is cut nightly when `main` moved, and the GA manifest lands with the first non-prerelease tag.
 They install the same `outl.exe`, so run one or the other, not both.
 
 ## The desktop app is not a Scoop package

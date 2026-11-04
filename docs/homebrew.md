@@ -6,15 +6,15 @@ Two surfaces live on `main`:
 | Path | What it ships |
 |---|---|
 | [`/Formula/outl.rb`](../Formula/outl.rb) | GA CLI / TUI, semver tag `vX.Y.Z`. |
-| [`/Formula/outl-beta.rb`](../Formula/outl-beta.rb) | Beta CLI / TUI, rebuilt on every push to `main`. |
-| [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) | Beta **desktop app** (.dmg), rebuilt on every push to `main`. |
+| [`/Formula/outl-beta.rb`](../Formula/outl-beta.rb) | Beta CLI / TUI, rebuilt nightly when `main` moved. |
+| [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) | Beta **desktop app** (.dmg), rebuilt nightly when `main` moved. |
 
 ## Install the CLI / TUI
 
 ```bash
 brew tap outlmd/outl https://github.com/outlmd/outl
 brew trust outlmd/outl    # one-time: required for third-party taps
-brew install outl-beta     # beta channel — every push to main
+brew install outl-beta     # beta channel — cut nightly from main
 # brew install outl        # GA channel — semver tags only
 ```
 
@@ -61,7 +61,7 @@ Both Apple Silicon and Intel Macs install the same dmg.
 
 > **Linux desktop:** Homebrew has no GUI cask on Linux, so the app ships as AppImage / `.deb` / `.rpm` assets on each [GitHub release](https://github.com/outlmd/outl/releases).
 > See [Getting started → Desktop app on Linux](getting-started.md#desktop-app-on-linux).
-The cask sits in [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) and is bumped automatically alongside the CLI formula on every push to `main`.
+The cask sits in [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) and is bumped automatically alongside the CLI formula on every nightly beta.
 
 The CLI formula (`outl-beta`) and the desktop cask coexist without conflicts — the formula installs `/usr/local/bin/outl`, the cask installs `/Applications/outl.app`.
 Both point at the same workspace on disk if you configure the same path; the op log (`ops/ops-<actor>.jsonl`) reconciles edits made from either surface.

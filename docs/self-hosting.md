@@ -390,7 +390,7 @@ Pulling a prebuilt image from GHCR is what the quick start does; building from t
 > The image started being published after the last release, so no stable tag has been cut yet: `docker compose pull` on `:latest` or on a version tag fails with `manifest unknown` until the next release runs.
 > The rows above describe what each tag will follow once it exists — they are the naming scheme, not a list of what is on the registry today.
 
-The beta releases that `release.yml` publishes for every push to `main` do **not** get their own image — they are tagged by a workflow token, and GitHub does not fire workflows for those, by design. `:dev` is the equivalent, one image per push rather than one per tag.
+The beta releases that `release.yml` publishes nightly do **not** get their own image — they are tagged by a workflow token, and GitHub does not fire workflows for those, by design. `:dev` is the equivalent, one image per push rather than one per tag.
 
 Every one of those tags is a **manifest list** over `linux/amd64` and `linux/arm64`, so the tag you pull is the same on both and the architecture is resolved by the daemon.
 `docker buildx imagetools inspect <tag>` prints the two entries; a tag showing one is a tag from before [#411](https://github.com/outlmd/outl/issues/411).

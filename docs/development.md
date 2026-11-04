@@ -733,12 +733,12 @@ cargo test -p outl-actions --release --test composite_write_bench -- --ignored -
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` + `test (macos)`. | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` on every event, plus `test (macos)` on pushes to `main` only (see [Runner sizing](#runner-sizing)). | **Yes** |
 | [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet), `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`), `scripts/tests/test_check_artifact_stripped.py` (the strip gate's own suite), and `scripts/check-release-assets.py --manifest` plus its suite (the three build matrices, `update_tap`'s loops, the Homebrew formula, the cask and the Scoop manifest all name the platforms `scripts/release_assets.py` names). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
 | [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-md`, plus weekly cron | Criterion (small/medium/large) on every PR; xlarge + CLI hyperfine on cron / manual dispatch. Artifacts retained 14–30 days. | No (informational) |
-| [`release.yml`](../.github/workflows/release.yml) | Push to `main` (beta), `v*` tag (GA), manual | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
+| [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when `main` moved in the last 24h (beta), `v*` tag (GA), manual | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
 | [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully | Downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
 | [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. | No |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Cron | Garbage-collects stale beta tags. | n/a |
@@ -758,12 +758,15 @@ Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted 
 Billing is per vCPU-minute, with a platform multiplier on top: ARM 0.625x, x64 Linux 1x, Windows 2x, macOS 6.67x.
 That multiplier is why job placement matters more than job speed: a 29s macOS job costs more than a 5min Linux one.
 
-Two rules follow from it, and both are already applied in the workflows:
+Three rules follow from it, and all three are already applied in the workflows:
 
 1. **Only platform-specific work runs on macOS or Windows.**
    Anything that produces the same result on Linux runs on Linux, once.
    `mobile.yml::rust-check` builds `outl-mobile` only for this reason — `outl-actions` / `outl-core` / `outl-md` are covered by `ci.yml::test`, and running their suites again on macOS was 55% of a full run's bill.
-2. **Size the SKU from measured CPU and memory, not from intuition.**
+2. **An expensive runner also has a cadence, and the cadence is a separate decision from the SKU.**
+   Rule 1 asks whether a job belongs on macOS at all; this one asks how often it has to answer.
+   Two jobs were paying every-event prices for a question that does not change that fast, and the evidence for both is in [Runner cadence](#runner-cadence) below.
+3. **Size the SKU from measured CPU and memory, not from intuition.**
    `blacksmith jobs stats <job_id>` prints the per-job CPU timeseries, memory peak and OOM count; `blacksmith usage --breakdown-by workflow_job` prints what each job costs.
 
 Sizes as of the Blacksmith migration, from a full run of every workflow:
@@ -793,6 +796,42 @@ The CLI matrix on the same image already did, which is why `outl-windows-arm64.z
 **Check names must not contain the runner SKU.**
 Branch protection matches required checks by name, so `test (ubuntu-latest)` becoming `test (blacksmith-8vcpu-ubuntu-2404)` leaves `main` blocked on a check that will never report again.
 Matrix jobs therefore carry a stable `label` (`linux`, `macos`, `macOS arm64`, …) and the SKU lives only in `matrix.os`.
+
+### Runner cadence
+
+macOS is 6.67x Linux per vCPU-minute and 6 vCPU is the smallest tier offered, so a macOS job has no cheaper SKU to move to.
+The only lever left is how often it runs.
+
+The October 2026 bill is what sized both changes below: 5,657 macOS minutes, $452.56 of a $699.92 gross month, 65% of the bill on one platform.
+Attributing those minutes to jobs put 63% of them in a single place.
+
+| Job | min/month | $ gross | min/run |
+|---|---:|---:|---:|
+| `ci.yml::test (macos)` | 3,259 | $260.75 | 12.8 |
+| `release.yml::build_desktop` (universal) | 525 | $41.96 | 7.9 |
+| `mobile.yml::rust-check` | 352 | $28.18 | 1.7 |
+| `desktop.yml::build` (macOS arm64) | 240 | $19.23 | 1.6 |
+| `release.yml::build` (both Apple targets) | 425 | $34.07 | 3.7 |
+| everything else on macOS | 400 | $32.02 | — |
+
+**`ci.yml::test (macos)` runs on pushes to `main`, not on pull requests.**
+The matrix is built from `github.event_name` rather than written out, so the leg is simply absent on a PR and the check keeps the name `test (macos)` on the runs that have one.
+What justifies it: across July–October 2026, 403 runs where both legs reached a conclusion, the macOS leg caught **zero** failures the Linux leg did not.
+It failed alone twice, both in September, and both were test calibration rather than platform defects — recalibrated in `085303b6` and `8f64fa4b`, after which October ran 254 of these clean.
+Once, the reverse happened and Linux caught what macOS passed.
+That is the expected result, because the two legs run the same crates: `--exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared` leaves exactly one piece of macOS-specific code under test, `platform_host_id` in `outl-core/src/device/host.rs`, which shells out to `ioreg`.
+Every other `cfg` in those crates selects iOS, which this runner is not.
+PRs were 2,672 of the 3,259 minutes, so the change is worth $213.76 a month at gross rates and leaves a macOS-only defect a window of exactly one merge.
+
+**`release.yml` cuts a beta nightly, not on every push to `main`.**
+66 betas in October, 2.1 a day, each spending 15.3 macOS minutes across `build_desktop` and the two CLI legs.
+The cron fires at 06:00 UTC and a `gate` job asks whether anything landed in the last 24h, so idle nights cost nothing.
+A tag push and a manual dispatch both bypass the gate — **if you need a beta right now, Actions → Release → "Run workflow"**, which is unchanged.
+
+**What neither of these covers, and nothing covered before.**
+APFS is case-insensitive and ext4 is not, so a slug collision that only reproduces on macOS is a real failure mode that no test in this workspace exercises.
+The macOS CI leg never protected against it, on a PR or anywhere else, because no such test exists to run.
+If that gap matters, the fix is a test for it on either platform, not restoring 12.8 minutes of macOS per pull request.
 
 ### What blocks merge
 
@@ -828,7 +867,9 @@ This is non-negotiable — see `crates/outl-mobile/CLAUDE.md` § "Versioning + T
 
 ### Beta cadence
 
-Every push to `main` produces a beta release automatically:
+A beta release is cut automatically **once a night**, at 06:00 UTC, and only when something landed on `main` in the preceding 24h.
+It used to be cut on every push; [Runner cadence](#runner-cadence) has the measurement that changed it and `release.yml`'s `gate` job is where the freshness check lives.
+**To cut one immediately, run the workflow by hand** (Actions → Release → "Run workflow"), which bypasses the gate, as does a `v*` tag.
 
 - Tag: `v<workspace.version>-beta.<run_number>` (e.g. `v0.6.0-beta.48`).
 - Binary: reports the full beta version (the workflow `sed`s `Cargo.toml` in-place before `cargo build`; the change is local to the runner).

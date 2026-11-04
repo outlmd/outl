@@ -1,6 +1,22 @@
 name: Release
 
-# Every push to `main` produces a beta release automatically.
+# A beta release is cut **once a night**, and only when `main` moved.
+#
+# It used to be cut on every push to `main`. That produced 66 beta
+# releases in October 2026 (2.1 a day), and each one spends 15.3 minutes
+# of macOS runner — `build_desktop` (universal, 7.9 min) plus the two CLI
+# legs (3.7 min each). 950 macOS minutes a month, $76 of a $699.92 gross
+# bill, for betas that were superseded within hours and mostly never
+# downloaded.
+#
+# Nightly caps that at 31 runs a month and the freshness gate below drops
+# the nights nobody pushed, so the real figure tracks days-with-commits
+# rather than commits.
+#
+# **Need a beta right now?** Run the workflow by hand: Actions → Release →
+# "Run workflow". That path is unchanged and still cuts a real beta off
+# whatever ref you pick. A GA tag (`v*`) is also unchanged and still
+# builds the moment it is pushed — neither goes through the gate.
 #
 # - Tag:     `v<workspace.version>-beta.<run_number>` (e.g. `v0.1.0-beta.42`).
 # - Binary:  reports the full beta version (workflow patches Cargo.toml
@@ -98,9 +114,14 @@ name: Release
 # ------------------------------------------------------------------
 
 on:
+  # No `branches: [main]` here on purpose — see the header. `tags` stays,
+  # so a GA release still builds the instant the tag lands.
   push:
-    branches: [main]
     tags: ["v*"]
+  schedule:
+    # 06:00 UTC / 03:00 BRT — after the working day, so a night's betas
+    # carry the whole day's merges in one build instead of 2.1 of them.
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       # Runs every build and every check against the branch it is
@@ -126,8 +147,62 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The freshness gate for the nightly cron, and nothing else.
+  #
+  # A tag push and a manual dispatch both pass straight through: they are
+  # deliberate acts and the caller already decided. Only `schedule` is
+  # asked whether `main` actually moved, because a cron that fires on an
+  # idle repo rebuilds the previous commit and spends 15.3 macOS minutes
+  # to publish a beta identical to last night's.
+  #
+  # The question is "did anything land in the last 24h", not "is HEAD the
+  # commit the last beta was cut from". The second reads more precise and
+  # is worse here: it needs the newest `v*-beta.N` tag, and the tags are
+  # lightweight, so `--sort=-creatordate` orders them by *commit* date
+  # (wrong after any rebase) and `--sort=-version:refname` has to compare
+  # `beta.286` against `beta.99` as numbers, which is a property of git's
+  # version sort rather than something this workflow should bet a release
+  # on. The window costs at most one redundant beta a month when a commit
+  # lands within minutes of the cron, and never a missed one — the error
+  # is in the harmless direction.
+  #
+  # Every downstream job already gates on `needs.prepare.result ==
+  # 'success'` or on `create_release`, so skipping `prepare` skips the
+  # whole graph without a second `if` per job.
+  gate:
+    name: Did main move?
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      proceed: ${{ steps.decide.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Deep enough to answer a 24h question; a full clone of this
+          # history to count a handful of commits is not worth the fetch.
+          fetch-depth: 100
+
+      - id: decide
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_EVENT_NAME} run — the freshness gate only applies to the nightly cron."
+            exit 0
+          fi
+
+          COUNT=$(git rev-list --count --since="24 hours ago" HEAD)
+          if [[ "${COUNT}" -gt 0 ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${COUNT} commit(s) landed in the last 24h — cutting tonight's beta."
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No commits in the last 24h — skipping tonight's beta. Use Run workflow to force one."
+          fi
+
   prepare:
     name: Compute version
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       base: ${{ steps.compute.outputs.base }}
