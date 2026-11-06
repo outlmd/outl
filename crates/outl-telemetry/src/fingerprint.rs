@@ -59,8 +59,7 @@ mod tests {
 
     #[test]
     fn two_distinct_panic_messages_get_distinct_fingerprints() {
-        let mut a =
-            event_with_exception_value(Some("called `Option::unwrap()` on a `None` value"));
+        let mut a = event_with_exception_value(Some("called `Option::unwrap()` on a `None` value"));
         let mut b = event_with_exception_value(Some(
             "index out of bounds: the len is 3 but the index is 5",
         ));
@@ -88,7 +87,10 @@ mod tests {
 
         assert_eq!(
             fingerprint_strs(&event),
-            vec!["outl-panic", "could not open <path>: no such file or directory"]
+            vec![
+                "outl-panic",
+                "could not open <path>: no such file or directory"
+            ]
         );
     }
 
