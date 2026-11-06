@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # Prune old `vX.Y.Z-beta.N` tags + GitHub Releases, keeping the
-# `$KEEP` most recent betas per base version.
+# `$KEEP` most recently generated betas in the whole repo.
 #
 # Driven by `.github/workflows/cleanup-tags.yml`. Runs after every
-# successful `Release` workflow on `main`.
+# `Release` workflow on `main`.
 #
 # Env vars (all required unless noted):
 #
 #     GH_TOKEN              GitHub token with `contents: write`
 #     GITHUB_REPOSITORY     owner/name (set by Actions runner)
-#     KEEP                  how many recent betas to keep per base (default: 2)
+#     KEEP                  how many recent betas to keep in total (default: 2)
 #     DRY_RUN               "true" to log without deleting (default: false)
+#
+# Retention is GLOBAL, not per base version. The old rule kept `$KEEP`
+# per base, which on 17 base versions is 34 tags, and those older lines
+# are dead weight: nothing installs from them (every package manifest
+# tracks the newest beta) and the commits stay reachable from `main`.
 #
 # Scope (intentional):
 # - Touches ONLY `vX.Y.Z-beta.N` tags. GA tags like `v0.5.3`
@@ -19,6 +24,8 @@
 #   the git tag — `gh release delete --cleanup-tag` does both atomically.
 # - Orphan tags (tag exists but the release is already gone) get
 #   pushed as `:refs/tags/<tag>` to drop the ref alone.
+# - A tag a shipped package manifest still references is never pruned,
+#   whatever the count says. See the `PROTECTED` block below.
 
 set -euo pipefail
 
@@ -38,30 +45,58 @@ git fetch --tags --prune --prune-tags --force origin
 #   2. Emit "<base> <beta_num> <full_tag>".
 #   3. Group by base, sort beta_num desc, drop the top KEEP.
 TO_DELETE_FILE="$(mktemp)"
-trap 'rm -f "$TO_DELETE_FILE"' EXIT
+PRUNE_ALL="$(mktemp)"
+PROTECTED="$(mktemp)"
+trap 'rm -f "$TO_DELETE_FILE" "$PRUNE_ALL" "$PROTECTED"' EXIT
 
+# Keep `vX.Y.Z-beta.N` only (GA and malformed tags are not candidates),
+# sort newest first, skip the newest $KEEP, prune the rest.
+#
+# `N` is `github.run_number`, a repo-global monotonic counter, so it is
+# generation order even across base versions (`v0.12.0-beta.241`
+# predates `v0.13.0-beta.250`). Sorting on the version tuple instead
+# would agree today and disagree the moment a base version is re-cut.
 git tag --list 'v*-beta.*' |
   awk -F'-beta\.' '
     NF == 2 && $1 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ && $2 ~ /^[0-9]+$/ {
-      print $1 " " $2 " " $0
+      print $2 " " $0
     }
   ' |
-  sort -k1,1 -k2,2nr |
-  awk -v keep="$KEEP" '
-    {
-      if ($1 != prev) { prev = $1; count = 0 }
-      count++
-      if (count > keep) print $3
-    }
-  ' > "$TO_DELETE_FILE"
+  sort -k1,1nr |
+  tail -n +"$((KEEP + 1))" |
+  cut -d' ' -f2 > "$PRUNE_ALL"
+
+# Never prune a tag a shipped package manifest still points at. `brew
+# install` and `scoop install` resolve through these files, so dropping
+# their tag breaks installs for everyone until the next bump.
+#
+# This is load-bearing, not decoration. The job no longer waits for
+# `Release` to go green (see the workflow), so it can observe a run that
+# pushed `beta.N` and `beta.N-1` but died before bumping the manifests —
+# leaving the newest $KEEP tags ahead of the version users install. The
+# count rule alone would delete exactly the tag still in the formula.
+for manifest in Formula/outl-beta.rb Casks/outl-desktop-beta.rb bucket/outl-beta.json; do
+  [[ -f "$manifest" ]] || continue
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+' "$manifest" || true
+done | sed 's/^/v/' | sort -u > "$PROTECTED"
+
+if [[ -s "$PROTECTED" ]]; then
+  echo "::notice::Pinned by a shipped manifest, never pruned: $(tr '\n' ' ' < "$PROTECTED")"
+  # `|| true`: grep exits 1 when every candidate was protected, which is
+  # a legitimate "nothing to do", not a failure.
+  grep -vxF -f "$PROTECTED" "$PRUNE_ALL" > "$TO_DELETE_FILE" || true
+else
+  echo "::warning::No beta version found in any package manifest; relying on the count rule alone."
+  cp "$PRUNE_ALL" "$TO_DELETE_FILE"
+fi
 
 if [[ ! -s "$TO_DELETE_FILE" ]]; then
-  echo "::notice::Nothing to prune (keep=$KEEP per base)."
+  echo "::notice::Nothing to prune (keep=$KEEP newest betas in total)."
   exit 0
 fi
 
 COUNT=$(wc -l < "$TO_DELETE_FILE" | tr -d ' ')
-echo "::notice::Will prune ${COUNT} tag(s) (keep=$KEEP per base):"
+echo "::notice::Will prune ${COUNT} tag(s) (keep=$KEEP newest betas in total):"
 sed 's/^/  - /' "$TO_DELETE_FILE"
 
 if [[ "$DRY_RUN" == "true" ]]; then

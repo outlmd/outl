@@ -1,23 +1,17 @@
 name: Cleanup beta tags
 
 # Every push to `main` produces a beta tag + GitHub Release via
-# `release.yml`. Left alone, that bucket grows by one item per
-# merge — by v0.5.3 we already had 39 beta releases. This workflow
-# keeps only the two most recent betas per base version (e.g. for
-# `v0.5.3` it keeps `v0.5.3-beta.39` and `v0.5.3-beta.38`; everything
-# else in the `v0.5.3-beta.*` series is deleted).
+# `release.yml`. Left alone, that bucket grows by one item per merge.
+# This workflow keeps only the two most recently generated betas in
+# the whole repo, and deletes every older one.
 #
-# It runs automatically after `Release` succeeds on `main`, and is
-# also exposed as `workflow_dispatch` with an opt-in `dry_run` flag
-# so we can preview what would be pruned before letting it act.
+# It runs after every `Release` on `main`, and is also exposed as
+# `workflow_dispatch` with an opt-in `dry_run` flag so we can preview
+# what would be pruned before letting it act.
 #
-# Scope (intentional):
-# - Touches ONLY `vX.Y.Z-beta.N` tags. GA tags like `v0.5.3`
-#   (no `-beta.` suffix) are never considered for deletion.
-# - Deletes both the GitHub Release (with its built binaries) and
-#   the git tag — `gh release delete --cleanup-tag` does both atomically.
-# - Orphan tags (tag exists but the release is already gone) get
-#   pushed as `:refs/tags/<tag>` to drop the ref alone.
+# What is and is not a prune candidate lives with the code that decides
+# it, in `.github/scripts/cleanup_beta_tags.sh`. This file only says
+# when that script runs.
 
 on:
   workflow_run:
@@ -31,7 +25,7 @@ on:
         type: boolean
         default: false
       keep:
-        description: "How many recent betas to keep per base version"
+        description: "How many of the newest betas to keep, repo-wide"
         type: string
         default: "2"
 
@@ -39,21 +33,35 @@ permissions:
   contents: write
 
 concurrency:
-  # Cancel an in-flight cleanup when a newer Release completes (or a
-  # workflow_dispatch fires). The prune is idempotent — every run
-  # recomputes "keep the 2 newest betas per base version" from
-  # scratch, so if we kill a cleanup mid-loop the next one finishes
-  # the job. Queueing both was the old behaviour, safer but wasted
-  # runner minutes on stale prune-state we were about to recompute.
+  # Queue, never cancel. The prune is idempotent, so cancelling used to
+  # look free: the next run recomputes the list from scratch. But a
+  # burst of merges then cancels every cleanup before it finishes its
+  # delete loop, and "the next one will finish the job" is only true if
+  # a next one ever gets to run to completion. That is the same shape as
+  # the bug below: a prune that silently never happens. Steady state is
+  # one deletion per run, so a queued run costs seconds.
   group: cleanup-tags
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   cleanup:
     name: Prune beta tags
-    # workflow_run fires on every conclusion (success/failure/cancelled).
-    # Only act when the upstream Release actually succeeded.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Deliberately does NOT gate on `workflow_run.conclusion`.
+    #
+    # `Release` concludes `failure` whenever ANY of its ~21 jobs fails,
+    # including jobs that say nothing about whether a release landed
+    # (`Publish @outl/plugin-sdk to npm` has been red since 2026-11-02
+    # while every beta published fine). Gating on it skipped this job on
+    # 25 consecutive runs, and the beta bucket reached 101 tags while the
+    # script that was supposed to cap it at 2 sat there, correct and
+    # never executed.
+    #
+    # That is the mistake `publish_release` already avoids: ask what is
+    # actually on the repo, not whether the workflow went green. The
+    # script asks it directly, off the live tag list, so a Release that
+    # published nothing leaves it a no-op. What this gate used to cover
+    # by accident is now covered on purpose, by the script's manifest
+    # guard.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
