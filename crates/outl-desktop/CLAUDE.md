@@ -273,11 +273,11 @@ Three guards (mobile mirrors them):
 - Both pass `textarea.value` so the draft is committed first.
 
 `components/outline-paste.ts` (`createPasteOps(deps)`) owns the three steps between the route decision and the workspace: flush the draft, run the command, fold the reply back in.
-Its own module, not two closures in `<OutlineView />`, for the reason mobile's `Journal.block-ops.ts` is one — the sequence deserves a test that does not have to mount the 3-pane shell.
+Its own module, not two closures in `<OutlineView />`, like mobile's `Journal.block-ops.ts` — so the sequence has `outline-paste.test.ts`, which no component test replaces.
 
 **The third step is not optional.** A caret paste rewrites the block the textarea is showing, and the draft is seeded once per row (only `startEdit` re-seeds it), so applying the view alone left the editor on the pre-paste string — which `commit()` wrote straight back on the next Esc or blur, losing the paste from the block *and* from the `.md` with nothing on screen ([issue #488](https://github.com/outlmd/outl/issues/488)).
 `<BlockEditor />`'s `applyPaste` writes `ta.value` as well as calling `setText`, because the caret has to move in the same frame: Solid's `value={props.text()}` binding lands in a later effect, and `setSelectionRange` against the stale value clamps to the old length.
-Regression net: `BlockRow.test.tsx` → "BlockRow paste into the block being edited — #488".
+Regression net: `outline-paste.test.ts` (the sequence) + `BlockRow.test.tsx` → "BlockRow paste into the block being edited — #488" (the editor).
 
 `create_block`: stale `after_id` (`NotInTree`) → append at page end (fixes `o`-key crash after peer reload).
 

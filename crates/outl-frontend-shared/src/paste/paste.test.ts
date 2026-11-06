@@ -439,4 +439,17 @@ describe("pasteEditorUpdate", () => {
       caret: 0,
     });
   });
+
+  it("reads an explicit null as absent, like a missing key", () => {
+    // "Absent" arrives as a missing key only because the Rust DTO
+    // carries `skip_serializing_if`. Drop that attribute, add a
+    // transport that re-serializes, and the reply says `null` instead —
+    // which must not become `{ text: null }` in a textarea, nor turn an
+    // absent caret into a real caret at 0.
+    expect(pasteEditorUpdate({ host_text: null })).toBeNull();
+    expect(pasteEditorUpdate({ host_text: "abc", host_caret: null })).toEqual({
+      text: "abc",
+      caret: 3,
+    });
+  });
 });

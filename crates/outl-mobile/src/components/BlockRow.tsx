@@ -54,8 +54,13 @@ interface BlockRowProps {
    * Called when the user pastes outline-shaped markdown into this
    * block's textarea. The frontend has already detected via
    * `looksLikeOutline` that the clipboard payload deserves a
-   * full-on tree conversion; the parent wires this up to the Tauri
-   * `paste_markdown_at` command and refreshes the page on resolve.
+   * full-on tree conversion. The parent (`Journal.block-ops.ts` →
+   * `pasteMarkdownAt`) flushes the draft, runs the Tauri
+   * `paste_markdown_at` command, refreshes the page, **and re-seeds
+   * this textarea from the reply**. That last step is not optional:
+   * a caret paste rewrites this very block, and an editor left on
+   * the pre-paste string commits it back over the paste on the next
+   * blur ([issue #488](https://github.com/outlmd/outl/issues/488)).
    * `caret` is a `char` offset into the host block's text.
    */
   onPasteMarkdown?: (blockId: string, caret: number, text: string) => void;

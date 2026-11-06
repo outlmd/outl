@@ -362,6 +362,10 @@ Either condition sends the paste to the backend (structured path) on `Cmd/Ctrl+V
 | Desktop | `Cmd/Ctrl+V` — routes to backend when outline or multi-paragraph; else native splice | `Cmd/Ctrl+Shift+V` — raw text, single block |
 | Mobile | paste — routes to backend when outline or multi-paragraph; else native splice | not available |
 
+A paste at the caret rewrites the block the user is typing in, so both GUI clients re-seed that editor from the reply's `host_text` / `host_caret` instead of only refreshing the page.
+Skipping it left the editor on the pre-paste string, which the next commit wrote back over the paste ([issue #488](https://github.com/outlmd/outl/issues/488)).
+Where the caret lands, and the rest of the paste contract: [`docs/paste.md`](paste.md).
+
 ### TUI mouse drag copy (opt-in)
 
 With `[tui] mouse_capture = true` in `~/.config/outl/config.toml`, dragging across blocks in the TUI selects a range and copies it as outl markdown on release.

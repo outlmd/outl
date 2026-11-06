@@ -236,14 +236,20 @@ export interface PasteEditorUpdate {
  * for WKWebView, the desktop does not.
  */
 export function pasteEditorUpdate(reply: {
-  host_text?: string;
-  host_caret?: number;
+  host_text?: string | null;
+  host_caret?: number | null;
 }): PasteEditorUpdate | null {
   const text = reply.host_text;
-  if (text === undefined) return null;
-  // A reply carrying the text but not the caret can only come from an
-  // older backend; the end of the text beats discarding the paste.
-  if (reply.host_caret === undefined) return { text, caret: text.length };
+  // `== null`, not `=== undefined`: "absent" is spelled by a missing
+  // key only because the Rust side carries `skip_serializing_if`, and
+  // this must not depend on an attribute a crate away. A `null` would
+  // otherwise read as present and write `{ text: null }` into a
+  // textarea, with `charOffsetToUtf16Offset(text, null)` clamping the
+  // caret to 0 — an absent caret turned into a real one.
+  if (text == null) return null;
+  // A reply carrying the text but not the caret: the end of the text
+  // beats discarding the paste.
+  if (reply.host_caret == null) return { text, caret: text.length };
   return { text, caret: charOffsetToUtf16Offset(text, reply.host_caret) };
 }
 
