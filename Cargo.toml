@@ -142,7 +142,7 @@ fs2 = "0.4"
 
 # Concurrency
 parking_lot = "0.12"
-lru = "0.18"
+lru = "0.19"
 
 # Misc
 sha2 = "0.11"
