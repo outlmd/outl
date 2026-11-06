@@ -146,7 +146,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - **`outl-linux-x64.tar.gz` carried a glibc 2.39 floor it never needed**, so it died with `version GLIBC_2.38 not found` on Debian 12, Ubuntu 22.04 and RHEL 9 — the distros where someone downloads a tarball instead of using a package manager.
   A glibc-linked binary runs on the glibc it was built against or newer, never older, so the runner image *is* the compatibility floor.
   `build_desktop_linux` was pinned to Ubuntu 22.04 (glibc 2.35) for exactly this and said so in a comment; the CLI leg was on 24.04, which was an oversight rather than a decision.
-  Both Linux legs are on 22.04 now, and `docs/development.md` → Runner sizing owns the rule so the next bump is made on purpose.
+  Both Linux legs are on 22.04 now, and `docs/ci-and-release.md` → Runner sizing owns the rule so the next bump is made on purpose.
   The same floor applied to the Homebrew `x86_64_linux` bottle, which is the other thing that binary feeds.
 
 ### Changed
@@ -162,7 +162,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   That follows from what the legs run: `--exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared` leaves one piece of macOS-specific code under test, `platform_host_id`, which shells out to `ioreg`.
   A macOS-only defect now has a window of one merge, and the push-to-`main` run is what closes it.
   **What this does not cover, and never did:** APFS is case-insensitive where ext4 is not, so a macOS-only slug collision is a real failure mode that no test here exercises — the macOS leg was not protecting against it on a PR either.
-  [`docs/development.md` → Runner cadence](docs/development.md#runner-cadence) carries the measurement and the gap.
+  [`docs/ci-and-release.md` → Runner cadence](docs/ci-and-release.md#runner-cadence) carries the measurement and the gap.
 - **Property order has one owner, and it is written down** ([#285](https://github.com/outlmd/outl/issues/285)).
   outl renders `key:: value` lines alphabetically, reorders a hand-sorted file on the next projection, and that was never documented anywhere — the behaviour lived in eight copy-pasted `sort_by` calls, three of which explained the reason in their own words and disagreed.
   `outl_actions::tree::sort_in_presentation_order` is the one owner now; every surface calls it (the `.md` renderer, the outline DTO each GUI reads, the parsed outline the from-disk readers build, a backlink row's shallow leaf, the tree-derived index, the clipboard, `outl page prop list` and `outl block prop list`), and [`docs/markdown-format.md` → Property order](docs/markdown-format.md#property-order) says what the order is and why declaration order is not recoverable: `Op::SetProp` carries no slot, so the nearest thing available is each op's HLC, which is the order properties were last *edited* — a peer fixing one typo would reshuffle the block on every device.

@@ -83,7 +83,7 @@ The **Documentation triggers** table in root `CLAUDE.md` and § 5.3 of `.github/
 | Sidecar format change | `markdown-format.md`, `outl-md/CLAUDE.md`, `development.md` § 6 cookbook if migration story changed |
 | Op log format change | `crdt.md`, `outl-core/CLAUDE.md`, `development.md` § 6 cookbook |
 | Storage trait change | `storage.md`, `outl-core/CLAUDE.md`, `development.md` § 5 |
-| CI workflow change (`ci.yml`, `release.yml`, `mobile.yml`, `desktop.yml`, `bench.yml`, `testflight.yml`, `cleanup-tags.yml`) | `development.md` § 9 (CI walkthrough), § 10 (Release) if release-related |
+| CI workflow change (`ci.yml`, `release.yml`, `mobile.yml`, `desktop.yml`, `bench.yml`, `testflight.yml`, `cleanup-tags.yml`) | `ci-and-release.md` § 1 (CI walkthrough), § 2 (Release process) if release-related |
 | `rust-toolchain.toml` bump | `development.md` § 1, `CONTRIBUTING.md` |
 | New required system dep (Tauri, GTK, Bun, Xcode) | `development.md` § 1 ("Optional toolchains by area") |
 | New crate added to workspace | `development.md` § 2, root `CLAUDE.md` repo layout, new `crates/<name>/CLAUDE.md` |

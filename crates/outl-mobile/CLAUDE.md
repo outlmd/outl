@@ -572,7 +572,7 @@ To bump the app version, edit `[workspace.package].version` at the repo root —
 The iOS code path does NOT honor Tauri's `Cargo.toml` fallback (it uses `1.0.0`), so CI injects the workspace version via `cargo tauri ios build --config`.
 A static field in the file would win over that override and the two drift on the next bump.
 
-The field-resolution table, the `CFBundleVersion` (build number) scheme, and the three-workflow CI release flow are in [`docs/development.md`](../../docs/development.md#ios-version-propagation-and-testflight).
+The field-resolution table, the `CFBundleVersion` (build number) scheme, and the three-workflow CI release flow are in [`docs/development.md`](../../docs/ci-and-release.md#ios-version-propagation-and-testflight).
 
 ## Deep links (`outl://`)
 

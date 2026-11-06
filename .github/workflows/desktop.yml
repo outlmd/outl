@@ -119,44 +119,15 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up the Tauri build
+        uses: ./.github/actions/setup-tauri-build
         with:
-          bun-version: latest
-
-      # `setup-bun` caches the bun binary, not the packages it
-      # downloads. On Blacksmith `actions/cache` is transparently
-      # redirected to the colocated cache, so this restores at
-      # ~400MB/s.
-      - name: Cache bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ runner.os }}-bun-
-
-      # Tauri 2 deps. Even the platform-agnostic checks (clippy,
-      # `cargo test`) need outl-desktop to compile first, and that
-      # depends on webkit2gtk-4.1 + libsoup-3 + libappindicator
-      # being present.
-      - name: Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            patchelf
+          linux-deps: "true"
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: desktop-Linux x86_64
-
-      - name: Install frontend dependencies
-        run: bun install
 
       # ── Platform-agnostic checks: clippy, rust tests, Vitest, tsc
       # all produce identical results on macOS / Linux / Windows, so
@@ -235,18 +206,14 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
+      # No `linux-deps`: this matrix is macOS + Windows only.
+      - name: Set up the Tauri build
+        uses: ./.github/actions/setup-tauri-build
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: desktop-${{ matrix.label }}
-
-      - name: Install frontend dependencies
-        run: bun install
 
       # `tauri build` compiles the Rust binary itself — no separate
       # `cargo build` step, which only duplicated the link. `--debug`

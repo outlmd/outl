@@ -175,8 +175,11 @@ jobs:
   # 'success'` or on `create_release`, so skipping `prepare` skips the
   # whole graph without a second `if` per job.
   gate:
-    name: Did main move?
+    name: Should we cut a beta?
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read # checkout
+      actions: read # `gh run list` against `ci.yml`
     outputs:
       proceed: ${{ steps.decide.outputs.proceed }}
     steps:
@@ -188,21 +191,68 @@ jobs:
 
       - id: decide
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${GITHUB_EVENT_NAME} run — the freshness gate only applies to the nightly cron."
+            echo "::notice::${GITHUB_EVENT_NAME} run — both gates below apply only to the nightly cron."
             exit 0
           fi
 
+          # Gate 1: did anything land worth building?
           COUNT=$(git rev-list --count --since="24 hours ago" HEAD)
-          if [[ "${COUNT}" -gt 0 ]]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::${COUNT} commit(s) landed in the last 24h — cutting tonight's beta."
-          else
+          if [[ "${COUNT}" -eq 0 ]]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No commits in the last 24h — skipping tonight's beta. Use Run workflow to force one."
+            exit 0
           fi
+
+          # Gate 2: does CI already know this tree is broken?
+          #
+          # This workflow runs no tests of its own on purpose — `ci.yml`
+          # owns fmt/clippy/test/docs and the frontend suite. Without this
+          # gate the nightly spends 9 to 34 minutes across ~20 build legs
+          # (macOS, Linux x64/arm64, Windows x64/arm64, Android) producing
+          # a beta from a tree whose tests are red.
+          #
+          # `cancelled` is not an answer: `ci.yml` cancels in progress per
+          # ref, so a run superseded by the next push says nothing about
+          # either commit. Take the newest *conclusive* run instead.
+          #
+          # Not pinned to HEAD's sha on purpose: `ci.yml` ignores
+          # `docs/**`, so a docs-only HEAD has no run of its own and an
+          # exact-sha gate would block every nightly until the next code
+          # commit landed.
+          #
+          # What this does NOT cover: if HEAD's own CI is still running at
+          # 06:00 UTC, the newest conclusive run belongs to an earlier
+          # commit, and a green answer there is an answer about that
+          # commit. The cron sits after the working day so that window is
+          # small, and a wrong green costs one beta, not a bad GA.
+          VERDICT=$(gh run list --workflow=ci.yml --branch main --limit 20 \
+            --json status,conclusion \
+            --jq 'map(select(.status == "completed"
+                   and (.conclusion | IN("success", "failure", "timed_out"))))
+                  | .[0].conclusion // "unknown"')
+
+          case "${VERDICT}" in
+            success)
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::${COUNT} commit(s) in the last 24h and CI on main is green — cutting tonight's beta."
+              ;;
+            unknown)
+              # Unknown is not red. Refusing here would turn any gap in CI
+              # history into a silent release freeze, which is the worse
+              # failure of the two.
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::${COUNT} commit(s) in the last 24h, but no conclusive ci.yml run found on main. Proceeding: unknown is not red."
+              ;;
+            *)
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::CI on main concluded ${VERDICT} — skipping tonight's beta so the builders are not spent on a red tree. Fix main, or use Run workflow to force one."
+              ;;
+          esac
 
   prepare:
     name: Compute version
@@ -778,10 +828,9 @@ jobs:
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           rustup target list --installed
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
+      # No `linux-deps`: this job builds the universal dmg on macOS.
+      - name: Set up the Tauri build
+        uses: ./.github/actions/setup-tauri-build
 
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
@@ -803,9 +852,6 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-universal-apple-darwin-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install frontend dependencies
-        run: bun install
 
       - name: Build universal dmg
         # `--target universal-apple-darwin` triggers Tauri's universal
@@ -1038,24 +1084,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # `linux-deps`: the bundler links these into the AppImage and
+      # references them from the .deb/.rpm dependency lists. This used to
+      # be a second copy of `desktop.yml`'s apt list, byte for byte.
+      - name: Set up the Tauri build
+        uses: ./.github/actions/setup-tauri-build
         with:
-          bun-version: latest
-
-      # Tauri 2 system deps. Same set the `desktop.yml` CI job installs;
-      # the bundler links these into the AppImage and references them
-      # from the .deb/.rpm dependency lists.
-      - name: Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            patchelf
+          linux-deps: "true"
 
       # The AppImage's launcher is not ours, and it is not stripped either.
       # Tauri copies `AppRun-<arch>` from its tool cache into the AppDir
@@ -1111,9 +1146,6 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install frontend dependencies
-        run: bun install
 
       - name: Build the Linux desktop binary
         # Compile only. Bundling happens after the symbol upload and the
@@ -1377,10 +1409,9 @@ jobs:
           rustup target add ${{ matrix.target }}
           rustup target list --installed
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
+      # No `linux-deps`: this job builds the NSIS installer on Windows.
+      - name: Set up the Tauri build
+        uses: ./.github/actions/setup-tauri-build
 
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
@@ -1400,9 +1431,6 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install frontend dependencies
-        run: bun install
 
       - name: Build NSIS installer
         working-directory: crates/outl-desktop

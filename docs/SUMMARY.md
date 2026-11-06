@@ -64,6 +64,7 @@
 ## Project
 
 * [Development guide](development.md)
+* [CI and release](ci-and-release.md)
 * [Mobile UX behaviour](mobile-ux.md)
 * [iOS platform integration](ios-platform.md)
 * [Android platform integration](android-platform.md)

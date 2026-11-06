@@ -374,8 +374,9 @@ The `doc-keeper` agent runs at the end of a feature to catch what slipped throug
 
 | If your PR changes... | Update |
 |---|---|
-| `.github/workflows/ci.yml` (jobs, matrix, excluded crates, `RUSTDOCFLAGS`, paths-ignore) | `docs/development.md` § 9 (CI walkthrough) |
-| `.github/workflows/release.yml`, `mobile.yml`, `desktop.yml`, `testflight.yml`, `bench.yml`, `cleanup-tags.yml` | `docs/development.md` § 9 (CI table) + § 10 (Release process) |
+| `.github/workflows/ci.yml` (jobs, matrix, excluded crates, `RUSTDOCFLAGS`, paths-ignore) | `docs/ci-and-release.md` § 1 (CI walkthrough) |
+| `.github/workflows/release.yml`, `mobile.yml`, `desktop.yml`, `testflight.yml`, `bench.yml`, `cleanup-tags.yml` | `docs/ci-and-release.md` § 1 (CI table) + § 2 (Release process) |
+| `.github/actions/*/action.yml` (a step shared by more than one workflow) | `docs/ci-and-release.md` § 1 ("Shared build setup") — say what it covers and, as importantly, what it deliberately leaves duplicated |
 | `.claude/settings.json` hooks, `.claude/agents/*.md`, `.claude/commands/*.md` (any slash command behavior) | `docs/development.md` § 4 (Dev loop) — slash command table + hooks list + agents list |
 | `rust-toolchain.toml` version bump | `docs/development.md` § 1 (Quick start) + `CONTRIBUTING.md` (Quick start) |
 | Required system deps for a crate (Tauri, GTK, Bun, Xcode, hyperfine, etc.) | `docs/development.md` § 1 ("Optional toolchains by area" table) |
@@ -385,8 +386,8 @@ The `doc-keeper` agent runs at the end of a feature to catch what slipped throug
 | New `Op` variant, sidecar field, op-log format change | `docs/development.md` § 6 (Cookbook: Add a new `Op` variant) + `docs/crdt.md` + `outl-md/CLAUDE.md` |
 | `/check` / `/check-invariants` / `/roundtrip` / `/coverage` / `/new-op` / `/init-playground` semantics | `docs/development.md` § 4 (Dev loop slash command table) |
 | Benchmark layout (new bench file, new size tier, hyperfine recipe) | `docs/development.md` § 8 (Performance) |
-| Version source-of-truth or release tooling (e.g. someone proposes re-adding `version` to `tauri.conf.json`) | `docs/development.md` § 10 (Release process) + `crates/outl-mobile/CLAUDE.md` |
-| Conventional Commits enforcement / release-notes pipeline | `docs/development.md` § 10 + root `CLAUDE.md` "Coding conventions" |
+| Version source-of-truth or release tooling (e.g. someone proposes re-adding `version` to `tauri.conf.json`) | `docs/ci-and-release.md` § 2 (Release process) + `crates/outl-mobile/CLAUDE.md` |
+| Conventional Commits enforcement / release-notes pipeline | `docs/ci-and-release.md` § 2 + root `CLAUDE.md` "Coding conventions" |
 | Storage trait surface, `JsonlStorage` / `MemoryStorage` test contract | `docs/development.md` § 5 ("What to mock and what not to") + `docs/storage.md` + `outl-core/CLAUDE.md` |
 | New `Action` variant in `outl-shortcuts` / new keybinding / chord rebound | `docs/shortcuts.md` (the row that ships to users) + `outl-shortcuts/src/{action.rs,defaults.rs}` + every client's dispatcher (`outl-tui/src/input/*.rs`, `outl-desktop/src/lib/{shortcuts.ts,action-handlers.ts}`) + `outl-desktop/src/lib/api.ts` (TS mirror of the `Action` union — no codegen) |
 | New helper / DTO promoted into `outl-core` / `outl-md` / `outl-actions` (anything that should be reused across clients) | the catalog part that owns the concept — `docs/primitives-core.md`, `docs/primitives-markdown.md` or `docs/primitives-actions.md` (index: `docs/shared-primitives.md`) + mirror at `.github/instructions/shared-primitives.instructions.md` |

@@ -78,10 +78,13 @@ jobs:
     #
     # The premise was that a next green release exists. `Release`
     # concludes `failure` when ANY of its ~21 jobs fails, and
-    # `Publish @outl/plugin-sdk to npm` has been red since 2026-11-02
-    # while every beta tagged and published fine. So the gate held shut
-    # on 25 consecutive runs and the bucket reached 101 tags, with the
-    # script meant to cap it at 2 sitting here correct and never run.
+    # `publish_npm` plus `publish_crates` have failed on essentially
+    # every run since 2026-10-19 while the betas themselves tagged and
+    # published fine. The last `Release` to conclude `success` was
+    # 2026-10-20; the 30 runs after it are 16 failures and 14
+    # cancellations. So the gate held shut on 25 consecutive runs and
+    # the bucket reached 101 tags, with the script meant to cap it at 2
+    # sitting here correct and never run.
     # Self-healing that needs a green run is not self-healing in a repo
     # that has not had one in a week.
     #

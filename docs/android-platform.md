@@ -344,7 +344,8 @@ A tap bump cannot: it patches the version of the release that triggered it, and 
 
 That argument had a premise worth stating out loud: **a next green release exists.**
 It stopped being true.
-`Release` concludes `failure` when any of its ~21 jobs fails, and `Publish @outl/plugin-sdk to npm` went red on 2026-11-02 while every beta kept tagging and publishing normally.
+`Release` concludes `failure` when any of its ~21 jobs fails, and `publish_npm` plus `publish_crates` have failed on essentially every run since 2026-10-19 while the betas themselves kept tagging and publishing normally.
+The last `Release` to conclude `success` was 2026-10-20, and the 30 runs after it are 16 failures and 14 cancellations.
 The gate held shut for 25 consecutive runs.
 The beta bucket reached 101 tags, with the script meant to cap it at 2 sitting there correct and never executed.
 Self-healing that needs a green run is not self-healing in a repo that has not had one in a week.
