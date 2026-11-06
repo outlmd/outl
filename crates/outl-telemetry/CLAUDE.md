@@ -114,6 +114,7 @@ An unsymbolicated release — missing debug files, or a platform `sentry-cli` ca
 Fingerprinting on the scrubbed panic message splits them without reopening the leak path the scrubber exists to close, because it reads the field *after* redaction, never the raw message.
 
 Events with no exception, or whose value redacted to empty, keep the reset-to-default fingerprint — there is nothing panic-specific to group them by.
+Because a panic event now serializes `fingerprint`, it is listed in `ALLOWED_EVENT_KEYS`; it carries nothing the redacted `exception` does not already send.
 
 ### The one field the scrubber writes
 

@@ -28,7 +28,8 @@ use crate::redact::redact;
 /// Everything here is either protocol plumbing (`event_id`, `level`,
 /// `platform`, `timestamp`, `sdk`), a constant we chose (`release`,
 /// `environment`, `contexts`), or scrubbed author-written text (`culprit`,
-/// `transaction`, `message`, `logentry`, `exception`, `debug_meta`).
+/// `transaction`, `message`, `logentry`, `exception`, `debug_meta`, and the
+/// `fingerprint` built from the redacted exception value).
 ///
 /// `contexts` is in the second group, not the first: it survives because this
 /// scrubber rebuilds it from compile-time constants, not because an incoming
@@ -44,6 +45,7 @@ pub const ALLOWED_EVENT_KEYS: &[&str] = &[
     "environment",
     "event_id",
     "exception",
+    "fingerprint",
     "level",
     "logentry",
     "message",
