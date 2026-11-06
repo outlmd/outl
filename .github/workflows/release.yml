@@ -279,6 +279,21 @@ jobs:
           git tag "${TAG}"
           git push origin "${TAG}"
 
+  prune_betas:
+    name: Prune old beta tags
+    needs: tag
+    # Runs the moment the tag exists, rather than when the last build
+    # finishes 9 to 34 min later (measured across recent runs).
+    # Deliberately has no `if:` and takes no
+    # inputs: `tag` already encodes both conditions worth checking. It
+    # only runs on `create_tag == 'true'`, and `prepare` forces that
+    # false for a dry run, so a skipped `tag` skips this too.
+    #
+    # It cannot be `on: push: tags:` inside the prune workflow itself,
+    # because the tag above is pushed with `GITHUB_TOKEN` and a ref
+    # pushed by that token triggers nothing.
+    uses: ./.github/workflows/cleanup-tags.yml
+
   create_release:
     name: Create draft release
     needs: [prepare, tag]

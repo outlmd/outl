@@ -2,8 +2,9 @@
 # Prune old `vX.Y.Z-beta.N` tags + GitHub Releases, keeping the
 # `$KEEP` most recently generated betas in the whole repo.
 #
-# Driven by `.github/workflows/cleanup-tags.yml`. Runs after every
-# `Release` workflow on `main`.
+# Driven by `.github/workflows/cleanup-tags.yml`, which `release.yml`
+# calls from `needs: tag` — once per tag created, not once per finished
+# release.
 #
 # Env vars (all required unless noted):
 #

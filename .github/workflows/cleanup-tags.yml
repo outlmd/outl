@@ -5,19 +5,38 @@ name: Cleanup beta tags
 # This workflow keeps only the two most recently generated betas in
 # the whole repo, and deletes every older one.
 #
-# It runs after every `Release` on `main`, and is also exposed as
-# `workflow_dispatch` with an opt-in `dry_run` flag so we can preview
-# what would be pruned before letting it act.
+# It runs once per tag, called from `release.yml`, and is also exposed
+# as `workflow_dispatch` with an opt-in `dry_run` flag so we can preview
+# what would be pruned before letting it act. Use the dispatch for a
+# large catch-up drain: it is outside `release.yml`'s concurrency group,
+# so a merge landing mid-drain will not cancel it.
 #
 # What is and is not a prune candidate lives with the code that decides
 # it, in `.github/scripts/cleanup_beta_tags.sh`. This file only says
 # when that script runs.
 
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
-    branches: [main]
+  # Called by `release.yml` from `needs: tag`, so the prune happens when
+  # the tag lands rather than when the whole workflow finishes, 9 to 34
+  # min later across recent runs. `tag` only runs on
+  # `create_tag == 'true'`, and a dry run forces that false, so reaching
+  # the call means a tag really exists.
+  #
+  # NOT `on: push: tags:`. `release.yml` pushes the beta tag with
+  # `GITHUB_TOKEN`, and a ref pushed by that token does not trigger
+  # workflows. `docker.yml` has declared `tags: ["v*"]` for months and
+  # has zero tag-triggered runs across ~100 pushed beta tags, which is
+  # what that looks like from the outside: nothing, silently.
+  workflow_call:
+    inputs:
+      dry_run:
+        description: "List what would be deleted, but don't delete"
+        type: boolean
+        default: false
+      keep:
+        description: "How many of the newest betas to keep, repo-wide"
+        type: string
+        default: "2"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -33,35 +52,45 @@ permissions:
   contents: write
 
 concurrency:
-  # Queue, never cancel. The prune is idempotent, so cancelling used to
-  # look free: the next run recomputes the list from scratch. But a
-  # burst of merges then cancels every cleanup before it finishes its
-  # delete loop, and "the next one will finish the job" is only true if
-  # a next one ever gets to run to completion. That is the same shape as
-  # the bug below: a prune that silently never happens. Steady state is
-  # one deletion per run, so a queued run costs seconds.
+  # Queue, never cancel. The prune is idempotent, so cancelling looked
+  # free: the next run recomputes the list from scratch. But "the next
+  # one will finish the job" is only true if a next one ever runs to
+  # completion, which is the same shape as the bug documented on the job
+  # below. Steady state is one deletion, so a queued run costs seconds.
+  #
+  # This only stops two prunes from racing each other. As a called job
+  # it still dies with its caller, and `release.yml` cancels in progress
+  # per ref, so a merge landing mid-prune takes it down. That is fine for
+  # one deletion and not fine for a 99-tag drain, which is what the
+  # `workflow_dispatch` path is for.
   group: cleanup-tags
   cancel-in-progress: false
 
 jobs:
   cleanup:
     name: Prune beta tags
-    # Deliberately does NOT gate on `workflow_run.conclusion`.
+    # No gate on how the caller's other jobs went, deliberately.
     #
-    # `Release` concludes `failure` whenever ANY of its ~21 jobs fails,
-    # including jobs that say nothing about whether a release landed
-    # (`Publish @outl/plugin-sdk to npm` has been red since 2026-11-02
-    # while every beta published fine). Gating on it skipped this job on
-    # 25 consecutive runs, and the beta bucket reached 101 tags while the
-    # script that was supposed to cap it at 2 sat there, correct and
-    # never executed.
+    # This used to be a `workflow_run` listener gated on
+    # `Release` concluding `success`, and `docs/android-platform.md`
+    # argued for it: a red Android build skips the prune, but the prune
+    # recomputes from scratch, so the next green release catches up.
     #
-    # That is the mistake `publish_release` already avoids: ask what is
-    # actually on the repo, not whether the workflow went green. The
-    # script asks it directly, off the live tag list, so a Release that
-    # published nothing leaves it a no-op. What this gate used to cover
-    # by accident is now covered on purpose, by the script's manifest
-    # guard.
+    # The premise was that a next green release exists. `Release`
+    # concludes `failure` when ANY of its ~21 jobs fails, and
+    # `Publish @outl/plugin-sdk to npm` has been red since 2026-11-02
+    # while every beta tagged and published fine. So the gate held shut
+    # on 25 consecutive runs and the bucket reached 101 tags, with the
+    # script meant to cap it at 2 sitting here correct and never run.
+    # Self-healing that needs a green run is not self-healing in a repo
+    # that has not had one in a week.
+    #
+    # Being called from `needs: tag` removes the question instead of
+    # re-answering it: the caller cannot reach the call unless the tag
+    # landed, and nothing about a later build failure is consulted. What
+    # the old gate covered by accident, a Release that tagged but died
+    # before bumping the package manifests, is covered on purpose now by
+    # the script's manifest guard.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,6 +100,9 @@ jobs:
       - name: Compute prune list and delete
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-          KEEP: ${{ github.event.inputs.keep || '2' }}
+          # `inputs` is populated for both `workflow_call` and
+          # `workflow_dispatch`, and both declare defaults, so no
+          # `|| 'false'` fallback is needed here.
+          DRY_RUN: ${{ inputs.dry_run }}
+          KEEP: ${{ inputs.keep }}
         run: .github/scripts/cleanup_beta_tags.sh
