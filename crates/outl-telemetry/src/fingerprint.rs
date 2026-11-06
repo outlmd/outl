@@ -94,7 +94,7 @@ mod tests {
         );
     }
 
-    fn fingerprint_strs(event: &Event<'static>) -> Vec<&str> {
+    fn fingerprint_strs<'a>(event: &'a Event<'static>) -> Vec<&'a str> {
         event.fingerprint.iter().map(|s| s.as_ref()).collect()
     }
 
