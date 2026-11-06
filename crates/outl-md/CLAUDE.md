@@ -58,6 +58,9 @@ Treat matching with the same paranoia as the CRDT.
   `insert_sibling_after/before` clamp the computed position to `siblings.len()` instead of panicking when a caller passes a path the live tree no longer satisfies,
   (typical case: page parsed to zero blocks because its content didn't start with a `- ` marker, but the TUI's `selected` cursor defaulted to `[0]`).
   Falling back to "append at the end" is the right shape — the user's intent ("create a new block") is satisfied, no data is lost.
+  **`siblings_mut` returns `Option<&mut Vec<OutlineNode>>`.**
+  A stale *nested* path (e.g. `[13, 0]` left over after an outline shrank) can walk past a parent level that no longer has that many children — the leaf-only clamp above only covered a path of length 1 against an empty page.
+  Callers treat `None` as "the path no longer resolves": the structural ops no-op, the insert helpers fall back to appending at the top level.
 - **Emoji catalog** (`emoji.rs`) — GitHub gemoji catalog (backed by the [`emojis`] crate).
   `shortcode_to_unicode("tada") → Some("🎉")` is the one-way resolver every renderer uses;
   `search(query, limit) → Vec<EmojiHit>` powers the `:shortcode:` autocomplete shared by TUI / mobile / desktop through the `outl_emoji_search` Tauri command,
@@ -310,6 +313,9 @@ src/
 ├── property.rs     # `key:: value` line + the page-property header run (private mod)
 ├── fence.rs        # fenced code: literal capture while the outline grammar is suspended
 ├── render.rs       # AST → md (clean)
+├── outline_ops.rs  # pure Vec<OutlineNode> AST helpers (insert/indent/outdent/delete/move); siblings_mut() is Option-returning, see "outline_ops" above
+├── outline_ops/
+│   └── tests.rs    # unit tests, incl. the stale-nested-path regression net (split out like parse/tests.rs)
 ├── sidecar.rs      # read/write .outl JSON; sidecar/{payload,paths,digest}.rs
 ├── matching.rs     # 3-level matching algorithm
 ├── matching/
