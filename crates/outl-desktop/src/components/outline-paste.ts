@@ -72,5 +72,6 @@ export function createPasteOps(deps: PasteOpsDeps) {
     return pasteEditorUpdate(reply);
   }
 
-  return { flushDraft, run };
+  // `flushDraft` stays private: `run` already runs it, first.
+  return { run };
 }

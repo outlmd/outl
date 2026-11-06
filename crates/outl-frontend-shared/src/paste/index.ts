@@ -241,11 +241,10 @@ export function pasteEditorUpdate(reply: {
 }): PasteEditorUpdate | null {
   const text = reply.host_text;
   if (text === undefined) return null;
-  // A reply that carries the text but not the caret can only come from
-  // an older backend; landing at the end of the paste beats discarding
-  // it.
-  const chars = reply.host_caret ?? Number.MAX_SAFE_INTEGER;
-  return { text, caret: charOffsetToUtf16Offset(text, chars) };
+  // A reply carrying the text but not the caret can only come from an
+  // older backend; the end of the text beats discarding the paste.
+  if (reply.host_caret === undefined) return { text, caret: text.length };
+  return { text, caret: charOffsetToUtf16Offset(text, reply.host_caret) };
 }
 
 /**
