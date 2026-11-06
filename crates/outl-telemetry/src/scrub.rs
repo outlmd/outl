@@ -419,8 +419,11 @@ mod tests {
 
         let scrubbed = scrub_event(event).expect("the event is never dropped");
 
-        let fingerprint: Vec<&str> =
-            scrubbed.fingerprint.iter().map(|part| part.as_ref()).collect();
+        let fingerprint: Vec<&str> = scrubbed
+            .fingerprint
+            .iter()
+            .map(|part| part.as_ref())
+            .collect();
         assert_eq!(fingerprint.first().copied(), Some("outl-panic"));
         let value = fingerprint
             .get(1)
