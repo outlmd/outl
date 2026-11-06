@@ -74,8 +74,13 @@ name: Release
 # ------------------------------------------------------------------
 # Crash-reporting secrets (RFC 0377).
 #
-#   OUTL_SENTRY_DSN_CLI       repository secret. DSN of the `outl-cli`
-#                             Sentry project
+#   OUTL_SENTRY_DSN_CLI       repository secret. DSN baked into the `outl`
+#                             binary. `outl` with no subcommand is the TUI
+#                             and reports as `tui@<version>`, so both the
+#                             CLI and TUI surfaces land in the `outl`
+#                             project (issue ids OUTL-*), same as desktop.
+#                             Symbol upload uses that project, not a
+#                             separate `outl-cli`
 #   OUTL_SENTRY_DSN_DESKTOP   repository secret. DSN baked into the desktop
 #                             binary. Events land in the `outl` project
 #                             (issue ids OUTL-*) with release
@@ -522,7 +527,7 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: outl
-          SENTRY_PROJECT: outl-cli
+          SENTRY_PROJECT: outl
         run: |
           set -uo pipefail
           if [[ -z "${SENTRY_AUTH_TOKEN}" ]]; then

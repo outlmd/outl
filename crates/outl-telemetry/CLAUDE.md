@@ -103,6 +103,17 @@ They come from `std::env::consts::OS` / `ARCH`, which are **compile-time constan
 The insert happens *after* `contexts.clear()`, which is what keeps this an allowlist by construction: enable that integration tomorrow and everything it gathered still dies in the clear, while those two fields are still only what the scrubber put there.
 An allowlist of keys *inside* `contexts` would have the opposite property — it would trust what arrived.
 
+### The second field the scrubber writes
+
+`fingerprint` is the second field `scrub_event` writes, through `set_panic_fingerprint` (`src/fingerprint.rs`).
+It runs last — after the exception-scrubbing loop and after the reset to the protocol default — so it only ever sees an already-redacted exception value.
+Sentry's default grouping hashes the stack trace, and an unsymbolicated trace (the common case for a `cargo install` or Homebrew build) hashes the same across unrelated panics.
+OUTL-4 was two different panics filed as one issue for exactly that reason.
+The redacted panic message is specific to the call site, so `["outl-panic", <redacted value>]` groups by that instead.
+It leaves the fingerprint alone when there is no exception, or the redacted value is empty.
+Never `[]`: that tells the server to group every crash together, the opposite of what this exists to do.
+`fingerprint` is in `ALLOWED_EVENT_KEYS` because of this.
+The value it carries is nothing the already-redacted exception did not already send, so allowing the key through costs nothing the scrubber had not already redacted.
 
 ## Why `redact` keeps relative paths
 
@@ -190,6 +201,13 @@ They are the gate.
 - `the_scrubber_writes_the_os_and_the_arch` and `an_incoming_os_context_is_replaced_not_merged` — the two halves of the one field we write.
   The second is what makes the write safe: the fixture arrives with a path sitting in `os.name`, shaped like what the `contexts` integration would produce, and none of it may survive.
   Without it, "the scrubber writes the OS" would also pass against an implementation that wrote the OS and left the rest of the map alone.
+- `two_scrubbed_panics_with_different_messages_get_different_fingerprints`,
+  `a_path_like_leak_in_the_panic_value_is_redacted_before_it_reaches_the_fingerprint`,
+  `an_event_with_no_exception_keeps_the_protocol_default_fingerprint` (`src/scrub.rs`) — the second field we write.
+  The first is OUTL-4 itself: two unrelated panics must not collapse into one fingerprint.
+  The second pins that the fingerprint only ever sees a value `redact` already cleaned, by running the scrubber's own leak fixture through it.
+  The third is the fail-safe: no exception means nothing to group by, so the protocol default survives rather than an empty list that would group every crash together.
+  `fingerprint.rs`'s own unit tests cover the same three cases directly against `set_panic_fingerprint`, plus the empty-but-present-value case `scrub_event`'s loop never produces on its own.
 - `a_closed_stderr_does_not_panic` (`tests/closed_stderr.rs`) — spawns this test binary with stderr piped, drops the read end, then logs and panics.
   Exit 0 is the assertion. A printer panic exits 101; a hook that panics again aborts, and `catch_unwind` hides neither.
   The file has no libtest harness because the harness would capture the pipe the parent is reading.

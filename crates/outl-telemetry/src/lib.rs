@@ -41,6 +41,8 @@ pub use redact::{redact, FILE_MARKER, ID_MARKER, PATH_MARKER, TEXT_MARKER};
 pub use stdio::{install_panic_hook, lossy_stderr, LossyStderr};
 
 #[cfg(feature = "sentry")]
+mod fingerprint;
+#[cfg(feature = "sentry")]
 mod scrub;
 #[cfg(feature = "sentry")]
 pub use scrub::{scrub_event, ALLOWED_EVENT_KEYS};

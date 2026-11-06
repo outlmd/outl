@@ -20,18 +20,22 @@ use std::borrow::Cow;
 
 use sentry::protocol::{DebugImage, DebugMeta, DeviceContext, Event, OsContext, Stacktrace};
 
+use crate::fingerprint::set_panic_fingerprint;
 use crate::redact::redact;
 
 /// The top-level keys a scrubbed event may serialize.
 ///
 /// Everything here is either protocol plumbing (`event_id`, `level`,
 /// `platform`, `timestamp`, `sdk`), a constant we chose (`release`,
-/// `environment`, `contexts`), or scrubbed author-written text (`culprit`,
-/// `transaction`, `message`, `logentry`, `exception`, `debug_meta`).
+/// `environment`, `contexts`), scrubbed author-written text (`culprit`,
+/// `transaction`, `message`, `logentry`, `exception`, `debug_meta`), or
+/// derived from already-redacted text (`fingerprint`).
 ///
 /// `contexts` is in the second group, not the first: it survives because this
 /// scrubber rebuilds it from compile-time constants, not because an incoming
-/// value was allowed through.
+/// value was allowed through. `fingerprint` carries nothing the exception
+/// does not already send — see [`set_panic_fingerprint`] — so allowing it
+/// through costs nothing the scrubber has not already redacted.
 ///
 /// `an_event_carries_only_allowlisted_fields` asserts the serialized key set
 /// against this list, so a field added to the protocol — or stopped being
@@ -43,6 +47,7 @@ pub const ALLOWED_EVENT_KEYS: &[&str] = &[
     "environment",
     "event_id",
     "exception",
+    "fingerprint",
     "level",
     "logentry",
     "message",
@@ -133,6 +138,10 @@ pub fn scrub_event(mut event: Event<'static>) -> Option<Event<'static>> {
     }
 
     scrub_debug_meta(&mut event.debug_meta);
+
+    // After the exception loop above, so this only ever sees the redacted
+    // value — never the raw panic message.
+    set_panic_fingerprint(&mut event);
 
     Some(event)
 }
@@ -379,6 +388,61 @@ mod tests {
             !payload.contains(LEAK),
             "the incoming os context leaked into the payload"
         );
+    }
+
+    /// RFC: OUTL-4 mixed two unrelated panics into one issue because
+    /// Sentry's default grouping hashes the stack trace, and an
+    /// unsymbolicated trace hashes the same across unrelated panics. The
+    /// fingerprint has to actually distinguish them.
+    #[test]
+    fn two_scrubbed_panics_with_different_messages_get_different_fingerprints() {
+        let mut other = fully_populated_event();
+        other.exception.values[0].value =
+            Some("index out of bounds: the len is 3 but the index is 5".into());
+
+        let a = scrub_event(fully_populated_event()).expect("never dropped");
+        let b = scrub_event(other).expect("never dropped");
+
+        assert_ne!(a.fingerprint, b.fingerprint);
+    }
+
+    /// The fingerprint is set from the exception value *after* the scrubbing
+    /// loop above has redacted it, so a path-like leak in the panic message
+    /// must never reach the fingerprint either.
+    #[test]
+    fn a_path_like_leak_in_the_panic_value_is_redacted_before_it_reaches_the_fingerprint() {
+        let mut event = fully_populated_event();
+        event.exception.values[0].value = Some(format!("could not open {LEAK}"));
+
+        let scrubbed = scrub_event(event).expect("never dropped");
+
+        let fingerprint = scrubbed.fingerprint.as_ref();
+        assert_eq!(
+            fingerprint.first().map(|value| value.as_ref()),
+            Some("outl-panic")
+        );
+        let panic_value = fingerprint.get(1).expect("the redacted panic value");
+        assert!(
+            !panic_value.contains("avelino"),
+            "the username leaked into the fingerprint: {panic_value}"
+        );
+        assert!(
+            !panic_value.contains("outl-p2p"),
+            "the workspace name leaked into the fingerprint: {panic_value}"
+        );
+    }
+
+    /// An event with no exception at all — nothing this scrubber could use
+    /// to group by — keeps the protocol default fingerprint rather than the
+    /// empty list that would group every crash together.
+    #[test]
+    fn an_event_with_no_exception_keeps_the_protocol_default_fingerprint() {
+        let mut event = fully_populated_event();
+        event.exception.values.clear();
+
+        let scrubbed = scrub_event(event).expect("never dropped");
+
+        assert_eq!(scrubbed.fingerprint, Event::default().fingerprint);
     }
 
     fn fully_populated_event() -> Event<'static> {
