@@ -390,7 +390,8 @@ impl App {
                     return;
                 };
                 let parent = abs_path[..abs_path.len() - 1].to_vec();
-                let Some(sibling_count) = siblings_mut(&mut page.blocks, &parent).map(Vec::len)
+                let Some(sibling_count) =
+                    siblings_mut(&mut page.blocks, &parent).map(|siblings| siblings.len())
                 else {
                     return;
                 };
@@ -412,7 +413,8 @@ impl App {
             return;
         };
         let parent_path = path[..path.len() - 1].to_vec();
-        let Some(sibling_count) = siblings_mut(&mut self.page.blocks, &parent_path).map(Vec::len)
+        let Some(sibling_count) =
+            siblings_mut(&mut self.page.blocks, &parent_path).map(|siblings| siblings.len())
         else {
             return;
         };
