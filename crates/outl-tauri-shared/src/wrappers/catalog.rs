@@ -140,7 +140,7 @@ macro_rules! block_commands {
                 block_id: String,
                 caret: u32,
                 text: String,
-            ) -> ::std::result::Result<$crate::state::PageView, String>
+            ) -> ::std::result::Result<$crate::state::PasteReply, String>
                 => $crate::commands::block::paste_markdown_at;
 
             /// Paste plain text into a block at `caret`, no outline parsing.
@@ -149,7 +149,7 @@ macro_rules! block_commands {
                 block_id: String,
                 caret: u32,
                 text: String,
-            ) -> ::std::result::Result<$crate::state::PageView, String>
+            ) -> ::std::result::Result<$crate::state::PasteReply, String>
                 => $crate::commands::block::paste_plain_at;
 
             /// Render several blocks' subtrees as one markdown string.

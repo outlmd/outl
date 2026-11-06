@@ -346,3 +346,91 @@ describe("BlockRow image rendering — #322", () => {
     expect(tagSpan?.className).toContain("text-(--color-outl-tag-link-fg)");
   });
 });
+
+/**
+ * Regression for #488: a paste rewrites the block the user is typing
+ * in, and the draft is seeded once per row (only `startEdit` re-seeds
+ * it). So re-rendering the outline left the textarea on the pre-paste
+ * string, and the next Esc / blur committed *that* back over the paste
+ * — the pasted link vanished from the block and from the `.md`, with
+ * nothing on screen to say so.
+ *
+ * The editor applies the update the paste callback resolves to. These
+ * pin both halves: the textarea shows the pasted text with the caret
+ * after it, and the commit that follows carries the pasted text.
+ */
+function pasteEvent(flavours: Record<string, string>): ClipboardEvent {
+  // jsdom's `ClipboardEvent` ignores `clipboardData` in its init dict.
+  const ev = new Event("paste", {
+    bubbles: true,
+    cancelable: true,
+  }) as ClipboardEvent;
+  Object.defineProperty(ev, "clipboardData", {
+    value: { getData: (type: string) => flavours[type] ?? "" },
+  });
+  return ev;
+}
+
+/** Let the paste handler's awaits settle. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+describe("BlockRow paste into the block being edited — #488", () => {
+  const HOST_AFTER = "Some text[See the invoice](https://example.test/i)";
+
+  it("shows the pasted text and commits it, not the stale draft", async () => {
+    const cb = makeCb({
+      onPasteMarkdown: vi
+        .fn()
+        .mockResolvedValue({ text: HOST_AFTER, caret: HOST_AFTER.length }),
+    });
+    const block = makeBlock("blk-paste", "Some text");
+    const ta = mountEditing(block, cb);
+    await flush();
+    ta.setSelectionRange(9, 9);
+
+    const ev = pasteEvent({
+      // A link copied out of an email: HTML only, so `choosePasteRoute`
+      // routes it `rich` and the backend gets `[label](url)`.
+      "text/html": '<a href="https://example.test/i">See the invoice</a>',
+      "text/plain": "See the invoice",
+    });
+    ta.dispatchEvent(ev);
+    await flush();
+
+    expect(ev.defaultPrevented).toBe(true);
+    expect(cb.onPasteMarkdown).toHaveBeenCalled();
+    expect(ta.value).toBe(HOST_AFTER);
+    expect(ta.selectionStart).toBe(HOST_AFTER.length);
+
+    // The part that was silent data loss: Esc used to write "Some text".
+    ta.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await flush();
+    expect(cb.onCommit).toHaveBeenCalledWith("blk-paste", HOST_AFTER);
+  });
+
+  it("leaves the draft alone when the paste did not touch the host block", async () => {
+    // `null` is what a paste that only created siblings resolves to.
+    // Writing the draft anyway would be a round-trip's worth of racing
+    // the user's keystrokes for no change.
+    const cb = makeCb({ onPasteMarkdown: vi.fn().mockResolvedValue(null) });
+    const block = makeBlock("blk-untouched", "Some text");
+    const ta = mountEditing(block, cb);
+    await flush();
+
+    ta.dispatchEvent(
+      pasteEvent({ "text/plain": "- one\n- two", "text/html": "" }),
+    );
+    await flush();
+
+    expect(cb.onPasteMarkdown).toHaveBeenCalled();
+    expect(ta.value).toBe("Some text");
+  });
+});

@@ -50,6 +50,7 @@ pub(super) fn paste_as_children(
     Ok(PasteOutcome {
         new_blocks: collect_ids(&outcomes),
         host_text: None,
+        host_caret: None,
         root_count: blocks.len(),
     })
 }
@@ -74,6 +75,7 @@ pub(super) fn paste_after(
     Ok(PasteOutcome {
         new_blocks,
         host_text: None,
+        host_caret: None,
         root_count: blocks.len(),
     })
 }
@@ -127,9 +129,15 @@ pub(super) fn paste_at_caret(
         new_blocks.push(id);
     }
 
+    // Everything that merged in sits to the left of the caret, and the
+    // tail became a sibling, so the end of the host text *is* the end
+    // of the pasted run. Measured rather than derived from `caret`:
+    // `join_caret_left_with` may have inserted a separating space.
+    let host_caret = host_text.chars().count();
     Ok(PasteOutcome {
         new_blocks,
         host_text: Some(host_text),
+        host_caret: Some(host_caret),
         root_count: blocks.len(),
     })
 }
@@ -149,9 +157,14 @@ pub(super) fn paste_plain_text(
             let (left, right) = split_at_char(&original, caret);
             let new_text = format!("{left}{text}{right}");
             edit_text(workspace, hlc, block, &new_text)?;
+            // The tail stays in the same block here, so the caret goes
+            // between the splice and `right` — not at the end, which
+            // would drop the user past text they were mid-sentence in.
+            let host_caret = left.chars().count() + text.chars().count();
             Ok(PasteOutcome {
                 new_blocks: Vec::new(),
                 host_text: Some(new_text),
+                host_caret: Some(host_caret),
                 root_count: 0,
             })
         }
@@ -163,6 +176,7 @@ pub(super) fn paste_plain_text(
             Ok(PasteOutcome {
                 new_blocks: vec![id],
                 host_text: None,
+                host_caret: None,
                 // Plain-text path: see `PasteOutcome::root_count`. The
                 // block exists because of the anchor, not because the
                 // user pasted outline syntax — counter stays at 0 so
@@ -178,6 +192,7 @@ pub(super) fn paste_plain_text(
             Ok(PasteOutcome {
                 new_blocks: vec![id],
                 host_text: None,
+                host_caret: None,
                 root_count: 0,
             })
         }

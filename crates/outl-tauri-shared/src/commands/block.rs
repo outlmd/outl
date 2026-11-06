@@ -12,7 +12,7 @@ use outl_actions::{
     paste_plain as action_paste_plain, render_block_md,
     set_block_collapsed as action_set_block_collapsed, split_block as action_split_block,
     toggle_quote as action_toggle_quote, toggle_todo as action_toggle_todo, ActionError,
-    PasteAnchor,
+    PasteAnchor, PasteOutcome,
 };
 use outl_md::index::WorkspaceIndex;
 use tracing::warn;
@@ -22,7 +22,7 @@ use crate::helpers::{
     with_ws, with_ws_mut,
 };
 use crate::host::AppHost;
-use crate::state::{CreateBlockReply, CutBlockReply, PageView};
+use crate::state::{CreateBlockReply, CutBlockReply, PageView, PasteReply};
 
 /// Create a block. Precedence: `before_id` (vim `O` /
 /// `Cmd/Ctrl+Shift+Enter` at col 0) wins over `after_id` (vim `o` /
@@ -366,16 +366,21 @@ pub fn set_block_collapsed<S: AppHost>(
 /// Unicode codepoint offset into the host block's text — the frontend
 /// converts `textarea.selectionStart` (UTF-16) via
 /// `utf16OffsetToCharOffset` from `@outl/shared/paste` first.
+///
+/// Returns a [`PasteReply`], not a bare `PageView`: the host block's
+/// new text rides along so a client editing it can re-seed its draft
+/// instead of committing the pre-paste string back over the paste
+/// ([issue #488](https://github.com/outlmd/outl/issues/488)).
 pub fn paste_markdown_at<S: AppHost>(
     state: &S,
     page_id: String,
     block_id: String,
     caret: u32,
     text: String,
-) -> Result<PageView, String> {
+) -> Result<PasteReply, String> {
     let page = parse_node_id(&page_id)?;
     let block = parse_node_id(&block_id)?;
-    finish_in_page(state, page, |ws| {
+    finish_in_page_with(state, page, |ws| {
         action_paste_markdown(
             ws,
             state.hlc(),
@@ -385,8 +390,8 @@ pub fn paste_markdown_at<S: AppHost>(
             },
             &text,
         )
-        .map(|_| ())
     })
+    .map(paste_reply)
 }
 
 /// Paste clipboard text **without formatting**: the raw string is
@@ -399,10 +404,10 @@ pub fn paste_plain_at<S: AppHost>(
     block_id: String,
     caret: u32,
     text: String,
-) -> Result<PageView, String> {
+) -> Result<PasteReply, String> {
     let page = parse_node_id(&page_id)?;
     let block = parse_node_id(&block_id)?;
-    finish_in_page(state, page, |ws| {
+    finish_in_page_with(state, page, |ws| {
         action_paste_plain(
             ws,
             state.hlc(),
@@ -412,8 +417,21 @@ pub fn paste_plain_at<S: AppHost>(
             },
             &text,
         )
-        .map(|_| ())
     })
+    .map(paste_reply)
+}
+
+/// Shape a paste's outcome into the wire reply, for both paste commands.
+///
+/// One function because the two differ only in which `outl-actions`
+/// entry point ran; a second copy of this mapping is how one of them
+/// would start forgetting to carry the caret.
+fn paste_reply((outcome, view): (PasteOutcome, PageView)) -> PasteReply {
+    PasteReply {
+        view,
+        host_text: outcome.host_text,
+        host_caret: outcome.host_caret.map(|c| c as u32),
+    }
 }
 
 /// Serialize the given blocks (each with its subtree) to clean outl

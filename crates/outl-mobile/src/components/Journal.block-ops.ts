@@ -33,11 +33,14 @@ import {
   moveBlockUp,
   outdentBlock,
   pasteBlockAfter,
+  pasteMarkdown,
   toggleTodo,
 } from "@outl/shared/api/commands";
 import { countDescendants, findBlock, rawTextWithTodo } from "@outl/shared/outline";
+import { pasteEditorUpdate } from "@outl/shared/paste";
 
 import { haptic } from "../lib/haptics";
+import { parkCaret, spliceText } from "../lib/textarea";
 
 /**
  * The slice of `Journal`'s state a block operation needs.
@@ -63,6 +66,13 @@ export interface JournalBlockDeps {
   blockClipboard: () => string | null;
   setBlockClipboard: (markdown: string) => void;
   setPendingDelete: (pending: { id: string; descendants: number }) => void;
+  /**
+   * The textarea the user is typing in, or `null` when no block is in
+   * edit mode. Needed by the ops that write into the live editor rather
+   * than only into the workspace — a caret paste is one, since the
+   * block it rewrites is the block being edited.
+   */
+  activeTextarea: () => HTMLTextAreaElement | null;
 }
 
 export function createBlockOps(deps: JournalBlockDeps) {
@@ -219,6 +229,61 @@ export function createBlockOps(deps: JournalBlockDeps) {
       } catch {
         // Best-effort, same as "Copy text" / "Copy block" above.
       }
+    },
+
+    /**
+     * An external-clipboard paste that landed inside a block's
+     * textarea. `<BlockTextarea />` already chose the route
+     * (`choosePasteRoute`) and called `preventDefault`, so what arrives
+     * is the markdown the backend should splice at `caret`.
+     *
+     * Three steps, and the last two are the ones easy to skip:
+     *
+     * 1. Flush the in-flight draft, so the backend splices at a caret
+     *    measured against the text it is holding.
+     * 2. Fold the fresh view in, as every op does.
+     * 3. **Put the host block's new text back into the editor.** The
+     *    draft is seeded once by `startEdit`, so stopping at step 2
+     *    left the textarea on the pre-paste string, and `commitEdit`
+     *    wrote that back over the paste on the next blur — issue #488,
+     *    a pasted link gone from the block and from the `.md` with
+     *    nothing said.
+     *
+     * The caret comes off the reply, never recomputed as "where I
+     * pasted plus what I sent": the backend built the string and may
+     * have inserted a separating space.
+     */
+    async pasteMarkdownAt(blockId: string, caret: number, text: string) {
+      const pid = deps.pageId();
+      if (!pid) return;
+      if (deps.editingId() === blockId) {
+        const committed = await deps.withError(() =>
+          editBlock(pid, blockId, deps.draft()),
+        );
+        if (committed) deps.setView(committed);
+      }
+      const reply = await deps.withError(() =>
+        pasteMarkdown(pid, blockId, caret, text),
+      );
+      if (!reply) return;
+      deps.applyView(reply.view);
+      const update = pasteEditorUpdate(reply);
+      // The guard is the round-trip: the user can tap out of the block
+      // while it runs, and the draft then belongs to another block.
+      if (!update || deps.editingId() !== blockId) return;
+      const el = deps.activeTextarea();
+      if (!el) {
+        deps.setDraft(update.text);
+        return;
+      }
+      // `spliceText` + double `parkCaret`, the pattern `lib/textarea.ts`
+      // owns: a bare `el.value =` jumps the caret to the end on
+      // WKWebView, and Solid's `value={draft()}` effect fires after
+      // `setDraft` and would jump it again.
+      spliceText(el, 0, el.value.length, update.text);
+      parkCaret(el, update.caret);
+      deps.setDraft(update.text);
+      parkCaret(el, update.caret);
     },
 
     indent: (id: string) => structural(id, indentBlock),

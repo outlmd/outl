@@ -460,3 +460,85 @@ fn plain_paste_never_converts_tabular_data() {
     let kids = crate::tree::children_of(&workspace, host);
     assert_eq!(workspace.block_text(kids[0].0).as_deref(), Some(tsv));
 }
+
+// ── The host block's new text and caret (issue #488) ──────────────────
+//
+// A client editing a block holds the text in a draft it seeded once.
+// After an `AtCaret` paste the host block's text changed under that
+// draft, so the client has to be told the new text *and* where the
+// caret now sits — otherwise it shows the pre-paste text and commits it
+// back over the paste on the way out of the editor.
+//
+// The offsets are codepoints, not UTF-16 code units, for the same
+// reason `PasteAnchor::AtCaret.caret` is.
+
+#[test]
+fn a_caret_paste_reports_the_caret_after_the_pasted_text() {
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("olá mundo")).unwrap();
+    let out = paste_markdown(
+        &mut workspace,
+        &hlc,
+        PasteAnchor::AtCaret {
+            block: host,
+            caret: 4,
+        },
+        "- um\n- dois",
+    )
+    .unwrap();
+    // "olá um" — the caret belongs at the end of what merged in, which
+    // is the whole host text here (the tail went to a sibling).
+    assert_eq!(out.host_text.as_deref(), Some("olá um"));
+    assert_eq!(out.host_caret, Some(6));
+}
+
+#[test]
+fn a_plain_caret_paste_reports_the_caret_between_the_splice_and_the_tail() {
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("hello world")).unwrap();
+    let out = paste_plain(
+        &mut workspace,
+        &hlc,
+        PasteAnchor::AtCaret {
+            block: host,
+            caret: 6,
+        },
+        "BRAVE ",
+    )
+    .unwrap();
+    assert_eq!(out.host_text.as_deref(), Some("hello BRAVE world"));
+    // Not the end of the text: "world" is still to the right of the
+    // caret, so the user keeps typing where they pasted.
+    assert_eq!(out.host_caret, Some(12));
+}
+
+#[test]
+fn a_caret_paste_counts_codepoints_not_utf16_units() {
+    // An emoji is two UTF-16 code units and one codepoint. A client
+    // converts back to UTF-16 itself; what it gets from here has to be
+    // the codepoint count or the conversion lands one position short
+    // per supplementary-plane character.
+    let (mut workspace, hlc) = ws();
+    let host = append_block(&mut workspace, &hlc, None, Some("🎉")).unwrap();
+    let out = paste_plain(
+        &mut workspace,
+        &hlc,
+        PasteAnchor::AtCaret {
+            block: host,
+            caret: 1,
+        },
+        "ok",
+    )
+    .unwrap();
+    assert_eq!(out.host_text.as_deref(), Some("🎉ok"));
+    assert_eq!(out.host_caret, Some(3));
+}
+
+#[test]
+fn an_anchor_that_leaves_the_host_alone_reports_no_caret() {
+    let (mut workspace, hlc) = ws();
+    let a = append_block(&mut workspace, &hlc, None, Some("a")).unwrap();
+    let out = paste_markdown(&mut workspace, &hlc, PasteAnchor::AfterBlock(a), "- one").unwrap();
+    assert_eq!(out.host_text, None);
+    assert_eq!(out.host_caret, None);
+}

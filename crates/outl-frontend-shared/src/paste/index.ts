@@ -174,6 +174,81 @@ export function utf16OffsetToCharOffset(
 }
 
 /**
+ * Convert a Unicode-codepoint offset back into the UTF-16 code unit
+ * offset a DOM textarea's `setSelectionRange` expects — the inverse of
+ * {@link utf16OffsetToCharOffset}.
+ *
+ * Needed on the way *back* from the backend: `PasteReply.host_caret` is
+ * a codepoint offset, because that is the unit `outl_actions` counts in.
+ * Dropping the conversion lands the caret one position short per
+ * supplementary-plane character before it, which for a block that opens
+ * with an emoji means the caret sits inside the surrogate pair.
+ *
+ * A `charOffset` past the end clamps to the text length rather than
+ * running off it, so a caret from a reply that raced an edit is a
+ * harmless end-of-text instead of a `NaN` selection.
+ */
+export function charOffsetToUtf16Offset(
+  text: string,
+  charOffset: number,
+): number {
+  if (charOffset <= 0) return 0;
+  let chars = 0;
+  let i = 0;
+  while (chars < charOffset && i < text.length) {
+    const cp = text.codePointAt(i);
+    if (cp === undefined) break;
+    i += cp > 0xffff ? 2 : 1;
+    chars += 1;
+  }
+  return i;
+}
+
+/**
+ * What an editor has to become after a paste: the host block's new text
+ * and where the caret goes in it, in UTF-16 units. `null` when the
+ * paste did not touch the block being edited.
+ */
+export interface PasteEditorUpdate {
+  text: string;
+  caret: number;
+}
+
+/**
+ * Fold a {@link PasteReply} back into the editor the paste happened in.
+ *
+ * Every client holds the block it is editing as a draft seeded once
+ * (the desktop's `<BlockRow />` signal, mobile's `Journal` draft), so
+ * re-rendering the outline is not enough: a caret paste rewrites that
+ * exact block, and an editor still showing the pre-paste string commits
+ * it straight back over the paste on the way out. That is issue #488 —
+ * the link vanished from the block and from the `.md`, with nothing
+ * said.
+ *
+ * This is the one owner of the two decisions involved: whether the
+ * paste touched the host block at all (`host_text` present, **not**
+ * truthy — pasting over a whole selection legitimately empties it), and
+ * where the caret lands. Neither is re-derived from the request: the
+ * backend built the string and may have inserted a separating space.
+ *
+ * Applying it is the client's half, because the mechanics differ —
+ * mobile has to park the caret twice around a programmatic `value =`
+ * for WKWebView, the desktop does not.
+ */
+export function pasteEditorUpdate(reply: {
+  host_text?: string;
+  host_caret?: number;
+}): PasteEditorUpdate | null {
+  const text = reply.host_text;
+  if (text === undefined) return null;
+  // A reply that carries the text but not the caret can only come from
+  // an older backend; landing at the end of the paste beats discarding
+  // it.
+  const chars = reply.host_caret ?? Number.MAX_SAFE_INTEGER;
+  return { text, caret: charOffsetToUtf16Offset(text, chars) };
+}
+
+/**
  * How a "paste with formatting" should be handled, decided from the two
  * clipboard flavours (`text/html` + `text/plain`).
  *

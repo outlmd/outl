@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  charOffsetToUtf16Offset,
   choosePasteRoute,
   hasMultipleParagraphs,
   htmlToOutlMarkdown,
   looksLikeOutline,
   looksLikeTable,
   looksLikeTabular,
+  pasteEditorUpdate,
   utf16OffsetToCharOffset,
 } from "./index";
 
@@ -344,5 +346,97 @@ describe("htmlToOutlMarkdown with a table", () => {
     // 1 cell + 999 padded ones = 1000 columns, the spec's own ceiling.
     const cells = md.split("\n")[0].split("|").slice(1, -1);
     expect(cells).toHaveLength(1000);
+  });
+});
+
+describe("charOffsetToUtf16Offset", () => {
+  it("is the identity for BMP text", () => {
+    expect(charOffsetToUtf16Offset("hello world", 6)).toBe(6);
+    expect(charOffsetToUtf16Offset("olá mundo", 4)).toBe(4);
+  });
+
+  it("counts a surrogate pair as two code units", () => {
+    // "🎉ok" is 3 codepoints and 4 UTF-16 units.
+    expect(charOffsetToUtf16Offset("🎉ok", 3)).toBe(4);
+    expect(charOffsetToUtf16Offset("🎉ok", 1)).toBe(2);
+  });
+
+  it("round-trips every codepoint boundary", () => {
+    const text = "a🎉b🧑‍🚀c";
+    // Walk the boundaries the way the runtime does, rather than every
+    // integer: an offset inside a surrogate pair is not a position a
+    // caret can hold.
+    for (const ch of text) {
+      const utf16 = text.indexOf(ch);
+      const chars = utf16OffsetToCharOffset(text, utf16);
+      expect(charOffsetToUtf16Offset(text, chars)).toBe(utf16);
+    }
+    expect(
+      charOffsetToUtf16Offset(text, utf16OffsetToCharOffset(text, text.length)),
+    ).toBe(text.length);
+  });
+
+  it("snaps an offset inside a surrogate pair to the pair's end", () => {
+    // `utf16OffsetToCharOffset` counts the whole codepoint it is
+    // standing in, so the composition rounds *up*. Pinned because the
+    // opposite reading (round down) is the natural assumption and would
+    // make a caret land before text the user just pasted.
+    const text = "a🎉b";
+    expect(utf16OffsetToCharOffset(text, 2)).toBe(2);
+    expect(charOffsetToUtf16Offset(text, 2)).toBe(3);
+  });
+
+  it("clamps a caret past the end instead of returning NaN", () => {
+    expect(charOffsetToUtf16Offset("abc", 99)).toBe(3);
+    expect(charOffsetToUtf16Offset("abc", -1)).toBe(0);
+  });
+});
+
+describe("pasteEditorUpdate", () => {
+  it("is null when the paste left the host block alone", () => {
+    // An `AfterBlock` / `AsLastChildOf` paste: the draft in the editor
+    // is still the block's text, so re-seeding it would be a no-op at
+    // best and a race at worst.
+    expect(pasteEditorUpdate({})).toBeNull();
+  });
+
+  it("carries the host text and the caret in UTF-16 units", () => {
+    // The backend counts codepoints; a textarea counts UTF-16.
+    expect(
+      pasteEditorUpdate({ host_text: "🎉ok", host_caret: 3 }),
+    ).toEqual({ text: "🎉ok", caret: 4 });
+  });
+
+  it("puts the caret at the end when the backend did not say where", () => {
+    // Shouldn't happen — `host_caret` is `Some` exactly when
+    // `host_text` is — but an older backend behind a newer webview
+    // would send one without the other, and losing the paste is worse
+    // than landing the caret at the end of it.
+    expect(pasteEditorUpdate({ host_text: "hello" })).toEqual({
+      text: "hello",
+      caret: 5,
+    });
+  });
+
+  it("keeps a mid-string caret where the backend put it", () => {
+    // A paste without formatting leaves the user's tail to the right of
+    // the caret. Collapsing this to "end of text" would drop them past
+    // the sentence they were in the middle of.
+    expect(
+      pasteEditorUpdate({
+        host_text: "hello BRAVE world",
+        host_caret: 12,
+      }),
+    ).toEqual({ text: "hello BRAVE world", caret: 12 });
+  });
+
+  it("accepts an empty host text as a real update", () => {
+    // Pasting nothing over a selection is not the same as "no host
+    // change": a falsy check here would leave a stale draft, which is
+    // the bug this function exists to close.
+    expect(pasteEditorUpdate({ host_text: "", host_caret: 0 })).toEqual({
+      text: "",
+      caret: 0,
+    });
   });
 });

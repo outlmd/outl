@@ -1,3 +1,5 @@
+import type { PasteEditorUpdate } from "@outl/shared/paste";
+
 /**
  * What a block row asks of whoever renders it.
  *
@@ -37,21 +39,28 @@ export interface BlockCallbacks {
    *  payload is converted to blocks. `hostText` is the in-flight
    *  textarea value so the parent can flush the draft into the
    *  workspace before splicing (else the caret is measured on the draft
-   *  but applied to stale backend text). */
+   *  but applied to stale backend text).
+   *
+   *  Resolves to the editor update the paste produced (`null` when it
+   *  left the host block alone). The editor **must** apply it: the
+   *  paste rewrote the very block the textarea is showing, and a draft
+   *  still holding the pre-paste string is committed back over the
+   *  paste on the next Esc / blur (issue #488). */
   onPasteMarkdown: (
     id: string,
     caret: number,
     text: string,
     hostText: string,
-  ) => Promise<void>;
+  ) => Promise<PasteEditorUpdate | null>;
   /** Paste without formatting (Cmd+Shift+V) — raw text spliced at the
-   *  caret, no conversion. `hostText` is flushed like `onPasteMarkdown`. */
+   *  caret, no conversion. `hostText` is flushed like `onPasteMarkdown`,
+   *  and the resolved update carries the same obligation. */
   onPastePlain: (
     id: string,
     caret: number,
     text: string,
     hostText: string,
-  ) => Promise<void>;
+  ) => Promise<PasteEditorUpdate | null>;
   /** Run a fenced code block through `outl-exec`. */
   onRunCodeBlock: (id: string) => Promise<void>;
   /** Run a plugin command picked from the inline `/` slash menu. The

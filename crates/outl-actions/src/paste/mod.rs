@@ -128,7 +128,21 @@ pub struct PasteOutcome {
     pub new_blocks: Vec<NodeId>,
     /// New text of the host block when `AtCaret` was used and the
     /// host's text changed. `None` for the other anchors.
+    ///
+    /// A client editing that block holds its text in a draft it seeded
+    /// once, so it has to be handed the new text or it shows the
+    /// pre-paste string and commits it back over the paste on the way
+    /// out of the editor ([issue #488](https://github.com/outlmd/outl/issues/488)).
     pub host_text: Option<String>,
+    /// Where the caret belongs inside `host_text`, as a **codepoint**
+    /// offset (the same unit `PasteAnchor::AtCaret.caret` arrives in).
+    /// `Some` exactly when `host_text` is.
+    ///
+    /// This is not always the end of the text: a plain splice keeps the
+    /// user's tail to the right of the caret, so "end of host text"
+    /// would jump them past it. It is the one place that knows, because
+    /// it is the one place that built the string.
+    pub host_caret: Option<usize>,
     /// Number of root-level blocks the paste created from structure it
     /// detected: root bullets (after normalisation and parsing) on the
     /// outline/table path, or one per paragraph on the multi-paragraph

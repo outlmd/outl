@@ -93,6 +93,9 @@ Convention: [`docs/clients.md` → Zoom / focus on a block](clients.md#zoom--foc
 The textarea in `BlockRow.tsx` intercepts paste (with formatting only — mobile has no `Cmd+Shift+V`).
 Rich `text/html` converts via `htmlToOutlMarkdown` (`@outl/shared/paste`); plain text routes to `paste_markdown_at` when `looksLikeOutline` **or** `hasMultipleParagraphs`, splitting multi-paragraph into one block each (else native splice).
 
+A paste that merges into the block being edited comes back carrying that block's new text (`PasteReply`), and `pasteMarkdownAt` in `Journal.block-ops.ts` writes it into the live textarea before the user keeps typing.
+Skipping that was [issue #488](https://github.com/outlmd/outl/issues/488): `draft` is seeded once, so the editor kept the pre-paste string and `commitEdit` wrote it back over the paste on the next blur, losing a pasted link from the block and from the `.md` with nothing said.
+
 `create_block` has a **stale-anchor fallback**: if `after_id` is not in the tree (`NotInTree`), the block is appended at the end of the page instead of returning an error (mirrors the desktop fix).
 
 The long-press context menu's "Copy" action calls `copy_markdown` (`commands/block.rs` → `outl_actions::copy_markdown`), serialising the block and its full subtree as clean outl markdown to the iOS clipboard.

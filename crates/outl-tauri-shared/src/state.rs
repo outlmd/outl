@@ -367,6 +367,33 @@ pub struct CreateBlockReply {
     pub new_id: String,
 }
 
+/// Reply for `paste_markdown_at` / `paste_plain_at`.
+///
+/// `view` is the refreshed page, as every mutation returns. The other
+/// two fields exist because a caret paste is the one mutation that
+/// rewrites the block the user is **currently typing in**, and a client
+/// holds that block's text in a draft it seeded once ([issue
+/// #488](https://github.com/outlmd/outl/issues/488)).
+///
+/// `host_text` is that block's new text and `host_caret` is a
+/// **codepoint** offset into it (convert with
+/// `charOffsetToUtf16Offset` from `@outl/shared/paste` before handing it
+/// to a textarea). Both are `None` when the paste left the host block
+/// alone — nothing merged into it, so the draft is still correct.
+///
+/// Neither is re-derived here: `outl_actions::PasteOutcome` built the
+/// string, and a client recomputing "caret plus what I pasted" is a
+/// second opinion that drifts the moment the merge inserts a separating
+/// space.
+#[derive(Debug, Clone, Serialize)]
+pub struct PasteReply {
+    pub view: PageView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_caret: Option<u32>,
+}
+
 /// Reply for `cut_block`. `markdown` is the removed block's (and its
 /// subtree's) clean outl markdown — hand it to `paste_block_after` to
 /// materialize the cut elsewhere. `view` is the page with the block

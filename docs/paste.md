@@ -69,6 +69,19 @@ What is deliberately **not** tabular:
 A `|` inside a pasted cell is escaped to `\|` so it cannot open a column that was never there.
 A cell holding a line break (a spreadsheet allows one) is flattened to a space — the one lossy step, and a visible one.
 
+## Where the caret lands, and what happens to the block you were in
+
+A paste with the caret inside a block is the one paste that rewrites the block you are **typing in**.
+With formatting, the first pasted bullet joins the text left of the caret and becomes that block's new text; the rest become siblings below it, and whatever was right of the caret becomes one more sibling so nothing you typed is lost.
+Without formatting, the raw text is spliced in and your tail stays where it was — which is why the caret lands between the two, not at the end of the block.
+
+Both clients put that new text back into the editor before you keep typing, and both take it from the backend rather than working it out themselves: the merge can insert a separating space, so "where I pasted plus what I sent" is not the answer.
+
+This used to be where the paste went missing ([issue #488](https://github.com/outlmd/outl/issues/488)).
+Each client holds the block being edited as a draft seeded once, so refreshing the outline was not enough — the editor stayed on the pre-paste text and wrote it straight back over the paste on the next Esc, blur or tap away.
+A link copied out of an email vanished from the block and from the `.md`, with nothing on screen to say so.
+A plain-text URL was unaffected, because a trivial paste never leaves the browser.
+
 ## Paste without formatting
 
 `Cmd/Ctrl+Shift+V` (desktop) and `Shift+P` (TUI) paste the raw clipboard text with **no** conversion:
@@ -94,6 +107,7 @@ The behaviour is shared across clients so it stays identical everywhere:
 - **`outl_md::tsv_to_markdown`** — tab-separated text → markdown table, and the owner of the "is this tabular" gate (`from_delimited`) both Rust and TypeScript answer from.
 - **`outl_actions::paste_markdown`** — with-formatting: normalises external syntax, detects outline shape, splits paragraphs, and grafts the result as blocks through the op log.
 - **`outl_actions::paste_plain`** — without-formatting: raw text as one block, no normalisation or splitting.
+- **`PasteOutcome.host_text` / `host_caret`** (`outl_actions`) — the host block's new text and where the caret belongs in it, in codepoints. The one owner of both, carried to the GUI clients as `PasteReply` and folded back into the editor by **`pasteEditorUpdate`** (`@outl/shared/paste`), which also converts the offset to the UTF-16 units a textarea counts in.
 
 The TUI reads the OS clipboard directly (`arboard`) and runs the same `outl_actions` pipeline; it has no `text/html` flavour to convert, so rich-clipboard conversion is a GUI-only capability.
 Tab-separated and markdown tables reach it through `text/plain` like everything else, so a spreadsheet paste works there too.
