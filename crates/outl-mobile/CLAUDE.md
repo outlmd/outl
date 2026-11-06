@@ -101,7 +101,7 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
 - **`Journal.toolbar-dispatch.ts`** — `dispatchToolbarAction(action, handlers)`, the switch both keyboard bars fire through, plus the tap counting that feeds MFU and the settings sheet.
   Same shape as `Journal.context-actions.ts`: a pure function from (action, handlers) to effects, no Solid import, so it is `.ts` and `Journal.toolbar-dispatch.test.ts` drives it directly.
   It counts the tap **before** routing it, so a button pressed with nothing focused still registers — the user pressed it, which is what MFU measures.
-- **`Journal.block-ops.ts`** — `createBlockOps(deps)`, every operation on **one** block: toggle TODO, delete (and its prompt), copy / paste / cut / copy-ref, indent, outdent, move.
+- **`Journal.block-ops.ts`** — `createBlockOps(deps)`, every operation on **one** block: toggle TODO, delete (and its prompt), copy / paste / cut / copy-ref, indent, outdent, move, and the external-clipboard `pasteMarkdownAt`.
   Each structural op is the same four-step shape (page id → one command through `withError` → fold the `PageView` back in → haptic), which is why they belong together and why the shape is the module's contract. The clipboard ops are the exception: `copyBlock` and `copyBlockRef` resolve no page id and buzz for nothing, because neither mutates the workspace.
   Handed accessors, never values: `Journal` passes `pageId` / `view` / `editingId` as functions, because a destructured prop (or dep) freezes at first render in Solid.
   **No handler reads `this`**, which is what lets `Journal` hand every one of them to `<BlockRow />` as a prop: they are always called detached from the object, and a `this.` would break there silently. Most are method shorthand on the returned literal, which is fine for exactly that reason; `performDelete` is a named function because `requestDelete` calls it internally. `Journal.block-ops.test.ts` pins the detached case rather than the spelling.
@@ -162,6 +162,16 @@ Two were declared and never forwarded, and both were invisible: optional props, 
 Both are fixed.
 The test reads the JSX rather than rendering it (rendering needs haptics, a Tauri bridge and a WKWebView-shaped textarea — mocking all three would pin the mocks, and the defect is in the JSX), and a prop the children legitimately must not have goes in its `NOT_FORWARDED` table with a reason.
 Same "declare the gap, don't discover it" shape as `outl_shortcuts::support` and `wire_types.rs`.
+
+### A paste rewrites the block being edited
+
+`pasteMarkdownAt` (in `Journal.block-ops.ts`) is three steps, and the last two are the ones easy to skip: flush the in-flight draft, fold the fresh view in, **then put the host block's new text back into the textarea**.
+
+That third step is the fix for [issue #488](https://github.com/outlmd/outl/issues/488).
+`draft` is seeded once by `startEdit`, so stopping at the view left the editor on the pre-paste string and `commitEdit` wrote it back over the paste on the next blur — a link copied out of an email gone from the block and from the `.md`, silently.
+The text and the caret come off `PasteReply` (`pasteEditorUpdate`, `@outl/shared/paste`), never recomputed as "where I pasted plus what I sent": the backend built the string and may have inserted a separating space.
+Writing it uses the `spliceText` + double `parkCaret` pattern `lib/textarea.ts` owns, and bails when `editingId()` moved during the round-trip.
+Regression net: `Journal.block-ops.test.ts` → "pasteMarkdownAt — #488".
 
 ## The keyboard has to come up inside the tap
 

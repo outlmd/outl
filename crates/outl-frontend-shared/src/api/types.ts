@@ -500,6 +500,8 @@ export interface CutBlockReply {
   markdown: string;
   view: PageView;
 }
+// `PasteReply` lives in `./paste`, with the two wrappers that return it.
+export type { PasteReply } from "./paste";
 
 /**
  * Successful execution payload of `runCodeBlock`. Mirrors the Rust

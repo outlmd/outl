@@ -32,10 +32,11 @@ crates/outl-frontend-shared/
     ├── index.ts            # barrel re-export
     ├── api/
     │   ├── types.ts        # PageMeta, OutlineNode, BlockNode, Backlink, InlineToken, …
-    │   ├── commands.ts     # invoke<T>() wrappers + re-exports of the three below
+    │   ├── commands.ts     # invoke<T>() wrappers + re-exports of the four below
     │   ├── commands-peers.ts      # peer pairing / iroh transport
     │   ├── commands-plugins.ts    # plugin host + marketplace
-    │   └── commands-reminders.ts  # `remind::` + its two display helpers
+    │   ├── commands-reminders.ts  # `remind::` + its two display helpers
+    │   └── paste.ts        # PasteReply + pasteMarkdown / pastePlain (DTO beside its wrappers)
     ├── capture/
     │   └── index.ts        # installForegroundRefresh / drainOnce — the inbox drain both GUIs run
     ├── warnings/
@@ -50,7 +51,7 @@ crates/outl-frontend-shared/
     │   ├── MarkdownTable.tsx   # a block's `table` as an HTML <table>
     │   └── index.ts
     ├── paste/
-    │   ├── index.ts        # looksLikeOutline/Table/Tabular, choosePasteRoute, utf16OffsetToCharOffset
+    │   ├── index.ts        # looksLikeOutline/Table/Tabular, choosePasteRoute, utf16/char offsets, pasteEditorUpdate
     │   ├── table.ts        # clipboard <table> → markdown table (Turndown ships no table rule)
     │   └── paste.test.ts
     ├── autocomplete/
@@ -166,6 +167,9 @@ When in doubt, ship in the client; promote later when the second client appears.
 | `htmlToOutlMarkdown` | `@outl/shared/paste` | Rich-clipboard `text/html` → outl markdown via **Turndown**, configured for the outl dialect (`*italic*` not `_italic_`, `**bold**`, `- ` bullets collapsed to 2-space nesting, `~~strike~~`, inline `<img alt>` → its alt text so Slack `:emoji:` survives). No Rust mirror — HTML only reaches the GUI webview clients; the resulting markdown then rides the same `paste_markdown_at` backend path as any paste |
 | `choosePasteRoute(html, plain)` → `PasteRoute` | `@outl/shared/paste` | The one owner of the paste-with-formatting routing decision (`rich` = HTML converted to markdown; `structured` = plain outline / multi-paragraph; `native` = trivial, let the browser splice). Desktop `handlePaste` and mobile `onPaste` both call it, so the gate can't drift between clients — it used to be duplicated inline in each handler |
 | `utf16OffsetToCharOffset` | `@outl/shared/paste` | (runtime gap — UTF-16 ↔ codepoint, no Rust mirror) |
+| `charOffsetToUtf16Offset(text, charOffset)` — the inverse, for an offset coming *back* from the backend (`PasteReply.host_caret`). Clamps past the end rather than running off it. The composition with `utf16OffsetToCharOffset` rounds **up** through a surrogate pair, which `paste.test.ts` pins — the opposite reading would land a caret before text the user just pasted | `@outl/shared/paste` | (runtime gap — no Rust mirror) |
+| `pasteEditorUpdate(reply)` → `{ text, caret } \| null` — what an editor has to become after a paste, with the caret already in UTF-16 units. The one owner of two decisions: whether the paste touched the block being edited (`host_text` **present**, not truthy — pasting over a whole selection legitimately empties it) and where the caret lands. Every client holds that block as a draft seeded once, so re-rendering the outline is not enough: a caret paste rewrites that exact block, and an editor left on the pre-paste string commits it back over the paste on the next Esc / blur ([#488](https://github.com/outlmd/outl/issues/488)). *Applying* it stays per client — mobile parks the caret twice around a programmatic `value =` for WKWebView, the desktop does not | `@outl/shared/paste` | reads `outl_actions::PasteOutcome`'s `host_text` / `host_caret`. **Never re-derive** either as "where I pasted plus what I sent" — the merge may have inserted a separating space |
+| `PasteReply` (`view`, `host_text?`, `host_caret?`) — reply of `pasteMarkdown` / `pastePlain`; `host_caret` is a **codepoint** offset | `@outl/shared/api/types` (declared in `api/paste.ts`) | `outl_tauri_shared::state::PasteReply` |
 | `detectRefContext`, `autoClose/DeletePair`, `insertPair/Text`, `applySuggestion` | `@outl/shared/autocomplete` | `outl_tui::actions::overlay::detect_trigger` |
 | `detectSlashContext` / `applySlashContext` (+ `SlashContext`) — block-initial `/command` trigger + token removal on accept, powering the desktop's inline slash menu (Notion-style); mirrors the TUI `/` slash overlay but inline in a block | `@outl/shared/autocomplete` | `outl_tui::actions::overlay::slash_candidates` (same command universe, different surface) |
 | `autoPairBracket` (single `(`/`[`/`{` auto-pair + closer step-over; `autoDeletePair` also collapses empty `()`/`[]`/`{}`) | `@outl/shared/autocomplete` | `outl_tui::input::insert` (`insert_pair`) + `EditBuffer::delete_pair_back` |

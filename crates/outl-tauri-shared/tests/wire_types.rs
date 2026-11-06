@@ -63,8 +63,8 @@ use outl_tauri_shared::commands::timeline::{PageTimelineDto, TimelineEventDto};
 use outl_tauri_shared::commands::trust::{ActorActivityDto, DeviceActivityDto, ExportReportDto};
 use outl_tauri_shared::merges::MergedEditDto;
 use outl_tauri_shared::state::{
-    BacklinksReply, CreateBlockReply, CutBlockReply, ProjectionWriteFailed, TemplateDto,
-    WorkspaceSummary,
+    BacklinksReply, CreateBlockReply, CutBlockReply, PasteReply, ProjectionWriteFailed,
+    TemplateDto, WorkspaceSummary,
 };
 
 use wire_fixtures::{
@@ -142,6 +142,20 @@ fn create_block_reply_matches_its_interface() {
         new_id: "01JQ0000000000000000000004".into(),
     };
     assert_wire_shape(&dto, "CreateBlockReply", &[]);
+}
+
+#[test]
+fn paste_reply_matches_its_interface() {
+    // Both optionals are `Some` on purpose: they `skip_serializing_if`,
+    // so a `None` value would drop the keys and the pin would compare an
+    // interface against a reply that never mentions the fields the
+    // clients read.
+    let dto = PasteReply {
+        view: page_view(),
+        host_text: Some("host text after the paste".into()),
+        host_caret: Some(25),
+    };
+    assert_wire_shape(&dto, "PasteReply", &[]);
 }
 
 #[test]

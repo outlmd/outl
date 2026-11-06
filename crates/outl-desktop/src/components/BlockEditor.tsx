@@ -4,6 +4,7 @@ import { autoDeletePair, autoPairBracket } from "@outl/shared/autocomplete";
 import { detectFence } from "@outl/shared/highlight";
 import {
   choosePasteRoute,
+  type PasteEditorUpdate,
   utf16OffsetToCharOffset,
 } from "@outl/shared/paste";
 import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
@@ -146,7 +147,9 @@ export function BlockEditor(props: {
       }
       if (!clip) return;
       const caretChars = utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0);
-      await props.cb.onPastePlain(props.blockId, caretChars, clip, ta.value);
+      applyPaste(
+        await props.cb.onPastePlain(props.blockId, caretChars, clip, ta.value),
+      );
       return;
     }
     // An open autocomplete popup owns the arrows / Enter / Tab / Esc
@@ -301,12 +304,43 @@ export function BlockEditor(props: {
       ta.value,
       ta.selectionStart ?? 0,
     );
-    await props.cb.onPasteMarkdown(
-      props.blockId,
-      caretChars,
-      decision.text,
-      ta.value,
+    applyPaste(
+      await props.cb.onPasteMarkdown(
+        props.blockId,
+        caretChars,
+        decision.text,
+        ta.value,
+      ),
     );
+  }
+
+  /**
+   * Put the paste's result into the textarea the user is still typing
+   * in.
+   *
+   * The draft is seeded once per row and only `startEdit` re-seeds it
+   * (see `<BlockRow />`), so re-rendering the outline is not enough: a
+   * caret paste rewrote this very block, and a draft still holding the
+   * pre-paste string is what `commit()` writes back on the next Esc or
+   * blur — the paste disappears from the block and from the `.md`, with
+   * nothing said (issue #488).
+   *
+   * `ta.value` is written directly as well as through `setText`,
+   * because the caret has to move in the same frame: Solid's
+   * `value={props.text()}` binding lands in a later effect, and
+   * `setSelectionRange` against the stale value would clamp the caret
+   * to the old text's length.
+   */
+  function applyPaste(update: PasteEditorUpdate | null) {
+    if (!update) return;
+    const ta = textareaRef;
+    props.setText(update.text);
+    if (!ta) return;
+    ta.value = update.text;
+    ta.setSelectionRange(update.caret, update.caret);
+    autoSize();
+    // The caret may now sit inside a `[[…]]` the paste brought in.
+    suggest.refresh();
   }
 
   return (

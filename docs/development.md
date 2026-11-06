@@ -79,6 +79,7 @@ crates/outl-desktop/
 │   ├── components/            # AppShell, Sidebar, OutlineView (impl BlockCallbacks),
 │   │                         #   BlockRow (chrome) → BlockBody (read) / BlockEditor
 │   │                         #     (textarea) / block-suggest / block-callbacks /
+│   │                         #     outline-paste (createPasteOps) /
 │   │                         #     CodeFenceView / SuggestPopups, BacklinksPanel, Picker,
 │   │                         #   SettingsModal, ChromeToggleBar, SyncIndicator,
 │   │                         #   PropertyEditor (key:: value chips + create/delete),

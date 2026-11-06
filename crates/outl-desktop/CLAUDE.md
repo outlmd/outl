@@ -57,6 +57,7 @@ New code of one of these shapes goes in the sibling, not back in the parent:
   Re-exported from `BlockRow.tsx`, so `import { type BlockCallbacks } from "./BlockRow"` keeps resolving.
 - **`BlockBody.tsx`** — read mode: fence → `<CodeFenceView />`, table → `<MarkdownTable />`, embed-only → `<EmbeddedSubtree />`, else `<MarkdownInline />` + the chip row.
   Flat, mutually exclusive branches, each routing a click back through the same `onStartEdit` — a table has no cell editor and a fence has no fence editor, by design (#329).
+- **`outline-paste.ts`** — `createPasteOps(deps)`: flush the draft, run `paste_markdown_at` / `paste_plain_at`, hand the editor back what it has to become. See "Paste" below.
 - **`BlockEditor.tsx`** — the textarea: chords, bracket auto-pairing, paste routing, `autoSize`, `commit`.
   Mounted only while editing, which is why focus + pending caret intent are `onMount` and not an effect on an `editing` flag.
 - **`block-suggest.ts`** — `createBlockSuggest(deps)`: the four inline autocomplete triggers, their round-trips and staleness guards, and the popup keyboard contract.
@@ -269,7 +270,14 @@ Three guards (mobile mirrors them):
 
 - Code-fence host bails `Cmd/Ctrl+V` to the native splice (`detectFence` early-return), keeping it literal.
 - `Cmd/Ctrl+Shift+V` reads via `tauri-plugin-clipboard-manager` (`clipboard-manager:allow-read-text`), dodging the macOS webview "Paste" gate.
-- Both pass `textarea.value` so `flushDraftBeforePaste` commits the draft first.
+- Both pass `textarea.value` so the draft is committed first.
+
+`components/outline-paste.ts` (`createPasteOps(deps)`) owns the three steps between the route decision and the workspace: flush the draft, run the command, fold the reply back in.
+Its own module, not two closures in `<OutlineView />`, like mobile's `Journal.block-ops.ts` — so the sequence has `outline-paste.test.ts`, which no component test replaces.
+
+**The third step is not optional.** A caret paste rewrites the block the textarea is showing, and the draft is seeded once per row (only `startEdit` re-seeds it), so applying the view alone left the editor on the pre-paste string — which `commit()` wrote straight back on the next Esc or blur, losing the paste from the block *and* from the `.md` with nothing on screen ([issue #488](https://github.com/outlmd/outl/issues/488)).
+`<BlockEditor />`'s `applyPaste` writes `ta.value` as well as calling `setText`, because the caret has to move in the same frame: Solid's `value={props.text()}` binding lands in a later effect, and `setSelectionRange` against the stale value clamps to the old length.
+Regression net: `outline-paste.test.ts` (the sequence) + `BlockRow.test.tsx` → "BlockRow paste into the block being edited — #488" (the editor).
 
 `create_block`: stale `after_id` (`NotInTree`) → append at page end (fixes `o`-key crash after peer reload).
 

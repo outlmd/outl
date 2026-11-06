@@ -60,6 +60,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Pasting a link into a block showed nothing and then erased it** ([#488](https://github.com/outlmd/outl/issues/488)).
+  Copy a link out of an email — the clipboard holds the label with the address behind it — paste it into a block you are editing, and nothing appeared.
+  Leave the block and the link was gone from the `.md` too, with nothing on screen to say so.
+  The same thing happened to the first line of a pasted outline: the lines below it became blocks as expected, the first one did not.
+  A plain-text URL was fine, which is why this looked like a rich-clipboard problem and was not.
+  Both GUI clients hold the block you are typing in as a draft seeded once, so refreshing the outline was not enough — the editor stayed on the pre-paste text and committed *that* back over the paste on the next Esc, blur or tap away.
+  The paste now reports the block's new text and where the caret belongs in it, and both clients put the caret back where you pasted rather than at the end of the block, so a paste without formatting leaves your tail where it was.
+  The backend is the single owner of both: the merge can insert a separating space, so "where I pasted plus what I sent" is the wrong answer.
+  Credit to [@matthieu403](https://github.com/matthieu403) for the report, including the detail that made it findable: the link *was* briefly in the `.md`, and leaving the block took it out again.
 - **`outl page prop list` listed the wrong properties, in both directions.**
   It probed a hardcoded list of nine "well-known" keys instead of reading the page, so a page carrying `alpha::`, `due::`, `owner::` and `zeta::` listed **none** of them — and it listed `page-slug` / `page-kind`, which define the page and which `outl page prop set` refuses, inviting an edit that would rewrite the page's identity on the next projection.
   The comment justifying the probe said the tree exposed no per-node property iterator; it has for a long time, and the sibling `outl block prop list` was already using it.

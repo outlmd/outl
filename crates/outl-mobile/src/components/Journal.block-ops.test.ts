@@ -16,6 +16,7 @@ const commands = vi.hoisted(() => ({
   moveBlockUp: vi.fn(),
   outdentBlock: vi.fn(),
   pasteBlockAfter: vi.fn(),
+  pasteMarkdown: vi.fn(),
   toggleTodo: vi.fn(),
 }));
 vi.mock("@outl/shared/api/commands", () => commands);
@@ -50,6 +51,7 @@ function harness(outline: BlockNode[] = [block("blk-1")]) {
     pendingDelete: null as { id: string; descendants: number } | null,
     applied: [] as PageView[],
     setViewCalls: [] as PageView[],
+    textarea: null as HTMLTextAreaElement | null,
   };
   const deps: JournalBlockDeps = {
     pageId: () => state.view.page.id,
@@ -78,6 +80,7 @@ function harness(outline: BlockNode[] = [block("blk-1")]) {
     setPendingDelete: (p) => {
       state.pendingDelete = p;
     },
+    activeTextarea: () => state.textarea,
   };
   return { state, ops: createBlockOps(deps) };
 }
@@ -241,5 +244,91 @@ describe("detached handlers", () => {
     expect(() => requestDelete("blk-1")).not.toThrow();
     await vi.waitFor(() => expect(commands.deleteBlock).toHaveBeenCalled());
     expect(state.pendingDelete).toBeNull();
+  });
+});
+
+/**
+ * Regression for #488. A caret paste rewrites the block the user is
+ * typing in, and `draft` is seeded once by `startEdit` — so applying
+ * only the fresh `PageView` left the editor on the pre-paste string,
+ * and `commitEdit` wrote that back over the paste on the next blur. The
+ * pasted link disappeared from the block and from the `.md`, silently.
+ */
+describe("pasteMarkdownAt — #488", () => {
+  const HOST_AFTER = "Some text[See the invoice](https://example.test/i)";
+
+  function textarea(value: string): HTMLTextAreaElement {
+    const el = document.createElement("textarea");
+    el.value = value;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it("re-seeds the draft and the caret from the reply", async () => {
+    const { state, ops } = harness();
+    state.editingId = "blk-1";
+    state.draft = "Some text";
+    state.textarea = textarea("Some text");
+    commands.editBlock.mockResolvedValue(pageView([block("blk-1")]));
+    commands.pasteMarkdown.mockResolvedValue({
+      view: pageView([block("blk-1")]),
+      host_text: HOST_AFTER,
+      host_caret: HOST_AFTER.length,
+    });
+
+    await ops.pasteMarkdownAt("blk-1", 9, "[See the invoice](https://example.test/i)");
+
+    expect(state.draft).toBe(HOST_AFTER);
+    expect(state.textarea?.value).toBe(HOST_AFTER);
+    expect(state.textarea?.selectionStart).toBe(HOST_AFTER.length);
+  });
+
+  it("flushes the in-flight draft before the splice", async () => {
+    // The caret the backend gets is measured against the textarea, so
+    // the block has to be holding that text when the splice runs.
+    const { state, ops } = harness();
+    state.editingId = "blk-1";
+    state.draft = "Some text";
+    commands.editBlock.mockResolvedValue(pageView([block("blk-1")]));
+    commands.pasteMarkdown.mockResolvedValue({ view: pageView([block("blk-1")]) });
+
+    await ops.pasteMarkdownAt("blk-1", 9, "x");
+
+    expect(commands.editBlock).toHaveBeenCalledWith("page-1", "blk-1", "Some text");
+  });
+
+  it("leaves the draft alone when the paste only created siblings", async () => {
+    const { state, ops } = harness();
+    state.editingId = "blk-1";
+    state.draft = "Some text";
+    commands.editBlock.mockResolvedValue(pageView([block("blk-1")]));
+    commands.pasteMarkdown.mockResolvedValue({ view: pageView([block("blk-1")]) });
+
+    await ops.pasteMarkdownAt("blk-1", 9, "- one\n- two");
+
+    expect(state.draft).toBe("Some text");
+    expect(state.applied).toHaveLength(1);
+  });
+
+  it("does not write the draft when the user left the block mid-paste", async () => {
+    // The round-trip is a window: the draft now belongs to another
+    // block, and seeding it with this block's text would corrupt it.
+    const { state, ops } = harness();
+    state.editingId = "blk-1";
+    state.draft = "Some text";
+    commands.editBlock.mockResolvedValue(pageView([block("blk-1")]));
+    commands.pasteMarkdown.mockImplementation(async () => {
+      state.editingId = "blk-2";
+      state.draft = "another block";
+      return {
+        view: pageView([block("blk-1")]),
+        host_text: HOST_AFTER,
+        host_caret: HOST_AFTER.length,
+      };
+    });
+
+    await ops.pasteMarkdownAt("blk-1", 9, "x");
+
+    expect(state.draft).toBe("another block");
   });
 });

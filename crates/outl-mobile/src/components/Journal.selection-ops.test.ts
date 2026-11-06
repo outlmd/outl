@@ -72,6 +72,7 @@ function harness(outline: BlockNode[] = FLAT) {
     blockClipboard: () => null,
     setBlockClipboard: () => {},
     setPendingDelete: () => {},
+    activeTextarea: () => null,
     selection: () => state.selection,
     setSelection: (sel) => {
       state.selection = sel;

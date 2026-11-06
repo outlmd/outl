@@ -30,7 +30,6 @@ import {
   openExternalUrl,
   openRef,
   pageBacklinks,
-  pasteMarkdown,
   peerStatus,
   pluginRun,
   pluginSyncHooks,
@@ -873,31 +872,6 @@ export function Journal() {
     }
   }
 
-  /**
-   * Apply an external-clipboard markdown paste to the workspace.
-   *
-   * `BlockRow`'s textarea has already detected via `looksLikeOutline`
-   * that the payload deserves the outline → blocks conversion and
-   * called `preventDefault` on the original paste event. We commit
-   * any in-flight draft first (the host block's text would otherwise
-   * race with the paste's `AtCaret` splice), hand the raw text to
-   * the backend, then re-apply the resulting `PageView`.
-   */
-  async function handlePasteMarkdown(blockId: string, caret: number, text: string) {
-    const pid = pageId();
-    if (!pid) return;
-    if (editingId() === blockId) {
-      // Flush whatever the user was typing so the splice operates on
-      // the workspace state the textarea is showing, not on stale
-      // backend text.
-      const draftText = draft();
-      const committed = await withError(() => editBlock(pid, blockId, draftText));
-      if (committed) setView(committed);
-    }
-    const next = await withError(() => pasteMarkdown(pid, blockId, caret, text));
-    if (next) applyView(next);
-  }
-
   // ── Block + range operations (issue #265 phases 1-2) ────────────
   //
   // The single-block handlers live in `Journal.block-ops.ts` and the
@@ -918,6 +892,7 @@ export function Journal() {
     blockClipboard,
     setBlockClipboard,
     setPendingDelete,
+    activeTextarea: activeTextareaSignal,
   };
   const blockOps = createBlockOps(blockDeps);
   // The two creates reached from a tap with the keyboard down. They are
@@ -1577,7 +1552,7 @@ export function Journal() {
                   onRefClick={handleRefClick}
                   onTagClick={handleTagClick}
                   onLinkClick={handleLinkClick}
-                  onPasteMarkdown={handlePasteMarkdown}
+                  onPasteMarkdown={blockOps.pasteMarkdownAt}
                   onTextareaMount={(el) => {
                     activeTextarea = el;
                     setActiveTextareaSignal(el);

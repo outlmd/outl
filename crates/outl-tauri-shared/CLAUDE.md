@@ -7,7 +7,7 @@ Before this crate existed, both clients kept near-identical copies of the same n
 
 | Module | Owns |
 |---|---|
-| `state.rs` | Wire DTOs every command returns: `PageView` (includes `backlinks_order: outl_config::BacklinksOrder`, serialized `"newest"`/`"oldest"`, so a client knows the current direction without a separate settings read; **`backlinks` now always comes back empty from the open commands** — see `BacklinksReply`; **`md_ahead_of_log: Option<MdAheadOfLog>`** + **`md_ahead_of_log_checked: bool`** — see "A page that stopped syncing" below), `MdAheadOfLog` (`path` + `lines` + `sample` — why a page stopped syncing, in the shape a client renders), `BacklinksReply` (the lazy `page_backlinks` reply: `backlinks` + `backlinks_order`, fetched off the page-open path because `backlinks_for_page` is an O(blocks) scan that used to block the first journal paint), `CreateBlockReply`, `WorkspaceSummary`, `BlockHit` (a `((…))` block-ref autocomplete hit — `handle` + `text` + `source_slug`), `ERR_LOADING` |
+| `state.rs` | Wire DTOs every command returns: `PageView` (includes `backlinks_order: outl_config::BacklinksOrder`, serialized `"newest"`/`"oldest"`, so a client knows the current direction without a separate settings read; **`backlinks` now always comes back empty from the open commands** — see `BacklinksReply`; **`md_ahead_of_log: Option<MdAheadOfLog>`** + **`md_ahead_of_log_checked: bool`** — see "A page that stopped syncing" below), `MdAheadOfLog` (`path` + `lines` + `sample` — why a page stopped syncing, in the shape a client renders), `BacklinksReply` (the lazy `page_backlinks` reply: `backlinks` + `backlinks_order`, fetched off the page-open path because `backlinks_for_page` is an O(blocks) scan that used to block the first journal paint), `CreateBlockReply`, **`PasteReply`** (`view` + the host block's new `host_text` / `host_caret` — see "A paste rewrites the block being edited" below), `WorkspaceSummary`, `BlockHit` (a `((…))` block-ref autocomplete hit — `handle` + `text` + `source_slug`), `ERR_LOADING` |
 | `host.rs` | `AppHost` + `StorageRootProvider` — the two traits that absorb the one real client divergence (desktop storage root is `Arc<Mutex<Option<PathBuf>>>`, mobile is a plain `PathBuf`). `AppHost::backlink_index() -> Option<Arc<Mutex<Option<BacklinkIndex>>>>` is the client's pre-computed backlinks index slot (default `None`); `Some` lets `page_backlinks` serve `O(refs)` lookups and rebuild the `O(blocks)` index only when it's stale instead of re-scanning the workspace every navigation. `AppHost::projection_writer() -> Option<&ProjectionWriter>` (default `None`) is the client's off-thread `.md`+sidecar writer slot — see `projection.rs` below and "Async projection writes" |
 | `helpers.rs` | `parse_node_id`, `parse_date`, `with_ws*`, **`reproject_stale_md(ws, root, page_id, context) -> ReprojectOutcome`** (every GUI open path calls it before reading a view off the `.md`; a thin DTO + log-line wrapper over `outl_actions::reproject_stale_md`, which owns both the refresh and the classification — see "A page that stopped syncing"), `build_page_view` (**does NOT compute backlinks** — it's on the first-paint AND post-mutation path, and `backlinks_for_page` is O(blocks); returns `backlinks: []`), `build_page_view_from_tree(workspace, page_id) -> Result<PageView, ActionError>` (projects the view straight from the in-memory tree via `outl_actions::project_outline`, no disk read; `warnings` always empty — feeds the async-projection commit path, see below), `invalidate_backlink_index` (drops the host's cached index so the next `page_backlinks` rebuilds it — called from `finish_in_page*` after every local mutation), `finish_in_page*` (see "Async projection writes" below), `storage_root_or_err`. There is no `compute_backlinks` here anymore — building the index from the in-memory `Workspace` (materializing every block's text under the workspace lock) was the freeze; the rebuild now happens in `commands/page_backlinks.rs::compute_backlinks_offloaded`, straight from disk. |
 | `offload.rs` | `run` + `locked` / `locked_mut` — the one owner of **getting a command body off the IPC thread**, and of why a non-O(1) body must be `async` (its module doc carries the `peer_status` crash that bought the rule). `locked*` are `with_ws*` against the slot's `Arc` rather than an `AppHost`, for a body already on the pool; `helpers::with_ws*` delegate to them |
@@ -130,6 +130,30 @@ Turning the refusal into an `Err` would trade a stale page for no page at all on
 **Closed in the same change that opened this note.** A local mutation used to overwrite those lines: `finish_in_page_with` queued an unconditional `apply_page_md_with_sidecar` on the `ProjectionWriter`, so the write the read path refuses happened on the next keystroke commit. Every GUI write path now routes through `outl_actions::apply_page_md_with_sidecar_guarded` (`projection.rs`, `commands/block.rs`, `commands/template.rs`), which asks the one question that matters and skips the projection instead of deleting. The user's edit is never at risk either way — it went through `Workspace::apply`.
 Post-mutation projection failures never turn that durable edit into an `Err`: synchronous paths annotate the successful `PageView` (`md_ahead_of_log` or `projection_error`), and the worker emits `projection-write-failed` with `ProjectionWriteFailed` after an async refusal.
 Both clients route the structured refusal to the sticky banner and preserve unrelated failures on their existing status/toast surface.
+
+## A paste rewrites the block being edited
+
+`paste_markdown_at` / `paste_plain_at` are the only mutations that
+rewrite the block the user is **currently typing in**, so they return
+`PasteReply` rather than a bare `PageView`: `view`, plus the host
+block's new `host_text` and the `host_caret` inside it (a **codepoint**
+offset, like the `caret` argument).
+
+Both GUI clients hold the block being edited as a draft seeded once, so
+a reply carrying only the view left the editor on the pre-paste string —
+which the next Esc / blur committed straight back over the paste. The
+pasted link vanished from the block and from the `.md`, silently
+([issue #488](https://github.com/outlmd/outl/issues/488)).
+
+Two rules:
+
+- **Neither field is computed here.** `outl_actions::PasteOutcome` built
+  the string, and `commands::block::paste_reply` only maps it — one
+  function for both commands, because a second copy is how one of them
+  starts forgetting to carry the caret.
+- **The caret is not "the end of the host text".** A plain splice leaves
+  the user's tail to the right of it. `@outl/shared/paste`'s
+  `pasteEditorUpdate` is the clients' one reader.
 
 ## One command surface, not two
 
