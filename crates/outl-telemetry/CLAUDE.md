@@ -103,8 +103,19 @@ They come from `std::env::consts::OS` / `ARCH`, which are **compile-time constan
 The insert happens *after* `contexts.clear()`, which is what keeps this an allowlist by construction: enable that integration tomorrow and everything it gathered still dies in the clear, while those two fields are still only what the scrubber put there.
 An allowlist of keys *inside* `contexts` would have the opposite property — it would trust what arrived.
 
+### `fingerprint` is also written, not just reset
 
-## Why `redact` keeps relative paths
+Resetting `event.fingerprint` to the protocol default (`Event::default().fingerprint`, never `[]`) is still the first thing that happens to it, but it is not the last.
+`set_panic_fingerprint` runs after the exception loop and, when the first exception carries a non-empty (already redacted) `value`, replaces it with `["outl-panic", <value>]`.
+
+This exists because Sentry's default grouping hashes the stack trace.
+An unsymbolicated release — missing debug files, or a platform `sentry-cli` cannot read — has no usable one, so every panic on that release collapses into one issue regardless of what it says.
+`OUTL-4` held a WebView2 startup message and an unrelated `index out of bounds` panic for exactly that reason.
+Fingerprinting on the scrubbed panic message splits them without reopening the leak path the scrubber exists to close, because it reads the field *after* redaction, never the raw message.
+
+Events with no exception, or whose value redacted to empty, keep the reset-to-default fingerprint — there is nothing panic-specific to group them by.
+
+### The one field the scrubber writes
 
 `crates/outl-core/src/tree/mod.rs:42` is the panic location.
 It is fixed at compile time and describes **our** source tree, not the user's disk, and it is the entire reason a report is actionable.
@@ -198,6 +209,10 @@ They are the gate.
 - `the_panic_itself_survives_the_scrubber` and `a_debug_image_keeps_its_id_and_loses_its_path` — the over-scrubbing direction.
   An empty event is not a safe event, it is a useless one.
 - `the_fixture_really_populates_everything` — guards the guard: if the fixture stops populating a field, the key-set test starts passing for the wrong reason.
+- `two_distinct_panic_messages_get_distinct_fingerprints` — the `OUTL-4` regression.
+  Two scrubbed events with different panic messages must not share a fingerprint.
+- `a_leaking_panic_message_is_redacted_before_it_reaches_the_fingerprint` — the fingerprint is built from the *redacted* value, so a panic message that quotes the user's disk cannot smuggle that path into the field Sentry groups on.
+- `an_event_with_no_exception_value_keeps_the_default_fingerprint` — the case `set_panic_fingerprint` has nothing to add to still ends on the protocol default, never on `[]`.
 
 ## Who calls `init`, and with what
 

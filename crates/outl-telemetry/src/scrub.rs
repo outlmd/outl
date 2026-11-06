@@ -20,6 +20,7 @@ use std::borrow::Cow;
 
 use sentry::protocol::{DebugImage, DebugMeta, DeviceContext, Event, OsContext, Stacktrace};
 
+use crate::fingerprint::set_panic_fingerprint;
 use crate::redact::redact;
 
 /// The top-level keys a scrubbed event may serialize.
@@ -108,6 +109,8 @@ pub fn scrub_event(mut event: Event<'static>) -> Option<Event<'static>> {
     event.template = None;
     // Back to the protocol default rather than empty: an empty fingerprint
     // serializes as `[]` and tells the server to group every crash together.
+    // `set_panic_fingerprint` below may replace this once the exception
+    // values are scrubbed.
     event.fingerprint = Event::default().fingerprint;
 
     // Author-written text. Ours, and therefore exactly where a page title
@@ -133,6 +136,7 @@ pub fn scrub_event(mut event: Event<'static>) -> Option<Event<'static>> {
     }
 
     scrub_debug_meta(&mut event.debug_meta);
+    set_panic_fingerprint(&mut event);
 
     Some(event)
 }
@@ -379,6 +383,70 @@ mod tests {
             !payload.contains(LEAK),
             "the incoming os context leaked into the payload"
         );
+    }
+
+    /// Two distinct panic messages must not collapse into one Sentry issue.
+    ///
+    /// The regression this guards: `OUTL-4` held a WebView2 timeout panic and
+    /// an unrelated `index out of bounds` panic as one issue, because the
+    /// default stack-trace grouping found nothing to distinguish them in
+    /// either unsymbolicated stack.
+    #[test]
+    fn two_distinct_panic_messages_get_distinct_fingerprints() {
+        let mut first = fully_populated_event();
+        first.exception.values[0].value =
+            Some("index out of bounds: the len is 0 but the index is 13".into());
+
+        let mut second = fully_populated_event();
+        second.exception.values[0].value = Some("WebView2 runtime not found".into());
+
+        let first = scrub_event(first).expect("the event is never dropped");
+        let second = scrub_event(second).expect("the event is never dropped");
+
+        assert_ne!(
+            first.fingerprint, second.fingerprint,
+            "distinct panic messages must not share a fingerprint"
+        );
+    }
+
+    /// The fingerprint is built from the exception value *after* redaction, so
+    /// a panic message that quotes the user's disk cannot smuggle that path
+    /// into the field Sentry groups on.
+    #[test]
+    fn a_leaking_panic_message_is_redacted_before_it_reaches_the_fingerprint() {
+        let mut event = fully_populated_event();
+        event.exception.values[0].value = Some(format!("could not read {LEAK}"));
+
+        let scrubbed = scrub_event(event).expect("the event is never dropped");
+
+        let fingerprint: Vec<&str> =
+            scrubbed.fingerprint.iter().map(|part| part.as_ref()).collect();
+        assert_eq!(fingerprint.first().copied(), Some("outl-panic"));
+        let value = fingerprint
+            .get(1)
+            .expect("a panic fingerprint carries the redacted value");
+        assert!(
+            !value.contains(LEAK),
+            "the raw path survived into the fingerprint: {value}"
+        );
+        assert!(
+            value.contains(crate::PATH_MARKER),
+            "the redacted marker is missing from the fingerprint: {value}"
+        );
+    }
+
+    /// An event whose exception value redacted to nothing (or has none at
+    /// all) has nothing panic-specific to group by, and keeps the protocol
+    /// default rather than an empty `fingerprint` — `[]` tells the server to
+    /// group every crash together.
+    #[test]
+    fn an_event_with_no_exception_value_keeps_the_default_fingerprint() {
+        let mut event = fully_populated_event();
+        event.exception.values[0].value = None;
+
+        let scrubbed = scrub_event(event).expect("the event is never dropped");
+
+        assert_eq!(scrubbed.fingerprint, Event::default().fingerprint);
     }
 
     fn fully_populated_event() -> Event<'static> {
