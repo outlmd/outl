@@ -11,7 +11,9 @@
 //! children, and so on. `flat_index` is a single counter that walks
 //! the same DFS preorder, useful for "the user's selection cursor".
 //!
-//! Every public function in this module is tested below.
+//! Every public function in this module is tested in `tests.rs`,
+//! split out to keep this file under the file-size guard (same seam
+//! as `parse/tests.rs`).
 
 use crate::parse::OutlineNode;
 
@@ -171,20 +173,26 @@ pub fn descendants_count_at_path(blocks: &[OutlineNode], path: &[usize]) -> usiz
 /// If `path` points past the actual sibling list (e.g. caller passed
 /// `[0]` against an empty outline because the page had no parseable
 /// blocks), the new node is appended at the end instead of panicking.
+/// Same fallback when a *parent* segment of `path` is out of range
+/// (a stale nested path against a shorter or empty tree) — `siblings_mut`
+/// returns `None` and the new node lands at the top level instead.
 pub fn insert_sibling_after(blocks: &mut Vec<OutlineNode>, path: &[usize]) {
     if path.is_empty() {
         blocks.push(OutlineNode::default());
         return;
     }
     let (last, parent_path) = path.split_last().unwrap();
-    let siblings = siblings_mut(blocks, parent_path);
+    let Some(siblings) = siblings_mut(blocks, parent_path) else {
+        blocks.push(OutlineNode::default());
+        return;
+    };
     let pos = (last + 1).min(siblings.len());
     siblings.insert(pos, OutlineNode::default());
 }
 
 /// Insert a new block carrying `text` as a sibling immediately *after*
 /// `path`. Same clamp behaviour as [`insert_sibling_after`] (a path past
-/// the live sibling list appends at the end).
+/// the live sibling list, or a stale parent segment, appends at the end).
 ///
 /// Used by the TUI's block-split (Enter mid-text): the tail of the
 /// current block becomes the new sibling's initial text while the head
@@ -200,7 +208,10 @@ pub fn insert_sibling_after_with_text(blocks: &mut Vec<OutlineNode>, path: &[usi
         return;
     }
     let (last, parent_path) = path.split_last().unwrap();
-    let siblings = siblings_mut(blocks, parent_path);
+    let Some(siblings) = siblings_mut(blocks, parent_path) else {
+        blocks.push(node);
+        return;
+    };
     let pos = (last + 1).min(siblings.len());
     siblings.insert(pos, node);
 }
@@ -208,40 +219,50 @@ pub fn insert_sibling_after_with_text(blocks: &mut Vec<OutlineNode>, path: &[usi
 /// Insert a fresh empty block as a sibling immediately *before* `path`.
 ///
 /// Clamp behavior mirrors [`insert_sibling_after`]: a path that
-/// overshoots the live sibling list falls back to appending so an
-/// empty outline + stale selection cursor never panics.
+/// overshoots the live sibling list, or whose parent segment is out of
+/// range, falls back to appending so a stale selection cursor never panics.
 pub fn insert_sibling_before(blocks: &mut Vec<OutlineNode>, path: &[usize]) {
     if path.is_empty() {
         blocks.insert(0, OutlineNode::default());
         return;
     }
     let (last, parent_path) = path.split_last().unwrap();
-    let siblings = siblings_mut(blocks, parent_path);
+    let Some(siblings) = siblings_mut(blocks, parent_path) else {
+        blocks.push(OutlineNode::default());
+        return;
+    };
     let pos = (*last).min(siblings.len());
     siblings.insert(pos, OutlineNode::default());
 }
 
 /// Borrow the sibling list of a path (i.e. the parent's children).
+///
+/// `None` if any segment of `parent_path` is out of range against the
+/// live tree — a caller holding a stale path (a parent that moved,
+/// got deleted, or was never in range to begin with) must get a
+/// chance to fall back instead of indexing past the end and
+/// panicking.
 pub fn siblings_mut<'a>(
     blocks: &'a mut Vec<OutlineNode>,
     parent_path: &[usize],
-) -> &'a mut Vec<OutlineNode> {
+) -> Option<&'a mut Vec<OutlineNode>> {
     let mut current = blocks;
     for &idx in parent_path {
-        current = &mut current[idx].children;
+        current = &mut current.get_mut(idx)?.children;
     }
-    current
+    Some(current)
 }
 
 /// Indent: become the last child of the previous sibling. Returns the
 /// new path of the moved block, or `None` if there is no previous
-/// sibling (already at the top of its parent).
+/// sibling (already at the top of its parent) or a parent segment of
+/// `path` is out of range against the live tree.
 pub fn indent_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
     let (last_idx, parent_path) = path.split_last()?;
     if *last_idx == 0 {
         return None;
     }
-    let siblings = siblings_mut(blocks, parent_path);
+    let siblings = siblings_mut(blocks, parent_path)?;
     let node = siblings.remove(*last_idx);
     let prev = &mut siblings[*last_idx - 1];
     let new_idx = prev.children.len();
@@ -253,7 +274,8 @@ pub fn indent_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<V
 }
 
 /// Outdent: become the next sibling of the parent. Returns the new
-/// path, or `None` if already at the top level.
+/// path, or `None` if already at the top level or a parent/grandparent
+/// segment of `path` is out of range against the live tree.
 pub fn outdent_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
     if path.len() < 2 {
         return None;
@@ -263,36 +285,40 @@ pub fn outdent_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<
     let parent_idx = *parent_idx;
     let last_idx = *last_idx;
     let node = {
-        let siblings = siblings_mut(blocks, parent_path);
+        let siblings = siblings_mut(blocks, parent_path)?;
         siblings.remove(last_idx)
     };
-    let grandparent_siblings = siblings_mut(blocks, grandparent_path);
+    let grandparent_siblings = siblings_mut(blocks, grandparent_path)?;
     grandparent_siblings.insert(parent_idx + 1, node);
     let mut new_path = grandparent_path.to_vec();
     new_path.push(parent_idx + 1);
     Some(new_path)
 }
 
-/// Delete the node at `path`. Silently no-ops on out-of-range or root.
+/// Delete the node at `path`. Silently no-ops on out-of-range leaf or
+/// parent segment, or root.
 pub fn delete_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) {
     if path.is_empty() {
         return;
     }
     let (last_idx, parent_path) = path.split_last().unwrap();
-    let siblings = siblings_mut(blocks, parent_path);
+    let Some(siblings) = siblings_mut(blocks, parent_path) else {
+        return;
+    };
     if *last_idx < siblings.len() {
         siblings.remove(*last_idx);
     }
 }
 
 /// Swap a node with its previous sibling. Returns the new path of the
-/// moved node, or `None` if there is no previous sibling.
+/// moved node, or `None` if there is no previous sibling or a parent
+/// segment of `path` is out of range against the live tree.
 pub fn move_up_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
     let (last_idx, parent_path) = path.split_last()?;
     if *last_idx == 0 {
         return None;
     }
-    let siblings = siblings_mut(blocks, parent_path);
+    let siblings = siblings_mut(blocks, parent_path)?;
     siblings.swap(*last_idx, *last_idx - 1);
     let mut new_path = parent_path.to_vec();
     new_path.push(*last_idx - 1);
@@ -300,10 +326,11 @@ pub fn move_up_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<
 }
 
 /// Swap a node with its next sibling. Returns the new path of the
-/// moved node, or `None` if there is no next sibling.
+/// moved node, or `None` if there is no next sibling or a parent
+/// segment of `path` is out of range against the live tree.
 pub fn move_down_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
     let (last_idx, parent_path) = path.split_last()?;
-    let siblings = siblings_mut(blocks, parent_path);
+    let siblings = siblings_mut(blocks, parent_path)?;
     if *last_idx + 1 >= siblings.len() {
         return None;
     }
@@ -314,242 +341,4 @@ pub fn move_down_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Optio
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn block(text: &str) -> OutlineNode {
-        OutlineNode {
-            text: text.into(),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn count_todos_counts_doing_as_open_work() {
-        // A started task is unfinished work: it belongs in the
-        // denominator, never in the numerator. Reading `DOING` as
-        // done would let the progress chip show 3/3 on a page where
-        // nothing shipped.
-        let blocks = vec![
-            OutlineNode {
-                text: "TODO write the RFC".into(),
-                children: vec![block("DOING ship the parser")],
-                ..Default::default()
-            },
-            block("DONE read the paper"),
-            block("just a note"),
-        ];
-        assert_eq!(count_todos(&blocks), (1, 3));
-    }
-
-    #[test]
-    fn count_todos_ignores_a_marker_word_without_its_space() {
-        assert_eq!(count_todos(&[block("DOINGs are piling up")]), (0, 0));
-    }
-
-    #[test]
-    fn count_todos_sees_a_marker_behind_a_quote_marker() {
-        // `"> TODO foo"` is the legacy authoring order, and the TUI
-        // already draws it as a checkbox (`split_block_prefixes` takes
-        // the two prefixes in either order). The chip has to agree
-        // with what is on screen, or the page shows four checkboxes
-        // and counts two.
-        let blocks = vec![
-            block("> TODO write the RFC"),
-            block("> [ ] file the issue"),
-            block("> DONE read the paper"),
-            block("TODO > canonical order"),
-            block("> just a quote"),
-        ];
-        assert_eq!(count_todos(&blocks), (1, 4));
-    }
-
-    #[test]
-    fn count_todos_unwraps_only_one_quote_marker() {
-        // "No nested quotes" — the inner `> ` stays part of the body,
-        // so this is a quote of a quote, not a task.
-        assert_eq!(count_todos(&[block("> > TODO foo")]), (0, 0));
-    }
-
-    #[test]
-    fn count_todos_counts_the_checkbox_spelling_too() {
-        // A block written `- [ ] ship it` draws a checkbox, so the
-        // progress chip has to see it as well — counting one spelling
-        // and rendering the other is how 3/7 disagrees with the
-        // screen (issue #230).
-        let blocks = vec![
-            block("[ ] write the RFC"),
-            block("[/] ship the parser"),
-            block("[x] read the paper"),
-            block("[X] merge it"),
-            block("[x](https://example.com) is a link, not a task"),
-        ];
-        assert_eq!(count_todos(&blocks), (2, 4));
-    }
-
-    #[test]
-    fn count_todos_counts_quote_first_tasks() {
-        // `"> TODO foo"` is the legacy authoring order the TUI's
-        // `split_block_prefixes` renders as a quoted checkbox, so the
-        // progress chip has to count it — a checkbox on screen that
-        // the chip skips disagrees with what the user sees. The
-        // canonical order (`"TODO > foo"`) already matched.
-        let blocks = vec![
-            block("> TODO write the RFC"),
-            block("> [ ] ship the parser"),
-            block("> DONE read the paper"),
-            block("TODO > canonical order"),
-            block("> just a quote"),
-            block("> > TODO nested quotes stay prose"),
-        ];
-        assert_eq!(count_todos(&blocks), (1, 4));
-    }
-
-    #[test]
-    fn flat_count_counts_nested_blocks() {
-        let blocks = vec![
-            OutlineNode {
-                text: "a".into(),
-                children: vec![block("a1"), block("a2")],
-                ..Default::default()
-            },
-            block("b"),
-        ];
-        assert_eq!(flat_count(&blocks), 4);
-    }
-
-    #[test]
-    fn path_for_index_round_trips() {
-        let blocks = vec![
-            OutlineNode {
-                text: "a".into(),
-                children: vec![block("a1"), block("a2")],
-                ..Default::default()
-            },
-            block("b"),
-        ];
-        for i in 0..flat_count(&blocks) {
-            let path = path_for_index(&blocks, i).unwrap();
-            let back = index_for_path(&blocks, &path).unwrap();
-            assert_eq!(back, i, "round-trip failed at index {i}");
-        }
-    }
-
-    #[test]
-    fn indent_makes_block_child_of_previous_sibling() {
-        let mut blocks = vec![block("a"), block("b")];
-        let new_path = indent_at_path(&mut blocks, &[1]).unwrap();
-        assert_eq!(new_path, vec![0, 0]);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].children.len(), 1);
-        assert_eq!(blocks[0].children[0].text, "b");
-    }
-
-    #[test]
-    fn indent_first_block_is_noop() {
-        let mut blocks = vec![block("a")];
-        assert!(indent_at_path(&mut blocks, &[0]).is_none());
-    }
-
-    #[test]
-    fn outdent_promotes_child_to_grandparent_level() {
-        let mut blocks = vec![OutlineNode {
-            text: "a".into(),
-            children: vec![block("a1")],
-            ..Default::default()
-        }];
-        let new_path = outdent_at_path(&mut blocks, &[0, 0]).unwrap();
-        assert_eq!(new_path, vec![1]);
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[1].text, "a1");
-    }
-
-    #[test]
-    fn outdent_top_level_is_noop() {
-        let mut blocks = vec![block("a")];
-        assert!(outdent_at_path(&mut blocks, &[0]).is_none());
-    }
-
-    #[test]
-    fn insert_sibling_after_inserts_at_correct_position() {
-        let mut blocks = vec![block("a"), block("b")];
-        insert_sibling_after(&mut blocks, &[0]);
-        assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[0].text, "a");
-        assert_eq!(blocks[1].text, "");
-        assert_eq!(blocks[2].text, "b");
-    }
-
-    /// Regression for issue #55: the TUI falls back to `vec![0]` when
-    /// `path_for_index` returns `None` (typical when the page parses to
-    /// zero blocks — e.g. the seeded journal starts with `# heading`,
-    /// which is not a block marker). The previous implementation
-    /// computed `pos = last + 1 = 1` against an empty Vec and panicked
-    /// with "insertion index (is 1) should be <= len (is 0)".
-    #[test]
-    fn insert_sibling_after_clamps_when_blocks_empty() {
-        let mut blocks: Vec<OutlineNode> = Vec::new();
-        insert_sibling_after(&mut blocks, &[0]);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].text, "");
-    }
-
-    #[test]
-    fn insert_sibling_before_clamps_when_blocks_empty() {
-        let mut blocks: Vec<OutlineNode> = Vec::new();
-        insert_sibling_before(&mut blocks, &[0]);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].text, "");
-    }
-
-    #[test]
-    fn insert_sibling_after_with_text_seeds_the_new_block() {
-        // The TUI block-split path: "hello world" split at the cursor
-        // leaves the head behind and drops the tail into a new sibling.
-        let mut blocks = vec![block("hello"), block("b")];
-        insert_sibling_after_with_text(&mut blocks, &[0], " world".to_string());
-        assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[0].text, "hello");
-        assert_eq!(blocks[1].text, " world");
-        assert_eq!(blocks[2].text, "b");
-    }
-
-    #[test]
-    fn insert_sibling_after_with_text_clamps_when_blocks_empty() {
-        let mut blocks: Vec<OutlineNode> = Vec::new();
-        insert_sibling_after_with_text(&mut blocks, &[0], "tail".to_string());
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].text, "tail");
-    }
-
-    #[test]
-    fn delete_removes_block_and_descendants() {
-        let mut blocks = vec![
-            OutlineNode {
-                text: "a".into(),
-                children: vec![block("a1")],
-                ..Default::default()
-            },
-            block("b"),
-        ];
-        delete_at_path(&mut blocks, &[0]);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].text, "b");
-    }
-
-    // `flatten_backlink_subtree` moved to
-    // `outl_actions::flatten_subtree_paths` along with the rest of the
-    // backlinks pipeline. Coverage now lives in `outl-actions::outline`
-    // tests next to the helper it operates on.
-
-    #[test]
-    fn descendants_count_handles_nested() {
-        let blocks = vec![OutlineNode {
-            text: "a".into(),
-            children: vec![block("a1"), block("a2")],
-            ..Default::default()
-        }];
-        assert_eq!(descendants_count_at_path(&blocks, &[0]), 2);
-        assert_eq!(descendants_count_at_path(&blocks, &[0, 0]), 0);
-    }
-}
+mod tests;

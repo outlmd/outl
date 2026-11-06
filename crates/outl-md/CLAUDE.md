@@ -54,10 +54,15 @@ Treat matching with the same paranoia as the CRDT.
   `insert_sibling_after_with_text` is the same insert as `insert_sibling_after` but seeds the new block's text — the TUI's in-flight block-split on Enter mid-text (issue #184).
   They operate on an in-flight AST that hasn't been parsed back into a workspace yet, so they sit in `outl-md` (UI-agnostic, no `Workspace`) rather than in `outl-actions`.
   The TUI re-exports them through a one-line shim at `outl-tui/src/outline_ops.rs`; the mobile client consumes them directly.
-  **Insert helpers clamp**:
-  `insert_sibling_after/before` clamp the computed position to `siblings.len()` instead of panicking when a caller passes a path the live tree no longer satisfies,
+  **Insert helpers clamp, at every segment of the path, not just the leaf.**
+  `insert_sibling_after/before` clamp the computed position to `siblings.len()` instead of panicking when a caller passes a path the live tree no longer satisfies.
   (typical case: page parsed to zero blocks because its content didn't start with a `- ` marker, but the TUI's `selected` cursor defaulted to `[0]`).
   Falling back to "append at the end" is the right shape — the user's intent ("create a new block") is satisfied, no data is lost.
+  `siblings_mut` returns `Option<&mut Vec<OutlineNode>>`.
+  `None` means a *parent* segment is out of range — a stale nested path like `[13, 0]` against a shorter or empty tree.
+  A leaf-only clamp still panicked walking down to a parent that no longer exists.
+  Every caller (`indent_at_path`, `outdent_at_path`, `delete_at_path`, `move_up_at_path`, `move_down_at_path`, the three insert helpers) treats `None` the same as the leaf-out-of-range case.
+  Insert helpers fall back to a top-level append; the rest return `None` / no-op.
 - **Emoji catalog** (`emoji.rs`) — GitHub gemoji catalog (backed by the [`emojis`] crate).
   `shortcode_to_unicode("tada") → Some("🎉")` is the one-way resolver every renderer uses;
   `search(query, limit) → Vec<EmojiHit>` powers the `:shortcode:` autocomplete shared by TUI / mobile / desktop through the `outl_emoji_search` Tauri command,
@@ -336,6 +341,9 @@ src/
 ├── reconcile.rs    # the pass; reconcile/{outcome,page_root,text_sync,orphan_log}.rs
 ├── slug.rs         # slugify page names
 ├── tag.rs          # text_contains_tag{,_or_child} — boundary-correct #tag predicates over the tokenizer
+├── outline_ops.rs  # pure Vec<OutlineNode> AST helpers (insert/indent/outdent/delete/move at a path)
+├── outline_ops/
+│   └── tests.rs    # the helpers' unit tests (split out like parse/tests.rs)
 ├── view.rs         # render helpers consumed by UIs
 ├── asset.rs        # ASSETS_DIR, hash_bytes, asset_rel_path, is_asset_link (pure; no filesystem)
 └── atomic.rs       # crash-safe write_atomic + its read counterpart read_for_rewrite

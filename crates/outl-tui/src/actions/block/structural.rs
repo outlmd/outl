@@ -353,7 +353,9 @@ impl App {
                     return;
                 }
                 let parent = &abs_path[..abs_path.len() - 1];
-                let siblings = siblings_mut(&mut page.blocks, parent);
+                let Some(siblings) = siblings_mut(&mut page.blocks, parent) else {
+                    return;
+                };
                 siblings.swap(last - 1, last);
                 *abs_path.last_mut().unwrap() = last - 1;
             });
@@ -370,7 +372,9 @@ impl App {
         }
         self.snapshot_for_undo();
         let parent_path = &path[..path.len() - 1];
-        let siblings = siblings_mut(&mut self.page.blocks, parent_path);
+        let Some(siblings) = siblings_mut(&mut self.page.blocks, parent_path) else {
+            return;
+        };
         siblings.swap(last_idx - 1, last_idx);
         let mut new_path = parent_path.to_vec();
         new_path.push(last_idx - 1);
@@ -386,11 +390,16 @@ impl App {
                     return;
                 };
                 let parent = abs_path[..abs_path.len() - 1].to_vec();
-                let sibling_count = siblings_mut(&mut page.blocks, &parent).len();
+                let Some(sibling_count) = siblings_mut(&mut page.blocks, &parent).map(Vec::len)
+                else {
+                    return;
+                };
                 if last + 1 >= sibling_count {
                     return;
                 }
-                let siblings = siblings_mut(&mut page.blocks, &parent);
+                let Some(siblings) = siblings_mut(&mut page.blocks, &parent) else {
+                    return;
+                };
                 siblings.swap(last, last + 1);
                 *abs_path.last_mut().unwrap() = last + 1;
             });
@@ -403,12 +412,17 @@ impl App {
             return;
         };
         let parent_path = path[..path.len() - 1].to_vec();
-        let sibling_count = siblings_mut(&mut self.page.blocks, &parent_path).len();
+        let Some(sibling_count) = siblings_mut(&mut self.page.blocks, &parent_path).map(Vec::len)
+        else {
+            return;
+        };
         if last_idx + 1 >= sibling_count {
             return;
         }
         self.snapshot_for_undo();
-        let siblings = siblings_mut(&mut self.page.blocks, &parent_path);
+        let Some(siblings) = siblings_mut(&mut self.page.blocks, &parent_path) else {
+            return;
+        };
         siblings.swap(last_idx, last_idx + 1);
         let mut new_path = parent_path;
         new_path.push(last_idx + 1);
