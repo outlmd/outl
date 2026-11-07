@@ -119,7 +119,7 @@ iroh-gossip = "0.101.0"
 iroh-mdns-address-lookup = "0.6"
 
 # Markdown
-comrak = { version = "0.52", default-features = false }
+comrak = { version = "0.59", default-features = false }
 emojis = "0.9"
 # NFC before slugifying a page name. The slug decides the page's NodeId,
 # so one name spelled two ways (macOS hands back NFD, a Korean IME
