@@ -141,7 +141,7 @@ walkdir = "2"
 fs2 = "0.4"
 
 # Concurrency
-parking_lot = "0.12"
+parking_lot = "0.13"
 lru = "0.19"
 
 # Misc
