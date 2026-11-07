@@ -20,10 +20,10 @@ use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
-use crate::tree::{next_sibling, position_after, position_before};
+use crate::tree::{next_sibling, position_before};
 
 use super::create::{append_block, create_with_position};
-use super::{ensure_live, wrap};
+use super::{ensure_live, slot_after, wrap};
 
 /// Insert a new sibling immediately after `after`, sharing the same
 /// parent.
@@ -38,8 +38,7 @@ pub fn create_after(
         .tree()
         .parent(after)
         .ok_or_else(|| ActionError::NotInTree(after.to_string()))?;
-    let position = position_after(workspace, after)
-        .ok_or_else(|| ActionError::MissingPosition(after.to_string()))?;
+    let position = slot_after(workspace, hlc, after)?;
     create_with_position(workspace, hlc, parent, position, text)
 }
 

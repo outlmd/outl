@@ -17,7 +17,9 @@ use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
-use crate::tree::{next_sibling, position_after, position_for_new_last_child, previous_sibling};
+use crate::tree::{
+    children_of, next_sibling, position_after, position_for_new_last_child, previous_sibling,
+};
 
 use super::{ensure_in_tree, wrap};
 
@@ -48,6 +50,84 @@ fn move_to(
         },
     ))?;
     Ok(())
+}
+
+/// A slot strictly between `node` and its next sibling, opening one
+/// when the gap between them is empty.
+///
+/// [`position_after`] cannot promise the upper bound: on an empty gap
+/// (a tie, or a next sibling at `node`'s key plus a single `a`)
+/// `Fractional::between` drops it, and a block meant to land right
+/// after `node` lands after its next sibling instead (issue #476).
+/// `Fractional::between` no longer mints such a key, but older ones are
+/// already in op logs and replay, and an offline tie is one too, so the
+/// callers have to cope with them, the way [`super::create_before`]
+/// does on its side.
+///
+/// So when the gap is empty, the next sibling moves up into the gap
+/// above it, keeping its place in the order, and the slot it frees is
+/// returned. When that gap is empty too, nothing moves: relocating a
+/// sibling past a block the user never touched is the worse of the
+/// two, as in `create_before`. The block then lands just past the
+/// siblings it cannot get ahead of — see `first_room_after`.
+pub(crate) fn slot_after(
+    workspace: &mut Workspace,
+    hlc: &HlcGenerator,
+    node: NodeId,
+) -> Result<Fractional, ActionError> {
+    let candidate = position_after(workspace, node)
+        .ok_or_else(|| ActionError::MissingPosition(node.to_string()))?;
+    let Some(next) = next_sibling(workspace, node) else {
+        return Ok(candidate);
+    };
+    let tree = workspace.tree();
+    let (Some(left), Some(right), Some(parent)) = (
+        tree.position(node).cloned(),
+        tree.position(next).cloned(),
+        tree.parent(next),
+    ) else {
+        return Ok(candidate);
+    };
+    if candidate < right {
+        return Ok(candidate);
+    }
+    let beyond = next_sibling(workspace, next).and_then(|n| workspace.tree().position(n).cloned());
+    let shifted = Fractional::between(Some(&right), beyond.as_ref());
+    let freed = Fractional::between(Some(&left), Some(&shifted));
+    // Both checks before anything moves: `next` may not jump past the
+    // sibling after it, and the gap it leaves has to hold a key.
+    if beyond.as_ref().is_some_and(|b| &shifted >= b) || freed >= shifted {
+        return Ok(first_room_after(workspace, parent, node, &left));
+    }
+    move_to(workspace, hlc, next, parent, shifted)?;
+    Ok(freed)
+}
+
+/// The first slot after `node` that sorts before a later sibling: just
+/// before the first one that leaves room above `left`, so the block
+/// passes only the siblings it could not get ahead of.
+///
+/// Not [`position_after`]'s answer, which on an empty gap drops the
+/// bound outright: `between("aam", "aam")` is `"n"`, and on a page whose
+/// blocks sit around `"aam"` that is the bottom of the page. Three tied
+/// siblings sent a block created after the first one past every block
+/// below them (issue #476).
+fn first_room_after(
+    workspace: &Workspace,
+    parent: NodeId,
+    node: NodeId,
+    left: &Fractional,
+) -> Fractional {
+    children_of(workspace, parent)
+        .into_iter()
+        .skip_while(|(id, _)| *id != node)
+        .skip(1)
+        .map(|(_, pos)| (Fractional::between(Some(left), Some(&pos)), pos))
+        // `between` honours its upper bound exactly when the gap holds
+        // a key, so this asks the same question it answers.
+        .find(|(slot, pos)| slot < pos)
+        .map(|(slot, _)| slot)
+        .unwrap_or_else(|| Fractional::between(Some(left), None))
 }
 
 /// Move the block under the trash root. Materialised tree drops it
@@ -118,8 +198,7 @@ pub fn outdent(
         .tree()
         .parent(parent)
         .ok_or_else(|| ActionError::NoGrandparent(node.to_string()))?;
-    let pos = position_after(workspace, parent)
-        .ok_or_else(|| ActionError::MissingPosition(parent.to_string()))?;
+    let pos = slot_after(workspace, hlc, parent)?;
     move_to(workspace, hlc, node, grand, pos)
 }
 
@@ -186,8 +265,7 @@ pub fn move_after(
         .tree()
         .parent(target)
         .ok_or_else(|| ActionError::NotInTree(target.to_string()))?;
-    let position = position_after(workspace, target)
-        .ok_or_else(|| ActionError::MissingPosition(target.to_string()))?;
+    let position = slot_after(workspace, hlc, target)?;
     move_to(workspace, hlc, node, parent, position)
 }
 

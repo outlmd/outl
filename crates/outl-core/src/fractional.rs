@@ -135,6 +135,11 @@ impl Fractional {
     ///   between the bounds exists. **When the gap is empty the lower
     ///   bound wins**: `right` is dropped and the result is the next key
     ///   above `left`.
+    /// - The result does not end on the floor byte `a` unless it is the
+    ///   only key in the gap (`("a", "aaa")` holds just `"aa"`). A key
+    ///   ending in `a` would leave nothing between `left` and itself, and
+    ///   the next insert right after `left` would land above it
+    ///   (issue #476).
     /// - The result is a pure function of the bounds, so two devices
     ///   performing the same insert converge on the same key.
     /// - It never panics.
@@ -171,7 +176,9 @@ impl Fractional {
         // `i` reads byte `i` of each bound and pushes exactly one byte,
         // so by `i == max(len(left), len(right))` both bounds are
         // exhausted, the window is the full `(BELOW_FIRST, ABOVE_LAST)`
-        // and the midpoint branch always breaks.
+        // and the midpoint branch always breaks. A midpoint on the floor
+        // byte (see below) only happens while `right` still binds, so
+        // before that last index: the descent it takes fits.
         let bound = left_bytes.len().max(right_bytes.len());
         let mut result = Vec::<u8>::with_capacity(bound + 1);
         for i in 0..=bound {
@@ -196,7 +203,21 @@ impl Fractional {
             // the panic this function exists to stop having.
             if (r_byte as u16) > (l_byte as u16) + 1 {
                 // Room for a byte strictly inside the window.
-                result.push((((l_byte as u16) + (r_byte as u16)) / 2) as u8);
+                let mid = (((l_byte as u16) + (r_byte as u16)) / 2) as u8;
+                if mid == FIRST_BYTE {
+                    // Never end a key on the floor byte: nothing sorts
+                    // between `left` and `left + "a"`, so the next insert
+                    // right after `left` would find an empty gap and land
+                    // above this key — after the sibling it was meant to
+                    // precede (issue #476). Take the floor and descend
+                    // into the full window instead (`"ba"` → `"bam"`).
+                    // `mid` is the floor only when `left` is exhausted
+                    // and `r_byte` is above it, so `right` stops binding.
+                    result.push(FIRST_BYTE);
+                    right_binding = false;
+                    continue;
+                }
+                result.push(mid);
                 break;
             }
 
@@ -213,13 +234,22 @@ impl Fractional {
             if right_binding && pushed < right_bytes[i] {
                 right_binding = false;
             }
-            if right_binding && i >= left_bytes.len() && i + 1 < right_bytes.len() {
+            if right_binding
+                && i >= left_bytes.len()
+                && i + 1 < right_bytes.len()
+                && (pushed != FIRST_BYTE || right_bytes[i + 1..].iter().all(|&b| b == FIRST_BYTE))
+            {
                 // `left` is exhausted and `result` matches `right` byte
                 // for byte with bytes to spare, so `result` is a proper
                 // prefix of `right`: already `> left` (same prefix, one
                 // byte longer) and `< right`. Descending further walks
                 // past the only slot the gap has — this is the
                 // `("a", "aaa")` case, whose answer is `"aa"`.
+                //
+                // Unless that prefix ends on the floor byte and `right`
+                // still has a byte above it: then a deeper key exists
+                // that does not (`("a", "aab")` → `"aaam"`, not `"aa"`),
+                // and it keeps room right after `left` (issue #476).
                 break;
             }
         }
@@ -386,6 +416,20 @@ mod tests {
         assert!(l < m);
         assert!(m < r);
         assert!(m.0.len() < 1024);
+    }
+
+    /// `between("b", "bc")` used to mint `"ba"`, and nothing sorts
+    /// between `"b"` and `"ba"`: the next insert right after `"b"` landed
+    /// above it (issue #476).
+    #[test]
+    fn between_never_ends_a_key_on_the_floor_byte() {
+        let b = Fractional::parse("b").unwrap();
+        let bc = Fractional::parse("bc").unwrap();
+        let got = Fractional::between(Some(&b), Some(&bc));
+        assert!(b < got && got < bc, "{got} must land inside (b, bc)");
+        assert!(!got.0.ends_with('a'), "{got} leaves no room right after b");
+        let next = Fractional::between(Some(&b), Some(&got));
+        assert!(b < next && next < got, "{next} must land inside (b, {got})");
     }
 
     #[test]

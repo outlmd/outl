@@ -333,4 +333,182 @@ mod tests {
         );
         assert_eq!(ws.block_text(fresh).as_deref(), Some("new"));
     }
+
+    /// Sibling order under `parent`.
+    fn order(ws: &Workspace, parent: NodeId) -> Vec<NodeId> {
+        children_of(ws, parent)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// `"ba"` is a key `between("b", "bc")` used to mint, and nothing
+    /// sorts between `"b"` and `"ba"`. Such keys are in op logs already.
+    /// Enter on the block at `"b"` put the new block after its successor
+    /// (issue #476).
+    #[test]
+    fn create_after_lands_before_a_successor_one_a_above() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let parent = NodeId::root();
+        let (anchor, successor) = (NodeId::new(), NodeId::new());
+        place(
+            &mut ws,
+            &hlc,
+            anchor,
+            parent,
+            &Fractional::parse("b").unwrap(),
+        );
+        place(
+            &mut ws,
+            &hlc,
+            successor,
+            parent,
+            &Fractional::parse("ba").unwrap(),
+        );
+
+        let fresh = crate::block::create_after(&mut ws, &hlc, anchor, Some("new")).unwrap();
+
+        let got = order(&ws, parent);
+        assert_eq!(got, vec![anchor, fresh, successor], "{got:?}");
+
+        // A peer replaying the same ops in reverse renders the same order.
+        let mut peer = Workspace::open_in_memory(actor).unwrap();
+        let mut ops: Vec<LogOp> = ws.log().iter().cloned().collect();
+        ops.reverse();
+        for op in ops {
+            peer.apply(op).unwrap();
+        }
+        assert_eq!(
+            order(&peer, parent),
+            got,
+            "two replicas must render one order"
+        );
+    }
+
+    /// A tie has no interior either: two offline creates under one
+    /// parent mint the same key.
+    #[test]
+    fn create_after_lands_before_a_tied_successor() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let parent = NodeId::root();
+        let mut ids = [NodeId::new(), NodeId::new()];
+        ids.sort();
+        for id in &ids {
+            place(&mut ws, &hlc, *id, parent, &Fractional::first());
+        }
+
+        let fresh = crate::block::create_after(&mut ws, &hlc, ids[0], Some("new")).unwrap();
+
+        assert_eq!(order(&ws, parent), vec![ids[0], fresh, ids[1]]);
+    }
+
+    /// The outdent half of issue #476: the block lands right after its
+    /// old parent, not after the parent's successor.
+    #[test]
+    fn outdent_lands_before_the_old_parents_successor() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let root = NodeId::root();
+        let (old_parent, successor, child) = (NodeId::new(), NodeId::new(), NodeId::new());
+        place(
+            &mut ws,
+            &hlc,
+            old_parent,
+            root,
+            &Fractional::parse("b").unwrap(),
+        );
+        place(
+            &mut ws,
+            &hlc,
+            successor,
+            root,
+            &Fractional::parse("ba").unwrap(),
+        );
+        place(&mut ws, &hlc, child, old_parent, &Fractional::first());
+
+        crate::block::outdent(&mut ws, &hlc, child).unwrap();
+
+        assert_eq!(order(&ws, root), vec![old_parent, child, successor]);
+    }
+
+    /// When the successor cannot move up either (it is tied with the
+    /// sibling after it), nothing moves, as
+    /// `create_before_never_moves_a_sibling_it_cannot_clear` does on the
+    /// other side, and the new block lands right after the two it could
+    /// not get ahead of.
+    #[test]
+    fn create_after_never_moves_a_sibling_it_cannot_clear() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let parent = NodeId::root();
+        let anchor = NodeId::new();
+        let b = Fractional::parse("b").unwrap();
+        let ba = Fractional::parse("ba").unwrap();
+        place(&mut ws, &hlc, anchor, parent, &b);
+        let mut tied = [NodeId::new(), NodeId::new()];
+        tied.sort();
+        for id in &tied {
+            place(&mut ws, &hlc, *id, parent, &ba);
+        }
+
+        let fresh = crate::block::create_after(&mut ws, &hlc, anchor, Some("new")).unwrap();
+
+        for id in &tied {
+            assert_eq!(ws.tree().position(*id), Some(&ba), "no sibling may move");
+        }
+        assert_eq!(ws.tree().position(anchor), Some(&b));
+        assert_eq!(order(&ws, parent), vec![anchor, tied[0], tied[1], fresh]);
+    }
+
+    /// Where nothing can move, the block still lands *just* past the
+    /// siblings it could not get ahead of. `position_after` alone drops
+    /// the bound on a tie: `between("aam", "aam")` is `"n"`, so a block
+    /// created after the first of three tied siblings went past every
+    /// block below them, to the bottom of the page (issue #476).
+    #[test]
+    fn create_after_a_tied_run_lands_before_the_next_block_with_room() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let parent = NodeId::root();
+        let mut tied = [NodeId::new(), NodeId::new(), NodeId::new()];
+        tied.sort();
+        for id in &tied {
+            place(
+                &mut ws,
+                &hlc,
+                *id,
+                parent,
+                &Fractional::parse("aam").unwrap(),
+            );
+        }
+        let (below, last) = (NodeId::new(), NodeId::new());
+        place(
+            &mut ws,
+            &hlc,
+            below,
+            parent,
+            &Fractional::parse("ac").unwrap(),
+        );
+        place(
+            &mut ws,
+            &hlc,
+            last,
+            parent,
+            &Fractional::parse("n").unwrap(),
+        );
+
+        let fresh = crate::block::create_after(&mut ws, &hlc, tied[0], Some("new")).unwrap();
+
+        assert_eq!(
+            order(&ws, parent),
+            vec![tied[0], tied[1], tied[2], fresh, below, last]
+        );
+    }
 }

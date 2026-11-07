@@ -60,6 +60,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A block inserted or outdented could land one row too low** ([#476](https://github.com/outlmd/outl/issues/476)).
+  Press `Enter` at the end of a block a few times in a row, or outdent a list from the bottom up, and sooner or later the new block appeared *after* the sibling it should have preceded — on every client, and it stayed there after a reload.
+  The position minted between two siblings could end on the lowest possible character, which leaves nothing between the previous block and the new one; the next insert at that spot had no room and was placed above the block just created instead.
+  New positions no longer end that way, so the room right after a block never runs out.
+  Positions minted before this fix are still in op logs, and two devices creating a block offline can still tie; on those, creating a block after another, outdenting and moving a block after another now make room first.
+  The next block moves up into the room above it, keeping its place in the order, and the new block takes the slot it freed.
+  When there is no room above it either — three blocks tied on one position, say — nothing moves, and the new block lands just past the blocks it cannot get ahead of instead of at the bottom of the page: shifting a block the user never touched past another would be the worse surprise.
+  Blocks already out of order stay where they are, since nothing says which order was meant.
 - **`Tab` / `Shift+Tab` on the desktop kicked you out of edit mode** ([#477](https://github.com/outlmd/outl/issues/477)).
   Indenting or outdenting the block you were typing in moved it, but the textarea closed and the selection stayed on whatever block had been selected before you started editing.
   The very next keystroke then ran as a Normal-mode command against that stale selection instead of the block you were still looking at.

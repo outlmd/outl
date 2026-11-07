@@ -241,6 +241,40 @@ proptest! {
         }
     }
 
+    /// Inserting again and again right after the same key — Enter on one
+    /// block, or outdenting a list bottom-up — halves the same gap towards
+    /// `left`. Every new key must stay below the one inserted before it:
+    /// the gap is never empty, because no key ends on the floor byte.
+    /// It used to empty within about seven inserts and put the block after
+    /// the sibling it was meant to precede (issue #476).
+    #[test]
+    fn inserting_repeatedly_right_after_one_key_stays_in_order(
+        left in "[a-z]{1,4}",
+        right in prop::option::of("[a-z]{1,4}"),
+        rounds in 1usize..40,
+    ) {
+        let left = Fractional::parse(left).unwrap();
+        // Start from a gap that holds a key, under a bound `between` could
+        // have minted: an already-empty gap is the #282 case, covered
+        // above, and a bound ending on the floor byte can leave `left`
+        // only floor-ending keys (`("a", "aaa")` holds just `"aa"`).
+        let mut upper = right
+            .filter(|r| !gap_is_empty(Some(left.as_str()), Some(r)) && !r.ends_with('a'))
+            .map(|r| Fractional::parse(r).unwrap());
+        for _ in 0..rounds {
+            let next = Fractional::between(Some(&left), upper.as_ref());
+            prop_assert!(next > left, "{next} must sort after {left}");
+            if let Some(u) = &upper {
+                prop_assert!(&next < u, "{next} must stay below {u}");
+            }
+            prop_assert!(
+                !gap_is_empty(Some(left.as_str()), Some(next.as_str())),
+                "{next} leaves no room right after {left}"
+            );
+            upper = Some(next);
+        }
+    }
+
     /// Repeated inserts against a *tied* pair still produce distinct,
     /// ordered keys rather than one key forever — the tie is dropped as a
     /// bound, not carried as one.
