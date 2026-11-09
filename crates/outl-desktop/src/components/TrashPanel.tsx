@@ -275,14 +275,17 @@ export function TrashPanel(props: TrashPanelDeps) {
                           {entry.blocks} blocks
                         </Show>
                       </p>
-                      {/* Both printed verbatim: the backend owns the
-                          whole sentence, "cannot restore" included. */}
-                      <Show when={entry.refusal}>
-                        {(why) => (
-                          <p class="mt-1 text-xs text-(--color-outl-todo-open-fg)">{why()}</p>
-                        )}
-                      </Show>
-                      <Show when={attemptNotice(entry)}>
+                      {/* One line, because only one of the two can be
+                          set: `attemptNotice` yields to the row's own
+                          verdict. Printed verbatim either way — the
+                          backend owns the whole sentence, "cannot
+                          restore" included.
+
+                          `||` rather than `??`, so a refusal that is
+                          somehow the empty string still falls through
+                          to the attempt, which is what the two
+                          separate `Show`s did. */}
+                      <Show when={entry.refusal || attemptNotice(entry)}>
                         {(why) => (
                           <p class="mt-1 text-xs text-(--color-outl-todo-open-fg)">{why()}</p>
                         )}

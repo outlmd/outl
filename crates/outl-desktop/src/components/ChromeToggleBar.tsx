@@ -5,7 +5,7 @@ import { pluginRun, pluginToolbar } from "@outl/shared/api/commands";
 import type { PluginToolbarButton as ToolbarButtonEntry } from "@outl/shared/api/types";
 import { rovingKeydown } from "../lib/keyboard-reach";
 import { playPluginViews } from "../lib/plugin-views";
-import { appState, setAppState, setOutline } from "../lib/store";
+import { appState, setAppState, setOutline, togglePanel } from "../lib/store";
 import type { ActionHandlers } from "../lib/shortcuts";
 import { SyncIndicator } from "./SyncIndicator";
 
@@ -224,7 +224,7 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
           active={appState.sidebarOpen}
           label={appState.sidebarOpen ? "Hide sidebar" : "Show sidebar"}
           title="Toggle sidebar (⌘⇧E)"
-          onToggle={() => setAppState("sidebarOpen", !appState.sidebarOpen)}
+          onToggle={() => togglePanel("sidebarOpen")}
         />
       </div>
       <div
@@ -274,23 +274,21 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
           active={appState.trashOpen}
           label="Trash"
           title="Trash — restore a deleted block"
-          onToggle={() => setAppState("trashOpen", !appState.trashOpen)}
+          onToggle={() => togglePanel("trashOpen")}
         />
         <ChromeToggle
           glyph={<BellIcon />}
           active={appState.remindersOpen}
           label="Reminders"
           title="Reminders (⌘⇧R)"
-          onToggle={() => setAppState("remindersOpen", !appState.remindersOpen)}
+          onToggle={() => togglePanel("remindersOpen")}
         />
         <ChromeToggle
           glyph={<PluginsIcon />}
           active={appState.marketplaceOpen}
           label={appState.marketplaceOpen ? "Hide plugins" : "Plugins"}
           title="Plugins"
-          onToggle={() =>
-            setAppState("marketplaceOpen", !appState.marketplaceOpen)
-          }
+          onToggle={() => togglePanel("marketplaceOpen")}
         />
         {/* Click syncs now, right-click opens Settings → Sync. */}
         <SyncIndicator />
@@ -306,7 +304,7 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
           active={appState.settingsOpen}
           label="Settings"
           title="Settings (⌘,)"
-          onToggle={() => setAppState("settingsOpen", !appState.settingsOpen)}
+          onToggle={() => togglePanel("settingsOpen")}
         />
       </div>
     </>
