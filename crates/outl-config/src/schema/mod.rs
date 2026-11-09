@@ -19,7 +19,7 @@ mod sync;
 mod telemetry;
 mod ui;
 
-pub use schedule::{CalendarCfg, RemindersCfg};
+pub use schedule::{CalendarCfg, RemindersCfg, WeekStart};
 pub use storage::{AssetsCfg, BackupCfg, SnapshotCfg, StorageCfg, WorkspaceCfg};
 pub use sync::{SyncConfig, SyncTransportKind};
 pub use telemetry::TelemetryCfg;
@@ -69,6 +69,7 @@ mod tests {
         assert_eq!(c.editor.diagrams, DiagramsMode::Pele);
         assert!(c.workspace.last.is_none());
         assert!(c.calendar.timezone.is_none());
+        assert_eq!(c.calendar.week_start, WeekStart::Monday);
         assert_eq!(c.sync.transport, SyncTransportKind::Iroh);
         assert!(c.sync.relay_url.is_none());
         assert!(c.snapshot.enabled);

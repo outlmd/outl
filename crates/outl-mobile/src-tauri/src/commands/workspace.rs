@@ -16,6 +16,9 @@ use crate::state::{AppState, WorkspaceSummary};
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     let guard = state.workspace.lock();
     let storage_root = state.storage_root.to_string_lossy().into_owned();
+    // Global `[calendar]`, the same file and section the desktop and TUI
+    // read — see the desktop twin's `workspace_stats`.
+    let week_start = outl_config::load().calendar.week_start;
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
@@ -23,6 +26,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
+            week_start,
             ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
@@ -31,6 +35,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: String::new(),
             storage_root,
             ready: false,
+            week_start,
             // See the desktop twin: zero with no workspace is exact.
             ops_complete: true,
         },

@@ -8,7 +8,7 @@ import {
   daysInMonth,
   formatJournalSlug,
   journalSlugToDate,
-  mondayIndex,
+  weekStartIndex,
   nextMonth,
   parseJournalSlug,
   prevMonth,
@@ -98,17 +98,22 @@ describe("prevMonth / nextMonth", () => {
   });
 });
 
-describe("labels + mondayIndex", () => {
+describe("labels + weekStartIndex", () => {
   it("exposes 12 month names and 7 weekday labels per convention", () => {
     expect(MONTH_NAMES).toHaveLength(12);
     expect(DAY_LABELS).toHaveLength(7);
     expect(DAY_LABELS_MONDAY_FIRST).toHaveLength(7);
   });
 
-  it("mondayIndex remaps getDay() onto Monday-first", () => {
-    expect(mondayIndex(1)).toBe(0); // Monday
-    expect(mondayIndex(0)).toBe(6); // Sunday
-    expect(mondayIndex(6)).toBe(5); // Saturday
+  it("weekStartIndex remaps getDay() onto each configured first day", () => {
+    // Monday-first: matches the Rust WeekStart::offset_from_sunday_index.
+    expect(weekStartIndex(1, "monday")).toBe(0); // Monday
+    expect(weekStartIndex(0, "monday")).toBe(6); // Sunday
+    expect(weekStartIndex(6, "monday")).toBe(5); // Saturday
+    // Sunday-first: getDay() is already the offset.
+    expect(weekStartIndex(0, "sunday")).toBe(0); // Sunday
+    expect(weekStartIndex(1, "sunday")).toBe(1); // Monday
+    expect(weekStartIndex(6, "sunday")).toBe(6); // Saturday
   });
 });
 

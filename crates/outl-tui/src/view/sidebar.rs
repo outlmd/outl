@@ -48,14 +48,20 @@ fn render_calendar(f: &mut ratatui::Frame<'_>, area: Rect, app: &App) {
         View::Page(_) => today,
     };
     let first = NaiveDate::from_ymd_opt(viewing.year(), viewing.month(), 1).unwrap_or(today);
-    // Weekday index, 0 = Monday — line up with the `Mo Tu …` header.
-    let weekday_offset = first.weekday().num_days_from_monday() as usize;
+    // Week layout owner: `[calendar] week_start`, loaded at boot
+    // (issue #94). The offset is the day's position within the week, so
+    // day 1 lands under its own header cell whichever day opens the grid.
+    let week_start = app.calendar_week_start;
+    let weekday_offset =
+        week_start.offset_from_sunday_index(first.weekday().num_days_from_sunday()) as usize;
     let days_in_month = days_in_month(viewing.year(), viewing.month());
-
-    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
-        "Mo Tu We Th Fr Sa Su",
-        app.theme.dim,
-    ))];
+    // The header row rotates with the grid: same seven days, two
+    // rotations, never a different week length.
+    let header = match week_start {
+        outl_config::WeekStart::Monday => "Mo Tu We Th Fr Sa Su",
+        outl_config::WeekStart::Sunday => "Su Mo Tu We Th Fr Sa",
+    };
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(header, app.theme.dim))];
 
     let mut row_spans: Vec<Span<'static>> = Vec::new();
     // Pad the first week with blanks so day 1 aligns with its weekday.

@@ -8,6 +8,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which day the calendar week starts on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeekStart {
+    /// Monday-first (`Mo Tu We Th Fr Sa Su`).
+    #[default]
+    Monday,
+    /// Sunday-first (`Su Mo Tu We Th Fr Sa`).
+    Sunday,
+}
+
+impl WeekStart {
+    /// Offset of a day within the week, given its Sunday-based index
+    /// (0 = Sunday … 6 = Saturday — `Date#getDay()` in JS,
+    /// `Weekday::num_days_from_sunday()` in Rust). Returns 0 for the
+    /// configured first day, 6 for the last.
+    pub fn offset_from_sunday_index(self, sunday_index: u32) -> u32 {
+        match self {
+            WeekStart::Monday => (sunday_index + 6) % 7,
+            WeekStart::Sunday => sunday_index % 7,
+        }
+    }
+}
+
 /// Calendar / time section — controls how outl renders "now" and
 /// "today".
 ///
@@ -27,6 +51,9 @@ pub struct CalendarCfg {
     /// unparseable name is ignored when the clock initializes (logged)
     /// and also falls back to local.
     pub timezone: Option<String>,
+    /// Which day the calendar week starts on. Defaults to Monday to
+    /// match the historical desktop/TUI behavior.
+    pub week_start: WeekStart,
 }
 
 /// Reminder delivery preferences.

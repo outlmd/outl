@@ -108,9 +108,8 @@ export const WEEKDAY_NAMES = [
 export const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"] as const;
 
 /**
- * Monday-first two-letter weekday labels — matches the TUI's
- * `Mo Tu We Th Fr Sa Su` header. Pairs with [`mondayIndex`].
- * Used by the desktop sidebar calendar.
+ * Monday-first two-letter weekday labels — the desktop sidebar and the
+ * TUI header (`Mo Tu We Th Fr Sa Su`).
  */
 export const DAY_LABELS_MONDAY_FIRST = [
   "Mo",
@@ -122,12 +121,17 @@ export const DAY_LABELS_MONDAY_FIRST = [
   "Su",
 ] as const;
 
+/** Which day the calendar week starts on. Mirrors `outl_config::WeekStart`. */
+export type WeekStart = "monday" | "sunday";
+
 /**
- * Remap a JS `Date#getDay()` (0 = Sunday) onto a Monday-first index
- * (0 = Monday … 6 = Sunday) for grids using [`DAY_LABELS_MONDAY_FIRST`].
+ * Remap a JS `Date#getDay()` (0 = Sunday) onto a weekday index relative
+ * to the configured week start (0 = first day … 6 = last day). Every
+ * calendar grid pads its first week with this many blanks, so a client
+ * that forgot it renders dates one column off under its own header.
  */
-export function mondayIndex(jsDay: number): number {
-  return (jsDay + 6) % 7;
+export function weekStartIndex(jsDay: number, weekStart: WeekStart): number {
+  return weekStart === "monday" ? (jsDay + 6) % 7 : jsDay;
 }
 
 /** Year/month pair for calendar navigation. `monthIndex` is 0-based. */

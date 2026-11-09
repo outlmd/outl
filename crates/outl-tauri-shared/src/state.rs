@@ -6,6 +6,7 @@
 //! fields differ); only what crosses the Tauri bridge lives here.
 
 use outl_actions::{ActionError, Backlink, OutlineNode, PageMeta};
+use outl_config::WeekStart;
 use serde::Serialize;
 
 /// Tauri event emitted when a post-mutation projection could not be written.
@@ -26,6 +27,12 @@ pub struct WorkspaceSummary {
     /// `true` when a workspace is loaded; `false` while the picker is
     /// still up or the background opener is in flight.
     pub ready: bool,
+    /// Which day the calendar week starts on for this workspace.
+    ///
+    /// Desktop and mobile read this from the workspace `config.toml`
+    /// so their mini-calendars lay out the grid consistently with the
+    /// TUI. See issue #94.
+    pub week_start: WeekStart,
     /// Whether [`Self::ops`] is the whole log.
     ///
     /// `ops` is `Workspace::log().len()`, the **resident** log, and a

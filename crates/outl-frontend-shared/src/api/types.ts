@@ -569,6 +569,12 @@ export interface WorkspaceSummary {
    * compare against `false`, never fall back to `false`.
    */
   ops_complete: boolean;
+  /**
+   * Which day the calendar week starts on for this workspace: `"monday"`
+   * or `"sunday"`. Defaults to `"monday"` when missing (matches the
+   * historical desktop/TUI behavior). See issue #94.
+   */
+  week_start: "monday" | "sunday";
 }
 
 // ── Plugins ─────────────────────────────────────────────────────────

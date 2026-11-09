@@ -144,6 +144,10 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // `[calendar]` is global (`~/.config/outl/config.toml`), the file and
+    // section the TUI reads `timezone` from — one owner for the week
+    // layout, so a GUI grid can't disagree with the TUI's (invariant 13).
+    let week_start = outl_config::load().calendar.week_start;
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
@@ -151,6 +155,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
+            week_start,
             ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
@@ -159,6 +164,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: state.hlc.actor().to_string(),
             storage_root,
             ready: false,
+            week_start,
             // No workspace, so nothing was withheld: zero is the whole
             // count. Labelling it partial would hedge about a number that
             // is exact.

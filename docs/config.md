@@ -61,6 +61,12 @@ diagrams = "pele"
 # Chrome OS Crostini report UTC regardless of where you are (issue #107).
 timezone = "Europe/London"
 
+# Which day the mini-calendar grid and its weekday header start on.
+# "monday" (default) → `Mo Tu We Th Fr Sa Su`; "sunday" → the iOS-style
+# `Su Mo Tu We Th Fr Sa`. Applies to the TUI sidebar, the desktop
+# sidebar, and the mobile journal calendar (issue #94).
+week_start = "monday"
+
 [sync]
 # Which transport moves the per-actor op log between devices.
 #   "iroh" (default) — direct P2P over QUIC (hole punching + relay).
@@ -120,6 +126,13 @@ enabled = true
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
 | `last` | absolute path | _none_ | desktop, TUI, CLI | Where the next `outl` (with no args) opens. The desktop persists this on every workspace switch. If the path no longer exists, every reader silently falls through to its next fallback (CLI: cwd; desktop: workspace picker). |
+
+#### `[calendar]`
+
+| Field | Type | Default | Read by | Effect |
+|---|---|---|---|---|
+| `timezone` | IANA name | _none_ (OS local) | desktop, TUI, mobile, CLI | The zone the journal date and status-line clock resolve in. See [RFC 0107](rfcs/0107-page-identity.md). |
+| `week_start` | `"monday"` \| `"sunday"` | `"monday"` | desktop, TUI, mobile | Which day the mini-calendar grid and its weekday header start on (issue #94). A pure display preference — never an Op, never converges between devices. |
 
 #### `[theme]`
 

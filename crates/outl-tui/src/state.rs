@@ -751,6 +751,12 @@ pub(crate) struct App {
     /// preference — it never goes through the op log.
     pub(crate) backlinks_newest_first: bool,
 
+    /// Which day the sidebar calendar grid starts on (issue #94).
+    /// Loaded from `[calendar] week_start` at boot; a pure display
+    /// preference, never an Op. The desktop and mobile mini-calendars
+    /// read the same field over the Tauri bridge.
+    pub(crate) calendar_week_start: outl_config::WeekStart,
+
     /// Left sidebar visible (`\`). Off by default; session only.
     pub(crate) show_sidebar: bool,
     /// Focus mode (`z f`): outline only, no header or status bar.
