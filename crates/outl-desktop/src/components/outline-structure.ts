@@ -3,7 +3,7 @@
  * inside a block's textarea.
  *
  * `<BlockEditor />`'s Tab handler commits the in-flight draft before
- * calling these — a commit flips `editingBlockId` to `null` (or, for
+ * calling these: a commit flips `editingBlockId` to `null` (or, for
  * an unchanged draft, does so directly) so the row re-renders out of
  * edit mode. Without re-entering it here, the moved block's row
  * re-renders in its new position with a fresh `<BlockEditor />`
@@ -14,14 +14,14 @@
  * mode on *itself*, regardless of whether the move landed, was a
  * backend no-op (`indent_block` / `outdent_block` swallow
  * `NoPreviousSibling` / `AlreadyAtRoot` and return the unchanged view),
- * or the command rejected outright — the user never asked to leave
+ * or the command rejected outright: the user never asked to leave
  * edit mode, so a failure must not strand them outside it either.
  *
  * Its own module for the same reason `./outline-paste` is one: the
  * sequence is worth a test of its own, and `<OutlineView />` mounts the
  * whole 3-pane shell, which is not where that test can live.
  *
- * Deps are accessors, never values — Solid's reactivity rides the
+ * Deps are accessors, never values: Solid's reactivity rides the
  * getter, and a snapshot taken here would freeze at first render.
  */
 

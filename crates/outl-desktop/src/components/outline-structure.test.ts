@@ -5,13 +5,13 @@ import type { PageView } from "@outl/shared/api/types";
 /**
  * Regression for #477: Tab / Shift-Tab inside a block's textarea
  * indented / outdented it but left edit mode, and the selection stayed
- * on whatever block was selected before — so the very next keystroke
+ * on whatever block was selected before, so the very next keystroke
  * ran as a Normal-mode command against the wrong block.
  *
  * `<BlockEditor />`'s Tab handler commits the draft (which flips
  * `editingBlockId` to `null`) before calling `onIndent` / `onOutdent`.
  * The two callbacks must put the moved block straight back into edit
- * mode — on itself, not on whatever was selected beforehand — whether
+ * mode (on itself, not on whatever was selected beforehand) whether
  * the move landed, was a no-op (first block can't indent further), or
  * the command outright failed.
  */
@@ -52,7 +52,7 @@ function makeDeps(): StructureOpsDeps {
   };
 }
 
-describe("createStructureOps — #477", () => {
+describe("createStructureOps (#477)", () => {
   it("onIndent re-selects and re-edits the moved block after a successful move", async () => {
     const view = makeView();
     vi.mocked(indentBlock).mockResolvedValue(view);
@@ -84,7 +84,7 @@ describe("createStructureOps — #477", () => {
   it("stays in edit mode on the block even when the command rejects", async () => {
     // A genuine backend failure (bad page id, invalid node). The block
     // must not be left stranded outside edit mode with a stale
-    // selection — that is the exact bug #477 reports.
+    // selection: that is the exact bug #477 reports.
     vi.mocked(indentBlock).mockRejectedValue(new Error("boom"));
     const deps = makeDeps();
     const ops = createStructureOps(deps);
@@ -98,7 +98,7 @@ describe("createStructureOps — #477", () => {
 
   it("stays in edit mode on the block when the move is a backend no-op (first block, Tab)", async () => {
     // `indent_block` swallows `NoPreviousSibling` and returns the
-    // unchanged view rather than rejecting — this pins that the
+    // unchanged view rather than rejecting; this pins that the
     // no-op path re-enters edit mode exactly like the success path.
     const view = makeView();
     vi.mocked(indentBlock).mockResolvedValue(view);

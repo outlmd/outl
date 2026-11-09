@@ -90,9 +90,9 @@ export function BlockEditor(props: {
       autoSize();
       // Apply pending caret intent (set by `EnterInsertAtEnd`, or by
       // the Tab / Shift-Tab handler below carrying a codepoint offset
-      // across the indent/outdent remount — #477). We do it here,
+      // across the indent/outdent remount for #477). We do it here,
       // after focus, because the textarea ref is guaranteed populated
-      // by this point — `<Show>` mounted it synchronously and the
+      // by this point: `<Show>` mounted it synchronously and the
       // microtask fence drained any pending Solid commits.
       //
       // `intent !== null`, not `intent &&`: a numeric offset of `0`
@@ -234,7 +234,7 @@ export function BlockEditor(props: {
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      // Capture the caret before `commit()` — it flips `editingBlockId`
+      // Capture the caret before `commit()`: it flips `editingBlockId`
       // to `null` (directly, or via the `onCommit` round-trip), which
       // tears this component down. `onIndent` / `onOutdent` put the
       // moved block straight back into edit mode (#477), mounting a
