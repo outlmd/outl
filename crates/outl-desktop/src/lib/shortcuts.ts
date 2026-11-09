@@ -10,13 +10,8 @@
  * Same chord vocabulary the TUI uses — so a user who learned
  * `[` / `]` in the terminal sees identical navigation here.
  *
- * Mode detection is DOM-driven:
- *
- * - Picker / settings open → `overlay`
- * - Focus in a `<textarea>` (block editor) → `insert`
- * - Otherwise → `normal`
- *
- * Visual mode is engaged explicitly by `EnterVisual` (TUI parity).
+ * The active mode comes from `detectMode` in `./mode`, which owns the
+ * precedence between overlays, Visual, and focus.
  */
 
 import { pluginRun } from "@outl/shared/api/commands";
@@ -27,7 +22,6 @@ import {
   type Chord,
   type Key,
   type PluginKeybinding,
-  type ShortcutMode,
   type SupportDto,
   MOD_ALT,
   MOD_CTRL,
@@ -38,6 +32,7 @@ import {
   pluginKeybindings,
 } from "./api";
 
+import { detectMode } from "./mode";
 import { playPluginViews } from "./plugin-views";
 import { appState, setAppState, setOutline } from "./store";
 
@@ -146,27 +141,6 @@ function isPrefix(prefix: Chord[], full: Chord[]): boolean {
   return (
     prefix.length < full.length && prefix.every((c, i) => chordEq(c, full[i]))
   );
-}
-
-// ---------------------------------------------------------------------------
-// Mode detection
-// ---------------------------------------------------------------------------
-
-function detectMode(): ShortcutMode {
-  if (appState.pickerOpen || appState.settingsOpen || appState.helpOpen)
-    return "overlay";
-  // `appState.mode` already tracks Normal/Insert/Visual when set
-  // explicitly by handlers (e.g. EnterVisual / ExitInsert).
-  if (appState.mode === "vim-visual") return "visual";
-  if (appState.mode === "vim-normal") return "normal";
-  if (appState.mode === "vim-insert") return "insert";
-  // DOM fallback for the no-vim-mode user: focus in textarea =
-  // insert; otherwise normal.
-  const el = document.activeElement;
-  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-    return "insert";
-  }
-  return "normal";
 }
 
 // ---------------------------------------------------------------------------
@@ -366,9 +340,13 @@ export async function installShortcuts(
 
     // Mode-specific match wins over Global. Without this the catalog
     // declaration order would silently shadow per-mode overrides —
-    // e.g. `Cmd+T` is `OpenToday` (Global) but also `ToggleTodo`
-    // (Insert), and inside a textarea the Insert binding has to win
-    // even though Global is declared first in `defaults.rs`.
+    // e.g. `Cmd+Shift+X` is `RunCodeBlock` (Global, `defaults.rs:150`)
+    // and `WrapStrike` (Insert, `:182`), and inside a textarea the
+    // Insert binding has to win even though Global is declared first.
+    // Pinned by `cmd_shift_x_splits_between_insert_and_global`
+    // (`outl-shortcuts/src/lib.rs`), which is why the example is that
+    // chord: the previous one here named a `Cmd+T` Insert binding that
+    // never existed, and a doc copied it as fact before anyone checked.
     const hit =
       bindings.find((b) => b.mode === mode && seqEq(b.chord, sequence)) ??
       bindings.find((b) => b.mode === "global" && seqEq(b.chord, sequence));

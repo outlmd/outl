@@ -22,7 +22,12 @@
 //!   child, and the `Op::Create` primitive every other file here uses.
 //! - `siblings` — place a new block relative to an existing one
 //!   (`create_before` / `create_after`), including what happens when
-//!   the fractional index has no slot and when the anchor is stale.
+//!   the anchor is stale.
+//! - `slot` — what to do when the fractional index has **no** slot
+//!   between two siblings: free a neighbour's key, and which of the two
+//!   empty gaps can be cleared at all. Shared by `siblings`, `moves`
+//!   and `crate::desync` (hence `pub(crate)`) so the five places that
+//!   place a node next to an existing one cannot disagree about it.
 //! - `forest` — build a whole subtree, or a forest of them, in one
 //!   batched call.
 //! - `edit` — rewrite a block's text and toggle its TODO / quote
@@ -47,6 +52,7 @@ mod edit;
 mod forest;
 mod moves;
 mod siblings;
+pub(crate) mod slot;
 mod split;
 
 pub(crate) use create::create_with_explicit_id;
@@ -96,28 +102,14 @@ fn ensure_in_tree(workspace: &Workspace, node: NodeId) -> Result<(), ActionError
 /// disappearing.
 fn ensure_live(workspace: &Workspace, node: NodeId) -> Result<(), ActionError> {
     ensure_in_tree(workspace, node)?;
-    if in_trash(workspace, node) {
+    // `crate::tree::is_trashed`, not a local walk. This module carried its
+    // own `in_trash` — the same parents walk, bounded, with a `root()`
+    // early-out — while `tree::is_under` underneath `is_trashed` had no
+    // bound at all. Two copies of one walk where only one is safe is how
+    // the unbounded one ends up on the hottest path; the bound moved to
+    // the survivor.
+    if crate::tree::is_trashed(workspace, node) {
         return Err(ActionError::NotInTree(node.to_string()));
     }
     Ok(())
-}
-
-/// Whether `node` sits anywhere under `TRASH_ROOT`.
-///
-/// Walks parents rather than checking one level: deleting a parent
-/// trashes its whole subtree, and every descendant keeps pointing at
-/// the parent. Bounded because a corrupt log must not hang a keystroke.
-fn in_trash(workspace: &Workspace, node: NodeId) -> bool {
-    let tree = workspace.tree();
-    let trash = NodeId::trash();
-    let mut at = node;
-    for _ in 0..1024 {
-        match tree.parent(at) {
-            Some(p) if p == trash => return true,
-            Some(p) if p == NodeId::root() => return false,
-            Some(p) => at = p,
-            None => return false,
-        }
-    }
-    false
 }

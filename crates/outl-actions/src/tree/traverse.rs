@@ -91,9 +91,18 @@ pub fn is_trashed(workspace: &Workspace, node: NodeId) -> bool {
 /// Reflexive: a node is under itself, because both callers are asking
 /// "would landing here be inside that subtree", and landing on the node
 /// itself is the degenerate case of yes.
+///
+/// **Bounded.** A cycle in the parent map makes this loop forever, and
+/// [`is_trashed`] sits on every client's page-open and every keystroke's
+/// `ensure_live`, so "forever" means a hung app rather than a wrong
+/// answer. The tree CRDT does not produce one — `creates_cycle` refuses
+/// the move — but `Tree::from_parts` loads a snapshot's node map without
+/// revalidating it, and `creates_cycle` carries its own defensive bound
+/// for the same reason. `block::in_trash` used to be a second copy of
+/// this walk *with* the bound; it is gone, and the bound came here.
 pub(crate) fn is_under(workspace: &Workspace, node: NodeId, ancestor: NodeId) -> bool {
     let mut current = node;
-    loop {
+    for _ in 0..MAX_ANCESTOR_WALK {
         if current == ancestor {
             return true;
         }
@@ -102,7 +111,14 @@ pub(crate) fn is_under(workspace: &Workspace, node: NodeId, ancestor: NodeId) ->
             None => return false,
         }
     }
+    false
 }
+
+/// How deep an ancestor walk goes before it gives up.
+///
+/// Same number `block::in_trash` carried, and far past any outline a
+/// human writes — a corrupt log must not hang a keystroke.
+const MAX_ANCESTOR_WALK: usize = 1024;
 
 /// The slug of the page hosting `node`, or `None` when the node is
 /// detached (or is itself the root).

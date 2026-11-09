@@ -18,6 +18,7 @@
 
 use std::path::Path;
 
+use outl_actions::backup::BackupRoot;
 use outl_core::fractional::Fractional;
 use outl_core::hlc::{Hlc, HlcGenerator};
 use outl_core::id::{ActorId, NodeId};
@@ -37,7 +38,7 @@ type Guards = Mutex<Option<WorkspaceGuards>>;
 
 fn open(root: &Path, actor: ActorId, held: &Guards) -> anyhow::Result<Workspace> {
     let hlc = HlcGenerator::new(actor);
-    open_workspace_at(actor, &hlc, root, 0, held)
+    open_workspace_at(actor, &hlc, root, 0, held, &BackupRoot::new())
 }
 
 /// Seed `ops/ops-<actor>.jsonl` with a `Create` + placement-restating
@@ -363,5 +364,32 @@ fn a_failed_re_pick_keeps_the_locks_it_could_not_replace() {
     assert!(
         matches!(compact_now(root), Err(CompactError::Busy(_))),
         "compaction was let through while a live workspace was still published"
+    );
+}
+
+/// The automatic backup follows the workspace the client has open, and
+/// only that one. Set after the open succeeds, like the guards: a refused
+/// open must leave the supervisor pointed where it was, not at a
+/// workspace nobody holds.
+#[test]
+fn the_backup_follows_a_successful_open_and_ignores_a_refused_one() {
+    let first = TempDir::new().expect("first tempdir");
+    let second = TempDir::new().expect("second tempdir");
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let held: Guards = Mutex::new(None);
+    let backup = BackupRoot::new();
+
+    let _ws = open_workspace_at(actor, &hlc, first.path(), 0, &held, &backup).expect("open first");
+    assert_eq!(backup.get().as_deref(), Some(first.path()));
+
+    // Another process owns the actor lock on `second`, so this open is refused.
+    let _other = ActorWriteLock::try_acquire(&second.path().join("ops"), actor)
+        .expect("first holder of the second workspace");
+    assert!(open_workspace_at(actor, &hlc, second.path(), 0, &held, &backup).is_err());
+    assert_eq!(
+        backup.get().as_deref(),
+        Some(first.path()),
+        "a refused open must not repoint the backup"
     );
 }

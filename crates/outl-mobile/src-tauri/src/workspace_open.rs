@@ -4,6 +4,13 @@
 //! `outl_tauri_shared::workspace_open` (re-exported below). This module
 //! keeps what is genuinely mobile:
 //!
+//! ## No `BackupRoot` on `AppState`
+//!
+//! The opener takes the `BackupRoot` by value and `AppState` holds none,
+//! unlike the desktop: mobile has one `spawn_workspace_opener` call and
+//! no `set_workspace` equivalent, so nothing can retarget it later.
+//! A workspace picker would need the field the desktop already has.
+//!
 //! ## Storage is a local folder, synced by iroh (no iCloud)
 //!
 //! The workspace root is a folder on this device; iroh P2P is the only
@@ -36,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 
+use outl_actions::backup::BackupRoot;
 use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
 use parking_lot::Mutex;
@@ -139,6 +147,7 @@ pub(crate) fn persist_workspace_path(path: &Path) {
 pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
     workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
+    backup_root: BackupRoot,
     storage_root: PathBuf,
     hlc: HlcGenerator,
     app: tauri::AppHandle,
@@ -150,14 +159,20 @@ pub(crate) fn spawn_workspace_opener(
     // index. Keeps the long-lived client well under iOS jetsam.
     let lru_cap = outl_config::load().storage.lru_cap.min(5_000);
     thread::spawn(move || {
-        let workspace =
-            match open_workspace_at(actor, &hlc, &storage_root, lru_cap, &workspace_guards) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!("background open failed for {}: {e}", storage_root.display());
-                    return;
-                }
-            };
+        let workspace = match open_workspace_at(
+            actor,
+            &hlc,
+            &storage_root,
+            lru_cap,
+            &workspace_guards,
+            &backup_root,
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("background open failed for {}: {e}", storage_root.display());
+                return;
+            }
+        };
         // Publish + fire `workspace-ready` FIRST so today's journal paints
         // immediately; the orphan reconcile runs after (see below).
         *workspace_slot.lock() = Some(workspace);

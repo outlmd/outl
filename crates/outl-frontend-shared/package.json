@@ -40,6 +40,7 @@
     "./api/overview": "./src/api/overview.ts",
     "./api/telemetry": "./src/api/telemetry.ts",
     "./api/types": "./src/api/types.ts",
+    "./api/trash": "./src/api/trash.ts",
     "./api/trust": "./src/api/trust.ts",
     "./autocomplete": "./src/autocomplete/index.ts",
     "./capture": "./src/capture/index.ts",

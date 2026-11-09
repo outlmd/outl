@@ -112,6 +112,11 @@ if [ "${1:-}" = "--update" ]; then
 #     to sit with the two wrappers that return it, and what stayed
 #     behind is the re-export that keeps the import path unchanged.
 #     The same move took commands.ts down by 41 lines.
+#     The third raise is 34 lines for DroppedEdit plus the PageView
+#     field that carries it (issue 473): a keystroke whose target block
+#     had left the tree. It is the registered reason above, verbatim -
+#     the wire grew, so the mirror grew. The pin is wire_types.rs's
+#     dropped_edit_matches_its_interface.
 #     (No backticks in this block — the header is written through an
 #     unquoted heredoc, so one becomes a command substitution and the
 #     sentence silently loses the word.)

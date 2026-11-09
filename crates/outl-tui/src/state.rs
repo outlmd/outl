@@ -204,17 +204,16 @@ pub(crate) enum Overlay {
     TemplatePicker(TemplatePickerState),
     /// Plugin settings: edit config + secret fields of installed plugins.
     PluginSettings(PluginSettingsState),
-    /// Reminders: every block in the workspace carrying a `remind::`,
-    /// grouped by next fire. Read-only inspection plus snooze / done —
-    /// the TUI deliberately **delivers** nothing (a terminal session
-    /// has no background presence), but it must still let the user see
-    /// and author what the GUI clients will deliver.
+    /// Reminders: every block carrying a `remind::`, grouped by next
+    /// fire. Snooze / done; `actions/reminders.rs` owns delivery.
     Reminders(RemindersState),
     /// Property editor for the selected block (or for the page): the
     /// discoverable counterpart to `:prop` / `:prop-page`.
     Properties(PropertiesState),
     /// Per-device pending and the merged edits log, with undo (`:sync`).
     SyncPanel(crate::actions::sync_panel::SyncPanelState),
+    /// What you have deleted, and the way back (`/trash`).
+    Trash(crate::actions::trash::TrashState),
 }
 
 /// Which set of properties [`Overlay::Properties`] is editing.

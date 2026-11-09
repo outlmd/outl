@@ -50,6 +50,7 @@ import { SettingsModal } from "./SettingsModal";
 import { HelpOverlay } from "./HelpOverlay";
 import { RemindersPanel } from "./RemindersPanel";
 import { TasksPanel } from "./TasksPanel";
+import { TrashPanel } from "./TrashPanel";
 import { TimelinePanel } from "./TimelinePanel";
 import { deliverDueReminders } from "@outl/shared/api/commands";
 
@@ -411,6 +412,7 @@ export function AppShell() {
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
       <TasksPanel applyView={applyView} setError={setError} />
+      <TrashPanel applyView={applyView} setError={setError} />
       <TimelinePanel setError={setError} applyView={applyView} />
       <PluginEffectLayer />
       {/* Shell level, not above the outline: it is a statement about the

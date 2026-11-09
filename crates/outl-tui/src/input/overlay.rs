@@ -28,6 +28,7 @@ pub(crate) fn handle_overlay_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         Some(Overlay::PluginSettings(_)) => handle_plugin_settings_key(app, key),
         Some(Overlay::Properties(_)) => handle_properties_key(app, key),
         Some(Overlay::SyncPanel(_)) => crate::actions::sync_panel::handle_key(app, key),
+        Some(Overlay::Trash(_)) => crate::actions::trash::handle_key(app, key),
         Some(Overlay::Error(_)) => {
             // Modal error popup: any key dismisses. Special-case Ctrl+C
             // so it still quits the whole TUI.

@@ -60,6 +60,25 @@ It wraps its whole body in one `Workspace::begin_batch()` so the N ops flush as 
 Each op still goes through `apply` individually (dedup, Yrs merge, and the CRDT stay untouched); only the persist is deferred to the guard's `commit()`.
 See `outl-core/CLAUDE.md` → "Batch append" and [`docs/storage.md`](../../docs/storage.md) for the mechanics and durability contract — this crate only needs to know: open a batch around a multi-`apply` action, commit it before returning.
 
+## Inserting a block next to another one
+
+`a..=z` is dense enough for a midpoint and not dense enough for every pair, so "the slot between these two siblings" sometimes does not exist.
+`outl_core::Fractional::between` says so by **dropping the bound it cannot satisfy** and returning a key above `left` — which is above `right` too.
+
+`tree::interior_between` is the single owner of noticing that — one comparison, three callers: `position_before`, `position_after`, and `block::slot`, which needs the same question asked of two loose positions.
+`block::slot` is the single owner of what to do next: `slot_between` decides, `vacate` frees a neighbour's key by shifting it up, and both **refuse to move a neighbour that cannot be cleared**.
+A new block is allowed to land one slot off its intended place; an existing sibling is never allowed to move to a key that would send it past a block the user did not touch.
+Relocating content nobody touched is the worse of the two failures, and the one that looks like data loss.
+
+**Five places put a node next to an existing one, and every one of them goes through `block::slot`**: `create_before`, `create_after`, `outdent`, `move_after`, and `desync::recover_level`.
+Four of them took `between`'s key unchecked and placed a block behind its neighbour ([issue #476](https://github.com/outlmd/outl/issues/476)); the recovery path was the fifth and the worst, because a user only reaches it already in trouble.
+`create_before` had the repair written out inline, which is exactly why none of the others got it.
+`tests/sibling_order.rs` drives the actions rather than `between`, because `between` was never the thing misbehaving; `tests/desync_recovery.rs` covers the fifth.
+
+**None of this is a migration**, and reading it as one is how it gets deleted.
+`between` still mints `(k, k + "a")` pairs on an all-new workspace wherever the gap forces a floor tail (18,278 of 12.8M sampled gaps), and a peer on an older binary keeps minting them tomorrow rather than only yesterday.
+The measurement lives on `tree::position_after`.
+
 ## The commit pipeline
 
 A mutation is never just the mutation. Five things happen around it, and
@@ -165,6 +184,23 @@ Two rules:
 - **A client decides where a notice goes, never what it says.** A surface that writes its own sentence is a second copy of the fact, and the GUI clients already share one (`@outl/shared/warnings::aheadOfLogNotice`, a declared mirror — `the_shared_frontend_copy_says_the_same_thing` pins the headline and the command across the language boundary).
 - **The notice's counts come off the `ActionError`, never recounted.** The number the user reads has to be the number the guard refused on.
 
+### A refusal's *way out* is per surface
+
+`refusal/trash.rs` is the second table, and it is **not** shaped like the first.
+`refusal_support` answers *does this surface tell the user*, and for the trash that was already yes on all five.
+What they lacked was a true second half to it.
+`ActionError::TrashParentMissing` told a desktop user to run `outl doctor` and `TrashPageRestoreUnsupported` told them `outl block tree <ULID>`, in a panel that renders `e.to_string()` verbatim and shows no block ids (invariant 2).
+
+`Remedy` is the closed set of ways out and `remedy_action` is one exhaustive `match` over (`Remedy`, `Surface`).
+**Keyed on the remedy, not on the refusal**: four refusals share three ways out, so a per-refusal table would declare one answer twice.
+Its module doc owns the rest; three rules from it:
+
+- **`ActionError`'s `Display` keeps the diagnosis only**, no command and no instruction, because that is the half true everywhere (`no_diagnosis_prescribes_a_command`).
+- **`trash::list` takes the `Surface`.** The forcing function, not a convenience: a caller cannot get a worded refusal without saying who it is for.
+- **A surface that re-lists after a failed restore leaves the mutation's error bare; a one-shot surface words it.** Both GUI clients refetch on purpose, so the way out reaches the row the sentence is about; `outl trash restore` has no listing to come back to.
+
+`TrashParentTrashed` is deliberately absent: "restore the ancestor first" works on every surface, since that ancestor is its own row in the same listing.
+
 ## The capture inbox
 
 `capture.rs` is both halves of RFC 0363: the writer a capture gesture calls, and the **only** path from an inbox into the op log.
@@ -219,14 +255,29 @@ Who drains: `outl_tauri_shared::capture_inbox::drain_capture_inbox` for both GUI
 
 Two single-owner rules, and both exist because a second copy already went wrong once:
 
-- **`parent_at_deletion`** folds the parent trail from `Create.parent` / `Move.new_parent`. `timeline::came_from` calls it instead of keeping its own fold. The old copy returned `true` on the *first* `Move` to the trash whose parent matched, which answers "the first page this block was ever deleted from" — wrong the moment a block can be restored and deleted somewhere else, which is exactly what `restore` made reachable. Pinned by `a_deletion_is_attributed_to_the_page_the_block_left_last`.
+- **`deletion_of`** folds the parent trail from `Create.parent` / `Move.new_parent`, once — `parent_at_deletion` and `TrashEntry::deleted_at_ms` are two readings of that one walk. `timeline::came_from` calls `parent_at_deletion` rather than its own. The old copy returned `true` on the *first* `Move` to the trash whose parent matched, which answers "the first page this block was ever deleted from" — wrong the moment a block can be restored and deleted somewhere else, which is exactly what `restore` made reachable. Pinned by `a_deletion_is_attributed_to_the_page_the_block_left_last`.
 - **`refusal_for`** is the only thing that decides whether a restore would work. `restore` asks it before touching anything and `list` asks it per entry, so a listing cannot promise an action the mutation then refuses — the same shape as invariant 8's "one owner of the verdict". Pinned by `a_listing_carries_the_same_refusal_restore_would_return`.
 
 **A restored block lands as the last child**, not in the slot it held. `Move.old_position` carries the same "originating replica's local derivation, undo-only" caveat as `old_parent`, so the original position is not recoverable from the log as data.
 
 Two things are deliberately absent. Restoring a **page** needs a re-projected `.md` on top of the `Move`, and on the reference workspace 16 of 18 deleted pages have their slug taken by a live page today — picking a free slug would make this module a second owner of the slug rule, so it refuses and names where the content still is. **`empty`** is the only operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)), not here.
 
-Surfaces: `outl trash list` / `outl trash restore`, the `outl_trash_*` MCP tools, and `outl doctor`'s trash section (which now renders this listing rather than walking the tree itself). No GUI client has it — recorded as `Capability::Trash` in `outl_shortcuts::CLI_ONLY`, whose rules live in [`outl-shortcuts/CLAUDE.md`](../outl-shortcuts/CLAUDE.md).
+Surfaces: `outl trash list` / `outl trash restore`, the `outl_trash_*` MCP tools, `outl doctor`, the desktop's `TrashPanel` and the TUI's `/trash` — all over `list` / `restore`. Per-client reach: `Capability::Trash`.
+
+### Reopening a deleted page is not `restore` — `page/revive.rs` is
+
+`trash` refuses a page root because *its* caller cannot pick a slug.
+`page::open_or_create` is the slug rule's owner and has already established the slug is free, so it revives the root itself ([issue #473](https://github.com/outlmd/outl/issues/473)).
+`page/revive.rs`'s module doc owns the reasoning; three rules from it:
+
+- **The parallel implementation is `outl_md::reconcile::page_root::ensure_page_root_in_tree`, not `restore`.**
+  Its `Move` fires for any non-`root()` parent, so it has revived trashed roots all along, and it leaves the children live where this trashes them.
+  Routing either through the other is the thing to refuse in review.
+- **Each direct child is trashed in its own op, before the root leaves the trash**, or "I deleted this page" means "hidden until tomorrow morning".
+  They become ordinary `trash::list` entries: one entry becomes N, deliberately, which keeps this *hiding* rather than *destroying*.
+  Except a child that is itself a **page root**, which `trash::restore` refuses — reopening it by its own slug is its recovery.
+- **It is the first caller to move a node to `NodeId::root()`**, which caught two guards asking `contains` about a parent that never appears in `Tree::nodes`: `move_under`'s destination and `trash::landing_for`'s (`tests/root_is_a_legal_parent.rs`).
+  `NodeId::trash()` stays refused there — landing in the trash is `delete`.
 
 ## Page namespaces
 
