@@ -35,10 +35,10 @@ use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
 
-use crate::block::{delete as trash_block, move_under};
+use crate::block::{delete as trash_block, move_to};
 use crate::error::ActionError;
 use crate::page::{set_property, PageKind, KIND_KEY, SLUG_KEY, TITLE_KEY};
-use crate::tree::children_of;
+use crate::tree::{children_of, position_for_new_last_child};
 
 /// Revive `node` (the deterministic root for `slug`, currently sitting
 /// in the trash) so [`crate::page::open_or_create`] can hand it back as
@@ -56,8 +56,12 @@ pub(crate) fn revive_trashed_page(
         .map(|(id, _)| id)
         .collect();
 
+    // `move_to`, not `move_under`: `NodeId::root()` is a sentinel the
+    // tree never `contains`, so `move_under`'s destination check would
+    // reject it as `NotInTree`.
+    let position = position_for_new_last_child(workspace, NodeId::root());
     let mut batch = workspace.begin_batch();
-    move_under(&mut batch, hlc, node, NodeId::root())?;
+    move_to(&mut batch, hlc, node, NodeId::root(), position)?;
     for child in stale_children {
         trash_block(&mut batch, hlc, child)?;
     }
