@@ -25,6 +25,7 @@ use router::{Route, StorageRouter};
 use snapshot_policy::SnapshotPolicy;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
 mod batch;
@@ -697,7 +698,35 @@ impl Workspace {
         &self.tree
     }
 
+    /// Total number of ops persisted across all storage shards.
+    ///
+    /// This is the authoritative op-log count, including ops folded into a
+    /// snapshot boot as well as the post-cutoff delta held in memory. Use this
+    /// when a human-facing report needs the whole count.
+    pub fn total_ops(&self) -> Result<usize, WorkspaceError> {
+        Ok(self.router.op_count()?)
+    }
+
+    /// Wall-clock time of the most recently persisted op, if any.
+    ///
+    /// This reads the per-actor high-water marks from storage, so it is
+    /// correct even after a snapshot boot where the in-memory log holds
+    /// only the delta.
+    pub fn last_op_time(&self) -> Result<Option<SystemTime>, WorkspaceError> {
+        let mut max_ms = None::<u64>;
+        for (_, hlc) in self.router.last_ts_per_actor()? {
+            max_ms = Some(match max_ms {
+                Some(ms) => ms.max(hlc.physical_ms),
+                None => hlc.physical_ms,
+            });
+        }
+        Ok(max_ms.map(|ms| UNIX_EPOCH + std::time::Duration::from_millis(ms)))
+    }
+
     /// Read-only access to the in-memory op log.
+    ///
+    /// After a snapshot boot this is only the post-cutoff delta, not the whole
+    /// op log. Use [`Self::total_ops`] when you need the persisted total.
     pub fn log(&self) -> &OpLog {
         &self.log
     }

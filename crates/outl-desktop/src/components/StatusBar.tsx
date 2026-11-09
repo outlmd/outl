@@ -136,24 +136,12 @@ export function StatusBar() {
             {" · "}
             {appState.workspace?.blocks ?? 0} blocks
           </span>
-          {/* `ops` is the resident log, which after a snapshot boot is
-              only the delta above the cutoff. A partial count rendered as
-              a total reads as data loss, so it says which it is — the same
-              rule `outl workspace info` follows. Compared against `false`
-              so an older backend with no flag still reads as complete. */}
           <span
             class="opacity-60"
-            title={
-              appState.workspace?.ops_complete === false
-                ? "Ops replayed since the last snapshot, not the whole log. `outl doctor` counts all of it."
-                : undefined
-            }
+            title="Total ops persisted in this workspace (including ops folded into the last snapshot)."
           >
             {" · "}
             {appState.workspace?.ops ?? 0} ops
-            <Show when={appState.workspace?.ops_complete === false}>
-              {" since snapshot"}
-            </Show>
           </span>
         </Show>
         <Show when={appState.backlinks.length > 0}>

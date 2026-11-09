@@ -107,6 +107,10 @@ impl Storage for MemoryStorage {
     fn all_ops(&self) -> Result<Vec<LogOp>, StorageError> {
         Ok(self.sorted_ops())
     }
+
+    fn op_count(&self) -> Result<usize, StorageError> {
+        Ok(self.ops.len())
+    }
 }
 
 #[cfg(test)]

@@ -175,7 +175,6 @@ fn workspace_summary_matches_its_interface() {
         actor: "01JQ0000000000000000000005".into(),
         storage_root: "/w".into(),
         ready: true,
-        ops_complete: false,
     };
     assert_wire_shape(&dto, "WorkspaceSummary", &[]);
 }

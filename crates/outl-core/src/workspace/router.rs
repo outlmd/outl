@@ -147,6 +147,22 @@ impl StorageRouter {
         }
     }
 
+    /// Total number of ops persisted across every shard.
+    ///
+    /// In normal operation each op lives in exactly one shard, so the
+    /// sum is exact. If page routing has placed the same HLC in more
+    /// than one shard, this over-counts; that is a routing invariant
+    /// violation and the number is still useful as a display statistic.
+    /// Callers that need an exact, deduplicated count must use
+    /// `Self::all_ops()?.len()` and pay for the full replay.
+    pub(crate) fn op_count(&self) -> Result<usize, StorageError> {
+        let mut total = self.global.op_count()?;
+        for s in self.pages.values() {
+            total += s.op_count()?;
+        }
+        Ok(total)
+    }
+
     /// Every op across every shard, HLC-ordered and de-duplicated.
     pub(crate) fn all_ops(&self) -> Result<Vec<LogOp>, StorageError> {
         self.merged(|s| s.all_ops())

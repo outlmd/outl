@@ -13,17 +13,16 @@ use crate::state::{AppState, WorkspaceSummary};
 /// `State<'_, _>` input return a `Result`, which would change this
 /// command's wire shape. Do not convert one of the pair alone.
 #[tauri::command]
-pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+pub(crate) fn workspace_stats(state: State<'_, AppState>) -> Result<WorkspaceSummary, String> {
     let guard = state.workspace.lock();
     let storage_root = state.storage_root.to_string_lossy().into_owned();
-    match guard.as_ref() {
+    let summary = match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
-            ops: ws.log().len(),
+            ops: ws.total_ops().map_err(|e| e.to_string())?,
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
-            ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
             blocks: 0,
@@ -31,10 +30,9 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: String::new(),
             storage_root,
             ready: false,
-            // See the desktop twin: zero with no workspace is exact.
-            ops_complete: true,
         },
-    }
+    };
+    Ok(summary)
 }
 
 /// Reload the workspace from disk after a peer change (the sync poll and

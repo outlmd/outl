@@ -477,6 +477,12 @@ impl Storage for JsonlStorage {
         self.read_all_ops_sequential()
     }
 
+    fn op_count(&self) -> Result<usize, StorageError> {
+        // The offset index is complete (the LRU cache is a subset), so
+        // the total index length is the op count without parsing a line.
+        Ok(self.index.total_len())
+    }
+
     fn ops_since_per_actor(
         &self,
         cutoff: &BTreeMap<ActorId, Hlc>,

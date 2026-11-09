@@ -50,27 +50,41 @@ fn workspace_info_returns_summary() {
         .unwrap());
     assert!(info["data"]["root"].is_string());
     assert!(info["data"]["actor"].is_string());
-    assert!(info["data"]["ops"].is_number());
-    // `ops` counts the resident log, which after a snapshot boot is the
-    // delta and not the total. A fresh workspace has no snapshot, so the
-    // count is complete — and the flag has to say so, because a reader
-    // with no flag cannot tell 332 ops from 332 ops out of 228,943.
+    for key in [
+        "ops",
+        "ops_since_snapshot",
+        "pages",
+        "journals",
+        "blocks",
+        "tree_nodes",
+        "properties",
+        "tags",
+        "backlinks",
+        "assets",
+        "trashed",
+        "snapshots",
+        "snapshot_bytes",
+    ] {
+        assert!(
+            info["data"][key].is_number(),
+            "workspace info should report `{key}`: {info}"
+        );
+    }
+    // `ops` is the persisted op-log total; for a fresh workspace with no
+    // snapshot it equals the in-memory log.
     assert_eq!(
-        info["data"]["ops_complete"], true,
-        "a workspace with no snapshot reports a complete count: {info}"
+        info["data"]["ops_since_snapshot"], info["data"]["ops"],
+        "a fresh workspace has no folded ops, so total and delta match: {info}"
     );
+    // A fresh workspace has one journal (today) and one root page.
+    assert_eq!(info["data"]["pages"], 1, "fresh workspace has a root page: {info}");
+    assert_eq!(info["data"]["journals"], 1, "fresh workspace has today's journal: {info}");
 }
 
-/// The other half of the pair above: the branch the flag exists for.
-///
-/// A workspace that booted from a snapshot replays only the delta above
-/// the cutoff, so `ops` is not the total — and with no op since the
-/// snapshot it is **zero**, on a workspace that plainly has ops. Without
-/// this, reverting the label (and the `ops_complete` field with it) would
-/// not fail a test, because the only covered branch was the one that was
-/// already correct.
+/// A workspace that booted from a snapshot still reports the persisted
+/// op-log total, even though the in-memory log only holds the delta.
 #[test]
-fn workspace_info_says_when_the_op_count_is_only_the_snapshot_delta() {
+fn workspace_info_reports_total_ops_after_snapshot_boot() {
     let ws = init_workspace();
     let _ = ok(outl()
         .args(["--workspace"])
@@ -80,7 +94,6 @@ fn workspace_info_says_when_the_op_count_is_only_the_snapshot_delta() {
         .unwrap());
 
     // The CLI never writes a snapshot of its own — its threshold is 0,
-    // an ephemeral process having no business churning the boot cache —
     // so the fixture writes one the way a GUI client does and lets the
     // next open adopt it.
     {
@@ -94,25 +107,36 @@ fn workspace_info_says_when_the_op_count_is_only_the_snapshot_delta() {
             .expect("the snapshot is written");
     }
 
+    // Apply an op after the snapshot so the next boot replays a non-zero
+    // delta above the cutoff.
+    let _ = ok(outl()
+        .args(["--workspace"])
+        .arg(ws.path())
+        .args(["page", "create", "later", "--json"])
+        .output()
+        .unwrap());
+
     let info = ok(outl()
         .args(["--workspace"])
         .arg(ws.path())
         .args(["workspace", "info", "--json"])
         .output()
         .unwrap());
-    assert_eq!(
-        info["data"]["ops_complete"], false,
-        "a snapshot boot replays a delta, and this flag is what says so: {info}"
+    let ops = info["data"]["ops"].as_u64().expect("ops is a number");
+    let delta = info["data"]["ops_since_snapshot"]
+        .as_u64()
+        .expect("ops_since_snapshot is a number");
+    assert!(
+        delta > 0,
+        "the resident log must hold the post-snapshot ops: {info}"
     );
-    assert_eq!(
-        info["data"]["ops"], 0,
-        "nothing landed since the snapshot, so the resident log is empty — \
-         which is exactly the count that must never read as a total: {info}"
+    assert!(
+        ops > delta,
+        "ops must be the persisted total, larger than the delta: {info}"
     );
 
-    // The human line is the surface a person reads. A flag only the JSON
-    // carries leaves the printed number saying the thing it was labelled
-    // to stop saying.
+    // The human line is the surface a person reads; it now shows both
+    // numbers, so a snapshot boot cannot be mistaken for an empty log.
     let human = outl()
         .args(["--workspace"])
         .arg(ws.path())
@@ -121,7 +145,7 @@ fn workspace_info_says_when_the_op_count_is_only_the_snapshot_delta() {
         .unwrap();
     let text = String::from_utf8_lossy(&human.stdout);
     assert!(
-        text.contains("since the last snapshot"),
-        "the human line must qualify a partial count: {text}"
+        text.contains("total") && text.contains("since the last snapshot"),
+        "the human line must show total and delta: {text}"
     );
 }

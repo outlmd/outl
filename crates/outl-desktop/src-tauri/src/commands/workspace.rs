@@ -136,7 +136,7 @@ pub(crate) fn current_workspace(state: State<'_, AppState>) -> Option<String> {
 /// representable on the one call `App.tsx` gates the first paint on —
 /// to relocate a wait that is already short.
 #[tauri::command]
-pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+pub(crate) fn workspace_stats(state: State<'_, AppState>) -> Result<WorkspaceSummary, String> {
     let guard = state.workspace.lock();
     let storage_root = state
         .storage_root
@@ -144,14 +144,13 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    match guard.as_ref() {
+    let summary = match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
-            ops: ws.log().len(),
+            ops: ws.total_ops().map_err(|e| e.to_string())?,
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
-            ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
             blocks: 0,
@@ -159,12 +158,9 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: state.hlc.actor().to_string(),
             storage_root,
             ready: false,
-            // No workspace, so nothing was withheld: zero is the whole
-            // count. Labelling it partial would hedge about a number that
-            // is exact.
-            ops_complete: true,
         },
-    }
+    };
+    Ok(summary)
 }
 
 /// Return the current settings (vim_mode, theme, font_size,
