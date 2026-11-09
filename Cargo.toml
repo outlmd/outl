@@ -96,7 +96,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # CRDT
-yrs = "0.27"
+yrs = "0.28"
 
 # P2P sync (iroh)
 # `default-features` stays ON: iroh 1.0.0 ships its TLS backend (tls-ring) and
