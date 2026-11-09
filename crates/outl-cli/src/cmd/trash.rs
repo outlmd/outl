@@ -19,6 +19,7 @@ use std::path::Path;
 use clap::Subcommand;
 use serde_json::{json, Value};
 
+use outl_actions::refusal::{trash_refusal_text, Surface};
 use outl_actions::trash;
 use outl_actions::ActionError;
 
@@ -49,19 +50,22 @@ pub enum TrashCommand {
 pub fn run(cmd: &TrashCommand, path: &Path) -> i32 {
     match cmd {
         TrashCommand::List { json } => {
-            let result = ws::open_read(path).and_then(|ctx| list(&ctx));
+            let result = ws::open_read(path).and_then(|ctx| list(&ctx, Surface::Cli));
             emit(*json, result, print_list)
         }
         TrashCommand::Restore { id, json } => {
-            let result = ws::open(path).and_then(|mut ctx| restore(&mut ctx, id));
+            let result = ws::open(path).and_then(|mut ctx| restore(&mut ctx, id, Surface::Cli));
             emit(*json, result, print_restored)
         }
     }
 }
 
 /// Every top-level deletion, with whether it can be restored.
-pub fn list(ctx: &WsCtx) -> Result<Value, ApiError> {
-    let entries: Vec<Value> = trash::list(&ctx.workspace)
+///
+/// `surface` is the caller's, not this module's: the MCP dispatch shares
+/// this handler and names its own tools rather than `outl` subcommands.
+pub fn list(ctx: &WsCtx, surface: Surface) -> Result<Value, ApiError> {
+    let entries: Vec<Value> = trash::list(&ctx.workspace, surface)
         .into_iter()
         .map(|entry| {
             json!({
@@ -70,6 +74,11 @@ pub fn list(ctx: &WsCtx) -> Result<Value, ApiError> {
                 "blocks": entry.subtree_len,
                 "page": entry.page,
                 "parent": entry.parent_at_deletion.map(|p| p.to_string()),
+                // Wall clock from whichever device deleted it, so an
+                // agent renders it and never orders on it — the listing
+                // is already in a stable order that cannot depend on a
+                // peer's clock.
+                "deleted_at_ms": entry.deleted_at_ms,
                 // The verdict comes from `outl_actions::trash::refusal_for`,
                 // never recomputed here — a listing that decided this on
                 // its own would offer a restore that then fails.
@@ -83,9 +92,16 @@ pub fn list(ctx: &WsCtx) -> Result<Value, ApiError> {
 }
 
 /// Restore one block.
-pub fn restore(ctx: &mut WsCtx, id_str: &str) -> Result<Value, ApiError> {
+///
+/// **This surface words its own refusal**, unlike the TUI overlay and
+/// the desktop panel: a one-shot command has no listing to refetch, so
+/// the error it prints is the only sentence the user gets. The GUI
+/// clients re-list on a failed restore on purpose, which is where their
+/// worded row comes from.
+pub fn restore(ctx: &mut WsCtx, id_str: &str, surface: Surface) -> Result<Value, ApiError> {
     let id = parse_id(id_str)?;
-    let entry = trash::restore(&mut ctx.workspace, &ctx.hlc, id).map_err(refusal_error)?;
+    let entry = trash::restore(&mut ctx.workspace, &ctx.hlc, id)
+        .map_err(|err| refusal_error(err, surface))?;
 
     // The page the block landed back on has to be re-projected, or the
     // `.md` keeps saying the block is gone.
@@ -103,23 +119,26 @@ pub fn restore(ctx: &mut WsCtx, id_str: &str) -> Result<Value, ApiError> {
 
 /// Map a refusal onto a stable code, so an agent can tell them apart
 /// without parsing prose. The message stays the one
-/// `outl_actions::error` wrote — a second wording here would be a
-/// second owner of the explanation.
+/// `outl_actions` wrote — a second wording here would be a second owner
+/// of the explanation — and it is `trash_refusal_text`'s rather than a
+/// bare `Display`, because a one-shot command has to carry the way out
+/// as well as the diagnosis.
 ///
 /// Deliberately no count in this sentence: it said "the three" while
 /// the match had four arms, and `docs/cli.md` said "Three refusals"
 /// over a four-row table. A number written beside a list is a second
 /// copy of the list's length.
-fn refusal_error(err: ActionError) -> ApiError {
+fn refusal_error(err: ActionError, surface: Surface) -> ApiError {
     let code = match &err {
         ActionError::NotTrashed(_) => codes::NOT_TRASHED,
         ActionError::TrashPageRestoreUnsupported { .. } => codes::TRASH_PAGE_UNSUPPORTED,
         ActionError::TrashParentTrashed { .. } => codes::TRASH_PARENT_TRASHED,
         ActionError::TrashParentMissing { .. } => codes::TRASH_PARENT_MISSING,
         ActionError::TrashOriginUnknown { .. } => codes::TRASH_ORIGIN_UNKNOWN,
+        ActionError::TrashOriginInsideSubtree { .. } => codes::TRASH_ORIGIN_INSIDE_SUBTREE,
         _ => return ApiError::internal(err),
     };
-    ApiError::new(code, err.to_string())
+    ApiError::new(code, trash_refusal_text(surface, &err))
 }
 
 fn print_list(value: &Value) {

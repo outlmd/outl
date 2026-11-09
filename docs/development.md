@@ -87,7 +87,15 @@ crates/outl-desktop/
 │   │                         #   PropertyEditor (key:: value chips + create/delete),
 │   │                         #   Onboarding, WorkspacePicker
 │   └── lib/                   # api.ts (desktop-only cmds), code-block.ts, events.ts,
-│                             #   shortcuts.ts, action-handlers.ts, store.ts
+│                             #   shortcuts.ts, mode.ts (detectMode), store.ts,
+│                             #   keyboard-reach.ts (roving focus, F6 regions,
+│                             #     focusFirstRowOnOpen, followSelection),
+│                             #   action-handlers.ts (assembly) → handler-context
+│                             #     (target + round-trip, one or a batch) / chrome- (surfaces + Esc
+│                             #     cascade) / cursor- (selection, day, zoom) /
+│                             #     block- (ops on the selected block) / page-
+│                             #     (delete, undo/redo, fold-all) / visual- (range) /
+│                             #     clipboard- (registers) / speed- handlers
 └── src-tauri/
     ├── Cargo.toml  build.rs  tauri.conf.json (app.outl.desktop)  capabilities/  icons/
     └── src/                   # main.rs, lib.rs (run() registers all commands),
@@ -257,6 +265,38 @@ cargo tauri build
 ```
 
 The Vite dev server runs on **port 1421** so it can coexist with `outl-mobile` (port 1420) when both are running side by side.
+
+**Launch it from a terminal when you are debugging sync.**
+The desktop's `EnvFilter` defaults to `info,outl_sync_iroh=debug,iroh=info` and honors `RUST_LOG`.
+A terminal-launched `cargo tauri dev` therefore prints the endpoint it bound plus its node id, every connect attempt's target and outcome, and each `delta sync received N ops`.
+That is the whole device↔device picture; see [`outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) for what the transport logs.
+
+#### Why the desktop crate has Windows-only boot code
+
+On macOS and Linux `run()` builds the Tauri app and the webview appears.
+On Windows the webview is a separate, user-installable runtime, so two failures happen *before* any outl code would run, and both used to arrive as a crash report instead of a sentence.
+`src-tauri/src/webview_boot.rs` owns both decisions and is unit-tested without a Windows machine; `crates/outl-desktop/CLAUDE.md` → "Logging" carries the rules a contributor must not undo.
+
+| Failure | What the user got | What happens now |
+|---|---|---|
+| **No WebView2 runtime installed.** `tauri::webview_version()` returns `Err`, which is the same reading `tauri-runtime-wry` turns into `Error::WebviewRuntimeNotInstalled` while creating the main window, so `App::run` panics with `Failed to setup app: {e}` | Tauri's own dialog, then a panic — which the crash reporter files | `webview_boot::webview_boot` runs **before** `outl_telemetry::init`, prints a Windows message box naming the Evergreen WebView2 runtime and Microsoft's download page, and `process::exit(1)`. The probe is before `init` so the reporter is not running on the path that exists to avoid a report |
+| **Runtime present, controller creation times out** (OUTL-4): a COM `ERROR_TIMEOUT` while `App::run` auto-created the configured window | The same `Failed to setup app: {e}` panic, with no retry | `tauri.windows.conf.json` adds `"create": false` to the same `"main"` entry, so `App::run` parses the window without building it. `setup` then builds it via `webview_boot::open_main_window`, retrying up to `WEBVIEW_CREATE_MAX_ATTEMPTS` before the same message-box-and-exit |
+
+Five things about that are easy to undo by accident:
+
+- **`Ok("")` is success.**
+  Tauri's gate is `is_ok()`, so an empty version string must boot; a second reading of that `Result` is how the two answers drift apart.
+- **macOS and Linux never call it.**
+  A failed WebKit probe on macOS is not a missing runtime, and Tauri still creates the webview there.
+- **The window is described once.**
+  `open_main_window` builds from `app.config().app.windows`, so there is no hand-maintained copy of title / size / resizable.
+  `the_windows_config_matches_the_base_config_entry_except_create` (runs on every platform) pins the two config files to describe the same window aside from `create`.
+- **`destroy()` only queues the teardown**, and the retry loop runs inside `setup`, before the event loop could process it.
+  So `clear_leftover_main_window` re-checks the label *after* `destroy()` and counts a still-registered leftover as a failed attempt, rather than calling `build()` into a `WindowLabelAlreadyExists` collision.
+  Reading `tauri` / `tauri-runtime-wry` 2.12.1, a controller failure does not actually leave one behind today, since the window-manager map insert only runs on the runtime's success path.
+  The guard exists to remove the dependency on that staying true across a bump.
+- **Both decisions are taken against traits, not `tauri::AppHandle`.**
+  `webview_create_decision` is the pure retry/give-up call and `LeftoverMainWindow` abstracts the `destroy()`, which is how either is testable at all on a machine that is not Windows.
 
 ### Testing P2P sync from a source build
 

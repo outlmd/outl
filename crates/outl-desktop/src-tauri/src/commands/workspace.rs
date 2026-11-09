@@ -39,6 +39,7 @@ pub(crate) fn set_workspace(
         &path,
         lru_cap,
         &state.workspace_guards,
+        &state.backup_root,
     )
     .map_err(|e| format!("open workspace at {}: {e}", path.display()))?;
 

@@ -45,6 +45,12 @@ Treat matching with the same paranoia as the CRDT.
   Minting a time-based ULID here split a day's journal across two competing roots.
   That happened when the same `journals/YYYY-MM-DD.md` was reconciled on a device that had no `.outl` yet (external editor, peer that shipped only the `.md`, crash before the sidecar landed).
   `ensure_page_root_in_tree` then writes that same slug into `page-slug`, so the id and the property stay in agreement.
+  **It also revives a page root out of the trash**, and is one of two places that do: the `Move` fires for any parent that is not `root()`, and `TRASH_ROOT` is one.
+  The other is `outl_actions::page::revive` (issue #473), which **trashes the page's children first** where this path leaves them live.
+  Not drift: this path holds a file whose content is evidence of intent the op log does not have, so it answers "make the tree match this", while the open path answers "the user wants to write here today".
+  **Do not route this through `revive_if_trashed`.**
+  It would trash blocks whose text is in the `.md` being reconciled, and the parse right after would recreate them with fresh ids, breaking every `((blk-…))` handle aimed at them.
+  Pinned by `outl-actions/tests/revive_convergence.rs`.
 - **`remind`** — the `remind::` block-property grammar (`3pm every 1h until DONE`) → `RemindRule`.
   **Syntax only.** *When* a rule actually fires is `outl_actions::reminders` — one owner for the schedule math, wrapped by every client and OS bridge.
   Permissive like the rest of the parser: an unreadable rule yields `rule: None` plus `ParseWarningKind::Remind*` records, and the property stays on disk verbatim so the user can fix the typo in place.

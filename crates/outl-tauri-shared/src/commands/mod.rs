@@ -45,6 +45,9 @@
 //!   for `[display] backlinks_order`.
 //! - [`theme`] — resolve a palette preset. Pure; no workspace access.
 //! - [`timeline`] — a page's history, read out of the op log.
+//! - [`trash`] — list what was deleted and put one back. Every verdict
+//!   is `outl_actions::trash`'s; this is the IPC wrapper and the
+//!   landing-page commit (issue #287).
 //! - [`trust`] — per-device activity and the plain Markdown export.
 //!   Distinct from [`history`]: that is this session's undo stack.
 //!   Read-only; there is no restore command.
@@ -68,4 +71,5 @@ pub mod telemetry;
 pub mod template;
 pub mod theme;
 pub mod timeline;
+pub mod trash;
 pub mod trust;

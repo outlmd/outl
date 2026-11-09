@@ -18,6 +18,7 @@
 
 use std::path::Path;
 
+use outl_actions::backup::BackupRoot;
 use outl_core::fractional::Fractional;
 use outl_core::hlc::{Hlc, HlcGenerator};
 use outl_core::id::{ActorId, NodeId};
@@ -68,7 +69,8 @@ fn the_gui_open_seeds_the_clock_from_the_op_log() {
 
     let held: Guards = Mutex::new(None);
     let hlc = HlcGenerator::new(actor);
-    let _ws = open_workspace_at(actor, &hlc, dir.path(), 0, &held).expect("open");
+    let _ws =
+        open_workspace_at(actor, &hlc, dir.path(), 0, &held, &BackupRoot::new()).expect("open");
 
     let issued = hlc.next();
     assert!(
@@ -93,13 +95,15 @@ fn every_open_seeds_again_not_just_the_first() {
     let held: Guards = Mutex::new(None);
     let hlc = HlcGenerator::new(actor);
 
-    let ws = open_workspace_at(actor, &hlc, first.path(), 0, &held).expect("open first");
+    let ws = open_workspace_at(actor, &hlc, first.path(), 0, &held, &BackupRoot::new())
+        .expect("open first");
     assert!(hlc.next().physical_ms >= near, "first open must seed");
     // Release the first workspace's per-actor write lock before the
     // second open asks for it under the same actor.
     drop(ws);
 
-    let _ws = open_workspace_at(actor, &hlc, second.path(), 0, &held).expect("open second");
+    let _ws = open_workspace_at(actor, &hlc, second.path(), 0, &held, &BackupRoot::new())
+        .expect("open second");
     let issued = hlc.next();
     assert!(
         issued.physical_ms >= far,
@@ -127,7 +131,8 @@ fn reopening_never_rewinds_the_clock() {
     // First session: its own generator, the way a fresh app launch has one.
     let written = {
         let hlc = HlcGenerator::new(actor);
-        let mut ws = open_workspace_at(actor, &hlc, dir.path(), 0, &held).expect("open");
+        let mut ws =
+            open_workspace_at(actor, &hlc, dir.path(), 0, &held, &BackupRoot::new()).expect("open");
         let page = outl_actions::open_today(&mut ws, &hlc).expect("open today");
         outl_actions::append_block(&mut ws, &hlc, Some(page), Some("first")).expect("append block");
         ws.log().last().expect("the session wrote something").ts
@@ -141,7 +146,8 @@ fn reopening_never_rewinds_the_clock() {
     *held.lock() = None;
 
     let hlc = HlcGenerator::new(actor);
-    let _ws = open_workspace_at(actor, &hlc, dir.path(), 0, &held).expect("reopen");
+    let _ws =
+        open_workspace_at(actor, &hlc, dir.path(), 0, &held, &BackupRoot::new()).expect("reopen");
     let reopened = hlc.next();
     assert!(
         reopened > written,

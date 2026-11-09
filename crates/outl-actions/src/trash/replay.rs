@@ -56,10 +56,27 @@ impl<'a> Replay<'a> {
     }
 
     /// `node`'s parent after each op that tried to place it, oldest
-    /// first. A refused op repeats the parent before it.
-    pub(super) fn trail(&mut self, node: NodeId) -> Result<&[Option<NodeId>], ActionError> {
+    /// first, paired with the HLC of the op that decided it. A refused
+    /// op repeats the parent before it.
+    ///
+    /// `ops` and `after` are the same length once `resolve` has run, so
+    /// the pairing is free — and it is the only way to answer *when* a
+    /// node was moved without folding the trail a second time. Owned
+    /// rather than borrowed because the caller reads it while still
+    /// holding `&mut Replay`; a trail is a handful of ops per node, not
+    /// a scan.
+    pub(super) fn trail(
+        &mut self,
+        node: NodeId,
+    ) -> Result<Vec<(Hlc, Option<NodeId>)>, ActionError> {
         self.resolve(node, None)?;
-        Ok(self.trails[&node].after.as_slice())
+        let trail = &self.trails[&node];
+        Ok(trail
+            .ops
+            .iter()
+            .map(|(ts, _)| *ts)
+            .zip(trail.after.iter().copied())
+            .collect())
     }
 
     fn load(&mut self, node: NodeId) -> Result<(), ActionError> {

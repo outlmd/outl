@@ -253,6 +253,16 @@ export interface AppStateShape {
    */
   tasksOpen: boolean;
   /**
+   * Trash panel open state. Opened from the `🗑` button in the chrome
+   * toggle bar. No chord yet: an `Action` needs an arm in
+   * `outl_shortcuts::support`, which is frozen at its size baseline —
+   * the same gap `timelineOpen` has. `Capability::Trash` records it.
+   *
+   * Distinct from the undo stack: that is this session's mutations,
+   * this is every deletion from every device, forever.
+   */
+  trashOpen: boolean;
+  /**
    * Page-history panel open state. Opened from the `⏱` button in the
    * page header. Read-only: it lists what the op log says happened to
    * this page, including blocks that were deleted out of it.
@@ -318,6 +328,7 @@ const [state, setState] = createStore<AppStateShape>({
   remindersOpen: false,
   tasksOpen: false,
   timelineOpen: false,
+  trashOpen: false,
   focusBlockId: null,
   dropTargetBlockId: null,
   lastError: null,

@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 
+import { detectMode, type ResolvedMode as Mode } from "../lib/mode";
 import { appState, setAppState } from "../lib/store";
 
 /**
@@ -12,23 +13,6 @@ import { appState, setAppState } from "../lib/store";
  * Mode badge picks up the theme tokens (`status_normal_*` etc) so
  * each preset colors it consistently with the TUI's badge.
  */
-
-type Mode = "normal" | "insert" | "visual" | "overlay";
-
-function detectMode(): Mode {
-  if (appState.pickerOpen || appState.settingsOpen || appState.helpOpen)
-    return "overlay";
-  // Vim mode owns the badge when active. Check before the DOM-focus
-  // fallback so `vim-visual` doesn't get swallowed by "insert" when a
-  // textarea happens to be focused, and so Visual reads as VISUAL
-  // instead of NORMAL (the badge used to lie during Visual sessions).
-  if (appState.mode === "vim-visual") return "visual";
-  if (appState.mode === "vim-insert") return "insert";
-  const el = document.activeElement;
-  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)
-    return "insert";
-  return "normal";
-}
 
 interface HintEntry {
   chord: string;

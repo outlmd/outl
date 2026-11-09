@@ -1,29 +1,24 @@
 //! Insert a new block relative to an existing one.
 //!
 //! The `create_before` / `create_after` pair and their
-//! `*_or_append` fallbacks. Two concerns live here and nowhere else:
+//! `*_or_append` fallbacks. One concern lives here and nowhere else:
 //!
-//! - **the fractional slot**, which is not always representable —
-//!   [`create_before`] carries the reposition path for an anchor with
-//!   no room beneath it, and the rule that it may cost the *new* block
-//!   a slot but may never move an existing sibling (issue #282);
 //! - **the stale anchor**, because a client's selected-block id
 //!   survives a peer reload, an external `.md` edit and a reconcile
 //!   that re-minted the id. Every GUI routes "new block above / below
 //!   the selection" through the `*_or_append` pair so the fallback
 //!   cannot drift between them.
 
-use outl_core::fractional::Fractional;
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::NodeId;
-use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
-use crate::tree::{next_sibling, position_after, position_before};
+use crate::tree::position_before;
 
 use super::create::{append_block, create_with_position};
-use super::{ensure_live, wrap};
+use super::ensure_live;
+use super::slot::{slot_after, vacate};
 
 /// Insert a new sibling immediately after `after`, sharing the same
 /// parent.
@@ -38,8 +33,7 @@ pub fn create_after(
         .tree()
         .parent(after)
         .ok_or_else(|| ActionError::NotInTree(after.to_string()))?;
-    let position = position_after(workspace, after)
-        .ok_or_else(|| ActionError::MissingPosition(after.to_string()))?;
+    let position = slot_after(workspace, hlc, after)?;
     create_with_position(workspace, hlc, parent, position, text)
 }
 
@@ -65,9 +59,45 @@ pub fn create_after_or_append(
     text: Option<&str>,
 ) -> Result<NodeId, ActionError> {
     match create_after(workspace, hlc, after, text) {
-        Err(ActionError::NotInTree(_)) => append_block(workspace, hlc, Some(page), text),
+        Err(ActionError::NotInTree(_)) => append_in_page(workspace, hlc, page, text),
         other => other,
     }
+}
+
+/// The fallback half of both `*_or_append` pairs: append at the end of
+/// `page`, **but only if that page can still hold a block.**
+///
+/// `append_block` does not ask. `create_with_explicit_id` applies the
+/// `Op::Create` unconditionally and then calls `edit_text`, which *does*
+/// ask ([`ensure_live`]) — so appending under a trashed page landed an
+/// empty block in the op log, under a parent nobody can see, discarded the
+/// text, and returned `NotInTree` naming the node it had just created.
+/// One junk op per attempt, and a client that retries writes another.
+///
+/// That is reachable whenever a peer deletes the page while an editor is
+/// open here: the anchor is trashed with it, so `create_after` fails and
+/// this is where the keystroke went. Refusing **before** the `Create`
+/// leaves the log clean and hands the caller a `NotInTree` naming the
+/// *page*, which is the thing that actually went away.
+fn append_in_page(
+    workspace: &mut Workspace,
+    hlc: &HlcGenerator,
+    page: NodeId,
+    text: Option<&str>,
+) -> Result<NodeId, ActionError> {
+    // `ensure_live` reaches `ensure_in_tree`, which asks `contains` — and
+    // that answers **no** for `NodeId::root()`, an implicit parent that
+    // never appears in `Tree::nodes`. Third instance of the question
+    // `move_under`'s destination check and `trash::landing_for` just
+    // stopped asking, introduced by the guard that removed them.
+    //
+    // No caller reaches it today (all five pass a real page root), which is
+    // exactly why it would have survived until one did. Root is never
+    // trashed, so skipping the whole check for it is the same verdict.
+    if page != NodeId::root() {
+        ensure_live(workspace, page)?;
+    }
+    append_block(workspace, hlc, Some(page), text)
 }
 
 /// Insert a new sibling immediately before `before`, sharing the same
@@ -105,50 +135,17 @@ pub fn create_before(
     // No representable slot beneath `before`. [`position_before`] names
     // the three shapes that get here: `before` at the fractional floor
     // (`Fractional::first()`), `before` tied with its predecessor, or a
-    // predecessor exactly one `a` below it. Mirror what `move_up` does:
-    // shift `before` up into the gap toward its next sibling, then drop
-    // the new block into the freed slot so it lands ahead of `before`
-    // while every sibling keeps its relative order.
-    let floor = workspace
-        .tree()
-        .position(before)
-        .cloned()
-        .ok_or_else(|| ActionError::MissingPosition(before.to_string()))?;
-    let next_pos =
-        next_sibling(workspace, before).and_then(|n| workspace.tree().position(n).cloned());
-    let shifted = Fractional::between(Some(&floor), next_pos.as_ref());
-
-    // ...but the gap *above* `before` can be empty too, and then there
-    // is no slot to shift into either. `Fractional::between` drops an
-    // upper bound it cannot satisfy, so `shifted` comes back sorting
-    // PAST the next sibling, and the move would send `before` below a
-    // block the user never touched. Two shapes reach it: `before` tied
-    // with its successor (three offline creates under one parent), and
-    // a successor that is `floor` plus a single `a` — `"aa"` is an
-    // ordinary key, `between("a", "ab")` mints it, and nothing sorts
-    // between `"a"` and `"aa"`.
+    // predecessor exactly one `a` below it. Free the key `before` is
+    // sitting on and drop the new block into it, so it lands ahead of
+    // `before` while every sibling keeps its relative order.
     //
-    // **A tie is not separable without choosing a `NodeId`**, and this
-    // function does not get to choose one: the new block's id is minted
-    // fresh, and `tree::sort_siblings` orders equal positions by id. So
-    // the new block is allowed to land one slot off — it shares `floor`
-    // with `before` and the id tiebreak decides which comes first — and
-    // the existing siblings are not allowed to move at all. Relocating
-    // content the user did not touch is the worse of the two, and it is
-    // the one that looks like data loss.
-    if next_pos.as_ref().is_none_or(|next| &shifted < next) {
-        workspace.apply(wrap(
-            hlc,
-            Op::Move {
-                node: before,
-                new_parent: parent,
-                position: shifted,
-                old_parent: parent,
-                old_position: floor.clone(),
-            },
-        ))?;
-    }
-    create_with_position(workspace, hlc, parent, floor, text)
+    // [`vacate`] owns what happens when the gap *above* `before` is
+    // empty too — it returns the key without moving anything, and the
+    // new block then shares it with `before`. `slot_after` leans on the
+    // same primitive from the other side; this used to be written out
+    // here, which is why only one of the two directions had it.
+    let freed = vacate(workspace, hlc, before)?;
+    create_with_position(workspace, hlc, parent, freed, text)
 }
 
 /// Insert a sibling before `before`, falling back to appending at the end
@@ -169,7 +166,7 @@ pub fn create_before_or_append(
     text: Option<&str>,
 ) -> Result<NodeId, ActionError> {
     match create_before(workspace, hlc, before, text) {
-        Err(ActionError::NotInTree(_)) => append_block(workspace, hlc, Some(page), text),
+        Err(ActionError::NotInTree(_)) => append_in_page(workspace, hlc, page, text),
         other => other,
     }
 }
@@ -364,5 +361,51 @@ mod tests {
             "the new block belongs to the page the user was looking at"
         );
         assert_ne!(ws.tree().parent(made), Some(outl_core::id::NodeId::trash()));
+    }
+
+    /// The fallback's own target can be gone — a peer deletes the page
+    /// while an editor is open here, so the anchor is trashed *with* it.
+    ///
+    /// `append_block` does not check its parent and `create_with_explicit_id`
+    /// applies the `Op::Create` before `edit_text` refuses, so this used to
+    /// land an empty block under the trashed page, discard the text, and
+    /// still return `NotInTree`. The op is the part that mattered: it is
+    /// permanent, invisible, and one more arrives on every retry.
+    #[test]
+    fn a_trashed_page_refuses_the_fallback_before_writing_an_op() {
+        use crate::page::{open_or_create, PageKind};
+        let (mut ws, hlc) = new_workspace();
+        let page = open_or_create(&mut ws, &hlc, "notes", "Notes", PageKind::Page).unwrap();
+        let anchor = append_block(&mut ws, &hlc, Some(page), Some("anchor")).unwrap();
+        crate::page::delete(&mut ws, &hlc, "notes").unwrap();
+        let log_before = ws.log().len();
+
+        for result in [
+            create_after_or_append(&mut ws, &hlc, page, anchor, Some("typed")),
+            create_before_or_append(&mut ws, &hlc, page, anchor, Some("typed")),
+        ] {
+            assert!(
+                matches!(result, Err(ActionError::NotInTree(_))),
+                "a trashed page cannot hold a block, got {result:?}"
+            );
+        }
+        assert_eq!(
+            ws.log().len(),
+            log_before,
+            "the refusal must come before the `Op::Create`, or the trash \
+             collects one empty block per attempt"
+        );
+        // Not `is_empty()`: deleting the page is one `Op::Move` on its
+        // root, so `anchor` still points at `page` (invariant 6). What must
+        // not appear is a *new* child.
+        let kids: Vec<NodeId> = crate::tree::children_of(&ws, page)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            kids,
+            vec![anchor],
+            "nothing new may land under a trashed page"
+        );
     }
 }

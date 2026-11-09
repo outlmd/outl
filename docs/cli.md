@@ -253,25 +253,32 @@ The `--raw='…'` flag is reserved for the not-yet-implemented query DSL and cur
 Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invariants-never-violate)), so nothing is ever physically removed.
 These two commands are how you read that back.
 
-`trash list` names every top-level deletion with a preview, how many blocks ride along under it, and whether it can be restored.
+`trash list` names every top-level deletion with a preview, how many blocks ride along under it, when it was deleted (`deleted_at_ms`, JSON only) and whether it can be restored.
+`deleted_at_ms` is a wall clock from the device that did the deleting, so render it and do not sort on it — the listing's own order is stable and cannot depend on a peer's clock.
 `trash restore` puts a block back **as the last child** of the parent it was deleted from, not in the slot it used to hold — `Move.old_position` is the originating replica's local derivation for `undo_op` and is not authoritative to a reader of the log, the same caveat that applies to `old_parent`.
 
 Each refusal has its own code, so an agent can tell them apart without reading prose:
 
-| Code                       | When                                                              |
-|----------------------------|-------------------------------------------------------------------|
-| `TRASH_PARENT_TRASHED`     | the block it was deleted from is in the trash too — restore that one first, the message names it |
-| `TRASH_PAGE_UNSUPPORTED`   | the id is a deleted **page**, which needs a re-projected `.md` and usually collides with a live slug; `outl block tree <id>` still shows the content |
-| `NOT_TRASHED`              | the block is not in the trash, so there is nothing to undo        |
-| `TRASH_PARENT_MISSING`     | the folded parent is not in the tree at all — run `outl doctor` ([#301](https://github.com/outlmd/outl/issues/301)) |
-| `TRASH_ORIGIN_UNKNOWN`     | the block is in the trash and the log cannot say where it came from: no move placed it, its ops would not read, or the block it was deleted from has since moved inside it. The text is still in the listing, so recovering it is a copy/paste |
+| Code                          | When                                                           |
+|-------------------------------|----------------------------------------------------------------|
+| `TRASH_PARENT_TRASHED`        | the block it was deleted from is in the trash too — restore that one first, the message names it |
+| `TRASH_PAGE_UNSUPPORTED`      | the id is a deleted **page**, which needs a re-projected `.md` and usually collides with a live slug; `outl block tree <id>` still shows the content |
+| `NOT_TRASHED`                 | the block is not in the trash, so there is nothing to undo     |
+| `TRASH_PARENT_MISSING`        | the folded parent is not in the tree at all — run `outl doctor` ([#301](https://github.com/outlmd/outl/issues/301)) |
+| `TRASH_ORIGIN_UNKNOWN`        | the block is in the trash and the log's answer about where it came from does not resolve here: no move placed it, its ops would not read, or the parent it names is unreachable |
+| `TRASH_ORIGIN_INSIDE_SUBTREE` | the block it was deleted from has since **moved inside** the subtree being restored, so that landing would be a cycle. `outl block move <parent-id> --parent <live-block-id>` first — a trashed node is a legal source |
+
+**A refusal's *diagnosis* is the same on every surface; its *way out* is not.**
+`outl trash list` / `outl trash restore` and the two MCP tools name a command, because a one-shot call has no listing to come back to.
+The TUI overlay and the desktop panel carry the way out on the row instead, re-listing after a failed restore, and a surface that genuinely cannot act says so rather than printing a step it cannot perform — a phone has no `outl` binary, and no outline can reach a block that sits inside the deletion being restored ([invariant 2](../CLAUDE.md#critical-invariants-never-violate) keeps block ids off those surfaces).
+`outl_actions::refusal::Remedy` is the one owner of that per-surface answer.
 
 **Nothing ever leaves the trash on its own, and there is no way to empty it.**
 That is deliberate rather than unfinished: emptying is the one operation here that actually destroys, so it belongs with op-log compaction ([#110](https://github.com/outlmd/outl/issues/110)) rather than as an `rm`.
 Until that lands, retention is unbounded and there is no user action that changes it.
 A workspace's trash therefore only grows; `outl doctor` reports its size.
 
-No client has a trash surface yet — it is CLI and MCP only, recorded as `Capability::Trash` in [docs/client-parity.md](client-parity.md).
+Per-client reach is recorded as `Capability::Trash` in [docs/client-parity.md](client-parity.md).
 
 ### Backlinks / Refs
 

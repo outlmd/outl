@@ -15,8 +15,8 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use outl_actions::{
-    append_block, apply_page_md_with_sidecar, delete, open_journal, recover_desynced_projection,
-    scan_for_desynced_projections, SyncEngine,
+    append_block, apply_page_md_with_sidecar, children_of, delete, edit_text, open_journal,
+    recover_desynced_projection, scan_for_desynced_projections, SyncEngine,
 };
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::{ActorId, NodeId};
@@ -320,4 +320,89 @@ fn recovery_does_not_reproject_over_text_the_log_never_saw() {
         md_offline,
         "re-projecting here deletes content the op log has never seen"
     );
+}
+
+/// Place `node` under `parent` at a hand-picked position, straight
+/// through the op log — the only way to reconstruct the sibling keys an
+/// older build left behind.
+fn place(ws: &mut Workspace, hlc: &HlcGenerator, node: NodeId, parent: NodeId, pos: &str) {
+    let ts = hlc.next();
+    ws.apply(outl_core::op::LogOp {
+        ts,
+        actor: ts.actor,
+        op: outl_core::op::Op::Create {
+            node,
+            parent,
+            position: outl_core::fractional::Fractional::parse(pos).expect("valid position"),
+        },
+    })
+    .expect("create applies");
+}
+
+/// The recovery walk mints a position between the `.md`'s neighbours,
+/// and the gap between them can be **empty** while still looking like a
+/// bound worth honouring: nothing sorts between `"b"` and `"ba"`.
+///
+/// `Fractional::between` then drops the bound by contract and returns a
+/// key above *both*, so the recovered block was created behind the
+/// sibling the `.md` says it precedes — issue #476 in the one path a
+/// user only reaches when they are already in trouble, and the fifth
+/// site that minted against an unchecked bound.
+///
+/// The property this makes impossible: a block recovered into a sibling
+/// gap with no interior landing after the sibling it was meant to
+/// precede. Asserted on the tree (what every peer replays) and on the
+/// re-projected file (what the user reads), and the untouched key of a
+/// block the recovery was not recovering.
+#[test]
+fn a_recovered_block_lands_before_the_sibling_the_md_says_it_precedes() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = open_ws(root, actor);
+
+    let date = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+    let page_id = open_journal(&mut ws, &hlc, date).unwrap();
+    let left = NodeId(ulid::Ulid::generate());
+    let right = NodeId(ulid::Ulid::generate());
+    place(&mut ws, &hlc, left, page_id, "b");
+    place(&mut ws, &hlc, right, page_id, "ba");
+    edit_text(&mut ws, &hlc, left, "left").unwrap();
+    edit_text(&mut ws, &hlc, right, "right").unwrap();
+    apply_page_md_with_sidecar(&ws, root, page_id).unwrap();
+
+    // The offline session that never reached an op log created a block
+    // between the two.
+    let md_path = root.join("journals/2026-04-05.md");
+    let sc_path = root.join("journals/2026-04-05.outl");
+    let md_offline = "- left\n- middle\n- right\n";
+    let middle = NodeId(ulid::Ulid::generate());
+    let mut sc = outl_md::sidecar::read(&sc_path).unwrap();
+    sc.blocks = vec![
+        outl_md::sidecar::SidecarBlock::from_text(left, 1, 0, "left"),
+        outl_md::sidecar::SidecarBlock::from_text(middle, 2, 0, "middle"),
+        outl_md::sidecar::SidecarBlock::from_text(right, 3, 0, "right"),
+    ];
+    sc.last_synced_hash = outl_md::sidecar::file_hash(md_offline);
+    fs::write(&md_path, md_offline).unwrap();
+    outl_md::sidecar::write(&sc_path, &sc).unwrap();
+
+    assert_eq!(
+        scan_for_desynced_projections(&ws, root),
+        vec![md_path.clone()]
+    );
+    recover_desynced_projection(&mut ws, &hlc, root, &md_path).unwrap();
+
+    let order: Vec<String> = children_of(&ws, page_id)
+        .into_iter()
+        .map(|(id, _)| ws.block_text(id).unwrap_or_default())
+        .collect();
+    assert_eq!(order, vec!["left", "middle", "right"]);
+    assert_eq!(
+        ws.tree().position(left).map(|p| p.as_str()),
+        Some("b"),
+        "a block the recovery was not recovering may not move"
+    );
+    assert_eq!(fs::read_to_string(&md_path).unwrap(), md_offline);
 }
