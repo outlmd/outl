@@ -77,8 +77,14 @@ fn workspace_info_returns_summary() {
         "a fresh workspace has no folded ops, so total and delta match: {info}"
     );
     // A fresh workspace has one journal (today) and one root page.
-    assert_eq!(info["data"]["pages"], 1, "fresh workspace has a root page: {info}");
-    assert_eq!(info["data"]["journals"], 1, "fresh workspace has today's journal: {info}");
+    assert_eq!(
+        info["data"]["pages"], 1,
+        "fresh workspace has a root page: {info}"
+    );
+    assert_eq!(
+        info["data"]["journals"], 1,
+        "fresh workspace has today's journal: {info}"
+    );
 }
 
 /// A workspace that booted from a snapshot still reports the persisted

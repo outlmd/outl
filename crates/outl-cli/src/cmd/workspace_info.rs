@@ -1,9 +1,10 @@
 //! `outl workspace info` — workspace summary (path, actor, counts).
 //!
 //! `ops` is the persisted op-log total, read through
-//! [`Workspace::total_ops`]. That includes ops folded into a snapshot
-//! boot as well as the post-cutoff delta held in memory, so it matches
-//! what `outl doctor` reports without paying for a full replay.
+//! [`outl_core::workspace::Workspace::total_ops`]. That includes ops
+//! folded into a snapshot boot as well as the post-cutoff delta held in
+//! memory, so it matches what `outl doctor` reports without paying for a
+//! full replay.
 //!
 //! The remaining fields are cheap projections of the materialized tree:
 //! they walk indexes or in-memory maps, not the raw op log, so this stays
@@ -33,8 +34,7 @@ pub struct WorkspaceInfoArgs {
 
 /// Run `outl workspace info`.
 pub fn run(args: &WorkspaceInfoArgs, path: &Path) -> i32 {
-    let result = ws::open_read(path)
-        .and_then(|ctx| info(&ctx).map_err(ApiError::internal));
+    let result = ws::open_read(path).and_then(|ctx| info(&ctx).map_err(ApiError::internal));
     emit(args.json, result, print_info)
 }
 
@@ -126,13 +126,9 @@ pub fn info(ctx: &WsCtx) -> Result<Value, outl_core::workspace::WorkspaceError> 
         .filter(|(_, parent, _)| *parent == NodeId::trash())
         .count();
     let (snapshot_count, snapshot_bytes) = snapshot_stats(&ctx.root);
-    let last_modified = ctx
-        .workspace
-        .last_op_time()?
-        .map(|t| {
-            chrono::DateTime::<chrono::Utc>::from(t)
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        });
+    let last_modified = ctx.workspace.last_op_time()?.map(|t| {
+        chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    });
     Ok(json!({
         "root": ctx.root.display().to_string(),
         "actor": ctx.actor.to_string(),
