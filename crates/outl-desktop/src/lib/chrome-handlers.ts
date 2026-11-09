@@ -17,7 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { type HandlerCtx, lookupBlock } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
-import { appState, setAppState } from "./store";
+import { appState, setAppState, togglePanel } from "./store";
 import { exitVisual } from "./visual-handlers";
 
 /** Pre-fill the picker with the selected block's text, then open
@@ -44,23 +44,6 @@ export function chromeHandlers(ctx: HandlerCtx): ActionHandlers {
   // the module's boundary rather than an accident.
   const { deps } = ctx;
 
-  /** Flip a chrome flag. Seven chords are exactly this, and writing
-   *  each one out invited the next one to be written out differently
-   *  (five of them had a block body, two an expression). */
-  const toggle =
-    (
-      flag:
-        | "pickerOpen"
-        | "settingsOpen"
-        | "sidebarOpen"
-        | "backlinksOpen"
-        | "helpOpen"
-        | "remindersOpen"
-        | "tasksOpen",
-    ) =>
-    () =>
-      setAppState(flag, !appState[flag]);
-
   /** Ask the selected block's row for a blank property editor.
    *  Refusing loudly matters: a chord that silently does nothing when
    *  no block is selected gets reported as "the shortcut is broken". */
@@ -75,20 +58,20 @@ export function chromeHandlers(ctx: HandlerCtx): ActionHandlers {
 
   return {
     // ── chrome ────────────────────────────────────────────────────
-    OpenPicker: toggle("pickerOpen"),
+    OpenPicker: () => togglePanel("pickerOpen"),
     // The same palette, opened on `>` so it lists actions only.
     OpenCommandPalette: () => setAppState({ pickerSeed: "> ", pickerOpen: true }),
-    OpenSettings: toggle("settingsOpen"),
-    ToggleSidebar: toggle("sidebarOpen"),
-    ToggleBacklinks: toggle("backlinksOpen"),
-    ToggleHelp: toggle("helpOpen"),
+    OpenSettings: () => togglePanel("settingsOpen"),
+    ToggleSidebar: () => togglePanel("sidebarOpen"),
+    ToggleBacklinks: () => togglePanel("backlinksOpen"),
+    ToggleHelp: () => togglePanel("helpOpen"),
     // ── read-only panels ──────────────────────────────────────────
     //
     // These two only mount a list. *Authoring* a `remind::` rule is a
     // mutation on the selected block, so `InsertRemind` / the nag
     // preset / `SnoozeReminder` live in `block-handlers.ts`.
-    OpenReminders: toggle("remindersOpen"),
-    OpenTaskList: toggle("tasksOpen"),
+    OpenReminders: () => togglePanel("remindersOpen"),
+    OpenTaskList: () => togglePanel("tasksOpen"),
     // ── properties (`key:: value`) ────────────────────────────────
     //
     // The chord has no chip to click, so it names the block and

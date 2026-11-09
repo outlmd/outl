@@ -341,6 +341,30 @@ const [state, setState] = createStore<AppStateShape>({
 export { state as appState, setState as setAppState };
 
 /**
+ * A chrome flag: a panel or overlay that is either on screen or not.
+ *
+ * Derived from the shape rather than hand-listed. The keyboard path and
+ * the click path each carried their own list — a seven-key union in
+ * `chrome-handlers.ts`, five inline flips in `<ChromeToggleBar />` — and
+ * the two never agreed: `trashOpen` and `marketplaceOpen` are clickable
+ * and absent from the union, `backlinksOpen` and `tasksOpen` are the
+ * other way round.
+ */
+export type PanelFlag = Extract<keyof AppStateShape, `${string}Open`>;
+
+/**
+ * Flip a chrome flag.
+ *
+ * The single owner of "the button and the chord do the same thing":
+ * both call this, so neither can end up reading one flag and writing
+ * another. The `Esc` cascade in `chrome-handlers.ts` keeps its own list
+ * because the thing it owns is the *order*, not the flip.
+ */
+export function togglePanel(flag: PanelFlag): void {
+  setState(flag, !state[flag]);
+}
+
+/**
  * Update the outline by **reconciling** (keyed on block id), not
  * replacing the array. Replacing it with a fresh array of new objects
  * makes the `<For>` re-create every `<BlockRow>` (it keys by reference),
