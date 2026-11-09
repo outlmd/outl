@@ -206,9 +206,13 @@ export interface AppStateShape {
    * Caret intent the next mounting `<BlockRow />` textarea consumes
    * the moment it lands in the DOM. Set by vim-style entry actions
    * that need the caret somewhere other than where the click would
-   * leave it — today only `EnterInsertAtEnd` (`A` in vim) uses
-   * `"end"`. Cleared by `<BlockRow />` as soon as it applies the
-   * intent so a subsequent regular click doesn't get hijacked.
+   * leave it — `EnterInsertAtEnd` (`A` in vim) uses `"end"`. A
+   * codepoint offset (`number`) carries the caret Tab / Shift-Tab
+   * captured before commit, through the remount `onIndent` /
+   * `onOutdent` cause by re-entering edit mode on the moved block
+   * (#477) — `"end"` / `"start"` can't express a mid-string position.
+   * Cleared by `<BlockRow />` as soon as it applies the intent so a
+   * subsequent regular click doesn't get hijacked.
    *
    * Why a signal and not `queueMicrotask` + `document.querySelector`:
    * the textarea is mounted by Solid's `<Show>` swap, which doesn't
@@ -217,7 +221,7 @@ export interface AppStateShape {
    * `createEffect` — same tick the textarea ref is populated, every
    * time.
    */
-  caretIntent: "end" | "start" | null;
+  caretIntent: "end" | "start" | number | null;
   /** Picker overlay open state. `Cmd/Ctrl+P` toggles. */
   pickerOpen: boolean;
   /**

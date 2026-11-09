@@ -496,3 +496,100 @@ describe("BlockRow paste into the block being edited — #488", () => {
     expect(ta.selectionStart).toBe(12);
   });
 });
+
+/**
+ * Regression for #477: Tab / Shift-Tab indented or outdented the
+ * edited block but left edit mode, and the selection stayed on
+ * whatever block was selected beforehand — so the next keystroke ran
+ * as a Normal-mode command against the wrong block.
+ *
+ * `onIndent` / `onOutdent` themselves (re-entering edit mode on the
+ * moved block, even on a failed / no-op move) are pinned in
+ * `outline-structure.test.ts`, against the real `<OutlineView />`
+ * wiring extracted into `createStructureOps` — a stub `cb` here, as
+ * used by every other test in this file, can't exercise that half.
+ *
+ * What a stub *can* pin is `<BlockEditor />`'s side of the caret
+ * handoff: the Tab handler has to capture the caret before `commit()`
+ * tears the textarea down, since indenting/outdenting mounts a fresh
+ * `<BlockEditor />` once the block re-enters edit mode, and that
+ * fresh instance has no memory of where the user's caret was.
+ */
+describe("BlockRow Tab / Shift-Tab indent-outdent caret handoff — #477", () => {
+  it("Tab captures the caret as a caretIntent offset before committing", async () => {
+    const cb = makeCb();
+    const ta = mountEditing(makeBlock("blk-indent", "hello world"), cb);
+    // Let this mount's own pending caret-intent microtask (queued by
+    // `onMount`, caretIntent is `null` at this point) drain first —
+    // otherwise it runs mid-test, after Tab has set a fresh intent,
+    // and swallows it before the assertion below ever sees it.
+    await Promise.resolve();
+    ta.setSelectionRange(5, 5);
+
+    ta.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cb.onIndent).toHaveBeenCalledWith("blk-indent");
+    // This stub `cb.onIndent` never flips `editingBlockId`, so the row
+    // never remounts and nothing has consumed the intent yet — it is
+    // still sitting there, captured, for the real `<OutlineView />`
+    // wiring to hand to the block's next mount.
+    expect(appState.caretIntent).toBe(5);
+  });
+
+  it("Shift+Tab captures the caret and fires onOutdent, not onIndent", async () => {
+    const cb = makeCb();
+    const ta = mountEditing(makeBlock("blk-outdent", "hello world"), cb);
+    await Promise.resolve();
+    ta.setSelectionRange(3, 3);
+
+    ta.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cb.onOutdent).toHaveBeenCalledWith("blk-outdent");
+    expect(cb.onIndent).not.toHaveBeenCalled();
+    expect(appState.caretIntent).toBe(3);
+  });
+
+  it("a caretIntent offset present on mount lands the caret there, not at the end", async () => {
+    // The other half of the handoff: once the moved block remounts
+    // into edit mode, the fresh `<BlockEditor />` must read the
+    // captured offset back out and clear it, the same contract
+    // `EnterInsertAtEnd`'s `"end"` sentinel already had.
+    setAppState("caretIntent", 5);
+    const ta = mountEditing(makeBlock("blk-remount", "hello world"), makeCb());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ta.selectionStart).toBe(5);
+    expect(ta.selectionEnd).toBe(5);
+    expect(appState.caretIntent).toBeNull();
+  });
+
+  it("a caretIntent offset of 0 is honoured, not treated as absent", async () => {
+    // `intent &&` would skip a falsy `0` — the caret-at-start case —
+    // and leave whatever position focus() happened to land on.
+    setAppState("caretIntent", 0);
+    const ta = mountEditing(makeBlock("blk-zero", "hello world"), makeCb());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(ta.selectionStart).toBe(0);
+    expect(appState.caretIntent).toBeNull();
+  });
+});

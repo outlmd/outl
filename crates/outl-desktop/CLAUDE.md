@@ -57,7 +57,10 @@ New code of one of these shapes goes in the sibling, not back in the parent:
   Re-exported from `BlockRow.tsx`, so `import { type BlockCallbacks } from "./BlockRow"` keeps resolving.
 - **`BlockBody.tsx`** — read mode: fence → `<CodeFenceView />`, table → `<MarkdownTable />`, embed-only → `<EmbeddedSubtree />`, else `<MarkdownInline />` + the chip row.
   Flat, mutually exclusive branches, each routing a click back through the same `onStartEdit` — a table has no cell editor and a fence has no fence editor, by design (#329).
-- **`outline-paste.ts`** — `createPasteOps(deps)`: flush the draft, run `paste_markdown_at` / `paste_plain_at`, hand the editor back what it has to become. See "Paste" below.
+- **`outline-paste.ts`** — `createPasteOps(deps)`: flush the draft, run `paste_markdown_at` / `paste_plain_at`, hand the editor back what it has to become.
+  See "Paste" below.
+- **`outline-structure.ts`** — `createStructureOps(deps)`: run `indent_block` / `outdent_block`, then re-select and re-edit the moved block on itself regardless of outcome.
+  See "Block-editor chords" below (issue #477).
 - **`BlockEditor.tsx`** — the textarea: chords, bracket auto-pairing, paste routing, `autoSize`, `commit`.
   Mounted only while editing, which is why focus + pending caret intent are `onMount` and not an effect on an `editing` flag.
 - **`block-suggest.ts`** — `createBlockSuggest(deps)`: the four inline autocomplete triggers, their round-trips and staleness guards, and the popup keyboard contract.
@@ -288,6 +291,12 @@ Load-bearing notes a contributor needs:
 
 - **Plain `Enter` → splits the block at the caret** (`onEnter`, issue #184).
   `Shift+Enter` → literal `\n` soft break (issue #119), handled in `BlockEditor`'s `handleKeydown` (not the catalog; see the code comment).
+- **`Tab` / `Shift+Tab` indent / outdent the block and keep it in edit mode, on itself** (issue #477).
+  `commit()` (called first, so the backend sees the latest draft) flips `editingBlockId` to `null`, and the moved block's row remounts a fresh `<BlockEditor />` elsewhere in the tree.
+  `onIndent` / `onOutdent` (`components/outline-structure.ts`'s `createStructureOps`) re-select and re-edit the block's own id once the move settles.
+  That holds whether the move landed, was a backend no-op (`indent_block` / `outdent_block` swallow `NoPreviousSibling` / `AlreadyAtRoot`), or the command rejected outright.
+  The caret survives the remount through `appState.caretIntent`, widened from the `"end"` / `"start"` sentinels to also carry a codepoint offset.
+  The Tab handler captures it before `commit()` runs; the fresh `<BlockEditor />` applies it on mount and clears it, the same contract `EnterInsertAtEnd` already had.
 - `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
   Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
 - Bracket auto-pairing (`[[`/`((` auto-close, `(`/`[`/`{` auto-pair with caret between, closer step-over, empty-pair collapse on `Backspace`) all live in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity).
