@@ -50,9 +50,18 @@
 #     unquoted so it can interpolate THRESHOLD, which means a backtick
 #     here runs as a command and silently empties the words around it.)
 #
+#   outl-actions/src/page.rs  682 -> 689  (issue 473)
+#     The dispatch branch that routes a reopened-by-slug page out of the
+#     trash: open_or_create already computes the deterministic root id
+#     at this point, so checking whether it is trashed and handing off
+#     to the revive helper is seven lines in the one place that already
+#     decides what a slug resolves to. The revival logic itself (and its
+#     tests) is a sibling module, same split as the existing page_merge
+#     and page_repair siblings, so page.rs only pays for the call site.
+#
 # None of these arguments generalises. A further raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
-682 crates/outl-actions/src/page.rs
+689 crates/outl-actions/src/page.rs
 683 crates/outl-actions/src/sync.rs
 679 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
@@ -74,9 +83,9 @@
 640 crates/outl-plugins/src/host_tests.rs
 776 crates/outl-shortcuts/src/defaults.rs
 702 crates/outl-shortcuts/src/support.rs
+868 crates/outl-sync-iroh/src/engine.rs
 763 crates/outl-sync-iroh/src/engine_pairing.rs
 736 crates/outl-sync-iroh/src/engine_sync.rs
-868 crates/outl-sync-iroh/src/engine.rs
 1245 crates/outl-sync-iroh/src/pairing.rs
 1022 crates/outl-sync-iroh/src/peers.rs
 821 crates/outl-sync-iroh/tests/chaos.rs

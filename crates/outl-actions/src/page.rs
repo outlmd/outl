@@ -381,6 +381,13 @@ pub fn open_or_create(
         return Ok(id);
     }
     let node_id = page_id_from_slug(slug);
+    // `find_by_slug` only scans children of `NodeId::root`, so a
+    // deleted-then-reopened page (same slug -> same deterministic id,
+    // sitting under `TRASH_ROOT`) falls through to here instead of
+    // being found. See `page_revive` (issue #473).
+    if crate::tree::is_trashed(workspace, node_id) {
+        return crate::page_revive::revive_trashed_page(workspace, hlc, node_id, slug, title, kind);
+    }
     let position = position_for_new_last_child(workspace, NodeId::root());
     // Create the root with NO text. The title used to be written into the
     // root's Yrs text, but with deterministic ids two devices that create

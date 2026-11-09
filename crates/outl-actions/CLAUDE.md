@@ -349,6 +349,13 @@ Clients call it once on startup; it's idempotent.
 It already writes an ordinary `Op::SetProp`, so pinned state converges through the op log like any other page property — root `CLAUDE.md` invariant 7 is satisfied, not something this function had to add.
 Refuses journal pages (`ActionError::CannotPinJournal`), same rule the TUI's `g P` enforces.
 
+**Reopening a deleted page by its own slug revives it instead of leaving it stuck in the trash.**
+Page ids are deterministic (`page::page_id_from_slug`), so deleting a page and later reopening that same slug resolves to the same root rather than minting a fresh one.
+`find_by_slug` only scans children of `NodeId::root`, so it never sees that root sitting under `TRASH_ROOT`, and `Op::Create` is a no-op for a node already in the tree: routing a reopen through the plain create path left the root trashed forever, with every edit on it rejected as `NotInTree` (issue #473, most visible on the journal, reopened every day).
+`page::open_or_create` now checks `tree::is_trashed` on that deterministic id and, when it is, routes through `page_revive::revive_trashed_page` instead: the root moves back under `NodeId::root` with a fresh `Op::Move`, its pre-delete children are trashed individually (still ordinary, restorable trash entries, just detached from the page), and the slug/kind/title properties are re-applied.
+A reopened journal is treated as a fresh daily: `open_journal`'s template re-stamp runs because `find_by_slug` did not find it before the revive.
+This is deliberately **not** the same operation as `trash::restore`, which still refuses a page (see "Restoring a deleted block" in `docs/clients.md`); that refusal is about putting an arbitrary trashed node back wherever it fits today, not about reopening the one page a slug has always deterministically named.
+
 ## Task state convention
 
 Task state lives **in the block's text** as a prefix:

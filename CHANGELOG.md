@@ -64,6 +64,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Indenting or outdenting the block you were typing in moved it, but the textarea closed and the selection stayed on whatever block had been selected before you started editing.
   The very next keystroke then ran as a Normal-mode command against that stale selection instead of the block you were still looking at.
   The moved block now stays selected and in edit mode on itself, with your caret where you left it, whether the move landed, was a no-op (the first block can't indent further), or failed outright.
+- **A deleted page stayed stuck in the trash after being reopened by its own slug** ([#473](https://github.com/outlmd/outl/issues/473)), most visible on the journal, which is reopened every day.
+  Page ids are deterministic, so deleting a page and reopening the same slug resolved to the same root, but `find_by_slug` only looks at live children of the workspace root, so it never saw that root sitting in the trash, and `open_or_create` fell through to a plain `Create`, which is a no-op for a node already in the tree.
+  The root stayed trashed forever: every edit on it was silently dropped as `NotInTree`, and a page reopened on a schedule re-stamped its template under a subtree nobody could edit, once per open.
+  `open_or_create` now notices a trashed deterministic root and revives it: the root moves back out of the trash, its pre-delete content is trashed individually rather than coming back attached (still recoverable, one entry per block), and the slug/kind/title properties are re-applied.
+  A revived journal is treated as a fresh daily, template stamp included.
 - **Pasting a link into a block showed nothing and then erased it** ([#488](https://github.com/outlmd/outl/issues/488)).
   Copy a link out of an email — the clipboard holds the label with the address behind it — paste it into a block you are editing, and nothing appeared.
   Leave the block and the link was gone from the `.md` too, with nothing on screen to say so.
