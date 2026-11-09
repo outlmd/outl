@@ -45,6 +45,11 @@ pub(crate) struct AppState {
     /// releases the previous workspace's. Never acquire or drop a lock
     /// from this crate; `outl-core` owns the protocol.
     pub workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
+    /// Which workspace the one automatic-backup thread snapshots.
+    /// `open_workspace_at` is the only writer, after a successful open,
+    /// so a switch retargets the existing thread instead of spawning
+    /// another.
+    pub backup_root: outl_actions::backup::BackupRoot,
     /// Per-device HLC generator. Static for the process lifetime —
     /// actors identify devices, not workspaces.
     pub hlc: HlcGenerator,

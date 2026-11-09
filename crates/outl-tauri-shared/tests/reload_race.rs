@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use outl_actions::backup::BackupRoot;
 use outl_actions::{
     append_block, open_or_create_page, render_page_md, HistoryStacks, PageKind, SyncTransport,
 };
@@ -81,7 +82,8 @@ fn host_with_a_page(
 ) -> (TestHost, NodeId) {
     let actor = ActorId::new();
     let hlc = HlcGenerator::new(actor);
-    let mut ws = open_workspace_at(actor, &hlc, root, 0, guards).expect("open workspace");
+    let mut ws = open_workspace_at(actor, &hlc, root, 0, guards, &BackupRoot::new())
+        .expect("open workspace");
     let page =
         open_or_create_page(&mut ws, &hlc, "alpha", "Alpha", PageKind::Page).expect("create page");
     append_block(&mut ws, &hlc, Some(page), Some("already in the log")).expect("seed block");
@@ -195,8 +197,15 @@ fn an_uncontended_reload_still_picks_up_a_peer() {
         let peer_actor = ActorId::new();
         let peer_hlc = HlcGenerator::new(peer_actor);
         let peer_guards = Mutex::new(None);
-        let mut peer =
-            open_workspace_at(peer_actor, &peer_hlc, root, 0, &peer_guards).expect("peer open");
+        let mut peer = open_workspace_at(
+            peer_actor,
+            &peer_hlc,
+            root,
+            0,
+            &peer_guards,
+            &BackupRoot::new(),
+        )
+        .expect("peer open");
         append_block(&mut peer, &peer_hlc, Some(page), Some("written by a peer")).expect("peer op");
     }
 

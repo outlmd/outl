@@ -39,7 +39,12 @@ const labels = (el: Element) =>
 afterEach(() => {
   dispose?.();
   dispose = undefined;
-  setAppState({ settingsOpen: false, remindersOpen: false, marketplaceOpen: false });
+  setAppState({
+    settingsOpen: false,
+    remindersOpen: false,
+    marketplaceOpen: false,
+    trashOpen: false,
+  });
   document.body.innerHTML = "";
 });
 
@@ -52,12 +57,16 @@ describe("ChromeToggleBar", () => {
     const l = labels(right);
     expect(l[0]).toBe("Fold all");
     expect(l[1]).toBe("Unfold all");
-    expect(l[2]).toBe("Reminders");
-    expect(l[3]).toBe("Plugins");
-    expect(l[4]).toMatch(/^Sync/);
-    expect(l[5]).toBe("Focus mode");
-    expect(l[6]).toBe("Settings");
-    expect(l).toHaveLength(7);
+    // Trash is desktop-only, so it sits with the other desktop-only
+    // controls ahead of the tail the phone also has — the order this
+    // test exists to pin is that tail.
+    expect(l[2]).toBe("Trash");
+    expect(l[3]).toBe("Reminders");
+    expect(l[4]).toBe("Plugins");
+    expect(l[5]).toMatch(/^Sync/);
+    expect(l[6]).toBe("Focus mode");
+    expect(l[7]).toBe("Settings");
+    expect(l).toHaveLength(8);
   });
 
   it("flips focus mode on <html> from its capsule button", () => {

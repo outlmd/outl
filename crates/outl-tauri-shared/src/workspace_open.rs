@@ -31,6 +31,7 @@
 
 use std::path::{Path, PathBuf};
 
+use outl_actions::backup::BackupRoot;
 use outl_actions::{migrate_legacy_into_today, open_today};
 use outl_core::device::DeviceStore;
 use outl_core::hlc::HlcGenerator;
@@ -208,6 +209,11 @@ fn acquire_guards(
 /// a second opinion about who holds the workspace is the defect this
 /// replaces.
 ///
+/// `backup_root` is told about the workspace only after the open has
+/// succeeded, for the reason the guards are: a failed open must not point
+/// the automatic backup at a workspace nobody has. It is set last, once
+/// nothing left in this function can fail.
+///
 /// # Errors
 ///
 /// Beyond the usual I/O and boot failures, this refuses to open when
@@ -220,6 +226,7 @@ pub fn open_workspace_at(
     path: &Path,
     lru_cap: usize,
     held: &Mutex<Option<WorkspaceGuards>>,
+    backup_root: &BackupRoot,
 ) -> anyhow::Result<Workspace> {
     std::fs::create_dir_all(path.join("ops"))?;
     std::fs::create_dir_all(path.join("journals"))?;
@@ -256,6 +263,7 @@ pub fn open_workspace_at(
         ),
     }
 
+    backup_root.set(Some(path.to_path_buf()));
     Ok(workspace)
 }
 

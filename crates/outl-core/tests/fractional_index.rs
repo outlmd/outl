@@ -176,8 +176,47 @@ fn gap_is_empty(left: Option<&str>, right: Option<&str>) -> bool {
     }
 }
 
+/// Does **every** key in this gap end in the floor byte?
+///
+/// A key ending in `"a"` has an empty gap above it (nothing sorts
+/// between `"b"` and `"ba"`), so minting one arms the next insert to
+/// land past its neighbour — issue #476. `between` therefore never
+/// returns one *unless the gap offers nothing else*, and this is the
+/// independent statement of when that is.
+///
+/// It happens exactly when `right` is `left` followed by two or more
+/// floor bytes: the keys in `(l, l + "aaa")` are `l + "a"` and
+/// `l + "aa"` and nothing else, because any key continuing past a floor
+/// byte of `right` sorts above it. Every other non-empty gap holds one:
+/// append `"m"` to `left` where the two diverge, or `"am"` / `"b"`
+/// under a tail that is not all floor bytes.
+///
+/// Written out here rather than exported, for the same reason as
+/// [`gap_is_empty`] — one implementation satisfying both sides proves
+/// nothing.
+fn gap_forces_a_floor_tail(left: Option<&str>, right: Option<&str>) -> bool {
+    if gap_is_empty(left, right) {
+        return false;
+    }
+    let Some(r) = right else { return false };
+    let tail = match left {
+        Some(l) => match r.strip_prefix(l) {
+            Some(tail) => tail,
+            None => return false,
+        },
+        None => r,
+    };
+    tail.len() >= 2 && tail.bytes().all(|b| b == b'a')
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    // 512 was below the bar this crate's own invariant battery holds
+    // (≥1000), and this is the suite guarding the mint rule that issue
+    // #476 turned into a correctness property. 8,192 runs in well under
+    // a second; 500,000 took 14.4s, so raising it further is available
+    // to anyone changing `between` without being paid for on every
+    // `cargo test`.
+    #![proptest_config(ProptestConfig::with_cases(8192))]
 
     /// `between` over arbitrary bounds, including the ones it used to
     /// `assert!` on (issue #282). The contract, in one property:
@@ -193,7 +232,7 @@ proptest! {
     fn between_honours_every_bound_that_can_be_honoured(
         left in prop::option::of("[a-z]{1,6}"),
         right in prop::option::of("[a-z]{1,6}"),
-        shape in 0u8..6,
+        shape in 0u8..8,
     ) {
         // Two independent draws essentially never produce the two shapes
         // whose gap is empty — an exact tie, and `left` plus a single
@@ -207,8 +246,15 @@ proptest! {
             // One `a` of tail: still no interior.
             (1, Some(l)) => Some(format!("{l}a")),
             // Two: holds exactly one key, `l + "a"`, and the old
-            // bisection walked straight past it.
+            // bisection walked straight past it. Also the only shape
+            // whose every key ends in the floor byte.
             (2, Some(l)) => Some(format!("{l}aa")),
+            // A floor byte with something above it: the gap holds keys
+            // that do *not* end in the floor, so `between` must reach
+            // one rather than stopping on the short floor-tailed prefix
+            // (issue #476).
+            (3, Some(l)) => Some(format!("{l}am")),
+            (4, Some(l)) => Some(format!("{l}ab")),
             _ => right,
         };
         let l = left.as_deref().map(|s| Fractional::parse(s).unwrap());
@@ -239,6 +285,20 @@ proptest! {
                 "the gap ({left:?}, {right:?}) holds a key, so {got} must be below {r}"
             );
         }
+        // Nothing sorts between a key and that key plus a floor byte, so
+        // a minted key ending in the floor hands the *next* insert an
+        // empty gap — and an empty gap drops the bound, which is how a
+        // block lands past its neighbour (issue #476). The only keys
+        // allowed to end there are the ones whose gap offers nothing
+        // else.
+        prop_assert_eq!(
+            got.as_str().ends_with('a'),
+            gap_forces_a_floor_tail(left.as_deref(), right.as_deref()),
+            "{} ends in the floor byte; the gap ({:?}, {:?}) does not force it",
+            got,
+            left,
+            right
+        );
     }
 
     /// Repeated inserts against a *tied* pair still produce distinct,

@@ -8,6 +8,7 @@ use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
 
 use super::*;
+use crate::refusal::Surface;
 
 /// A workspace with one page root under the tree root.
 ///
@@ -184,7 +185,7 @@ fn list_reports_each_top_level_deletion_with_its_subtree_size() {
     f.delete(section);
     f.delete(loose);
 
-    let entries = list(&f.ws);
+    let entries = list(&f.ws, Surface::Cli);
 
     assert_eq!(entries.len(), 2, "two top-level deletions");
     let section_entry = entries
@@ -200,13 +201,59 @@ fn list_reports_each_top_level_deletion_with_its_subtree_size() {
     assert!(section_entry.page.is_none(), "a block is not a page");
 }
 
+/// The deletion time comes off the same fold the landing parent does,
+/// so an entry that knows where it came from also knows when it left.
+///
+/// Pinned against `parent_at_deletion` rather than against a literal:
+/// the two are the public readings of one walk (`deletion_of`), and a
+/// second fold reintroduced for the timestamp would be invisible in a
+/// value assertion.
+#[test]
+fn a_listed_entry_knows_when_it_was_deleted() {
+    let mut f = Fixture::new();
+    let block = f.block(f.page, "ontem");
+    let before = f.hlc.next().physical_ms;
+    f.delete(block);
+    let after = f.hlc.next().physical_ms;
+
+    let entries = list(&f.ws, Surface::Cli);
+    let entry = entries.iter().find(|e| e.node == block).expect("listed");
+
+    let at = entry
+        .deleted_at_ms
+        .expect("the log holds the move that trashed it");
+    assert!(
+        (before..=after).contains(&at),
+        "the instant has to be the trashing move's own HLC: {at} outside {before}..={after}"
+    );
+    assert_eq!(
+        entry.parent_at_deletion,
+        parent_at_deletion(&f.ws, block).expect("foldable"),
+        "both halves come off one fold, so they cannot disagree"
+    );
+}
+
+/// A node that was never trashed has no instant to report — the same
+/// `None` `parent_at_deletion` answers, from the same walk.
+#[test]
+fn a_live_block_has_no_deletion_time() {
+    let mut f = Fixture::new();
+    let block = f.block(f.page, "vivo");
+
+    assert_eq!(parent_at_deletion(&f.ws, block).expect("foldable"), None);
+    assert!(
+        list(&f.ws, Surface::Cli).iter().all(|e| e.node != block),
+        "a live block is not in the trash listing at all"
+    );
+}
+
 #[test]
 fn list_marks_a_deleted_page_with_its_slug() {
     let mut f = Fixture::new();
     let page = f.page_with_slug("archive");
     f.delete(page);
 
-    let entries = list(&f.ws);
+    let entries = list(&f.ws, Surface::Cli);
 
     let entry = entries.iter().find(|e| e.node == page).expect("listed");
     assert_eq!(
@@ -229,7 +276,7 @@ fn a_listing_carries_the_same_refusal_restore_would_return() {
     let page = f.page_with_slug("archive");
     f.delete(page);
 
-    let entries = list(&f.ws);
+    let entries = list(&f.ws, Surface::Cli);
     assert_eq!(entries.len(), 3);
 
     // Every refusable entry first: a refused restore mutates nothing, so
@@ -237,9 +284,16 @@ fn a_listing_carries_the_same_refusal_restore_would_return() {
     for node in [child, page] {
         let entry = entries.iter().find(|e| e.node == node).expect("listed");
         let refused = restore(&mut f.ws, &f.hlc, node).expect_err("should refuse");
+        // Compared through the same wording function the listing used,
+        // not against a bare `Display`: both halves are one `ActionError`
+        // and the surface decides how it reads, so an `err.to_string()`
+        // here would pin the listing to the surface-blind string and
+        // undo the thing the `Surface` parameter exists for. The
+        // property under test is that the two agree, which is what
+        // `refusal_for` being the single owner of the verdict buys.
         assert_eq!(
             entry.refusal.as_deref(),
-            Some(refused.to_string().as_str()),
+            Some(crate::refusal::trash_refusal_text(Surface::Cli, &refused).as_str()),
             "listing and restore must agree about {node}"
         );
     }
@@ -258,7 +312,7 @@ fn list_leaves_out_a_block_that_was_already_restored() {
     restore(&mut f.ws, &f.hlc, block).expect("restore");
 
     assert!(
-        list(&f.ws).is_empty(),
+        list(&f.ws, Surface::Cli).is_empty(),
         "the trash listing reads the tree, not the history of deletions"
     );
 }
@@ -439,7 +493,16 @@ fn a_block_the_log_cannot_place_is_not_reported_as_untrashed() {
         "the block IS in the trash; saying otherwise contradicts the listing: {refusal}"
     );
     assert!(
-        refusal.to_string().contains("where it was"),
-        "the refusal should say the log cannot place it: {refusal}"
+        matches!(refusal, ActionError::TrashOriginUnknown { .. }),
+        "the fold came back empty, which is what this variant is for: {refusal}"
+    );
+    // The wrapper used to prepend "the op log cannot say where it was"
+    // and parenthesise the reason. The clause stands on its own now, so
+    // this pins the clause rather than the frame around it.
+    assert!(
+        refusal
+            .to_string()
+            .contains("no move in the log put it there"),
+        "the refusal should name which shape this is: {refusal}"
     );
 }

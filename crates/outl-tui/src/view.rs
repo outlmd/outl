@@ -32,6 +32,7 @@ mod sidebar;
 mod sync_panel;
 mod table;
 mod toasts;
+mod trash;
 mod warnings_banner;
 mod wrap;
 
@@ -98,6 +99,7 @@ pub(crate) fn render_app(f: &mut ratatui::Frame<'_>, app: &mut App) {
         Some(Overlay::PluginSettings(ps)) => overlays::render_plugin_settings(f, area, app, ps),
         Some(Overlay::Properties(p)) => properties::render_properties(f, area, app, p),
         Some(Overlay::SyncPanel(s)) => sync_panel::render_sync_panel(f, area, app, s),
+        Some(Overlay::Trash(t)) => trash::render_trash(f, area, app, t),
         None => {}
     }
 

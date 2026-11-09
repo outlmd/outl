@@ -1,18 +1,10 @@
 //! Minting the fractional slot a new node goes into.
 //!
-//! [`Fractional::between`] guarantees a key **above** its lower bound
-//! and one below the upper bound only when the gap holds a key at all.
-//! On an empty gap it drops the upper bound, which is why the functions
-//! here differ in what they can promise:
-//! [`position_after`] never needs the bound it might lose, and
-//! [`position_before`] exists to honour exactly that bound — so it
-//! returns `None` rather than a key that sorts past the anchor the
-//! caller asked to insert above.
-//!
-//! An empty gap is ordinary state, not corruption: a tie between two
-//! siblings is what two offline devices produce, it lives in the op log,
-//! and it replays. This used to be an `assert!(left < right)` inside
-//! `between`, so it killed the process on every boot (issue #282).
+//! [`interior_between`] is the single owner of "does this gap hold a
+//! key at all", and the two public functions here are its node-shaped
+//! faces. What to do when the answer is `None` belongs to
+//! `crate::block::slot`, which is also the only place that reasoning is
+//! written down — see [`position_after`] for the contract and the rest.
 
 use outl_core::fractional::Fractional;
 use outl_core::id::NodeId;
@@ -20,21 +12,71 @@ use outl_core::workspace::Workspace;
 
 use super::children::{children_of, next_sibling, previous_sibling};
 
-/// A fractional position strictly between `node` and the sibling that
-/// follows it. Returns `None` when `node` is not in the tree.
+/// The key [`Fractional::between`] returns, but only when it honoured
+/// the upper bound — `None` when the gap between the two has no
+/// interior.
 ///
-/// Unlike [`position_before`] this never returns `None` for a tie, and
-/// does not need to: when `node` and its next sibling share a position
-/// the gap has no interior, [`Fractional::between`] drops the upper
-/// bound, and the key still sorts after `node` — which is what the
-/// caller asked for. The new block lands after the tied sibling too,
-/// one slot further than intended. `position_before` has no such luck:
-/// the bound the tie makes unsatisfiable is the one it exists to
-/// honour.
+/// **The single owner of that verdict.** `between` drops a bound it
+/// cannot satisfy and says so in its contract, so somebody has to ask;
+/// asking it in two places is how a caller ends up acting on a key that
+/// sorts past the neighbour it was given. Three callers:
+/// [`position_before`], [`position_after`], and `block::slot`, which
+/// also needs it from two loose positions rather than from a node.
+///
+/// Two shapes have no interior, and **both are permanent**: the
+/// neighbours are tied (two offline devices mint one key, #282), or
+/// `right` is `left` plus a single floor byte, below which `[a-z]` has
+/// no room (#476).
+pub(crate) fn interior_between(
+    left: Option<&Fractional>,
+    right: Option<&Fractional>,
+) -> Option<Fractional> {
+    let candidate = Fractional::between(left, right);
+    right
+        .is_none_or(|next| &candidate < next)
+        .then_some(candidate)
+}
+
+/// A fractional position strictly between `node` and the sibling that
+/// follows it.
+///
+/// Returns `None` when no such slot is representable — the mirror of
+/// [`position_before`], and two shapes reach it:
+///
+/// - `node` is not in the tree;
+/// - the gap above `node` has no interior (`interior_between` names the
+///   two shapes).
+///
+/// **The bound check is the whole point of this function**, and it was
+/// missing for as long as a tie looked like the only empty gap.
+/// [`Fractional::between`] drops a bound it cannot satisfy, so on an
+/// empty gap it hands back a key above `node` **and above the next
+/// sibling** — and a caller that places a block there puts it behind
+/// the neighbour it was meant to precede. On a tie that is merely one
+/// slot off; on a floor-tailed neighbour it is a block in the wrong
+/// place, which is what [`crate::block::outdent`], `move_after` and
+/// [`crate::block::create_after`] shipped for months
+/// ([issue #476](https://github.com/outlmd/outl/issues/476)).
+///
+/// **This check is not a migration, and neither is `slot::vacate`.**
+/// Reading them as "for op logs written before the mint rule" is the
+/// one wrong reading, and it is the reading that gets them deleted once
+/// everybody has upgraded. Two reasons they are permanent. First, the
+/// forced floor tail: where `right`'s tail is floor bytes all the way
+/// down, every key in the gap ends in one, so `between` still mints
+/// `(k, k + "a")` pairs — measured at 18,278 of 12.8M sampled gaps, one
+/// per `left`, on an all-new workspace. Second, a peer on an older
+/// binary keeps minting them into the shared log tomorrow, not only
+/// yesterday.
+///
+/// Callers open a slot by repositioning the right neighbour, the way
+/// [`crate::block::create_before`] shifts its anchor — the `block::slot`
+/// module owns that, and owns which of the two empty gaps it can
+/// actually clear.
 pub fn position_after(workspace: &Workspace, node: NodeId) -> Option<Fractional> {
     let left = workspace.tree().position(node)?.clone();
     let right = next_sibling(workspace, node).and_then(|n| workspace.tree().position(n).cloned());
-    Some(Fractional::between(Some(&left), right.as_ref()))
+    interior_between(Some(&left), right.as_ref())
 }
 
 /// A fractional position strictly between `node` and the sibling that
@@ -57,7 +99,7 @@ pub fn position_after(workspace: &Workspace, node: NodeId) -> Option<Fractional>
 /// [`crate::block::create_before`]), exactly how `move_up` swaps rather
 /// than minting a sub-floor key.
 ///
-/// **The `< node_pos` check is the whole point of this function.**
+/// **The bound check is the whole point of this function.**
 /// [`Fractional::between`] guarantees a key above its lower bound and
 /// promises one below the upper bound only when the gap holds a key at
 /// all; on an empty gap it drops the upper bound and returns a key that
@@ -66,12 +108,15 @@ pub fn position_after(workspace: &Workspace, node: NodeId) -> Option<Fractional>
 /// `assert!(left < right)` inside `between` instead, which killed the
 /// process on a tie — on every boot, since the tie lives in the op log
 /// and replays (issue #282).
+///
+/// It asks `interior_between`, same as [`position_after`]: the two
+/// directions had a comparison each, written the same way, and this is
+/// one question.
 pub fn position_before(workspace: &Workspace, node: NodeId) -> Option<Fractional> {
     let node_pos = workspace.tree().position(node)?.clone();
     let prev_pos =
         previous_sibling(workspace, node).and_then(|prev| workspace.tree().position(prev).cloned());
-    let candidate = Fractional::between(prev_pos.as_ref(), Some(&node_pos));
-    (candidate < node_pos).then_some(candidate)
+    interior_between(prev_pos.as_ref(), Some(&node_pos))
 }
 
 /// Fractional position for a new last child appended under `parent`.

@@ -254,6 +254,30 @@ What each paired device is still waiting for, and the concurrent edits Yrs merge
 
 Both lists live in `.outl/state/` and survive a restart.
 
+### Trash (`/trash`, `:trash`)
+
+Every block you have deleted in this workspace, and the way back (issue #287).
+A delete here is a move, never a removal, so this reaches a deletion from any device and any day — unlike `u`, which walks this session only.
+
+| Key | What it does |
+|-----|--------------|
+| `j` / `k` (or `↑` / `↓`) | Move between deletions |
+| `r` | Restore: put the block back under the block it was deleted from |
+| `Enter` | On a deleted **block**: open the page it came from, without restoring it |
+| `Esc` / `q` | Close |
+
+A deleted subtree is one row, and the row says how many blocks come back with it.
+A row that cannot be restored says why in place of offering it: a deleted page (its slug is usually taken by now), or a block whose parent went to the trash after it did.
+`Enter` still works on a refused **block** row — "where did my content go" is answerable even when "bring it back" is not.
+
+On a deleted **page** row `Enter` refuses and says so, because opening a page whose `.md` went with the delete is how you *revive* it: the opener reads the missing file as a new page and reconciles a seed, which lifts the page out of the trash and turns one row into one per child.
+Reviving a page deliberately is a real thing and that is the route the refusal names — close the overlay and open the page by name.
+
+The same sentence can also come back from `r` on a row that looked restorable, because another device can trash the landing parent after the list was read.
+It lands on the overlay's own status line and the list re-reads itself.
+
+It opens from the command registry rather than a chord, which is why `/` lists it with a description.
+
 ### Property editor (`g p`)
 
 Lists the `key:: value` pairs on the selected block, and edits them without your having to remember a single key.
@@ -566,7 +590,7 @@ Some things are explicitly deferred:
 - **`{{query: ...}}`** — inline saved queries; not yet implemented.
 - **Visual mode batch indent / yank / paste** — only delete is wired
   today.
-- **Graph view** — the desktop has it; the TUI may grow one but
+- **Graph view** — no client has one yet; the TUI may grow one but
   not a priority.
 - **P2P sync via iroh** — works today (default transport, single-user
   multi-device over QUIC); the `file` transport (iCloud Drive) is opt-in.

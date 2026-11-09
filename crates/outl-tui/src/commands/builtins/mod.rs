@@ -48,7 +48,7 @@ use refer::{ReferCommand, ReferEmbedCommand};
 use template::TemplateCommand;
 use workspace::{
     HelpCommand, OpenCommand, PluginSettingsCommand, QuitCommand, RefreshCommand, SyncCommand,
-    TodayCommand, WriteCommand,
+    TodayCommand, TrashCommand, WriteCommand,
 };
 
 /// Hook for `super::CommandRegistry::with_builtins`.
@@ -67,6 +67,7 @@ pub(super) fn register_all(reg: &mut CommandRegistry) {
     reg.register(OpenCommand);
     reg.register(PluginSettingsCommand);
     reg.register(SyncCommand);
+    reg.register(TrashCommand);
 
     // exec — side-effecting actions
     reg.register(SearchCommand);

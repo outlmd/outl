@@ -134,6 +134,22 @@ One contract, and it was the alternative:
 
 **Still not covered**: `commit_insert` on an `EditTarget::SourcePage` records nothing and is the last instance of the old reasoning. Neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
 
+### Trash (`/trash`)
+
+`actions/trash/` lists what has been deleted and puts one back; `view/trash.rs` draws it.
+Its own pair rather than arms in `view/overlays.rs` / `actions/overlay.rs`, both at their frozen size baselines.
+
+Six contracts, each of which was the alternative:
+
+- **Opened from the command registry, not a chord.** One `TrashCommand` registration serves `/trash` and `:trash`, the surface `:sync` and `/template` already use, so it shows up in the slash menu with a description. A chord needs an `Action` variant and `outl_shortcuts::support`'s exhaustive `match` is frozen at its baseline; the three per-client verdicts it would force are the mechanism invariant 12 exists for, never the reason to skip it.
+- **Both halves flush first.** The listing reads the workspace **tree** and this client edits an in-memory AST, so without `flush_pending_save()` a block deleted a keystroke ago is missing from the trash the user is looking at — the same trap `open_properties` documents. The restore flushes for the other direction: a pending save renders the AST over the `.md` the re-projection is about to write.
+- **`Enter` on a deleted *page* row refuses.** `open_page_by_slug` reads a missing `.md` as "new page", seeds `title:: <slug>` and reconciles it, and `ensure_page_root_in_tree` then lifts the root out of the trash while the sidecar-less matching orphan-trashes each child on its own — so a key documented as read-only undid the delete and turned one trash row into forty. Reviving a page deliberately belongs to `page::open_or_create` (`page/revive.rs`), reached by opening the page *by name*; the nudge names that route instead of performing it. `enter_on_a_deleted_page_row_never_brings_the_page_back` asserts on the workspace, so a reworded refusal cannot make it pass.
+- **The restore runs the whole `commit_page` pipeline**, not step 5 alone (`RestoreCommit`, the sibling of `CaptureCommit`). The undo snapshot is keyed to the **landing** page's path, not the open view's, because a restore can land on a page the user is not looking at — the cross-page rule `snapshot_page_for_undo` owns. Skipping it meant `u` after a restore applied the landing page's previous snapshot, re-trashing the block and reverting an unrelated edit.
+- **A withheld projection is classified, and only a *cross-page* one is announced here.** `ProjectionRefusal::from_error` splits it, the same classifier `loading.rs` asks: `Retryable` is a `tracing::warn!` and nothing else (toasting it put a permissions error in the same voice as a frozen page), and `AheadOfLog` reaches the user. For the page **on screen** that is the persistent banner below, re-derived by `load_current` — so this path stays quiet. Only a restore into a page the user is *not* looking at gets a toast, because the banner's surface cannot reach it, and every word in it is `refusal::ahead_of_log_notice`'s.
+- **The refusal is the backend's sentence, and it can arrive twice.** The row's own `refusal` is a snapshot of a verdict that reads the live tree, so `r` can be declined on a row that looked restorable. `trash::restore` re-asks `refusal_for` and its answer is the *same* string, which lands on the overlay's status line while the list re-reads itself. Nothing here phrases a refusal.
+
+Recorded as `Capability::Trash` → `Full` on the TUI column; mobile is the one client left without a surface.
+
 ### Properties (`g p`)
 
 `g p` opens the property editor for the selected block (`actions/properties.rs` + `view/properties.rs`, keys routed by `input/overlay.rs::handle_properties_key`).
@@ -397,11 +413,18 @@ reach different verdicts.
 
 Four contracts, each of which was the alternative:
 
-- **The notice is persistent.** `App::md_ahead_of_log` drives a banner
-  above the outline (`view/ahead_of_log_banner.rs`), not a status-line
-  message and not a toast. Nothing clears this condition on its own, so
-  a message that scrolls away is the same silence with a delay
+- **The notice is persistent, for the page on screen.** `App::md_ahead_of_log`
+  drives a banner above the outline (`view/ahead_of_log_banner.rs`), not a
+  status-line message and not a toast. Nothing clears this condition on its
+  own, so a message that scrolls away is the same silence with a delay
   ([#292](https://github.com/outlmd/outl/issues/292)).
+  **Scope matters, because one surface cannot answer for every page.** This
+  banner says "the page you are reading has stopped syncing" and cannot name
+  a different one. A write that freezes a page the user is *not* looking at —
+  only `trash`'s restore does this today — has no banner to appear on, so it
+  toasts instead (`actions/trash/mod.rs`). That is not a second opinion about
+  where the notice belongs; it is the same rule applied where the banner does
+  not reach.
 - **It survives focus mode.** `z f` drops the header, the sidebar, the
   status bar and the parse-warning banner, because those are chrome.
   This is not: wanting a distraction-free outline is not consent to be
@@ -445,7 +468,8 @@ This means concurrent `outl serve` is OK — both go through the same reconcile 
 
 ### Automatic backups
 
-`runtime::run_with_theme_override` calls `outl_actions::backup::spawn_auto_pass(root, cfg.backup.enabled, cfg.backup.interval_minutes)` once at startup — the TUI is the **only** client running the pass today.
+`runtime::run_with_theme_override` sets a `BackupRoot` to the workspace root and calls `outl_actions::backup::spawn_auto_pass(root, cfg.backup.enabled, cfg.backup.interval_minutes)` once at startup.
+The GUI clients run the same pass.
 It is a detached background thread on purpose: a snapshot walks the whole workspace and forks `git`, which on a large graph is seconds, so it must never sit on the event loop, a commit boundary, or the quit path.
 Don't "improve" this by hanging it off the idle tick or `flush_pending_save` — the interval floor is read back out of the git history, so a session that ends before a snapshot simply gets one on the next launch.
 Policy + the "which client snapshots" table live in [`docs/clients.md` → Automatic backups](../../docs/clients.md#automatic-backups).

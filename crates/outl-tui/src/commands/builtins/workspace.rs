@@ -187,3 +187,34 @@ impl SlashCommand for SyncCommand {
         Ok(false)
     }
 }
+
+/// `/trash` — every block deleted out of this workspace, and the way
+/// back (issue #287).
+///
+/// The command registry rather than a chord: one registration serves
+/// both `/trash` (the discoverable slash menu, which lists it with this
+/// description) and `:trash`. A chord would need an `Action` variant,
+/// and `outl_shortcuts::support`'s exhaustive `match` is frozen at its
+/// size baseline — the per-client verdicts it would force are the point
+/// of that catalog, not a cost, so this is a deferral with a file
+/// behind it. `Capability::Trash` records where the trash is reachable.
+pub struct TrashCommand;
+
+impl SlashCommand for TrashCommand {
+    fn name(&self) -> &'static str {
+        "trash"
+    }
+
+    fn description(&self) -> &'static str {
+        "What you have deleted, and putting one back"
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["deleted"]
+    }
+
+    fn execute(&self, app: &mut App, _args: &str) -> Result<bool> {
+        app.open_trash();
+        Ok(false)
+    }
+}

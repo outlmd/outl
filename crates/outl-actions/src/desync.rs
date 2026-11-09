@@ -335,18 +335,35 @@ fn recover_level(
             // under this parent. A peer move may have reordered
             // siblings, making the bound ≤ left — fall back to
             // appending after `left` in that case.
+            //
+            // The node id travels with the position because the gap can
+            // be **empty** even with a bound this walk is honouring:
+            // `left = "b"` with `right = "ba"` passes the filter below
+            // (`"b" < "ba"`), and `Fractional::between` then correctly
+            // drops the bound and hands back a key above *both*, which
+            // would create the recovered block behind the sibling the
+            // `.md` says it precedes — issue #476, in the path a user
+            // reaches only when they are already in trouble. Opening
+            // the slot means moving that neighbour, so
+            // `block::slot::slot_between` owns the decision for all
+            // five places that place a node beside an existing one.
             let right = child_idx[i + 1..]
                 .iter()
                 .find_map(|&ei| {
                     let sid = entries[ei].id;
                     if ws.tree().parent(sid) == Some(parent) {
-                        ws.tree().position(sid).cloned()
+                        ws.tree().position(sid).cloned().map(|pos| (sid, pos))
                     } else {
                         None
                     }
                 })
-                .filter(|r| left.as_ref().is_none_or(|l| l < r));
-            let position = Fractional::between(left.as_ref(), right.as_ref());
+                .filter(|(_, r)| left.as_ref().is_none_or(|l| l < r));
+            let position = crate::block::slot::slot_between(
+                ws,
+                hlc,
+                left.as_ref(),
+                right.as_ref().map(|(id, pos)| (*id, pos)),
+            )?;
             apply_log_op(
                 ws,
                 hlc,

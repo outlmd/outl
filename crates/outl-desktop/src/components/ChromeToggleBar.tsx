@@ -64,6 +64,12 @@ const BellIcon = () => (
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
   </Icon>
 );
+const TrashIcon = () => (
+  <Icon>
+    <path d="M4 7h16M10 11v6M14 11v6" />
+    <path d="M6 7l1 13h10l1-13M9 7V4h6v3" />
+  </Icon>
+);
 const PluginsIcon = () => (
   <Icon>
     <rect x="3" y="3" width="8" height="8" rx="1.5" />
@@ -248,6 +254,28 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
         <For each={toolbar()}>
           {(entry) => <PluginToolbarButton entry={entry} />}
         </For>
+        {/* Desktop-only, and placed with the other desktop-only
+            controls rather than inside the mobile-matching tail
+            (Reminders → Plugins → Sync → Focus → Settings), which this
+            crate's CLAUDE.md asks to keep in the phone's order.
+
+            No chord **yet**, and the reason is a file, not a design:
+            an `Action` variant needs an arm in
+            `outl_shortcuts::support`, which sits at its frozen
+            600-line baseline, so the arm cannot land until that file
+            is split. The three per-client verdicts an `Action` would
+            force are the *mechanism* (invariant 12), never a cost —
+            `TimelinePanel` carries the same gap for the same reason.
+            Until then this button is the whole affordance, and the
+            TUI's `/trash` is its counterpart; `Capability::Trash` is
+            where that pair is recorded. */}
+        <ChromeToggle
+          glyph={<TrashIcon />}
+          active={appState.trashOpen}
+          label="Trash"
+          title="Trash — restore a deleted block"
+          onToggle={() => setAppState("trashOpen", !appState.trashOpen)}
+        />
         <ChromeToggle
           glyph={<BellIcon />}
           active={appState.remindersOpen}
