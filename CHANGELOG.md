@@ -60,6 +60,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **`Tab` / `Shift+Tab` on the desktop kicked you out of edit mode** ([#477](https://github.com/outlmd/outl/issues/477)).
+  Indenting or outdenting the block you were typing in moved it, but the textarea closed and the selection stayed on whatever block had been selected before you started editing.
+  The very next keystroke then ran as a Normal-mode command against that stale selection instead of the block you were still looking at.
+  The moved block now stays selected and in edit mode on itself, with your caret where you left it, whether the move landed, was a no-op (the first block can't indent further), or failed outright.
 - **Pasting a link into a block showed nothing and then erased it** ([#488](https://github.com/outlmd/outl/issues/488)).
   Copy a link out of an email — the clipboard holds the label with the address behind it — paste it into a block you are editing, and nothing appeared.
   Leave the block and the link was gone from the `.md` too, with nothing on screen to say so.
