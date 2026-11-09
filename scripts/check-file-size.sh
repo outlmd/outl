@@ -141,6 +141,15 @@ if [ "${1:-}" = "--update" ]; then
 #     unquoted so it can interpolate THRESHOLD, which means a backtick
 #     here runs as a command and silently empties the words around it.)
 #
+#   outl-actions/src/page.rs  682 -> 689  (issue 473)
+#     The dispatch branch that routes a reopened-by-slug page out of the
+#     trash: open_or_create already computes the deterministic root id
+#     at this point, so checking whether it is trashed and handing off
+#     to the revive helper is seven lines in the one place that already
+#     decides what a slug resolves to. The revival logic itself (and its
+#     tests) is a sibling module, same split as the existing page_merge
+#     and page_repair siblings, so page.rs only pays for the call site.
+#
 # None of these arguments generalises. A further raise makes its own case.
 HEADER
     printf '%s\n' "$scanned" | oversized

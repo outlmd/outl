@@ -80,6 +80,7 @@ pub mod page;
 pub mod page_merge;
 pub mod page_repair_namespaces;
 pub mod page_repair_titles;
+mod page_revive;
 pub mod paste;
 pub mod person;
 pub mod property;

@@ -26,9 +26,10 @@ use super::{ensure_in_tree, wrap};
 /// `position`, reading the undo fields off the tree rather than trusting
 /// a caller's guess at them.
 ///
-/// `pub(super)` for [`super::slot`], which shifts a sibling out of the
-/// way through the same op.
-pub(super) fn move_to(
+/// `pub(crate)` for `super::slot`, which shifts a sibling out of the
+/// way through the same op, and for `crate::page_revive`, which moves a
+/// revived page root under the workspace root sentinel.
+pub(crate) fn move_to(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
     node: NodeId,
