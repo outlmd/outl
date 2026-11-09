@@ -186,8 +186,8 @@ mod tests {
     #[test]
     fn reopening_a_deleted_journal_several_times_stamps_the_template_once() {
         let (mut w, hlc) = ws();
-        let tpl = open_or_create(&mut w, &hlc, "templates-journal", "journal", PageKind::Page)
-            .unwrap();
+        let tpl =
+            open_or_create(&mut w, &hlc, "templates-journal", "journal", PageKind::Page).unwrap();
         set_property(
             &mut w,
             &hlc,
