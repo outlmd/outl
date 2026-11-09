@@ -8,7 +8,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ### Added
 - **The calendar week starts where you say it does** ([#94](https://github.com/outlmd/outl/issues/94)).
   `[calendar] week_start = "monday" | "sunday"` in `~/.config/outl/config.toml` retitles and re-pads the grid on all three surfaces that draw one: the TUI sidebar, the desktop sidebar, and the phone's journal sheet.
-  Monday stays the default — that is what desktop and TUI have always drawn — so an untouched config changes nothing; `"sunday"` gives the phone's iOS-style `Su Mo Tu We Th Fr Sa` to the other two, and the day cells land under the header they belong to.
+  Unset, each surface keeps the day it has always drawn — Monday on desktop and the TUI, Sunday on the phone — so an untouched config changes nothing; setting it makes all three agree.
   A pure display preference: never an Op, never converges between devices, like every other preference in the file.
 - **A task list on the desktop** ([#364](https://github.com/outlmd/outl/issues/364)).
   `g t`, or `Cmd/Ctrl+Shift+L`, opens the workspace's open `TODO` / `DOING` blocks, grouped by page, journal days named the way the journal names them.

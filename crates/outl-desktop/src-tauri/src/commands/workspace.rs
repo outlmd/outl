@@ -137,6 +137,7 @@ pub(crate) fn current_workspace(state: State<'_, AppState>) -> Option<String> {
 /// to relocate a wait that is already short.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+    let week_start = state.calendar_week_start;
     let guard = state.workspace.lock();
     let storage_root = state
         .storage_root
@@ -144,10 +145,6 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // `[calendar]` is global (`~/.config/outl/config.toml`), the file and
-    // section the TUI reads `timezone` from — one owner for the week
-    // layout, so a GUI grid can't disagree with the TUI's (invariant 13).
-    let week_start = outl_config::load().calendar.week_start;
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),

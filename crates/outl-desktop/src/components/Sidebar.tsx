@@ -290,9 +290,9 @@ export function Sidebar(props: {
     const monthIdx = () => month().getMonth();
     const monthLabel = () =>
       month().toLocaleDateString(undefined, { month: "long", year: "numeric" });
-    /** Week layout owner: workspace `[calendar] week_start` (issue #94).
-     *  An older binary sends no field — the historical desktop grid is
-     *  Monday-first, so a missing value keeps that shape. */
+    /** Week layout owner: the global `[calendar] week_start` (issue #94).
+     *  `null`/unset (or an older binary that sends no field) keeps this
+     *  surface's historical Monday-first grid. */
     const weekStart = (): WeekStart => appState.workspace?.week_start ?? "monday";
     /** Header labels rotated to the configured first day. */
     const dayLabels = (): string[] =>

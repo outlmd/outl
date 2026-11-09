@@ -14,11 +14,9 @@ use crate::state::{AppState, WorkspaceSummary};
 /// command's wire shape. Do not convert one of the pair alone.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+    let week_start = state.calendar_week_start;
     let guard = state.workspace.lock();
     let storage_root = state.storage_root.to_string_lossy().into_owned();
-    // Global `[calendar]`, the same file and section the desktop and TUI
-    // read — see the desktop twin's `workspace_stats`.
-    let week_start = outl_config::load().calendar.week_start;
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),

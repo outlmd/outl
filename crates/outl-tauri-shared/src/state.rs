@@ -27,12 +27,13 @@ pub struct WorkspaceSummary {
     /// `true` when a workspace is loaded; `false` while the picker is
     /// still up or the background opener is in flight.
     pub ready: bool,
-    /// Which day the calendar week starts on for this workspace.
+    /// Which day the calendar week starts on, from the global
+    /// `[calendar] week_start` (`~/.config/outl/config.toml`).
     ///
-    /// Desktop and mobile read this from the workspace `config.toml`
-    /// so their mini-calendars lay out the grid consistently with the
-    /// TUI. See issue #94.
-    pub week_start: WeekStart,
+    /// `None` (serialises as `null`) means unset: each client keeps the
+    /// layout it has always drawn — Monday on desktop and the TUI,
+    /// Sunday on mobile. See issue #94.
+    pub week_start: Option<WeekStart>,
     /// Whether [`Self::ops`] is the whole log.
     ///
     /// `ops` is `Workspace::log().len()`, the **resident** log, and a

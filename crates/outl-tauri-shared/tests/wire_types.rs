@@ -172,10 +172,10 @@ fn workspace_summary_matches_its_interface() {
     let dto = WorkspaceSummary {
         blocks: 66_000,
         ops: 120_000,
-        actor: "01JQ000000000000000005".into(),
+        actor: "01JQ0000000000000000000005".into(),
         storage_root: "/w".into(),
         ready: true,
-        week_start: outl_config::WeekStart::Monday,
+        week_start: Some(outl_config::WeekStart::Monday),
         ops_complete: false,
     };
     assert_wire_shape(&dto, "WorkspaceSummary", &[]);

@@ -50,11 +50,11 @@ export function Calendar(props: CalendarProps) {
     initial?.monthIndex ?? new Date().getMonth(),
   );
 
-  // Week layout owner: workspace `[calendar] week_start` (issue #94).
+  // Week layout owner: the global `[calendar] week_start` (issue #94).
   // Read when the sheet opens — the sheet is the only consumer, so a
-  // boot-time fetch would pay the round trip for a screen most
-  // sessions never open. An unresolved read or an older backend keeps
-  // the historical Sunday-first grid.
+  // boot-time fetch would pay the round trip for a screen most sessions
+  // never open. An unresolved read, `null` (unset), or an older backend
+  // keeps the phone's historical Sunday-first grid.
   const [stats] = createResource(() => props.open, (open) =>
     open ? workspaceStats() : null,
   );

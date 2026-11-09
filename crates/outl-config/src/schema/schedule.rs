@@ -8,12 +8,15 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Which day the calendar week starts on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Which day the calendar week starts on, from `[calendar] week_start`.
+///
+/// `None` (the field unset) means "no opinion": each surface keeps the
+/// layout it has always drawn — Monday on desktop and the TUI, Sunday on
+/// the phone — so an untouched config changes nothing anyone sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WeekStart {
     /// Monday-first (`Mo Tu We Th Fr Sa Su`).
-    #[default]
     Monday,
     /// Sunday-first (`Su Mo Tu We Th Fr Sa`).
     Sunday,
@@ -51,9 +54,11 @@ pub struct CalendarCfg {
     /// unparseable name is ignored when the clock initializes (logged)
     /// and also falls back to local.
     pub timezone: Option<String>,
-    /// Which day the calendar week starts on. Defaults to Monday to
-    /// match the historical desktop/TUI behavior.
-    pub week_start: WeekStart,
+    /// Which day the calendar grid starts on. `None` (the default) lets
+    /// each surface keep its historical first day — Monday on desktop
+    /// and the TUI, Sunday on mobile — so no client jumps on an unset
+    /// config. Set it to make every surface agree on one day.
+    pub week_start: Option<WeekStart>,
 }
 
 /// Reminder delivery preferences.

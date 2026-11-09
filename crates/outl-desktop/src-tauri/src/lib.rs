@@ -327,6 +327,10 @@ pub fn run() {
             // opens and renders today's journal (#107). No `[calendar]
             // timezone` → OS local, as before.
             outl_actions::clock::init(global_cfg.calendar.timezone.as_deref());
+            // `[calendar] week_start` cached for `workspace_stats` (issue #94).
+            // `None` keeps the desktop's historical Monday; restart-to-apply,
+            // matching the timezone line above and the TUI.
+            let calendar_week_start = global_cfg.calendar.week_start;
 
             let workspace: Arc<Mutex<Option<Workspace>>> = Arc::new(Mutex::new(None));
             let storage_root: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
@@ -395,6 +399,7 @@ pub fn run() {
                 history: Mutex::new(std::collections::HashMap::new()),
                 backlink_index: Arc::new(Mutex::new(None)),
                 projection_writer,
+                calendar_week_start,
             });
             app.manage(plugins);
             app.manage(PendingDeepLink(parking_lot::Mutex::new(None)));

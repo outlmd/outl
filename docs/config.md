@@ -61,10 +61,11 @@ diagrams = "pele"
 # Chrome OS Crostini report UTC regardless of where you are (issue #107).
 timezone = "Europe/London"
 
+
 # Which day the mini-calendar grid and its weekday header start on.
-# "monday" (default) → `Mo Tu We Th Fr Sa Su`; "sunday" → the iOS-style
-# `Su Mo Tu We Th Fr Sa`. Applies to the TUI sidebar, the desktop
-# sidebar, and the mobile journal calendar (issue #94).
+# Omit (the default) and each surface keeps the day it has always drawn:
+# Monday on the TUI and desktop (`Mo Tu We Th Fr Sa Su`), Sunday on the
+# phone (iOS-style `Su Mo Tu We Th Fr Sa`). Set it to make all three agree.
 week_start = "monday"
 
 [sync]
@@ -132,7 +133,7 @@ enabled = true
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
 | `timezone` | IANA name | _none_ (OS local) | desktop, TUI, mobile, CLI | The zone the journal date and status-line clock resolve in. See [RFC 0107](rfcs/0107-page-identity.md). |
-| `week_start` | `"monday"` \| `"sunday"` | `"monday"` | desktop, TUI, mobile | Which day the mini-calendar grid and its weekday header start on (issue #94). A pure display preference — never an Op, never converges between devices. |
+| `week_start` | `"monday"` \| `"sunday"` | _unset_ (desktop/TUI Monday, mobile Sunday) | desktop, TUI, mobile | Which day the mini-calendar grid and its weekday header start on (issue #94). A pure display preference — never an Op, never converges between devices. |
 
 #### `[theme]`
 

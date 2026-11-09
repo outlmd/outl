@@ -289,6 +289,10 @@ pub fn run() {
             // renders today's journal (#107). No `[calendar] timezone` → OS
             // local, as before.
             outl_actions::clock::init(global_cfg.calendar.timezone.as_deref());
+
+            // `[calendar] week_start` cached for `workspace_stats` (issue #94).
+            // `None` keeps the phone's historical Sunday.
+            let calendar_week_start = global_cfg.calendar.week_start;
             let storage_root = resolve_storage_root(&local_dir, persisted.as_deref());
             std::fs::create_dir_all(&storage_root)?;
             info!("workspace root {}", storage_root.display());
@@ -357,6 +361,7 @@ pub fn run() {
                 history: Mutex::new(std::collections::HashMap::new()),
                 backlink_index: Arc::new(Mutex::new(None)),
                 projection_writer,
+                calendar_week_start,
             });
             app.manage(plugins);
             app.manage(PendingDeepLink(Mutex::new(None)));
