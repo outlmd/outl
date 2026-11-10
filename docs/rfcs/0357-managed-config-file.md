@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted |
+| **Status** | Proposed |
 | **Issue** | [#356](https://github.com/outlmd/outl/issues/356) |
 | **PR** | [#357](https://github.com/outlmd/outl/pull/357) |
 | **Date** | 2026-10-10 |
