@@ -123,65 +123,117 @@
               };
             };
 
-          # Normal derivation: the output path depends on src, so any
-          # frontend change forces a rebuild. A FOD would address the
-          # store by its declared outputHash (not src) and reuse the
-          # stale bundle after a source edit without running Vite.
-          # Nix content-addressing already gives the caching we want:
-          # outl-desktop rebuilds only when the frontend's store path
-          # changes, and that path changes only when frontend inputs
-          # (src, bun, nodejs) change — Rust edits never touch it.
+          # The frontend build is split so CI can keep the strict Nix
+          # sandbox (nix-build.yml):
+          #
+          #   1. `mkDesktopNodeModules` is a fixed-output derivation running
+          #      `bun install` at the workspace root. FODs are the one
+          #      sandbox exception: they get network through it, so the npm
+          #      tarball fetches work with `sandbox = true`. The output is a
+          #      self-contained node_modules tree addressed by its declared
+          #      hash. `--linker=copyfile` writes real files instead of
+          #      hardlinks into bun's global content store, so the tree is
+          #      closed over — nothing downstream dereferences outside $out.
+          #   2. `mkDesktopFrontend` is a normal derivation running `vite
+          #      build` offline against that tree. A normal derivation gets
+          #      no network even with `allowNetworking = true`, which is
+          #      fine: the bundle step only reads vendored files. Being
+          #      non-FOD, its output path depends on src, so a frontend edit
+          #      rebuilds the bundle (a FOD would address the stale bundle
+          #      by its declared hash and skip Vite).
+          #
+          # Changing bun.lock invalidates the deps hash: `nix build
+          # .#outl-desktop-node-modules` then fails and prints the new value
+          # as `got: sha256-...`; put it in frontendNodeModulesHash below.
+          # The hash is per-system because node_modules carries native
+          # binaries (esbuild, tailwind-oxide) built for the build machine.
+          frontendNodeModulesHash = {
+            x86_64-linux = "sha256-hXPno3IaCc/Ep2Y+9IRJzXvF6PmPupnUClrEs8PO8KA=";
+            aarch64-linux = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          };
+
+          mkDesktopNodeModules =
+            {
+              pname,
+              version,
+              src,
+              outputHash,
+            }:
+            pkgs.stdenv.mkDerivation {
+              inherit pname version src;
+
+              nativeBuildInputs = with pkgs; [ bun ];
+
+              # stdenv's automatic patchShebangs would rewrite vendored
+              # scripts' shebangs to the store's bash, embedding store paths
+              # in a fixed-output tree (which must stay path-free). Nothing
+              # here execs those scripts — mkDesktopFrontend runs Vite
+              # through `node` directly — so leave them alone.
+              dontPatchShebangs = true;
+
+              buildPhase = ''
+                runHook preBuild
+                export HOME=$TMPDIR
+                # bun 1.4's default linker is `isolated`: $out would be a
+                # `.bun` content store with no resolvable tree for Node.
+                # `--linker=hoisted` writes real directories (hardlinks out
+                # of the store), so `mv` yields a closed node_modules whose
+                # packages Node resolves by walking up — which is exactly
+                # what Vite finds from crates/outl-desktop and what the
+                # `node .../vite/bin/vite.js` invocation below loads.
+                bun install --frozen-lockfile --linker=hoisted
+                # Workspace entries (the clients, plugin-sdk, examples) are
+                # relative links into the source tree; `mv` below orphans
+                # them. Replace each with a real copy so the tree is closed
+                # and fixupPhase's symlink audit passes.
+                for l in node_modules/outl* node_modules/@outl/*; do
+                  if [ -L "$l" ]; then
+                    t="$(readlink -f "$l")"
+                    rm "$l"
+                    cp -rL "$t" "$l"
+                  fi
+                done
+                mv node_modules $out
+                runHook postBuild
+              '';
+
+              outputHashMode = "recursive";
+              outputHashAlgo = "sha256";
+              inherit outputHash;
+            };
+
           mkDesktopFrontend =
             {
               pname,
               version,
               src,
+              deps,
             }:
             pkgs.stdenv.mkDerivation {
               inherit pname version src;
-              # `bun install` fetches npm tarballs at build time, so the
-              # derivation needs outbound network. The nix-build workflow
-              # sets `sandbox = false` for the job because the strict/relaxed
-              # Nix sandbox has no /etc/resolv.conf and DNS fails even with
-              # this flag; a global sandbox mode also overrides any
-              # per-derivation sandbox setting.
-              allowNetworking = true;
 
-              nativeBuildInputs = with pkgs; [
-                bun
-                nodejs
-              ];
+              nativeBuildInputs = with pkgs; [ nodejs ];
 
               buildPhase = ''
-                export HOME=$TMPDIR
+                runHook preBuild
+                # Vendored deps at the workspace root, beside the unpacked
+                # source: Node walks up from crates/outl-desktop to find
+                # them, which is how vite.config.ts's plugin imports resolve.
+                # Writable copy: Vite's dep optimizer caches in node_modules.
+                cp -r ${deps} node_modules
+                chmod -R u+w node_modules
                 cd crates/outl-desktop
-                bun install --frozen-lockfile
-                # `bun run build` execs node_modules/.bin/vite, whose shebang is
-                # `#!/usr/bin/env node` and the Nix sandbox has no /usr/bin/env,
-                # so it dies with "bad interpreter". bun materialises .bin entries
-                # as symlinks whose targets may live in its global cache OUTSIDE
-                # node_modules (what the GitHub runners hit; a warm local cache
-                # links inside the tree, which is why the same derivation builds
-                # locally yet fails in CI). patchShebangs skips symlinks and, when
-                # the target is out of tree, never reaches it. Resolve each .bin
-                # symlink to its real file and patch THAT in place -- its path is
-                # preserved, so the script's own relative imports (vite resolves
-                # ../dist via the symlink's realpath) still work. installPhase only
-                # copies dist/, so the output hash is unaffected.
-                for f in node_modules/.bin/*; do
-                  if [ -L "$f" ]; then
-                    t="$(readlink -f "$f")"
-                    [ -w "$t" ] || chmod u+w "$t"
-                    patchShebangs "$t"
-                  fi
-                done
-                patchShebangs --build node_modules
-                bun run build
+                # `node` provides the interpreter; the .bin shims are not
+                # exec'd, so the sandbox's missing /usr/bin/env is moot.
+                node ../../node_modules/vite/bin/vite.js build
+                runHook postBuild
               '';
 
               installPhase = ''
+                runHook preInstall
                 mkdir -p $out
                 cp -r dist/* $out/
+                runHook postInstall
               '';
             };
 
@@ -294,10 +346,18 @@
             rust = rustToolchain;
           };
 
+          desktopNodeModules = mkDesktopNodeModules {
+            pname = "outl-desktop-node-modules";
+            inherit version;
+            src = projectSrc;
+            outputHash = frontendNodeModulesHash.${system};
+          };
+
           desktopFrontend = mkDesktopFrontend {
             pname = "outl-desktop-frontend";
             inherit version;
             src = projectSrc;
+            deps = desktopNodeModules;
           };
 
           outlDesktop = mkOutlDesktop {
@@ -347,6 +407,7 @@
             inherit outl;
             outl-desktop = outlDesktop;
             outl-desktop-frontend = desktopFrontend;
+            outl-desktop-node-modules = desktopNodeModules;
             default = outl;
           };
 
