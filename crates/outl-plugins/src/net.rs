@@ -93,6 +93,7 @@ pub(crate) fn fetch(grant: &NetGrant, url: &str, opts_json: &str) -> String {
     let opts: Value = serde_json::from_str(opts_json).unwrap_or(Value::Null);
     let req = PluginRequest::from_opts(&opts);
     let timeout_ms = clamp_timeout_ms(opts.get("timeoutMs").and_then(Value::as_u64));
+    let as_base64 = opts.get("encoding").and_then(Value::as_str) == Some("base64");
 
     // No client-level timeout: with the chain driven here that would be a
     // *per-hop* budget, so ten hops could hold the thread for ten times what
@@ -110,7 +111,7 @@ pub(crate) fn fetch(grant: &NetGrant, url: &str, opts_json: &str) -> String {
         Ok(resp) => {
             let status = resp.status().as_u16();
             let ok = resp.status().is_success();
-            match read_body_capped(resp) {
+            match read_body_capped(resp, as_base64) {
                 Ok(body) => {
                     serde_json::json!({ "ok": ok, "status": status, "body": body }).to_string()
                 }
@@ -307,7 +308,7 @@ fn error_json(msg: &str) -> String {
 /// a declared oversize before a byte is read, and the capped reader is what
 /// bounds a chunked or close-delimited body, whose size is not declared at all.
 /// The second one is the one that actually prevents the OOM.
-fn read_body_capped(resp: reqwest::blocking::Response) -> Result<String, String> {
+fn read_body_capped(resp: reqwest::blocking::Response, as_base64: bool) -> Result<String, String> {
     if let Some(len) = resp.content_length() {
         if len > MAX_RESPONSE_BYTES {
             return Err(format!(
@@ -324,6 +325,16 @@ fn read_body_capped(resp: reqwest::blocking::Response) -> Result<String, String>
     if buf.len() as u64 > MAX_RESPONSE_BYTES {
         return Err(format!(
             "response body exceeds the {MAX_RESPONSE_BYTES}-byte cap"
+        ));
+    }
+    if as_base64 {
+        // The cap above is measured on the raw bytes, before this grows them
+        // by a third. So `encoding` cannot be used to pull a bigger *body*
+        // through the gate — though the string that holds it is 4N/3 long,
+        // which is a cost of asking for bytes at all, not a way around the cap.
+        return Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &buf,
         ));
     }
     Ok(String::from_utf8_lossy(&buf).into_owned())

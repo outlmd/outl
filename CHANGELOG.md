@@ -7,6 +7,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **An Excalidraw plugin**: a ` ```excalidraw ` fence renders the drawing inline, as SVG, hand-drawn strokes and all.
+  Three ways to point it at a scene: paste the **share link** from excalidraw.com and it works with no account at all, use an [Excalidraw+](https://plus.excalidraw.com) scene id with a token from the OS keychain, or paste a `.excalidraw` file, which needs no network.
+  A share link is end-to-end encrypted with the key in its URL fragment, so the plugin does what the web app does with WebCrypto and pako — AES-128 and DEFLATE, in plain JS, since the plugin runtime has neither.
+  That happens in the sync command rather than while rendering, so it costs about ¾ of a second once per change instead of on every repaint, and a scene over 32 KB compressed is declined with a way around it rather than freezing the app.
+  `excalidraw-scenes` writes your workspace's scenes into a page as ready-made fences; `excalidraw-sync` (also the ✏️ toolbar button) pulls them.
+  The renderer covers rectangles, diamonds and ellipses with their fills, lines, arrows and every arrowhead, freehand strokes, text, images and frames, in light and dark.
+  What it leaves out — elements past its cap, embeds, images over the cache budget — is named in the caption under the drawing, because a render that silently drops part of a scene looks exactly like a complete one.
+  `rich` descriptors are GUI-only, so the fence draws on desktop and mobile and stays as written text on the TUI.
+  A scene is data from someone else, so the renderer treats it that way: a `dataURL` has to be an inline `data:image/` (a remote one would make the webview fetch it on every repaint, a request the plugin's `network:` allowlist never sees), the page declares its own CSP since the desktop ships none, a payload is refused past 32 KB compressed **and** 256 KB decompressed (DEFLATE reaches 1029:1, so the first ceiling does not imply the second), and a field holding the wrong type draws a placeholder instead of taking the fence down with it.
+  It is also the largest example in `examples/`, kept as the template for a real integration: [docs](docs/plugin-examples/excalidraw.md), [README](examples/excalidraw/README.md).
 - **A task list on the desktop** ([#364](https://github.com/outlmd/outl/issues/364)).
   `g t`, or `Cmd/Ctrl+Shift+L`, opens the workspace's open `TODO` / `DOING` blocks, grouped by page, journal days named the way the journal names them.
   It lists the first 200 and shows the uncapped count beside them, so a workspace past the cap reads `200 of 1431 open` instead of looking complete.
@@ -58,8 +68,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   A page property `alias:: Big Apple, NYC` now lists extra names, comma-separated. Every resolution surface matches them beside the title: `[[NYC]]` opens the New York page, `#nyc` and `@NYC` land there too, its backlinks collect all three spellings, and autocomplete finds it from any of them. The aliases ride the title's paths — one case-insensitive comparison in the resolver ladder, one `title → slug` map in the workspace index — so no client changes anything to benefit (RFC 0107).
   `outl doctor` reports alias names claimed by more than one page, so the shared spelling is visible instead of silently resolving to whichever match comes first.
 
+- **`ctx.net.fetch` can read a binary response**, through `encoding: "base64"`.
+  A body crosses into JS inside a JSON string, so bytes that are not valid UTF-8 could not survive the text read: it replaced each one with U+FFFD, irreversibly, which silently corrupted a cipher text, an image or a compressed stream rather than failing.
+  There was no way for a plugin to read one at all.
+  The response-size cap is still measured on the raw bytes, before encoding, so asking for base64 does not let a larger body through.
+  It does cost a third more memory to hold, since the base64 of N bytes is 4N/3 characters — the cap is on what the server may send, not on the representation.
+
 ### Fixed
 
+- **`ctx.storage` was unreachable from a plugin's `activate`, its content transformers and its sync transport**, with or without the `storage:local` permission.
+  A turn needs two things wired before the engine runs — the plugin's local KV and its keychain access — and four of the six entry points wired only the keychain: `load_plugin` (whose `engine.load` also runs `activate(ctx)`), `transform_block`, `sync_push` and `sync_pull`.
+  `ctx.storage.get` throws when it was never set up, using the same message it uses for a missing permission, so a transformer reading a cache its own command had written failed with "needs the `storage:local` permission" while holding exactly that permission.
+  An uncaught throw costs the whole descriptor, so the block then rendered as nothing and said nothing about why.
+  In `activate` it is worse: the throw fails the load outright, so a plugin that reads its own state on startup never registers at all.
+  A sync transport storing a cursor hit the same wall.
+  All six entry points now go through one `prepare_turn` / `finish_turn` pair, so a new one cannot half-arrive.
+  `finish_turn` also runs **before** the `?` on every fallible path: setting up the next turn overwrites the engine's KV from disk and clears its dirty flag, so a write made before a throw was *discarded*, not merely unsaved.
 - **`Tab` / `Shift+Tab` on the desktop kicked you out of edit mode** ([#477](https://github.com/outlmd/outl/issues/477)).
   Indenting or outdenting the block you were typing in moved it, but the textarea closed and the selection stayed on whatever block had been selected before you started editing.
   The very next keystroke then ran as a Normal-mode command against that stale selection instead of the block you were still looking at.
