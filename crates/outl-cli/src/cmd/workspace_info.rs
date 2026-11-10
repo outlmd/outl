@@ -104,6 +104,21 @@ fn format_bytes(n: u64) -> String {
     format!("{value:.1} {}", UNITS[exp])
 }
 
+/// Group a count into thousands (`228943` → `228,944`), matching the
+/// `docs/cli.md` example a user copies these numbers out of.
+fn fmt_count(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
 /// Pure handler for the MCP shim.
 pub fn info(ctx: &WsCtx) -> Result<Value, outl_core::workspace::WorkspaceError> {
     let pages = list_pages(&ctx.workspace);
@@ -181,27 +196,34 @@ fn print_info(v: &Value) {
         .get("ephemeral_actor")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    println!("root:     {root}");
+    println!("root:      {root}");
     if ephemeral {
-        println!("actor:    {actor} (ephemeral — another outl owns the config actor)");
+        println!("actor:     {actor} (ephemeral — another outl owns the config actor)");
     } else {
-        println!("actor:    {actor}");
+        println!("actor:     {actor}");
     }
-    println!("pages:    {pages}");
-    println!("journals: {journals}");
-    println!("blocks:   {blocks} ({tree_nodes} total nodes)");
-    println!("props:    {properties}");
-    println!("tags:     {tags}");
-    println!("backlinks: {backlinks}");
-    println!("assets:   {assets}");
-    println!("trashed:  {trashed}");
-    println!("snapshots: {snapshot_count} ({snapshot_size})");
+    println!("pages:     {}", fmt_count(pages));
+    println!("journals:  {}", fmt_count(journals));
+    println!(
+        "blocks:    {} ({} total nodes)",
+        fmt_count(blocks),
+        fmt_count(tree_nodes)
+    );
+    println!("props:     {}", fmt_count(properties));
+    println!("tags:      {}", fmt_count(tags));
+    println!("backlinks: {}", fmt_count(backlinks));
+    println!("assets:    {}", fmt_count(assets));
+    println!("trashed:   {}", fmt_count(trashed));
+    println!("snapshots: {} ({snapshot_size})", fmt_count(snapshot_count));
     if let Some(last_modified) = last_modified {
-        println!("modified: {last_modified}");
+        println!("modified:  {last_modified}");
     }
-    print!("ops:      {ops} total");
+    print!("ops:       {} total", fmt_count(ops));
     if ops_since_snapshot != ops {
-        println!(", {ops_since_snapshot} since the last snapshot");
+        println!(
+            ", {} since the last snapshot",
+            fmt_count(ops_since_snapshot)
+        );
     } else {
         println!();
     }

@@ -7,19 +7,24 @@ use crate::state::{AppState, WorkspaceSummary};
 
 /// Block / op counts and readiness for the frontend's boot gate.
 ///
-/// **Deliberately synchronous**, for the reasons spelled out on the
-/// desktop twin (`outl-desktop/src-tauri/src/commands/workspace.rs`):
-/// the body is O(1), and Tauri makes an async command with a
-/// `State<'_, _>` input return a `Result`, which would change this
-/// command's wire shape. Do not convert one of the pair alone.
+/// **Deliberately synchronous and infallible**, for the reasons spelled
+/// out on the desktop twin (`outl-desktop/src-tauri/src/commands/
+/// workspace.rs`): the body is O(1) (`total_ops()` answers from the
+/// offset index, falling back to `log().len()` on the rare index
+/// failure), and Tauri makes an async command with a `State<'_, _>`
+/// input return a `Result`, which would change this command's wire
+/// shape. Do not convert one of the pair alone.
 #[tauri::command]
-pub(crate) fn workspace_stats(state: State<'_, AppState>) -> Result<WorkspaceSummary, String> {
+pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     let guard = state.workspace.lock();
     let storage_root = state.storage_root.to_string_lossy().into_owned();
-    let summary = match guard.as_ref() {
+    match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
-            ops: ws.total_ops().map_err(|e| e.to_string())?,
+            ops: ws.total_ops().unwrap_or_else(|e| {
+                tracing::warn!("total_ops failed ({e}); reporting the resident log");
+                ws.log().len()
+            }),
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
@@ -31,8 +36,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> Result<WorkspaceSum
             storage_root,
             ready: false,
         },
-    };
-    Ok(summary)
+    }
 }
 
 /// Reload the workspace from disk after a peer change (the sync poll and
