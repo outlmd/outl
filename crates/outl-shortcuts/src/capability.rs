@@ -98,6 +98,19 @@ pub enum Capability {
     /// gets edited on all three. A capability every client lacks
     /// equally would be a row that says nothing.
     TableRendering,
+    /// Taking a local, versioned snapshot of the workspace on a timer,
+    /// without the user asking.
+    ///
+    /// `[backup] enabled` defaults to **on**, so a client without this
+    /// is a client whose user believes they have a safety net and does
+    /// not. That is the whole reason it is a row: the setting says yes
+    /// everywhere, and only some clients can keep the promise.
+    ///
+    /// Not about *restoring* one — `outl backup restore` is a terminal
+    /// command on every platform that has a terminal, and no GUI client
+    /// has a restore surface. This row is only whether snapshots happen
+    /// on this device while the app runs.
+    AutomaticBackups,
     /// Reading the trash back: listing what has been deleted and
     /// putting a block back where it was deleted from (issue #287).
     ///
@@ -205,6 +218,7 @@ impl Capability {
         Capability::OpenExternalFile,
         Capability::TableRendering,
         Capability::Trash,
+        Capability::AutomaticBackups,
         Capability::QuickCapture,
         Capability::CaptureOutsideTheApp,
         Capability::TaskList,
@@ -222,7 +236,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_18: usize = 18;
+    const EXPECTED_19: usize = 19;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -238,6 +252,7 @@ mod tests {
             Capability::OpenExternalFile => "OpenExternalFile",
             Capability::TableRendering => "TableRendering",
             Capability::Trash => "Trash",
+            Capability::AutomaticBackups => "AutomaticBackups",
             Capability::QuickCapture => "QuickCapture",
             Capability::CaptureOutsideTheApp => "CaptureOutsideTheApp",
             Capability::TaskList => "TaskList",
@@ -260,9 +275,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_18,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_18} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_18)",
+            EXPECTED_19,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_19} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_19)",
             names.len(),
         );
     }

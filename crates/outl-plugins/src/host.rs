@@ -50,6 +50,19 @@ use self::project::{build_read_model, project_op};
 pub use self::contributions::{CommandEntry, PluginBinding, ToolbarButtonEntry, TransformerEntry};
 
 /// One loaded, activated plugin.
+/// What an engine needs wired before it runs a turn of plugin JS.
+///
+/// Carried as one value so the two halves cannot be wired separately — four
+/// of six entry points once wired only the keychain, and `ctx.storage` throws
+/// when it was never set up. See [`PluginHost::prepare_turn`].
+struct TurnInputs {
+    storage_enabled: bool,
+    kv: serde_json::Map<String, Value>,
+    secrets_enabled: bool,
+    service: String,
+    store: Option<Rc<dyn SecretStore>>,
+}
+
 struct LoadedPlugin {
     manifest: PluginManifest,
     caps: CapabilityMatch,
@@ -116,17 +129,63 @@ impl PluginHost {
         self.secret_store = store;
     }
 
-    /// Configure `ctx.secrets` for the plugin at `idx` this turn: grant the
-    /// keychain store only when the plugin holds the `secrets` permission, and
-    /// namespace it to this plugin's service so it can never read another's.
-    fn prepare_secrets(&mut self, idx: usize) {
-        let p = &self.plugins[idx];
-        let enabled = p.perms.check(&Permission::Secrets);
-        let service = plugin_service(&p.manifest.id);
-        let store = enabled.then(|| Rc::clone(&self.secret_store));
-        self.plugins[idx]
-            .engine
-            .set_secrets(enabled, service, store);
+    /// Everything an engine needs wired before it runs plugin JS.
+    ///
+    /// A struct rather than two calls because the two halves must travel
+    /// together: see [`PluginHost::prepare_turn`].
+    fn turn_inputs(&self, id: &str, perms: &PermissionSet) -> TurnInputs {
+        let storage_enabled = perms.check(&Permission::StorageLocal);
+        let kv = if storage_enabled {
+            self.storage_path(id)
+                .and_then(|path| std::fs::read(path).ok())
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default()
+        } else {
+            serde_json::Map::new()
+        };
+
+        let secrets_enabled = perms.check(&Permission::Secrets);
+        TurnInputs {
+            storage_enabled,
+            kv,
+            secrets_enabled,
+            service: plugin_service(id),
+            store: secrets_enabled.then(|| Rc::clone(&self.secret_store)),
+        }
+    }
+
+    /// Apply them. An associated function, so it can run against an engine
+    /// that is not in `self.plugins` yet — which is the case during load.
+    fn apply_inputs(engine: &mut Box<dyn PluginEngine>, inputs: TurnInputs) {
+        engine.set_storage(inputs.storage_enabled, inputs.kv);
+        engine.set_secrets(inputs.secrets_enabled, inputs.service, inputs.store);
+    }
+
+    /// Hand the engine everything a turn needs before it runs plugin JS: the
+    /// plugin's local KV and its keychain access, each gated by its own
+    /// permission.
+    ///
+    /// **Every entry point that runs JS goes through this or `apply_inputs`**,
+    /// and that is the point. The two halves used to be wired at each call
+    /// site, so each new entry point had to remember both — and four of the
+    /// six remembered only secrets. `ctx.storage.get` *throws* when it was
+    /// never set up, with the same message it uses for a missing permission,
+    /// so a plugin touching its own cache failed with "needs the
+    /// `storage:local` permission" while holding that permission. One door,
+    /// so the next entry point cannot half-arrive.
+    ///
+    /// Pair it with [`PluginHost::finish_turn`] on the way out.
+    fn prepare_turn(&mut self, idx: usize) {
+        let id = self.plugins[idx].manifest.id.clone();
+        let perms = self.plugins[idx].perms.clone();
+        let inputs = self.turn_inputs(&id, &perms);
+        Self::apply_inputs(&mut self.plugins[idx].engine, inputs);
+    }
+
+    /// Persist whatever the turn changed. The counterpart to
+    /// [`PluginHost::prepare_turn`]; a no-op when the plugin wrote nothing.
+    fn finish_turn(&mut self, idx: usize) {
+        self.flush_storage(idx);
     }
 
     /// Tell the host where to persist per-plugin `ctx.storage` KVs (the
@@ -134,22 +193,6 @@ impl PluginHost {
     /// survives restarts.
     pub fn set_storage_dir(&mut self, dir: std::path::PathBuf) {
         self.storage_dir = Some(dir);
-    }
-
-    /// Load a plugin's local KV from disk and hand it to its engine for this
-    /// turn (no-op / disabled when `storage:local` isn't granted).
-    fn prepare_storage(&mut self, idx: usize) {
-        let p = &self.plugins[idx];
-        let enabled = p.perms.check(&crate::permission::Permission::StorageLocal);
-        let kv = if enabled {
-            self.storage_path(&p.manifest.id)
-                .and_then(|path| std::fs::read(path).ok())
-                .and_then(|b| serde_json::from_slice(&b).ok())
-                .unwrap_or_default()
-        } else {
-            serde_json::Map::new()
-        };
-        self.plugins[idx].engine.set_storage(enabled, kv);
     }
 
     /// Persist a plugin's KV if it changed this turn.
@@ -201,6 +244,14 @@ impl PluginHost {
             plugin_id: manifest.id.clone(),
             domains: net_domains,
         });
+        // `engine.load` evaluates the bundle *and* calls `activate(ctx)`, so
+        // this is the sixth entry point that runs the author's JS — and the
+        // harshest one to get wrong: a throw here fails the load outright, so
+        // a plugin that reads its cache in `activate` would never register at
+        // all, blaming a permission it holds.
+        let inputs = self.turn_inputs(&manifest.id, &approved);
+        Self::apply_inputs(&mut engine, inputs);
+
         engine
             .load(bundle)
             .map_err(|e| PluginError::Engine(e.to_string()))?;
@@ -211,6 +262,8 @@ impl PluginHost {
             config,
             engine,
         });
+        // `activate` may have written to storage; it is the last plugin now.
+        self.finish_turn(self.plugins.len() - 1);
         Ok(())
     }
 
@@ -238,12 +291,14 @@ impl PluginHost {
             .iter()
             .position(|p| p.manifest.id == plugin_id)
             .ok_or_else(|| PluginError::Manifest(format!("no such plugin `{plugin_id}`")))?;
-        self.prepare_secrets(idx);
+        self.prepare_turn(idx);
         let config = self.plugins[idx].config.clone();
-        let json = self.plugins[idx]
-            .engine
-            .transform(lang, input, &config)
-            .map_err(|e| PluginError::Engine(e.to_string()))?;
+        let produced = self.plugins[idx].engine.transform(lang, input, &config);
+        // Before the `?`: the next `prepare_turn` overwrites the engine's KV
+        // from disk and clears the dirty flag, so a write the plugin made
+        // before it threw would not merely go unsaved — it would be discarded.
+        self.finish_turn(idx);
+        let json = produced.map_err(|e| PluginError::Engine(e.to_string()))?;
         match json {
             None => Ok(None),
             Some(s) => Ok(Some(serde_json::from_str::<TransformResult>(&s)?)),
@@ -271,8 +326,7 @@ impl PluginHost {
             .ok_or_else(|| PluginError::Manifest(format!("no such plugin `{plugin_id}`")))?;
 
         let read_model = build_read_model(workspace);
-        self.prepare_storage(idx);
-        self.prepare_secrets(idx);
+        self.prepare_turn(idx);
         let (config, turn) = {
             let p = &mut self.plugins[idx];
             let config = p.config.clone();
@@ -283,7 +337,7 @@ impl PluginHost {
             (config, turn)
         };
         let _ = config;
-        self.flush_storage(idx);
+        self.finish_turn(idx);
 
         let perms = self.plugins[idx].perms.clone();
         let has_ui = self.plugins[idx].has(Capability::UiRender);
@@ -334,8 +388,7 @@ impl PluginHost {
 
         for view in &views {
             for &i in &plugin_ids {
-                self.prepare_storage(i);
-                self.prepare_secrets(i);
+                self.prepare_turn(i);
                 let (perms, plugin_id, has_ui, turn) = {
                     let p = &mut self.plugins[i];
                     let config = p.config.clone();
@@ -352,7 +405,7 @@ impl PluginHost {
                         }
                     }
                 };
-                self.flush_storage(i);
+                self.finish_turn(i);
                 run.logs.extend(turn.logs);
                 run.notifications.extend(turn.notifications);
                 if has_ui {

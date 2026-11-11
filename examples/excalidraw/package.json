@@ -1,0 +1,22 @@
+{
+  "name": "outl-excalidraw",
+  "version": "1.0.0",
+  "description": "Example outl plugin: render Excalidraw scenes inline from a ```excalidraw fence.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=iife --platform=neutral --target=es2022 --outfile=index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@outl/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "@types/node": "catalog:",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

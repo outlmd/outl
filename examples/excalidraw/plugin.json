@@ -1,0 +1,60 @@
+{
+  "$schema": "https://outl.app/schemas/plugin-v1.json",
+  "id": "app.outl.examples.excalidraw",
+  "name": "Excalidraw",
+  "version": "1.0.0",
+  "api": "^1.0",
+  "engines": {
+    "outl": ">=0.7.0"
+  },
+  "main": "index.js",
+  "description": "Renders an Excalidraw scene inline from a ```excalidraw fence: an excalidraw.com share link, an Excalidraw+ scene id, or a pasted .excalidraw file.",
+  "author": "Avelino <avelinorun@gmail.com>",
+  "license": "MIT",
+  "repository": "https://github.com/outlmd/outl/tree/main/examples/excalidraw",
+  "category": "productivity",
+  "capabilities": [
+    "content-transformer:rich",
+    "slash-command",
+    "toolbar-button",
+    "config-schema"
+  ],
+  "permissions": [
+    "read-page",
+    "write-page",
+    "storage:local",
+    "secrets",
+    "network:api.excalidraw.com",
+    "network:json.excalidraw.com"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "excalidraw-sync",
+        "title": "Excalidraw: sync scenes"
+      },
+      {
+        "id": "excalidraw-scenes",
+        "title": "Excalidraw: list scenes into a page"
+      },
+      {
+        "id": "excalidraw-cache-clear",
+        "title": "Excalidraw: clear scene cache"
+      }
+    ],
+    "toolbar": [
+      {
+        "command": "excalidraw-sync",
+        "icon": "✏️",
+        "title": "Sync Excalidraw scenes"
+      }
+    ],
+    "transformers": [
+      {
+        "lang": "excalidraw",
+        "kind": "rich"
+      }
+    ],
+    "configSchema": "config.schema.json"
+  }
+}

@@ -130,6 +130,9 @@ pub fn build_page_view(
         md_ahead_of_log: None,
         md_ahead_of_log_checked: false,
         projection_error: None,
+        // Set by the one command that can discover it, `edit_block`, via
+        // `PageView::with_dropped_edit`.
+        dropped_edit: None,
     })
 }
 
@@ -163,6 +166,7 @@ pub fn build_page_view_from_tree(
         md_ahead_of_log: None,
         md_ahead_of_log_checked: false,
         projection_error: None,
+        dropped_edit: None,
     })
 }
 

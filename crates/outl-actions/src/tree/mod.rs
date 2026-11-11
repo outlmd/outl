@@ -11,7 +11,8 @@
 //!   convergence-critical, not tidiness) and the two ways to ask for a
 //!   parent's children: one lookup, or an index for a whole walk.
 //! - `position` — minting a [`outl_core::fractional::Fractional`] slot
-//!   for a new node, including the shapes where no slot exists.
+//!   for a new node, and the single owner of "does this gap hold a key
+//!   at all" (`interior_between`), which `block::slot` asks too.
 //! - `traverse` — walking down into a subtree and up to the page.
 //!
 //! Re-exported here so every `crate::tree::*` path keeps resolving.
@@ -25,6 +26,7 @@ pub(crate) use children::{
     children_index, children_index_unordered, previous_sibling, sort_siblings, subtree_ids,
 };
 pub use children::{children_of, next_sibling, ChildrenIndex};
+pub(crate) use position::interior_between;
 pub use position::{position_after, position_before, position_for_new_last_child};
 pub use props::{is_page_model_key, sort_in_presentation_order};
 pub(crate) use props::{renderable_prop_value, text_properties_of};

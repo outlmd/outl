@@ -40,6 +40,7 @@ pub(crate) mod sidebar;
 pub(crate) mod sync_panel;
 pub(crate) mod text_ops;
 pub(crate) mod toast;
+pub(crate) mod trash;
 pub(crate) mod visual;
 pub(crate) mod yank;
 pub(crate) mod zoom;

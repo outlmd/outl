@@ -40,6 +40,21 @@
 //! `ActionError`'s variants is mechanical once the mechanism exists;
 //! doing it in the same change that built the mechanism would bury it
 //! under forty declarations (RFC 0255, Scope).
+//!
+//! ## Two questions, two tables
+//!
+//! The matrix above answers **does this surface tell the user**. The
+//! `trash` submodule answers a different one — **is there a way out
+//! from this client at all** — and keys on the way out rather than on
+//! the refusal, because several refusals share one. Neither subsumes the
+//! other, and the trash refusals have no row in [`Refusal::ALL`]
+//! precisely because the first question has no gap there: all five
+//! surfaces print `trash::refusal_for`'s sentence already. What they did
+//! not have was a true second half to it.
+
+mod trash;
+pub use trash::trash_refusal_text;
+pub use trash::{remedy_action, remedy_for, Remedy, RemedyAction};
 
 /// A refusal a write path hands back instead of silently doing
 /// nothing — or silently doing the wrong thing.
@@ -184,7 +199,11 @@ pub fn refusal_support(refusal: Refusal) -> SurfaceSupport {
                  a TUI-initiated write re-projects the page (template apply, `call:` \
                  code-block exec, mention-creation autocomplete) and a toast when a \
                  peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, \
-                 `reload_workspace_from_disk`)."
+                 `reload_workspace_from_disk`) or when a trash restore lands on a page the \
+                 user is **not** looking at (`actions/trash`): the banner can only speak \
+                 for the page on screen, so a write that freezes a different one has no \
+                 banner to appear on. A restore into the open page stays silent, because \
+                 `load_current` re-derives that banner."
             ),
             Full(
                 "`<PageAheadOfLogBanner client=\"desktop\" />` above the outline, from \
@@ -253,6 +272,27 @@ pub struct AheadOfLogNotice {
     pub command: &'static str,
 }
 
+impl AheadOfLogNotice {
+    /// The notice as one line, for a surface that has only one.
+    ///
+    /// A toast and a status line cannot render four fields, so a caller
+    /// with one line used to join them itself — and joining is where
+    /// wording creeps back into a client. `title` carries no terminal
+    /// punctuation and `action` ends in a colon, so the obvious
+    /// `"{title} {action} {command}"` reads as a run-on:
+    /// *"This page isn't syncing To record them, run this in the
+    /// workspace folder: outl reconcile --ahead-of-log"*.
+    ///
+    /// Owning the join here fixes it once for every one-line surface,
+    /// and keeps the invariant-12 rule whole: a client decides **where**
+    /// a notice goes, never how it reads. `sample` is left out — a
+    /// single line has no room to quote content, and the count in
+    /// `body` already says how much is at risk.
+    pub fn one_line(&self) -> String {
+        format!("{}. {} {}", self.title, self.action, self.command)
+    }
+}
+
 /// The notice for [`Refusal::PageMarkdownAheadOfLog`] on one surface.
 ///
 /// `lines` and `sample` come straight off
@@ -315,6 +355,27 @@ pub(crate) fn refusal_matrix_markdown() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The join reads as one sentence on every surface, which is the
+    /// whole reason it is not a client's to write.
+    #[test]
+    fn the_one_line_form_is_not_a_run_on() {
+        for surface in Surface::ALL {
+            let line = ahead_of_log_notice(surface, 3, "- uma linha").one_line();
+            assert!(
+                !line.contains("syncing To"),
+                "{surface:?} renders a run-on: {line:?}"
+            );
+            assert!(
+                line.contains(". "),
+                "{surface:?} has no sentence break: {line:?}"
+            );
+            assert!(
+                !line.contains('\n'),
+                "{surface:?} is not one line: {line:?}"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

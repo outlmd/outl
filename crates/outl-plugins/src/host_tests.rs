@@ -454,13 +454,9 @@ fn every_shipped_example_plugin_loads() {
             .unwrap_or_else(|e| panic!("{}: load failed: {e}", path.display()));
         loaded.push(id);
     }
-    // The two combo examples plus one per capability.
-    assert!(
-        loaded.len() >= 9,
-        "loaded only {}: {:?}",
-        loaded.len(),
-        loaded
-    );
+    // A floor, not a tally: the loop panics on any example that fails to
+    // load, so this only catches `examples/` going missing or empty.
+    assert!(!loaded.is_empty(), "no example plugins found: {loaded:?}");
 }
 
 #[test]

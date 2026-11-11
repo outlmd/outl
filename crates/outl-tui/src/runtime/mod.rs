@@ -142,8 +142,10 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     // into a git repo behind their back. Missing a snapshot at quit is
     // deliberate: the interval floor is read back out of git, so the
     // next launch takes it.
+    let backup_root = outl_actions::backup::BackupRoot::new();
+    backup_root.set(Some(workspace_root.clone()));
     outl_actions::backup::spawn_auto_pass(
-        workspace_root.clone(),
+        backup_root,
         global_cfg.backup.enabled,
         global_cfg.backup.interval_minutes,
     );

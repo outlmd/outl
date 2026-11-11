@@ -11,6 +11,9 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
+/// What happens to the bytes once this gate has let them through.
+mod body;
+
 /// The plugin every test fetches as. A refusal must name it — knowing
 /// *which* plugin tried is what makes the log line actionable.
 const PLUGIN: &str = "acme.sync";
@@ -146,45 +149,6 @@ fn a_redirect_to_another_approved_host_is_still_followed() {
     assert!(
         landed.recv_timeout(Duration::from_secs(5)).is_ok(),
         "the approved redirect target should have been reached"
-    );
-}
-
-#[test]
-fn a_response_declaring_a_body_over_the_cap_is_refused() {
-    let over = MAX_RESPONSE_BYTES + 1;
-    let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {over}\r\nConnection: close\r\n\r\n")
-        .into_bytes();
-    let (port, _seen) = spawn("127.0.0.1", reply);
-
-    let out = json(&fetch(
-        &domains(&["127.0.0.1"]),
-        &format!("http://127.0.0.1:{port}/big"),
-        "{}",
-    ));
-    assert_eq!(out["ok"], Value::Bool(false), "got: {out}");
-    assert!(
-        out["error"].as_str().unwrap_or_default().contains("cap"),
-        "got: {out}"
-    );
-}
-
-#[test]
-fn a_close_delimited_body_over_the_cap_is_refused_mid_stream() {
-    // No `Content-Length`, so the up-front check cannot see the size —
-    // this is the path that has to stop reading on its own.
-    let mut reply = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec();
-    reply.resize(reply.len() + MAX_RESPONSE_BYTES as usize + 1, b'a');
-    let (port, _seen) = spawn("127.0.0.1", reply);
-
-    let out = json(&fetch(
-        &domains(&["127.0.0.1"]),
-        &format!("http://127.0.0.1:{port}/stream"),
-        "{}",
-    ));
-    assert_eq!(out["ok"], Value::Bool(false), "got: {out}");
-    assert!(
-        out["error"].as_str().unwrap_or_default().contains("cap"),
-        "got: {out}"
     );
 }
 
@@ -361,49 +325,6 @@ fn a_refusal_logs_the_origin_never_the_credentials_in_the_url() {
     assert!(
         log.joined().contains("origin=https://blocked.test"),
         "the refusal must say where the plugin tried to go: {:?}",
-        log.lines()
-    );
-}
-
-#[test]
-fn a_body_over_the_cap_is_logged_not_only_returned() {
-    let over = MAX_RESPONSE_BYTES + 1;
-    let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {over}\r\nConnection: close\r\n\r\n")
-        .into_bytes();
-    let (port, _seen) = spawn("127.0.0.1", reply);
-
-    let (_out, log) = capturing(|| {
-        fetch(
-            &domains(&["127.0.0.1"]),
-            &format!("http://127.0.0.1:{port}/big"),
-            "{}",
-        )
-    });
-
-    assert!(
-        log.joined().contains("cap"),
-        "the declared-oversize refusal must reach the host log: {:?}",
-        log.lines()
-    );
-}
-
-#[test]
-fn a_streamed_body_over_the_cap_is_logged_not_only_returned() {
-    let mut reply = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec();
-    reply.resize(reply.len() + MAX_RESPONSE_BYTES as usize + 1, b'a');
-    let (port, _seen) = spawn("127.0.0.1", reply);
-
-    let (_out, log) = capturing(|| {
-        fetch(
-            &domains(&["127.0.0.1"]),
-            &format!("http://127.0.0.1:{port}/stream"),
-            "{}",
-        )
-    });
-
-    assert!(
-        log.joined().contains("cap"),
-        "the mid-stream refusal must reach the host log: {:?}",
         log.lines()
     );
 }

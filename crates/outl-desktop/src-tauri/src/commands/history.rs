@@ -65,6 +65,7 @@ mod tests {
             // This fixture builds the workspace directly rather than
             // through `open_workspace_at`, so it holds no locks.
             workspace_guards: Arc::new(Mutex::new(None)),
+            backup_root: outl_actions::backup::BackupRoot::new(),
             hlc,
             settings: Arc::new(Mutex::new(Settings::default())),
             app_config_dir: tmp.path().to_path_buf(),

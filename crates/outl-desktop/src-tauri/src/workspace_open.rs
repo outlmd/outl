@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
+use outl_actions::backup::BackupRoot;
 use outl_actions::SyncTransport;
 use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
@@ -60,6 +61,42 @@ pub(crate) fn spawn_background_reconcile(
     );
 }
 
+/// Start the process's one automatic-backup thread and return the cell
+/// that aims it.
+///
+/// Called from `setup` unconditionally: `enabled` is checked inside
+/// `spawn_auto_pass`, and the root is not known yet. Every successful
+/// `open_workspace_at` retargets the returned [`BackupRoot`], so a
+/// workspace switch moves the one thread instead of adding another.
+pub(crate) fn start_backup(cfg: &outl_config::BackupCfg) -> BackupRoot {
+    let root = BackupRoot::new();
+    outl_actions::backup::spawn_auto_pass(root.clone(), cfg.enabled, cfg.interval_minutes);
+    root
+}
+
+/// Background projection writer: mutations queue their page here so the
+/// `.md` + sidecar write happens off the IPC thread (async-writes
+/// default). Shares the same workspace slot + swap-capable storage root
+/// the commands lock. Lives beside the opener, not in `lib.rs`, to keep
+/// `setup` under the file-size ceiling.
+pub(crate) fn spawn_projection_writer(
+    workspace: &Arc<Mutex<Option<Workspace>>>,
+    storage_root: &Arc<Mutex<Option<PathBuf>>>,
+    app: &tauri::AppHandle,
+) -> outl_tauri_shared::ProjectionWriter {
+    let app = app.clone();
+    outl_tauri_shared::ProjectionWriter::spawn(
+        workspace.clone(),
+        storage_root.clone(),
+        move |failure| {
+            if let Err(error) = app.emit(outl_tauri_shared::PROJECTION_WRITE_FAILED_EVENT, failure)
+            {
+                warn!("failed to emit projection failure: {error}");
+            }
+        },
+    )
+}
+
 /// Background opener used at boot when `settings.last_workspace` is
 /// already set. Runs on a worker thread so the WebView starts
 /// painting immediately; the frontend polls `workspace_stats` /
@@ -69,6 +106,7 @@ pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
     storage_root_slot: Arc<Mutex<Option<PathBuf>>>,
     workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
+    backup_root: BackupRoot,
     fs_watcher_slot: Arc<Mutex<Option<WatcherHandle>>>,
     iroh_transport_slot: Arc<Mutex<Option<Arc<dyn SyncTransport>>>>,
     iroh_pairing_slot: Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>>,
@@ -90,17 +128,23 @@ pub(crate) fn spawn_workspace_opener(
         // resolved; legacy blocks moved under it. **No orphan
         // reconcile here** — that runs after we publish the workspace
         // so the user sees today's journal immediately.
-        let workspace =
-            match open_workspace_at(actor, &hlc, &last_workspace, lru_cap, &workspace_guards) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!(
-                        "background open failed for {}: {e}",
-                        last_workspace.display()
-                    );
-                    return;
-                }
-            };
+        let workspace = match open_workspace_at(
+            actor,
+            &hlc,
+            &last_workspace,
+            lru_cap,
+            &workspace_guards,
+            &backup_root,
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!(
+                    "background open failed for {}: {e}",
+                    last_workspace.display()
+                );
+                return;
+            }
+        };
         // Start the FS watcher BEFORE we swap the slot so the first
         // peer change after boot is captured. Failure is logged but
         // non-fatal — the user can still work, just without

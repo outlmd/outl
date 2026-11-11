@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Excalidraw config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "token": {
+      "type": "string",
+      "title": "Excalidraw+ API key",
+      "description": "Only needed for `scene:` fences. Create it in your Excalidraw+ workspace settings. A personal key starts with `uk-`. Stored in the OS keychain, never in the workspace.",
+      "x-outl-secret": true
+    },
+    "theme": {
+      "type": "string",
+      "title": "Default theme",
+      "description": "Theme a fence uses when it does not set one itself. `auto` follows the client's colour scheme.",
+      "enum": ["auto", "light", "dark"],
+      "default": "auto"
+    },
+    "maxHeight": {
+      "type": "integer",
+      "title": "Maximum height (px)",
+      "description": "Tallest a rendered scene may get before it scales down to fit. A fence can set its own `height:`.",
+      "minimum": 80,
+      "maximum": 2000,
+      "default": 480
+    },
+    "indexPage": {
+      "type": "string",
+      "title": "Scene index page",
+      "description": "Page slug the \"list scenes into a page\" command writes to.",
+      "default": "excalidraw"
+    }
+  }
+}

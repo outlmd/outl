@@ -146,6 +146,20 @@ export interface FetchOptions {
   body?: string;
   /** Hard timeout in milliseconds. Required: no unbounded fetches. */
   timeoutMs: number;
+  /**
+   * How the **response** body is handed back. Defaults to `"text"`.
+   *
+   * A body crosses into JS inside a JSON string, so bytes that are not valid
+   * UTF-8 cannot survive as text — a text read replaces each one with U+FFFD,
+   * irreversibly. `"base64"` is therefore the only way to read a binary
+   * response (a cipher text, an image, a compressed stream): `text()` then
+   * returns the base64, which you decode yourself.
+   *
+   * The response-size cap is measured on the raw bytes, before encoding, so
+   * this cannot be used to pull a bigger body through. The string that holds
+   * it is a third longer, which is the cost of reading bytes at all.
+   */
+  encoding?: "text" | "base64";
 }
 
 /** A minimal response shape returned by `ctx.net.fetch`. */
@@ -153,7 +167,7 @@ export interface FetchResponse {
   status: number;
   ok: boolean;
   headers: Record<string, string>;
-  /** Resolve the body as text. */
+  /** Resolve the body as text — the base64 string when `encoding: "base64"`. */
   text(): Promise<string>;
   /** Resolve and parse the body as JSON. */
   json<T = unknown>(): Promise<T>;

@@ -8,7 +8,7 @@
 
 use outl_actions::{Backlink, BacklinkCrumb, OutlineNode, PageKind, PageMeta, TodoState};
 use outl_md::parse::{ParseWarning, ParseWarningKind};
-use outl_tauri_shared::state::{MdAheadOfLog, PageView};
+use outl_tauri_shared::state::{DroppedEdit, MdAheadOfLog, PageView};
 
 // --- example values ------------------------------------------------------
 //
@@ -110,5 +110,16 @@ pub fn page_view() -> PageView {
         md_ahead_of_log: Some(md_ahead_of_log()),
         md_ahead_of_log_checked: true,
         projection_error: Some("disk full".into()),
+        // `Some` on purpose, like the two above: the field
+        // `skip_serializing_if`s, so a `None` here would drop the key and
+        // the pin would compare the interface against a reply that never
+        // mentions it.
+        dropped_edit: Some(dropped_edit()),
     }
+}
+
+/// The `kept_as` arm, because it is the one with every key present —
+/// `DroppedEdit::lost` omits it by design.
+pub fn dropped_edit() -> DroppedEdit {
+    DroppedEdit::kept("01JQ0000000000000000000002", "01JQ0000000000000000000009")
 }

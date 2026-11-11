@@ -9,13 +9,11 @@ import {
   deleteBlock,
   editBlock,
   importAssetFile,
-  indentBlock,
   instantiateTemplateAt,
   openAsset,
   openExternalUrl,
   openPageBySlug,
   openRef,
-  outdentBlock,
   pageBacklinks,
   pasteMarkdown,
   pastePlain,
@@ -63,6 +61,7 @@ import {
 } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
 import { createPasteOps } from "./outline-paste";
+import { createStructureOps } from "./outline-structure";
 import { PageSections } from "./PageSections";
 import { PageTitle } from "./PageTitle";
 import { PropertyEditor } from "./PropertyEditor";
@@ -368,6 +367,15 @@ export function OutlineView() {
     handleError,
   });
 
+  /** Tab / Shift-Tab indent and outdent. See `./outline-structure`. */
+  const structureOps = createStructureOps({
+    pageId: () => appState.page?.id,
+    applyView,
+    handleError,
+    setSelectedBlockId: (id) => setAppState("selectedBlockId", id),
+    setEditingId,
+  });
+
   async function handleRefClick(target: string) {
     const view = await handleError(openRef(target));
     if (view) applyView(view);
@@ -490,18 +498,8 @@ export function OutlineView() {
       setAppState("selectedBlockId", reply.new_id);
       setEditingId(reply.new_id);
     },
-    onIndent: async (id) => {
-      const pageId = appState.page?.id;
-      if (!pageId) return;
-      const view = await handleError(indentBlock(pageId, id));
-      if (view) applyView(view);
-    },
-    onOutdent: async (id) => {
-      const pageId = appState.page?.id;
-      if (!pageId) return;
-      const view = await handleError(outdentBlock(pageId, id));
-      if (view) applyView(view);
-    },
+    onIndent: structureOps.onIndent,
+    onOutdent: structureOps.onOutdent,
     onDeleteEmpty: async (id) => {
       const pageId = appState.page?.id;
       if (!pageId) return;

@@ -21,6 +21,11 @@
 #     to sit with the two wrappers that return it, and what stayed
 #     behind is the re-export that keeps the import path unchanged.
 #     The same move took commands.ts down by 41 lines.
+#     The third raise is 34 lines for DroppedEdit plus the PageView
+#     field that carries it (issue 473): a keystroke whose target block
+#     had left the tree. It is the registered reason above, verbatim -
+#     the wire grew, so the mirror grew. The pin is wire_types.rs's
+#     dropped_edit_matches_its_interface.
 #     (No backticks in this block — the header is written through an
 #     unquoted heredoc, so one becomes a command substitution and the
 #     sentence silently loses the word.)
@@ -45,9 +50,18 @@
 #     unquoted so it can interpolate THRESHOLD, which means a backtick
 #     here runs as a command and silently empties the words around it.)
 #
+#   outl-actions/src/page.rs  682 -> 689  (issue 473)
+#     The dispatch branch that routes a reopened-by-slug page out of the
+#     trash: open_or_create already computes the deterministic root id
+#     at this point, so checking whether it is trashed and handing off
+#     to the revive helper is seven lines in the one place that already
+#     decides what a slug resolves to. The revival logic itself (and its
+#     tests) is a sibling module, same split as the existing page_merge
+#     and page_repair siblings, so page.rs only pays for the call site.
+#
 # None of these arguments generalises. A further raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
-990 crates/outl-actions/src/page.rs
+689 crates/outl-actions/src/page.rs
 683 crates/outl-actions/src/sync.rs
 679 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
@@ -57,17 +71,16 @@
 725 crates/outl-core/src/workspace/batch.rs
 877 crates/outl-core/src/workspace.rs
 712 crates/outl-core/tests/tree_unit.rs
-921 crates/outl-desktop/src/components/OutlineView.tsx
-1038 crates/outl-desktop/src/lib/action-handlers.ts
+919 crates/outl-desktop/src/components/OutlineView.tsx
 831 crates/outl-frontend-shared/src/api/commands.ts
-682 crates/outl-frontend-shared/src/api/types.ts
+718 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
 1798 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
-640 crates/outl-plugins/src/host_tests.rs
+636 crates/outl-plugins/src/host_tests.rs
 776 crates/outl-shortcuts/src/defaults.rs
 702 crates/outl-shortcuts/src/support.rs
 763 crates/outl-sync-iroh/src/engine_pairing.rs
@@ -83,5 +96,5 @@
 985 crates/outl-tui/src/actions/plugins.rs
 620 crates/outl-tui/src/actions/properties.rs
 661 crates/outl-tui/src/input/normal.rs
-995 crates/outl-tui/src/state.rs
+994 crates/outl-tui/src/state.rs
 1115 crates/outl-tui/src/view/overlays.rs

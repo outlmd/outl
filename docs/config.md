@@ -241,8 +241,8 @@ This one is your consent, which belongs to you rather than to the hardware — s
 
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
-| `enabled` | boolean | `true` | the TUI's background snapshot pass | Take periodic local git snapshots of the workspace. Costs nothing on an unchanged workspace (no diff → no commit) and degrades to a logged warning where there is no `git` on `PATH`. |
-| `interval_minutes` | integer | `30` | the TUI's background snapshot pass | Minimum minutes between automatic snapshots. A **floor, not a schedule** — the pass wakes on this cadence and commits only when at least this long has passed since the newest snapshot, so a burst of edits never becomes a burst of commits. The elapsed time is read back out of the git history, so it survives a restart. |
+| `enabled` | boolean | `true` | every client's background snapshot pass (TUI, desktop, mobile) | Take periodic local git snapshots of the workspace. Costs nothing on an unchanged workspace (no diff → no commit) and degrades to a logged warning where there is no `git` on `PATH`. |
+| `interval_minutes` | integer | `30` | every client's background snapshot pass (TUI, desktop, mobile) | Minimum minutes between automatic snapshots. A **floor, not a schedule** — the pass wakes on this cadence and commits only when at least this long has passed since the newest snapshot, so a burst of edits never becomes a burst of commits. The elapsed time is read back out of the git history, so it survives a restart. |
 
 Backups default **on** for the same reason reminders do.
 The failures they catch — a bad projection, an `outl import` aimed at a workspace that already had pages, a page deleted with the app then closed — are ones you discover *after* the moment when you could have enabled a safety net.

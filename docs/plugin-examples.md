@@ -22,6 +22,7 @@ Read the [tutorial](plugin-tutorial.md) first, then the [API reference](plugin-a
 | `network` | [Inspire](plugin-examples/inspire.md) | Fetches a quote from an API |
 | `sync-transport` | [Echo Sync](plugin-examples/echo-sync.md) | A push/pull transport skeleton |
 | _several at once_ | [TODO Archiver](plugin-examples/todo-archiver.md) | op-hook + slash-command + keybinding + config-schema in one plugin |
+| _several at once_ | [Excalidraw](plugin-examples/excalidraw.md) | Draws an Excalidraw scene inline: rich transformer + network + secrets + storage |
 
 ## Real integrations (external plugins)
 

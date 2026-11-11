@@ -5,7 +5,7 @@ import { pluginRun, pluginToolbar } from "@outl/shared/api/commands";
 import type { PluginToolbarButton as ToolbarButtonEntry } from "@outl/shared/api/types";
 import { rovingKeydown } from "../lib/keyboard-reach";
 import { playPluginViews } from "../lib/plugin-views";
-import { appState, setAppState, setOutline } from "../lib/store";
+import { appState, setAppState, setOutline, togglePanel } from "../lib/store";
 import type { ActionHandlers } from "../lib/shortcuts";
 import { SyncIndicator } from "./SyncIndicator";
 
@@ -62,6 +62,12 @@ const BellIcon = () => (
   <Icon>
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </Icon>
+);
+const TrashIcon = () => (
+  <Icon>
+    <path d="M4 7h16M10 11v6M14 11v6" />
+    <path d="M6 7l1 13h10l1-13M9 7V4h6v3" />
   </Icon>
 );
 const PluginsIcon = () => (
@@ -218,7 +224,7 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
           active={appState.sidebarOpen}
           label={appState.sidebarOpen ? "Hide sidebar" : "Show sidebar"}
           title="Toggle sidebar (⌘⇧E)"
-          onToggle={() => setAppState("sidebarOpen", !appState.sidebarOpen)}
+          onToggle={() => togglePanel("sidebarOpen")}
         />
       </div>
       <div
@@ -248,21 +254,41 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
         <For each={toolbar()}>
           {(entry) => <PluginToolbarButton entry={entry} />}
         </For>
+        {/* Desktop-only, and placed with the other desktop-only
+            controls rather than inside the mobile-matching tail
+            (Reminders → Plugins → Sync → Focus → Settings), which this
+            crate's CLAUDE.md asks to keep in the phone's order.
+
+            No chord **yet**, and the reason is a file, not a design:
+            an `Action` variant needs an arm in
+            `outl_shortcuts::support`, which sits at its frozen
+            600-line baseline, so the arm cannot land until that file
+            is split. The three per-client verdicts an `Action` would
+            force are the *mechanism* (invariant 12), never a cost —
+            `TimelinePanel` carries the same gap for the same reason.
+            Until then this button is the whole affordance, and the
+            TUI's `/trash` is its counterpart; `Capability::Trash` is
+            where that pair is recorded. */}
+        <ChromeToggle
+          glyph={<TrashIcon />}
+          active={appState.trashOpen}
+          label="Trash"
+          title="Trash — restore a deleted block"
+          onToggle={() => togglePanel("trashOpen")}
+        />
         <ChromeToggle
           glyph={<BellIcon />}
           active={appState.remindersOpen}
           label="Reminders"
           title="Reminders (⌘⇧R)"
-          onToggle={() => setAppState("remindersOpen", !appState.remindersOpen)}
+          onToggle={() => togglePanel("remindersOpen")}
         />
         <ChromeToggle
           glyph={<PluginsIcon />}
           active={appState.marketplaceOpen}
           label={appState.marketplaceOpen ? "Hide plugins" : "Plugins"}
           title="Plugins"
-          onToggle={() =>
-            setAppState("marketplaceOpen", !appState.marketplaceOpen)
-          }
+          onToggle={() => togglePanel("marketplaceOpen")}
         />
         {/* Click syncs now, right-click opens Settings → Sync. */}
         <SyncIndicator />
@@ -278,7 +304,7 @@ export function ChromeToggleBar(props: { handlers?: ActionHandlers | null }) {
           active={appState.settingsOpen}
           label="Settings"
           title="Settings (⌘,)"
-          onToggle={() => setAppState("settingsOpen", !appState.settingsOpen)}
+          onToggle={() => togglePanel("settingsOpen")}
         />
       </div>
     </>

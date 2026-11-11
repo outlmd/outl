@@ -699,7 +699,7 @@ pub(crate) fn render_reminders(
 /// The `- 5` was a second bug: the offset has to come from the
 /// viewport height, or a tall popup scrolls while there is still room
 /// and a short one does not scroll enough.
-fn scroll_to_keep_visible(selected: usize, visible: usize) -> u16 {
+pub(super) fn scroll_to_keep_visible(selected: usize, visible: usize) -> u16 {
     if visible == 0 {
         return 0;
     }

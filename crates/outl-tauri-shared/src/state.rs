@@ -109,6 +109,12 @@ pub struct PageView {
     /// Non-refusal projection failure after the mutation committed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projection_error: Option<String>,
+    /// Set when the block this mutation targeted was no longer in the
+    /// tree, so the keystroke did not land where the user typed it. `None`
+    /// on every ordinary reply — `skip_serializing_if` keeps the JSON
+    /// quiet. See [`DroppedEdit`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dropped_edit: Option<DroppedEdit>,
 }
 
 impl PageView {
@@ -122,6 +128,71 @@ impl PageView {
         self.md_ahead_of_log = ahead;
         self.md_ahead_of_log_checked = true;
         self
+    }
+
+    /// Stamp "this edit did not land where you typed it" onto the view.
+    #[must_use]
+    pub fn with_dropped_edit(mut self, dropped: Option<DroppedEdit>) -> Self {
+        self.dropped_edit = dropped;
+        self
+    }
+}
+
+/// A keystroke that did not land on the block the user was typing in.
+///
+/// Between the frontend reading a block's id and the commit arriving, a
+/// sync reload can re-mint or trash that node — or a peer can delete the
+/// whole page. `edit_text` refuses (`ActionError::NotInTree`), and
+/// `edit_block` deliberately does **not** turn that into an `Err`: mobile
+/// pins a **Retry** to a failed commit, so a dead id becomes a retry that
+/// can never succeed, and the desktop skips `applyView`, so it never drops
+/// the stale `editingId` it is failing against.
+///
+/// Keeping the text is not a substitute for saying so. The block lands at
+/// the end of the page, which on a journal day is below the fold, so from
+/// the user's seat "my text vanished from where I typed it" is the
+/// identical observation — now with a block they did not ask for somewhere
+/// they are not looking, and a natural retype produces a duplicate they
+/// meet later as mystery content. That is a new silence, not a fixed one
+/// ([issue #473](https://github.com/outlmd/outl/issues/473) bullet 2).
+///
+/// **The wording lives here**, in the two constructors, not in either
+/// client: a surface that writes its own sentence is a second copy of the
+/// fact (`outl-actions/CLAUDE.md` → "Refusals: who tells the user").
+#[derive(Debug, Clone, Serialize)]
+pub struct DroppedEdit {
+    /// The block id the commit was aimed at. The client clears its stale
+    /// `editingId` against this rather than guessing from the outline.
+    pub block: String,
+    /// `Some(id)` when the text was kept as a new block at the end of the
+    /// page — the client can select it. `None` when the page went too and
+    /// nothing could be written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept_as: Option<String>,
+    /// What to tell the user.
+    pub message: String,
+}
+
+impl DroppedEdit {
+    /// The target block was gone but the page was still there, so the text
+    /// was appended at the end of it.
+    pub fn kept(block: &str, kept_as: &str) -> Self {
+        Self {
+            block: block.to_string(),
+            kept_as: Some(kept_as.to_string()),
+            message: "That block is gone, so your text was kept as a new block at the \
+                      end of this page."
+                .to_string(),
+        }
+    }
+
+    /// The page itself was gone, so there was nowhere to put the text.
+    pub fn lost(block: &str) -> Self {
+        Self {
+            block: block.to_string(),
+            kept_as: None,
+            message: "This page was deleted, so your text could not be saved.".to_string(),
+        }
     }
 }
 

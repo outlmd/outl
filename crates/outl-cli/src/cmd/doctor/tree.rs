@@ -33,7 +33,9 @@ const MAX_LISTED: usize = 20;
 /// traversal, which is how the doctor could count 683 blocks that no
 /// other surface could name (issue #287).
 pub(super) fn check_trash(b: &mut Builder, ws: &Workspace) {
-    let entries = outl_actions::trash::list(ws);
+    // `Surface::Cli` because the doctor is a terminal report; a row's
+    // refusal therefore carries the `outl` command that resolves it.
+    let entries = outl_actions::trash::list(ws, outl_actions::refusal::Surface::Cli);
     if entries.is_empty() {
         b.ok("trash is empty — nothing has been deleted in this workspace");
         return;

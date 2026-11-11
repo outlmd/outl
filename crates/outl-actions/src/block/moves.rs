@@ -17,11 +17,19 @@ use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 
 use crate::error::ActionError;
-use crate::tree::{next_sibling, position_after, position_for_new_last_child, previous_sibling};
+use crate::tree::{next_sibling, position_for_new_last_child, previous_sibling};
 
+use super::slot::slot_after;
 use super::{ensure_in_tree, wrap};
 
-fn move_to(
+/// Emit the `Op::Move` that puts `node` under `new_parent` at
+/// `position`, reading the undo fields off the tree rather than trusting
+/// a caller's guess at them.
+///
+/// `pub(crate)` for `super::slot`, which shifts a sibling out of the
+/// way through the same op, and for `crate::page_revive`, which moves a
+/// revived page root under the workspace root sentinel.
+pub(crate) fn move_to(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
     node: NodeId,
@@ -66,6 +74,10 @@ pub fn delete(
 /// block under another page). A move that would create a cycle is a
 /// deterministic no-op on the materialized tree, but the op still lands in the
 /// log (root invariant #4) — that is handled inside `apply`, not here.
+///
+/// `new_parent` may be [`NodeId::root`]; see the destination check below
+/// for why that needs saying, and why [`NodeId::trash`] is not on that
+/// list.
 pub fn move_under(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -74,10 +86,24 @@ pub fn move_under(
 ) -> Result<(), ActionError> {
     // `ensure_in_tree`, not `ensure_live`: `trash::restore` is a
     // `move_under` out of the trash, so a node sitting there has to be
-    // a legal source here. The destination is checked the same way
-    // because `delete` aims one at `TRASH_ROOT` through `move_to`.
+    // a legal source here.
     ensure_in_tree(workspace, node)?;
-    ensure_in_tree(workspace, new_parent)?;
+    // The destination is a different question, and asking `contains` was
+    // the wrong one. `ROOT` and `TRASH_ROOT` are implicit — `Tree::new`'s
+    // doc says they "don't appear in `nodes` but are valid parents for any
+    // other node" — so `contains` answers no for a parent that is always
+    // legal. Nothing noticed because no caller aimed here: `delete` reaches
+    // `TRASH_ROOT` through `move_to` directly, and the comment above used
+    // to cite that as evidence the check was right. `page::revive` is the
+    // first caller to need the root side.
+    //
+    // `TRASH_ROOT` stays refused on purpose, asymmetry and all: landing
+    // there is `delete`, which places at `Fractional::first()`, and
+    // accepting it here would be a second spelling of the same op with a
+    // different position. One owner.
+    if new_parent != NodeId::root() {
+        ensure_in_tree(workspace, new_parent)?;
+    }
     let pos = position_for_new_last_child(workspace, new_parent);
     move_to(workspace, hlc, node, new_parent, pos)
 }
@@ -118,8 +144,7 @@ pub fn outdent(
         .tree()
         .parent(parent)
         .ok_or_else(|| ActionError::NoGrandparent(node.to_string()))?;
-    let pos = position_after(workspace, parent)
-        .ok_or_else(|| ActionError::MissingPosition(parent.to_string()))?;
+    let pos = slot_after(workspace, hlc, parent)?;
     move_to(workspace, hlc, node, grand, pos)
 }
 
@@ -165,7 +190,8 @@ pub fn move_down(
 /// (pasting an ancestor onto one of its descendants) with
 /// [`ActionError::WouldCreateCycle`]: the CRDT would silently no-op
 /// such a move, so the client should nudge instead. Pasting a block
-/// after itself is a no-op (returns `Ok`).
+/// after itself, or after the sibling it already follows, is a no-op
+/// (returns `Ok`).
 pub fn move_after(
     workspace: &mut Workspace,
     hlc: &HlcGenerator,
@@ -177,6 +203,13 @@ pub fn move_after(
     if node == target {
         return Ok(());
     }
+    // Already where the gesture would put it. Without this the move is
+    // still *correct* — `slot_after` vacates `node` and `move_to` puts
+    // it back on the key it just left — but it costs two `Op::Move`s
+    // and two page-history entries for a paste that changed nothing.
+    if next_sibling(workspace, target) == Some(node) {
+        return Ok(());
+    }
     // `target` must not sit inside `node`'s own subtree — that move
     // creates a cycle the CRDT drops on the materialised tree.
     if is_within_subtree(workspace, node, target) {
@@ -186,8 +219,7 @@ pub fn move_after(
         .tree()
         .parent(target)
         .ok_or_else(|| ActionError::NotInTree(target.to_string()))?;
-    let position = position_after(workspace, target)
-        .ok_or_else(|| ActionError::MissingPosition(target.to_string()))?;
+    let position = slot_after(workspace, hlc, target)?;
     move_to(workspace, hlc, node, parent, position)
 }
 
@@ -296,6 +328,38 @@ mod tests {
         assert_eq!(ws.tree().parent(b), Some(NodeId::root()));
         // a stays where it is
         assert_eq!(ws.tree().parent(a), Some(NodeId::root()));
+    }
+
+    /// `ROOT` is an implicit parent — it never appears in `Tree::nodes` —
+    /// so the destination check cannot be `contains`. `page::revive` moves
+    /// a trashed page root back to exactly here, and that is what caught
+    /// it: the revive answered `NotInTree("000…000")`, naming the root.
+    #[test]
+    fn move_under_accepts_the_implicit_root_as_a_destination() {
+        let (mut ws, hlc) = new_workspace();
+        let page = append_block(&mut ws, &hlc, None, Some("page")).unwrap();
+        let block = append_block(&mut ws, &hlc, Some(page), Some("block")).unwrap();
+
+        move_under(&mut ws, &hlc, block, NodeId::root()).unwrap();
+
+        assert_eq!(ws.tree().parent(block), Some(NodeId::root()));
+    }
+
+    /// The asymmetry is deliberate: landing in the trash is [`delete`],
+    /// which places at `Fractional::first()`. Accepting it here would be a
+    /// second spelling of the same op with a different position.
+    #[test]
+    fn move_under_refuses_the_trash_as_a_destination() {
+        let (mut ws, hlc) = new_workspace();
+        let block = append_block(&mut ws, &hlc, None, Some("block")).unwrap();
+
+        let result = move_under(&mut ws, &hlc, block, NodeId::trash());
+
+        assert!(
+            matches!(result, Err(ActionError::NotInTree(_))),
+            "use `delete` to trash a block, got {result:?}"
+        );
+        assert_eq!(ws.tree().parent(block), Some(NodeId::root()));
     }
 
     #[test]
@@ -435,6 +499,28 @@ mod tests {
         // No op leaked into the log: the guard rejects before minting a
         // `LogOp`, so nothing reaches `Workspace::apply`.
         assert_eq!(ws.log().len(), log_before);
+    }
+
+    /// Pasting a block after the sibling it already follows changes
+    /// nothing, so it must cost nothing: no `Op::Move`, and therefore no
+    /// page-history entry. Without the guard `slot_after` vacates the
+    /// node and `move_to` puts it back on the key it just left — right
+    /// answer, two ops.
+    #[test]
+    fn move_after_the_sibling_it_already_follows_writes_no_op() {
+        let (mut ws, hlc) = new_workspace();
+        let a = append_block(&mut ws, &hlc, None, Some("a")).unwrap();
+        let b = append_block(&mut ws, &hlc, None, Some("b")).unwrap();
+        let before = ws.log().len();
+
+        move_after(&mut ws, &hlc, b, a).unwrap();
+
+        assert_eq!(ws.log().len(), before, "nothing changed, so nothing logged");
+        let order: Vec<NodeId> = children_of(&ws, NodeId::root())
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(order, vec![a, b]);
     }
 
     #[test]

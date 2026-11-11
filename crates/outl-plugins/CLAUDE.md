@@ -94,7 +94,8 @@ src/
 ├── net.rs         # ctx.net.fetch: drives the redirect chain itself (non-negotiable 6)
 ├── net/
 │   ├── gate.rs          # one hop's rules as pure fns: scheme, host, downgrade, origin change, timeout clamp
-│   └── tests.rs         # loopback servers; the deny cases assert on what the unapproved server received
+│   ├── tests.rs         # loopback servers; the deny cases assert on what the unapproved server received
+│   └── tests/body.rs    # what happens to the bytes after the gate allowed them: the cap, and `encoding: "base64"`
 ├── host.rs        # PluginHost: a plugin's lifetime — load, per-turn engine state, run_command, sync_hooks
 ├── host/          # the four jobs with their own rules, split out of host.rs
 │   ├── project.rs       # &Workspace -> ReadModel / LogOpView; read-only, one producer of the JS shapes
@@ -133,6 +134,18 @@ Plugin handlers live in JS-land (`globalThis.__OUTL`), so no `JsFunction` is eve
 Ops a plugin produces advance `last_seen` too, so they never re-trigger `onOp` — no plugin→op→plugin cycle.
 `sync_hooks` is the single post-mutation entry point a client calls after any action.
 
+**Every entry point that runs JS goes through `prepare_turn` / `finish_turn`.**
+A turn needs two things set up before the engine runs — the plugin's local KV (`ctx.storage`) and its keychain access (`ctx.secrets`) — and each used to be wired at the call site.
+There are **six** such entry points, and four wired only the keychain: `load_plugin` (whose `engine.load` also runs `activate(ctx)`), `transform_block`, `sync_push` and `sync_pull`.
+`ctx.storage.get` **throws** when it was never set up, with the same message it uses for a missing permission.
+So a content transformer reading a cache its own command had written failed with "needs the `storage:local` permission" *while holding that permission*.
+An uncaught throw costs the whole descriptor, so the fence then rendered as nothing at all and said nothing.
+In `activate` it is worse: the throw fails `load_plugin` outright, so a plugin that reads its own state on startup never registers at all.
+A sync transport storing a cursor hit the same wall.
+`turn_inputs` builds both halves as one value and `apply_inputs` applies them, which is what lets `load_plugin` use the same door for an engine that is not in `self.plugins` yet.
+`finish_turn` persists whatever changed, and it runs **before** the `?` on every entry point that can fail: `set_storage` overwrites the engine's KV from disk and clears the dirty flag, so a write the plugin made before it threw would be *discarded*, not merely unsaved.
+Pinned by `a_scene_fence_without_storage_permission_explains_itself` and `a_scene_reference_with_no_cache_says_what_to_run` (`tests/excalidraw_bundle.rs`), which fail if the storage half is dropped again.
+
 `PluginHost` is **not `Send`** (Boa `Context` is single-threaded).
 Fine for TUI/CLI; GUI clients run it on a dedicated plugin thread.
 
@@ -164,6 +177,8 @@ So the network suite is against real loopback servers (`net.rs` tests, no new de
 - `a_redirect_to_another_approved_host_is_still_followed` — the load-bearing allow.
   A gate that refuses everything passes every deny test ever written, and `Policy::none()` would pass every other test in this list.
 - `a_response_declaring_a_body_over_the_cap_is_refused` / `a_close_delimited_body_over_the_cap_is_refused_mid_stream` — the declared-length and unknown-length halves of the cap; only the second one actually bounds memory.
+  Both live in `net/tests/body.rs`, next to `base64_does_not_raise_the_response_cap`, which is why they moved there: `encoding: "base64"` grows a body by a third *after* it is read, so the cap and the encoding are one question, not two.
+  `a_binary_body_survives_as_base64_and_is_destroyed_as_text` pins the other half — the text read corrupts non-UTF-8 bytes irreversibly, which is the whole reason the option exists.
 - `a_custom_header_never_crosses_to_another_approved_host` — the hop the allowlist *approves*. It asserts the second server's own record lacks `X-Api-Key` **and** that the fetch still succeeded, so a future "just refuse cross-origin hops" cannot pass it.
 - `a_blocked_redirect_is_logged_not_only_returned`, `a_body_over_the_cap_is_logged_not_only_returned`, `a_streamed_body_over_the_cap_is_logged_not_only_returned` — a refusal the host never recorded is a refusal nobody can act on. They read a captured `tracing` subscriber, and the first also pins that the line names the plugin.
 - `a_non_http_scheme_is_refused_before_a_request_is_built` / `a_redirect_to_a_non_http_scheme_is_refused_even_when_the_host_is_approved` — both assert on **our** wording (`only http`), not on the word "scheme", because reqwest's own refusal says that too and a looser assertion passes with the gate deleted.
