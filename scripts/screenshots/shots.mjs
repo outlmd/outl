@@ -69,11 +69,13 @@ export const mobileShots = [
   { name: "person-backlinks", link: () => ({ kind: "page", slug: "ana-costa" }) },
   { name: "checklist", link: () => ({ kind: "page", slug: "atlas-launch-checklist" }) },
   { name: "tasks", act: tab("Tasks") },
-  { name: "pages", act: tab("Pages") },
+  // The bar has no Pages tab since #417: an empty Search box lists every
+  // page under a Pages heading, so that is where this shot goes.
+  { name: "pages", act: tab("Search") },
   {
     name: "search-blocks",
     act: seq(tab("Search"), async (page) => {
-      await page.getByPlaceholder(/^Search blocks/).pressSequentially("sync", { delay: 40 });
+      await page.getByPlaceholder(/^Search pages, tasks and blocks/).pressSequentially("sync", { delay: 40 });
       await page.waitForTimeout(600);
     }),
   },
