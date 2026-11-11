@@ -98,7 +98,16 @@ pub fn render_graph(
     // carry both `May 25th, 2026` and `2026-05-25`); named pages
     // disambiguate slug collisions with a numeric suffix.
     let mut journal_groups: Vec<(NaiveDate, Vec<&ImportPage>)> = Vec::new();
+    // Named pages grouped by their outl identity. outl derives a page's
+    // id from its slug and resolves `[[Name]]` by slug before anything
+    // else, so two source pages on one slug (`Cloudflare` and
+    // `cloudflare`) are one page in outl whatever the files say: with a
+    // `-2` suffix the second one was unreachable, every link to it landed
+    // on the first. They merge like same-date journals do, and the other
+    // spellings become `alias::` names. Adapters with their own stem
+    // policy (Obsidian paths) pin the stem and are left alone.
     let mut named: Vec<(&str, Vec<&ImportPage>)> = Vec::new();
+    let mut named_by_slug: HashMap<String, usize> = HashMap::new();
     for page in &graph.pages {
         match &page.name {
             PageName::Journal(d) => match journal_groups.iter_mut().find(|(k, _)| k == d) {
@@ -115,6 +124,27 @@ pub fn render_graph(
                 }
                 None => journal_groups.push((*d, vec![page])),
             },
+            PageName::Named(t) if page.stem_override.is_none() => {
+                let slug = slugify(t);
+                match named_by_slug.get(&slug) {
+                    Some(&i) => {
+                        report.pages_merged += 1;
+                        report.slug_collisions += 1;
+                        report.warn(
+                            t,
+                            format!(
+                                "shares the outl page `{slug}` with [[{}]], merged and kept as an alias",
+                                named[i].0
+                            ),
+                        );
+                        named[i].1.push(page);
+                    }
+                    None => {
+                        named_by_slug.insert(slug, named.len());
+                        named.push((t.as_str(), vec![page]));
+                    }
+                }
+            }
             PageName::Named(t) => named.push((t.as_str(), vec![page])),
         }
     }
@@ -130,6 +160,7 @@ pub fn render_graph(
         render_page(
             sources,
             &title,
+            &[],
             stem,
             path,
             true,
@@ -140,7 +171,19 @@ pub fn render_graph(
         );
         report.journals += 1;
     }
-    for (title, sources) in &named {
+    for (title, sources) in &mut named {
+        // The page with the most content keeps the title; the other
+        // spellings of a merged group become aliases.
+        if sources.len() > 1 {
+            let primary = (0..sources.len())
+                .max_by_key(|&i| (outline_len(sources[i]), std::cmp::Reverse(i)))
+                .unwrap_or(0);
+            sources.swap(0, primary);
+            sources[1..].sort_by_key(|p| graph_position(graph, p));
+            *title = page_title(sources[0]);
+        }
+        let title: &str = title;
+        let sources: &[&ImportPage] = sources;
         // Adapters with their own collision policy (Obsidian) pin the
         // stem; otherwise the title slugifies.
         let base = sources[0]
@@ -157,9 +200,15 @@ pub fn render_graph(
             format!("{base}-{n}")
         };
         let path = pages_dir.join(format!("{stem}.md"));
+        let aliases: Vec<&str> = sources[1..]
+            .iter()
+            .map(|p| page_title(p))
+            .filter(|t| *t != title && !t.contains(','))
+            .collect();
         render_page(
             sources,
             title,
+            &aliases,
             stem,
             path,
             false,
@@ -172,6 +221,34 @@ pub fn render_graph(
     }
 
     (pages_out, uid_map)
+}
+
+/// A named page's title (journals never reach the callers).
+fn page_title(page: &ImportPage) -> &str {
+    match &page.name {
+        PageName::Named(t) => t,
+        PageName::Journal(_) => "",
+    }
+}
+
+/// Blocks in a page's outline, for picking a merged group's title.
+fn outline_len(page: &ImportPage) -> usize {
+    fn count(blocks: &[ImportBlock]) -> usize {
+        blocks.iter().map(|b| 1 + count(&b.children)).sum()
+    }
+    match &page.body {
+        PageBody::Outline(blocks) => count(blocks),
+        PageBody::Raw(raw) => raw.len(),
+    }
+}
+
+/// Source order of a page, so a merged group keeps it after its primary.
+fn graph_position(graph: &ImportGraph, page: &ImportPage) -> usize {
+    graph
+        .pages
+        .iter()
+        .position(|p| std::ptr::eq(p, page))
+        .unwrap_or(usize::MAX)
 }
 
 /// Per-page render accumulator.
@@ -189,6 +266,7 @@ struct Ctx<'a> {
 fn render_page(
     sources: &[&ImportPage],
     title: &str,
+    aliases: &[&str],
     stem: String,
     path: PathBuf,
     is_journal: bool,
@@ -213,11 +291,21 @@ fn render_page(
     if !is_journal {
         header.push_str(&format!("title:: {title}\n"));
     }
+    let mut aliases_written = aliases.is_empty();
     for page in sources {
         for (k, v) in &page.props {
-            header.push_str(&format!("{k}:: {v}\n"));
+            if k == "alias" && !aliases_written {
+                // One `alias::` line: the index reads only the first.
+                header.push_str(&format!("{k}:: {v}, {}\n", aliases.join(", ")));
+                aliases_written = true;
+            } else {
+                header.push_str(&format!("{k}:: {v}\n"));
+            }
             ctx.report.props_pages += 1;
         }
+    }
+    if !aliases_written {
+        header.push_str(&format!("alias:: {}\n", aliases.join(", ")));
     }
     // Page timestamps, same policy as block ones. A merged journal
     // (two source pages, one date) keeps the earliest creation and the
