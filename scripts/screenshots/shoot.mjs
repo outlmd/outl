@@ -79,6 +79,13 @@ async function withServer(crate, port, fn) {
 
 const bridge = readFileSync(join(here, "lib/bridge.js"), "utf8");
 
+// The first-run crash-reports strip (`CrashReportsNotice`) floats over
+// the bottom of both clients, and on the phone its card covers the
+// bottom bar, so a tap on Search or Tasks lands on the strip and times
+// out. A screenshot is not a first run: every context starts with the
+// strip already dismissed, the same flag "Got it" writes.
+const firstRunDone = `try { localStorage.setItem("outl.crash-reports-notice", "done"); } catch {}`;
+
 async function shootWeb(browser, url, device, shots) {
   for (const shot of shots) {
     for (const scheme of ["light", "dark"]) {
@@ -93,7 +100,7 @@ async function shootWeb(browser, url, device, shots) {
       });
       const link = shot.link ? shot.link(fx) : null;
       await ctx.addInitScript(
-        `window.__OUTL_SHOTS__ = ${JSON.stringify(fx)};\nwindow.__OUTL_SHOTS_LINK__ = ${JSON.stringify(link)};\n${bridge}`,
+        `${firstRunDone}\nwindow.__OUTL_SHOTS__ = ${JSON.stringify(fx)};\nwindow.__OUTL_SHOTS_LINK__ = ${JSON.stringify(link)};\n${bridge}`,
       );
       const page = await ctx.newPage();
       try {
