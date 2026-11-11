@@ -361,6 +361,7 @@ Stored through `outl-config` at the shared global config path; the flat JSON DTO
 `settings.rs::restore_unmodeled_sections` lists only fields the modal does not own.
 **A new unmodeled config field omitted there will get silently dropped on the next modal save.**
 `backlinks_order` is the same pattern from the other side: it rides the DTO but `save` restores it from disk, so the modal cannot clobber the dedicated `set_backlinks_order` command's write.
+`managed` is one of those: it belongs to whoever installed the file (Nix/home-manager), so `restore_unmodeled_sections` restores it from disk and `update_settings` pins the DTO field to `outl_config::managed()` before storing — the client's `managed` value is display-only and can never reach the file. When set, `outl_config::save` is itself a no-op, `settings::load` carries the flag, and `SettingsModal` shows a notice and disables Save (the theme picker still previews live). See [`docs/nix.md`](../../docs/nix.md#declarative-config).
 
 ### Privacy: the crash-reporting toggle writes outside Save
 

@@ -29,7 +29,16 @@ default = ["lang-js", "lang-python", "lang-lua", "lang-rust", "lang-query"]
 # `src/runtimes/lisp.rs`.
 lang-lisp = ["dep:steel-core"]
 lang-js = ["dep:boa_engine"]
-lang-python = ["dep:rustpython-vm", "dep:rustpython-host_env"]
+lang-python = [
+  "dep:rustpython-vm",
+  "dep:rustpython-host_env",
+  # The rest are resolver pins, not code this crate calls. See [dependencies].
+  "dep:rustpython-ruff_python_ast",
+  "dep:rustpython-ruff_python_parser",
+  "dep:rustpython-ruff_python_trivia",
+  "dep:rustpython-ruff_source_file",
+  "dep:rustpython-ruff_text_size",
+]
 lang-lua = ["dep:mlua"]
 # Rust support requires the wasmtime sandbox
 lang-rust = ["wasm"]
@@ -57,6 +66,38 @@ tracing.workspace = true
 steel-core = { version = "0.8", optional = true }
 boa_engine = { version = "0.22", optional = true }
 rustpython-vm = { version = "0.6", optional = true, default-features = false, features = ["compiler"] }
+
+# None of the five below is code this crate calls. They are resolver pins, and
+# a direct dependency is the only mechanism cargo has for bounding the version
+# of a transitive one.
+#
+# RustPython vendors five forks of ruff's parser crates and publishes them in
+# lockstep at one version, but each declares the others with a caret. So
+# `rustpython-codegen 0.6.0` asks for `rustpython-ruff_python_ast = "0.16.5"`,
+# cargo reads that as `^0.16.5`, and 0.16.10 rewrote the AST codegen is written
+# against: `ExprCompare` lost `left` / `comparators`, `Vec<Comprehension>`
+# became `Box<[_]>`, `FStringValue::as_slice` is gone. rustpython-vm 0.6.0 is
+# the newest release, so there is nothing to bump to.
+#
+# `Cargo.lock` already holds 0.16.5, which is why the workspace builds and CI
+# stays green. But `cargo install` is the one cargo command that ignores the
+# lockfile and re-resolves, so without these `cargo install --path
+# crates/outl-cli` dies with ten E0026 / E0308 errors inside a crate nobody
+# here named, which reads like a broken checkout and is not one.
+#
+# Pinning only the AST is half a fix: it holds the parser too (0.16.10 of the
+# parser wants 0.16.10 of the AST), and leaves `text_size`, `source_file` and
+# `trivia` free to float to 0.16.10 under an 0.16.5 AST. That skew is not a
+# combination upstream ships or tests, so the whole family is pinned to the
+# version rustpython 0.6.0 was built against.
+#
+# Lift all five together when rustpython ships a codegen built against 0.16.10
+# or later. Lifting one is what put the skew back.
+rustpython-ruff_python_ast = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_python_parser = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_python_trivia = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_source_file = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_text_size = { version = "=0.16.5", optional = true, default-features = false }
 mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 
 # Source hashing (auto-run cache key, sidecar content hash). Used
@@ -64,8 +105,8 @@ mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 sha2 = { workspace = true }
 
 # WASM sandbox stack (gated behind `wasm`). Workspace MSRV is rust 1.99.
-wasmtime = { version = "49.0.5", optional = true }
-wasmtime-wasi = { version = "49.0.5", optional = true }
+wasmtime = { version = "50.0.1", optional = true }
+wasmtime-wasi = { version = "50.0.1", optional = true }
 dirs = { workspace = true, optional = true }
 
 [dev-dependencies]
