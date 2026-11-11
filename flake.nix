@@ -151,7 +151,7 @@
           # binaries (esbuild, tailwind-oxide) built for the build machine.
           frontendNodeModulesHash = {
             x86_64-linux = "sha256-Sibc8YY2b+SbvjM8KXA6ZCxgUoRFGY4vPDTbKAKaV0U=";
-            aarch64-linux = "sha256-RS8tcU3k4Bj5Vs2wEF512FqiME+rOe6Xy/Ytm1S59TM=";
+            aarch64-linux = "sha256-o4OetK45qmD1E3UKWlOEYG5Irh7uaos5P4pLfNaRAzY=";
           };
 
           mkDesktopNodeModules =
