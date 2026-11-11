@@ -131,9 +131,11 @@
           #      sandbox exception: they get network through it, so the npm
           #      tarball fetches work with `sandbox = true`. The output is a
           #      self-contained node_modules tree addressed by its declared
-          #      hash. `--linker=copyfile` writes real files instead of
-          #      hardlinks into bun's global content store, so the tree is
-          #      closed over — nothing downstream dereferences outside $out.
+          #      hash. `--linker=hoisted` writes real directories instead of
+          #      a `.bun` content store, so the tree is closed over and
+          #      nothing downstream dereferences outside $out. Workspace
+          #      packages are not part of it (see the loop below), so the
+          #      hash moves only with bun.lock, not with workspace source.
           #   2. `mkDesktopFrontend` is a normal derivation running `vite
           #      build` offline against that tree. A normal derivation gets
           #      no network even with `allowNetworking = true`, which is
@@ -148,8 +150,8 @@
           # The hash is per-system because node_modules carries native
           # binaries (esbuild, tailwind-oxide) built for the build machine.
           frontendNodeModulesHash = {
-            x86_64-linux = "sha256-hXPno3IaCc/Ep2Y+9IRJzXvF6PmPupnUClrEs8PO8KA=";
-            aarch64-linux = "sha256-RS8tcU3k4Bj5Vs2wEF512FqiME+rOe6Xy/Ytm1S59TM=";
+            x86_64-linux = "sha256-Sibc8YY2b+SbvjM8KXA6ZCxgUoRFGY4vPDTbKAKaV0U=";
+            aarch64-linux = "sha256-o4OetK45qmD1E3UKWlOEYG5Irh7uaos5P4pLfNaRAzY=";
           };
 
           mkDesktopNodeModules =
@@ -184,13 +186,13 @@
                 bun install --frozen-lockfile --linker=hoisted
                 # Workspace entries (the clients, plugin-sdk, examples) are
                 # relative links into the source tree; `mv` below orphans
-                # them. Replace each with a real copy so the tree is closed
-                # and fixupPhase's symlink audit passes.
+                # them. Drop them instead of copying: a copy would tie this
+                # fixed-output hash to workspace source, so any edit under
+                # crates/ or plugin-sdk/ would change it. mkDesktopFrontend
+                # recreates the two links Vite needs from its own src.
                 for l in node_modules/outl* node_modules/@outl/*; do
                   if [ -L "$l" ]; then
-                    t="$(readlink -f "$l")"
                     rm "$l"
-                    cp -rL "$t" "$l"
                   fi
                 done
                 mv node_modules $out
@@ -222,6 +224,11 @@
                 # Writable copy: Vite's dep optimizer caches in node_modules.
                 cp -r ${deps} node_modules
                 chmod -R u+w node_modules
+                # Workspace links dropped by mkDesktopNodeModules, pointed
+                # at this derivation's own source tree.
+                mkdir -p node_modules/@outl
+                ln -sfn ../../crates/outl-frontend-shared node_modules/@outl/shared
+                ln -sfn ../../plugin-sdk node_modules/@outl/plugin-sdk
                 cd crates/outl-desktop
                 # `node` provides the interpreter; the .bin shims are not
                 # exec'd, so the sandbox's missing /usr/bin/env is moot.
