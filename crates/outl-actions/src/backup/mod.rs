@@ -102,7 +102,7 @@ mod repo;
 #[cfg(test)]
 mod tests;
 
-pub use auto::{maybe_snapshot, spawn_auto_pass, STARTUP_DELAY};
+pub use auto::{maybe_snapshot, spawn_auto_pass, BackupRoot, STARTUP_DELAY};
 pub use repo::BackupRepo;
 
 /// Ways a backup can fail.

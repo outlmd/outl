@@ -13,6 +13,11 @@
 //!   the two bounds exists. When none does — the bounds are tied, or
 //!   `right` is `left` plus a single `a`, or `right` is the floor `"a"`
 //!   itself — the right bound is dropped and the lower bound wins.
+//! - The result ends in the floor byte `a` **only when every key in the
+//!   gap does**, because a key ending there is one whose own successor
+//!   gap is empty: nothing sorts between `"b"` and `"ba"`, so the next
+//!   insert after `"b"` loses its bound and lands past `"ba"`
+//!   (issue #476).
 //! - It never panics, on any pair of positions.
 //!
 //! **`between` is a pure function, and that is the whole reason ties
@@ -34,6 +39,11 @@ const FIRST_BYTE: u8 = b'a';
 const LAST_BYTE: u8 = b'z';
 const BELOW_FIRST: u8 = FIRST_BYTE - 1; // 0x60 — sentinel: "before any valid byte"
 const ABOVE_LAST: u8 = LAST_BYTE + 1; // 0x7b  — sentinel: "after any valid byte"
+/// Midpoint of the unconstrained window — `b'm'`, the byte
+/// [`Fractional::between`]'s own midpoint branch pushes once both bounds
+/// are exhausted. Spelled as that arithmetic rather than as `b'm'` so
+/// the two can never disagree about where the middle of `a..=z` is.
+const FREE_MIDPOINT: u8 = (((BELOW_FIRST as u16) + (ABOVE_LAST as u16)) / 2) as u8;
 
 /// A lexicographically sortable position string.
 ///
@@ -127,6 +137,57 @@ impl Fractional {
     /// `O`), on every boot, because the tie lives in the op log and
     /// replays (issue #282).
     ///
+    /// # Why the result never ends in `a`
+    ///
+    /// That second empty gap is one this function used to **mint**:
+    /// `between("b", "bc")` was `"ba"`, and `"ba"` is `"b"` plus the
+    /// floor byte, so the next insert after `"b"` had nowhere to go.
+    /// Dropping the bound was correct and the block still landed behind
+    /// `"ba"` — a wrong tree rather than a crash, which is #282's other
+    /// side (issue #476). Halving one gap towards `left` reaches such a
+    /// key in about seven steps, so bottom-up outdents and repeated
+    /// inserts after one block hit it routinely.
+    ///
+    /// The rule that closes it is the usual one for fractional indexing:
+    /// **no minted key ends in the floor byte**, so no pair
+    /// `(k, k + "a")` can be produced, so every pair of minted keys has
+    /// an interior. Where the floor byte is the midpoint, the descent
+    /// goes one level deeper (`"ba"` becomes `"bam"`); where `right`'s
+    /// own tail is floor bytes all the way down, every key in the gap
+    /// ends there — `("a", "aaa")` holds only `"aa"` — and the shortest
+    /// is returned, because overshooting the bound is the worse answer.
+    ///
+    /// **Two builds mint different keys for one gap, and that is
+    /// fine.** "Same gap, same key" is a property of *this* function,
+    /// relied on so that two devices inserting into one gap offline
+    /// converge; it was never a property across versions, and could not
+    /// be — an old peer mints `"ba"` where a new one mints `"bam"`.
+    /// Both are valid positions, both replay through the same CRDT, and
+    /// `outl_actions::tree::sort_siblings` orders them with the same
+    /// comparison, so the two devices still render one tree. What the
+    /// user sees on a mixed-version pair is the *old* device's inserts
+    /// occasionally landing a slot off, which is the bug being fixed,
+    /// bounded to that device. Nothing is rewritten: positions already
+    /// in the op log are replayed, never recomputed, which
+    /// `outl-actions/tests/sibling_order.rs` pins by replaying legacy
+    /// positions through the op log.
+    ///
+    /// # Cost, and how not to misread a benchmark of it
+    ///
+    /// O(len(left) + len(right)) per call, and keys grow by roughly one
+    /// byte per three inserts when every insert targets the same anchor
+    /// — 20,000 of them reach a 6,668-byte key at ~880µs a call. That
+    /// is inherent to fractional indexing.
+    ///
+    /// **An old-vs-new benchmark of that workload reads as a ~1,000×
+    /// regression, and it is not one.** The old code was fast there
+    /// because it had stopped working: it minted `"ba"`, then `"bam"`,
+    /// then `"ba"` again — a two-cycle between one pair of keys, short
+    /// forever because it had quit producing fresh ones. Every insert
+    /// past the second landed in the wrong place. That oscillation
+    /// *was* issue #476. Compare against correct placement or do not
+    /// compare.
+    ///
     /// # Guarantees
     ///
     /// - The result is always a valid position: non-empty, `a..=z`.
@@ -135,17 +196,24 @@ impl Fractional {
     ///   between the bounds exists. **When the gap is empty the lower
     ///   bound wins**: `right` is dropped and the result is the next key
     ///   above `left`.
+    /// - The result ends in the floor byte only when every key in the
+    ///   gap does, so no pair of minted keys is left without an
+    ///   interior.
     /// - The result is a pure function of the bounds, so two devices
     ///   performing the same insert converge on the same key.
     /// - It never panics.
     ///
     /// A caller that needs the upper bound honoured compares the result
-    /// against `right` itself — `outl_actions::tree::position_before`
-    /// does, returning `None`, and `create_before` then moves the anchor
-    /// up and takes its key, which is the only way to open a slot in a
-    /// gap that has none. Returning `Result` was the alternative: it
-    /// buys the same check at every call site, and most of them pass no
-    /// upper bound at all and so can never fail.
+    /// against `right` itself. **Both** of
+    /// `outl_actions::tree::position_before` and `position_after` do,
+    /// returning `None`, and `outl_actions::block::slot` then frees a
+    /// neighbour's key — the only way to open a slot in a gap that has
+    /// none. `position_after` skipped that check for as long as a tie
+    /// looked like the only empty gap, which is how a block ended up
+    /// behind the neighbour it was meant to precede (issue #476).
+    /// Returning `Result` was the alternative: it buys the same check at
+    /// every call site, and most of them pass no upper bound at all and
+    /// so can never fail.
     pub fn between(left: Option<&Self>, right: Option<&Self>) -> Self {
         let left_bytes: &[u8] = left.map(|f| f.0.as_bytes()).unwrap_or(&[]);
         let right_bytes: &[u8] = right.map(|f| f.0.as_bytes()).unwrap_or(&[]);
@@ -173,7 +241,20 @@ impl Fractional {
         // exhausted, the window is the full `(BELOW_FIRST, ABOVE_LAST)`
         // and the midpoint branch always breaks.
         let bound = left_bytes.len().max(right_bytes.len());
-        let mut result = Vec::<u8>::with_capacity(bound + 1);
+        // How many of `right`'s trailing bytes are the floor. Hoisted
+        // out of the loop on purpose: the descent below asks "is the
+        // rest of `right` all floor bytes", and asking it per byte made
+        // `between` quadratic in key length — 880µs for one call at a
+        // 6,668-byte key, which a 20,000-insert run at one anchor
+        // reaches. `len - (i + 1) <= run` is the same question in O(1).
+        let right_floor_tail = right_bytes
+            .iter()
+            .rev()
+            .take_while(|&&b| b == FIRST_BYTE)
+            .count();
+        // `+ 2`: one byte per index, plus the one the floor-byte descent
+        // below appends before breaking.
+        let mut result = Vec::<u8>::with_capacity(bound + 2);
         for i in 0..=bound {
             debug_assert_eq!(result.len(), i, "exactly one byte pushed per byte index");
             let l_byte = left_bytes.get(i).copied().unwrap_or(BELOW_FIRST);
@@ -196,7 +277,24 @@ impl Fractional {
             // the panic this function exists to stop having.
             if (r_byte as u16) > (l_byte as u16) + 1 {
                 // Room for a byte strictly inside the window.
-                result.push((((l_byte as u16) + (r_byte as u16)) / 2) as u8);
+                let mid = (((l_byte as u16) + (r_byte as u16)) / 2) as u8;
+                result.push(mid);
+                if mid == FIRST_BYTE {
+                    // The floor byte has nothing below it, so a key
+                    // ending in one has no room *above* it either:
+                    // `("b", "ba")` is an empty gap, and the next insert
+                    // after `"b"` falls into it and lands past `"ba"`
+                    // (issue #476). Descend one more level instead.
+                    //
+                    // Safe against both bounds without re-reading
+                    // either: a midpoint is strictly inside its window,
+                    // so `result` already sorts above `left` and
+                    // strictly below `right` at this byte — appending
+                    // cannot reach either. A midpoint of `a` also means
+                    // `l_byte` was the `BELOW_FIRST` sentinel, so `left`
+                    // is exhausted and the level below is unconstrained.
+                    result.push(FREE_MIDPOINT);
+                }
                 break;
             }
 
@@ -213,13 +311,30 @@ impl Fractional {
             if right_binding && pushed < right_bytes[i] {
                 right_binding = false;
             }
-            if right_binding && i >= left_bytes.len() && i + 1 < right_bytes.len() {
+            if right_binding
+                && i >= left_bytes.len()
+                && i + 1 < right_bytes.len()
+                && i + 1 + right_floor_tail >= right_bytes.len()
+            {
                 // `left` is exhausted and `result` matches `right` byte
                 // for byte with bytes to spare, so `result` is a proper
                 // prefix of `right`: already `> left` (same prefix, one
                 // byte longer) and `< right`. Descending further walks
                 // past the only slot the gap has — this is the
                 // `("a", "aaa")` case, whose answer is `"aa"`.
+                //
+                // **Only when the rest of `right` is floor bytes**, and
+                // that qualifier is the whole of issue #476's second
+                // half. `pushed` is `FIRST_BYTE` here (`left` exhausted
+                // means the sentinel), so stopping leaves a
+                // floor-tailed key — the shape with no room above it.
+                // Where `right` still holds a byte above the floor there
+                // *is* a better answer below it (`("b", "bam")` → `baf`,
+                // not `ba`), and taking the short one re-armed the bug
+                // one insert later, with `"bam"` being exactly what the
+                // mint rule above now produces for `("b", "bc")`.
+                // Where it does not, every key in the gap ends in the
+                // floor byte and the shortest is the honest answer.
                 break;
             }
         }
@@ -375,6 +490,40 @@ mod tests {
             serde_json::from_str::<Fractional>("\"abc\"").unwrap(),
             Fractional::parse("abc").unwrap()
         );
+    }
+
+    /// The floor byte has nothing below it, so a key ending in one has
+    /// no room above it: `("b", "ba")` is an empty gap, and the next
+    /// insert after `b` falls into it, drops the bound and lands past
+    /// `"ba"` (issue #476). Minting `"ba"` in the first place is what
+    /// arms that, so the midpoint pushes past the floor instead.
+    #[test]
+    fn between_never_mints_a_key_ending_in_the_floor_byte() {
+        for (l, r) in [("b", "bc"), ("a", "b"), ("m", "mn"), ("a", "ac")] {
+            let left = Fractional::parse(l).unwrap();
+            let right = Fractional::parse(r).unwrap();
+            let got = Fractional::between(Some(&left), Some(&right));
+            assert!(
+                !got.as_str().ends_with('a'),
+                "({l}, {r}) minted {got}, whose successor gap is empty"
+            );
+            assert!(
+                left < got && got < right,
+                "{got} must land inside ({l}, {r})"
+            );
+        }
+    }
+
+    /// The exception, and it is forced rather than chosen: every key in
+    /// `("a", "aaa")` is `"a"` followed by floor bytes, so there is no
+    /// non-floor-tailed answer to give. Pushing past the floor here
+    /// would overshoot the bound, which is the worse failure.
+    #[test]
+    fn between_ends_in_the_floor_byte_only_when_every_key_in_the_gap_does() {
+        let a = Fractional::parse("a").unwrap();
+        let aaa = Fractional::parse("aaa").unwrap();
+        let got = Fractional::between(Some(&a), Some(&aaa));
+        assert_eq!(got.as_str(), "aa", "the gap holds exactly one key");
     }
 
     #[test]

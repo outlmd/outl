@@ -49,7 +49,7 @@ That file rides the file-sync surface (Syncthing / Dropbox / NFS / git all repli
 | Device-store scratch files a killed writer left half-published (never bindings, never backed up) | `outl_core::STALE_SCRATCH_TTL` (via `DeviceStore::stale_scratch` / `prune_scratch`) | `crates/outl-core/src/device/gc.rs` |
 
 | Snapshot / restore a workspace locally (git-backed; the git dir lives **outside** the workspace, so no file transport replicates it and the user's own repo in that folder is never touched). Use `git_available`, never a raw `git` spawn | `outl_actions::backup::{init, snapshot, snapshot_best_effort, list, restore, repo_dir, git_available, is_initialized, BackupRepo, BackupEntry, BackupError}` + `outl_config::BackupCfg` | `crates/outl-actions/src/backup/` |
-| Wire a client up to periodic backups — one call, detached thread, interval floor read back out of git, never on the edit or quit path | `outl_actions::backup::{spawn_auto_pass, maybe_snapshot, STARTUP_DELAY}` | `crates/outl-actions/src/backup/auto.rs` |
+| Wire a client up to periodic backups — one call, detached thread, interval floor read back out of git, never on the edit or quit path | `outl_actions::backup::{spawn_auto_pass, BackupRoot, maybe_snapshot, STARTUP_DELAY}` | `crates/outl-actions/src/backup/auto.rs` |
 
 Also block any `reconcile_md(.., None)` outside a test.
 Matching level 3 trashes the blocks it can't place, and `outl-md`'s hard rule is that they are recorded in `orphans.log` first — passing `None` is how the desktop and mobile boot paths deleted silently.
@@ -92,6 +92,7 @@ Two rules the module owns: a deleted block stays in its page's history (a histor
 | Put a deleted block back where it was deleted from | `outl_actions::trash::restore` | `crates/outl-actions/src/trash.rs` |
 | Why a restore would refuse (single owner; `list` and `restore` both ask) | `outl_actions::trash::refusal_for` | `crates/outl-actions/src/trash.rs` |
 | The parent a node sat under just before it was trashed (folded from the log, never `Move.old_parent`) | `outl_actions::trash::parent_at_deletion` | `crates/outl-actions/src/trash.rs` |
+| The page a restore would land on, for a caller that must name one before mutating | `outl_actions::trash::landing_page` | `crates/outl-actions/src/trash.rs` |
 
 Recently added — check these before writing a parallel **table** helper (catalog: `docs/primitives-markdown.md` → "Parse / render", "View helpers", "Cross-runtime TS contracts"):
 
@@ -199,7 +200,9 @@ Recently added — check these before writing a parallel template helper (catalo
 | Parse a markdown **fragment** (clipboard text, a pasted subtree) where a leading `---` is content, not page metadata — `parse` would split it off as frontmatter | `outl_md::parse::parse_fragment` | `crates/outl-md/src/parse.rs` |
 | Split a comma-separated page-property value (`alias::`, and the template `params::` list) into trimmed, non-empty entries — never hand-roll a second comma splitter | `outl_md::parse_alias_list` | `crates/outl-md/src/index.rs` |
 | The recovery command for `ActionError::PageMarkdownAheadOfLog`, as one constant so the variant's `Display`, `outl doctor`'s listing, and the MCP's structured refusal can't quote three spellings of the same command | `outl_actions::error::AHEAD_OF_LOG_RECOVERY_COMMAND` | `crates/outl-actions/src/error.rs` |
-| Per-surface catalog of which write-refusal (today: `PageMarkdownAheadOfLog`) is explained on which of five surfaces (TUI/Desktop/Mobile/CLI/MCP) — exhaustive `match` mirroring `outl_shortcuts::support`, deliberately its own type rather than an extension of `Client` (three members, outline-drawing clients only). Generates `docs/clients.md`'s refusal table (RFC 0255) | `outl_actions::refusal::{Refusal, Surface, Support, SurfaceSupport, refusal_support}` | `crates/outl-actions/src/refusal.rs` |
+| Per-surface catalog of which write-refusal (today: `PageMarkdownAheadOfLog`) is explained on which of five surfaces (TUI/Desktop/Mobile/CLI/MCP) — exhaustive `match` mirroring `outl_shortcuts::support`, deliberately its own type rather than an extension of `Client` (three members, outline-drawing clients only). Generates `docs/clients.md`'s refusal table (RFC 0255) | `outl_actions::refusal::{Refusal, Surface, Support, SurfaceSupport, refusal_support}` | `crates/outl-actions/src/refusal/mod.rs` |
+| The words every Rust surface uses for `PageMarkdownAheadOfLog`: title, body (counts off the `ActionError`), sample, a **surface-specific** `action`, the recovery command, and `one_line()` so a toast or status line never joins them itself. `@outl/shared`'s `aheadOfLogNotice` is a declared, pinned mirror | `outl_actions::refusal::{ahead_of_log_notice, AheadOfLogNotice}` | `crates/outl-actions/src/refusal/mod.rs` |
+| What a user can do about a **trash** refusal, per surface. Keyed on the way out (`Remedy`), not on the refusal, since four refusals share three ways out; `remedy_action` is exhaustive over (`Remedy`, `Surface`) and `trash_refusal_text` owns the join. `ActionError`'s `Display` keeps the diagnosis only | `outl_actions::refusal::{Remedy, RemedyAction, remedy_for, remedy_action, trash_refusal_text}` | `crates/outl-actions/src/refusal/trash.rs` |
 | Split a block at a character offset (Enter mid-text): head stays in the block, tail becomes a new sibling right after it, children stay with the head | `outl_actions::block::split_block` | `crates/outl-actions/src/block/split.rs` |
 | Insert a sibling after a path, seeded with text (the TUI's in-flight block-split: tail of the split goes into the new sibling) | `outline_ops::insert_sibling_after_with_text` | `crates/outl-md/src/outline_ops.rs` |
 | Resolve the markdown link `[text](url)` under a caret position (anchor OR url) — the URL a client opens externally (TUI `gx` opens it in the browser when the block isn't code) | `outl_md::inline::link_at_cursor` → `Option<&str>` | `crates/outl-md/src/cursor.rs` |
@@ -218,6 +221,19 @@ Two ingestors exist (`outl-sync-iroh`'s `ingest_received_ops`, `outl-plugins`' `
 |---|---|---|
 | Is this op's timestamp too far in the future to trust? Returns how far past `MAX_CLOCK_SKEW_MS` it sits (for the caller's `warn!`), `None` to accept. **Call it before `observe`** | `outl_core::hlc::skew_ahead_ms(ts, now_ms)` + `outl_core::hlc::MAX_CLOCK_SKEW_MS` | `crates/outl-core/src/hlc.rs` |
 | Local wall clock in epoch ms, `None` before the epoch — the fallible form a ceiling-deciding caller needs (`0` would drop every op as 55 years ahead) | `outl_core::hlc::wall_clock_ms_checked()` | `crates/outl-core/src/hlc.rs` |
+
+Recently added — placing a block next to another one (catalog: `docs/primitives-core.md` §1).
+**Block any PR that places or moves a node with a `Fractional::between` result without checking the bound it passed in.**
+`between` drops a bound it cannot satisfy, so on an empty gap — a tie (#282), or a neighbour one floor byte away (#476) — the key sorts **past** the neighbour the caller named, and the block lands on the wrong side of it.
+`tree::interior_between` is the one owner of that check and `block::slot` the one owner of what to do about it; a caller re-deriving either is the drift to refuse.
+Five places put a node beside an existing one — `create_before`, `create_after`, `outdent`, `move_after`, `desync::recover_level` — and all five route through `block::slot`.
+**Neither is transitional**: a gap whose tail is all floor bytes forces the shape on an all-new workspace, and an un-upgraded peer keeps minting it.
+
+| Intent | Use this | File |
+|---|---|---|
+| Does this gap hold a key at all? `None` for a tie or a neighbour one floor byte away | `outl_actions::tree::interior_between` (crate-private) | `crates/outl-actions/src/tree/position.rs` |
+| A slot strictly between a node and its next / previous sibling, `None` when the gap has no interior | `outl_actions::tree::position_after` / `position_before` | `crates/outl-actions/src/tree/position.rs` |
+| Open a slot that does not exist — free a neighbour's key by shifting it up, and refuse to move one that cannot be cleared (the new block may land a slot off; an existing sibling may never move) | `outl_actions::block::slot::{slot_between, slot_after, vacate}` (crate-private) | `crates/outl-actions/src/block/slot.rs` |
 
 Frontend shared primitives (`@outl/shared`) — canonical home is [`crates/outl-frontend-shared/CLAUDE.md`](../../crates/outl-frontend-shared/CLAUDE.md) → "Today's surface"; the embed / block-ref pieces the desktop wires for issue #147:
 

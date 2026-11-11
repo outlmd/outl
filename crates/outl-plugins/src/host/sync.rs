@@ -60,12 +60,13 @@ impl PluginHost {
         }
         let jsonl = lines.join("\n");
         let count = lines.len();
-        self.prepare_secrets(idx);
+        self.prepare_turn(idx);
         let config = self.plugins[idx].config.clone();
-        self.plugins[idx]
-            .engine
-            .sync_push(&jsonl, &config)
-            .map_err(|e| PluginError::Engine(e.to_string()))?;
+        let pushed = self.plugins[idx].engine.sync_push(&jsonl, &config);
+        // Before the `?`, for the reason `transform_block` spells out: a
+        // discarded write is worse than an unsaved one.
+        self.finish_turn(idx);
+        pushed.map_err(|e| PluginError::Engine(e.to_string()))?;
         Ok(count)
     }
 
@@ -86,13 +87,13 @@ impl PluginHost {
         let Some(idx) = self.sync_plugin() else {
             return Ok(0);
         };
-        self.prepare_secrets(idx);
+        self.prepare_turn(idx);
         let config = self.plugins[idx].config.clone();
-        let Some(jsonl) = self.plugins[idx]
-            .engine
-            .sync_pull(&config)
-            .map_err(|e| PluginError::Engine(e.to_string()))?
-        else {
+        let pulled = self.plugins[idx].engine.sync_pull(&config);
+        // Before both the `?` and the early return: a transport that stored
+        // its cursor keeps it whether the pull found nothing or threw.
+        self.finish_turn(idx);
+        let Some(jsonl) = pulled.map_err(|e| PluginError::Engine(e.to_string()))? else {
             return Ok(0);
         };
 

@@ -214,7 +214,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 
 TUI + desktop; mobile has no Visual equivalent yet.
 
-On the desktop, `Shift+↑` / `Shift+↓` start (and keep growing) a contiguous selection **without** vim mode — the non-vim multi-select entry.
+On the desktop, `Shift+↑` / `Shift+↓` start (and keep growing) a contiguous selection **without** vim mode — the non-vim multi-select entry, painted at 18% accent opacity.
 It flips the client into Visual and pops a floating **batch toolbar** (`N selected` + Indent / Outdent / Move up / Move down / Delete / Done) so the range ops are reachable by mouse; the toolbar fires the same actions the chords do.
 Only the toolbar's **Delete** confirms before erasing a range that contains nested children; the keyboard delete (`d` / `x` / `Delete` / `Backspace`) and the TUI delete without a prompt, matching vim.
 
@@ -334,6 +334,44 @@ Quick capture (`Cmd+Shift+Space` / `Ctrl+Shift+Space`) adds one line to the end 
 
 A chord change is a single line in `defaults.rs` plus, if the action is new, a row in `action.rs` and a handler in each client.
 See [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) for the full add-a-binding checklist.
+
+### Desktop internals: the range and fold handlers
+
+**This one is for contributors, not for looking up a key.**
+It sits under the table above because it is the next question after it: having found the handler, what does the handler have to do?
+Six decisions behind individual desktop handlers, each a rule rather than a preference, and each with an obvious alternative that is wrong in a way that is quiet.
+The architectural half (the three categories of vim op, why the char-cursor ops have no handler, how Visual mode is reachable without vim) is in [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md) → "Vim parity".
+
+**This section is a declared home for desktop handler behaviour contracts, alongside the per-client CLAUDE.md — and that is a widening, not what the catalog crate already said.**
+[`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) → "What this crate does NOT own" sends those contracts to the per-client doc and gives *this* page a different job: "`docs/tui.md` / `docs/shortcuts.md` for user-facing copy".
+It states outright that "the per-client doc is the right place to land the contract", so it is the counterpart to this paragraph, not its corroboration.
+It illustrates the contracts with `FoldAll` (`z M`), `UnfoldAll` (`z R`) and `DeleteRange` — three of the rules below, which is why the address matters here rather than in the abstract.
+The widening stands on its own: the crate CLAUDE.md sits under a 40k context guard, so a contract that is pure iteration order lands here and the rule it serves stays there.
+Written down so the next contributor inherits the decision instead of relitigating it from the same evidence.
+
+- **Range ops walk bottom-up or top-down, and tolerate an id that is already gone.**
+  `applyVisualBlockOp` has four callers.
+  `IndentVisualRange`, `OutdentVisualRange` and `MoveVisualRangeUp` walk `[lo → hi]`; `MoveVisualRangeDown` passes `reverse = true` for `[hi → lo]`, because a descending move has to clear the block below the range first.
+  `DeleteRange` is **not** one of them — it owns its own `[...rangeIds].reverse()` loop, bottom-up for a different reason: children before parents, so a parent's move-to-trash cannot pull a still-targeted descendant out from under the walk.
+  NodeIds are stable — `deleteBlock` is `Move(node, TRASH)` and moves preserve identity — so the highlight follows the re-render, and `safeCall` swallows a per-id failure instead of aborting the range.
+- **`z R` / `z M` walk `flattenAll` / `flattenParents`, never `flattenVisible`.**
+  `z R` must expand subtrees hidden under a collapsed parent, and a visible-only walk no-ops on every descendant of a folded node.
+  `z M` uses `flattenParents` because `set_block_collapsed` always writes `Op::SetCollapsed` (the CRDT needs every flip to converge), so folding a leaf would make its future children appear collapsed.
+  `z R` can use `flattenAll`, since unfolding a leaf has no future effect.
+  This mirrors `outl-tui`'s `collect_collapse_candidates`, so the op count matches across clients.
+- **`A` routes through a caret intent, not a post-focus fixup.**
+  The handler sets `caretIntent: "end"` *before* `editingBlockId`; the row's effect reads it on mount, applies `setSelectionRange`, then clears it.
+- **The Visual highlight is a memoised `Set<id>` at the parent**, built once per change as `visualSet` and answered per row in O(1).
+  A per-row predicate is O(N²) per keystroke; `isInVisualRange` survives in `@outl/shared/outline` for tests only.
+  Mobile's `Journal.tsx` mirrors `visualSet` by that name, so renaming it is a two-client change.
+- **`O` creates with `beforeId`.**
+  `createBlock({ beforeId: anchor })` → `create_before` (a floor-slot swap in core).
+  Never reintroduce the old create-at-tail plus `moveBlockDown` loop.
+  `Cmd/Ctrl+Shift+Enter` is caret-aware inside the editor (col 0 → *before*, past col 0 → *below*), and `stopImmediatePropagation` is what preempts the catalog's create-below binding.
+- **The block clipboard is one tagged value, and cut preserves identity.**
+  `{ kind: "cut", nodeId } | { kind: "copy", markdown }`, with the backend resolving the page via `enclosing_page_id`.
+  Cut emits a single `Op::Move` (cross-page allowed, a self-subtree target rejected); copy duplicates through `paste_block_after` with fresh ids.
+  `Y` and Visual `y` additionally write the OS clipboard via `copy_markdown`; paste-in `p` / `P` is deferred.
 
 ---
 

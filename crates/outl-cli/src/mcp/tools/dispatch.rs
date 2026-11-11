@@ -41,6 +41,7 @@
 
 use std::sync::Arc;
 
+use outl_actions::refusal::Surface;
 use serde_json::{json, Value};
 
 use crate::cmd::{
@@ -322,10 +323,10 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         }
 
         // --- backlinks / refs ---
-        "outl_trash_list" => ctx.with_workspace(|wc| trash_cmd::list(wc)),
+        "outl_trash_list" => ctx.with_workspace(|wc| trash_cmd::list(wc, Surface::Mcp)),
         "outl_trash_restore" => {
             let id = require_str(args, "id")?.to_string();
-            ctx.with_workspace(|wc| trash_cmd::restore(wc, &id))
+            ctx.with_workspace(|wc| trash_cmd::restore(wc, &id, Surface::Mcp))
         }
         "outl_backlinks" => {
             let slug = require_str(args, "slug")?.to_string();

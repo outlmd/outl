@@ -66,7 +66,7 @@ use crate::commands::{
     get_settings, get_telemetry_enabled, get_theme, get_theme_config, import_asset_file,
     indent_block, instantiate_template_at, journal_days_with_content, known_property_keys,
     list_action_support, list_all_pages, list_open_tasks, list_reminders, list_shortcut_bindings,
-    list_templates_cmd, list_themes, mark_block_done, merged_edits, move_block_after,
+    list_templates_cmd, list_themes, list_trash, mark_block_done, merged_edits, move_block_after,
     move_block_down, move_block_up, next_day, open_asset, open_external_file, open_journal_for,
     open_page_by_slug, open_ref, open_today_journal, outdent_block, outl_emoji_search,
     outl_peer_list, outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove, outl_peer_status,
@@ -76,8 +76,8 @@ use crate::commands::{
     plugin_settings_describe, plugin_sync_hooks, plugin_toolbar, plugin_transform,
     plugin_transformers, plugin_uninstall, previous_day, read_asset_data_url, redo_page,
     reload_workspace, reminder_settings, resolve_embeds, resolve_page_labels, resolve_ref,
-    run_auto_run_blocks, run_code_block, search_blocks, search_pages, search_persons,
-    set_backlinks_order, set_block_collapsed, set_block_property, set_block_remind,
+    restore_trash_entry, run_auto_run_blocks, run_code_block, search_blocks, search_pages,
+    search_persons, set_backlinks_order, set_block_collapsed, set_block_property, set_block_remind,
     set_page_property, set_reminder_settings, set_telemetry_enabled, set_workspace, snooze_presets,
     snooze_reminder, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
     undo_merged_edit, undo_page, update_settings, workspace_stats,
@@ -333,6 +333,7 @@ pub fn run() {
             // Cross-process workspace locks, held for as long as a
             // workspace is open. Written only by `open_workspace_at`.
             let workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>> = Arc::new(Mutex::new(None));
+            let backup_root = workspace_open::start_backup(&global_cfg.backup);
 
             let registry = Arc::new(RuntimeRegistry::with_builtins());
             let fs_watcher = Arc::new(Mutex::new(None));
@@ -346,6 +347,7 @@ pub fn run() {
                     workspace.clone(),
                     storage_root.clone(),
                     workspace_guards.clone(),
+                    backup_root.clone(),
                     fs_watcher.clone(),
                     iroh_transport.clone(),
                     iroh_pairing.clone(),
@@ -364,27 +366,14 @@ pub fn run() {
             let plugins =
                 spawn_plugin_service(workspace.clone(), storage_root.clone(), hlc.clone());
 
-            // Background projection writer: mutations queue their page
-            // here so the `.md` + sidecar write happens off the IPC
-            // thread (async-writes default). Shares the same workspace
-            // slot + swap-capable storage root the commands lock.
-            let projection_app = app.handle().clone();
-            let projection_writer = outl_tauri_shared::ProjectionWriter::spawn(
-                workspace.clone(),
-                storage_root.clone(),
-                move |failure| {
-                    if let Err(error) = projection_app
-                        .emit(outl_tauri_shared::PROJECTION_WRITE_FAILED_EVENT, failure)
-                    {
-                        tracing::warn!("failed to emit projection failure: {error}");
-                    }
-                },
-            );
+            let projection_writer =
+                workspace_open::spawn_projection_writer(&workspace, &storage_root, app.handle());
 
             app.manage(AppState {
                 workspace,
                 storage_root,
                 workspace_guards,
+                backup_root,
                 hlc,
                 settings: Arc::new(Mutex::new(settings)),
                 app_config_dir,
@@ -477,6 +466,9 @@ pub fn run() {
             deliver_due_reminders,
             // Page history, read out of the op log (read-only)
             page_timeline,
+            // Trash: what was deleted, and putting one back
+            list_trash,
+            restore_trash_entry,
             device_activity,
             export_markdown,
             merged_edits,

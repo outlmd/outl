@@ -186,7 +186,7 @@ A refusal is owed to whoever asked for the write, whether or not that asker draw
 | CLI | Every write subcommand that touches an existing page (`page update`, `block append`, `template apply`/`run`, ...) returns the same structured `PAGE_MARKDOWN_AHEAD_OF_LOG` JSON error the MCP does, with `--json`. `outl doctor` names the page, the line count and one sample outside any write attempt. `outl serve`'s `tree → .md` sweep discovers it with nobody asking: it names the page and the recovery on the first sweep that sees it and on every change to the set, never once per 30s tick, and says so once more when the set clears. `outl reconcile --ahead-of-log` is the recovery on all three. |
 | Desktop | `<PageAheadOfLogBanner client="desktop" />` above the outline, from `PageView.md_ahead_of_log`. Names the command to run in the workspace folder. |
 | Mobile | Same banner, `client="mobile"`. **There is no `outl` binary on iOS**, so the copy says to open the workspace on a computer instead of pointing at a terminal that doesn't exist. |
-| TUI | A persistent banner above the outline, from `App::md_ahead_of_log`: every page open runs `apply_page_md_with_sidecar_if_stale` (`load_current_no_autorun`), so a page that drifted ahead of the log is named on open, with no write attempt in between. Not a status-line message — the page stays frozen until the recovery runs, and a line that scrolls away is the same silence with a delay. Plus a status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`). |
+| TUI | A persistent banner above the outline, from `App::md_ahead_of_log`: every page open runs `apply_page_md_with_sidecar_if_stale` (`load_current_no_autorun`), so a page that drifted ahead of the log is named on open, with no write attempt in between. Not a status-line message — the page stays frozen until the recovery runs, and a line that scrolls away is the same silence with a delay. Plus a status-line message wherever a TUI-initiated write re-projects the page (template apply, `call:` code-block exec, mention-creation autocomplete) and a toast when a peer-sync reload's re-projection declines (`SyncEngine::reproject_page`, `reload_workspace_from_disk`) or when a trash restore lands on a page the user is **not** looking at (`actions/trash`): the banner can only speak for the page on screen, so a write that freezes a different one has no banner to appear on. A restore into the open page stays silent, because `load_current` re-derives that banner. |
 | MCP | A structured tool refusal — `PAGE_MARKDOWN_AHEAD_OF_LOG` — naming the page, line count, sample, and the recovery command, instead of a generic failure. |
 <!-- END GENERATED: refusal-matrix -->
 
@@ -219,7 +219,10 @@ This banner is not: asking for a distraction-free outline is not consent to be t
 
 The op log holds every revision of every block. `outl_actions::timeline` is the single owner of turning that into "what happened to this page" — which blocks count as the page's, which ops are not events, and the order. No client re-derives any of it.
 
-**Read-only on every surface.** Restoring a revision is `outl recover`, which covers one narrow case with a provably-additive rule (the recovered text *contains* the current text as a prefix). A general "put this back" button needs its own safety argument and does not exist.
+**A restore is new ops, never a rewind**, and `@outl/shared/trust`'s `restorePlan` is the single owner of which rows carry one.
+Two do: an edit puts the block's previous text back, a deletion brings the lost text back as a new block at the page end.
+A move, a property change, or an edit on a since-deleted block gets no button — "the version before" is a position or a value whose meaning depends on its neighbours, and the deletion row offers that text back instead.
+`outl recover` is the narrower CLI tool, and writes back a revision only when the recovered text *contains* the current text as a prefix.
 
 Two rules that decide what a reader sees:
 
@@ -247,17 +250,42 @@ Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invarian
 
 **The listing and the mutation share one verdict function** (`trash::refusal_for`). A listing that decided "restorable" for itself would drift towards offering an action that then fails — the same rule invariant 8 applies to which pages are safe to overwrite.
 
+**A refusal is a snapshot, not a promise.** The verdict reads the live tree, so a peer can trash the landing parent between a listing and a click, and the mutation declines a row the list showed as restorable. Every surface therefore handles the refusal *as well as* filtering on it, and the two sentences are the same one — both are `ActionError::to_string()` off `trash::refusal_for`. A GUI puts it on the row it belongs to and re-reads the listing; nothing re-words it.
+
 | Client | Surface |
 |--------|---------|
 | CLI | `outl trash list` and `outl trash restore <id>`. See [`docs/cli.md`](cli.md#trash). |
 | MCP | `outl_trash_list`, `outl_trash_restore` — an agent that can delete a block can undo it. |
-| Desktop | Not yet. |
-| Mobile | Not yet. |
-| TUI | Not yet. |
+| Desktop | `TrashPanel`, from the `🗑` button in the chrome toggle bar. See [`desktop-ux.md`](desktop-ux.md#trash-panel). |
+| TUI | `/trash` (and `:trash`), `r` to restore, `Enter` to open the page a deleted block came from. See [`tui.md`](tui.md#trash-trash-trash). |
+| Mobile | Not yet — the commands are registered, no sheet calls them. |
 
-No client surface exists, which is why `Capability::Trash` is in `outl_shortcuts::CLI_ONLY` rather than simply missing: a capability nobody reaches is normally a feature that does not exist, and that exemption has to be a declared row with a reason instead of a weakened test. Tracked in [issue #287](https://github.com/outlmd/outl/issues/287).
+Both GUI commands are `list_trash` / `restore_trash_entry` (`outl_tauri_shared::commands::trash`), which neither client may second-guess: `refusal` rides each row, and `restore_trash_entry` re-asks under its own lock.
+
+Neither surface has a chord. A chord needs an `Action` in `outl-shortcuts`, whose `support()` match is at its frozen size baseline, so it waits on that split — the per-client verdicts it would force are the mechanism, not the cost. The desktop's affordance is a button and the TUI's is its command registry, which is what `Capability::Trash` records (it was the one row in `CLI_ONLY`, now empty). [Issue #287](https://github.com/outlmd/outl/issues/287).
 
 Related but different: **undo / redo** is this session's mutations and does not survive a restart; this reaches a deletion from any device, on any day, because it reads the op log.
+
+## Reopening a deleted page
+
+A page root's id is derived from its slug, and delete keeps the node, so a deleted page's slug still resolves to that same node sitting in the trash.
+Opening it again therefore has to *move the root back*, not create it: `Op::Create` is idempotent, so it found the node and left it exactly where it was — in the trash.
+The page opened looking normal and every keystroke under it was dropped with no error, every morning, on a journal day the user had deleted ([issue #473](https://github.com/outlmd/outl/issues/473)).
+
+`outl_actions::page::open_or_create` revives it, so every client gets this without asking for it.
+Two things it deliberately does **not** do:
+
+- **It does not bring the deleted blocks back.**
+  They went to the trash with the page in one `Op::Move`, so reviving the root alone would undo the user's delete behind their back.
+  Each one is trashed in its own op instead, which is also what makes it an ordinary [trash](#restoring-a-deleted-block) entry: `outl trash restore <id>` puts it back under the revived page, with its subtree.
+  The one exception is a child that is itself a page root, from a page nested under another: `trash restore` refuses a page root, and reopening that page by its own slug is what brings it back.
+  Either way the content is hidden, never destroyed — the asymmetry [invariant 8](../CLAUDE.md#critical-invariants-never-violate) argues from.
+- **It does not append an empty block.**
+  A revived page is empty, and a client's own "this page is blank" affordance is what fills it.
+
+The page's `.md` is the caller's business as usual.
+A revive emits `Op::Move`s only, so a `.md` holding lines the op log never saw still refuses to be overwritten — see [Surfacing a page that stopped syncing](#surfacing-a-page-that-stopped-syncing).
+A `.md` still showing blocks the log holds *in the trash* is re-projected without them, which is the delete reaching the file.
 
 ## Running code blocks
 
@@ -698,15 +726,20 @@ Plugin `onOp` hooks on desktop/mobile are fire-and-forget (no `await` on the rep
 `outl_actions::backup` is the shared engine: local, versioned git snapshots of a workspace, with `outl backup list|restore` on top.
 `[backup] enabled` defaults to **on** ([config.md → `[backup]`](config.md#backup)), so the pass that makes that default true has to exist on the client, not just in the CLI.
 
-**One call wires a client up:** `outl_actions::backup::spawn_auto_pass(root, enabled, interval_minutes)`.
+**One call wires a client up:** `outl_actions::backup::spawn_auto_pass(root, enabled, interval_minutes)`, where `root` is a `BackupRoot`.
 It spawns a detached background thread, waits `STARTUP_DELAY` (60 s — boot is already the busiest moment a client has), then snapshots whenever `interval_minutes` has passed since the newest commit.
+The thread reads the current root at each pass instead of capturing a path, because the Tauri clients open their workspace asynchronously and can replace it at runtime; one thread per open would leave a snapshotter on every root the user has left.
+The TUI sets its `BackupRoot` once.
+The Tauri clients create one in `setup`, call `spawn_auto_pass` there, and hand it to `open_workspace_at`, which sets it only after the open succeeds.
+With no workspace open the pass does nothing.
+Two long-lived passes on one device (the TUI and the desktop on the same workspace) share one backup git dir and take no process lock, so the loser of an `index.lock` race logs a `warn!` and skips that interval.
 
 | Client | Automatic snapshots | Where it's wired |
 |---|---|---|
-| TUI | **Yes** | `runtime::run_with_theme_override`, right after `clock::init` |
+| TUI | **Yes** | `runtime::run_with_theme_override`, right after `clock::init`; sets its `BackupRoot` once |
 | CLI subcommands | No — a one-shot process; `outl backup now` is the explicit path | — |
-| Desktop | Not yet | — |
-| Mobile | Not yet — there is no `git` binary on iOS | — |
+| Desktop | **Yes** | `setup` in `outl-desktop/src-tauri/src/lib.rs`; `open_workspace_at` retargets it on every workspace switch |
+| Mobile | Wired, but only does something where a `git` binary exists — there is none on iOS, so the pass logs a `warn!` per interval and takes no snapshot | `setup` in `outl-mobile/src-tauri/src/lib.rs` |
 
 Three rules any client that wires this up must keep:
 

@@ -203,7 +203,7 @@ The typed signatures live in `@outl/plugin-sdk`; the runtime ships the subset be
 | `ctx.content` | `register(lang, fn)` — `fn(body) → { kind: "text" \| "rich", content } \| null` renders a fenced block of language `lang` (e.g. ` ```query `) | capability `content-transformer:text` / `:rich` |
 | `ctx.storage` | `get(k) → v \| null`, `set(k, v)`, `delete(k)` — per-plugin KV at `<workspace>/.outl/plugins/<id>/storage.json`, local-only (never converges) | `storage:local` |
 | `ctx.secrets` | `get(k) → string \| null` — read the plugin's own secret from the **OS keychain** (namespaced `outl-plugin:<id>`, never on disk in the workspace). Set out-of-band by the user; the plugin only reads | `secrets` |
-| `ctx.net` | `fetch(url, { method?, headers?, body?, timeoutMs? }) → { ok, status, headers, text(), json() }` (or `{ ok: false, error }` on a denied domain — it returns, it doesn't throw); **blocking** on the plugin thread | `network:<domain>` |
+| `ctx.net` | `fetch(url, { method?, headers?, body?, timeoutMs?, encoding? }) → { ok, status, headers, text(), json() }` (or `{ ok: false, error }` on a denied domain — it returns, it doesn't throw); **blocking** on the plugin thread | `network:<domain>` |
 | `ctx.sync` | `register({ push(opsJsonl), pull() → jsonl \| null })` — register a sync transport (core live; client polling is roadmap) | capability `sync-transport` |
 | `ctx.log` | `info(m)` / `warn(m)` / `error(m)` | — |
 | `ctx.ui` | `notify(m)` | — |
@@ -250,6 +250,12 @@ A few load-bearing notes:
     The plugin thread is shared by every plugin feature in the app, so an unbounded wait is not a slow fetch — it is the whole plugin surface, until the process restarts.
   - **Only `http` and `https`.** `ftp://`, `ws://` and friends carry a host your grant may well cover, and are refused anyway.
   - **Every redirect hop is re-checked** against your grants, and an `https → http` downgrade is refused outright.
+  - **`encoding: "base64"` is how you read a *binary* body**, and the only way.
+    A response crosses into JS inside a JSON string, so bytes that are not valid UTF-8 cannot survive the default text read.
+    It replaces each one with U+FFFD, irreversibly, which silently corrupts a cipher text, an image or a compressed stream rather than failing.
+    With it, `text()` returns the base64 and your plugin decodes it.
+    The size cap is measured on the raw bytes **before** encoding, so asking for base64 does not let a bigger body through.
+    Holding it does cost a third more, since base64 of N bytes is 4N/3 characters.
   - **Your `headers` stop at an origin change.** A redirect to a different host, port or scheme is followed *without* them, so a token in `X-Api-Key` never lands on a host that merely happens to be inside a wildcard grant (`*.s3.amazonaws.com`, `*.github.io`).
     If your API needs the header after a cross-origin redirect, follow the redirect yourself with a second `fetch`.
 - **`ctx.sync.register({ push, pull })`** registers a sync transport: the host serializes local ops into `push(opsJsonl)` and applies whatever `pull()` returns through `Workspace::apply`.

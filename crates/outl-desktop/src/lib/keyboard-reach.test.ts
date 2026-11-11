@@ -61,6 +61,71 @@ describe("rovingKeydown", () => {
     expect(document.activeElement).toBe(input);
     expect(ev.defaultPrevented).toBe(false);
   });
+
+  it("walks from a control beside the item it belongs to, not from row 0", () => {
+    // `TrashPanel`'s shape: the row is the stop and the Restore button
+    // is its *sibling* inside a flex wrapper. Focus lands on that button
+    // when it is clicked (WebKitGTK) and a refused mutation leaves it
+    // there, so the walk has to resolve it back to its row — `indexOf`
+    // answered -1 and `(-1 + 1) % len` sent ArrowDown to row 0.
+    html(`<div id="l">
+      <div class="wrap"><div data-row tabindex="0">a</div><button>ra</button></div>
+      <div class="wrap"><div data-row tabindex="0">b</div><button>rb</button></div>
+      <div class="wrap"><div data-row tabindex="0">c</div><button>rc</button></div>
+    </div>`);
+    const l = document.getElementById("l")!;
+    l.addEventListener("keydown", (e) => rovingKeydown(e, "vertical", { items: "[data-row]" }));
+    const rows = Array.from(l.querySelectorAll<HTMLElement>("[data-row]"));
+    const buttons = Array.from(l.querySelectorAll("button"));
+    const landed = () => rows.indexOf(document.activeElement as HTMLElement);
+
+    buttons[1].focus();
+    buttons[1].dispatchEvent(key("ArrowDown"));
+    expect(landed()).toBe(2);
+    buttons[1].focus();
+    buttons[1].dispatchEvent(key("ArrowUp"));
+    expect(landed()).toBe(0);
+  });
+
+  it("walks from a control nested inside the item too", () => {
+    // The other containment shape, which plain `closest` already
+    // covered. Both go through one resolver so a panel cannot pick the
+    // arrangement that happens to work.
+    html(`<div id="l">
+      <div data-row tabindex="0">a<button>x</button></div>
+      <div data-row tabindex="0">b<button>y</button></div>
+    </div>`);
+    const l = document.getElementById("l")!;
+    l.addEventListener("keydown", (e) => rovingKeydown(e, "vertical", { items: "[data-row]" }));
+    const rows = Array.from(l.querySelectorAll<HTMLElement>("[data-row]"));
+    // ArrowDown off row **0**, deliberately: an unresolved index is -1,
+    // and `(-1 - 1 + len) % len` is `len - 2`, which for several row
+    // counts happens to be the right answer for ArrowUp. ArrowDown's
+    // `(-1 + 1) % len` is always 0, so only row 0 moving to row 1 can
+    // tell a resolved index from an unresolved one.
+    const nested = l.querySelectorAll("button")[0];
+
+    nested.focus();
+    nested.dispatchEvent(key("ArrowDown"));
+    expect(rows.indexOf(document.activeElement as HTMLElement)).toBe(1);
+  });
+
+  it("still enters at the top from outside every item", () => {
+    // Focus on the container itself belongs to no item, and ArrowDown
+    // there should enter the list rather than do nothing. That is
+    // today's `-1 → 0`, kept deliberately: the resolver stops *before*
+    // the container precisely so it cannot answer "the first item" for
+    // focus that is simply not in one.
+    html(`<div id="l" tabindex="0">
+      <div data-row tabindex="0">a</div><div data-row tabindex="0">b</div>
+    </div>`);
+    const l = document.getElementById("l")!;
+    l.addEventListener("keydown", (e) => rovingKeydown(e, "vertical", { items: "[data-row]" }));
+    const rows = Array.from(l.querySelectorAll<HTMLElement>("[data-row]"));
+    l.focus();
+    l.dispatchEvent(key("ArrowDown"));
+    expect(document.activeElement).toBe(rows[0]);
+  });
 });
 
 describe("regions", () => {

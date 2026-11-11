@@ -48,11 +48,16 @@ reqwest = { version = "0.13", default-features = false, features = [
 # handing it to `install_from_dir`.
 tempfile = { workspace = true, optional = true }
 
+# `ctx.net.fetch`'s `encoding: "base64"`. A response body crosses into JS as a
+# JSON string, so bytes that are not valid UTF-8 cannot survive as text; this
+# is how a plugin reads a binary body at all.
+base64 = { version = "0.23", optional = true }
+
 [features]
 default = ["js"]
 # The Boa-backed plugin engine. Without it the crate still parses manifests,
 # gates permissions, and manages the lockfile — it just can't run plugin code.
-js = ["dep:boa_engine", "dep:reqwest"]
+js = ["dep:boa_engine", "dep:reqwest", "dep:base64"]
 # HTTP fetch of the static plugin registry (plugins.outl.app/registry.json).
 # Separate from `js`: a client can browse/search the registry without the
 # engine. Registry parsing + search are always available; only the network

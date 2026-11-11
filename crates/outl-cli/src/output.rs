@@ -51,8 +51,17 @@ pub mod codes {
     pub const TRASH_PARENT_TRASHED: &str = "TRASH_PARENT_TRASHED";
     /// The folded parent is absent from the materialized tree (#301).
     pub const TRASH_PARENT_MISSING: &str = "TRASH_PARENT_MISSING";
-    /// The block is in the trash but the log cannot say where it was.
+    /// The block is in the trash and the log's answer about where it
+    /// was does not resolve to a place this device can restore to.
     pub const TRASH_ORIGIN_UNKNOWN: &str = "TRASH_ORIGIN_UNKNOWN";
+    /// The block it was deleted from has since moved *inside* the
+    /// subtree being restored, so restoring there would be a cycle.
+    ///
+    /// Split out of `TRASH_ORIGIN_UNKNOWN`: the log says exactly where
+    /// the block was, and the saying is what produced the refusal, so
+    /// folding the two left an agent unable to tell "the log is
+    /// incomplete" from "the destination moved".
+    pub const TRASH_ORIGIN_INSIDE_SUBTREE: &str = "TRASH_ORIGIN_INSIDE_SUBTREE";
     /// Underlying CRDT / storage / filesystem error.
     pub const INTERNAL: &str = "INTERNAL";
     /// Generic user-input validation failure.

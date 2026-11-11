@@ -187,9 +187,19 @@ mod tests {
         // across modes" case (see `defaults.rs` + the crate
         // CLAUDE.md). Inside a textarea (Insert) the mode-specific
         // `WrapStrike` row must win over the Global `RunCodeBlock`
-        // one; everywhere else the Global binding fires. If this
-        // split ever regresses, running a fenced block while editing
-        // it would clobber the user's selection with strikethrough.
+        // one; everywhere else the Global binding fires.
+        //
+        // If this split ever regresses, `lookup` stops preferring the
+        // mode-specific row and falls through to `Global` inside the
+        // textarea, so `Cmd+Shift+X` executes the fence mid-edit
+        // instead of striking the selection.
+        //
+        // The previous wording here described `WrapStrike` winning as
+        // the regression. That is the shipped, deliberate behaviour
+        // these assertions protect (`docs/shortcuts.md`: "inside a
+        // textarea the Insert-mode strikethrough wins — commit first
+        // or use the Run button"), so a reader trusting it would have
+        // "fixed" the split backwards.
         let shift_meta_x = ChordSequence::chord(Chord::new(
             Modifiers::META | Modifiers::SHIFT,
             Key::char('x'),

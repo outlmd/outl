@@ -33,6 +33,7 @@ pub(crate) mod telemetry;
 pub(crate) mod template;
 pub(crate) mod theme;
 pub(crate) mod timeline;
+pub(crate) mod trash;
 pub(crate) mod workspace;
 
 pub(crate) use asset::*;
@@ -52,4 +53,5 @@ pub(crate) use telemetry::*;
 pub(crate) use template::*;
 pub(crate) use theme::*;
 pub(crate) use timeline::*;
+pub(crate) use trash::*;
 pub(crate) use workspace::*;

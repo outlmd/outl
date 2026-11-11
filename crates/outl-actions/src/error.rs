@@ -56,14 +56,19 @@ pub enum ActionError {
     /// `trash::restore` a second owner of the slug rule, so v1 refuses
     /// and says where the content still is.
     ///
-    /// It points at `outl block tree <id>` rather than `outl page
-    /// history <slug>`: the history resolves the slug among the live
-    /// pages, so it cannot find a deleted one, and when the slug has
-    /// been reused it shows the replacement's history instead.
+    /// **The way to read the content is not in this sentence.** It used
+    /// to end in "`outl block tree {node}` shows it", which is true on
+    /// the CLI and the MCP and false on the desktop panel and the TUI
+    /// overlay that print this string verbatim — neither has an `outl`
+    /// binary in reach, and by invariant 2 neither shows the user a
+    /// block id to paste into one. `crate::refusal::Remedy::ReadTrashedSubtree`
+    /// is where that per-surface answer lives now (and it is still
+    /// `outl block tree`, not `outl page history`: the history resolves
+    /// the slug among the *live* pages, so it cannot find a deleted one,
+    /// and when the slug has been reused it shows the replacement's).
     #[error(
         "cannot restore the page `{slug}` yet — only blocks can be restored today. \
-         Nothing is lost: the content is still in the op log, and \
-         `outl block tree {node}` shows it"
+         Nothing is lost: the content is still in the op log"
     )]
     TrashPageRestoreUnsupported {
         /// The deleted page root's id, as `outl trash list` shows it.
@@ -81,10 +86,12 @@ pub enum ActionError {
     /// exactly [#301](https://github.com/outlmd/outl/issues/301). Naming
     /// it as its own refusal keeps that diagnosis separate from "your
     /// parent is in the trash", which has a fix the user can act on.
-    #[error(
-        "cannot restore {node}: the block it was deleted from ({parent}) is not in the tree — \
-         run `outl doctor` to see whether ops for it are missing"
-    )]
+    ///
+    /// The "run `outl doctor`" half moved to
+    /// `crate::refusal::Remedy::CheckWorkspaceHealth`, which answers it
+    /// per surface — a phone has no binary to run, and this string is
+    /// printed verbatim by the desktop panel.
+    #[error("cannot restore {node}: the block it was deleted from ({parent}) is not in the tree")]
     TrashParentMissing {
         /// The block the caller asked to restore.
         node: String,
@@ -105,27 +112,67 @@ pub enum ActionError {
     #[error("block {0} is not in the trash — there is nothing to restore")]
     NotTrashed(String),
 
-    /// The node is in the trash, but the op log cannot say where it was
-    /// before.
+    /// The node is in the trash, and the op log's answer about where it
+    /// was does not resolve to a place this device can restore to.
     ///
     /// Three shapes reach this, and they share an answer because the
-    /// user's options are the same in all three — the block's text is
-    /// readable in the listing, and putting it back is a copy/paste:
+    /// same question settles all three — is this workspace's op log
+    /// complete here:
     ///
     /// - the log holds no move that placed it (a node created straight
     ///   under the trash root);
     /// - reading its ops failed, which is the damaged-log class
     ///   `outl doctor` reports;
-    /// - the only move on record is one the tree **refused** as a cycle.
-    ///   Invariant 4 keeps such an op in the log, so a fold that replays
-    ///   it lands inside the subtree being restored. Believing it would
-    ///   produce "restore X first" naming X itself.
-    #[error("cannot restore {node}: the op log cannot say where it was ({why})")]
+    /// - the parent the trail names is present, untrashed and
+    ///   **unreachable** — its own ancestor chain dead-ends at a node
+    ///   this replica never received (invariant 4's third clause).
+    ///
+    /// **`why` is the whole clause after the colon, not a parenthetical.**
+    /// The wrapper used to read "the op log cannot say where it was
+    /// ({why})", which was false for the fourth shape it carried (a
+    /// `Move` the tree refused as a cycle — the log says exactly where
+    /// it was, which is how the code knew) and nested one parenthetical
+    /// inside another. That shape is
+    /// [`ActionError::TrashOriginInsideSubtree`] now, and the three left
+    /// each state themselves.
+    #[error("cannot restore {node}: {why}")]
     TrashOriginUnknown {
         /// The block the caller asked to restore.
         node: String,
-        /// Which of the three shapes this is, in the user's words.
+        /// Which of the three shapes this is, in the user's words, as a
+        /// clause that can stand on its own after a colon.
         why: String,
+    },
+
+    /// `trash::restore` folded a parent out of the op log that has since
+    /// moved **inside** the subtree being restored.
+    ///
+    /// Restoring there would be a cycle, which the tree refuses as a
+    /// deterministic no-op — reported to the user as a restore that
+    /// worked. Reachable *concurrently*, not only by a local sequence:
+    /// one device deletes the block while another moves its old parent
+    /// inside it. Both ops are kept (invariant 4), the tree converges,
+    /// and the loser of that race is a trash row whose refusal never
+    /// clears on its own, because no further op un-nests the parent.
+    ///
+    /// **Its own variant rather than a `why` on
+    /// [`ActionError::TrashOriginUnknown`]**, which is where it used to
+    /// live. That variant's prefix said the log could not say where the
+    /// block was; here the log says precisely that, and the saying is
+    /// what produced this refusal. Three other things follow from the
+    /// split: its own error code, so an agent tells it apart without
+    /// parsing prose; a `Remedy` of its own
+    /// (`crate::refusal::Remedy::MoveOutOfTrash`), which is the one
+    /// remedy no GUI surface can perform; and one fewer nested
+    /// parenthetical.
+    #[error(
+        "cannot restore {node}: the block it was deleted from ({parent}) has since moved inside it"
+    )]
+    TrashOriginInsideSubtree {
+        /// The block the caller asked to restore.
+        node: String,
+        /// Its parent at deletion time, now inside `node`'s subtree.
+        parent: String,
     },
 
     /// The block is at the top of its sibling list and cannot be

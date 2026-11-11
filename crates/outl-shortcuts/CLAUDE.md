@@ -122,7 +122,8 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
    You do not get to skip this: `support()` is an exhaustive `match`, so the crate does not compile until the row exists.
    Then wire the handlers the row promised:
    - TUI: `crates/outl-tui/src/input/normal.rs` (its own `match`, not `lookup` — see the note under "What this crate does NOT own").
-   - Desktop: `crates/outl-desktop/src/lib/action-handlers.ts`.
+   - Desktop: the handler group under `crates/outl-desktop/src/lib/` that owns what your action changes — `chrome-`, `cursor-`, `block-`, `page-`, `visual-` or `clipboard-handlers.ts`.
+     `action-handlers.ts` is the assembly and takes no new entries; see `outl-desktop/CLAUDE.md` → "`action-handlers.ts` is eight files".
 
    > **This step used to read:** *"A client that doesn't need the action just doesn't add a handler — `lookup` returns `Some(Action::Foo)` and the dispatcher no-ops with a debug log."*
    >

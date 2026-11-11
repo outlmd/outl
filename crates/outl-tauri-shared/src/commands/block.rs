@@ -22,7 +22,7 @@ use crate::helpers::{
     with_ws, with_ws_mut,
 };
 use crate::host::AppHost;
-use crate::state::{CreateBlockReply, CutBlockReply, PageView, PasteReply};
+use crate::state::{CreateBlockReply, CutBlockReply, DroppedEdit, PageView, PasteReply};
 
 /// Create a block. Precedence: `before_id` (vim `O` /
 /// `Cmd/Ctrl+Shift+Enter` at col 0) wins over `after_id` (vim `o` /
@@ -109,35 +109,90 @@ pub fn edit_block<S: AppHost>(
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
     let registry = state.exec_registry();
-    finish_in_page(state, page, |ws| {
-        // Tolerate a stale block id. Between the frontend reading the block's
-        // id and this commit landing, a concurrent sync reload can re-mint or
-        // trash that node (its content already converged via the peer's ops),
-        // leaving `edit_text` with nowhere to write. Surfacing the raw
-        // `block <id> is not in the tree` as a Retry toast is the wrong UX —
-        // Retry re-fails forever against the same dead id. Treat it as a no-op
-        // and let the projection below refresh the page to the merged state, so
-        // the client swaps its stale `editingId` for the live tree. This mirrors
-        // the stale-anchor tolerance `create_after_or_append` already has.
+    let (dropped, view) = finish_in_page_with(state, page, |ws| {
+        // A stale block id. Between the frontend reading the block's id and
+        // this commit landing, a concurrent sync reload can re-mint or trash
+        // that node — or a peer can delete the whole page.
+        //
+        // Returning the error is not the answer, and the shape of each client
+        // says why: mobile's `commitEdit` keeps the editor open and pins a
+        // **Retry** button to the failure, so a dead id becomes a retry that
+        // can never succeed with the draft parked behind it; the desktop's
+        // `handleError` skips `applyView`, so the client also never drops the
+        // stale `editingId` it is failing against.
+        //
+        // So two things happen instead, and **both** are needed. The text is
+        // kept where it still can be, through the one function that already
+        // owns this tolerance for `create_block`. And the reply says so, via
+        // [`DroppedEdit`] — keeping the text silently is a new silence, not a
+        // fixed one: the end of a journal day is below the fold, so "my text
+        // vanished from where I typed it" is the same observation from the
+        // user's seat ([issue #473](https://github.com/outlmd/outl/issues/473)
+        // bullet 2).
+        //
+        // An empty edit has nothing to preserve, and appending a blank block
+        // is the issue's third bullet. It writes nothing and says nothing.
+        // `None` once nothing holds this text: the block the `call:` re-run
+        // below would read does not exist, so there is nothing to re-run.
+        let mut target = Some(node);
+        let mut dropped = None;
         match edit_text(ws, state.hlc(), node, &text) {
             Ok(()) => {}
+            Err(ActionError::NotInTree(_)) if text.trim().is_empty() => {
+                warn!("edit_block: node {node} not in tree and the edit is empty; skipping");
+                target = None;
+            }
             Err(ActionError::NotInTree(_)) => {
-                warn!(
-                    "edit_block: node {node} not in tree (re-minted by a sync reload?); skipping"
-                );
-                return Ok(());
+                // `create_after_or_append` refuses a page that is not live
+                // itself, **before** writing an op — without that guard this
+                // arm landed an empty `Op::Create` under the trashed page,
+                // discarded the text anyway, and returned the error it was
+                // written to avoid.
+                match create_after_or_append(ws, state.hlc(), page, node, Some(&text)) {
+                    Ok(new_id) => {
+                        warn!(
+                            "edit_block: node {node} not in tree (re-minted by a sync \
+                             reload?); kept the text as {new_id} at the end of the page"
+                        );
+                        target = Some(new_id);
+                        dropped = Some(DroppedEdit::kept(&node.to_string(), &new_id.to_string()));
+                    }
+                    // The page went with it. Nothing was written and there is
+                    // nowhere to write it; the notice is the whole of what we
+                    // can give the user.
+                    Err(ActionError::NotInTree(_)) => {
+                        warn!(
+                            "edit_block: page {page} is not in the tree either; the edit \
+                             to {node} could not be kept anywhere"
+                        );
+                        target = None;
+                        dropped = Some(DroppedEdit::lost(&node.to_string()));
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             Err(e) => return Err(e),
         }
         // Finishing an edit on a `call:<name>` block re-runs it so the
         // `> **result:**` reflects the freshly-typed params. Best-effort:
-        // a failing template must never drop the edit itself.
-        if let Some((name, params)) = outl_actions::parse_call_invocation(&text) {
-            let _ =
-                outl_actions::run_callable_block(ws, state.hlc(), &registry, &name, &params, node);
+        // a failing template must never drop the edit itself. Runs against
+        // the block that actually holds the text — the re-targeted one when
+        // the original was gone, and not at all when nothing holds it.
+        if let (Some(target), Some((name, params))) =
+            (target, outl_actions::parse_call_invocation(&text))
+        {
+            let _ = outl_actions::run_callable_block(
+                ws,
+                state.hlc(),
+                &registry,
+                &name,
+                &params,
+                target,
+            );
         }
-        Ok(())
-    })
+        Ok(dropped)
+    })?;
+    Ok(view.with_dropped_edit(dropped))
 }
 
 pub fn toggle_todo<S: AppHost>(state: &S, page_id: String, id: String) -> Result<PageView, String> {

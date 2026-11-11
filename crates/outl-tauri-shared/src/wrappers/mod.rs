@@ -147,3 +147,4 @@ pub mod capture;
 pub mod catalog;
 pub mod merges;
 pub mod telemetry;
+pub mod trash;

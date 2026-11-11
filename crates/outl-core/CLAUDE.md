@@ -39,9 +39,14 @@ Treat every change as production-bound.
   What it does now: **the lower bound wins.**
   The result is always a valid position, always sorts after `left`, and sorts before `right` *iff* a key between the two exists; when the gap is empty `right` is dropped.
   It never panics, and it is still a pure function of the bounds, so two devices converge.
-  A caller that needs the upper bound honoured checks it, and **every** caller that would *move* an existing node with the result must: `outl_actions::tree::position_before` returns `None`, and `create_before` then shifts the anchor up and takes its key — but only after asking the same question about the gap *above* it, because a tie there would send the anchor below a block the user never touched.
-  Where both gaps are empty the new block shares the anchor's key and the `NodeId` tiebreak decides the order, which is the honest answer: a tie is not separable without choosing a `NodeId`.
+  A caller that needs the upper bound honoured checks it, and **every** caller that places a node with the result must: `outl_actions::tree::interior_between` is the one comparison that asks (behind `position_before` / `position_after`), and `outl_actions::block::slot` then frees a neighbour's key — but only after asking the same question about the gap *above* that neighbour, because a tie there would send it below a block the user never touched.
+  Where both gaps are empty the new block shares the neighbour's key and the `NodeId` tiebreak decides the order, which is the honest answer: a tie is not separable without choosing a `NodeId`.
   `Result` was the alternative and buys the same check at all eleven call sites, most of which pass no upper bound and so can never fail.
+  **`between` also never mints a key ending in the floor byte**, unless every key in the gap does.
+  It used to mint `"ba"` for `("b", "bc")`, so the *next* insert after `"b"` had no interior and landed behind `"ba"` — #282's empty gap producing a wrong tree instead of a crash.
+  The reasoning, and why two builds minting different keys for one gap costs nothing, live in the `between` doc comment ([issue #476](https://github.com/outlmd/outl/issues/476)).
+  The mint rule stops producing new ones; **the callers' checks are not a migration** — a gap whose tail is all floor bytes still forces one on an all-new workspace, and an un-upgraded peer mints them tomorrow, not only yesterday.
+  Pinned by the floor-tail half of the `tests/fractional_index.rs` proptest and by `outl-actions/tests/sibling_order.rs`, which drives the actions rather than the function.
   **`Deserialize` is a constructor and goes through `parse`.**
   The derived impl took the `String` as-is, which made the one constructor fed untrusted bytes — a line of `ops-<actor>.jsonl` off iroh, off iCloud, or half-written after a crash — the one that skipped validation, so a remote peer chose when this process aborted.
   `#[serde(try_from = "String")]` makes a malformed position one skipped record, named in the log, with every healthy op around it still replayed (invariant #5).

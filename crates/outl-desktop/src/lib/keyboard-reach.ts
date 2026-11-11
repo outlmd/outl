@@ -32,27 +32,82 @@ function visible(el: HTMLElement): boolean {
   return !el.closest("[hidden],[inert]");
 }
 
-function focusables(root: Element): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(visible);
+function focusables(root: Element, selector: string = FOCUSABLE): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(visible);
+}
+
+/**
+ * The item focus belongs to, which is not always the item focus is *on*.
+ *
+ * Only resolved when the caller narrowed the stops: without `items`
+ * every focusable is its own stop, so there is nothing to resolve and
+ * walking up would change behaviour for every caller that passes
+ * nothing.
+ *
+ * **Not `closest`.** That answers only the nested shape, and the panel
+ * this was written for does not have it: `TrashPanel`'s Restore button
+ * is the row's *sibling* inside a flex wrapper, so `closest` finds
+ * nothing and the index stays `-1`. The question is "which item does
+ * this focus belong to", and the answer that covers both shapes is the
+ * innermost ancestor that **is, or holds,** an item.
+ *
+ * The walk stops *before* `container`: the container holds every item,
+ * so including it would answer "the first one" for anything — which is
+ * the `-1 → 0` jump this exists to remove, wearing a different mask.
+ * Focus genuinely outside every item keeps today's `-1`, so an arrow
+ * from the container itself still enters at the top.
+ */
+function activeItem(container: HTMLElement, items?: string): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  if (!items || !active) return active;
+  for (let n: HTMLElement | null = active; n && n !== container; n = n.parentElement) {
+    if (n.matches(items)) return n;
+    const held = n.querySelector<HTMLElement>(items);
+    if (held) return held;
+  }
+  return active;
 }
 
 /**
  * Wire as `onKeyDown` on a toolbar or list container. With
  * `includeFields` (forms such as Settings) arrows can land on a text
  * field or select too; once there, arrows belong to it again.
+ *
+ * `items` narrows what counts as a stop, for a list whose rows contain
+ * controls. {@link FOCUSABLE} is a *selector list*, so `button` matches
+ * on its own tag and `tabindex="-1"` on a button removes nothing — a
+ * row holding a button is therefore two arrow stops, and arrowing off
+ * row 0 lands on row 0's own button instead of row 1. Passing the row
+ * selector makes the container say what its items are rather than
+ * leaving a generic selector to guess, which is the only thing that can
+ * answer it: whether a descendant is a *stop* or part of the row is the
+ * container's question, not the element's.
+ *
+ * Narrowing the stops is only half of it: focus can still be **on** one
+ * of the controls a narrowed `items` excluded, because clicking a
+ * button focuses it (WebKitGTK, the Linux desktop runtime) and a
+ * mutation that then refuses leaves it there. `indexOf` answered `-1`
+ * for that, `(-1 + 1) % len` is `0`, and ArrowDown from a focused
+ * button jumped to row 0 while ArrowUp landed on row n-2. So the active
+ * element is resolved **up** to the item that contains it before the
+ * index is taken — the same question `items` answers, asked of focus
+ * rather than of the walk.
  */
 export function rovingKeydown(
   e: KeyboardEvent,
   orientation: Orientation,
-  opts: { includeFields?: boolean } = {},
+  opts: { includeFields?: boolean; items?: string } = {},
 ): void {
   const container = e.currentTarget as HTMLElement | null;
   if (!container || isTextField(e.target as Element)) return;
   const [prev, next] = orientation === "horizontal" ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
   if (![prev, next, "Home", "End"].includes(e.key)) return;
-  const items = focusables(container).filter((el) => opts.includeFields || !isTextField(el));
+  const items = focusables(container, opts.items).filter(
+    (el) => opts.includeFields || !isTextField(el),
+  );
   if (items.length === 0) return;
-  const at = items.indexOf(document.activeElement as HTMLElement);
+  const active = activeItem(container, opts.items);
+  const at = active ? items.indexOf(active) : -1;
   let to: number;
   if (e.key === "Home") to = 0;
   else if (e.key === "End") to = items.length - 1;

@@ -206,9 +206,13 @@ export interface AppStateShape {
    * Caret intent the next mounting `<BlockRow />` textarea consumes
    * the moment it lands in the DOM. Set by vim-style entry actions
    * that need the caret somewhere other than where the click would
-   * leave it — today only `EnterInsertAtEnd` (`A` in vim) uses
-   * `"end"`. Cleared by `<BlockRow />` as soon as it applies the
-   * intent so a subsequent regular click doesn't get hijacked.
+   * leave it: `EnterInsertAtEnd` (`A` in vim) uses `"end"`. A
+   * codepoint offset (`number`) carries the caret Tab / Shift-Tab
+   * captured before commit, through the remount `onIndent` /
+   * `onOutdent` cause by re-entering edit mode on the moved block
+   * (#477); `"end"` / `"start"` can't express a mid-string position.
+   * Cleared by `<BlockRow />` as soon as it applies the intent so a
+   * subsequent regular click doesn't get hijacked.
    *
    * Why a signal and not `queueMicrotask` + `document.querySelector`:
    * the textarea is mounted by Solid's `<Show>` swap, which doesn't
@@ -217,7 +221,7 @@ export interface AppStateShape {
    * `createEffect` — same tick the textarea ref is populated, every
    * time.
    */
-  caretIntent: "end" | "start" | null;
+  caretIntent: "end" | "start" | number | null;
   /** Picker overlay open state. `Cmd/Ctrl+P` toggles. */
   pickerOpen: boolean;
   /**
@@ -252,6 +256,16 @@ export interface AppStateShape {
    * 200, with the uncapped count shown beside them.
    */
   tasksOpen: boolean;
+  /**
+   * Trash panel open state. Opened from the `🗑` button in the chrome
+   * toggle bar. No chord yet: an `Action` needs an arm in
+   * `outl_shortcuts::support`, which is frozen at its size baseline —
+   * the same gap `timelineOpen` has. `Capability::Trash` records it.
+   *
+   * Distinct from the undo stack: that is this session's mutations,
+   * this is every deletion from every device, forever.
+   */
+  trashOpen: boolean;
   /**
    * Page-history panel open state. Opened from the `⏱` button in the
    * page header. Read-only: it lists what the op log says happened to
@@ -318,12 +332,37 @@ const [state, setState] = createStore<AppStateShape>({
   remindersOpen: false,
   tasksOpen: false,
   timelineOpen: false,
+  trashOpen: false,
   focusBlockId: null,
   dropTargetBlockId: null,
   lastError: null,
 });
 
 export { state as appState, setState as setAppState };
+
+/**
+ * A chrome flag: a panel or overlay that is either on screen or not.
+ *
+ * Derived from the shape rather than hand-listed. The keyboard path and
+ * the click path each carried their own list — a seven-key union in
+ * `chrome-handlers.ts`, five inline flips in `<ChromeToggleBar />` — and
+ * the two never agreed: `trashOpen` and `marketplaceOpen` are clickable
+ * and absent from the union, `backlinksOpen` and `tasksOpen` are the
+ * other way round.
+ */
+export type PanelFlag = Extract<keyof AppStateShape, `${string}Open`>;
+
+/**
+ * Flip a chrome flag.
+ *
+ * The single owner of "the button and the chord do the same thing":
+ * both call this, so neither can end up reading one flag and writing
+ * another. The `Esc` cascade in `chrome-handlers.ts` keeps its own list
+ * because the thing it owns is the *order*, not the flip.
+ */
+export function togglePanel(flag: PanelFlag): void {
+  setState(flag, !state[flag]);
+}
 
 /**
  * Update the outline by **reconciling** (keyed on block id), not

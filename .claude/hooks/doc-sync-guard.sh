@@ -278,12 +278,39 @@ esac
 # moved there when `BlockRow.tsx` was split; `BlockRow.tsx` now has no
 # keyboard code at all, so watching only it meant a one-line chord swap
 # fired nothing.
+#
+# The `*-handlers.ts` siblings are here for the identical reason, one
+# split later: `action-handlers.ts` is the assembly now and is designed
+# to take no new entries, so watching only it would have missed every
+# future handler edit rather than merely some of them.
+#
+# `docs/desktop-ux.md` joined this list when the feature-by-feature
+# behaviour moved there (the crate CLAUDE.md was over the 40k context
+# guard). The CLAUDE.md kept the rules; what a surface actually *does*
+# is now on the docs page, and a keystroke change can invalidate either.
+#
+# Note the gate below is an AND, not an either/or: rule 3 adds EVERY
+# untouched doc in `docs_to_check` to `stale`, and `shortcut_change=1`
+# also bypasses the >=10-added-lines threshold. So a one-line handler
+# edit warns unless all three of these are touched. That breadth is the
+# intended cost here, not an accident: a chord or handler change that
+# genuinely reaches none of the three is the case the warning's own
+# "or confirm this is invisible to those readers" escape is for.
 case "$rel" in
   crates/outl-desktop/src/lib/shortcuts.ts \
   | crates/outl-desktop/src/lib/action-handlers.ts \
+  | crates/outl-desktop/src/lib/handler-context.ts \
+  | crates/outl-desktop/src/lib/chrome-handlers.ts \
+  | crates/outl-desktop/src/lib/cursor-handlers.ts \
+  | crates/outl-desktop/src/lib/block-handlers.ts \
+  | crates/outl-desktop/src/lib/page-handlers.ts \
+  | crates/outl-desktop/src/lib/visual-handlers.ts \
+  | crates/outl-desktop/src/lib/clipboard-handlers.ts \
+  | crates/outl-desktop/src/lib/speed-handlers.ts \
   | crates/outl-desktop/src/components/BlockRow.tsx \
   | crates/outl-desktop/src/components/BlockEditor.tsx)
     docs_to_check+=("crates/outl-desktop/CLAUDE.md")
+    docs_to_check+=("docs/desktop-ux.md")
     docs_to_check+=("crates/outl-shortcuts/CLAUDE.md")
     shortcut_change=1
     ;;
