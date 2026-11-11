@@ -411,7 +411,9 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         "outl_batch" => ctx.with_workspace(|wc| batch_cmd::apply_batch(wc, args)),
 
         // --- workspace ---
-        "outl_workspace_info" => ctx.with_workspace(|wc| Ok(wi_cmd::info(wc))),
+        "outl_workspace_info" => {
+            ctx.with_workspace(|wc| wi_cmd::info(wc).map_err(ApiError::internal))
+        }
         "outl_workspace_doctor" => doctor_cmd::collect_in_session_json(&ctx.workspace_path),
 
         // --- templates ---

@@ -124,18 +124,24 @@ pub(crate) fn current_workspace(state: State<'_, AppState>) -> Option<String> {
 
 /// Block / op counts and readiness for the frontend's boot gate.
 ///
-/// **Deliberately synchronous.** The body is O(1) — `node_count()` and
-/// `log().len()` are both a `len()` on a collection — so unlike the rest
-/// of the surface there is no work here to move off the IPC thread. Its
-/// only cost is the wait on the workspace mutex, and the fix for that is
-/// to stop holding the mutex for seconds (see
-/// `outl_tauri_shared::offload`), not to move the waiting.
+/// **Deliberately synchronous and infallible.** The body is O(1) —
+/// `node_count()` is a `len()` on a collection and `total_ops()` answers
+/// from the persisted offset index — so unlike the rest of the surface
+/// there is no work here to move off the IPC thread. Its only cost is
+/// the wait on the workspace mutex, and the fix for that is to stop
+/// holding the mutex for seconds (see `outl_tauri_shared::offload`), not
+/// to move the waiting.
+///
+/// It stays fallible-*free* on purpose: `App.tsx` gates first paint on
+/// this call in a `try/finally` with no `catch`, so a rejected promise
+/// would drop a user with a perfectly fine workspace back on the
+/// picker. An index read that *does* fail falls back to the resident
+/// `log().len()` — a smaller number, never a broken boot.
 ///
 /// Making it `async` is also not free: Tauri requires an async command
 /// with a reference input (`State<'_, _>`) to return a `Result`, so it
-/// would change this command's wire shape — a rejected promise becomes
-/// representable on the one call `App.tsx` gates the first paint on —
-/// to relocate a wait that is already short.
+/// would change this command's wire shape — the same rejected-promise
+/// hazard, for a wait that is already short.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     let week_start = state.calendar_week_start;
@@ -149,12 +155,14 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
-            ops: ws.log().len(),
+            ops: ws.total_ops().unwrap_or_else(|e| {
+                tracing::warn!("total_ops failed ({e}); reporting the resident log");
+                ws.log().len()
+            }),
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
             week_start,
-            ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
             blocks: 0,
@@ -163,10 +171,6 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             storage_root,
             ready: false,
             week_start,
-            // No workspace, so nothing was withheld: zero is the whole
-            // count. Labelling it partial would hedge about a number that
-            // is exact.
-            ops_complete: true,
         },
     }
 }

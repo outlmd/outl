@@ -593,17 +593,6 @@ export interface WorkspaceSummary {
    */
   ready: boolean;
   /**
-   * Whether `ops` is the whole log. `false` after a snapshot boot, when
-   * the count covers only the delta replayed above the cutoff — on a real
-   * workspace that is 332 against 228,943, so a client that renders `ops`
-   * must say which of the two it is showing. `outl workspace info` prints
-   * the same verdict as `ops_complete`.
-   *
-   * Older binaries did not send it, so treat a missing value as `true`:
-   * compare against `false`, never fall back to `false`.
-   */
-  ops_complete: boolean;
-  /**
    * Which day the calendar grid starts on, from the global
    * `[calendar] week_start` (`~/.config/outl/config.toml`): `"monday"`
    * or `"sunday"`. `null` (or missing on an older backend) means unset,

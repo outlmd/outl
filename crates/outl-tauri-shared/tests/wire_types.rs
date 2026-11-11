@@ -186,7 +186,6 @@ fn workspace_summary_matches_its_interface() {
         storage_root: "/w".into(),
         ready: true,
         week_start: Some(outl_config::WeekStart::Monday),
-        ops_complete: false,
     };
     assert_wire_shape(&dto, "WorkspaceSummary", &[]);
 }

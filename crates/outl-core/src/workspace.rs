@@ -31,6 +31,7 @@ mod batch;
 mod clock;
 mod router;
 mod snapshot_policy;
+mod stats;
 mod text_history;
 
 pub use text_history::TextRevision;
@@ -698,6 +699,9 @@ impl Workspace {
     }
 
     /// Read-only access to the in-memory op log.
+    ///
+    /// After a snapshot boot this is only the post-cutoff delta, not the whole
+    /// op log. Use [`Self::total_ops`] when you need the persisted total.
     pub fn log(&self) -> &OpLog {
         &self.log
     }

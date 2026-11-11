@@ -7,11 +7,13 @@ use crate::state::{AppState, WorkspaceSummary};
 
 /// Block / op counts and readiness for the frontend's boot gate.
 ///
-/// **Deliberately synchronous**, for the reasons spelled out on the
-/// desktop twin (`outl-desktop/src-tauri/src/commands/workspace.rs`):
-/// the body is O(1), and Tauri makes an async command with a
-/// `State<'_, _>` input return a `Result`, which would change this
-/// command's wire shape. Do not convert one of the pair alone.
+/// **Deliberately synchronous and infallible**, for the reasons spelled
+/// out on the desktop twin (`outl-desktop/src-tauri/src/commands/
+/// workspace.rs`): the body is O(1) (`total_ops()` answers from the
+/// offset index, falling back to `log().len()` on the rare index
+/// failure), and Tauri makes an async command with a `State<'_, _>`
+/// input return a `Result`, which would change this command's wire
+/// shape. Do not convert one of the pair alone.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     let week_start = state.calendar_week_start;
@@ -20,12 +22,14 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
     match guard.as_ref() {
         Some(ws) => WorkspaceSummary {
             blocks: ws.tree().node_count(),
-            ops: ws.log().len(),
+            ops: ws.total_ops().unwrap_or_else(|e| {
+                tracing::warn!("total_ops failed ({e}); reporting the resident log");
+                ws.log().len()
+            }),
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
             week_start,
-            ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
             blocks: 0,
@@ -34,8 +38,6 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             storage_root,
             ready: false,
             week_start,
-            // See the desktop twin: zero with no workspace is exact.
-            ops_complete: true,
         },
     }
 }

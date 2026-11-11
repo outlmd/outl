@@ -118,6 +118,15 @@ pub trait Storage: Send + Sync {
     /// Return all ops in HLC order.
     fn all_ops(&self) -> Result<Vec<LogOp>, StorageError>;
 
+    /// Number of ops persisted in this storage.
+    ///
+    /// The default implementation parses every op; backends should override
+    /// with an index-driven count when available so that a summary statistic
+    /// does not pay the cost of a full replay.
+    fn op_count(&self) -> Result<usize, StorageError> {
+        self.all_ops().map(|v| v.len())
+    }
+
     /// Return every op that a snapshot with the given per-actor `cutoff`
     /// has **not** yet folded into its materialized state, in HLC order.
     ///

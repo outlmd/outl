@@ -497,14 +497,42 @@ That release matters: a lease left held by a killed process locks every outl pro
 
 ### `outl workspace info`
 
-A summary: root, actor, page and journal counts, op count, tree nodes.
+A summary of the workspace and its materialized tree.
 
-**`ops` counts the resident op log, which is not always the whole log.**
-A workspace that boots from a snapshot replays only the ops above the cutoff, so that is what the count covers.
-When it does, the output says so (`ops: 332 since the last snapshot`) and the JSON carries `ops_complete: false`.
-A partial count presented as a total reads as data loss — it printed `ops: 332` for a graph whose `ops/` holds 228,943 — so the label is part of the answer, not a footnote.
+```text
+root:      /path/to/workspace
+actor:     01J...
+pages:     12
+journals:  3
+blocks:    89 (107 total nodes)
+props:     214
+tags:      7
+backlinks: 31
+assets:    4
+trashed:   2
+snapshots: 1 (12.4 KB)
+modified:  2026-11-09T01:23:45Z
+ops:       23,456 total
+```
 
-`outl doctor` is where the exact figure lives: it parses every `.jsonl` because integrity is its job, and making a summary command parse the whole log to print one number is a cost this command has no reason to pay.
+**`ops` is the persisted op-log total.**
+It includes ops folded into the snapshot boot cache as well as the post-cutoff delta held in memory, so it matches the figure `outl doctor` reports without parsing every `.jsonl`.
+The JSON also carries `ops_since_snapshot`, the in-memory delta above the snapshot cutoff; the human line only prints it when it differs from the total.
+
+Other fields:
+
+| Field | Meaning |
+|---|---|
+| `pages` / `journals` | Count by page kind. |
+| `blocks` | Nodes that are not pages or journals. |
+| `tree_nodes` | Total nodes in the materialized tree. |
+| `properties` | Property bindings on all nodes. |
+| `tags` | Unique `#tag` names in properties. |
+| `backlinks` | Referencing blocks across the whole workspace. |
+| `assets` | Files in `assets/`. |
+| `trashed` | Nodes currently under the trash root. |
+| `snapshots` / `snapshot_bytes` | Snapshot cache file count and size. |
+| `last_modified` | Wall-clock time of the most recent persisted op. |
 
 ### `outl doctor`
 

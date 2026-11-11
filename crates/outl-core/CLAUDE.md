@@ -114,6 +114,9 @@ Treat every change as production-bound.
   `<root>/ops/` (the op log) is deliberately **not** a dotfile because it must sync; `<root>/.outl/snapshots/` deliberately **is**, because it must not.
   The replay cutoff is a **per-actor vector clock** (`SnapshotBody.cutoff: BTreeMap<ActorId, Hlc>`), never a single global HLC — boot replays, per actor, every op above that actor's mark plus every op of an actor the snapshot never saw.
   A single global cutoff silently drops a low-HLC op from a lagging peer delivered after the snapshot (#156 Half 2); the delta comes from `Storage::ops_since_per_actor`.
+  - **`Workspace::log().len()` is the in-memory delta after snapshot boot, not the total.**
+    `Workspace::total_ops()` reads the storage count (index-driven, no full replay), so reports and UI can show the persisted total without paying for a `Storage::all_ops()` parse.
+    See issue #289 and `tests/total_ops_snapshot.rs`.
   The body is **postcard**-encoded at `SCHEMA_VERSION = 4` (bincode through schema 3) — see below.
 
 ### This crate's dependency graph is public surface

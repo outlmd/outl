@@ -77,7 +77,7 @@ pub fn read(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
 /// `LockError::AlreadyHeld`.
 fn resolve(uri: &str, ctx: &Arc<ServerCtx>) -> Result<(String, String), ApiError> {
     if uri == "outl://workspace/info" {
-        let value = ctx.with_workspace(|wc| Ok(wi_cmd::info(wc)))?;
+        let value = ctx.with_workspace(|wc| wi_cmd::info(wc).map_err(ApiError::internal))?;
         let text = serde_json::to_string_pretty(&value).map_err(ApiError::internal)?;
         return Ok(("application/json".to_string(), text));
     }
