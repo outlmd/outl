@@ -56,18 +56,20 @@ outl-tui = { path = "crates/outl-tui", version = "0.13.0" }
 # IDs and time
 ulid = { version = "3", features = ["serde"] }
 
-# OS keychain for per-plugin secrets (`ctx.secrets`). Native stores on macOS /
-# Windows; on Linux the Secret Service via `async-secret-service` (zbus, pure
-# Rust) + `crypto-rust` — NOT `sync-secret-service`, which pulls the C
-# `libdbus-sys` and needs `libdbus-1-dev` on every Linux build (CI has none).
-# `async-io` gives the blocking wrapper its reactor; the keyring API stays sync.
-keyring = { version = "3", default-features = false, features = [
-    "apple-native",
-    "windows-native",
-    "async-secret-service",
-    "crypto-rust",
-    "async-io",
-] }
+# OS keychain for per-plugin secrets (`ctx.secrets`).
+# keyring 4 split every backend into its own crate and renamed every feature,
+# so the v3 names (`apple-native`, `async-secret-service`, `crypto-rust`,
+# `async-io`) no longer exist. `v1` is the bundle that keeps the v1-shaped API
+# (`Entry::new` + `get_password`) working with a store already registered, and
+# it expands to exactly the three backends we want:
+# `apple-native-keyring-store/keychain`, `windows-native-keyring-store` and
+# `zbus-secret-service-keyring-store`.
+#
+# The Linux choice is the load-bearing one and it survived the rename: zbus is
+# pure Rust, while `dbus-secret-service-keyring-store` (v3's
+# `sync-secret-service`) pulls the C `libdbus-sys` and needs `libdbus-1-dev` on
+# every Linux build, which CI does not have. Do not swap it in.
+keyring = { version = "4", default-features = false, features = ["v1"] }
 # Hidden-input prompt for `outl plugin secret set` (never echo a token).
 rpassword = "7"
 
@@ -96,7 +98,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # CRDT
-yrs = "0.27"
+yrs = "0.28"
 
 # P2P sync (iroh)
 # `default-features` stays ON: iroh 1.0.0 ships its TLS backend (tls-ring) and
@@ -113,13 +115,13 @@ yrs = "0.27"
 # though macOS / curl / Safari trust it fine. Enabling the feature is NOT enough
 # on its own: `system()` must be passed explicitly (default stays EmbeddedWebPki).
 iroh = { version = "1.0.0", features = ["platform-verifier"] }
-iroh-gossip = "0.101.0"
+iroh-gossip = "0.102.0"
 # LAN-local peer discovery (issue #149). Attached POST-bind and fail-soft, not
 # through `Builder::address_lookup` — see `outl-sync-iroh/src/bind.rs`.
 iroh-mdns-address-lookup = "0.6"
 
 # Markdown
-comrak = { version = "0.52", default-features = false }
+comrak = { version = "0.59", default-features = false }
 emojis = "0.9"
 # NFC before slugifying a page name. The slug decides the page's NodeId,
 # so one name spelled two ways (macOS hands back NFD, a Korean IME
@@ -141,7 +143,7 @@ walkdir = "2"
 fs2 = "0.4"
 
 # Concurrency
-parking_lot = "0.12"
+parking_lot = "0.13"
 lru = "0.19"
 
 # Misc
