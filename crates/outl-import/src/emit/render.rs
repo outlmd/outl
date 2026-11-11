@@ -345,15 +345,18 @@ fn render_block(b: &ImportBlock, depth: usize, ctx: &mut Ctx<'_>) {
     // Emit: first line as the bullet, the rest as continuation lines.
     let pad = "  ".repeat(depth);
     let cont_pad = "  ".repeat(depth + 1);
-    let mut lines = logical.split('\n');
-    let first = lines.next().unwrap_or("");
+    // Same line split + escaping as outl-md's own renderer, so a
+    // continuation line shaped like `- item` stays text instead of
+    // parsing back as a child bullet (which broke the 1:1 DFS mapping).
+    let mut lines = outl_md::render::block_text_lines(&logical).into_iter();
+    let first = lines.next().unwrap_or_default();
     ctx.out.push_str(&pad);
     ctx.out.push_str("- ");
-    ctx.out.push_str(first);
+    ctx.out.push_str(&first);
     ctx.out.push('\n');
     for line in lines {
         ctx.out.push_str(&cont_pad);
-        ctx.out.push_str(line);
+        ctx.out.push_str(&line);
         ctx.out.push('\n');
     }
 

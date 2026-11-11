@@ -283,12 +283,18 @@ fn parse_block_list(
         // opener and swallow everything down to EOF.
         if let Some(marker) = fence_marker(node.text.trim_start()) {
             consume_fence_until_close(lines, i, indent + 1, marker, &mut node.text);
-            // Once a code fence has closed, the block is done — any
-            // further indented text is no longer "continuation of a
-            // single bullet" but a fresh thing the grammar can't see
-            // safely. Properties and children still work via the loop
-            // below if they appear.
-            accepting_continuation = false;
+            // The fence closed, but the block's text may go on: the
+            // renderer writes `"```\ncode\n```\n\nprose"` as one bullet
+            // with continuation lines, exactly like the mid-text fence
+            // arm below (which never closed continuation). Closing it
+            // here turned the trailing prose into a recovered child:
+            // one block in, two blocks back. Children and properties
+            // still close it through the loop below.
+        } else if let Some(rest) = crate::render::unescape_first_line(&node.text) {
+            // `\```yaml`: a fence opener the renderer escaped because the
+            // block's text never closes it (see
+            // `render::block_text_lines`). Text, not a fence.
+            node.text = rest.to_string();
         }
 
         // Read this block's continuation, properties and children at
@@ -402,7 +408,8 @@ fn parse_block_list(
                     for _ in 0..std::mem::take(&mut pending_blanks) {
                         node.text.push('\n');
                     }
-                    node.text.push_str(next_stripped);
+                    node.text
+                        .push_str(&crate::render::unescape_continuation_line(next_stripped));
                     *i += 1;
                 } else if let Some(table) = crate::table::take_table(lines, i, indent + 1) {
                     // Same claim as the depth-0 arm: a table under a
@@ -479,7 +486,8 @@ fn parse_block_list(
                 for _ in 0..std::mem::take(&mut pending_blanks) {
                     node.text.push('\n');
                 }
-                node.text.push_str(body.trim_end());
+                node.text
+                    .push_str(&crate::render::unescape_continuation_line(body.trim_end()));
                 *i += 1;
             } else {
                 // Over-indented; recurse so the deeper level can claim it.

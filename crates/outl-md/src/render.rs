@@ -70,18 +70,155 @@ fn write_block_text(out: &mut String, indent: usize, text: &str) {
         out.push('\n');
         return;
     }
-    let mut lines = text.split('\n');
+    let mut lines = block_text_lines(text).into_iter();
     // First line keeps the bullet.
-    let first = lines.next().unwrap_or("");
+    let first = lines.next().unwrap_or_default();
     out.push_str("- ");
-    out.push_str(first);
+    out.push_str(&first);
     out.push('\n');
     // Remaining lines are continuation: indented one level deeper so
     // they align under the `-` and our own parser recognizes them.
     for line in lines {
         write_indent(out, indent + 1);
-        out.push_str(line);
+        out.push_str(&line);
         out.push('\n');
+    }
+}
+
+/// A trimmed line the parser reads as a block marker (`- x` / `-`).
+fn is_bullet_shaped(body: &str) -> bool {
+    body == "-" || body.starts_with("- ")
+}
+
+/// A trimmed line that opens a fenced code block, or the escaped form
+/// of one (`\```yaml`), which needs one more backslash so the unescape
+/// on the way back is unambiguous.
+fn is_fence_escapable(body: &str) -> bool {
+    crate::fence::fence_marker(body).is_some()
+        || body.strip_prefix('\\').is_some_and(is_fence_escapable)
+}
+
+/// A trimmed line whose leading backslash the parser drops on a
+/// continuation line: a bullet, a fence opener, or the escaped form of
+/// either.
+fn is_escapable(body: &str) -> bool {
+    is_bullet_shaped(body)
+        || crate::fence::fence_marker(body).is_some()
+        || body.strip_prefix('\\').is_some_and(is_escapable)
+}
+
+/// Whether `line` closes a fence opened with `marker`, read the way
+/// [`crate::fence`] reads it: the marker (or more of its character)
+/// alone, at the continuation column (less than one indent level of
+/// leading whitespace of its own).
+fn closes_fence(line: &str, marker: &str) -> bool {
+    let fence_char = marker.chars().next().unwrap_or('`');
+    let stripped = line.trim();
+    crate::parse::leading_indent(line) == 0
+        && stripped.starts_with(marker)
+        && stripped.chars().skip(marker.len()).all(|c| c == fence_char)
+}
+
+/// A block's text split into the lines the renderer writes: every line
+/// that the parser would otherwise read as structure is escaped with a
+/// leading backslash, so the block comes back as exactly one block with
+/// exactly this text.
+///
+/// Two shapes need it:
+///
+/// - A **continuation line shaped like a bullet** (`- item`). Written
+///   verbatim it parses back as a child block. A Roam/Logseq block like
+///   `"head\n- item"` came back as two blocks, the import lost its 1:1
+///   DFS mapping and every ref into the page degraded to a link.
+/// - A **fence opener with no closer in the same text** (`"intro\n```yaml"`,
+///   with the YAML in the child blocks). Written verbatim the open fence
+///   swallows the children, so several blocks come back as one.
+///
+/// A line that already starts with a backslash in front of one of those
+/// shapes gets one more, so the unescape is a strict inverse. Lines
+/// inside a closed fence are never escaped: the parser suspends the
+/// outline grammar there, so they already round-trip.
+pub fn block_text_lines(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut fence: Option<&'static str> = None;
+    for (n, line) in lines.iter().enumerate() {
+        let body = line.trim_start();
+        let escape = if let Some(m) = fence {
+            if closes_fence(line, m) {
+                fence = None;
+            }
+            false
+        } else if n == 0 {
+            // The first line sits after the bullet; only a fence opener
+            // is structure there. A bullet-shaped first line is text.
+            match crate::fence::fence_marker(body) {
+                Some(m) if has_closer(&lines[1..], m) => {
+                    fence = Some(m);
+                    false
+                }
+                Some(_) => true,
+                None => body.strip_prefix('\\').is_some_and(is_fence_escapable),
+            }
+        } else if is_bullet_shaped(body) || body.strip_prefix('\\').is_some_and(is_escapable) {
+            true
+        } else if let Some(m) = crate::fence::fence_marker(body) {
+            if crate::parse::leading_indent(line) > 0 {
+                // Over-indented: the parser keeps it as plain
+                // continuation, never as a fence.
+                false
+            } else if has_closer(&lines[n + 1..], m) {
+                fence = Some(m);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+        if escape {
+            let ws = &line[..line.len() - body.len()];
+            out.push(format!("{ws}\\{body}"));
+        } else {
+            out.push((*line).to_string());
+        }
+    }
+    out
+}
+
+/// Whether a fence opened with `marker` closes somewhere in `rest`.
+fn has_closer(rest: &[&str], marker: &str) -> bool {
+    rest.iter().any(|l| closes_fence(l, marker))
+}
+
+/// Inverse of the escape in [`block_text_lines`] for one continuation
+/// line: drop exactly one backslash in front of an escapable body.
+pub(crate) fn unescape_continuation_line(line: &str) -> String {
+    let body = line.trim_start();
+    match body.strip_prefix('\\') {
+        Some(rest) if is_escapable(rest) => {
+            let ws = &line[..line.len() - body.len()];
+            format!("{ws}{rest}")
+        }
+        _ => line.to_string(),
+    }
+}
+
+/// Inverse of the escape in [`block_text_lines`] for a block's first
+/// line, where only a fence opener is ever escaped.
+pub(crate) fn unescape_first_line(body: &str) -> Option<&str> {
+    body.strip_prefix('\\')
+        .filter(|rest| is_fence_escapable(rest))
+}
+
+/// The text a disk line stands for once its escape is undone: `first`
+/// says the line carried the block's own `- ` marker.
+pub(crate) fn unescaped_disk_body(body: &str, first: bool) -> Option<&str> {
+    let rest = body.strip_prefix('\\')?;
+    if first {
+        is_fence_escapable(rest).then_some(rest)
+    } else {
+        is_escapable(rest).then_some(rest)
     }
 }
 
