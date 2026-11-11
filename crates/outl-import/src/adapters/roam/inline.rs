@@ -10,13 +10,14 @@
 //! - `((uid))` → [`Inline::BlockRef`]
 //! - `[alias](((uid)))` → aliased [`Inline::BlockRef`]
 //! - `{{[[embed]]: …}}` / `{{embed: …}}` → [`Inline::Embed`]
-//! - `{{[[TODO]]}}` / `{{[[DONE]]}}` mid-text → literal `TODO`/`DONE`
+//! - `{{[[TODO]]}}` / `{{[[DONE]]}}` mid-text → kept verbatim, counted
 //! - other `{{…}}` → [`Inline::Component`] verbatim, counted
 //! - `$$…$$` → LaTeX component, verbatim + counted
 //! - `__italic__` → `*italic*` (Roam `__` is italic; CommonMark bold)
 //! - `^^highlight^^` → `==highlight==` (inert today; lights up if
 //!   outl ever gains `==` highlight)
-//! - `#[[Multi Word]]` → `[[Multi Word]]` (outl tags are single-token)
+//! - `#[[Multi Word]]` → kept verbatim: outl reads it as `#` plus the
+//!   `[[Multi Word]]` page ref, so the link survives and so does the text
 //! - `` `code` `` spans are consumed atomically so none of the above
 //!   rewrites fire inside them
 
@@ -91,11 +92,13 @@ pub(super) fn tokenize(text: &str, page: &str, report: &mut ImportReport) -> Vec
             }
         }
 
-        // #[[Multi Word]] → [[Multi Word]] (outl tags are single-token).
+        // #[[Multi Word]]: kept as written. outl tags are single-token,
+        // but its tokenizer reads this as `#` plus the `[[Multi Word]]`
+        // page ref, so the link resolves without rewriting the user's
+        // text. Consumed atomically like `[[Page]]` below.
         if rest.starts_with("#[[") {
             if let Some(len) = balanced(&rest[1..], "[[", "]]") {
-                buf.push_str(&rest[1..1 + len]);
-                report.tags_multiword_to_page_ref += 1;
+                buf.push_str(&rest[..1 + len]);
                 i += 1 + len;
                 continue;
             }
@@ -172,24 +175,21 @@ fn component(
 ) {
     let inner = raw[2..raw.len() - 2].trim();
 
-    // Mid-text task markers → literal prefix text (start-of-block
+    // Mid-text task markers stay exactly as written (start-of-block
     // markers are stripped upstream before tokenize runs).
     //
-    // The word survives, the task state doesn't: outl models one task
-    // per block, driven by the marker at the block's head, so a marker
-    // buried mid-text can't become one without moving the user's words
-    // around. Keeping it literal is the least-bad option — and it's
-    // counted, because the block silently stops answering `outl query
-    // --kind=task`. The aggregate warning is emitted once per import
-    // (a 10k-DONE graph would otherwise produce 10k warnings).
-    if inner == "[[TODO]]" || inner == "TODO" {
+    // outl models one task per block, driven by the marker at the
+    // block's head, so a marker buried mid-text can't become one without
+    // moving the user's words around. Rewriting it to a bare `TODO` /
+    // `DONE` word kept the word and threw away the markup that says it
+    // was a checkbox, and with it the `[[TODO]]` / `[[DONE]]` page ref
+    // Roam files the block under. Verbatim keeps both. Still counted,
+    // because the block does not answer `outl query --kind=task`; the
+    // aggregate warning is emitted once per import (a 10k-DONE graph
+    // would otherwise produce 10k warnings).
+    if matches!(inner, "[[TODO]]" | "TODO" | "[[DONE]]" | "DONE") {
         report.tasks_midtext_literal += 1;
-        buf.push_str("TODO");
-        return;
-    }
-    if inner == "[[DONE]]" || inner == "DONE" {
-        report.tasks_midtext_literal += 1;
-        buf.push_str("DONE");
+        buf.push_str(raw);
         return;
     }
 

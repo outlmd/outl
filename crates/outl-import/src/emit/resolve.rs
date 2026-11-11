@@ -210,19 +210,15 @@ pub(super) fn apply(
         {
             continue;
         }
-        let new_text = rewrite_placeholders(&text, &mut |uid, is_embed| match uid_map.get(uid) {
-            Some(loc) => {
-                if is_embed {
-                    report.embeds_page_fallback += 1;
-                } else {
-                    report.refs_page_fallback += 1;
-                }
-                format!("[[{}]]", loc.page_title)
-            }
-            None => {
-                report.refs_unresolved += 1;
-                format!("((unresolved:{uid}))")
-            }
+        // The page *holding* the marker could not be wired block by
+        // block (a marker in a property value, or a page whose block
+        // count diverged), but the *target* usually can: its handle is
+        // in its own sidecar. Only a target on an unmappable page
+        // degrades to a `[[Title]]` link. Degrading every one of them
+        // turned a `note:: ((uid))` property into a page link even when
+        // the block it named was right there.
+        let new_text = rewrite_placeholders(&text, &mut |uid, is_embed| {
+            resolve_one(uid, is_embed, uid_map, &sidecars, report)
         });
         if let Err(e) = outl_md::write_atomic(&page.path, new_text.as_bytes()) {
             report.warn(&page.title, format!("fallback sweep write failed: {e}"));
@@ -235,7 +231,8 @@ pub(super) fn apply(
         }
         report.warn(
             &page.title,
-            "unmappable placeholders degraded to [[links]] via file fallback",
+            "placeholders outside block text resolved via file fallback (unmappable targets \
+             degrade to [[links]])",
         );
     }
 

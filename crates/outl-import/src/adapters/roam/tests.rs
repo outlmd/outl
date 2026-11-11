@@ -88,11 +88,16 @@ fn todo_done_markers_set_task_state() {
 }
 
 #[test]
-fn multiword_tag_becomes_page_ref() {
+fn multiword_tag_is_kept_as_written() {
+    // outl reads `#[[My Project]]` as `#` + the `[[My Project]]` page
+    // ref, so the link survives without rewriting the text.
     let (b, report) = parse_one_block("see #[[My Project]] today");
     let toks = inline_tokens(&b);
-    assert_eq!(toks, &[Inline::Text("see [[My Project]] today".into())]);
-    assert_eq!(report.tags_multiword_to_page_ref, 1);
+    assert_eq!(toks, &[Inline::Text("see #[[My Project]] today".into())]);
+    assert_eq!(report.tags_multiword_to_page_ref, 0);
+    // Atomic: a `((…))` inside the tag name is not a block ref.
+    let (b, _) = parse_one_block("#[[a ((b)) c]]");
+    assert_eq!(inline_tokens(&b), &[Inline::Text("#[[a ((b)) c]]".into())]);
 }
 
 #[test]
@@ -193,9 +198,29 @@ fn org_deadline_becomes_date_link() {
     let (b, report) = parse_one_block("finish it DEADLINE: <2025-11-12 Wed>");
     assert_eq!(
         inline_tokens(&b),
-        &[Inline::Text("finish it [[2025-11-12]]".into())]
+        &[Inline::Text("finish it DEADLINE: [[2025-11-12]]".into())]
     );
     assert_eq!(report.org_dates_converted, 1);
+}
+
+/// The keyword says what the date is, and a time or repeater in the
+/// stamp is information the link alone does not carry.
+#[test]
+fn org_stamp_keeps_keyword_time_and_repeater() {
+    let (b, report) = parse_one_block(
+        "SCHEDULED: <2025-11-12 Wed 10:00 +1w>\nDEADLINE:<2025-11-13 thu>\nDEADLINE: <2025-11-14 Mon>",
+    );
+    assert_eq!(
+        inline_tokens(&b),
+        &[Inline::Text(
+            "SCHEDULED: [[2025-11-12]] 10:00 +1w\nDEADLINE:[[2025-11-13]]\nDEADLINE: [[2025-11-14]] Mon"
+                .into()
+        )]
+    );
+    assert_eq!(report.org_dates_converted, 3);
+    // Not a stamp: left alone.
+    let (b, _) = parse_one_block("DEADLINE: soon");
+    assert_eq!(inline_tokens(&b), &[Inline::Text("DEADLINE: soon".into())]);
 }
 
 #[test]
@@ -342,12 +367,25 @@ fn mid_page_attribute_block_is_not_promoted() {
     }
 }
 
+/// `id::` is in the Roam block's own text (Logseq residue Roam shows
+/// as an attribute). It is kept, not stripped: outl's parser lifts it
+/// into a block property like any other `key:: value` line.
 #[test]
-fn id_line_is_stripped_as_artifact() {
+fn id_line_is_kept() {
     let (b, report) = parse_one_block("real content\nid:: qnkrWK1ba");
     assert!(b.props.is_empty());
-    assert_eq!(inline_tokens(&b), &[Inline::Text("real content".into())]);
-    assert_eq!(report.artifacts_stripped, 1);
+    assert_eq!(
+        inline_tokens(&b),
+        &[Inline::Text("real content\nid:: qnkrWK1ba".into())]
+    );
+    assert_eq!(report.artifacts_stripped, 0);
+    // `collapsed::` is still structural.
+    let (b, _) = parse_one_block("x\ncollapsed:: true\nid:: 6908fc01-aaaa");
+    assert!(b.collapsed);
+    assert_eq!(
+        inline_tokens(&b),
+        &[Inline::Text("x\nid:: 6908fc01-aaaa".into())]
+    );
 }
 
 #[test]
@@ -457,9 +495,9 @@ fn parse_backup(json: &str) -> (crate::ir::ImportGraph, ImportReport, tempfile::
     (graph, report, dir)
 }
 
-/// A `{{[[DONE]]}}` buried mid-text keeps its literal word but loses
-/// the task state — the block stops answering `outl query
-/// --kind=task`. With 10k+ DONEs in a real graph, that has to be
+/// A `{{[[DONE]]}}` buried mid-text is kept exactly as written, but it
+/// is not the block's task state: the block does not answer `outl
+/// query --kind=task`. With 10k+ DONEs in a real graph, that has to be
 /// counted, not silently dropped.
 #[test]
 fn midtext_task_marker_is_counted_as_literal() {
@@ -467,7 +505,7 @@ fn midtext_task_marker_is_counted_as_literal() {
     assert_eq!(b.task, None, "mid-text marker must not set the task state");
     assert_eq!(
         inline_tokens(&b),
-        &[Inline::Text("shipped it DONE yesterday".into())]
+        &[Inline::Text("shipped it {{[[DONE]]}} yesterday".into())]
     );
     assert_eq!(report.tasks_midtext_literal, 1);
     // A head marker is a real task — it must NOT inflate the counter.
@@ -499,7 +537,7 @@ fn midtext_task_markers_emit_one_aggregate_warning() {
     assert!(
         hits[0]
             .detail
-            .contains("3 mid-block TODO/DONE markers became literal text")
+            .contains("3 mid-block TODO/DONE markers kept verbatim as text")
             && hits[0].detail.contains("task state not preserved"),
         "warning must name the count and the loss: {}",
         hits[0].detail

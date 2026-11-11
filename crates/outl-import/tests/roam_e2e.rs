@@ -160,7 +160,7 @@ fn collapsed_state_lands_in_the_op_log() {
 fn journals_and_dialect_translations_land() {
     let (ws, report) = import_fixture(FIXTURE);
     let journal = read(&ws.root.join("journals/2026-05-25.md"));
-    assert!(journal.contains("- TODO review [[My Project]] *soon*"));
+    assert!(journal.contains("- TODO review #[[My Project]] *soon*"));
     assert!(!journal.starts_with("title::"));
     assert_eq!(report.journals, 1);
     assert_eq!(report.pages, 2);
@@ -215,6 +215,33 @@ fn unmappable_page_placeholders_resolve_via_file_fallback() {
         "a mappable target resolves to its handle:\n{tricky}"
     );
     assert_eq!(report.refs_page_fallback, 0);
+}
+
+/// A `((uid))` in a block property value (`note:: ((uid))` under prose,
+/// lifted by outl's parser) resolves to the target's real handle. It
+/// used to degrade to a `[[Title]]` page link.
+#[test]
+fn a_ref_in_a_property_value_resolves_to_the_block() {
+    let json = r#"[
+        {"title": "Target", "children": [
+            {"string": "the referenced block", "uid": "tgt-uid", "children": []}
+        ]},
+        {"title": "Notes", "children": [
+            {"string": "a highlight\nnote:: ((tgt-uid))", "uid": "n1", "children": []}
+        ]}
+    ]"#;
+    let (ws, report) = import_fixture(json);
+    let notes = read(&ws.root.join("pages/notes.md"));
+    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
+        &ws.root.join("pages/target.md"),
+    ))
+    .expect("target sidecar");
+    assert!(
+        notes.contains(&format!("note:: (({}))", sc.blocks[0].ref_handle)),
+        "notes:\n{notes}"
+    );
+    assert_eq!(report.refs_page_fallback, 0);
+    assert_eq!(report.refs_resolved, 1);
 }
 
 #[test]
@@ -567,8 +594,8 @@ fn midtext_task_markers_surface_in_the_final_report() {
     );
     let log = read(&ws.root.join("pages/log.md"));
     assert!(
-        log.contains("shipped DONE the migration"),
-        "literal text is kept:\n{log}"
+        log.contains("shipped {{[[DONE]]}} the migration"),
+        "the marker is kept as written:\n{log}"
     );
 }
 

@@ -1,0 +1,455 @@
+diff --git a/crates/outl-import/src/adapters/roam/inline.rs b/crates/outl-import/src/adapters/roam/inline.rs
+index b12a70ea..b478852d 100644
+--- a/crates/outl-import/src/adapters/roam/inline.rs
++++ b/crates/outl-import/src/adapters/roam/inline.rs
+@@ -10,13 +10,14 @@
+ //! - `((uid))` → [`Inline::BlockRef`]
+ //! - `[alias](((uid)))` → aliased [`Inline::BlockRef`]
+ //! - `{{[[embed]]: …}}` / `{{embed: …}}` → [`Inline::Embed`]
+-//! - `{{[[TODO]]}}` / `{{[[DONE]]}}` mid-text → literal `TODO`/`DONE`
++//! - `{{[[TODO]]}}` / `{{[[DONE]]}}` mid-text → kept verbatim, counted
+ //! - other `{{…}}` → [`Inline::Component`] verbatim, counted
+ //! - `$$…$$` → LaTeX component, verbatim + counted
+ //! - `__italic__` → `*italic*` (Roam `__` is italic; CommonMark bold)
+ //! - `^^highlight^^` → `==highlight==` (inert today; lights up if
+ //!   outl ever gains `==` highlight)
+-//! - `#[[Multi Word]]` → `[[Multi Word]]` (outl tags are single-token)
++//! - `#[[Multi Word]]` → kept verbatim: outl reads it as `#` plus the
++//!   `[[Multi Word]]` page ref, so the link survives and so does the text
+ //! - `` `code` `` spans are consumed atomically so none of the above
+ //!   rewrites fire inside them
+ 
+@@ -91,11 +92,13 @@ pub(super) fn tokenize(text: &str, page: &str, report: &mut ImportReport) -> Vec
+             }
+         }
+ 
+-        // #[[Multi Word]] → [[Multi Word]] (outl tags are single-token).
++        // #[[Multi Word]]: kept as written. outl tags are single-token,
++        // but its tokenizer reads this as `#` plus the `[[Multi Word]]`
++        // page ref, so the link resolves without rewriting the user's
++        // text. Consumed atomically like `[[Page]]` below.
+         if rest.starts_with("#[[") {
+             if let Some(len) = balanced(&rest[1..], "[[", "]]") {
+-                buf.push_str(&rest[1..1 + len]);
+-                report.tags_multiword_to_page_ref += 1;
++                buf.push_str(&rest[..1 + len]);
+                 i += 1 + len;
+                 continue;
+             }
+@@ -172,24 +175,21 @@ fn component(
+ ) {
+     let inner = raw[2..raw.len() - 2].trim();
+ 
+-    // Mid-text task markers → literal prefix text (start-of-block
++    // Mid-text task markers stay exactly as written (start-of-block
+     // markers are stripped upstream before tokenize runs).
+     //
+-    // The word survives, the task state doesn't: outl models one task
+-    // per block, driven by the marker at the block's head, so a marker
+-    // buried mid-text can't become one without moving the user's words
+-    // around. Keeping it literal is the least-bad option — and it's
+-    // counted, because the block silently stops answering `outl query
+-    // --kind=task`. The aggregate warning is emitted once per import
+-    // (a 10k-DONE graph would otherwise produce 10k warnings).
+-    if inner == "[[TODO]]" || inner == "TODO" {
++    // outl models one task per block, driven by the marker at the
++    // block's head, so a marker buried mid-text can't become one without
++    // moving the user's words around. Rewriting it to a bare `TODO` /
++    // `DONE` word kept the word and threw away the markup that says it
++    // was a checkbox, and with it the `[[TODO]]` / `[[DONE]]` page ref
++    // Roam files the block under. Verbatim keeps both. Still counted,
++    // because the block does not answer `outl query --kind=task`; the
++    // aggregate warning is emitted once per import (a 10k-DONE graph
++    // would otherwise produce 10k warnings).
++    if matches!(inner, "[[TODO]]" | "TODO" | "[[DONE]]" | "DONE") {
+         report.tasks_midtext_literal += 1;
+-        buf.push_str("TODO");
+-        return;
+-    }
+-    if inner == "[[DONE]]" || inner == "DONE" {
+-        report.tasks_midtext_literal += 1;
+-        buf.push_str("DONE");
++        buf.push_str(raw);
+         return;
+     }
+ 
+diff --git a/crates/outl-import/src/adapters/roam/mod.rs b/crates/outl-import/src/adapters/roam/mod.rs
+index becd55de..d912de2a 100644
+--- a/crates/outl-import/src/adapters/roam/mod.rs
++++ b/crates/outl-import/src/adapters/roam/mod.rs
+@@ -156,8 +156,8 @@ impl SourceAdapter for RoamAdapter {
+             report.warn(
+                 GRAPH_SCOPE,
+                 format!(
+-                    "{midtext} mid-block TODO/DONE markers became literal text \
+-                     (task state not preserved)"
++                    "{midtext} mid-block TODO/DONE markers kept verbatim as text \
++                     (task state not preserved: outl tracks one task per block)"
+                 ),
+             );
+         }
+@@ -199,7 +199,7 @@ fn convert_block(
+     let (props, collapsed_prop, text) = if is_fence {
+         (Vec::new(), false, after_task.to_string())
+     } else {
+-        split_block_props(after_task, report)
++        split_block_props(after_task)
+     };
+ 
+     ImportBlock {
+@@ -227,10 +227,13 @@ fn convert_block(
+ ///
+ /// Two classes of line are handled differently:
+ ///
+-/// - **Structural** (`id::`, `collapsed::`) is never user data and is
+-///   *always* stripped from the text: `id::` is Logseq residue (the
+-///   block's ref identity is the Roam JSON `uid`) dropped + counted;
++/// - **Structural** (`collapsed::`) is *always* stripped from the text:
+ ///   `collapsed:: true` flips the returned fold flag (its own IR field).
++///   `id::` (Logseq residue: the block's ref identity is the Roam JSON
++///   `uid`) is **not** structural here. It is in the Roam block's text,
++///   Roam shows it as an attribute, and dropping it lost the only copy
++///   of the id that pre-Roam links point at, so it stays like any other
++///   user attribute.
+ /// - **User attributes** (`icon::`, `work::`, …) are lifted into `props`
+ ///   **only when the block is nothing but attribute lines**. A block
+ ///   that still has prose keeps its attribute lines *in the text*: outl's
+@@ -240,10 +243,7 @@ fn convert_block(
+ ///   (the Omnivore `note:: ((uid))` shape). Roam's page-attribute blocks
+ ///   (`icon::` at the head of a contact page) are pure-attribute, so this
+ ///   still captures the case that matters.
+-fn split_block_props(
+-    raw: &str,
+-    report: &mut ImportReport,
+-) -> (Vec<(String, String)>, bool, String) {
++fn split_block_props(raw: &str) -> (Vec<(String, String)>, bool, String) {
+     // Fast path: no `::` at all → nothing to lift, keep the string byte
+     // for byte (the common case, and it preserves exact whitespace).
+     if !raw.contains("::") {
+@@ -255,7 +255,6 @@ fn split_block_props(
+     let mut has_prose = false;
+     for line in raw.split('\n') {
+         match parse_prop_line(line.trim()) {
+-            Some((k, _)) if k == "id" => report.artifacts_stripped += 1,
+             Some((k, v)) if k == "collapsed" => collapsed |= v == "true",
+             Some((k, v)) => {
+                 user_props.push((k, v));
+@@ -430,11 +429,18 @@ fn translate_query(raw: &str) -> Option<String> {
+     Some(lines.join("\n"))
+ }
+ 
+-/// `DEADLINE: <2025-11-12 Wed>` / `SCHEDULED: <…>` → `[[2025-11-12]]`.
++/// `DEADLINE: <2025-11-12 Wed>` / `SCHEDULED: <…>` →
++/// `DEADLINE: [[2025-11-12]]` / `SCHEDULED: [[…]]`.
+ ///
+ /// Follows the issue #63 model: a date in the block text is a
+ /// `[[date]]` link, surfacing the block in that day's journal via
+ /// backlinks; notification scheduling is a separate opt-in property.
++///
++/// Only the `<…>` stamp is rewritten. The keyword stays (it is what
++/// says the date is a deadline and not a mention), and so does anything
++/// in the stamp past the date and weekday, such as a time or a repeater
++/// (`<2025-11-12 Wed 10:00 +1w>` → `[[2025-11-12]] 10:00 +1w`). The
++/// weekday alone is dropped: the date already names it.
+ fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
+     let mut out = String::with_capacity(raw.len());
+     let mut rest = raw;
+@@ -454,15 +460,22 @@ fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
+             .and_then(|inner| inner.find('>').map(|close| &inner[..close]))
+             .and_then(|stamp| {
+                 let date_part = stamp.get(..10)?;
+-                chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()
++                let date = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()?;
++                Some((date, stamp[10..].trim()))
+             });
+         match converted {
+-            Some(date) => {
+-                out.push_str(&rest[..pos]);
++            Some((date, tail)) => {
++                // Keyword and the whitespace after it, as written.
++                let ws = after_kw.len() - after_sp.len();
++                out.push_str(&rest[..pos + kw.len() + ws]);
+                 out.push_str(&format!("[[{date}]]"));
++                let extra = strip_weekday(tail, date);
++                if !extra.is_empty() {
++                    out.push(' ');
++                    out.push_str(extra);
++                }
+                 report.org_dates_converted += 1;
+-                // Skip: keyword + whitespace + `<…>`.
+-                let ws = after_kw.len() - after_sp.len();
++                // Skip: `<…>`.
+                 let angle_len = after_sp.find('>').expect("checked above") + 1;
+                 rest = &rest[pos + kw.len() + ws + angle_len..];
+             }
+@@ -474,6 +487,23 @@ fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
+     }
+ }
+ 
++/// Drop a leading weekday name (`Wed`, `Wednesday`, any case) from an
++/// org stamp's tail, but only when it is the weekday of `date`: a
++/// mismatched one is information, not redundancy.
++fn strip_weekday(tail: &str, date: chrono::NaiveDate) -> &str {
++    let word_end = tail
++        .find(|c: char| !c.is_alphabetic())
++        .unwrap_or(tail.len());
++    let word = &tail[..word_end];
++    let full = date.format("%A").to_string();
++    let short = date.format("%a").to_string();
++    if !word.is_empty() && (word.eq_ignore_ascii_case(&full) || word.eq_ignore_ascii_case(&short)) {
++        tail[word_end..].trim_start()
++    } else {
++        tail
++    }
++}
++
+ /// Roam timestamps are milliseconds since epoch.
+ fn ms_to_datetime(ms: i64) -> Option<DateTime<Utc>> {
+     Utc.timestamp_millis_opt(ms).single()
+diff --git a/crates/outl-import/src/adapters/roam/tests.rs b/crates/outl-import/src/adapters/roam/tests.rs
+index 82075bc9..7ad8838c 100644
+--- a/crates/outl-import/src/adapters/roam/tests.rs
++++ b/crates/outl-import/src/adapters/roam/tests.rs
+@@ -88,11 +88,16 @@ fn todo_done_markers_set_task_state() {
+ }
+ 
+ #[test]
+-fn multiword_tag_becomes_page_ref() {
++fn multiword_tag_is_kept_as_written() {
++    // outl reads `#[[My Project]]` as `#` + the `[[My Project]]` page
++    // ref, so the link survives without rewriting the text.
+     let (b, report) = parse_one_block("see #[[My Project]] today");
+     let toks = inline_tokens(&b);
+-    assert_eq!(toks, &[Inline::Text("see [[My Project]] today".into())]);
+-    assert_eq!(report.tags_multiword_to_page_ref, 1);
++    assert_eq!(toks, &[Inline::Text("see #[[My Project]] today".into())]);
++    assert_eq!(report.tags_multiword_to_page_ref, 0);
++    // Atomic: a `((…))` inside the tag name is not a block ref.
++    let (b, _) = parse_one_block("#[[a ((b)) c]]");
++    assert_eq!(inline_tokens(&b), &[Inline::Text("#[[a ((b)) c]]".into())]);
+ }
+ 
+ #[test]
+@@ -193,11 +198,31 @@ fn org_deadline_becomes_date_link() {
+     let (b, report) = parse_one_block("finish it DEADLINE: <2025-11-12 Wed>");
+     assert_eq!(
+         inline_tokens(&b),
+-        &[Inline::Text("finish it [[2025-11-12]]".into())]
++        &[Inline::Text("finish it DEADLINE: [[2025-11-12]]".into())]
+     );
+     assert_eq!(report.org_dates_converted, 1);
+ }
+ 
++/// The keyword says what the date is, and a time or repeater in the
++/// stamp is information the link alone does not carry.
++#[test]
++fn org_stamp_keeps_keyword_time_and_repeater() {
++    let (b, report) = parse_one_block(
++        "SCHEDULED: <2025-11-12 Wed 10:00 +1w>\nDEADLINE:<2025-11-13 thu>\nDEADLINE: <2025-11-14 Mon>",
++    );
++    assert_eq!(
++        inline_tokens(&b),
++        &[Inline::Text(
++            "SCHEDULED: [[2025-11-12]] 10:00 +1w\nDEADLINE:[[2025-11-13]]\nDEADLINE: [[2025-11-14]] Mon"
++                .into()
++        )]
++    );
++    assert_eq!(report.org_dates_converted, 3);
++    // Not a stamp: left alone.
++    let (b, _) = parse_one_block("DEADLINE: soon");
++    assert_eq!(inline_tokens(&b), &[Inline::Text("DEADLINE: soon".into())]);
++}
++
+ #[test]
+ fn simple_query_translates_to_fence() {
+     let (b, report) = parse_one_block("{{[[query]]: {and: [[TODO]] [[Be Happy]]}}}");
+@@ -342,12 +367,25 @@ fn mid_page_attribute_block_is_not_promoted() {
+     }
+ }
+ 
++/// `id::` is in the Roam block's own text (Logseq residue Roam shows
++/// as an attribute). It is kept, not stripped: outl's parser lifts it
++/// into a block property like any other `key:: value` line.
+ #[test]
+-fn id_line_is_stripped_as_artifact() {
++fn id_line_is_kept() {
+     let (b, report) = parse_one_block("real content\nid:: qnkrWK1ba");
+     assert!(b.props.is_empty());
+-    assert_eq!(inline_tokens(&b), &[Inline::Text("real content".into())]);
+-    assert_eq!(report.artifacts_stripped, 1);
++    assert_eq!(
++        inline_tokens(&b),
++        &[Inline::Text("real content\nid:: qnkrWK1ba".into())]
++    );
++    assert_eq!(report.artifacts_stripped, 0);
++    // `collapsed::` is still structural.
++    let (b, _) = parse_one_block("x\ncollapsed:: true\nid:: 6908fc01-aaaa");
++    assert!(b.collapsed);
++    assert_eq!(
++        inline_tokens(&b),
++        &[Inline::Text("x\nid:: 6908fc01-aaaa".into())]
++    );
+ }
+ 
+ #[test]
+@@ -457,9 +495,9 @@ fn parse_backup(json: &str) -> (crate::ir::ImportGraph, ImportReport, tempfile::
+     (graph, report, dir)
+ }
+ 
+-/// A `{{[[DONE]]}}` buried mid-text keeps its literal word but loses
+-/// the task state — the block stops answering `outl query
+-/// --kind=task`. With 10k+ DONEs in a real graph, that has to be
++/// A `{{[[DONE]]}}` buried mid-text is kept exactly as written, but it
++/// is not the block's task state: the block does not answer `outl
++/// query --kind=task`. With 10k+ DONEs in a real graph, that has to be
+ /// counted, not silently dropped.
+ #[test]
+ fn midtext_task_marker_is_counted_as_literal() {
+@@ -467,7 +505,7 @@ fn midtext_task_marker_is_counted_as_literal() {
+     assert_eq!(b.task, None, "mid-text marker must not set the task state");
+     assert_eq!(
+         inline_tokens(&b),
+-        &[Inline::Text("shipped it DONE yesterday".into())]
++        &[Inline::Text("shipped it {{[[DONE]]}} yesterday".into())]
+     );
+     assert_eq!(report.tasks_midtext_literal, 1);
+     // A head marker is a real task — it must NOT inflate the counter.
+@@ -499,7 +537,7 @@ fn midtext_task_markers_emit_one_aggregate_warning() {
+     assert!(
+         hits[0]
+             .detail
+-            .contains("3 mid-block TODO/DONE markers became literal text")
++            .contains("3 mid-block TODO/DONE markers kept verbatim as text")
+             && hits[0].detail.contains("task state not preserved"),
+         "warning must name the count and the loss: {}",
+         hits[0].detail
+diff --git a/crates/outl-import/src/emit/resolve.rs b/crates/outl-import/src/emit/resolve.rs
+index 92c93d6c..687fbb15 100644
+--- a/crates/outl-import/src/emit/resolve.rs
++++ b/crates/outl-import/src/emit/resolve.rs
+@@ -210,19 +210,15 @@ pub(super) fn apply(
+         {
+             continue;
+         }
+-        let new_text = rewrite_placeholders(&text, &mut |uid, is_embed| match uid_map.get(uid) {
+-            Some(loc) => {
+-                if is_embed {
+-                    report.embeds_page_fallback += 1;
+-                } else {
+-                    report.refs_page_fallback += 1;
+-                }
+-                format!("[[{}]]", loc.page_title)
+-            }
+-            None => {
+-                report.refs_unresolved += 1;
+-                format!("((unresolved:{uid}))")
+-            }
++        // The page *holding* the marker could not be wired block by
++        // block (a marker in a property value, or a page whose block
++        // count diverged), but the *target* usually can: its handle is
++        // in its own sidecar. Only a target on an unmappable page
++        // degrades to a `[[Title]]` link. Degrading every one of them
++        // turned a `note:: ((uid))` property into a page link even when
++        // the block it named was right there.
++        let new_text = rewrite_placeholders(&text, &mut |uid, is_embed| {
++            resolve_one(uid, is_embed, uid_map, &sidecars, report)
+         });
+         if let Err(e) = outl_md::write_atomic(&page.path, new_text.as_bytes()) {
+             report.warn(&page.title, format!("fallback sweep write failed: {e}"));
+@@ -235,7 +231,8 @@ pub(super) fn apply(
+         }
+         report.warn(
+             &page.title,
+-            "unmappable placeholders degraded to [[links]] via file fallback",
++            "placeholders outside block text resolved via file fallback (unmappable targets \
++             degrade to [[links]])",
+         );
+     }
+ 
+diff --git a/crates/outl-import/tests/roam_e2e.rs b/crates/outl-import/tests/roam_e2e.rs
+index 91b62029..e2e4e585 100644
+--- a/crates/outl-import/tests/roam_e2e.rs
++++ b/crates/outl-import/tests/roam_e2e.rs
+@@ -160,7 +160,7 @@ fn collapsed_state_lands_in_the_op_log() {
+ fn journals_and_dialect_translations_land() {
+     let (ws, report) = import_fixture(FIXTURE);
+     let journal = read(&ws.root.join("journals/2026-05-25.md"));
+-    assert!(journal.contains("- TODO review [[My Project]] *soon*"));
++    assert!(journal.contains("- TODO review #[[My Project]] *soon*"));
+     assert!(!journal.starts_with("title::"));
+     assert_eq!(report.journals, 1);
+     assert_eq!(report.pages, 2);
+@@ -186,12 +186,11 @@ fn dry_run_writes_nothing_and_predicts_resolution() {
+ }
+ 
+ #[test]
+-fn unmappable_page_placeholders_degrade_via_file_fallback() {
+-    // The second block's string embeds a `- ` line, which outl's parser
+-    // SPLITS into a child block — the page's block count diverges from
+-    // the renderer's walk, so the whole page is unmappable for handle
+-    // wiring. The ref on it must still degrade to a `[[Title]]` link
+-    // (file fallback), never survive as a literal placeholder.
++fn unmappable_page_placeholders_resolve_via_file_fallback() {
++    // A page whose blocks the resolve pass cannot wire one by one still
++    // gets its markers rewritten by the file-fallback sweep, and a ref
++    // whose *target* is mappable resolves to that block's real handle
++    // instead of degrading to a `[[Title]]` link. No marker may survive.
+     let json = r#"[
+         {"title": "Source", "children": [
+             {"string": "the original", "uid": "src-uid", "children": []}
+@@ -207,11 +206,42 @@ fn unmappable_page_placeholders_degrade_via_file_fallback() {
+         !tricky.contains("outl-import"),
+         "no placeholder marker may survive on disk:\n{tricky}"
+     );
++    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
++        &ws.root.join("pages/source.md"),
++    ))
++    .expect("source sidecar");
++    assert!(
++        tricky.contains(&format!("see (({})) here", sc.blocks[0].ref_handle)),
++        "a mappable target resolves to its handle:\n{tricky}"
++    );
++    assert_eq!(report.refs_page_fallback, 0);
++}
++
++/// A `((uid))` in a block property value (`note:: ((uid))` under prose,
++/// lifted by outl's parser) resolves to the target's real handle. It
++/// used to degrade to a `[[Title]]` page link.
++#[test]
++fn a_ref_in_a_property_value_resolves_to_the_block() {
++    let json = r#"[
++        {"title": "Target", "children": [
++            {"string": "the referenced block", "uid": "tgt-uid", "children": []}
++        ]},
++        {"title": "Notes", "children": [
++            {"string": "a highlight\nnote:: ((tgt-uid))", "uid": "n1", "children": []}
++        ]}
++    ]"#;
++    let (ws, report) = import_fixture(json);
++    let notes = read(&ws.root.join("pages/notes.md"));
++    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
++        &ws.root.join("pages/target.md"),
++    ))
++    .expect("target sidecar");
+     assert!(
+-        tricky.contains("see [[Source]] here"),
+-        "unmappable ref must degrade to a page link:\n{tricky}"
++        notes.contains(&format!("note:: (({}))", sc.blocks[0].ref_handle)),
++        "notes:\n{notes}"
+     );
+-    assert!(report.refs_page_fallback >= 1);
++    assert_eq!(report.refs_page_fallback, 0);
++    assert_eq!(report.refs_resolved, 1);
+ }
+ 
+ #[test]
+@@ -531,7 +561,7 @@ fn midtext_task_markers_surface_in_the_final_report() {
+     );
+     let log = read(&ws.root.join("pages/log.md"));
+     assert!(
+-        log.contains("shipped DONE the migration"),
+-        "literal text is kept:\n{log}"
++        log.contains("shipped {{[[DONE]]}} the migration"),
++        "the marker is kept as written:\n{log}"
+     );
+ }
