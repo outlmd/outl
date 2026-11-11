@@ -522,12 +522,25 @@ version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05832cdddc8f2650cc2cc187cc2e952b8c133a48eb055f35211f61ee81502d77"
 dependencies = [
- "attribute-derive-macro",
+ "attribute-derive-macro 0.10.5",
  "derive-where",
- "manyhow",
+ "manyhow 0.11.4",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "attribute-derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f9ef7a68684657ce9da341c934c73b63df7a3585a61e366d84c84ed5d3d167"
+dependencies = [
+ "attribute-derive-macro 0.11.0",
+ "manyhow 0.14.1",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -538,12 +551,28 @@ checksum = "0a7cdbbd4bd005c5d3e2e9c885e6fa575db4f4a3572335b974d8db853b6beb61"
 dependencies = [
  "collection_literals",
  "interpolator",
- "manyhow",
+ "manyhow 0.11.4",
  "proc-macro-utils",
  "proc-macro2",
  "quote",
- "quote-use",
+ "quote-use 0.8.4",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "attribute-derive-macro"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300d426e5e73549125bb8e4649bdd5508f82c94ddf898fb0517246e71dfb8e98"
+dependencies = [
+ "collection_literals",
+ "interpolator",
+ "manyhow 0.14.1",
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+ "quote-use 0.9.0",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1248,7 +1277,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "576ba56f6ca18ebb069d0d07260407171712aff4dfe15ee3f8982dc16a455bcf"
 dependencies = [
  "castaway",
- "get-size2",
+ "get-size2 0.10.3",
  "itoa",
  "ryu",
 ]
@@ -3215,9 +3244,20 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c736d226c32e496b8377813b52269e11ad3a48d8373b68862d0364f04fd1229d"
 dependencies = [
- "attribute-derive",
+ "attribute-derive 0.10.5",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "get-size-derive2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28f0daa179069133df60523e0f59d0a6bd2d3db9ccae01b630896d269c4a802e"
+dependencies = [
+ "attribute-derive 0.11.0",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3227,7 +3267,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b411f34418305908ab15a82ff78958c2a9aee9a272b2a2e663836b20a4e4b9d3"
 dependencies = [
  "compact_str 0.10.0",
- "get-size-derive2",
+ "get-size-derive2 0.10.3",
+ "hashbrown 0.17.1",
+ "ordermap",
+ "smallvec",
+ "thin-vec",
+]
+
+[[package]]
+name = "get-size2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050a5d07359ebfac7f0b74916d94cfa30575e45fdc7e9bfbb0f76d5d4203325a"
+dependencies = [
+ "compact_str 0.10.0",
+ "get-size-derive2 0.11.1",
  "hashbrown 0.17.1",
  "ordermap",
  "smallvec",
@@ -5202,10 +5256,22 @@ version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b33efb3ca6d3b07393750d4030418d594ab1139cee518f0dc88db70fec873587"
 dependencies = [
- "manyhow-macros",
+ "manyhow-macros 0.11.4",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "manyhow"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1704b073316272a6785b70599f91f73b49022c2e290b065591ee6b9109ed8c7"
+dependencies = [
+ "manyhow-macros 0.14.1",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -5213,6 +5279,17 @@ name = "manyhow-macros"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46fce34d199b78b6e6073abf984c9cf5fd3e9330145a93ee0738a7443e371495"
+dependencies = [
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "manyhow-macros"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31601db71f1f5fb6f831a18aa3052d13a62528ee4f2cba7e8c9a5e258d953725"
 dependencies = [
  "proc-macro-utils",
  "proc-macro2",
@@ -7761,7 +7838,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9619db1197b497a36178cfc736dc96b271fe918875fbf1344c436a7e93d0321e"
 dependencies = [
  "quote",
- "quote-use-macros",
+ "quote-use-macros 0.8.4",
+]
+
+[[package]]
+name = "quote-use"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48356e493823dc3c1d7e9fc7b3ff204ecec48afbdd718fc4134091b88eb63f3d"
+dependencies = [
+ "quote",
+ "quote-use-macros 0.9.0",
 ]
 
 [[package]]
@@ -7774,6 +7861,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "quote-use-macros"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cf1c5de6a7cc231c71e03c77aa4c7019097859ea7029156b54d2894a8430704"
+dependencies = [
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -8615,7 +8714,7 @@ dependencies = [
  "bitflags 2.13.2",
  "char_str",
  "compact_str 0.10.0",
- "get-size2",
+ "get-size2 0.10.3",
  "is-macro",
  "memchr",
  "rustc-hash",
@@ -8635,7 +8734,7 @@ dependencies = [
  "bitflags 2.13.2",
  "bstr",
  "drop_bomb",
- "get-size2",
+ "get-size2 0.10.3",
  "memchr",
  "rustc-hash",
  "rustpython-ruff_python_ast",
@@ -8674,11 +8773,11 @@ dependencies = [
 
 [[package]]
 name = "rustpython-ruff_text_size"
-version = "0.16.5"
+version = "0.16.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fedbd1af4f91cd828185123d95119662db9c4a0b21c02b695783d74360d4f46"
+checksum = "5e5377a04f2855030600b93a05754242950ea9b070507ef9aef67965a52eeb09"
 dependencies = [
- "get-size2",
+ "get-size2 0.11.1",
 ]
 
 [[package]]

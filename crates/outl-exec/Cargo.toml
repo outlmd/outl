@@ -97,7 +97,7 @@ rustpython-ruff_python_ast = { version = "=0.16.5", optional = true, default-fea
 rustpython-ruff_python_parser = { version = "=0.16.5", optional = true, default-features = false }
 rustpython-ruff_python_trivia = { version = "=0.16.5", optional = true, default-features = false }
 rustpython-ruff_source_file = { version = "=0.16.5", optional = true, default-features = false }
-rustpython-ruff_text_size = { version = "=0.16.5", optional = true, default-features = false }
+rustpython-ruff_text_size = { version = "=0.16.10", optional = true, default-features = false }
 mlua = { version = "0.12", optional = true, features = ["lua54", "vendored"] }
 
 # Source hashing (auto-run cache key, sidecar content hash). Used
