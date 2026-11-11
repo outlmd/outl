@@ -75,9 +75,11 @@ jobs:
       - name: Build frontend node modules
         run: |
           set -o pipefail
-          nix build .#outl-desktop-node-modules --no-link 2>&1 \
-            || { echo; echo 'frontendNodeModulesHash is stale:'; \
-                 echo '  set frontendNodeModulesHash."${{ matrix.system }}" to the got: value above.'; \
+          nix build .#outl-desktop-node-modules --no-link 2>&1 | tee "$RUNNER_TEMP/node-modules.log" \
+            || { if grep -q 'hash mismatch' "$RUNNER_TEMP/node-modules.log"; then \
+                   echo; echo 'frontendNodeModulesHash is stale:'; \
+                   echo '  set frontendNodeModulesHash."${{ matrix.system }}" to the got: value above.'; \
+                 fi; \
                  exit 1; }
 
       - name: Build outl (CLI + TUI)
