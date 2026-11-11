@@ -44,6 +44,13 @@ struct RoamPage {
     title: String,
     #[serde(default)]
     children: Vec<RoamBlock>,
+    /// Milliseconds since epoch. Roam stamps pages as well as blocks;
+    /// dropping these lost the creation date of every page.
+    #[serde(default, rename = "create-time")]
+    create_time: Option<i64>,
+    /// Milliseconds since epoch.
+    #[serde(default, rename = "edit-time")]
+    edit_time: Option<i64>,
 }
 
 /// One block in the Roam tree.
@@ -146,6 +153,8 @@ impl SourceAdapter for RoamAdapter {
                 props,
                 body: PageBody::Outline(blocks),
                 stem_override: None,
+                created: page.create_time.and_then(ms_to_datetime),
+                edited: page.edit_time.and_then(ms_to_datetime),
             });
         }
         // One aggregate warning, never one per occurrence: a real graph

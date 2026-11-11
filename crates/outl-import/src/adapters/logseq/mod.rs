@@ -155,6 +155,8 @@ fn convert_file(
         props,
         body: PageBody::Outline(blocks),
         stem_override,
+        created: None,
+        edited: None,
     });
     Ok(())
 }

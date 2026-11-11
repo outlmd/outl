@@ -365,6 +365,51 @@ fn timestamps_dropped_by_default_kept_on_opt_in() {
     let _ = open_test_ws(); // keep harness helpers exercised
 }
 
+/// Roam stamps pages too, not only blocks. Those stamps used to be
+/// dropped at deserialization, so every imported page lost its
+/// creation date even with `--preserve-timestamps`.
+#[test]
+fn page_timestamps_land_as_page_properties_on_opt_in() {
+    let json = r#"[
+        {"title": "Stamped Page", "create-time": 1700000000000, "edit-time": 1700000500000,
+         "children": [{"string": "x", "uid": "p1", "children": []}]},
+        {"title": "With Own Attr", "create-time": 1700000000000,
+         "children": [{"string": "created:: by hand", "uid": "p2", "children": []},
+                      {"string": "y", "uid": "p3", "children": []}]}
+    ]"#;
+    let (_ws, report) = import_fixture(json);
+    assert_eq!(report.timestamps_dropped, 2, "one per stamped page");
+
+    let src_dir = tempfile::tempdir().expect("tempdir");
+    let src = src_dir.path().join("backup.json");
+    fs::write(&src, json).expect("write fixture");
+    let opts = ImportOptions {
+        preserve_timestamps: true,
+        ..Default::default()
+    };
+    let (ws, report) = import_with_opts(&RoamAdapter, &src, &opts);
+    assert_eq!(report.timestamps_dropped, 0);
+    let page = read(&ws.root.join("pages/stamped-page.md"));
+    let header: Vec<&str> = page.lines().take_while(|l| !l.is_empty()).collect();
+    assert!(
+        header
+            .iter()
+            .any(|l| l.starts_with("created:: 2023-11-14T22:13:20")),
+        "page:\n{page}"
+    );
+    assert!(
+        header
+            .iter()
+            .any(|l| l.starts_with("edited:: 2023-11-14T22:21:40")),
+        "page:\n{page}"
+    );
+    // A source attribute of the same name is what the user wrote: it
+    // stays, and the stamp does not duplicate the key.
+    let own = read(&ws.root.join("pages/with-own-attr.md"));
+    assert_eq!(own.matches("created::").count(), 1, "page:\n{own}");
+    assert!(own.contains("created:: by hand"), "page:\n{own}");
+}
+
 /// The report's own counters only prove what the pipeline *knows* it
 /// emitted. The reconciliation adds the denominator, taken straight off
 /// the source JSON, so a block lost anywhere in between shows up.

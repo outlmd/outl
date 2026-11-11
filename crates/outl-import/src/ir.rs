@@ -78,6 +78,11 @@ pub struct ImportPage {
     /// their own collision policy (Obsidian's path-derived suffixes)
     /// set it; `None` lets the emitter slugify the title.
     pub stem_override: Option<String>,
+    /// Source page creation timestamp (kept only with
+    /// `--preserve-timestamps`, same policy as [`ImportBlock::created`]).
+    pub created: Option<DateTime<Utc>>,
+    /// Source page last-edit timestamp (same policy).
+    pub edited: Option<DateTime<Utc>>,
 }
 
 /// Page body shapes.
