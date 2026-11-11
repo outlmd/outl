@@ -603,6 +603,14 @@ export interface WorkspaceSummary {
    * compare against `false`, never fall back to `false`.
    */
   ops_complete: boolean;
+  /**
+   * Which day the calendar grid starts on, from the global
+   * `[calendar] week_start` (`~/.config/outl/config.toml`): `"monday"`
+   * or `"sunday"`. `null` (or missing on an older backend) means unset,
+   * and the client keeps its own historical first day — Monday on
+   * desktop, Sunday on mobile. See issue #94.
+   */
+  week_start?: "monday" | "sunday" | null;
 }
 
 // ── Plugins ─────────────────────────────────────────────────────────

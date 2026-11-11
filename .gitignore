@@ -83,3 +83,4 @@ docs/app-store-*
 # Written by .claude/skills/run-desktop/battery: the last state the
 # layout battery passed against. Local, never shared.
 .claude/.ux-battery-stamp
+issue497.zip

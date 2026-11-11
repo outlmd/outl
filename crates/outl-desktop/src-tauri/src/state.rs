@@ -105,6 +105,11 @@ pub(crate) struct AppState {
     /// (the outl async-writes default). See
     /// [`outl_tauri_shared::projection`].
     pub projection_writer: ProjectionWriter,
+
+    /// `[calendar] week_start` from the global config, read once at boot
+    /// beside the timezone. `None` keeps this surface's historical
+    /// Monday. Restart-to-apply, like every other `[calendar]` value.
+    pub calendar_week_start: Option<outl_config::WeekStart>,
 }
 
 /// The desktop's projection onto the shared command surface. The one

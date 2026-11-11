@@ -34,6 +34,7 @@ pub(super) fn event_loop(
     theme: Theme,
     shared_workspace: bool,
     backlinks_newest_first: bool,
+    calendar_week_start: outl_config::WeekStart,
     icon_style: outl_config::TuiIconStyle,
     config_warning: Option<String>,
 ) -> Result<()> {
@@ -49,6 +50,10 @@ pub(super) fn event_loop(
     // only feeds the render path, so setting it post-construction is
     // enough and keeps it out of `App::new`'s already-long signature.
     app.backlinks_newest_first = backlinks_newest_first;
+    // Sidebar calendar week layout (issue #94), same rationale as the
+    // backlinks direction: render-path only, so it stays out of
+    // `App::new`'s signature.
+    app.calendar_week_start = calendar_week_start;
     // Land anything `outl capture` left waiting (RFC 0363). After
     // `App::new` because the drain writes ops and must use the app's own
     // `HlcGenerator` — a second generator on the same actor mints

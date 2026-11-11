@@ -138,6 +138,7 @@ pub(crate) fn current_workspace(state: State<'_, AppState>) -> Option<String> {
 /// to relocate a wait that is already short.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+    let week_start = state.calendar_week_start;
     let guard = state.workspace.lock();
     let storage_root = state
         .storage_root
@@ -152,6 +153,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
+            week_start,
             ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
@@ -160,6 +162,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: state.hlc.actor().to_string(),
             storage_root,
             ready: false,
+            week_start,
             // No workspace, so nothing was withheld: zero is the whole
             // count. Labelling it partial would hedge about a number that
             // is exact.

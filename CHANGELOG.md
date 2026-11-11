@@ -6,6 +6,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ## [Unreleased]
 
 ### Added
+- **The calendar week starts where you say it does** ([#94](https://github.com/outlmd/outl/issues/94)).
+  `[calendar] week_start = "monday" | "sunday"` in `~/.config/outl/config.toml` retitles and re-pads the grid on all three surfaces that draw one: the TUI sidebar, the desktop sidebar, and the phone's journal sheet.
+  Unset, each surface keeps the day it has always drawn — Monday on desktop and the TUI, Sunday on the phone — so an untouched config changes nothing; setting it makes all three agree.
+  A pure display preference: never an Op, never converges between devices, like every other preference in the file.
 
 - **An Excalidraw plugin**: a ` ```excalidraw ` fence renders the drawing inline, as SVG, hand-drawn strokes and all.
   Three ways to point it at a scene: paste the **share link** from excalidraw.com and it works with no account at all, use an [Excalidraw+](https://plus.excalidraw.com) scene id with a token from the OS keychain, or paste a `.excalidraw` file, which needs no network.

@@ -82,7 +82,7 @@ pub use paths::{config_dir, config_path};
 pub use schema::{
     AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DiagramsMode, DisplayCfg, EditorCfg,
     RemindersCfg, SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, TelemetryCfg, ThemeCfg,
-    ThemeMode, WorkspaceCfg,
+    ThemeMode, WeekStart, WorkspaceCfg,
 };
 pub use tui::{TuiCfg, TuiIconStyle};
 

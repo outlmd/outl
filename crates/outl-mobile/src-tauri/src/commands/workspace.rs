@@ -14,6 +14,7 @@ use crate::state::{AppState, WorkspaceSummary};
 /// command's wire shape. Do not convert one of the pair alone.
 #[tauri::command]
 pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
+    let week_start = state.calendar_week_start;
     let guard = state.workspace.lock();
     let storage_root = state.storage_root.to_string_lossy().into_owned();
     match guard.as_ref() {
@@ -23,6 +24,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: ws.actor.to_string(),
             storage_root,
             ready: true,
+            week_start,
             ops_complete: !ws.booted_from_snapshot(),
         },
         None => WorkspaceSummary {
@@ -31,6 +33,7 @@ pub(crate) fn workspace_stats(state: State<'_, AppState>) -> WorkspaceSummary {
             actor: String::new(),
             storage_root,
             ready: false,
+            week_start,
             // See the desktop twin: zero with no workspace is exact.
             ops_complete: true,
         },

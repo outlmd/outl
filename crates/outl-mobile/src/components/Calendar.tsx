@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
   DAY_LABELS,
   MONTH_NAMES,
@@ -7,7 +7,10 @@ import {
   nextMonth,
   parseJournalSlug,
   prevMonth,
+  weekStartIndex,
+  type WeekStart,
 } from "@outl/shared/journal";
+import { workspaceStats } from "@outl/shared/api/commands";
 import { createSheetDrag } from "../lib/sheet-drag";
 
 interface CalendarProps {
@@ -47,6 +50,21 @@ export function Calendar(props: CalendarProps) {
     initial?.monthIndex ?? new Date().getMonth(),
   );
 
+  // Week layout owner: the global `[calendar] week_start` (issue #94).
+  // Read when the sheet opens — the sheet is the only consumer, so a
+  // boot-time fetch would pay the round trip for a screen most sessions
+  // never open. An unresolved read, `null` (unset), or an older backend
+  // keeps the phone's historical Sunday-first grid.
+  const [stats] = createResource(() => props.open, (open) =>
+    open ? workspaceStats() : null,
+  );
+  const weekStart = (): WeekStart => stats()?.week_start ?? "sunday";
+  /** Header labels rotated to the configured first day. */
+  const dayLabels = (): string[] =>
+    weekStart() === "monday"
+      ? [...DAY_LABELS.slice(1), DAY_LABELS[0]!]
+      : [...DAY_LABELS];
+
   // When the sheet reopens (e.g. user navigated via header chevron and
   // tapped the calendar icon again), realign the visible month to the
   // current view's context so the user lands where they expect.
@@ -66,10 +84,10 @@ export function Calendar(props: CalendarProps) {
 
   const days = createMemo(() => {
     const firstDay = new Date(year(), month(), 1);
-    const firstWeekday = firstDay.getDay();
+    const lead = weekStartIndex(firstDay.getDay(), weekStart());
     const total = daysInMonth(year(), month());
     const cells: Array<{ day: number; slug: string } | null> = [];
-    for (let i = 0; i < firstWeekday; i += 1) cells.push(null);
+    for (let i = 0; i < lead; i += 1) cells.push(null);
     for (let d = 1; d <= total; d += 1) {
       cells.push({ day: d, slug: formatJournalSlug(year(), month(), d) });
     }
@@ -182,7 +200,7 @@ export function Calendar(props: CalendarProps) {
         </div>
 
         <div class="mx-auto grid w-full max-w-[28rem] grid-cols-7 gap-1 px-3 pb-1 text-center text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dim)">
-          <For each={DAY_LABELS}>{(d) => <div>{d}</div>}</For>
+          <For each={dayLabels()}>{(d) => <div>{d}</div>}</For>
         </div>
 
         <div class="ios-scroll mx-auto grid min-h-0 w-full max-w-[28rem] flex-1 grid-cols-7 gap-1 overflow-y-auto px-3 pb-5">
