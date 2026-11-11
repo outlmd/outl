@@ -1,5 +1,6 @@
 import { Show, onCleanup } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
+import type { EmbedMap } from "@outl/shared/markdown";
 import {
   BlockProperties,
   MarkdownInline,
@@ -81,6 +82,8 @@ export function BlockBody(props: {
   onLinkClick?: (href: string) => void;
   /** Commit a `key:: value` property edit; empty value clears it. */
   onSetProperty?: (blockId: string, key: string, value: string) => void;
+  /** Resolved `((blk-…))` / `!((blk-…))` sources, keyed by handle. */
+  embeds?: EmbedMap;
   onTextareaMount?: (el: HTMLTextAreaElement) => void;
   /** See `BlockRowProps.onPasteMarkdown`. The parent has already
    *  injected `blockId`; this variant gets the caret + text. */
@@ -329,6 +332,7 @@ export function BlockBody(props: {
                         tokens={tokens}
                         variant="inline"
                         blockAssets
+                        embeds={props.embeds}
                         onRefClick={tap(props.onRefClick)}
                         onTagClick={tap(props.onTagClick)}
                         onLinkClick={tap(props.onLinkClick)}

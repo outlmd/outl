@@ -160,7 +160,7 @@ the drift this RFC exists to prevent.
 
 | Capability | TUI | Desktop | Mobile |
 |---|---|---|---|
-| `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ❌ Page history isn't on mobile yet — open the same page in the desktop app and use the ⏱ button. |
+| `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ✅ |
 | `PluginMarketplace` | ❌ Browsing and installing plugins from a marketplace isn't in the TUI — install by id from a terminal with `outl plugin install <id>`, or use the desktop or mobile app. | ✅ | ✅ |
 | `Calendar` | ⚠️ The TUI's month grid shows which days have journals but can't open one — press `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date (YYYY-MM-DD) to jump straight there. | ✅ | ✅ |
 | `Templates` | ✅ | ✅ | ✅ |

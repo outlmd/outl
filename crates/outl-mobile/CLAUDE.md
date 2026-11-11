@@ -26,7 +26,7 @@ Android components and why they need no "a capture arrived" notification: [`docs
 
 ## `Journal.tsx` is being broken up
 
-1,802 lines in one component, still 3x the `file-size-guard.sh` ceiling.
+1,804 lines in one component, still 3x the `file-size-guard.sh` ceiling.
 The chrome came out first (`JournalChrome.tsx`), then the delete prompts (`JournalDeleteDialogs.tsx`) and the toolbar dispatch (`Journal.toolbar-dispatch.ts`); [issue 265](https://github.com/outlmd/outl/issues/265) phases 1-3 took the block ops, the selection state machine and the platform listeners out.
 Day navigation and wake-to-today live in `Journal.day-nav.ts`, quick capture in `Journal.capture.ts` (`outl://capture` opens its sheet through `openCapture` in `Journal.listeners.ts`), and the empty states and zoom bar in `JournalEmpty.tsx` and `JournalZoomBar.tsx`.
 The foreground pull and the capture inbox drain come from `@outl/shared/capture` (`installForegroundRefresh`), which the desktop uses too.
@@ -130,6 +130,10 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   Every await in here is capped. The open is the one the journal's skeleton waits on, so an uncapped call there is not a slow page, it is a page that never comes back.
 - **`Journal.polls.ts`** — `installJournalPolls`: the connectivity listeners and every ticker (peers 3s, reminders 30s).
   Armed in the body so `onCleanup` owns the right scope, started only after the boot load settles.
+- **`Journal.embeds.ts`** — `createEmbedResolver(slug)`: the `((blk-…))` resolve for the visible page, called from `applyView`.
+  It owns the signal too, so the component holds no state for it.
+  The skip rule is the part with a failure mode: a resolve is skipped only when the page **and** the handle set both match the last one.
+  Keyed on the slug alone, a newly typed ref keeps printing its raw handle until the user navigates away ([#16](https://github.com/outlmd/outl/issues/16)).
 
 What is left is ~1,800 lines, almost all of it one `Journal()` function.
 That is real debt, not a finished job: what is left is a state/effects question (edit lifecycle, sync signals, the native bridges, the sheet stack), not a "move these functions" question — phases 1-3 were the movable half — and it wants its own plan.

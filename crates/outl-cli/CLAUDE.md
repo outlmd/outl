@@ -312,6 +312,7 @@ What that means for the surfaces in this crate:
 - **`outl sync` contends and stands down when it loses.**
   It is the explicit flush for scripts: bring a transport up, force a push/pull pass against every peer, wait, exit.
   When another local process already holds the endpoint it says so and exits, because that process is already pushing these ops out and a 25s route steal would break the sync `outl sync` was asked to help.
+  **It opens through `open_read`** and mints no actor — see the `run_sync` comment and [RFC 0298](../../docs/rfcs/0298-read-opens-do-not-mint-actors.md), pinned by `tests/sync_cmd.rs`.
 - **`outl serve` contends but never competes — it is the only process built to run forever.**
   Winning the lease once and holding it for a week is not the same trade as a GUI winning it for a session: it would push every GUI and TUI on the machine permanently into the degraded mode where the sync dot never turns green and Refresh cannot force a pass.
   So `cmd/sync_supervisor.rs` re-asks every 30s and treats a refusal as a normal state, with each stand-down reason logged once rather than twice a minute.

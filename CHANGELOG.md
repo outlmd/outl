@@ -6,6 +6,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ## [Unreleased]
 
 ### Added
+
+- **`#` opens the page picker on the desktop and the phone** ([#15](https://github.com/outlmd/outl/issues/15)).
+  A tag is a page, so the trigger searches the same pages `[[` does.
+  It accepts the **slug**, not the title: `#` has no closing delimiter, so the first space ends the tag, and inserting "Deep Work" would tag `#Deep` and leave "Work" sitting in the block as prose.
+  The TUI has had this for a while; the two GUI clients were reading a shared detector that only knew `[[` and `((`.
+  Where a tag name ends is `outl_md::reference::try_tag`'s answer, not a second rule written in TypeScript, so the popup never offers to complete past the point the parser stops reading.
+  When more than one trigger could fire, an open `[[` or `((` wins over `#` and `@`, and `#` wins over `@` — a tag is one word, so whenever it matches it is the trigger closest to the caret.
+
+- **`((blk-…))` refs and `!((blk-…))` embeds render as the source block's text on the phone** ([#16](https://github.com/outlmd/outl/issues/16)).
+  They printed the raw handle before, on every ref, which reads as the feature being absent.
+  Nothing was missing from the backend or the renderer: `MarkdownInline` decides this entirely from an `embeds` prop, and this client never filled it.
+  Resolving is `O(workspace)` and the journal re-renders on every commit, so it reruns only when the page or its set of handles changed, and an older in-flight answer can no longer land on top of a newer one.
+  Two surfaces still show the handle on both GUI clients: a ref inside a **backlink** row, and a ref whose source block you are editing **on the page you are looking at** — the second settles as soon as you navigate.
 - **The calendar week starts where you say it does** ([#94](https://github.com/outlmd/outl/issues/94)).
   `[calendar] week_start = "monday" | "sunday"` in `~/.config/outl/config.toml` retitles and re-pads the grid on all three surfaces that draw one: the TUI sidebar, the desktop sidebar, and the phone's journal sheet.
   Unset, each surface keeps the day it has always drawn — Monday on desktop and the TUI, Sunday on the phone — so an untouched config changes nothing; setting it makes all three agree.
@@ -79,6 +92,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   It does cost a third more memory to hold, since the base64 of N bytes is 4N/3 characters — the cap is on what the server may send, not on the representation.
 
 ### Fixed
+
+- **`outl doctor` told you to file a bug about ops that a sync would have fetched** ([#301](https://github.com/outlmd/outl/issues/301)).
+  It had one line for two defects with opposite remediations: a node whose `Create` never arrived from a peer, and a node the log did create that the replay then rejected.
+  The first is fixed by running `outl sync` against the device that still holds the op, so the finding now names that device and that op.
+  The second is not fixed by anything the user can do, so it says to report it.
+  `Move` is not evidence that the log placed a node: replaying one against a node this replica has never seen is a no-op on the tree, so a node carrying a `Move` and no `Create` was being filed under "please report it" with no device named — the complaint in [#301](https://github.com/outlmd/outl/issues/301), reproduced in the other direction.
+
+- **The client catalog said the phone had no page history, and the phone has had one.**
+  `<HistorySheet />` is reached by long-pressing the page title, reads the same `page_timeline` the desktop's `⏱` panel reads, and restores from it.
+  The catalog's job is that every client declares a verdict for every capability, and an exhaustive `match` can force the declaration without forcing it to be true.
+  A wrong `Missing` is worse than an undeclared gap, because its sentence is shown to the user: this one sent people who already had the feature to go and find it on another device.
+  `capability_parity.rs` now fails if that row and this client disagree again.
 
 - **`ctx.storage` was unreachable from a plugin's `activate`, its content transformers and its sync transport**, with or without the `storage:local` permission.
   A turn needs two things wired before the engine runs — the plugin's local KV and its keychain access — and four of the six entry points wired only the keychain: `load_plugin` (whose `engine.load` also runs `activate(ctx)`), `transform_block`, `sync_push` and `sync_pull`.

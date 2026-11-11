@@ -150,6 +150,21 @@ if [ "${1:-}" = "--update" ]; then
 #     tests) is a sibling module, same split as the existing page_merge
 #     and page_repair siblings, so page.rs only pays for the call site.
 #
+#   outl-mobile/src/components/Journal.tsx  1798 -> 1804  (issue 16)
+#     Six lines to wire a ((blk-...)) ref resolver: one import, two
+#     comment lines, the const, the resolve call in applyView, and the
+#     prop on BlockRow. The logic is not here - Journal.embeds.ts is 110
+#     lines and its test 196, and the module owns the signal too, so the
+#     component holds no state for this feature. Mobile printed raw
+#     handles on every ref because this client never called
+#     resolveEmbeds; the backend and the renderer both already had it.
+#     What is left in Journal.tsx is a state and effects question (edit
+#     lifecycle, sync signals, native bridges, the sheet stack), which
+#     outl-mobile/CLAUDE.md records as wanting its own plan - phases 1-3
+#     of issue 265 already took the movable half. Extracting more of it
+#     to pay for six lines is the larger change, and the silent failure
+#     it risks is a destructured prop frozen at first render.
+#
 # None of these arguments generalises. A further raise makes its own case.
 HEADER
     printf '%s\n' "$scanned" | oversized

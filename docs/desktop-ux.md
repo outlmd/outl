@@ -141,16 +141,18 @@ Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoo
 
 ## Inline autocomplete popups
 
-`BlockEditor` hosts four popups, and only one is ever open at a time.
+`BlockEditor` hosts five popups, and only one is ever open at a time.
 
 | Trigger | Popup | Source | What accepting inserts |
 |---|---|---|---|
 | `:shortcode` (word-initial `:[a-z]`) | `EmojiSuggestPopup` | `searchEmojis` → `outl_md::emoji::search` | the canonical `:shortcode:` |
 | `[[…]]` | `RefSuggestPopup` | `search_pages`, the same command the `Cmd+P` picker calls | the page title, or the ISO slug for a journal |
 | `((…))` | `BlockSuggestPopup` | `search_blocks`, from disk, debounced ~150 ms | the ref handle `((blk-XXXXXX))` |
+| `#…` (word-initial, one word) | `RefSuggestPopup` | `search_pages` — a tag *is* a page | the page **slug**, never the title: `#` has no closer, so the first space would end the tag and leave the rest as prose |
 | block-initial `/` | slash menu | `templateSlashCommands` (`lib/slash-commands.ts`) plus the shared command set | runs the row, e.g. `instantiateTemplateAt` for `template: <name>` |
 
 Detection and span replacement are `@outl/shared/autocomplete`'s (`detectRefContext`, `detectEmojiContext`, `applySuggestion`, `applyEmojiSuggestion`), which the TUI and mobile run too.
+When more than one trigger could fire, an open `[[`/`((` wins over `#` and `@`, and `#` wins over `@` — a tag is one word, so it is always the closer trigger when it matches.
 
 `((blk-…))` handles also **resolve** at render (issue #147, TUI parity).
 `OutlineView` gathers them with `collectBlockRefHandles` plus `resolveEmbeds` into `appState.embeds`, and `BlockBody` feeds that to `<MarkdownInline embeds= />`.

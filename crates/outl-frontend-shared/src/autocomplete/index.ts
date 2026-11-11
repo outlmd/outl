@@ -22,6 +22,14 @@
  */
 
 /** Result of {@link autoClosePair}. */
+// Re-exported so `@outl/shared/autocomplete` stays the single import
+// path after the split (see `emoji.ts`'s header).
+export {
+  applyEmojiSuggestion,
+  detectEmojiContext,
+  type EmojiContext,
+} from "./emoji";
+
 export interface PairCompletion {
   /** Full textarea value after the completion. */
   value: string;
@@ -142,7 +150,10 @@ export function autoDeletePair(
   if (selection >= 2) {
     const left = value.slice(selection - 2, selection);
     const right = value.slice(selection, selection + 2);
-    if ((left === "[[" && right === "]]") || (left === "((" && right === "))")) {
+    if (
+      (left === "[[" && right === "]]") ||
+      (left === "((" && right === "))")
+    ) {
       return {
         value: value.slice(0, selection - 2) + value.slice(selection + 2),
         caret: selection - 2,
@@ -205,8 +216,11 @@ export interface RefContext {
    *   like `@Thiago Avelino`). Mentions have no closing delimiter;
    *   `replaceEnd` equals the caret. On accept the popup wraps the
    *   chosen title with `[[@…]]`.
+   * - `"tag"` — caret inside a word-initial `#tag`. Like a mention it
+   *   has no closer, and unlike one it stops at whitespace: a tag is
+   *   one word. On accept the popup writes `#slug` with no brackets.
    */
-  kind: "page" | "block" | "mention";
+  kind: "page" | "block" | "mention" | "tag";
   /** The text between the opener and the caret — what to filter by. */
   query: string;
   /** Index of the first delimiter character (the leftmost `[` / `(` / `@`). */
@@ -231,72 +245,154 @@ export interface RefContext {
  * later caret.
  *
  * **Cross-runtime mirror.** The TUI runs the same walk-back in Rust
- * at `outl_tui::actions::overlay::detect_trigger`, plus `#` and `/`
- * triggers no GUI client surfaces yet. Frontend clients keep a local
- * TS copy (here in `@outl/shared`) so the autocomplete popup never
- * pays a Tauri round-trip per keystroke. If you extend either side
- * (a new opener, a different closing rule), update both in the same
- * commit.
+ * at `outl_tui::actions::overlay::detect_trigger`, which also owns the
+ * `/` slash trigger this file mirrors in `detectSlashContext`.
+ * Frontend clients keep a local TS copy (here in `@outl/shared`) so
+ * the autocomplete popup never pays a Tauri round-trip per keystroke.
+ * If you extend either side (a new opener, a different closing rule),
+ * update both in the same commit.
+ *
+ * The `#` trigger is the sharpest instance of that: the TUI gates its
+ * tag query on the tokenizer's alphabet, so `isTagChar` below reads
+ * from the same source rather than inventing a second rule. A GUI that
+ * offered a popup for `#foo.bar` would be offering to complete a tag
+ * the tokenizer ends at `foo`.
  */
+/**
+ * Is the character at `at` inside a fenced code block?
+ *
+ * Counts ``` runs before it: an odd number means the caret sits inside
+ * an open fence. A shell comment (`#!/bin/sh`) is a word-initial `#`
+ * with no space after it, so nothing else in the tag walk-back can
+ * tell it from a tag.
+ */
+function insideFence(value: string, at: number): boolean {
+  return (value.slice(0, at).split("```").length - 1) % 2 === 1;
+}
+
+/**
+ * May this character sit inside a `#tag` name?
+ *
+ * Mirrors `outl_md::reference::try_tag`, which is the single owner of
+ * where a tag ends — it walks `is_alphanumeric() || '-' || '_' || '/'`
+ * and stops. The TUI's `detect_trigger` gates on the same set.
+ *
+ * This is what ends the walk below, so it subsumes the two rules that
+ * used to be spelled out there: whitespace is not a tag char (a `# `
+ * heading and `#one two` both stop), and neither is a bracket (`#fo[o`
+ * stops before the `[`).
+ */
+function isTagChar(ch: string): boolean {
+  return (
+    /[\p{Alphabetic}\p{N}]/u.test(ch) || ch === "-" || ch === "_" || ch === "/"
+  );
+}
+
+/**
+ * The `[[` / `((` ref the caret sits inside, or `null`.
+ *
+ * One owner for "is the caret inside a bracketed ref", because three
+ * callers ask it: the page/block context below, and each of the two
+ * openerless pre-passes (`#`, `@`) deciding whether to stand down.
+ *
+ * A bracketed ref outranks both of those. `#` inside `[[Issue #42` is
+ * part of a page title, and a tag pre-pass that claimed it spliced
+ * from the `#` instead of the `[[` — turning `[[Issue #42` into
+ * `[[Issue #deep-work]]` and making any page whose title holds a `#`
+ * after a space impossible to complete.
+ */
+function openRefAt(
+  value: string,
+  selection: number,
+): { kind: "page" | "block"; openIndex: number } | null {
+  for (let i = selection - 1; i >= 1; i -= 1) {
+    const pair = value.slice(i - 1, i + 1);
+    if (pair === "]]" || pair === "))") return null;
+    if (value[i] === "\n") return null;
+    if (pair === "[[") return { kind: "page", openIndex: i - 1 };
+    if (pair === "((") return { kind: "block", openIndex: i - 1 };
+  }
+  return null;
+}
+
 export function detectRefContext(
   value: string,
   selection: number,
 ): RefContext | null {
+  // Order is the whole design here, most-constrained trigger first.
+  //
+  // 1. A bracketed ref has an explicit opener *and* closer, so it wins
+  //    outright: a `#` or `@` typed inside one belongs to the ref.
+  // 2. `#` next, because a tag is one word — the walk ends at the
+  //    first non-tag char, so it can only fire on the caret's own
+  //    word, which makes it the closest trigger whenever it matches.
+  // 3. `@` last, because mentions allow spaces (`@Thiago Avelino`), so
+  //    its walk reaches across prose. Running it first let a stray `@`
+  //    anywhere in the preceding 64 chars swallow the `#` the user had
+  //    just typed, and the tag popup silently never opened.
+  const open = openRefAt(value, selection);
+  if (open) {
+    const query = value.slice(open.openIndex + 2, selection);
+    const closer = open.kind === "page" ? "]]" : "))";
+    return {
+      kind: open.kind,
+      query,
+      openIndex: open.openIndex,
+      replaceEnd: findCloser(value, selection, closer),
+    };
+  }
+
+  // Tag pre-pass: walk back looking for a word-initial `#`.
+  //
+  // A mid-word `#` is not a tag (`a#b`, a CSS colour, a URL fragment),
+  // the same trap `@` has in an email address. The fence check is
+  // separate because the alphabet cannot catch it: a shell comment is
+  // `#!/bin/sh`, a word-initial `#` whose `!` ends the name.
+  const TAG_CAP = 64;
+  for (let j = selection - 1; j >= Math.max(0, selection - TAG_CAP); j -= 1) {
+    const ch = value[j];
+    if (ch === undefined) break;
+    if (ch === "#") {
+      const prev = j === 0 ? "" : value[j - 1];
+      if (j !== 0 && !/\s/.test(prev)) break;
+      if (insideFence(value, j)) break;
+      return {
+        kind: "tag",
+        query: value.slice(j + 1, selection),
+        openIndex: j,
+        replaceEnd: selection, // tags have no closer
+      };
+    }
+    if (!isTagChar(ch)) break;
+  }
+
   // Mention pre-pass: walk back looking for a word-initial `@`.
-  // Mentions allow spaces in the query (composite names like
-  // `@Thiago Avelino`), so the main walk-back below — which stops at
-  // bracket delimiters — would never detect them. Cap the search at
-  // 64 chars to avoid scanning the entire buffer when the user typed
-  // a stray `@` followed by lots of prose.
-  {
-    const MENTION_CAP = 64;
-    const lower = Math.max(0, selection - MENTION_CAP);
-    for (let i = selection - 1; i >= lower; i -= 1) {
-      const ch = value[i];
-      if (
-        ch === "\n" ||
-        ch === "[" ||
-        ch === "]" ||
-        ch === "(" ||
-        ch === ")"
-      ) {
-        // Walked into another token's territory — fall through to
-        // the main walk-back so `[[…` / `((…` still work.
-        break;
-      }
-      if (ch === "@") {
-        const prev = i === 0 ? "" : value[i - 1];
-        if (i === 0 || /\s/.test(prev)) {
-          return {
-            kind: "mention",
-            query: value.slice(i + 1, selection),
-            openIndex: i,
-            replaceEnd: selection, // mentions have no closer
-          };
-        }
-        // Mid-word `@` (email, social handle) — not a mention. Stop
-        // so the main walk-back doesn't accidentally fire.
-        break;
-      }
+  // Composite names carry spaces, so this one does not stop at
+  // whitespace; it is capped at 64 chars so a stray `@` followed by
+  // prose does not scan the whole buffer.
+  const MENTION_CAP = 64;
+  for (
+    let i = selection - 1;
+    i >= Math.max(0, selection - MENTION_CAP);
+    i -= 1
+  ) {
+    const ch = value[i];
+    if (ch === "\n" || ch === "[" || ch === "]" || ch === "(" || ch === ")") {
+      break;
+    }
+    if (ch === "@") {
+      const prev = i === 0 ? "" : value[i - 1];
+      // Mid-word `@` (email, social handle) is not a mention.
+      if (i !== 0 && !/\s/.test(prev)) break;
+      return {
+        kind: "mention",
+        query: value.slice(i + 1, selection),
+        openIndex: i,
+        replaceEnd: selection, // mentions have no closer
+      };
     }
   }
-  let i = selection - 1;
-  while (i >= 1) {
-    const pair = value.slice(i - 1, i + 1);
-    if (pair === "]]" || pair === "))") return null;
-    if (value[i] === "\n") return null;
-    if (pair === "[[") {
-      const query = value.slice(i + 1, selection);
-      const replaceEnd = findCloser(value, selection, "]]");
-      return { kind: "page", query, openIndex: i - 1, replaceEnd };
-    }
-    if (pair === "((") {
-      const query = value.slice(i + 1, selection);
-      const replaceEnd = findCloser(value, selection, "))");
-      return { kind: "block", query, openIndex: i - 1, replaceEnd };
-    }
-    i -= 1;
-  }
+
   return null;
 }
 
@@ -315,7 +411,10 @@ export function applySuggestion(
   const before = value.slice(0, ctx.openIndex);
   const after = value.slice(ctx.replaceEnd);
   let rebuilt: string;
-  if (ctx.kind === "mention") {
+  if (ctx.kind === "tag") {
+    // No brackets and no closer: a tag *is* its text.
+    rebuilt = `#${replacement}`;
+  } else if (ctx.kind === "mention") {
     // Mention sugar: the page identity does NOT carry the `@`, so the
     // caller passes the page title verbatim. We add the `@` only on
     // the link side (where it acts as the mention affordance).
@@ -341,93 +440,6 @@ function findCloser(value: string, from: number, closer: string): number {
     if (value.slice(i, i + 2) === closer) return i + 2;
   }
   return from;
-}
-
-/** Result of {@link detectEmojiContext}. */
-export interface EmojiContext {
-  /** Text typed after the opening `:`, used as fuzzy query. */
-  query: string;
-  /** Index of the opening `:`. */
-  openIndex: number;
-  /**
-   * Index of the character right after the trigger span. Mirrors the
-   * `replaceEnd` shape of {@link RefContext} so {@link applyEmojiSuggestion}
-   * can splice deterministically. Emojis have no closer in this state
-   * (the user hasn't typed the second `:`) so this equals the caret.
-   */
-  replaceEnd: number;
-}
-
-/**
- * Detect whether the caret sits inside an open `:shortcode` emoji
- * trigger. Returns the typed query (everything after the opening `:`)
- * + the span the caller will replace on commit. Returns `null` when
- * the caret isn't in that state.
- *
- * Trigger rules (pinned to gemoji syntax, identical across TUI / mobile
- * / desktop):
- *
- * - The opener `:` must be at the start of the buffer **or** preceded
- *   by whitespace. Mid-word `:` is ambiguous (`14:00`, `mailto:foo`,
- *   `key::value`) — bail.
- * - The first char after `:` must be `[a-z]`. A digit-only or
- *   symbol-only trigger (`:1`, `:+`) opens too eagerly and produces a
- *   popup on every prose `:`.
- * - The query body is `[a-z0-9_+-]*` — the same alphabet
- *   `outl_md::emoji::is_valid_shortcode_char` accepts. The first char
- *   outside that alphabet — including whitespace, `:` (closing —
- *   commit handled separately), or any URL char (`/`, `.`, `@`) —
- *   closes the trigger.
- * - Cap the scan at 32 chars left of the caret. A real shortcode is
- *   short; long misses (`:thisisaverylongthingnotanemoji`) shouldn't
- *   keep the popup open.
- *
- * The "first char after `:` must be `[a-z]`" rule keeps the popup
- * silent during URL typing — `https://` produces `:` followed by `/`
- * which fails immediately.
- */
-export function detectEmojiContext(
-  value: string,
-  selection: number,
-): EmojiContext | null {
-  const CAP = 32;
-  const lower = Math.max(0, selection - CAP);
-  for (let i = selection - 1; i >= lower; i -= 1) {
-    const ch = value[i] ?? "";
-    if (ch === ":") {
-      // Opener candidate. Validate the left side (start-of-buffer or
-      // whitespace) and the right side (first char `[a-z]`).
-      const prev = i === 0 ? "" : value[i - 1] ?? "";
-      if (i !== 0 && !/\s/.test(prev)) return null;
-      const first = value[i + 1] ?? "";
-      if (!/[a-z]/.test(first)) return null;
-      const query = value.slice(i + 1, selection);
-      return { query, openIndex: i, replaceEnd: selection };
-    }
-    // Any non-shortcode char breaks the run.
-    if (!/[a-z0-9_+\-]/.test(ch)) return null;
-  }
-  return null;
-}
-
-/**
- * Replace the in-flight `:query` trigger with the canonical
- * `:shortcode:` form (opening + closing `:`s included) and place the
- * caret immediately after the closing `:`. Mirrors {@link applySuggestion}
- * for refs / mentions so the call sites look the same.
- */
-export function applyEmojiSuggestion(
-  value: string,
-  ctx: EmojiContext,
-  shortcode: string,
-): PairCompletion {
-  const before = value.slice(0, ctx.openIndex);
-  const after = value.slice(ctx.replaceEnd);
-  const rebuilt = `:${shortcode}:`;
-  return {
-    value: before + rebuilt + after,
-    caret: before.length + rebuilt.length,
-  };
 }
 
 /**
@@ -510,8 +522,12 @@ export interface PageMetaLike {
  */
 export function refReplacement(
   page: Pick<PageMetaLike, "kind" | "slug" | "title">,
-  opts: { mention?: boolean } = {},
+  opts: { mention?: boolean; tag?: boolean } = {},
 ): string {
+  // A tag is always the slug. `#` has no closing delimiter, so the
+  // first space ends the tag — inserting a title like "Deep Work"
+  // would write `#Deep` and leave "Work" as loose prose.
+  if (opts.tag) return page.slug;
   return page.kind === "journal" && !opts.mention ? page.slug : page.title;
 }
 

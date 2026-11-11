@@ -53,19 +53,29 @@ pub const CLI_ONLY: &[(Capability, &str)] = &[];
 pub fn capability_support(cap: Capability) -> ClientSupport {
     match cap {
         // Desktop: `TimelinePanel.tsx`, opened by the page header's
-        // `⏱` button — read-only view of what the op log recorded
-        // for the open page. Neither the TUI nor mobile has anything
-        // that reads the op log's history back to the user.
+        // `⏱` button — read-only view of what the op log recorded for
+        // the open page. The TUI has nothing that reads the op log's
+        // history back to the user.
+        //
+        // Mobile's verdict was `Missing` while this client registered
+        // `page_timeline` and mounted `HistorySheet.tsx` off the page
+        // properties sheet — a surface `outl-mobile/CLAUDE.md` lists
+        // under "Trust surfaces". The sentence sent a user who already
+        // had the feature to another device to go and find it.
+        //
+        // Worth stating because it is the failure an exhaustive `match`
+        // cannot catch: invariant 12 forces every client to *declare* a
+        // verdict, and nothing forces the verdict to be true. A wrong
+        // `Missing` is worse than an undeclared gap, since the text is
+        // shown to the user. `outl-mobile`'s `capability_parity.rs` is
+        // what fails now if this row and that client disagree again.
         Capability::PageHistory => ClientSupport {
             tui: Missing(
                 "Page history isn't in the TUI — open the same page in the desktop app and \
                  use the ⏱ button to see what the op log recorded.",
             ),
             desktop: Full,
-            mobile: Missing(
-                "Page history isn't on mobile yet — open the same page in the desktop app and \
-                 use the ⏱ button.",
-            ),
+            mobile: Full,
         },
 
         // Desktop `PluginMarketplace.tsx` and mobile `PluginSheet.tsx`

@@ -59,6 +59,21 @@
 #     tests) is a sibling module, same split as the existing page_merge
 #     and page_repair siblings, so page.rs only pays for the call site.
 #
+#   outl-mobile/src/components/Journal.tsx  1798 -> 1804  (issue 16)
+#     Six lines to wire a ((blk-...)) ref resolver: one import, two
+#     comment lines, the const, the resolve call in applyView, and the
+#     prop on BlockRow. The logic is not here - Journal.embeds.ts is 110
+#     lines and its test 196, and the module owns the signal too, so the
+#     component holds no state for this feature. Mobile printed raw
+#     handles on every ref because this client never called
+#     resolveEmbeds; the backend and the renderer both already had it.
+#     What is left in Journal.tsx is a state and effects question (edit
+#     lifecycle, sync signals, native bridges, the sheet stack), which
+#     outl-mobile/CLAUDE.md records as wanting its own plan - phases 1-3
+#     of issue 265 already took the movable half. Extracting more of it
+#     to pay for six lines is the larger change, and the silent failure
+#     it risks is a destructured prop frozen at first render.
+#
 # None of these arguments generalises. A further raise makes its own case.
 645 crates/outl-actions/src/backlinks.rs
 689 crates/outl-actions/src/page.rs
@@ -69,25 +84,25 @@
 636 crates/outl-config/src/lib.rs
 754 crates/outl-core/src/storage/jsonl/read.rs
 810 crates/outl-core/src/storage/jsonl/tests.rs
-725 crates/outl-core/src/workspace/batch.rs
 881 crates/outl-core/src/workspace.rs
+725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
-919 crates/outl-desktop/src/components/OutlineView.tsx
 620 crates/outl-desktop/src-tauri/src/settings.rs
+919 crates/outl-desktop/src/components/OutlineView.tsx
 831 crates/outl-frontend-shared/src/api/commands.ts
 707 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1798 crates/outl-mobile/src/components/Journal.tsx
+1804 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 636 crates/outl-plugins/src/host_tests.rs
 776 crates/outl-shortcuts/src/defaults.rs
 702 crates/outl-shortcuts/src/support.rs
 763 crates/outl-sync-iroh/src/engine_pairing.rs
-868 crates/outl-sync-iroh/src/engine.rs
 736 crates/outl-sync-iroh/src/engine_sync.rs
+868 crates/outl-sync-iroh/src/engine.rs
 1245 crates/outl-sync-iroh/src/pairing.rs
 1022 crates/outl-sync-iroh/src/peers.rs
 821 crates/outl-sync-iroh/tests/chaos.rs

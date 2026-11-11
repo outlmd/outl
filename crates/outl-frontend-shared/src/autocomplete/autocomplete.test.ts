@@ -75,8 +75,14 @@ describe("autoPairBracket", () => {
   );
 
   it("steps over both closers of a doubled ref pair", () => {
-    expect(autoPairBracket("[[a]]", 3, "]")).toEqual({ value: "[[a]]", caret: 4 });
-    expect(autoPairBracket("[[a]]", 4, "]")).toEqual({ value: "[[a]]", caret: 5 });
+    expect(autoPairBracket("[[a]]", 3, "]")).toEqual({
+      value: "[[a]]",
+      caret: 4,
+    });
+    expect(autoPairBracket("[[a]]", 4, "]")).toEqual({
+      value: "[[a]]",
+      caret: 5,
+    });
   });
 
   it("lets a closer through when the next char differs", () => {
@@ -319,7 +325,10 @@ describe("withCreateNewPersonCandidate", () => {
   });
 
   it("appends a synthetic candidate when no match exists", () => {
-    const result = withCreateNewPersonCandidate([person("avelino", "Avelino")], "vini");
+    const result = withCreateNewPersonCandidate(
+      [person("avelino", "Avelino")],
+      "vini",
+    );
     expect(result).toHaveLength(2);
     expect(result[1]).toEqual({
       id: "",

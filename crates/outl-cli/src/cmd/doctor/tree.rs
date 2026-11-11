@@ -13,10 +13,10 @@
 //! - [`check_projections`] — every page in the tree vs its `.md` on
 //!   disk, which is also where the `--repair` plan comes from.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use outl_actions::journal::{survey_page_projections, PageProjectionState};
-use outl_core::id::NodeId;
+use outl_core::id::{ActorId, NodeId};
 use outl_core::workspace::Workspace;
 
 use super::repair::PageWrite;
@@ -135,10 +135,54 @@ pub(super) fn check_alias_collisions(b: &mut Builder, ws: &Workspace) {
 /// `SetProp` / `SetCollapsed` on a node that never got either is an op
 /// whose effect the user will never see. On a healthy workspace this is
 /// zero.
+/// Who wrote an op for a node the log never placed, and which op it was.
+///
+/// Both halves are what make the finding actionable. The actor names the
+/// device whose log carries the op, which is the device to ask for the
+/// `Create` that is missing; the op kind is what the user sees described
+/// as having had no effect.
+pub(super) struct OpWitness {
+    pub actor: ActorId,
+    pub kind: &'static str,
+}
+
+/// Which node an op names.
+///
+/// Every variant carries exactly one, so this is total — and it is a
+/// function rather than two copies of the `match` because the doctor
+/// asks it per op over a 234k-op log, in a pass that also decides
+/// which nodes were ever placed.
+pub(super) fn node_of(op: &outl_core::op::Op) -> NodeId {
+    match op {
+        outl_core::op::Op::Move { node, .. }
+        | outl_core::op::Op::Edit { node, .. }
+        | outl_core::op::Op::SetProp { node, .. }
+        | outl_core::op::Op::Create { node, .. }
+        | outl_core::op::Op::SetCollapsed { node, .. }
+        | outl_core::op::Op::SnoozeRemind { node, .. } => *node,
+    }
+}
+
+/// The variant name, for a report a human reads.
+///
+/// Spelled out rather than derived from `Debug`, because `Debug` on
+/// `Op::Edit` prints the whole Yrs delta.
+pub(super) fn op_kind(op: &outl_core::op::Op) -> &'static str {
+    match op {
+        outl_core::op::Op::Create { .. } => "Create",
+        outl_core::op::Op::Move { .. } => "Move",
+        outl_core::op::Op::Edit { .. } => "Edit",
+        outl_core::op::Op::SetProp { .. } => "SetProp",
+        outl_core::op::Op::SetCollapsed { .. } => "SetCollapsed",
+        outl_core::op::Op::SnoozeRemind { .. } => "SnoozeRemind",
+    }
+}
+
 pub(super) fn check_unmaterialized_ops(
     b: &mut Builder,
     ws: &Workspace,
     op_nodes: &HashSet<NodeId>,
+    unplaced: &HashMap<NodeId, OpWitness>,
 ) {
     if op_nodes.is_empty() {
         return;
@@ -156,16 +200,59 @@ pub(super) fn check_unmaterialized_ops(
         return;
     }
     missing.sort();
-    b.warn(format!(
-        "{} node id(s) appear in the op log but not in the materialized tree — \
-         their ops (Edit / SetProp / SetCollapsed) never took effect",
-        missing.len()
-    ));
-    for id in missing.iter().take(MAX_LISTED) {
-        b.warn(format!("  unmaterialized node {id}"));
+
+    // Two different defects, and the old single line could not be acted
+    // on because it described both at once.
+    //
+    // A node with no `Create` anywhere in the merged log was never
+    // built here: the op that would have placed it did not arrive. The
+    // peer that wrote the op we *do* hold is the one to ask, so naming
+    // that actor is the whole remediation.
+    //
+    // `Move` is deliberately not evidence of placement — on a node the
+    // replica has never seen it is a no-op on the tree, so a node whose
+    // only positional op is a `Move` belongs here, not below.
+    //
+    // A node the log did place and the tree still lacks is a different,
+    // worse thing — the replay rejected it — and it is not something a
+    // sync pass fixes.
+    let (unarrived, rejected): (Vec<NodeId>, Vec<NodeId>) =
+        missing.iter().partition(|id| unplaced.contains_key(id));
+
+    if !unarrived.is_empty() {
+        b.warn(format!(
+            "{} node id(s) carry ops but were never created here — the `Create` that \
+             would have placed them never arrived, so those ops had no effect. Run \
+             `outl sync` against the device named below; it may still hold them",
+            unarrived.len()
+        ));
+        for id in unarrived.iter().take(MAX_LISTED) {
+            match unplaced.get(id) {
+                Some(w) => b.warn(format!(
+                    "  node {id}: {} written by actor {}",
+                    w.kind, w.actor
+                )),
+                None => b.warn(format!("  node {id}")),
+            }
+        }
+        if unarrived.len() > MAX_LISTED {
+            b.warn(format!("  … and {} more", unarrived.len() - MAX_LISTED));
+        }
     }
-    if missing.len() > MAX_LISTED {
-        b.warn(format!("  … and {} more", missing.len() - MAX_LISTED));
+
+    if !rejected.is_empty() {
+        b.warn(format!(
+            "{} node id(s) were placed by a `Create` in the op log and are still \
+             absent from the materialized tree — the replay rejected them, so a sync \
+             pass does not fix this; please report it with the ids below",
+            rejected.len()
+        ));
+        for id in rejected.iter().take(MAX_LISTED) {
+            b.warn(format!("  unmaterialized node {id}"));
+        }
+        if rejected.len() > MAX_LISTED {
+            b.warn(format!("  … and {} more", rejected.len() - MAX_LISTED));
+        }
     }
 }
 

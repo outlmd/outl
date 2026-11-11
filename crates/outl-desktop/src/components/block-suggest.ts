@@ -288,8 +288,13 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
       }, BLOCK_SEARCH_DEBOUNCE_MS);
       return;
     }
-    // `page` → fuzzy over every page; `mention` → fuzzy over persons.
-    if (!ctx || (ctx.kind !== "page" && ctx.kind !== "mention")) {
+    // `page` → fuzzy over every page; `mention` → fuzzy over persons;
+    // `tag` → the same page search, since a tag in outl *is* a page.
+    // Only the accept differs: a tag inserts the slug, not the title.
+    if (
+      !ctx ||
+      (ctx.kind !== "page" && ctx.kind !== "mention" && ctx.kind !== "tag")
+    ) {
       return closeSuggest();
     }
     const key = `${ctx.kind}:${ctx.query}`;
@@ -332,7 +337,10 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     const ta = deps.textarea();
     if (!ta) return;
     const ctx = detectRefContext(ta.value, ta.selectionStart ?? 0);
-    if (!ctx || (ctx.kind !== "page" && ctx.kind !== "mention")) {
+    if (
+      !ctx ||
+      (ctx.kind !== "page" && ctx.kind !== "mention" && ctx.kind !== "tag")
+    ) {
       return closeSuggest();
     }
     // For mentions the page identity carries no `@` — the shared
@@ -340,6 +348,7 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     // prepends `@` on the link side.
     const replacement = refReplacement(page, {
       mention: ctx.kind === "mention",
+      tag: ctx.kind === "tag",
     });
     // Mention sugar: materialise the person page in the backend
     // (fire-and-forget) so the inserted `[[@title]]` link resolves
