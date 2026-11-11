@@ -94,8 +94,9 @@ pub struct ImportReport {
     pub props_blocks: usize,
     /// Blocks whose collapsed/folded state landed as `Op::SetCollapsed`.
     pub collapsed_applied: usize,
-    /// Blocks whose create/edit timestamps were dropped (default
-    /// policy; re-run with `--preserve-timestamps` to keep them).
+    /// Blocks and pages whose create/edit timestamps were dropped
+    /// (default policy; re-run with `--preserve-timestamps` to keep
+    /// them).
     pub timestamps_dropped: usize,
     /// Page-name collisions after slugify — disambiguated with a
     /// numeric suffix.

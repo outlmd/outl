@@ -219,6 +219,29 @@ fn render_page(
             ctx.report.props_pages += 1;
         }
     }
+    // Page timestamps, same policy as block ones. A merged journal
+    // (two source pages, one date) keeps the earliest creation and the
+    // latest edit. A source attribute of the same name wins: it is what
+    // the user wrote.
+    let created = sources.iter().filter_map(|p| p.created).min();
+    let edited = sources.iter().filter_map(|p| p.edited).max();
+    if created.is_some() || edited.is_some() {
+        if ctx.opts.preserve_timestamps {
+            let has_key = |key: &str| {
+                sources
+                    .iter()
+                    .any(|p| p.props.iter().any(|(k, _)| k.eq_ignore_ascii_case(key)))
+            };
+            for (key, ts) in [("created", created), ("edited", edited)] {
+                if let Some(ts) = ts.filter(|_| !has_key(key)) {
+                    header.push_str(&format!("{key}:: {}\n", ts.to_rfc3339()));
+                    ctx.report.props_pages += 1;
+                }
+            }
+        } else {
+            ctx.report.timestamps_dropped += 1;
+        }
+    }
     if !header.is_empty() {
         header.push('\n');
     }
