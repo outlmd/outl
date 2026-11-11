@@ -99,6 +99,7 @@ impl App {
             // Product default; the runtime overrides it from
             // `[display] backlinks_order` right after construction.
             backlinks_newest_first: true,
+            calendar_week_start: outl_config::WeekStart::Monday,
             show_sidebar: false,
             focus_mode: false,
             sidebar_focus: None,

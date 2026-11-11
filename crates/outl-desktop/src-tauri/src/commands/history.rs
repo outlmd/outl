@@ -76,6 +76,7 @@ mod tests {
             history: Mutex::new(HashMap::new()),
             backlink_index: Arc::new(Mutex::new(None)),
             projection_writer,
+            calendar_week_start: None,
         };
         (tmp, state, page, block.to_string())
     }

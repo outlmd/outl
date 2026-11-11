@@ -21,7 +21,8 @@ import {
   daysInMonth,
   formatJournalSlug,
   journalSlugToDate,
-  mondayIndex,
+  weekStartIndex,
+  type WeekStart,
 } from "@outl/shared/journal";
 import { CalendarIcon, PageGlyph, SearchIcon } from "@outl/shared/icons";
 
@@ -289,6 +290,15 @@ export function Sidebar(props: {
     const monthIdx = () => month().getMonth();
     const monthLabel = () =>
       month().toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    /** Week layout owner: the global `[calendar] week_start` (issue #94).
+     *  `null`/unset (or an older binary that sends no field) keeps this
+     *  surface's historical Monday-first grid. */
+    const weekStart = (): WeekStart => appState.workspace?.week_start ?? "monday";
+    /** Header labels rotated to the configured first day. */
+    const dayLabels = (): string[] =>
+      weekStart() === "sunday"
+        ? [...DAY_LABELS_MONDAY_FIRST.slice(6), ...DAY_LABELS_MONDAY_FIRST.slice(0, 6)]
+        : [...DAY_LABELS_MONDAY_FIRST];
     const today = new Date();
     const todaySlug = formatJournalSlug(
       today.getFullYear(),
@@ -305,7 +315,7 @@ export function Sidebar(props: {
      *  empty leading / trailing days. */
     function cells(): Array<{ day: number; slug: string } | null> {
       const first = new Date(year(), monthIdx(), 1);
-      const lead = mondayIndex(first.getDay());
+      const lead = weekStartIndex(first.getDay(), weekStart());
       const total = daysInMonth(year(), monthIdx());
       const out: Array<{ day: number; slug: string } | null> = [];
       for (let i = 0; i < lead; i++) out.push(null);
@@ -348,7 +358,7 @@ export function Sidebar(props: {
         </div>
 
         <div class="grid grid-cols-7 gap-[2px] text-center text-[9.5px] uppercase tracking-wider text-(--color-outl-fg-dimmer)">
-          <For each={DAY_LABELS_MONDAY_FIRST}>
+          <For each={dayLabels()}>
             {(d) => <div class="py-[2px]">{d}</div>}
           </For>
         </div>

@@ -19,7 +19,7 @@ mod sync;
 mod telemetry;
 mod ui;
 
-pub use schedule::{CalendarCfg, RemindersCfg};
+pub use schedule::{CalendarCfg, RemindersCfg, WeekStart};
 pub use storage::{AssetsCfg, BackupCfg, SnapshotCfg, StorageCfg, WorkspaceCfg};
 pub use sync::{SyncConfig, SyncTransportKind};
 pub use telemetry::TelemetryCfg;
@@ -40,6 +40,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Set by an external configuration manager (Nix / home-manager) when
+    /// it owns this file. When `true`, no client rewrites `config.toml` —
+    /// see [`crate::managed`]. The directive travels inside the file it
+    /// describes, so a package manager that generates the file also
+    /// declares itself its owner in one write.
+    ///
+    /// This is a **machine-level** directive, never op-log state (root
+    /// `CLAUDE.md` invariant #7): it says how *this* device's file is
+    /// produced, not anything about workspace content, so it correctly
+    /// lives in the per-device TOML and not the CRDT.
+    ///
+    /// Must stay the **first** field: `toml::to_string_pretty` serialises
+    /// scalar fields before tables, so a top-level key emitted after
+    /// `[workspace]` would re-parse as `[workspace].managed`.
+    pub managed: bool,
     pub workspace: WorkspaceCfg,
     pub theme: ThemeCfg,
     pub editor: EditorCfg,
@@ -69,6 +84,7 @@ mod tests {
         assert_eq!(c.editor.diagrams, DiagramsMode::Pele);
         assert!(c.workspace.last.is_none());
         assert!(c.calendar.timezone.is_none());
+        assert!(c.calendar.week_start.is_none());
         assert_eq!(c.sync.transport, SyncTransportKind::Iroh);
         assert!(c.sync.relay_url.is_none());
         assert!(c.snapshot.enabled);

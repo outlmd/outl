@@ -153,6 +153,13 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     // Backlinks list direction (issue #142). Read once at boot; the
     // `Ctrl+O` toggle persists changes back to `config.toml`.
     let backlinks_newest_first = global_cfg.display.backlinks_order.newest_first();
+    // Sidebar calendar week layout (issue #94). Read once at boot, like
+    // the timezone and the backlinks direction beside it. `None` (no
+    // `[calendar] week_start`) keeps this surface's historical Monday.
+    let calendar_week_start = global_cfg
+        .calendar
+        .week_start
+        .unwrap_or(outl_config::WeekStart::Monday);
     // `shared_workspace` gates the peer-sync threads (iroh transport + the
     // filesystem poller). JsonlStorage is the ONLY persistent backend
     // (sqlite was removed in 0.5.0), so a workspace is shareable unless its
@@ -223,6 +230,7 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         theme,
         shared_workspace,
         backlinks_newest_first,
+        calendar_week_start,
         global_cfg.tui.icons,
         config_warning,
     );

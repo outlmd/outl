@@ -90,6 +90,10 @@ pub(crate) struct AppState {
     /// so a commit never blocks the next tap on disk I/O (the outl
     /// async-writes default). See [`outl_tauri_shared::projection`].
     pub(crate) projection_writer: ProjectionWriter,
+    /// `[calendar] week_start` from the global config, read once at boot
+    /// beside the timezone. `None` keeps the phone's historical Sunday.
+    /// Restart-to-apply, like every other `[calendar]` value.
+    pub(crate) calendar_week_start: Option<outl_config::WeekStart>,
 }
 
 impl Drop for AppState {

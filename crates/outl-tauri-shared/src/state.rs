@@ -6,6 +6,7 @@
 //! fields differ); only what crosses the Tauri bridge lives here.
 
 use outl_actions::{ActionError, Backlink, OutlineNode, PageMeta};
+use outl_config::WeekStart;
 use serde::Serialize;
 
 /// Tauri event emitted when a post-mutation projection could not be written.
@@ -26,6 +27,13 @@ pub struct WorkspaceSummary {
     /// `true` when a workspace is loaded; `false` while the picker is
     /// still up or the background opener is in flight.
     pub ready: bool,
+    /// Which day the calendar week starts on, from the global
+    /// `[calendar] week_start` (`~/.config/outl/config.toml`).
+    ///
+    /// `None` (serialises as `null`) means unset: each client keeps the
+    /// layout it has always drawn — Monday on desktop and the TUI,
+    /// Sunday on mobile. See issue #94.
+    pub week_start: Option<WeekStart>,
 }
 
 /// Reply shape for every "open page / open journal" command. Bundles

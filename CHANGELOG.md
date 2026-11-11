@@ -6,6 +6,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ## [Unreleased]
 
 ### Added
+- **The calendar week starts where you say it does** ([#94](https://github.com/outlmd/outl/issues/94)).
+  `[calendar] week_start = "monday" | "sunday"` in `~/.config/outl/config.toml` retitles and re-pads the grid on all three surfaces that draw one: the TUI sidebar, the desktop sidebar, and the phone's journal sheet.
+  Unset, each surface keeps the day it has always drawn — Monday on desktop and the TUI, Sunday on the phone — so an untouched config changes nothing; setting it makes all three agree.
+  A pure display preference: never an Op, never converges between devices, like every other preference in the file.
 
 - **An Excalidraw plugin**: a ` ```excalidraw ` fence renders the drawing inline, as SVG, hand-drawn strokes and all.
   Three ways to point it at a scene: paste the **share link** from excalidraw.com and it works with no account at all, use an [Excalidraw+](https://plus.excalidraw.com) scene id with a token from the OS keychain, or paste a `.excalidraw` file, which needs no network.
@@ -434,6 +438,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `BlockRow.recursion.test.ts` now fails on the next one. It reads the JSX and asserts every declared prop is either forwarded or listed with a reason, because that is the defect's actual shape — rendering this component needs haptics, a Tauri bridge and a WKWebView-shaped textarea, and a test mocking all three would pin the mocks.
 
 ### Added
+- **Nix flake + home-manager module: install and configure outl declaratively.**
+  The flake builds `packages.outl` (CLI + TUI) and `packages.outl-desktop` (Tauri app) for `x86_64-linux`/`aarch64-linux` from source — no external inputs beyond the pinned `nixpkgs-unstable`, `flake-utils`, `rust-overlay`, and `home-manager`; CI builds them on every change ([#356](https://github.com/outlmd/outl/issues/356)).
+  `programs.outl` renders `~/.config/outl/config.toml` from typed options, can install the packages (desktop entry + icons included), and can run per-user background sync as a systemd user service.
+  Guide: [docs/nix.md](docs/nix.md).
+- **`managed = true` in `config.toml` makes a declarative config win.**
+  Every client skips its config rewrite when the directive is set, so the home-manager symlink survives `home-manager switch` and the desktop Settings modal disables Save and points at the declarative source.
+  Set `managed = false` to hand the file back to the clients.
 
 - **Mobile command palette, and one look across desktop and phone.**
   Type `>` in the phone's Search or Pages sheet to list actions (today, capture, tasks, reminders, calendar, sync, devices, plugins, settings, fold); a plain query shows matching actions under the pages, as the desktop palette does.

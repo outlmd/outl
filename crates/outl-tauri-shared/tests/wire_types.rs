@@ -185,6 +185,7 @@ fn workspace_summary_matches_its_interface() {
         actor: "01JQ0000000000000000000005".into(),
         storage_root: "/w".into(),
         ready: true,
+        week_start: Some(outl_config::WeekStart::Monday),
     };
     assert_wire_shape(&dto, "WorkspaceSummary", &[]);
 }

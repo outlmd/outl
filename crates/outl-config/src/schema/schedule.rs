@@ -8,6 +8,33 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which day the calendar week starts on, from `[calendar] week_start`.
+///
+/// `None` (the field unset) means "no opinion": each surface keeps the
+/// layout it has always drawn — Monday on desktop and the TUI, Sunday on
+/// the phone — so an untouched config changes nothing anyone sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeekStart {
+    /// Monday-first (`Mo Tu We Th Fr Sa Su`).
+    Monday,
+    /// Sunday-first (`Su Mo Tu We Th Fr Sa`).
+    Sunday,
+}
+
+impl WeekStart {
+    /// Offset of a day within the week, given its Sunday-based index
+    /// (0 = Sunday … 6 = Saturday — `Date#getDay()` in JS,
+    /// `Weekday::num_days_from_sunday()` in Rust). Returns 0 for the
+    /// configured first day, 6 for the last.
+    pub fn offset_from_sunday_index(self, sunday_index: u32) -> u32 {
+        match self {
+            WeekStart::Monday => (sunday_index + 6) % 7,
+            WeekStart::Sunday => sunday_index % 7,
+        }
+    }
+}
+
 /// Calendar / time section — controls how outl renders "now" and
 /// "today".
 ///
@@ -27,6 +54,11 @@ pub struct CalendarCfg {
     /// unparseable name is ignored when the clock initializes (logged)
     /// and also falls back to local.
     pub timezone: Option<String>,
+    /// Which day the calendar grid starts on. `None` (the default) lets
+    /// each surface keep its historical first day — Monday on desktop
+    /// and the TUI, Sunday on mobile — so no client jumps on an unset
+    /// config. Set it to make every surface agree on one day.
+    pub week_start: Option<WeekStart>,
 }
 
 /// Reminder delivery preferences.

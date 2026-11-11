@@ -34,6 +34,24 @@ const BINDINGS = [
     action: { kind: "QuickCapture" },
     description: "Quick capture to today",
   })),
+  // The task list, so `g t` and Cmd/Ctrl+Shift+L do what they do in the
+  // app. The capture pipeline photographs that pane, and without these
+  // two the keys land on nothing and the shot shows the journal.
+  {
+    chord: [
+      { mods: 0, key: { kind: "Char", value: "g" } },
+      { mods: 0, key: { kind: "Char", value: "t" } },
+    ],
+    mode: "normal",
+    action: { kind: "OpenTaskList" },
+    description: "Open the task list (chord)",
+  },
+  ...[META, CTRL].map((mods) => ({
+    chord: [{ mods: mods | SHIFT, key: { kind: "Char", value: "l" } }],
+    mode: "global",
+    action: { kind: "OpenTaskList" },
+    description: "Open the task list",
+  })),
 ];
 const palette = (name: unknown) =>
   palettes.find((p) => p.name === name) ?? palettes[0];
@@ -110,7 +128,7 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
 
   const handlers: Record<string, Handler> = {
     current_workspace: () => settings.last_workspace,
-    workspace_stats: () => ({ blocks: [...ws.walk()].length, ops: 0, actor: "mock", storage_root: settings.last_workspace, ready: true }),
+    workspace_stats: () => ({ blocks: [...ws.walk()].length, ops: 0, actor: "mock", storage_root: settings.last_workspace, ready: true, week_start: "monday" }),
     get_settings: () => settings,
     update_settings: (a) => Object.assign(settings, a.next),
     get_theme_config: () => ({ preset: settings.theme, preset_dark: settings.theme_dark, mode: settings.theme_mode }),
