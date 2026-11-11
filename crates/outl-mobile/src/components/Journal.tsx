@@ -107,6 +107,7 @@ import { createLongPress } from "../lib/long-press";
 import { editableProperties } from "../lib/properties";
 import { haptic } from "../lib/haptics";
 import { armKeyboard, installKeyboardKeeper } from "../lib/keyboard-keeper";
+import { createEmbedResolver } from "./Journal.embeds";
 import { createBlockOps, type JournalBlockDeps } from "./Journal.block-ops";
 import { createNewBlockOps } from "./Journal.new-block";
 import { createSelectionOps } from "./Journal.selection-ops";
@@ -163,6 +164,9 @@ function detectAndroid(): boolean {
 export function Journal() {
   const isAndroid = detectAndroid();
   const [view, setView] = createSignal<PageView | null>(null);
+  // Resolves `((blk-…))` refs for the visible page; without it every
+  // ref rendered as its raw handle (issue #16).
+  const refs = createEmbedResolver(() => view()?.page.slug ?? "");
   // Fetched lazily, off the page-open path (`view().backlinks` is always empty:
   // the O(blocks-in-workspace) scan blocked the first paint). The key refires
   // on a slug or `title::` change, so navigation and namespace renames refetch.
@@ -360,6 +364,7 @@ export function Journal() {
       setAheadOfLog(null);
     }
     setView(v);
+    refs.resolve(v.outline); // after setView, so the slug is the new one
   }
 
   /** Open the page a reminder is on and show its block, for the
@@ -658,9 +663,9 @@ export function Journal() {
         return;
       }
       const ctx = detectRefContext(el.value, cursor);
-      // `page` → fuzzy over every page; `mention` → fuzzy over
-      // persons only. Block-ref autocompletion stays out of this path.
-      if (!ctx || (ctx.kind !== "page" && ctx.kind !== "mention")) {
+      // `page`/`tag` → every page (a tag *is* one); `mention` → persons.
+      // `((block` is not here: the bridge speaks `PageMeta` (issue #15).
+      if (!ctx || ctx.kind === "block") {
         if (lastQuery !== null) {
           setNativeSuggesterState(null);
           lastQuery = null;
@@ -684,7 +689,7 @@ export function Journal() {
           setNativeSuggesterState(HIDE_MESSAGE);
           return;
         }
-        setNativeSuggesterState(buildShowMessage(finalItems, { mention }));
+        setNativeSuggesterState(buildShowMessage(finalItems, ctx));
       });
     });
   }
@@ -1527,6 +1532,7 @@ export function Journal() {
                 <BlockRow
                   block={block}
                   depth={0}
+                  embeds={refs.embeds()}
                   editingId={editingId()}
                   draftText={draft}
                   onStartEdit={startEdit}

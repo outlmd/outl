@@ -48,7 +48,8 @@ The next writing open still runs it.
 `open()` is unchanged.
 A writer that loses the device lock still mints, and the HLC for the actor it keeps is still seeded from that actor's log by `Workspace::seed_clock`.
 
-The CLI's read subcommands (`workspace info`, `search`, `query`, `page get` / `list` / `render`, `block get` / `tree`, `backlinks`, `history`, `export`, `tag`, `trash list`, `template list` / `resolve`, `prop get` / `list`, `daily range`) open through `open_read`.
+The CLI's read subcommands open through `open_read`.
+Those are `workspace info`, `search`, `query`, `page get` / `list` / `render`, `block get` / `tree`, `backlinks`, `history`, `export`, `tag`, `trash list`, `template list` / `resolve`, `prop get` / `list`, `daily range`, and `sync`.
 The GUI still refuses a held lock instead of forking, for the reason in [clients.md](../clients.md): its `HlcGenerator` is fixed at startup.
 
 `outl doctor` reports the `ops-*.jsonl` count even when this device holds no write lock, and warns when the local `.lock-<actor>` count reaches `EPHEMERAL_ACTOR_WARN_AT`.
@@ -128,6 +129,7 @@ Not in this change:
 - Bounding the writers that still mint when the device lock is held.
 - Retiring an actor from the handshake once every peer's snapshot covers it.
 - Compaction of identities ([#110](https://github.com/outlmd/outl/issues/110)).
-- `outl sync` and `outl plugin`, which still open for writing.
+- `outl plugin`, which still opens for writing.
+  Nine call sites, and only some of them write, so each needs its own verdict.
 - The MCP session, which serves writes and still uses `open`.
 - Index sidecar writes during a read open.

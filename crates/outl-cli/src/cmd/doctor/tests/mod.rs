@@ -34,6 +34,7 @@ mod oplog;
 mod safety;
 mod snapshots;
 mod tree;
+mod unmaterialized;
 mod volume;
 
 use super::*;

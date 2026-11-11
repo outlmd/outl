@@ -201,7 +201,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Delete block on empty | `Backspace` on empty | `Backspace` on empty | — |
 | Auto-pair `(` `[` `{` `[[` `((` | yes | yes | yes |
 | Ref autocomplete | `[[` triggers picker | `[[` triggers picker | `[[` triggers picker |
-| Tag autocomplete | `#` triggers picker | `#` triggers picker | — |
+| Tag autocomplete | `#` triggers picker | `#` triggers picker | `#` triggers chip strip |
 | Block ref autocomplete | `((` triggers picker | `((` triggers picker | — |
 | Slash command autocomplete | `/` | `/` | — |
 | Cycle task state on current (`TODO` → `DOING` → `DONE` → none) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox / long-press menu |

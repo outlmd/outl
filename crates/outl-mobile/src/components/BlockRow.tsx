@@ -1,5 +1,6 @@
 import { For, JSX, Show } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
+import type { EmbedMap } from "@outl/shared/markdown";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { createSettle } from "@outl/shared/polish";
 import { haptic } from "../lib/haptics";
@@ -49,6 +50,15 @@ interface BlockRowProps {
   onLinkClick?: (href: string) => void;
   /** Commit a `key:: value` property edit; empty value clears it. */
   onSetProperty?: (blockId: string, key: string, value: string) => void;
+  /**
+   * Resolved `((blk-…))` / `!((blk-…))` sources, keyed by handle.
+   * Handed straight to `MarkdownInline`, which prints the raw handle
+   * when it has nothing to resolve against — the whole symptom in
+   * [#16](https://github.com/outlmd/outl/issues/16). `Journal` fills it
+   * with `resolveEmbeds` for the visible page, the way the desktop's
+   * `resolvePageEmbeds` does.
+   */
+  embeds?: EmbedMap;
   onTextareaMount?: (el: HTMLTextAreaElement) => void;
   /**
    * Called when the user pastes outline-shaped markdown into this
@@ -151,6 +161,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           onDraftChange={props.onDraftChange}
           onCommitEdit={props.onCommitEdit}
           onSetProperty={props.onSetProperty}
+          embeds={props.embeds}
           onDeleteEmpty={() => {
             // Backspace on an already-empty block (RFC 0254 phase 4b,
             // `DeleteEmptyBlock`) — same destructive haptic and the
@@ -228,6 +239,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
                 onTextareaMount={props.onTextareaMount}
                 onPasteMarkdown={props.onPasteMarkdown}
                 onSetProperty={props.onSetProperty}
+                embeds={props.embeds}
                 selectionMode={props.selectionMode}
                 selectionSet={props.selectionSet}
                 onSelectTap={props.onSelectTap}

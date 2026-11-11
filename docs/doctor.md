@@ -35,12 +35,26 @@ The only thing a default run writes is its own stdout.
   That last count comes from the same verdict the command itself uses (`outl_actions::trash::refusal_for`), so the doctor cannot promise a restore that then refuses.
   See [`docs/cli.md`](cli.md#trash) for the command and what it declines.
 - **Unmaterialized ops** — node ids the op log touches that never landed in the tree, i.e. `Edit` / `SetProp` / `SetCollapsed` whose effect you will never see.
+
+  These arrive as **two separate findings**, because they are two different problems and only one of them is yours to fix.
+
+  A node with no `Create` and no `Move` anywhere in the merged log was never built on this device: the ops that would have placed it did not arrive.
+  The line names the **actor** whose log carries the op you do hold, which is the device to ask — `outl sync` against it may still bring the rest.
+  This is the common one, and on a synced graph it is usually a handful of `SetCollapsed` ops from one peer.
+
+  A node the log *did* place, and the tree still lacks, is the rarer and worse case: the replay rejected it.
+  A sync pass does not fix that, so the line says to report it instead of sending you to a command that cannot help.
+
+  **`--repair` does not touch either.**
+  The op log is append-only ([invariant 1](../CLAUDE.md#critical-invariants-never-violate)) and `--repair` writes projections and caches, never `ops/`.
+  Dropping the orphaned op would also destroy the only surviving evidence that something is missing.
 - **Projection drift** — every page in the op log compared against its `.md` on disk: missing files, stale projections, missing sidecars.
   A bare `key::` left by an older render of an empty value is a stale projection.
   The empty value is already an op, so this is not content the log never saw, and `--repair` rewrites the page without that line.
 
   **Stale pages that lose nothing are counted, not listed.**
-  A re-projection that only reorders properties or normalises whitespace has nothing for you to decide, and a workspace bulk-edited outside outl can have hundreds of them — 840 on one real 2,865-page graph, each printing the same sentence with a different path, which buried the two findings that mattered.
+  A re-projection that only reorders properties or normalises whitespace has nothing for you to decide.
+  A workspace bulk-edited outside outl can have hundreds of them — 840 on one real 2,865-page graph, each printing the same sentence with a different path, which buried the two findings that mattered.
   So they arrive as one line with the count and a handful of example paths.
   A stale page whose re-projection would **remove** content keeps its own line with its own line count, always, however many there are; that is the page you have to read, and a number cannot carry it.
   `--json` lists every path either way (see [`--json`](#--json) below).
@@ -147,7 +161,8 @@ Three conditions, all required:
    A permission or I/O error keeps the binding.
 2. The root's **parent directory is still there**, on the **filesystem the root was bound on**.
    Deleting a folder leaves its parent behind; an unmounted volume takes the whole path with it.
-   A workspace that is *itself* a mount point would defeat the parent test alone (unmounting `/Volumes/Notes` leaves `/Volumes` behind), so each binding records which filesystem its root lived on, and a surviving parent on a different filesystem keeps the binding.
+   A workspace that is *itself* a mount point would defeat the parent test alone, since unmounting `/Volumes/Notes` leaves `/Volumes` behind.
+   So each binding records which filesystem its root lived on, and a surviving parent on a different filesystem keeps the binding.
    A binding written before that stamp existed has nothing to compare and keeps the plain parent reading.
 3. The record is **older than 30 days** — the age of the *record*, not time since the deletion.
    A binding is rewritten only when its workspace moves, so a graph you have had for years and deleted today is eligible right away.

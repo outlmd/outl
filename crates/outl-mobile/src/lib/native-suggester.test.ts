@@ -59,10 +59,44 @@ describe("buildShowMessage", () => {
     const pages: PageMeta[] = [
       { id: "p1", slug: "avelino", title: "Avelino", kind: "page" },
     ];
-    // mention=true → pick value is the title (applySuggestion wraps it
+    // mention → pick value is the title (applySuggestion wraps it
     // as `[[@Avelino]]`).
-    expect(buildShowMessage(pages, { mention: true }).items[0].slug).toBe(
+    expect(buildShowMessage(pages, { kind: "mention" }).items[0].slug).toBe(
       "Avelino",
+    );
+  });
+
+  it("inserts the slug, not the title, for a # tag (#15)", () => {
+    // Regression. `#` has no closer, so the first space ends the tag:
+    // handing back "Deep Work" writes `#Deep Work`, which tags `#Deep`
+    // and leaves "Work" as loose prose. The desktop got this right
+    // from the start because its accept passes `tag` to
+    // `refReplacement`; this path passed `{ mention }` alone, so a
+    // tag took the title branch. Nothing was red — no test reached
+    // the mobile tag accept at all.
+    const pages: PageMeta[] = [
+      { id: "t1", slug: "deep-work", title: "Deep Work", kind: "page" },
+    ];
+    expect(buildShowMessage(pages, { kind: "tag" }).items[0].slug).toBe(
+      "deep-work",
+    );
+    // The chip still *shows* the human title; only the pick differs.
+    expect(buildShowMessage(pages, { kind: "tag" }).items[0].title).toBe(
+      "Deep Work",
+    );
+  });
+
+  it("keeps a journal's ISO slug for a tag too", () => {
+    const pages: PageMeta[] = [
+      {
+        id: "j1",
+        slug: "2026-11-11",
+        title: "Wednesday, November 11, 2026",
+        kind: "journal",
+      },
+    ];
+    expect(buildShowMessage(pages, { kind: "tag" }).items[0].slug).toBe(
+      "2026-11-11",
     );
   });
 

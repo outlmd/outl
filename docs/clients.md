@@ -233,7 +233,7 @@ Two rules that decide what a reader sees:
 |--------|---------|
 | CLI | `outl page history <slug>` and `outl block history <id>`, both with `--limit` and `--json`. See [`docs/cli.md`](cli.md#outl-page-history--outl-block-history). |
 | Desktop | The `⏱` button in the page-header eyebrow opens `<TimelinePanel />`; `Esc` closes. No chord yet. |
-| Mobile | Not yet. The command body is in `outl-tauri-shared`, so it is a handler registration plus a surface. |
+| Mobile | `<HistorySheet />`, reached from the page properties sheet (long-press the page title) — the same `page_timeline` read, with restores. |
 | TUI | Not yet. |
 
 Related but different: **undo / redo** (`outl_actions::history`) is this session's mutations, and `outl backup` is workspace-granular git snapshots. Neither answers "what did this page say last Tuesday" — that is this.

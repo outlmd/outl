@@ -24,6 +24,7 @@ import { createSignal } from "solid-js";
 import type { EmojiHit } from "@outl/shared/api/commands";
 import type { PageMeta } from "@outl/shared/api/types";
 import { refReplacement } from "@outl/shared/autocomplete";
+import type { RefContext } from "@outl/shared/autocomplete";
 
 interface WindowWithBridge extends Window {
   __outlSuggesterState?: SuggesterMessage | null;
@@ -53,17 +54,27 @@ export type SuggesterMessage = SuggesterShowMessage | SuggesterHideMessage;
 
 export function buildShowMessage(
   items: PageMeta[],
-  opts: { mention?: boolean } = {},
+  ctx?: Pick<RefContext, "kind">,
 ): SuggesterShowMessage {
   return {
     action: "show",
     items: items.map((p) => ({
       // `slug` is the value handed back to JS on tap and spliced into
-      // the document. The rule (journals → ISO slug, everything else /
-      // mentions → title; bug #88) lives in the shared `refReplacement`
-      // — the same function the desktop's ref popup calls, so the two
-      // accept paths can't drift.
-      slug: refReplacement(p, opts),
+      // the document. The rule (journals → ISO slug, tags → slug
+      // always, everything else / mentions → title; issues #88 and
+      // #15) lives in the shared `refReplacement` — the same function
+      // the desktop's ref popup calls, so the two accept paths can't
+      // drift.
+      //
+      // It takes the ref *context*, not one boolean per kind: a flag
+      // pair is what let this path ship passing `{ mention }` alone,
+      // so a `#` pick inserted the title and `#Deep Work` tagged
+      // `#Deep` with "Work" left as prose. One `kind` field cannot
+      // say "mention and tag", and cannot say neither by omission.
+      slug: refReplacement(p, {
+        mention: ctx?.kind === "mention",
+        tag: ctx?.kind === "tag",
+      }),
       // Journal pages render under a human-readable title server-side
       // ("Thursday, May 28, 2026"). The mobile UI is anchored on ISO
       // slugs (`2026-05-28`), so show the slug in the chip strip
@@ -110,9 +121,7 @@ export const nativeSuggesterState = suggesterState;
  * `window.__outlSuggesterState` on its next poll tick; the web strip
  * reacts to the signal. Pass `null` to clear (suggester becomes inert).
  */
-export function setNativeSuggesterState(
-  state: SuggesterMessage | null,
-): void {
+export function setNativeSuggesterState(state: SuggesterMessage | null): void {
   (window as WindowWithBridge).__outlSuggesterState = state;
   setSuggesterSignal(state);
 }

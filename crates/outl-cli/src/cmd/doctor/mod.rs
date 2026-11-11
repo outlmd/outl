@@ -51,7 +51,7 @@ use outl_core::storage::{JsonlStorage, Storage};
 use outl_core::workspace::Workspace;
 use outl_md::index::WorkspaceIndex;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub use gate::RepairScope;
@@ -223,6 +223,9 @@ fn collect_internal(
     let announced = repair::announced_paths(&plan.prune_index_sidecars);
     let ops_guard = ops_guard::OpsDirGuard::capture(&paths.ops, &announced);
     let mut storage_for_ws: Option<Box<dyn Storage>> = None;
+    // Which actor's log carries an op for a node the log never placed,
+    // and which op it was. Empty on a healthy workspace.
+    let mut unplaced_witness: HashMap<outl_core::id::NodeId, tree::OpWitness> = HashMap::new();
     let known_node_ids: HashSet<outl_core::id::NodeId> =
         match JsonlStorage::open(paths.ops.clone(), actor) {
             Ok(storage) => match storage.all_ops() {
@@ -230,17 +233,38 @@ fn collect_internal(
                     b.op_count = ops.len();
                     b.ok(format!("op log has {} ops", ops.len()));
                     let mut ids = HashSet::new();
+                    // `Op::Create` is the only op that can bring a node
+                    // into the tree, so it is the only evidence that the
+                    // log "placed" one.
+                    //
+                    // `Move` looks like it belongs here — it carries a
+                    // parent and a position — and it does not: `do_op`
+                    // on a node it has never seen is "a complete no-op
+                    // on the tree" (`outl-core/src/tree/op.rs`). So a
+                    // node holding a `Move` and no `Create` is absent
+                    // from the tree *because its `Create` never
+                    // arrived*, which is this split's whole subject.
+                    // Counting `Move` filed exactly that node under
+                    // "please report it" and named no actor — issue 301
+                    // re-created in the opposite direction.
+                    let mut placed = HashSet::new();
                     for op in &ops {
-                        let node = match &op.op {
-                            outl_core::op::Op::Move { node, .. }
-                            | outl_core::op::Op::Edit { node, .. }
-                            | outl_core::op::Op::SetProp { node, .. }
-                            | outl_core::op::Op::Create { node, .. }
-                            | outl_core::op::Op::SetCollapsed { node, .. }
-                            | outl_core::op::Op::SnoozeRemind { node, .. } => *node,
-                        };
+                        let node = tree::node_of(&op.op);
+                        if matches!(&op.op, outl_core::op::Op::Create { .. }) {
+                            placed.insert(node);
+                        }
                         ids.insert(node);
+                        unplaced_witness
+                            .entry(node)
+                            .or_insert_with(|| tree::OpWitness {
+                                actor: op.actor,
+                                kind: tree::op_kind(&op.op),
+                            });
                     }
+                    // Dropped after the pass, not skipped during it: a
+                    // node's `Create` can arrive after an `Edit` on it,
+                    // so `placed` is only complete here.
+                    unplaced_witness.retain(|node, _| !placed.contains(node));
                     storage_for_ws = Some(Box::new(storage));
                     ids
                 }
@@ -281,7 +305,7 @@ fn collect_internal(
         Some(ws) => {
             tree::check_trash(&mut b, ws);
             tree::check_alias_collisions(&mut b, ws);
-            tree::check_unmaterialized_ops(&mut b, ws, &known_node_ids);
+            tree::check_unmaterialized_ops(&mut b, ws, &known_node_ids, &unplaced_witness);
             let projection =
                 tree::check_projections(&mut b, ws, &paths.root, health.is_compromised());
             plan.reproject = projection.reproject;

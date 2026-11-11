@@ -39,6 +39,34 @@ Every **ref-click** code path on the frontend (`handleRefClick`, `handleTagClick
 
 `resolve_ref` survives for autocomplete previews ("this ref will land on `<page>`") but is **not** the navigation entry point — for that, always call `openRef`.
 
+## What a `((blk-…))` ref shows
+
+A ref renders the source block's text, and an embed renders it with its subtree.
+`MarkdownInline` decides that purely from its `embeds` prop, so the question is only ever *who filled the map*.
+`Journal.embeds.ts` owns the answer here: it collects the handles the open outline carries and asks `resolve_embeds` for them.
+
+It is not asked on every commit.
+Resolving rebuilds the workspace index, and `applyView` runs after every mutation, so a resolve happens only when the page or the handle set changed — typing a new ref grows the set, navigating changes the page, and both still resolve.
+An older answer that lands after a newer one is dropped, since two resolves genuinely race (no workspace lock, a blocking pool) and the skip key already names the newer page, so letting the stale map win would leave the new refs raw until the next edit.
+
+Two places still show the raw handle, on the desktop too:
+
+- a ref inside a **backlink** row, because the handle collection walks the outline and a backlink's source block is not in it;
+- a ref whose source block you are editing **on the page you are looking at**, because that changes neither the slug nor the handle set.
+  It settles when you navigate away and back.
+
+A failed resolve is silent on purpose.
+The fallback is the raw handle, and a toast here would fire on every commit while a peer is mid-sync.
+
+## Tag autocomplete (`#`)
+
+Typing `#` plus a word opens the same chip strip `[[` opens, listing pages, because a tag is a page.
+Tapping a chip inserts the page's **slug**, not its title: `#` has no closing delimiter, so the first space ends the tag and a title like "Deep Work" would tag `#Deep` and leave "Work" in the block as prose.
+The chip still shows the human title.
+
+`((` is deliberately absent from this trigger.
+The native bridge speaks `PageMeta`, and a block hit is a handle plus a snippet, which is a different shape ([#15](https://github.com/outlmd/outl/issues/15)).
+
 ## Search sheet — what one box lists, and when it asks the backend
 
 Pages, Tasks, Blocks and Actions in one pass, ordered by `@outl/shared/palette`; a leading `>` narrows to Actions.

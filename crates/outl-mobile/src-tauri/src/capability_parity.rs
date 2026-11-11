@@ -33,6 +33,28 @@ mod tests {
     /// this module's doc comment for that limit.
     #[test]
     fn mobile_capability_column_is_backed_by_real_commands() {
+        // The catalog called this `Missing` on mobile — "open the same
+        // page in the desktop app and use the ⏱ button" — while this
+        // client registered `page_timeline` and mounted
+        // `HistorySheet.tsx` off the page properties sheet, which
+        // `outl-mobile/CLAUDE.md` lists under "Trust surfaces".
+        //
+        // That is the failure mode an exhaustive `match` does **not**
+        // close. Invariant 12 forces every client to *declare* a
+        // verdict; it cannot force the verdict to be true. A wrong
+        // `Missing` is worse than an undeclared gap, because the
+        // sentence is shown to the user: it sent someone who had the
+        // feature to another device to go and find it.
+        let _ = crate::commands::page_timeline;
+        assert_eq!(
+            capability_support(Capability::PageHistory).mobile,
+            Support::Full,
+            "outl-mobile registers page_timeline and mounts HistorySheet.tsx \
+             from PropertiesSheet — the catalog must not call this client's \
+             PageHistory missing and send the user to the desktop for a \
+             feature that is right there",
+        );
+
         let _ = crate::commands::plugin_registry_list;
         assert_eq!(
             capability_support(Capability::PluginMarketplace).mobile,

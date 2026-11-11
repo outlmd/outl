@@ -112,6 +112,14 @@ describe("BlockRow recursion", () => {
     expect(forwarded.has("onSetProperty")).toBe(true);
   });
 
+  it("hands embeds to the body that renders them", () => {
+    // Same half as `onSetProperty` below, for the resolved-ref map.
+    // Without it `MarkdownInline` has nothing to resolve `((blk-…))`
+    // against and falls back to printing the raw handle, which is the
+    // whole of [#16](https://github.com/outlmd/outl/issues/16).
+    expect(SOURCE).toContain("embeds={props.embeds}");
+  });
+
   it("hands onSetProperty to the body that calls it", () => {
     // The other half: `BlockBody` declares and uses it, so a forward to
     // the children is not enough if the row itself withholds it.

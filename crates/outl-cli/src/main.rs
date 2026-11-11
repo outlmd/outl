@@ -477,7 +477,18 @@ fn run_sync(path: &std::path::Path) -> anyhow::Result<i32> {
     use outl_actions::SyncTransport;
     use outl_sync_iroh::{LeaseDenied, TransportOutcome};
 
-    let wc = ws::open(path).map_err(|e| anyhow::anyhow!("{}: {}", e.code, e.message))?;
+    // Read-only: this command has nothing to append. The transport buckets
+    // incoming ops by `op.actor` through `OpsDirAppendLock`, never the
+    // `JsonlStorage::append` path that `ActorWriteLock` guards, and nothing
+    // below commits. A writing open bought an identity it never used — and on
+    // the machine this matters for (a GUI or `outl serve` holding the device
+    // actor all session) it took the `AlreadyHeld` branch and left a permanent
+    // `.lock-<ulid>` behind on every run, which is RFC 0298's unbounded case
+    // with a different entry point.
+    //
+    // It also passed that minted id to `transport.start` below, so the
+    // handshake announced a clock entry for an actor holding no ops at all.
+    let wc = ws::open_read(path).map_err(|e| anyhow::anyhow!("{}: {}", e.code, e.message))?;
     let transport = match outl_sync_iroh::build_default_transport(path)? {
         TransportOutcome::Ready(t) => t,
         TransportOutcome::EndpointBusy(LeaseDenied::HeldByAnotherProcess) => {
