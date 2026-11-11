@@ -1,0 +1,121 @@
+diff --git a/crates/outl-md/src/unlogged.rs b/crates/outl-md/src/unlogged.rs
+index 3fbd406d..fd1310ed 100644
+--- a/crates/outl-md/src/unlogged.rs
++++ b/crates/outl-md/src/unlogged.rs
+@@ -313,7 +313,12 @@ pub fn content_lines_missing_from_texts<'a>(
+     let disk = crate::frontmatter::strip_bom(disk);
+     let mut missing = Vec::new();
+     let skip = crate::frontmatter::frontmatter_line_count(disk);
++    // Where a fenced code block is open on disk: its marker and the
++    // indent level its body lives at. Tracked so the verbatim reading
++    // below is preferred only where the renderer writes a line verbatim.
++    let mut fence: Option<(&'static str, usize)> = None;
+     for raw in disk.lines().skip(skip) {
++        let in_fence = track_fence(&mut fence, raw);
+         let Some(line) = disk_line(raw) else { continue };
+         // Try the stripped form first, then the line as written.
+         //
+@@ -374,8 +379,16 @@ pub fn content_lines_missing_from_texts<'a>(
+             }
+             _ => false,
+         };
++        // **Only inside a fence.** Outside one, an indented `- x` is a
++        // nested block's own marker, and reading it verbatim first let a
++        // bare `-` (an empty child block) or a nested `- url` spend the
++        // logged line that belonged to a *later* block whose text really
++        // is `-` / carries `- url`. That later line then matched nothing,
++        // and the page was left unsynced with nothing wrong with it (two
++        // journals of a real Roam import, `lines=1` and `lines=3`).
+         let hit = match verbatim {
+-            Some(v) => take(v) || take(line),
++            Some(v) if in_fence => take(v) || take(line),
++            Some(v) => take(line) || take(v),
+             None => take(line),
+         };
+         if !hit {
+@@ -385,6 +398,44 @@ pub fn content_lines_missing_from_texts<'a>(
+     missing
+ }
+ 
++/// Advance the fence state over one disk line and say whether that line
++/// is the **body** of a fenced code block (where the renderer writes the
++/// block's text verbatim, bullets included).
++///
++/// Mirrors [`crate::fence`]: an opener is a fence marker on a block's
++/// first line (`- ```yaml`, body one level deeper) or on a continuation
++/// line (body at the same level); the fence ends on its own closer at
++/// the body level, or on a non-blank line outdented below the body.
++fn track_fence(fence: &mut Option<(&'static str, usize)>, raw: &str) -> bool {
++    let trimmed = raw.trim();
++    let indent = crate::parse::leading_indent(raw);
++    if let Some((marker, body_indent)) = *fence {
++        if trimmed.is_empty() {
++            return true;
++        }
++        if indent < body_indent {
++            *fence = None;
++        } else {
++            let fence_char = marker.chars().next().unwrap_or('`');
++            let closes = indent == body_indent
++                && trimmed.starts_with(marker)
++                && trimmed.chars().skip(marker.len()).all(|c| c == fence_char);
++            if closes {
++                *fence = None;
++            }
++            return true;
++        }
++    }
++    let (content, body_indent) = match trimmed.strip_prefix("- ") {
++        Some(rest) => (rest.trim_start(), indent + 1),
++        None => (trimmed, indent),
++    };
++    if let Some(marker) = crate::fence::fence_marker(content) {
++        *fence = Some((marker, body_indent));
++    }
++    false
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -560,6 +611,40 @@ mod tests {
+         );
+     }
+ 
++    /// An empty child block (a bare `-`, indented) next to a block whose
++    /// text is literally `-` (written `- -`). Reading the indented bare
++    /// `-` verbatim first spent the `-` the log held for the later block,
++    /// so a page whose every line the log holds reported one unlogged
++    /// line and stayed unsynced. Seen on a real Roam import.
++    #[test]
++    fn an_empty_child_does_not_steal_a_dash_blocks_match() {
++        let disk = "- head
++  -
++  - x
++    - -
++";
++        let logged = [blk("head"), blk(""), blk("x"), blk("-")];
++        assert!(
++            content_lines_missing_from(disk, &logged).is_empty(),
++            "every line here is a block the log holds: {:?}",
++            content_lines_missing_from(disk, &logged)
++        );
++    }
++
++    /// Outside a fence the stripped reading wins, but the verbatim one is
++    /// still a fallback, and a line absent in both forms is reported.
++    #[test]
++    fn outside_a_fence_an_unlogged_nested_bullet_is_still_reported() {
++        let disk = "- head
++  - gone
++";
++        let logged = [blk("head")];
++        assert_eq!(
++            content_lines_missing_from(disk, &logged),
++            vec!["gone".to_string()]
++        );
++    }
++
+     /// The same shape, with the bullet's stripped form genuinely absent.
+     ///
+     /// Guards the fix from being "always prefer verbatim": the indented
