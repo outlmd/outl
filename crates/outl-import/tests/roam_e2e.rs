@@ -3,44 +3,11 @@
 
 mod common;
 
-use common::{import_with, import_with_opts, open_test_ws, read, TestWs};
+use common::roam::{import_fixture, FIXTURE};
+use common::{import_with_opts, open_test_ws, read};
 use outl_import::adapters::RoamAdapter;
-use outl_import::{dry_run, ImportOptions, ImportReport};
+use outl_import::{dry_run, ImportOptions};
 use std::fs;
-
-const FIXTURE: &str = r#"[
-    {
-        "title": "Source",
-        "children": [
-            {"string": "the original decision", "uid": "src-uid", "children": [
-                {"string": "supporting detail", "uid": "child-uid", "children": [], "open": false}
-            ]}
-        ]
-    },
-    {
-        "title": "Referrer",
-        "children": [
-            {"string": "see ((src-uid)) please", "uid": "r1", "children": []},
-            {"string": "context: {{[[embed]]: ((src-uid))}}", "uid": "r2", "children": []},
-            {"string": "dangling ((nope-uid)) ref", "uid": "r3", "children": []},
-            {"string": "Done!((src-uid))", "uid": "r4", "children": []},
-            {"string": "negociar: {{embed: ((src-uid))}}\ncollapsed:: true\nid:: 6908fc01-aaaa", "uid": "r5", "children": []}
-        ]
-    },
-    {
-        "title": "May 25th, 2026",
-        "children": [
-            {"string": "{{[[TODO]]}} review #[[My Project]] __soon__", "uid": "j1", "children": []}
-        ]
-    }
-]"#;
-
-fn import_fixture(json: &str) -> (TestWs, ImportReport) {
-    let src_dir = tempfile::tempdir().expect("src tempdir");
-    let src = src_dir.path().join("backup.json");
-    fs::write(&src, json).expect("write fixture");
-    import_with(&RoamAdapter, &src)
-}
 
 /// A remote image link in a Roam block is scanned into a remote asset
 /// ref and, with `--no-assets` (which the harness sets so no download
@@ -160,7 +127,7 @@ fn collapsed_state_lands_in_the_op_log() {
 fn journals_and_dialect_translations_land() {
     let (ws, report) = import_fixture(FIXTURE);
     let journal = read(&ws.root.join("journals/2026-05-25.md"));
-    assert!(journal.contains("- TODO review [[My Project]] *soon*"));
+    assert!(journal.contains("- TODO review #[[My Project]] *soon*"));
     assert!(!journal.starts_with("title::"));
     assert_eq!(report.journals, 1);
     assert_eq!(report.pages, 2);
@@ -215,6 +182,33 @@ fn unmappable_page_placeholders_resolve_via_file_fallback() {
         "a mappable target resolves to its handle:\n{tricky}"
     );
     assert_eq!(report.refs_page_fallback, 0);
+}
+
+/// A `((uid))` in a block property value (`note:: ((uid))` under prose,
+/// lifted by outl's parser) resolves to the target's real handle. It
+/// used to degrade to a `[[Title]]` page link.
+#[test]
+fn a_ref_in_a_property_value_resolves_to_the_block() {
+    let json = r#"[
+        {"title": "Target", "children": [
+            {"string": "the referenced block", "uid": "tgt-uid", "children": []}
+        ]},
+        {"title": "Notes", "children": [
+            {"string": "a highlight\nnote:: ((tgt-uid))", "uid": "n1", "children": []}
+        ]}
+    ]"#;
+    let (ws, report) = import_fixture(json);
+    let notes = read(&ws.root.join("pages/notes.md"));
+    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
+        &ws.root.join("pages/target.md"),
+    ))
+    .expect("target sidecar");
+    assert!(
+        notes.contains(&format!("note:: (({}))", sc.blocks[0].ref_handle)),
+        "notes:\n{notes}"
+    );
+    assert_eq!(report.refs_page_fallback, 0);
+    assert_eq!(report.refs_resolved, 1);
 }
 
 #[test]
@@ -401,147 +395,6 @@ fn page_timestamps_land_as_page_properties_on_opt_in() {
     assert!(own.contains("created:: by hand"), "page:\n{own}");
 }
 
-/// The report's own counters only prove what the pipeline *knows* it
-/// emitted. The reconciliation adds the denominator, taken straight off
-/// the source JSON, so a block lost anywhere in between shows up.
-#[test]
-fn reconciliation_balances_on_a_clean_import() {
-    let (_ws, report) = import_fixture(FIXTURE);
-    let r = report.reconciliation.expect("roam reports source counts");
-
-    // 3 source pages → 3 files, nothing merged or skipped.
-    assert_eq!(r.source_pages, 3);
-    assert_eq!(r.emitted_pages, 3);
-    assert_eq!(r.pages_skipped, 0);
-    assert_eq!(r.pages_merged, 0);
-    // 8 source blocks: 2 on Source, 5 on Referrer, 1 on the journal.
-    assert_eq!(r.source_blocks, 8);
-    assert_eq!(r.emitted_blocks, 8);
-    assert_eq!(r.blocks_unaccounted, 0);
-    assert!(r.balanced, "clean import must reconcile: {r:?}");
-}
-
-/// Every legitimate reducer (page skipped, block promoted to a page
-/// property) is subtracted by name, so the books still close — the
-/// unaccounted counters stay reserved for real silent loss.
-#[test]
-fn reconciliation_accounts_for_skipped_pages_and_lifted_props() {
-    let json = r#"[
-        {"title": "  ", "children": [
-            {"string": "dropped", "uid": "d1", "children": [
-                {"string": "dropped child", "uid": "d2", "children": []}
-            ]}
-        ]},
-        {"title": "@Tonico", "children": [
-            {"string": "icon:: 👤", "uid": "a1", "children": []},
-            {"string": "the note", "uid": "n1", "children": []}
-        ]},
-        {"title": "May 25th, 2026", "children": [{"string": "x", "uid": "j1", "children": []}]},
-        {"title": "2026-05-25", "children": [{"string": "y", "uid": "j2", "children": []}]}
-    ]"#;
-    let (_ws, report) = import_fixture(json);
-    let r = report.reconciliation.expect("reconciliation present");
-
-    assert_eq!(r.source_pages, 4);
-    assert_eq!(r.emitted_pages, 2, "one skipped, two journals merged");
-    assert_eq!(r.pages_skipped, 1);
-    assert_eq!(r.pages_merged, 1);
-    assert_eq!(r.pages_unaccounted, 0);
-
-    assert_eq!(r.source_blocks, 6);
-    assert_eq!(r.emitted_blocks, 3, "2 dropped with the page, 1 lifted");
-    assert_eq!(r.blocks_skipped, 2);
-    assert_eq!(r.blocks_lifted_to_props, 1);
-    assert_eq!(r.blocks_unaccounted, 0);
-    assert!(r.balanced, "explained losses must still balance: {r:?}");
-
-    // The skipped page is named in the report, not silently gone.
-    assert_eq!(report.skipped.len(), 1);
-    assert_eq!(report.skipped[0].blocks_dropped, 2);
-}
-
-/// Every counter except the landing ones is bumped in `render`, before
-/// a byte hits disk — they prove the parser and the renderer agree, not
-/// that the content is in a workspace. The landing numbers are summed
-/// off the sidecars `reconcile_md` stamps from the materialized tree, so
-/// they are the only ones that answer "did it actually arrive".
-#[test]
-fn the_report_confirms_the_blocks_reached_the_op_log() {
-    let (_ws, report) = import_fixture(FIXTURE);
-    assert!(report.landing_measured, "a real import measures landing");
-    assert_eq!(report.landed_pages, 3);
-    assert_eq!(
-        report.landed_blocks, report.blocks,
-        "every emitted block must be confirmed in the op log"
-    );
-
-    let r = report.reconciliation.expect("reconciliation present");
-    assert!(r.landing_measured);
-    assert_eq!(r.landed_blocks, 8);
-    assert_eq!(r.blocks_not_landed, 0);
-    assert!(r.balanced, "{r:?}");
-}
-
-/// A dry-run answers "what would I lose" — the reconciliation has to be
-/// part of that answer, not only of the real run. But it writes nothing,
-/// so it must say the landing was **not** measured rather than imply the
-/// content is somewhere.
-#[test]
-fn dry_run_reports_the_reconciliation_too() {
-    let src_dir = tempfile::tempdir().expect("tempdir");
-    let src = src_dir.path().join("backup.json");
-    fs::write(&src, FIXTURE).expect("write fixture");
-
-    let report = dry_run(&RoamAdapter, &src, &ImportOptions::default()).expect("dry run");
-    let r = report.reconciliation.expect("reconciliation present");
-    assert_eq!(r.source_blocks, 8);
-    assert!(r.balanced, "{r:?}");
-    assert!(
-        !r.landing_measured,
-        "a dry-run writes nothing — it cannot claim the blocks landed"
-    );
-    assert_eq!(r.landed_blocks, 0);
-    assert_eq!(r.blocks_not_landed, 0);
-}
-
-/// The landing check has to notice a page that never reached the tree,
-/// not repeat the renderer's optimism. Blocking one page's sidecar (a
-/// directory sits where the file must go) makes `reconcile_md` fail for
-/// exactly that page — the same shape as the write/reconcile failures
-/// the real pipeline can hit at block 40k of 66k, where the in-memory
-/// counters happily report success.
-#[test]
-fn a_page_that_never_reconciled_breaks_the_balance() {
-    let mut ws = open_test_ws();
-    let src_dir = tempfile::tempdir().expect("tempdir");
-    let src = src_dir.path().join("backup.json");
-    fs::write(&src, FIXTURE).expect("write fixture");
-    // `Source` (2 blocks) can never get a sidecar written or read.
-    fs::create_dir_all(ws.root.join("pages/source.outl")).expect("block the sidecar");
-
-    let report = common::import_into(&RoamAdapter, &src, &mut ws, &ImportOptions::default());
-    let r = report.reconciliation.expect("reconciliation present");
-
-    assert_eq!(r.emitted_blocks, 8, "the renderer still emitted all 8");
-    assert_eq!(r.blocks_unaccounted, 0, "parse → render still adds up");
-    assert_eq!(
-        r.blocks_not_landed, 2,
-        "the two Source blocks are not confirmed anywhere: {r:?}"
-    );
-    assert!(
-        !r.balanced,
-        "content that never reached the op log must not report as balanced: {r:?}"
-    );
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|w| w.detail.contains("NOT confirmed in the op log")),
-        "the failure is named per page: {:?}",
-        report.warnings
-    );
-}
-
 /// Mid-block `{{[[DONE]]}}` keeps the word but loses the task state.
 /// The count and the aggregate warning are the only trace the user
 /// gets — they must survive a full import, not just the parse.
@@ -567,8 +420,8 @@ fn midtext_task_markers_surface_in_the_final_report() {
     );
     let log = read(&ws.root.join("pages/log.md"));
     assert!(
-        log.contains("shipped DONE the migration"),
-        "literal text is kept:\n{log}"
+        log.contains("shipped {{[[DONE]]}} the migration"),
+        "the marker is kept as written:\n{log}"
     );
 }
 
