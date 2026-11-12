@@ -302,7 +302,10 @@ fn heal_own_index(ops_dir: &std::path::Path, local_actor: ActorId, unlisted: &[H
             return;
         }
     };
-    let in_log = unlisted.iter().filter(|ts| rebuilt.get(ts).is_some()).count();
+    let in_log = unlisted
+        .iter()
+        .filter(|ts| rebuilt.get(ts).is_some())
+        .count();
     if in_log > 0 {
         warn!(
             actor = %local_actor,

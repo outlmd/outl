@@ -40,12 +40,18 @@ impl JsonlStorage {
         let _lock = match IdxLock::acquire(idx_path) {
             Ok(lock) => lock,
             Err(e) => {
-                warn!("could not lock index {}: {e}; not persisting", idx_path.display());
+                warn!(
+                    "could not lock index {}: {e}; not persisting",
+                    idx_path.display()
+                );
                 return;
             }
         };
         if Self::extend_to_eof(jsonl_path, offset_index, node_index).is_none() {
-            warn!("not persisting indexes for {}: tail unreadable", jsonl_path.display());
+            warn!(
+                "not persisting indexes for {}: tail unreadable",
+                jsonl_path.display()
+            );
             return;
         }
         if let Err(e) = offset_index.save(idx_path) {
@@ -101,7 +107,12 @@ impl JsonlStorage {
             .map_err(|e| StorageError::Backend(format!("open {}: {e}", jsonl_path.display())))?;
         let mut hlc = OffsetIndex::new();
         let mut node = NodeIndex::new();
-        if Self::index_stream(&mut BufReader::new(file), &jsonl_path, &mut hlc, Some(&mut node)) {
+        if Self::index_stream(
+            &mut BufReader::new(file),
+            &jsonl_path,
+            &mut hlc,
+            Some(&mut node),
+        ) {
             return Err(StorageError::Backend(format!(
                 "read error rebuilding {}; sidecars left as they were",
                 jsonl_path.display()
