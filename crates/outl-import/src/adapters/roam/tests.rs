@@ -195,34 +195,20 @@ fn mixed_fence_stays_verbatim() {
     }
 }
 
+/// Roam has no org syntax: an org stamp is plain text in the source
+/// graph (Logseq residue), so it lands exactly as written, weekday and
+/// angle brackets included, and is not counted as a converted date.
 #[test]
-fn org_deadline_becomes_date_link() {
-    let (b, report) = parse_one_block("finish it DEADLINE: <2025-11-12 Wed>");
-    assert_eq!(
-        inline_tokens(&b),
-        &[Inline::Text("finish it DEADLINE: [[2025-11-12]]".into())]
-    );
-    assert_eq!(report.org_dates_converted, 1);
-}
-
-/// The keyword says what the date is, and a time or repeater in the
-/// stamp is information the link alone does not carry.
-#[test]
-fn org_stamp_keeps_keyword_time_and_repeater() {
-    let (b, report) = parse_one_block(
+fn org_stamp_stays_verbatim() {
+    for raw in [
+        "finish it DEADLINE: <2025-11-12 Wed>",
         "SCHEDULED: <2025-11-12 Wed 10:00 +1w>\nDEADLINE:<2025-11-13 thu>\nDEADLINE: <2025-11-14 Mon>",
-    );
-    assert_eq!(
-        inline_tokens(&b),
-        &[Inline::Text(
-            "SCHEDULED: [[2025-11-12]] 10:00 +1w\nDEADLINE:[[2025-11-13]]\nDEADLINE: [[2025-11-14]] Mon"
-                .into()
-        )]
-    );
-    assert_eq!(report.org_dates_converted, 3);
-    // Not a stamp: left alone.
-    let (b, _) = parse_one_block("DEADLINE: soon");
-    assert_eq!(inline_tokens(&b), &[Inline::Text("DEADLINE: soon".into())]);
+        "DEADLINE: soon",
+    ] {
+        let (b, report) = parse_one_block(raw);
+        assert_eq!(inline_tokens(&b), &[Inline::Text(raw.into())]);
+        assert_eq!(report.org_dates_converted, 0);
+    }
 }
 
 #[test]

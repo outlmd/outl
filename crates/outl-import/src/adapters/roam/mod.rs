@@ -361,8 +361,11 @@ fn convert_content(
         return BlockContent::Verbatim(raw.to_string());
     }
 
-    let pre = convert_org_dates(raw, report);
-    let pre = pdf::link_pdf_components(&pre, report);
+    // An org stamp (`DEADLINE: <2024-03-20 Wed>`) stays as written: Roam
+    // has no org syntax, so in the source graph it is plain text, not a
+    // link to a daily page. Rewriting it to `[[2024-03-20]]` changed the
+    // text and added a reference Roam never had.
+    let pre = pdf::link_pdf_components(raw, report);
     // Pull image/file links out to placeholders before tokenizing; a
     // remote `![](https://…)` becomes an `AssetSource::Remote` ref.
     let pre = scan_assets(&pre, base_dir, assets);
@@ -457,64 +460,6 @@ fn translate_query(raw: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-/// `DEADLINE: <2025-11-12 Wed>` / `SCHEDULED: <…>` →
-/// `DEADLINE: [[2025-11-12]]` / `SCHEDULED: [[…]]`.
-///
-/// Follows the issue #63 model: a date in the block text is a
-/// `[[date]]` link, surfacing the block in that day's journal via
-/// backlinks; notification scheduling is a separate opt-in property.
-///
-/// Only the `<…>` stamp is rewritten. The keyword stays (it is what
-/// says the date is a deadline and not a mention), and so does anything
-/// in the stamp past the date and weekday, such as a time or a repeater
-/// (`<2025-11-12 Wed 10:00 +1w>` → `[[2025-11-12]] 10:00 +1w`). The
-/// weekday alone is dropped: the date already names it.
-fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut rest = raw;
-    loop {
-        let hit = ["DEADLINE:", "SCHEDULED:"]
-            .iter()
-            .filter_map(|kw| rest.find(kw).map(|p| (p, *kw)))
-            .min_by_key(|(p, _)| *p);
-        let Some((pos, kw)) = hit else {
-            out.push_str(rest);
-            return out;
-        };
-        let after_kw = &rest[pos + kw.len()..];
-        let after_sp = after_kw.trim_start();
-        let converted = after_sp
-            .strip_prefix('<')
-            .and_then(|inner| inner.find('>').map(|close| &inner[..close]))
-            .and_then(|stamp| {
-                let date_part = stamp.get(..10)?;
-                let date = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()?;
-                Some((date, stamp[10..].trim()))
-            });
-        match converted {
-            Some((date, tail)) => {
-                // Keyword and the whitespace after it, as written.
-                let ws = after_kw.len() - after_sp.len();
-                out.push_str(&rest[..pos + kw.len() + ws]);
-                out.push_str(&format!("[[{date}]]"));
-                let extra = strip_weekday(tail, date);
-                if !extra.is_empty() {
-                    out.push(' ');
-                    out.push_str(extra);
-                }
-                report.org_dates_converted += 1;
-                // Skip: `<…>`.
-                let angle_len = after_sp.find('>').expect("checked above") + 1;
-                rest = &rest[pos + kw.len() + ws + angle_len..];
-            }
-            None => {
-                out.push_str(&rest[..pos + kw.len()]);
-                rest = &rest[pos + kw.len()..];
-            }
-        }
-    }
-}
-
 /// The title Roam gives the daily note of `d` (`March 19th, 2024`).
 fn roam_daily_title(d: chrono::NaiveDate) -> String {
     use chrono::Datelike;
@@ -527,23 +472,6 @@ fn roam_daily_title(d: chrono::NaiveDate) -> String {
         _ => "th",
     };
     format!("{} {day}{suffix}, {}", d.format("%B"), d.year())
-}
-
-/// Drop a leading weekday name (`Wed`, `Wednesday`, any case) from an
-/// org stamp's tail, but only when it is the weekday of `date`: a
-/// mismatched one is information, not redundancy.
-fn strip_weekday(tail: &str, date: chrono::NaiveDate) -> &str {
-    let word_end = tail
-        .find(|c: char| !c.is_alphabetic())
-        .unwrap_or(tail.len());
-    let word = &tail[..word_end];
-    let full = date.format("%A").to_string();
-    let short = date.format("%a").to_string();
-    if !word.is_empty() && (word.eq_ignore_ascii_case(&full) || word.eq_ignore_ascii_case(&short)) {
-        tail[word_end..].trim_start()
-    } else {
-        tail
-    }
 }
 
 /// Roam timestamps are milliseconds since epoch.
