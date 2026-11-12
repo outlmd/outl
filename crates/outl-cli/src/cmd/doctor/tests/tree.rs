@@ -214,11 +214,11 @@ fn a_missing_sidecar_over_diverged_content_is_never_repaired() {
     assert!(repaired.repair.is_none(), "there was nothing safe to do");
 }
 
-/// A bare `foo::` is what an older render wrote for `PropValue::Text("")`.
-/// The value is in the op log, so this is ordinary projection drift:
-/// `--repair` rewrites the `.md` and the line goes away.
+/// `PropValue::Text("")` projects as a bare `foo::`. A `.md` written
+/// without that line (by a render that skipped empty values) is
+/// ordinary projection drift: `--repair` writes the line back.
 #[test]
-fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
+fn a_missing_empty_property_line_is_stale_projection_and_repair_restores_it() {
     let (_dir, root, paths) = fresh();
     let page = seed_page(&root, "notes", &["hello"]);
 
@@ -236,22 +236,20 @@ fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
 
     let md = paths.pages.join("notes.md");
     let before = std::fs::read_to_string(&md).unwrap();
-    let planted = format!("foo::\n{before}");
-    std::fs::write(&md, &planted).unwrap();
-    let sidecar_path = outl_md::sidecar::sidecar_path_for(&md);
-    let mut sidecar = outl_md::sidecar::read(&sidecar_path).expect("sidecar");
-    sidecar.last_synced_hash = outl_md::sidecar::file_hash(&planted);
-    outl_md::sidecar::write(&sidecar_path, &sidecar).expect("stamp the planted hash");
+    assert!(
+        !before.contains("foo::"),
+        "seeded without the line: {before}"
+    );
 
     let report = collect(&root, false).expect("doctor runs");
     assert!(
         has(&report, "1 page(s) hold a stale `.md` projection"),
-        "a ghost `foo::` is stale projection, got: {:#?}",
+        "a missing `foo::` is stale projection, got: {:#?}",
         messages(&report)
     );
     // A property line is not block content, so this page carries no
-    // removal — which is exactly what puts it in the grouped finding
-    // instead of being named with a line count.
+    // removal, which is what puts it in the grouped finding instead of
+    // being named with a line count.
     assert!(
         !has(&report, "content line(s) from disk"),
         "a property line is not block content, so nothing may report a \
@@ -259,16 +257,8 @@ fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
         messages(&report)
     );
     assert!(
-        report
-            .repairable
-            .iter()
-            .any(|r| r.contains("adds or reorders only, removes nothing")),
-        "the plan still has to state the cost per page: {:?}",
-        report.repairable
-    );
-    assert!(
         !has(&report, "exist in no op"),
-        "the empty value is in the log, so this must not be unlogged content: {:#?}",
+        "nothing on disk is missing from the log: {:#?}",
         messages(&report)
     );
 
@@ -276,17 +266,11 @@ fn an_empty_property_line_is_stale_projection_and_repair_drops_it() {
     let rep = repaired.repair.expect("a repair report");
     assert_eq!(rep.failed, 0, "repair actions: {:#?}", rep.actions);
     let after = std::fs::read_to_string(&md).unwrap();
-    assert_eq!(
-        after, before,
-        "repair rewrites the page to the projection the log holds"
+    assert!(
+        after.contains("foo::\n"),
+        "repair writes the projection the log holds: {after}"
     );
-    let backup = Path::new(&rep.backup_dir).join("pages").join("notes.md");
-    assert_eq!(
-        std::fs::read_to_string(&backup).unwrap(),
-        planted,
-        "the ghost line stays recoverable from {}",
-        backup.display()
-    );
+    assert!(after.contains("hello"), "{after}");
 }
 
 // ------------------------------------------------------ alias collisions

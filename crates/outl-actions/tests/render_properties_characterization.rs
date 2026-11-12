@@ -270,11 +270,11 @@ fn render_page_md_emits_nothing_for_nodes_without_properties() {
     assert_eq!(md, "- a\n  - b\n", "bare page grew a property line:\n{md}");
 }
 
-/// `PropValue::Text("")` is a stored value. It is not a line.
-/// `None` is the delete, and that removes the key from the tree.
-/// Both projections omit `foo::`.
+/// `PropValue::Text("")` is a stored value, and it projects as a bare
+/// `key::` on a page and on a block. `None` is the delete, and that
+/// removes the key from the tree and the line from the projection.
 #[test]
-fn an_empty_property_value_is_not_projected() {
+fn an_empty_property_value_projects_as_a_bare_key() {
     let (mut ws, hlc) = workspace();
     let page = open_or_create_page(&mut ws, &hlc, "hb", "HB", PageKind::Page).expect("page");
     set_property(&mut ws, &hlc, page, "foo", text("")).unwrap();
@@ -285,19 +285,23 @@ fn an_empty_property_value_is_not_projected() {
 
     let md = render_page_md(&ws, page);
     assert!(
-        !md.contains("foo::"),
-        "an empty page property must not become a line:\n{md}"
+        md.contains("foo::\n"),
+        "an empty page property is a line:\n{md}"
     );
     assert!(
-        !md.contains("note::"),
-        "an empty block property must not become a line:\n{md}"
+        md.contains("  note::\n"),
+        "an empty block property is a line:\n{md}"
     );
     assert!(md.contains("status:: active\n"), "{md}");
     assert!(md.contains("priority:: high\n"), "{md}");
     assert!(md.contains("title:: HB\n"), "{md}");
+    let back = outl_md::parse(&md);
     assert!(
-        matches!(ws.tree().property(page, "foo"), Some(PropValue::Text(s)) if s.is_empty()),
-        "an empty string stays in the log until an explicit delete"
+        back.properties
+            .iter()
+            .any(|(k, v)| k == "foo" && v.is_empty()),
+        "the bare line reads back as the empty value: {:?}",
+        back.properties
     );
 
     set_property(&mut ws, &hlc, page, "foo", None).unwrap();

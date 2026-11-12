@@ -26,20 +26,20 @@ pub fn render(page: &ParsedPage) -> String {
         // header and into the outline as recovered blocks — the same
         // "content read in the wrong shape" this fix exists to stop, one
         // construct over.
-        if !has_visible_property(&page.properties) && !page.blocks.is_empty() {
+        if page.properties.is_empty() && !page.blocks.is_empty() {
             out.push('\n');
         }
     }
 
-    // Page properties at the top. An empty value is not a line: the
-    // reader already treats `key::` as absent, and writing it back
-    // leaves a key no surface can clear.
+    // Page properties at the top. An empty value is still a line, a
+    // bare `key::`: the key was written by someone (a source graph, a
+    // `prop set key=`) and dropping it loses that. Removing a key is
+    // `SetProp` with no value, which takes it out of `properties`.
     for (k, v) in &page.properties {
         write_property(&mut out, 0, k, v);
     }
-    // Separator line between header and outline. Empty values do not
-    // count: a header that writes nothing must not insert a blank line.
-    if has_visible_property(&page.properties) && !page.blocks.is_empty() {
+    // Separator line between header and outline.
+    if !page.properties.is_empty() && !page.blocks.is_empty() {
         out.push('\n');
     }
 
@@ -228,20 +228,15 @@ fn write_indent(out: &mut String, level: usize) {
     }
 }
 
-/// A value that is empty or only whitespace has no `key:: value` line.
-/// The parser stores a bare `key::` as `""`, and every reader already
-/// treats that as absent, so writing the line back leaves a key no
-/// surface can see.
-fn has_visible_property(properties: &[(String, String)]) -> bool {
-    properties.iter().any(|(_, value)| !value.trim().is_empty())
-}
-
 fn write_property(out: &mut String, indent: usize, key: &str, value: &str) {
-    if value.trim().is_empty() {
-        return;
-    }
     write_indent(out, indent);
-    let _ = write!(out, "{key}:: {value}");
+    if value.trim().is_empty() {
+        // `key::` form (no trailing space, no value). The parser reads
+        // it back as `""`.
+        let _ = write!(out, "{key}::");
+    } else {
+        let _ = write!(out, "{key}:: {value}");
+    }
     out.push('\n');
 }
 
@@ -292,11 +287,11 @@ mod tests {
         assert!(out.contains("title:: foo\n\n- one"));
     }
 
-    /// An empty value is not a line. The reader already drops `key::`
-    /// with nothing after it; the writer has to do the same, or a
-    /// cleared property stays on disk forever.
+    /// An empty value is still a line, a bare `key::`, on a page and on
+    /// a block. A source graph writes `published::` on purpose; the
+    /// writer keeps it so the key survives a round trip.
     #[test]
-    fn an_empty_property_is_not_written() {
+    fn an_empty_property_is_written_as_a_bare_key() {
         let page = ParsedPage {
             properties: vec![
                 ("foo".into(), String::new()),
@@ -311,25 +306,19 @@ mod tests {
             ..ParsedPage::default()
         };
         let out = render(&page);
-        assert!(
-            !out.contains("foo::"),
-            "an empty page property must not be a line: {out:?}"
+        assert_eq!(out, "foo::\ntitle:: HB\nblank::\n\n- body\n  status::\n");
+        let back = crate::parse(&out);
+        assert_eq!(back.properties[0], ("foo".into(), String::new()));
+        assert_eq!(
+            back.blocks[0].properties,
+            vec![("status".into(), String::new())]
         );
-        assert!(
-            !out.contains("blank::"),
-            "a whitespace-only property must not be a line: {out:?}"
-        );
-        assert!(
-            !out.contains("status::"),
-            "an empty block property must not be a line: {out:?}"
-        );
-        assert_eq!(out, "title:: HB\n\n- body\n");
     }
 
-    /// A header made only of empty values is the same as no header:
-    /// no leading blank line in front of the outline.
+    /// A header made only of empty values is still a header, so the
+    /// blank line that ends it is still there.
     #[test]
-    fn a_header_of_only_empty_properties_does_not_open_with_a_blank_line() {
+    fn a_header_of_only_empty_properties_keeps_its_separator() {
         let page = ParsedPage {
             properties: vec![("foo".into(), String::new())],
             blocks: vec![OutlineNode {
@@ -338,14 +327,13 @@ mod tests {
             }],
             ..ParsedPage::default()
         };
-        assert_eq!(render(&page), "- body\n");
+        assert_eq!(render(&page), "foo::\n\n- body\n");
     }
 
-    /// The blank line after a YAML fence is what keeps the outline out
-    /// of the property header. It still belongs there when every
-    /// `key::` value is empty and therefore unwritten.
+    /// After a YAML fence the `key::` header follows directly, with no
+    /// blank line in between, even when every value is empty.
     #[test]
-    fn frontmatter_still_gets_a_blank_line_when_every_property_is_empty() {
+    fn frontmatter_is_followed_by_an_empty_property_header() {
         let page = ParsedPage {
             frontmatter: Some("title: kept".into()),
             properties: vec![("foo".into(), String::new())],
@@ -355,7 +343,7 @@ mod tests {
             }],
             ..ParsedPage::default()
         };
-        assert_eq!(render(&page), "---\ntitle: kept\n---\n\n- body\n");
+        assert_eq!(render(&page), "---\ntitle: kept\n---\nfoo::\n\n- body\n");
     }
 
     #[test]
