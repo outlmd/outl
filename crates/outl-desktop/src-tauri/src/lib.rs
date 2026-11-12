@@ -41,6 +41,7 @@ mod fs_watcher;
 mod helpers;
 mod iroh_sync;
 mod log_target;
+mod menu;
 mod open_with;
 mod plugin_service;
 mod quick_capture;
@@ -226,7 +227,8 @@ pub fn run() {
     // boot. Install `ring` (the provider in our dep graph) explicitly.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    tauri::Builder::default()
+    // `install` is a no-op off macOS, see `menu.rs`.
+    menu::install(tauri::Builder::default())
         // Single-instance MUST be the first plugin. Its `deep-link`
         // feature forwards an `outl://` URL opened while the app is
         // already running to `on_open_url` (Linux/Windows); the callback

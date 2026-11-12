@@ -437,6 +437,26 @@ Three things a contributor will trip on:
   The event callback is the only place `RunEvent::Opened` is reachable.
   Do not collapse it back.
 
+## Application menu
+
+`src-tauri/src/menu.rs` builds the native menu on **macOS only** (`menu::install`, a no-op elsewhere).
+Tauri's default menu is macOS-only, so Windows and Linux had no menu bar before; installing one there would be new chrome.
+On macOS the default's File menu had only "Close Window" while Settings pointed users at "File → Switch Workspace…".
+Windows and Linux switch from the **Switch…** button in `SettingsModal.tsx`, which calls the same `switchWorkspace`.
+Behaviour and the frontend half: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#switch-workspace--file-menu-macos-and-settings-button).
+
+- **The Rust side only emits `menu://switch-workspace`.**
+  The dialog, `set_workspace` and the store reset are `lib/switch-workspace.ts`, so no workspace logic sits behind a menu click or a button.
+- **`build` and `on_event` are `cfg(target_os = "macos")`; `event_for` and the constants are not**, so Linux CI still runs `menu.rs`'s tests.
+  Do not add a Windows / Linux branch to `build`.
+- **It replaces the default menu, so it has to carry what the default carried.**
+  The Edit items are what route `Cmd+C` / `Cmd+V` / `Cmd+A` to the webview; dropping them breaks text editing.
+  A new predefined item belongs in `build`, not in a second menu.
+- **The label is written twice** (`SWITCH_WORKSPACE_LABEL` and `switchWorkspaceHint` in `lib/switch-workspace.ts`); `menu.rs`'s test pins the Rust side.
+  The hint must not mention a File menu off macOS.
+- **No chord, no palette row.**
+  Either needs an `Action`, and an `Action` needs a verdict from every client in `outl_shortcuts::support`.
+
 ## Capture from outside the app (RFC 0363)
 
 `drain_capture_inbox` plus `AppShell`'s `installForegroundRefresh` (`@outl/shared/capture`) land a line `outl capture` left in `<root>/.outl/captures/`, on mount and on every return to the foreground.

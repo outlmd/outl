@@ -50,7 +50,7 @@ function markOnboarded() {
  *     fall back into `<Onboarding />` so the user re-picks.
  *
  * The split is intentional: the user can re-pick a workspace at runtime
- * (from a future "Switch workspace…" menu entry) without remounting the
+ * (File → Switch Workspace…, see `lib/switch-workspace.ts`) without remounting the
  * whole app.
  */
 function App() {

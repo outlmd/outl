@@ -28,6 +28,7 @@ import {
   onDeepLinkNavigate,
   onOpenFileImport,
   onQuickCaptureHotkey,
+  onMenuSwitchWorkspace,
   onPeerOpsChanged,
   onProjectionWriteFailed,
   onWorkspaceReady,
@@ -44,6 +45,7 @@ import { OutlineView } from "./OutlineView";
 import { Picker } from "./Picker";
 import { QuickCapture } from "./QuickCapture";
 import { openQuickCapture } from "../lib/quick-capture";
+import { switchWorkspace } from "../lib/switch-workspace";
 import { PluginMarketplace } from "./PluginMarketplace";
 import { PluginEffectLayer } from "./PluginEffectLayer";
 import { SettingsModal } from "./SettingsModal";
@@ -115,6 +117,11 @@ export function AppShell() {
     } catch {
       // Backend not ready yet — picker stays visible; nothing to do.
     }
+  }
+
+  /** Shared by the macOS menu item and the Settings button. */
+  function switchWorkspaceHere(): Promise<boolean> {
+    return switchWorkspace({ setError, reload: loadToday });
   }
 
   async function loadToday() {
@@ -321,6 +328,13 @@ export function AppShell() {
     });
     onCleanup(() => unlistenReady());
 
+    // File → Switch Workspace… (native menu). `loadToday` runs after the
+    // store is reset, so the new workspace opens on its own journal.
+    const unlistenSwitch = await onMenuSwitchWorkspace(() => {
+      void switchWorkspaceHere();
+    });
+    onCleanup(() => unlistenSwitch());
+
     const unlisten = await onPeerOpsChanged(() => {
       void onPeerChange();
     });
@@ -408,7 +422,7 @@ export function AppShell() {
       <Picker onPicked={applyView} handlers={handlers()} />
       <QuickCapture applyView={applyView} />
       <PluginMarketplace />
-      <SettingsModal />
+      <SettingsModal onSwitchWorkspace={switchWorkspaceHere} />
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
       <TasksPanel applyView={applyView} setError={setError} />
