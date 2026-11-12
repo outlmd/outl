@@ -111,7 +111,19 @@ fn discard_stale_page(
         .into_iter()
         .map(|(id, _)| id)
         .collect();
-    if children.is_empty() {
+    // Page-level properties the importer does not own. Structural keys
+    // (`page-slug`, `page-kind`, `page-source`, `page-frontmatter`) and
+    // `title` stay: reconcile sets or clears them from the new `.md`.
+    let stale_props: Vec<String> = dest
+        .workspace
+        .tree()
+        .properties_of(page_id)
+        .map(|(k, _)| k.to_string())
+        .filter(|k| {
+            !outl_actions::tree::is_page_model_key(k) && k != outl_actions::page::TITLE_KEY
+        })
+        .collect();
+    if children.is_empty() && stale_props.is_empty() {
         return Ok(());
     }
     let mut discarded = 0usize;
@@ -133,7 +145,11 @@ fn discard_stale_page(
     for c in children {
         outl_actions::block::delete(dest.workspace, dest.hlc, c)?;
     }
+    for key in &stale_props {
+        outl_actions::page::set_property(dest.workspace, dest.hlc, page_id, key, None)?;
+    }
     report.replaced_blocks += discarded;
+    report.replaced_props += stale_props.len();
     Ok(())
 }
 

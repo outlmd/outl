@@ -102,3 +102,81 @@ fn a_rerun_over_finished_pages_is_stable() {
     assert_eq!(live_texts(&ws, "alpha"), ["alpha one", "alpha two"]);
     assert_eq!(report.replaced_blocks, 0);
 }
+
+const P1: &str = r#"[
+    {"title": "Alpha", "children": [
+        {"string": "type:: person", "uid": "p0", "children": []},
+        {"string": "alpha one", "uid": "a1", "children": []}]}
+]"#;
+const P2: &str = r#"[
+    {"title": "Alpha", "children": [
+        {"string": "alpha one EDITED", "uid": "a1", "children": []}]}
+]"#;
+const P3: &str = r#"[
+    {"title": "Alpha", "children": [
+        {"string": "type:: place", "uid": "p0", "children": []},
+        {"string": "alpha one EDITED", "uid": "a1", "children": []}]}
+]"#;
+
+fn type_prop(ws: &TestWs) -> Option<String> {
+    outl_actions::page::read_text_prop(&ws.workspace, NodeId::from_slug("alpha"), "type")
+}
+
+fn drop_projection(ws: &TestWs) {
+    fs::remove_file(ws.root.join("pages/alpha.md")).expect("rm md");
+    fs::remove_file(ws.root.join("pages/alpha.outl")).expect("rm sidecar");
+}
+
+#[test]
+fn a_page_property_the_source_dropped_is_gone_after_a_forced_reimport() {
+    let mut ws = open_test_ws();
+    run(&mut ws, P1);
+    assert_eq!(type_prop(&ws).as_deref(), Some("person"));
+    drop_projection(&ws);
+
+    let report = run(&mut ws, P2);
+
+    assert_eq!(type_prop(&ws), None);
+    assert_eq!(report.replaced_props, 1);
+    assert_eq!(live_texts(&ws, "alpha"), ["alpha one EDITED"]);
+}
+
+#[test]
+fn a_trashed_page_does_not_keep_its_old_properties() {
+    let mut ws = open_test_ws();
+    run(&mut ws, P1);
+    outl_actions::block::delete(&mut ws.workspace, &ws.hlc, NodeId::from_slug("alpha"))
+        .expect("trash page");
+    drop_projection(&ws);
+
+    run(&mut ws, P2);
+
+    assert_eq!(type_prop(&ws), None);
+    assert_eq!(live_texts(&ws, "alpha"), ["alpha one EDITED"]);
+}
+
+#[test]
+fn a_property_the_new_source_carries_has_the_new_value() {
+    let mut ws = open_test_ws();
+    run(&mut ws, P1);
+    drop_projection(&ws);
+
+    run(&mut ws, P3);
+
+    assert_eq!(type_prop(&ws).as_deref(), Some("place"));
+}
+
+#[test]
+fn a_page_with_properties_but_no_children_is_still_cleaned() {
+    let mut ws = open_test_ws();
+    run(&mut ws, P1);
+    let alpha = NodeId::from_slug("alpha");
+    for (id, _) in children_of(&ws.workspace, alpha) {
+        outl_actions::block::delete(&mut ws.workspace, &ws.hlc, id).expect("trash child");
+    }
+    drop_projection(&ws);
+
+    run(&mut ws, P2);
+
+    assert_eq!(type_prop(&ws), None);
+}

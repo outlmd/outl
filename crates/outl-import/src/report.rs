@@ -87,6 +87,9 @@ pub struct ImportReport {
     /// were moved to the trash so the page holds exactly what the
     /// source has (`--force`, or a trashed page being re-imported).
     pub replaced_blocks: usize,
+    /// Page-level properties removed from those pages for the same
+    /// reason; the new `.md` sets the ones the source still carries.
+    pub replaced_props: usize,
     /// Blocks confirmed in the destination's op log, summed off the
     /// sidecars `reconcile_md` stamps straight from the materialized
     /// tree. This is the only counter downstream of the write: a page
@@ -403,10 +406,10 @@ impl ImportReport {
         for s in &self.skipped {
             println!("  skipped: {} ({})", s.path, s.reason);
         }
-        if self.replaced_blocks > 0 {
+        if self.replaced_blocks > 0 || self.replaced_props > 0 {
             println!(
-                "  replaced blocks:     {} (previous content of re-imported pages, moved to the trash)",
-                self.replaced_blocks
+                "  replaced:            {} blocks (moved to the trash), {} page properties (previous content of re-imported pages)",
+                self.replaced_blocks, self.replaced_props
             );
         }
         self.print_reconciliation();
