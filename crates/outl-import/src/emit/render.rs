@@ -128,15 +128,10 @@ pub fn render_graph(
                 let slug = slugify(t);
                 match named_by_slug.get(&slug) {
                     Some(&i) => {
+                        // Warned per page below, once the group knows
+                        // which spelling keeps the title.
                         report.pages_merged += 1;
                         report.slug_collisions += 1;
-                        report.warn(
-                            t,
-                            format!(
-                                "shares the outl page `{slug}` with [[{}]], merged and kept as an alias",
-                                named[i].0
-                            ),
-                        );
                         named[i].1.push(page);
                     }
                     None => {
@@ -205,6 +200,9 @@ pub fn render_graph(
             .map(|p| page_title(p))
             .filter(|t| *t != title && !t.contains(','))
             .collect();
+        for other in sources[1..].iter().map(|p| page_title(p)) {
+            report.warn(other, merged_warning(other, title, &stem));
+        }
         render_page(
             sources,
             title,
@@ -221,6 +219,22 @@ pub fn render_graph(
     }
 
     (pages_out, uid_map)
+}
+
+/// What happened to `other`, a title merged into the page `title`.
+/// An `alias::` value is a comma-separated list, so a title with a comma
+/// can't be one; `[[other]]` still reaches the page, by its slug.
+fn merged_warning(other: &str, title: &str, stem: &str) -> String {
+    if other == title {
+        format!("shares the outl page `{stem}` with [[{title}]], merged")
+    } else if other.contains(',') {
+        format!(
+            "shares the outl page `{stem}` with [[{title}]], merged; not kept as an alias \
+             (an alias:: name can't contain a comma), links to it still resolve by slug"
+        )
+    } else {
+        format!("shares the outl page `{stem}` with [[{title}]], merged and kept as an alias")
+    }
 }
 
 /// A named page's title (journals never reach the callers).

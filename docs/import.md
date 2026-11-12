@@ -20,6 +20,7 @@ A remote image (`![alt](https://…)`, such as Roam's firebase uploads) keeps th
 `--download-remote-assets` downloads remote images into `assets/` too and points the link at the local copy, keeping the alt text as written; the URL is not kept, since a link holds one target.
 An encrypted upload (`….enc`, from an encrypted Roam graph) is never downloaded: its bytes are ciphertext, so its link always stays as written.
 A file that can't be pulled (missing, download failed, over `[assets] max_bytes`) keeps its original link and is counted in `assets missing`, never fatal.
+Local files that can't be read are named in one `(graph)` warning (the first five paths, with `RUST_LOG=debug` logging every one), not one line per file.
 `--no-assets` skips all of that, keeping every original relative/remote link verbatim.
 A real (non-dry) import paints a live progress line on stderr — phase, page counter, percentage, current page, elapsed — TTY-only, so piped output stays clean.
 `--dry-run` parses and reports without writing a byte — run it against a real backup to measure fidelity before migrating.
