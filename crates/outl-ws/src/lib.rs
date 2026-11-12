@@ -65,6 +65,10 @@ pub enum WsError {
     /// Locking, storage, or op-log failure while booting.
     #[error("{0}")]
     Internal(String),
+    /// [`OpenOptions::device_actor_only`] was set and another process holds
+    /// the device actor's write lock. Nothing was minted or created.
+    #[error("the device actor's write lock is held by another outl process")]
+    DeviceActorHeld,
 }
 
 impl WsError {
@@ -218,6 +222,15 @@ pub struct OpenOptions {
     /// Defaults to `true`. [`open_read`] sets it `false`: no per-actor
     /// write lock, no minted actor, and storage refuses an append.
     pub writes: bool,
+    /// Refuse to fall back to an ephemeral actor.
+    ///
+    /// Defaults to `false`. A resident server that must not leave an
+    /// `ops-<ulid>.jsonl` and a lock file behind forever (the embedded MCP of
+    /// `outl serve`) sets it: when the device actor's lock is held elsewhere
+    /// the open fails with [`WsError::DeviceActorHeld`] before anything is
+    /// created, and the caller picks a degraded mode (a read) instead.
+    /// Ignored when [`Self::writes`] is `false`.
+    pub device_actor_only: bool,
 }
 
 impl Default for OpenOptions {
@@ -225,6 +238,7 @@ impl Default for OpenOptions {
         Self {
             write_snapshots: false,
             writes: true,
+            device_actor_only: false,
         }
     }
 }
@@ -254,6 +268,7 @@ pub fn open_read(path: &Path) -> Result<WsCtx, WsError> {
         OpenOptions {
             write_snapshots: false,
             writes: false,
+            device_actor_only: false,
         },
     )
 }
@@ -294,7 +309,13 @@ pub fn open_with(path: &Path, opts: OpenOptions) -> Result<WsCtx, WsError> {
     // every call. A read does not take the lock and does not mint.
     // The actor it reports is still the device actor — readers merge
     // every log, and the id is an identity, not a claim.
-    let (actor_lock, actor, ephemeral_actor) = if opts.writes {
+    let (actor_lock, actor, ephemeral_actor) = if opts.writes && opts.device_actor_only {
+        match ActorWriteLock::try_acquire(&paths.ops, device_actor) {
+            Ok(lock) => (Some(lock), device_actor, false),
+            Err(outl_core::LockError::AlreadyHeld(_)) => return Err(WsError::DeviceActorHeld),
+            Err(e) => return Err(WsError::internal(e)),
+        }
+    } else if opts.writes {
         let (lock, actor) =
             resolve_write_actor(&paths.ops, device_actor).map_err(WsError::internal)?;
         (Some(lock), actor, actor != device_actor)

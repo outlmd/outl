@@ -568,6 +568,7 @@ Losing the election is a working state: the loser writes its ops to the shared `
   The winner binds the endpoint, announces after each local mutation, and answers inbound dials.
   A GUI opened at login therefore keeps the endpoint and an MCP server started later stays passive; with no GUI at all, the MCP server *is* the peer, which is the whole point.
 - **`outl serve` contends but never competes.**
+  Its embedded MCP server does not bind an endpoint of its own: the supervisor's transport is the only one, and peer ops it ingests reach the MCP sessions through the same signal that reloads the watcher.
   It is the one process designed to run forever, so it asks for the lease every 30s and treats a refusal as normal: a GUI or TUI that already holds the endpoint keeps it, and the daemon takes over when that exits.
   It never yields once it has won, though, so a GUI opened after the daemon started stays degraded until the daemon stops.
   Anything else would push every GUI on the machine permanently into the degraded mode where the sync indicator never turns green.

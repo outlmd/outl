@@ -13,6 +13,10 @@
 //! See [`crate::cmd::sync_supervisor`] for why it defers to a running GUI
 //! rather than competing with it.
 //!
+//! A third, optional piece is the **embedded MCP server** (`--no-mcp` turns it
+//! off): a Unix-socket listener whose sessions share this process's single
+//! workspace, see [`crate::mcp`]'s `embedded` module.
+//!
 //! # Actor policy, and why `--no-watch` exists
 //!
 //! The watcher emits ops, so it needs the exclusive per-actor write lock. Any
@@ -32,14 +36,14 @@
 mod projection;
 
 use crate::cmd::sync_supervisor;
+use crate::mcp::{start_embedded, EmbeddedServer, SharedWs};
 use crate::sync_engine::{reconcile_dir, reconcile_md, ReconcileReport};
 use crate::workspace_layout::{ensure_ops_dir, is_workspace_md, read_config, Paths};
 use anyhow::{bail, Context, Result};
 use notify::RecursiveMode;
 use notify_debouncer_full::new_debouncer;
-use outl_actions::SyncEngine;
+use outl_actions::{FileSyncTransport, SyncTransport};
 use outl_core::hlc::HlcGenerator;
-use outl_core::storage::JsonlStorage;
 use outl_core::workspace::Workspace;
 use projection::{project_stale_pages, ProjectionReporter, PROJECTION_MIN_INTERVAL};
 use std::path::Path;
@@ -67,7 +71,7 @@ const TICK: Duration = Duration::from_secs(1);
 /// per-actor write lock through [`outl_core::resolve_write_actor`]. Without the
 /// watcher there is nothing to write, so the write lock is skipped — see the
 /// module doc.
-pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
+pub fn run(path: &Path, once: bool, watch: bool, sync: bool, mcp: bool) -> Result<()> {
     if !watch && !sync {
         bail!("--no-watch and --no-sync together leave nothing to do");
     }
@@ -92,49 +96,54 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     ensure_ops_dir(&paths)?;
 
     if !watch {
-        return run_sync_only(&paths, device_actor);
+        return run_sync_only(&paths, device_actor, mcp);
     }
 
-    // Exclusive per-actor write lock. Falls back to ephemeral when
-    // another process already owns the config actor.
-    let (_actor_lock, actor) = outl_core::resolve_write_actor(&paths.ops, device_actor)
-        .with_context(|| format!("acquiring per-actor write lock at {}", paths.ops.display()))?;
-    if actor != device_actor {
+    // One writing open, shared with the embedded MCP sessions (see
+    // `crate::mcp::SharedWs` for why). It takes the exclusive per-actor write
+    // lock, falling back to an ephemeral actor when another process owns the
+    // device actor, and seeds the clock from the log.
+    let wc = outl_ws::open_with(
+        &paths.root,
+        outl_ws::OpenOptions {
+            write_snapshots: true,
+            writes: true,
+            device_actor_only: false,
+        },
+    )
+    .with_context(|| format!("opening the workspace at {}", paths.root.display()))?;
+    let actor = wc.actor;
+    if wc.ephemeral_actor {
         info!(
             "another outl process owns the device actor {device_actor}; serve writes under ephemeral actor {actor}"
         );
     }
-    let storage = JsonlStorage::open(paths.ops.clone(), actor)?;
-    let mut ws = Workspace::open_with_storage(actor, Box::new(storage), Some(paths.root.clone()))?;
-    let hlc = HlcGenerator::new(actor);
-    // This path opens its own workspace instead of going through
-    // `outl_ws::open_with`, so it owns this step itself. Raise the
-    // generator above the log before the initial scan emits its first op
-    // (see `Workspace::seed_clock`). Propagated: `serve` is a daemon that
-    // writes for weeks, so a storage read that fails at boot is worth
-    // refusing to start over.
-    ws.seed_clock(&hlc)
-        .with_context(|| "seeding the clock from the op log")?;
+    let shared = SharedWs::with_open(wc);
 
     info!("starting outl serve at {}", paths.root.display());
 
     // Initial scan: reconcile every .md in pages/ and journals/.
-    let initial = initial_scan(&mut ws, &hlc, &paths)?;
+    let initial = locked(&shared, |wc| {
+        initial_scan(&mut wc.workspace, &wc.hlc, &paths)
+    })??;
     summarize(&initial);
     // …then the other direction. `.md → tree` runs first on purpose: a
     // local hand edit becomes ops before the projection pass renders the
     // tree back out, so the two never fight over the same file.
     let mut reporter = ProjectionReporter::default();
-    project_stale_pages(&ws, &paths.root, &mut reporter);
+    locked(&shared, |wc| {
+        project_stale_pages(&wc.workspace, &paths.root, &mut reporter)
+    })?;
 
     if once {
         return Ok(());
     }
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    // Peer-op arrivals from the transport, so the watcher reloads before it
-    // reconciles.
+    // Peer-op arrivals from the transport, folded into `shared.peer_dirty`, so
+    // the watcher (and any MCP session) reloads before it reconciles.
     let (peer_tx, peer_rx) = channel::<()>();
+    forward_peer_signals(peer_rx, Arc::clone(&shared));
     // Wakes the supervisor's own sleep so a signal doesn't have to wait out
     // the rest of a 30s lease retry.
     let (wake_tx, wake_rx) = channel::<()>();
@@ -158,23 +167,40 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
         None
     };
 
+    let embedded = if mcp {
+        start_mcp(&paths.root, actor, &shared, &peer_tx, &shutdown, false)
+    } else {
+        info!("embedded MCP server disabled (--no-mcp)");
+        None
+    };
+
     // File watcher with 200ms debounce.
     let (tx, rx) = channel();
-    let mut debouncer = new_debouncer(Duration::from_millis(200), None, move |res| {
+    let watcher = new_debouncer(Duration::from_millis(200), None, move |res| {
         let _ = tx.send(res);
     })
-    .with_context(|| "creating file watcher")?;
-
-    debouncer
-        .watch(&paths.pages, RecursiveMode::NonRecursive)
-        .with_context(|| format!("watching {}", paths.pages.display()))?;
-    debouncer
-        .watch(&paths.journals, RecursiveMode::NonRecursive)
-        .with_context(|| format!("watching {}", paths.journals.display()))?;
+    .with_context(|| "creating file watcher")
+    .and_then(|mut debouncer| {
+        debouncer
+            .watch(&paths.pages, RecursiveMode::NonRecursive)
+            .with_context(|| format!("watching {}", paths.pages.display()))?;
+        debouncer
+            .watch(&paths.journals, RecursiveMode::NonRecursive)
+            .with_context(|| format!("watching {}", paths.journals.display()))?;
+        Ok(debouncer)
+    });
+    let debouncer = match watcher {
+        Ok(d) => d,
+        Err(e) => {
+            // Same teardown as the loop's exit: the socket and the lease
+            // must not outlive a failed start.
+            stop_background(&shutdown, supervisor, embedded);
+            return Err(e);
+        }
+    };
 
     info!("watching pages/ and journals/ (Ctrl-C or SIGTERM to stop)");
 
-    let engine = SyncEngine::new(paths.root.clone(), actor);
     // The one loop exit that is a failure. Without it the teardown below
     // cannot tell a dead watcher from a clean SIGTERM, so the process exits 0
     // and `Restart=on-failure` never brings the daemon back.
@@ -186,14 +212,16 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     while !shutdown.load(Ordering::SeqCst) {
         // Keeps the snapshot current on an idle daemon; correctness is the
         // second call, just before the reconcile.
-        projection_due |= reload_if_peer_ops(&peer_rx, &engine, &hlc, &mut ws);
+        projection_due |= reload_if_peer_ops(&shared, &paths.root);
         // The whole reason this daemon now has a `tree → .md` half: ops
         // that arrive by sync change the tree and nothing else, so the
         // `.md` stays wrong until a human opens the page. Throttled
         // because the sweep renders every page, and a sync burst would
         // otherwise render the graph once per batch.
         if projection_due && last_projection.elapsed() >= PROJECTION_MIN_INTERVAL {
-            project_stale_pages(&ws, &paths.root, &mut reporter);
+            shared.run_locked(|wc| {
+                project_stale_pages(&wc.workspace, &paths.root, &mut reporter)
+            });
             projection_due = false;
             last_projection = std::time::Instant::now();
         }
@@ -211,26 +239,12 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
                 // Again, right before reconciling: the call above ran before
                 // a block of up to TICK, and peer ops that landed during it
                 // would otherwise be diffed against the pre-peer tree.
-                reload_if_peer_ops(&peer_rx, &engine, &hlc, &mut ws);
-                for p in paths_to_sync {
-                    match reconcile_md(&mut ws, &hlc, &paths, &p) {
-                        Ok(r) if r.ops_applied > 0 || r.orphans > 0 => {
-                            info!(
-                                "{} → {} ops, {} orphans, sidecar {}",
-                                r.md_path.display(),
-                                r.ops_applied,
-                                r.orphans,
-                                if r.created_sidecar {
-                                    "created"
-                                } else {
-                                    "updated"
-                                }
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(e) => error!("reconcile failed for {}: {e:#}", p.display()),
+                projection_due |= reload_if_peer_ops(&shared, &paths.root);
+                shared.run_locked(|wc| {
+                    for p in paths_to_sync {
+                        reconcile_one(wc, &paths, &p);
                     }
-                }
+                });
             }
             Ok(Err(errs)) => {
                 for e in errs {
@@ -247,20 +261,11 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
         }
     }
 
-    // Unconditional, not only on the signal path: the loop also exits when the
-    // watcher dies, and the supervisor's other exits are a stop signal and P2P
-    // being off. Without this, `join()` waits for a signal that may never come
-    // and the process sits there looking alive with a dead watcher.
-    shutdown.store(true, Ordering::SeqCst);
     // Drop the watcher before joining: the supervisor's shutdown releases the
     // endpoint lease, and a lease left held locks every outl process on this
     // device out of an endpoint.
     drop(debouncer);
-    if let Some(handle) = supervisor {
-        if handle.join().is_err() {
-            warn!("sync supervisor thread panicked on the way out");
-        }
-    }
+    stop_background(&shutdown, supervisor, embedded);
     if watcher_died {
         bail!("the file watcher stopped delivering events");
     }
@@ -268,31 +273,134 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool) -> Result<()> {
     Ok(())
 }
 
+/// Reconcile one edited `.md` into the shared workspace and log the outcome.
+fn reconcile_one(wc: &mut outl_ws::WsCtx, paths: &Paths, p: &Path) {
+    match reconcile_md(&mut wc.workspace, &wc.hlc, paths, p) {
+        Ok(r) if r.ops_applied > 0 || r.orphans > 0 => {
+            info!(
+                "{} → {} ops, {} orphans, sidecar {}",
+                r.md_path.display(),
+                r.ops_applied,
+                r.orphans,
+                if r.created_sidecar {
+                    "created"
+                } else {
+                    "updated"
+                }
+            );
+        }
+        Ok(_) => {}
+        Err(e) => error!("reconcile failed for {}: {e:#}", p.display()),
+    }
+}
+
+/// Run `f` on the shared workspace, or fail when the slot is empty (it never
+/// is on the watcher path, which opens it before anything else).
+fn locked<R>(shared: &SharedWs, f: impl FnOnce(&mut outl_ws::WsCtx) -> R) -> Result<R> {
+    shared
+        .run_locked(f)
+        .ok_or_else(|| anyhow::anyhow!("the shared workspace is not open"))
+}
+
+/// Fold the supervisor's "peer ops landed" channel into the shared dirty flag.
+/// Ends when every sender is gone.
+fn forward_peer_signals(rx: std::sync::mpsc::Receiver<()>, shared: Arc<SharedWs>) {
+    let _ = std::thread::Builder::new()
+        .name("outl-serve-peer-signal".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                shared.peer_dirty.store(true, Ordering::Release);
+            }
+        });
+}
+
+/// What `start_mcp` brought up, torn down together.
+struct EmbeddedMcp {
+    server: EmbeddedServer,
+    poller: FileSyncTransport,
+}
+
+/// Start the embedded MCP server plus the local file poller that flags
+/// `peer_dirty` when another process on this machine writes to `ops/`.
+/// `None` when the socket could not be set up; `serve` carries on without it.
+///
+/// No iroh endpoint is bound here: the sync supervisor owns it.
+fn start_mcp(
+    root: &Path,
+    actor: outl_core::id::ActorId,
+    shared: &Arc<SharedWs>,
+    peer_tx: &std::sync::mpsc::Sender<()>,
+    shutdown: &Arc<AtomicBool>,
+    warm: bool,
+) -> Option<EmbeddedMcp> {
+    let server = start_embedded(root, Arc::clone(shared), Arc::clone(shutdown), warm)?;
+    let poller = FileSyncTransport::default();
+    poller.start(root.to_path_buf(), actor, peer_tx.clone());
+    Some(EmbeddedMcp { server, poller })
+}
+
+/// Stop everything `serve` started in the background and wait for it.
+///
+/// Unconditional on the way out, not only on a signal: the main loop also
+/// exits when the watcher dies, and the supervisor's other exits are a stop
+/// signal and P2P being off. Without it `join()` waits for a signal that may
+/// never come. Joining the MCP accept loop is what removes the socket file.
+fn stop_background(
+    shutdown: &AtomicBool,
+    supervisor: Option<std::thread::JoinHandle<()>>,
+    embedded: Option<EmbeddedMcp>,
+) {
+    shutdown.store(true, Ordering::SeqCst);
+    if let Some(handle) = supervisor {
+        if handle.join().is_err() {
+            warn!("sync supervisor thread panicked on the way out");
+        }
+    }
+    if let Some(mcp) = embedded {
+        mcp.poller.shutdown();
+        mcp.server.join();
+    }
+}
+
 /// `--no-watch`: hold the endpoint and nothing else.
 ///
 /// Takes no per-actor write lock (see the module doc), so it can run
 /// permanently beside a GUI without pushing that GUI onto a fresh ephemeral
-/// actor on every launch.
-fn run_sync_only(paths: &Paths, actor: outl_core::id::ActorId) -> Result<()> {
+/// actor on every launch. The embedded MCP, when on, opens the workspace
+/// lazily under the device actor (warmed in the background) and never mints
+/// another; if the actor is taken it serves reads only.
+fn run_sync_only(paths: &Paths, actor: outl_core::id::ActorId, mcp: bool) -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
-    // The receiver is dropped, not bound: with no watcher there is nothing to
-    // reload, and a bound-but-never-drained receiver would queue one message
-    // per ingested batch for as long as this runs — which is meant to be
-    // weeks. Both send sites use `.ok()`, so dropping it is safe.
-    let (peer_tx, _) = channel::<()>();
+    let shared = SharedWs::empty();
+    let (peer_tx, peer_rx) = channel::<()>();
     let (wake_tx, wake_rx) = channel::<()>();
     sync_supervisor::install_signal_handler(Arc::clone(&shutdown), wake_tx);
     info!(
         "starting outl serve at {} (sync only, no file watcher)",
         paths.root.display()
     );
+    let embedded = if mcp {
+        start_mcp(&paths.root, actor, &shared, &peer_tx, &shutdown, true)
+    } else {
+        info!("embedded MCP server disabled (--no-mcp)");
+        None
+    };
+    if embedded.is_some() {
+        forward_peer_signals(peer_rx, Arc::clone(&shared));
+    } else {
+        // Dropped, not bound: with no watcher and no MCP there is nothing to
+        // reload, and a bound-but-never-drained receiver would queue one
+        // message per ingested batch for as long as this runs — which is meant
+        // to be weeks. Both send sites use `.ok()`, so dropping it is safe.
+        drop(peer_rx);
+    }
     // With no watcher, "P2P is off" leaves this process with nothing to do.
     // Returning `Ok` there would exit 0, and a process manager set to keep the
     // daemon alive would restart it into the same config forever, each restart
     // reporting success.
-    if sync_supervisor::run(&paths.root, actor, peer_tx, wake_rx, shutdown)
-        == sync_supervisor::SupervisorExit::P2pDisabled
-    {
+    let exit = sync_supervisor::run(&paths.root, actor, peer_tx, wake_rx, Arc::clone(&shutdown));
+    stop_background(&shutdown, None, embedded);
+    if exit == sync_supervisor::SupervisorExit::P2pDisabled {
         bail!(
             "`--no-watch` holds the P2P endpoint and nothing else, but `[sync] transport` \
              is \"file\". Set it to \"iroh\", or drop `--no-watch` to run the file watcher."
@@ -302,38 +410,24 @@ fn run_sync_only(paths: &Paths, actor: outl_core::id::ActorId) -> Result<()> {
     Ok(())
 }
 
-/// Reload `ws` from the op log when the transport signals peer ops.
-///
-/// `hlc` rides along because the reload raises it past the peer ops it just
-/// merged; a daemon that never restarts would otherwise keep stamping local
-/// ops below a peer that runs ahead of its clock.
-///
-/// Drains the whole burst first: one reload covers every signal in it.
-/// A failed reload is logged and left alone — the next signal retries, and
-/// reconciling against the tree we already have beats not reconciling at all.
-///
-/// Returns whether the tree moved, which is what tells the caller a
+/// Reload the shared workspace when the op log changed, and report whether the
+/// tree moved since the last call — which is what tells the caller a
 /// `tree → .md` sweep now has something to do.
-fn reload_if_peer_ops(
-    peer_rx: &std::sync::mpsc::Receiver<()>,
-    engine: &SyncEngine,
-    hlc: &HlcGenerator,
-    ws: &mut Workspace,
-) -> bool {
-    if peer_rx.try_iter().count() == 0 {
-        return false;
-    }
-    match engine.reload_workspace(hlc) {
-        Ok(fresh) => {
-            *ws = fresh;
-            info!("peer ops landed; workspace reloaded");
-            true
+///
+/// A session may have done the reload first; the shared `moved` fact keeps the
+/// sweep from being skipped in that case. A failed reload is logged and left
+/// alone: reconciling against the tree we already have beats not reconciling.
+fn reload_if_peer_ops(shared: &SharedWs, root: &Path) -> bool {
+    match shared.refresh(root) {
+        Ok(_) => {
+            let moved = shared.take_moved();
+            if moved {
+                info!("peer ops landed; workspace reloaded");
+            }
+            moved
         }
         Err(e) => {
-            error!("reloading after peer ops failed: {e:#}");
-            // The signal is spent either way, and a sweep against the
-            // tree we already have is the ordinary case, not a repair —
-            // it just finds nothing.
+            error!("reloading after peer ops failed: {}", e.message);
             false
         }
     }

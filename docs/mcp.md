@@ -128,6 +128,35 @@ Prompts are nice-to-have.
 Same surface works through tools (`outl_daily_today`
 + a free-form prompt) — they're just keyboard shortcuts.
 
+## Running beside `outl serve`
+
+On a machine that already runs `outl serve` as its daemon, you do not need a second process to own the workspace.
+`outl serve` serves MCP itself by default (`--no-mcp` turns it off; `--once` never does), and `outl mcp serve` becomes a thin bridge to it.
+
+- **Socket.**
+  The embedded server listens on a Unix domain socket, and only there: no TCP, no network listener.
+  It lives at `<device dir>/run/mcp-<hash>.sock`, where `<device dir>` is the same per-device directory that holds `identity.key` (`~/.config/outl` by default, `$OUTL_DEVICE_DIR` or `$XDG_CONFIG_HOME/outl` when set) and `<hash>` identifies the canonical workspace root.
+  The `run/` directory is mode 0700 and the socket 0600, so only your user can connect.
+  Where Unix sockets do not exist (Windows) the embedded server is unavailable and `outl serve` carries on without it.
+- **Sessions.**
+  Each connection is one MCP session (the same newline-delimited JSON-RPC as stdio), served on its own thread.
+  All sessions share the daemon's single open workspace, so they are serialized, replay the op log once (warmed in the background at startup), and write under **one** actor: the device actor.
+  No session ever mints an ephemeral actor, so there is no `ops-<ulid>.jsonl` or lock file left per session.
+  If another process already holds the device actor (for example a GUI, with `--no-watch`), the embedded server serves reads only and says so, rather than minting one.
+- **Bridge.**
+  `outl mcp serve` first looks for a live socket for the workspace.
+  If one answers, it pipes stdin/stdout to it and opens nothing: no workspace load, no lock, no actor.
+  Otherwise it behaves as before and owns the workspace itself.
+  Which mode it picked is logged to stderr.
+  Pass `--standalone` to force the old behaviour even when a daemon is running.
+  The host config does not change: keep `outl --workspace … mcp serve`.
+- **Failure is never fatal to serve.**
+  A path that is too long, a directory that cannot be made private, or another `outl serve` already serving the workspace is logged as a warning and `outl serve` keeps running without MCP.
+  A stale socket from a killed daemon is replaced on the next start; a clean shutdown removes it.
+  The embedded server never reads stdin, so backgrounded and supervised daemons are unaffected.
+- **Sync.**
+  The embedded server does not bind its own iroh endpoint; the daemon's sync supervisor owns it, and peer ops it receives are served to sessions on their next call.
+
 ## Architecture in one paragraph
 
 `outl mcp serve` is a 200-line stdio loop on top of the same Rust handlers the CLI subcommands call.
@@ -159,7 +188,8 @@ Almost always it's a permission error reading the workspace path.
 
 **`workspace at … is locked by another outl process`.** As of 0.5.1 the workspace lock (`.outl/.lock`) is shared, so this error is no longer raised on simple co-tenancy: TUI + MCP server + a subprocess CLI all coexist.
 The remaining contention point is the per-actor write lock at `ops/.lock-<actor>`.
-The opener tries this device's actor first and, if taken, mints an `ActorId::new()` ephemeral and locks that one instead — so the second `outl mcp serve` of the day usually just writes to a fresh `ops-<ephemeral>.jsonl` without telling you.
+The opener tries this device's actor first and, if taken, mints an `ActorId::new()` ephemeral and locks that one instead — so the second standalone `outl mcp serve` of the day usually just writes to a fresh `ops-<ephemeral>.jsonl` without telling you.
+Run `outl serve` and let `outl mcp serve` [bridge to it](#running-beside-outl-serve) to avoid that entirely.
 You only see a hard error when both the device actor AND the ephemeral path can't be acquired (e.g. a stale `.lock-<actor>` left by a killed process, or a filesystem that doesn't support `flock`).
 Recovery: delete the dangling `ops/.lock-*` files for processes that are no longer running, or move the workspace off the unsupported filesystem.
 
