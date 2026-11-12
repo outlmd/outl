@@ -25,6 +25,10 @@
 #   the git tag — `gh release delete --cleanup-tag` does both atomically.
 # - Orphan tags (tag exists but the release is already gone) get
 #   pushed as `:refs/tags/<tag>` to drop the ref alone.
+# - Every deletion is confirmed by re-reading the ref from origin, not
+#   by the exit status of the command that deleted it. A 46-tag drain
+#   once printed `- [deleted]` 46 times, left 21 refs in place, and
+#   exited 0. See the `ATTEMPTS` block below.
 # - A tag a shipped package manifest still references is never pruned,
 #   whatever the count says. See the `PROTECTED` block below.
 
@@ -105,32 +109,103 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
+# A delete that reported success is not a delete that happened.
+#
+# Measured on a 46-tag catch-up drain: `git push origin :refs/tags/<tag>`
+# ran 46 times, git printed `- [deleted]` for every one, and 21 of those
+# refs were still on origin minutes later. The 21 survivors were the ones
+# processed FIRST, so this is not a "last write lost" shape, and deleting
+# them again one at a time through the REST API worked on the first try
+# for all 21.
+#
+# The run concluded `success` and logged `Pruned 46 tag(s) successfully`.
+# Nothing in it said otherwise, so a prune that skipped 46% of its list
+# was invisible until someone listed the tags by hand. That is the
+# failure this file exists to prevent, so the verdict now comes from
+# re-reading the ref rather than from the exit status of whatever
+# deleted it.
+#
+# `git push` keeps the first attempt: it is one round trip, and the
+# steady state here is a single deletion per release.
+ATTEMPTS=3
+
+# Does `refs/tags/$1` exist on origin? 0 = present, 1 = absent,
+# 2 = could not tell. The third state is load-bearing: a failed read
+# must not be counted as a successful delete, which is the same mistake
+# in a new costume.
+#
+# `git/matching-refs/` is a PREFIX query — `v0.1.0-beta.1` also returns
+# `.10` through `.19` — so `grep -qxF` is what makes the answer about
+# one ref. No pipeline, deliberately: `grep -q` closes the pipe on its
+# first match, and under `pipefail` the resulting SIGPIPE on `gh` would
+# come back as a non-zero status, i.e. "absent" for a ref that is there.
+ref_exists() {
+  local refs
+  if ! refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$1" --jq '.[].ref' 2>/dev/null); then
+    return 2
+  fi
+  grep -qxF "refs/tags/$1" <<<"$refs"
+}
+
+# 0 once `refs/tags/$1` is gone from origin, retrying the delete through
+# the API in between. 1 if it is still there, or still unreadable, after
+# $ATTEMPTS checks.
+confirm_ref_gone() {
+  local tag="$1" attempt rc
+  for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
+    rc=0
+    ref_exists "$tag" || rc=$?
+    case "$rc" in
+      1) return 0 ;;
+      2) echo "Could not read refs/tags/$tag from origin (check $attempt/$ATTEMPTS)." ;;
+      *)
+        echo "refs/tags/$tag is still on origin (check $attempt/$ATTEMPTS); deleting through the API."
+        gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true
+        ;;
+    esac
+    sleep 2
+  done
+  return 1
+}
+
 FAILED=0
+PRUNED=0
 while IFS= read -r tag; do
   [[ -z "$tag" ]] && continue
   echo "::group::Delete $tag"
   if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
     # `--cleanup-tag` drops the git ref alongside the release.
+    #
+    # A failure here is counted on the spot and the ref is not checked:
+    # the release and its built binaries are still published, so the tag
+    # surviving is the lesser half of the problem.
     if ! gh release delete "$tag" \
       --repo "$GITHUB_REPOSITORY" \
       --cleanup-tag \
       --yes; then
       echo "::error::Failed to delete release $tag"
       FAILED=$((FAILED + 1))
+      echo "::endgroup::"
+      continue
     fi
   else
     # Release already gone; nuke the orphan tag directly.
     echo "No release for $tag; deleting orphan tag ref."
-    if ! git push origin ":refs/tags/$tag"; then
-      echo "::error::Failed to delete tag $tag"
-      FAILED=$((FAILED + 1))
-    fi
+    git push origin ":refs/tags/$tag" ||
+      echo "::warning::\`git push :refs/tags/$tag\` exited non-zero; checking the ref anyway."
+  fi
+
+  if confirm_ref_gone "$tag"; then
+    PRUNED=$((PRUNED + 1))
+  else
+    echo "::error::refs/tags/$tag survived $ATTEMPTS delete attempts"
+    FAILED=$((FAILED + 1))
   fi
   echo "::endgroup::"
 done < "$TO_DELETE_FILE"
 
 if [[ "$FAILED" -gt 0 ]]; then
-  echo "::error::Cleanup finished with $FAILED failure(s)."
+  echo "::error::Pruned ${PRUNED} of ${COUNT} tag(s); ${FAILED} failure(s)."
   exit 1
 fi
-echo "::notice::Pruned ${COUNT} tag(s) successfully."
+echo "::notice::Pruned ${PRUNED} tag(s) successfully."
