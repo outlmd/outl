@@ -483,12 +483,38 @@ fn is_truthy(v: &str) -> bool {
 
 /// Parse a comma-separated `alias::` page-property value into trimmed,
 /// non-empty names — the same shape the template `params::` list uses.
+///
+/// An entry may be wrapped in `[[…]]` (`alias:: [[Fale, escute]], Ave`):
+/// a comma inside the brackets belongs to the name, and the brackets are
+/// not part of it. That is the only way to alias a title that has a
+/// comma, and it is the form Logseq and Roam write their aliases in.
 pub fn parse_alias_list(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect()
+    let mut out = Vec::new();
+    let mut rest = value;
+    loop {
+        let trimmed = rest.trim_start();
+        let (entry, tail) = match trimmed.strip_prefix("[[").and_then(|inner| {
+            let close = inner.find("]]")?;
+            let after = inner[close + 2..].trim_start();
+            // Bracketed only when the entry ends at the brackets.
+            (after.is_empty() || after.starts_with(','))
+                .then(|| (inner[..close].to_string(), after.strip_prefix(',')))
+        }) {
+            Some((name, tail)) => (name, tail),
+            None => match trimmed.split_once(',') {
+                Some((head, tail)) => (head.to_string(), Some(tail)),
+                None => (trimmed.to_string(), None),
+            },
+        };
+        let entry = entry.trim();
+        if !entry.is_empty() {
+            out.push(entry.to_string());
+        }
+        match tail {
+            Some(t) => rest = t,
+            None => return out,
+        }
+    }
 }
 
 // Integration-level tests for WorkspaceIndex live in

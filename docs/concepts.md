@@ -51,6 +51,7 @@ type:: person
 ```
 
 A page can also answer to short or alternative names, listed comma-separated in the `alias::` property.
+A name with a comma of its own is written in brackets, `alias:: [[Speak, then listen]], Talk`: the comma inside `[[…]]` is part of the name, and the brackets are not.
 Every name a page answers to — slug, title, each alias — resolves the same way: `[[ref]]`, `#tag`, `@mention`, and autocomplete all match case-insensitively against the title and the aliases.
 
 The `type::` property on a page is read by surfaces that filter pages by role.

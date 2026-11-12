@@ -13,6 +13,7 @@ Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences,
 Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
 `LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
 A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
+Two Roam pages whose titles land on one outl slug (`Cloudflare` and `cloudflare`, `@Ana` and `Ana`) are one page in outl: they merge, the page with the most blocks keeps the title, and every other spelling becomes an `alias::` name, a title with a comma written as `[[Plan, v2]]` so it stays one name.
 A Roam `{{[[table]]}}` block becomes one [pipe-table](markdown-format.md#tables) block: its first row is the header, and a table with merged cells, multi-line or attribute cells, or a cell another block refers to keeps its subtree as it was.
 Obsidian: frontmatter → `key:: value` properties, wiki-link variants collapse to `[[Note]]`.
 Referenced local files are pulled into the workspace's `assets/` dir, content-addressed.
