@@ -505,3 +505,77 @@ fn a_utf8_bom_does_not_destroy_a_leading_page_property() {
     );
     assert_eq!(back.blocks.len(), 1);
 }
+
+/// A continuation line shaped like a bullet stays text (Roam import:
+/// `"head\n- item"` came back as two blocks).
+#[test]
+fn bullet_shaped_continuation_lines_roundtrip() {
+    assert_text_roundtrips("head\n- item one\n- item two");
+    assert_text_roundtrips("head\n-");
+    assert_text_roundtrips("head\n  - indented item");
+    assert_text_roundtrips("head\n \u{20}- one space short of a level");
+    assert_text_roundtrips("head\n\\- literal backslash");
+    assert_text_roundtrips("head\n\\\\- two literal backslashes");
+    assert_text_roundtrips("head\n```\n- inside fence\n\\- also inside\n```");
+    assert_text_roundtrips("- first line keeps its own dash\n- and the next one");
+    assert_text_roundtrips("\\- a first line backslash is plain text");
+}
+
+/// Prose after a fence that opens the block stays in the block.
+#[test]
+fn prose_after_leading_fence_roundtrips() {
+    assert_text_roundtrips("```clojure\n(+ 1 2)\n```\n\nexplain this");
+}
+
+/// A fence opened in a block's text and closed in a later block's text
+/// (Roam keeps one YAML document spread over sibling blocks this way).
+/// Written verbatim, the open fence swallowed every following child:
+/// 47 blocks in, 44 back on the real graph.
+#[test]
+fn a_fence_left_open_by_its_block_does_not_swallow_the_next_blocks() {
+    // Each text on its own.
+    assert_text_roundtrips("intro\n\n```yaml");
+    assert_text_roundtrips("```yaml");
+    assert_text_roundtrips("b: 2\n```");
+    assert_text_roundtrips("~~~\nunclosed tilde");
+    assert_text_roundtrips("head\n\\```literal escaped opener");
+    assert_text_roundtrips("\\```literal escaped opener on the first line");
+    assert_text_roundtrips("head\n  ```over-indented, never a fence");
+
+    // And the tree: parent opens, children carry the body, the last
+    // child closes. Every block must come back, with its own text.
+    let mut parent = block("intro\n\n```yaml");
+    parent.children = vec![block("- a: 1"), block("b: 2\n- c: 3"), block("d: 4\n```")];
+    let page = page_of(vec![parent, block("next sibling")]);
+    let rendered = render(&page);
+    let back = parse(&rendered);
+    assert_eq!(back.blocks.len(), 2, "rendered:\n{rendered}");
+    assert_eq!(back.blocks[0].text, "intro\n\n```yaml");
+    let kids: Vec<&str> = back.blocks[0]
+        .children
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert_eq!(
+        kids,
+        ["- a: 1", "b: 2\n- c: 3", "d: 4\n```"],
+        "rendered:\n{rendered}"
+    );
+    assert_eq!(back.blocks[1].text, "next sibling");
+    assert!(back.warnings.is_empty(), "{:?}", back.warnings);
+    // Stable on the second pass: what we write is what we read.
+    assert_eq!(render(&back), rendered);
+}
+
+/// Compatibility: a file written before the escape existed, carrying a
+/// literal `\- x` continuation line, now reads as `- x` (CommonMark's
+/// reading of the escape) and is written back byte-identical, so the
+/// file itself never changes.
+#[test]
+fn a_pre_existing_backslash_dash_line_reads_as_an_escape_and_keeps_its_bytes() {
+    let md = "- head\n  \\- was typed by hand\n- next\n";
+    let back = parse(md);
+    assert_eq!(back.blocks.len(), 2);
+    assert_eq!(back.blocks[0].text, "head\n- was typed by hand");
+    assert_eq!(render(&back), md);
+}
