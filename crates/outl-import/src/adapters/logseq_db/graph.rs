@@ -103,7 +103,9 @@ impl Graph {
         let mut graph = Graph::default();
         for (i, d) in datoms.iter().enumerate() {
             let triple = d.as_seq().filter(|t| t.len() == 3).ok_or_else(|| {
-                bad(&format!("datom #{i} is not an `[entity attribute value]` triple"))
+                bad(&format!(
+                    "datom #{i} is not an `[entity attribute value]` triple"
+                ))
             })?;
             let e = triple[0]
                 .as_int()

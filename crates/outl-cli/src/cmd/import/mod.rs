@@ -290,8 +290,8 @@ mod tests {
             ..ImportFlags::default()
         };
         for source in ["auto", "logseq", "logseq-db"] {
-            let err = run(source, dir.path(), &dst, flags)
-                .expect_err("a DB graph directory is refused");
+            let err =
+                run(source, dir.path(), &dst, flags).expect_err("a DB graph directory is refused");
             let msg = format!("{err:#}");
             assert!(msg.contains("Export EDN file"), "{source}: {msg}");
             assert!(msg.contains("outl import logseq-db"), "{source}: {msg}");

@@ -450,9 +450,9 @@ impl<'a> Reader<'a> {
 
     fn hex4(&self, at: usize) -> Option<u32> {
         let digits = self.bytes.get(at..at + 4)?;
-        digits.iter().try_fold(0u32, |acc, &b| {
-            Some(acc * 16 + (b as char).to_digit(16)?)
-        })
+        digits
+            .iter()
+            .try_fold(0u32, |acc, &b| Some(acc * 16 + (b as char).to_digit(16)?))
     }
 
     /// Reads `\uXXXX`, combining a UTF-16 surrogate pair into one char.
@@ -463,7 +463,11 @@ impl<'a> Reader<'a> {
         match hi {
             0xD800..=0xDBFF => {
                 let is_escape = self.bytes[self.pos..].starts_with(b"\\u");
-                let lo = if is_escape { self.hex4(self.pos + 2) } else { None };
+                let lo = if is_escape {
+                    self.hex4(self.pos + 2)
+                } else {
+                    None
+                };
                 let Some(lo @ 0xDC00..=0xDFFF) = lo else {
                     return Err(self.err(esc, "unpaired high surrogate in `\\u` escape"));
                 };

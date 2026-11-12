@@ -107,7 +107,10 @@ fn characters() {
 fn characters_that_are_delimiters() {
     assert_eq!(ok(r"\("), Edn::Char('('));
     assert_eq!(ok(r#"\""#), Edn::Char('"'));
-    assert_eq!(ok(r"[\] \,]"), Edn::Vector(vec![Edn::Char(']'), Edn::Char(',')]));
+    assert_eq!(
+        ok(r"[\] \,]"),
+        Edn::Vector(vec![Edn::Char(']'), Edn::Char(',')])
+    );
 }
 
 #[test]
@@ -162,15 +165,27 @@ fn collections() {
     assert_eq!(ok("{}"), Edn::Map(vec![]));
     assert_eq!(ok("#{}"), Edn::Set(vec![]));
     assert_eq!(ok("[1 2 3]"), Edn::Vector(vec![int(1), int(2), int(3)]));
-    assert_eq!(ok("(1 :a \"x\")"), Edn::List(vec![int(1), kw("a"), Edn::Str("x".into())]));
+    assert_eq!(
+        ok("(1 :a \"x\")"),
+        Edn::List(vec![int(1), kw("a"), Edn::Str("x".into())])
+    );
     assert_eq!(ok("#{1 2}"), Edn::Set(vec![int(1), int(2)]));
-    assert_eq!(ok("{:a 1 :b 2}"), Edn::Map(vec![(kw("a"), int(1)), (kw("b"), int(2))]));
+    assert_eq!(
+        ok("{:a 1 :b 2}"),
+        Edn::Map(vec![(kw("a"), int(1)), (kw("b"), int(2))])
+    );
 }
 
 #[test]
 fn delimiters_end_tokens_without_whitespace() {
-    assert_eq!(ok("[1[2]3]"), Edn::Vector(vec![int(1), Edn::Vector(vec![int(2)]), int(3)]));
-    assert_eq!(ok("[:a\"x\":b]"), Edn::Vector(vec![kw("a"), Edn::Str("x".into()), kw("b")]));
+    assert_eq!(
+        ok("[1[2]3]"),
+        Edn::Vector(vec![int(1), Edn::Vector(vec![int(2)]), int(3)])
+    );
+    assert_eq!(
+        ok("[:a\"x\":b]"),
+        Edn::Vector(vec![kw("a"), Edn::Str("x".into()), kw("b")])
+    );
     assert_eq!(ok("{:a 1}"), ok("{:a,1}"));
 }
 
@@ -179,7 +194,11 @@ fn map_keeps_order_and_duplicates() {
     let m = ok("{:b 1 :a 2 :b 3}");
     assert_eq!(
         m,
-        Edn::Map(vec![(kw("b"), int(1)), (kw("a"), int(2)), (kw("b"), int(3))])
+        Edn::Map(vec![
+            (kw("b"), int(1)),
+            (kw("a"), int(2)),
+            (kw("b"), int(3))
+        ])
     );
     assert_eq!(m.map_get("b"), Some(&int(1)));
 }
@@ -208,7 +227,10 @@ fn commas_are_whitespace() {
 #[test]
 fn line_comments() {
     assert_eq!(ok("; leading\n42 ; trailing"), int(42));
-    assert_eq!(ok("[1 ; one\n 2 ;two\n]"), Edn::Vector(vec![int(1), int(2)]));
+    assert_eq!(
+        ok("[1 ; one\n 2 ;two\n]"),
+        Edn::Vector(vec![int(1), int(2)])
+    );
     assert_eq!(ok("42 ; no newline at the end"), int(42));
     assert_eq!(ok("[1 ;]\n 2]"), Edn::Vector(vec![int(1), int(2)]));
     assert_eq!(ok("\"a;b\""), Edn::Str("a;b".into()));
@@ -252,11 +274,17 @@ fn tagged_literals() {
     );
     assert_eq!(
         ok("#my.app/thing {:a 1}"),
-        Edn::Tagged("my.app/thing".into(), Box::new(Edn::Map(vec![(kw("a"), int(1))])))
+        Edn::Tagged(
+            "my.app/thing".into(),
+            Box::new(Edn::Map(vec![(kw("a"), int(1))]))
+        )
     );
     assert_eq!(
         ok("#a #b 1"),
-        Edn::Tagged("a".into(), Box::new(Edn::Tagged("b".into(), Box::new(int(1)))))
+        Edn::Tagged(
+            "a".into(),
+            Box::new(Edn::Tagged("b".into(), Box::new(int(1))))
+        )
     );
     assert_eq!(
         ok("[#t 1 #t 2]"),
@@ -331,7 +359,10 @@ fn realistic_logseq_export() {
         Some("graph")
     );
 
-    let datoms = root.map_get("datoms").and_then(Edn::as_seq).expect("datoms");
+    let datoms = root
+        .map_get("datoms")
+        .and_then(Edn::as_seq)
+        .expect("datoms");
     assert_eq!(datoms.len(), 5);
     let row = |i: usize| datoms[i].as_seq().expect("datom row");
     assert_eq!(row(0)[2].as_keyword(), Some("logseq.class/Page"));

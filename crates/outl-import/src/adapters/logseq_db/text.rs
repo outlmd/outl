@@ -88,10 +88,8 @@ impl RefTargets {
             (true, 3, "]]", r)
         } else if let Some(r) = rest.strip_prefix("[[") {
             (false, 2, "]]", r)
-        } else if let Some(r) = rest.strip_prefix("((") {
-            (false, 2, "))", r)
         } else {
-            return None;
+            (false, 2, "))", rest.strip_prefix("((")?)
         };
         let uuid = body.get(..36).filter(|u| is_uuid(u))?;
         if !body[36..].starts_with(close) {

@@ -408,7 +408,7 @@ impl Ctx<'_> {
             kids.entry(key).or_default().push(*id);
         }
         for list in kids.values_mut() {
-            list.sort_by(|a, b| self.order_key(*a).cmp(&self.order_key(*b)).then(a.cmp(b)));
+            list.sort_by(|a, b| self.order_key(*a).cmp(self.order_key(*b)).then(a.cmp(b)));
         }
         let mut visited: HashSet<i64> = HashSet::new();
         let mut roots: Vec<ImportBlock> = kids
@@ -476,7 +476,10 @@ impl Ctx<'_> {
             (t.built_in_classes, "built-in tags/classes"),
             (t.property_defs, "property definitions"),
             (t.closed_values, "closed-value definitions"),
-            (t.value_blocks, "property value blocks (folded into their properties)"),
+            (
+                t.value_blocks,
+                "property value blocks (folded into their properties)",
+            ),
             (t.recycled_blocks, "blocks in the recycle bin"),
             (t.hidden_blocks, "hidden blocks"),
         ] {
@@ -487,7 +490,10 @@ impl Ctx<'_> {
         if !skipped.is_empty() {
             report.warn(
                 GRAPH_SCOPE,
-                format!("not imported (not page or block content): {}", skipped.join(", ")),
+                format!(
+                    "not imported (not page or block content): {}",
+                    skipped.join(", ")
+                ),
             );
         }
         if t.reparented_blocks > 0 || t.cyclic_blocks > 0 {

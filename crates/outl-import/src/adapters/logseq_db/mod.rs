@@ -53,6 +53,8 @@ mod text;
 #[cfg(test)]
 mod edge_tests;
 #[cfg(test)]
+mod reject_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::adapter::{ImportError, SourceAdapter};
@@ -92,8 +94,8 @@ impl SourceAdapter for LogseqDbAdapter {
             return Err(ImportError::Parse(msg));
         }
         let text = std::fs::read_to_string(src).map_err(|e| ImportError::io(src, e))?;
-        let root = edn::parse(&text)
-            .map_err(|e| ImportError::Parse(format!("{}: {e}", src.display())))?;
+        let root =
+            edn::parse(&text).map_err(|e| ImportError::Parse(format!("{}: {e}", src.display())))?;
         let graph = graph::Graph::from_edn(&root)?;
         if let Some(v) = graph::schema_version(&root) {
             let major = v.split('.').next().and_then(|m| m.parse::<i64>().ok());

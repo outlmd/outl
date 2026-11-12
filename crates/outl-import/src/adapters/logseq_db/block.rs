@@ -122,7 +122,10 @@ impl Ctx<'_> {
             .into_iter()
             .filter_map(|t| self.g.entity(t))
             .filter(|t| !t.flag("logseq.property/built-in?"))
-            .filter(|t| t.uuid().is_none_or(|u| !title.to_ascii_lowercase().contains(&u)))
+            .filter(|t| {
+                t.uuid()
+                    .is_none_or(|u| !title.to_ascii_lowercase().contains(&u))
+            })
             .filter_map(|t| t.str("block/title").map(str::to_string))
             .collect()
     }
@@ -158,7 +161,9 @@ impl Ctx<'_> {
 
     pub(super) fn note_dangling(&mut self, label: &str, dangling: &[Dangling]) {
         for d in dangling {
-            self.tally.dangling.push((label.to_string(), d.uuid.clone()));
+            self.tally
+                .dangling
+                .push((label.to_string(), d.uuid.clone()));
         }
     }
 }

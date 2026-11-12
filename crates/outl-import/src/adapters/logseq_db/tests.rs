@@ -111,7 +111,7 @@ pub(super) fn built_in(fx: &mut Fx, id: i64) {
     fx.raw(id, "logseq.property/built-in?", "true");
 }
 
-fn fixture() -> String {
+pub(super) fn fixture() -> String {
     let mut fx = Fx::default();
     // Built-in classes.
     for (id, name, title) in [
@@ -141,26 +141,48 @@ fn fixture() -> String {
     for (id, ident, title, prop) in [
         (STATUS_TODO, "logseq.property/status.todo", "Todo", STATUS),
         (STATUS_DONE, "logseq.property/status.done", "Done", STATUS),
-        (STATUS_BACKLOG, "logseq.property/status.backlog", "Backlog", STATUS),
-        (PRIORITY_HIGH, "logseq.property/priority.high", "High", PRIORITY),
+        (
+            STATUS_BACKLOG,
+            "logseq.property/status.backlog",
+            "Backlog",
+            STATUS,
+        ),
+        (
+            PRIORITY_HIGH,
+            "logseq.property/priority.high",
+            "High",
+            PRIORITY,
+        ),
     ] {
         fx.ent(id, Some(ident), Some(title));
         fx.raw(id, "block/closed-value-property", &prop.to_string());
         built_in(&mut fx, id);
     }
     // User properties: a text one and a number one.
-    fx.ent(READING, Some("user.property/reading-status-aB1"), Some("Reading status"));
+    fx.ent(
+        READING,
+        Some("user.property/reading-status-aB1"),
+        Some("Reading status"),
+    );
     fx.tag(READING, PROPERTY_CLASS);
     fx.raw(READING, "logseq.property/type", ":default");
     fx.ent(READING_VALUE, None, Some("In progress"));
-    fx.raw(READING_VALUE, "logseq.property/created-from-property", &READING.to_string());
+    fx.raw(
+        READING_VALUE,
+        "logseq.property/created-from-property",
+        &READING.to_string(),
+    );
     fx.raw(READING_VALUE, "block/page", &PROJECT.to_string());
     fx.ent(RATING, Some("user.property/rating-cD2"), Some("Rating"));
     fx.tag(RATING, PROPERTY_CLASS);
     fx.raw(RATING, "logseq.property/type", ":number");
     fx.ent(RATING_VALUE, None, None);
     fx.raw(RATING_VALUE, "logseq.property/value", "4");
-    fx.raw(RATING_VALUE, "logseq.property/created-from-property", &RATING.to_string());
+    fx.raw(
+        RATING_VALUE,
+        "logseq.property/created-from-property",
+        &RATING.to_string(),
+    );
     fx.raw(RATING_VALUE, "block/page", &PROJECT.to_string());
     // A built-in page that must be skipped, a whiteboard, a user tag.
     fx.ent(LIBRARY, None, Some("Library"));
@@ -191,7 +213,13 @@ fn project_page(fx: &mut Fx) {
     let child = format!("child of {} tagged #[[{}]]", r(PROJECT), uuid(BOOK_TAG));
     fx.block(42, PROJECT, 41, "a0", &child);
     fx.block(43, PROJECT, PROJECT, "Zz", "first root");
-    fx.block(44, PROJECT, PROJECT, "a1", &format!("see {} and [[{}]]", r(42), uuid(GONE)));
+    fx.block(
+        44,
+        PROJECT,
+        PROJECT,
+        "a1",
+        &format!("see {} and [[{}]]", r(42), uuid(GONE)),
+    );
     fx.block(45, PROJECT, PROJECT, "a2", "buy milk");
     fx.tag(45, TASK_CLASS);
     fx.raw(45, "logseq.property/status", &STATUS_TODO.to_string());
@@ -210,7 +238,11 @@ fn project_page(fx: &mut Fx) {
     fx.raw(49, "logseq.property/status", &STATUS_BACKLOG.to_string());
     fx.raw(49, "logseq.property/scheduled", &NOON_NOV_10.to_string());
     fx.block(50, PROJECT, PROJECT, "a7", "a book");
-    fx.raw(50, "user.property/reading-status-aB1", &READING_VALUE.to_string());
+    fx.raw(
+        50,
+        "user.property/reading-status-aB1",
+        &READING_VALUE.to_string(),
+    );
     fx.raw(50, "user.property/rating-cD2", &RATING_VALUE.to_string());
     fx.tag(50, BOOK_TAG);
     fx.raw(50, "logseq.property/icon", "{:type :emoji}");
@@ -223,7 +255,13 @@ fn journal_page(fx: &mut Fx) {
     fx.ent(JOURNAL, None, Some("Nov 11th, 2026"));
     fx.tag(JOURNAL, JOURNAL_CLASS);
     fx.raw(JOURNAL, "block/journal-day", "20261111");
-    fx.block(61, JOURNAL, JOURNAL, "a0", &format!("worked on #[[{}]]", uuid(PROJECT)));
+    fx.block(
+        61,
+        JOURNAL,
+        JOURNAL,
+        "a0",
+        &format!("worked on #[[{}]]", uuid(PROJECT)),
+    );
 }
 
 // --- helpers over the IR ---------------------------------------------------
@@ -296,21 +334,39 @@ fn pages_journals_and_user_tags_are_imported_and_built_ins_skipped() {
         .collect();
     assert!(titles.contains(&"2026-11-11".to_string()), "{titles:?}");
     assert!(titles.contains(&"My Project".to_string()), "{titles:?}");
-    assert!(titles.contains(&"book".to_string()), "user tag class is a page");
-    assert_eq!(titles.len(), 3, "no property, closed value or built-in leaks: {titles:?}");
-    assert!(g.pages.iter().any(|p| p.name
-        == PageName::Journal(NaiveDate::from_ymd_opt(2026, 11, 11).expect("date"))));
+    assert!(
+        titles.contains(&"book".to_string()),
+        "user tag class is a page"
+    );
+    assert_eq!(
+        titles.len(),
+        3,
+        "no property, closed value or built-in leaks: {titles:?}"
+    );
+    assert!(
+        g.pages
+            .iter()
+            .any(|p| p.name
+                == PageName::Journal(NaiveDate::from_ymd_opt(2026, 11, 11).expect("date")))
+    );
 
     let skipped: Vec<&str> = report.skipped.iter().map(|s| s.path.as_str()).collect();
     assert!(skipped.iter().any(|p| p.contains("Library")), "{skipped:?}");
-    assert!(skipped.iter().any(|p| p.contains("Sketch")), "whiteboard: {skipped:?}");
+    assert!(
+        skipped.iter().any(|p| p.contains("Sketch")),
+        "whiteboard: {skipped:?}"
+    );
     // Structural definitions land in the aggregate warning instead.
     let agg = report
         .warnings
         .iter()
         .find(|w| w.detail.starts_with("not imported"))
         .expect("aggregate warning");
-    assert!(agg.detail.contains("property definitions"), "{}", agg.detail);
+    assert!(
+        agg.detail.contains("property definitions"),
+        "{}",
+        agg.detail
+    );
     assert!(agg.detail.contains("closed-value"), "{}", agg.detail);
     assert!(agg.detail.contains("built-in tags"), "{}", agg.detail);
     assert!(agg.detail.contains("recycle bin"), "{}", agg.detail);
@@ -336,8 +392,14 @@ fn page_tags_and_timestamps_ride_along() {
         "{:?}",
         p.props
     );
-    assert_eq!(p.created.map(|d| d.timestamp_millis()), Some(1_700_000_000_000));
-    assert_eq!(p.edited.map(|d| d.timestamp_millis()), Some(1_700_000_100_000));
+    assert_eq!(
+        p.created.map(|d| d.timestamp_millis()),
+        Some(1_700_000_000_000)
+    );
+    assert_eq!(
+        p.edited.map(|d| d.timestamp_millis()),
+        Some(1_700_000_100_000)
+    );
 }
 
 // --- blocks ------------------------------------------------------------------
@@ -346,7 +408,10 @@ fn page_tags_and_timestamps_ride_along() {
 fn siblings_follow_the_block_order_string_bytewise() {
     let (g, _) = parse_fixture();
     let roots: Vec<String> = outline(named(&g, "My Project")).iter().map(text).collect();
-    assert_eq!(roots[0], "first root", "\"Zz\" sorts before \"a0\": {roots:?}");
+    assert_eq!(
+        roots[0], "first root",
+        "\"Zz\" sorts before \"a0\": {roots:?}"
+    );
     assert_eq!(roots[1], "second root");
     assert!(roots[2].starts_with("see "), "{roots:?}");
 }
@@ -372,8 +437,14 @@ fn recycled_blocks_are_not_imported() {
 fn timestamps_land_on_blocks() {
     let (g, _) = parse_fixture();
     let b = &outline(named(&g, "My Project"))[1];
-    assert_eq!(b.created.map(|d| d.timestamp_millis()), Some(1_700_000_000_000));
-    assert_eq!(b.edited.map(|d| d.timestamp_millis()), Some(1_700_000_200_000));
+    assert_eq!(
+        b.created.map(|d| d.timestamp_millis()),
+        Some(1_700_000_000_000)
+    );
+    assert_eq!(
+        b.edited.map(|d| d.timestamp_millis()),
+        Some(1_700_000_200_000)
+    );
 }
 
 // --- text --------------------------------------------------------------------
@@ -469,7 +540,10 @@ fn a_code_block_becomes_a_code_block_with_its_language() {
 #[test]
 fn a_quote_keeps_its_text_and_is_counted() {
     let (g, report) = parse_fixture();
-    assert_eq!(text(&outline(named(&g, "My Project"))[6]), "> to be or not\n> to be");
+    assert_eq!(
+        text(&outline(named(&g, "My Project"))[6]),
+        "> to be or not\n> to be"
+    );
     assert_eq!(report.components_verbatim.get("quote"), Some(&1));
 }
 
@@ -498,91 +572,4 @@ fn built_in_attributes_without_an_equivalent_are_counted_not_silent() {
         "{:?}",
         report.warnings
     );
-}
-
-// --- rejection ---------------------------------------------------------------------
-
-fn parse_err(edn: &str) -> String {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("x.edn");
-    std::fs::write(&file, edn).expect("write");
-    let mut report = ImportReport::new("logseq-db");
-    LogseqDbAdapter
-        .parse(&file, &mut report)
-        .expect_err("must be rejected")
-        .to_string()
-}
-
-#[test]
-fn a_page_or_block_export_is_refused_with_a_clear_message() {
-    let e = parse_err("{:logseq.db.sqlite.export/export-type :page, :pages-and-blocks []}");
-    assert!(e.contains("unsupported export shape"), "{e}");
-    assert!(e.contains(":page"), "{e}");
-}
-
-#[test]
-fn the_human_graph_export_is_refused() {
-    let e = parse_err(
-        "{:logseq.db.sqlite.export/export-type :graph-human, :pages-and-blocks [], :classes {}}",
-    );
-    assert!(e.contains(":graph-human"), "{e}");
-}
-
-#[test]
-fn another_graph_format_is_refused() {
-    let e = parse_err("{:logseq.db.sqlite.export/graph-format :other, :datoms []}");
-    assert!(e.contains("graph-format :other"), "{e}");
-}
-
-#[test]
-fn not_a_map_and_bad_datoms_are_refused() {
-    assert!(parse_err("[1 2 3]").contains("not an EDN map"));
-    let e = parse_err("{:logseq.db.sqlite.export/graph-format :datoms, :datoms [[1 :a]]}");
-    assert!(e.contains("datom #0"), "{e}");
-    let e = parse_err("{:logseq.db.sqlite.export/graph-format :datoms}");
-    assert!(e.contains("`:datoms`"), "{e}");
-}
-
-#[test]
-fn a_syntax_error_reports_line_and_column() {
-    let e = parse_err("{:a 1\n :b [1 2");
-    assert!(e.contains("line 2"), "{e}");
-}
-
-// --- detection and the db.sqlite directory --------------------------------------------
-
-#[test]
-fn detect_accepts_only_a_datoms_edn_file() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let good = dir.path().join("good.edn");
-    std::fs::write(&good, fixture()).expect("write");
-    assert!(LogseqDbAdapter::detect(&good));
-
-    let page = dir.path().join("page.edn");
-    std::fs::write(&page, "{:logseq.db.sqlite.export/export-type :page}").expect("write");
-    assert!(!LogseqDbAdapter::detect(&page));
-
-    let wrong_ext = dir.path().join("good.json");
-    std::fs::write(&wrong_ext, fixture()).expect("write");
-    assert!(!LogseqDbAdapter::detect(&wrong_ext));
-    assert!(!LogseqDbAdapter::detect(dir.path()));
-}
-
-#[test]
-fn a_db_graph_directory_is_explained_not_silently_empty() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    std::fs::write(dir.path().join("db.sqlite"), b"SQLite format 3\0").expect("write");
-    assert!(is_db_graph_dir(dir.path()));
-    let mut report = ImportReport::new("logseq-db");
-    let e = LogseqDbAdapter
-        .parse(dir.path(), &mut report)
-        .expect_err("a directory is refused")
-        .to_string();
-    assert!(e.contains("Export EDN file"), "{e}");
-    assert!(e.contains("outl import logseq-db"), "{e}");
-
-    // A file graph that happens to carry a db.sqlite is still a file graph.
-    std::fs::create_dir(dir.path().join("pages")).expect("mkdir");
-    std::fs::create_dir(dir.path().join("journals")).expect("mkdir");
-    assert!(!is_db_graph_dir(dir.path()));
 }

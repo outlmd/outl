@@ -19,7 +19,11 @@ fn base() -> Fx {
     }
     fx.ent(STATUS, Some("logseq.property/status"), Some("Status"));
     for (id, name) in [(11, "in-review"), (12, "canceled"), (13, "doing")] {
-        fx.ent(id, Some(&format!("logseq.property/status.{name}")), Some(name));
+        fx.ent(
+            id,
+            Some(&format!("logseq.property/status.{name}")),
+            Some(name),
+        );
         fx.raw(id, "block/closed-value-property", &STATUS.to_string());
     }
     fx.ent(PROJECT, None, Some("Page"));
@@ -41,7 +45,10 @@ fn a_parent_cycle_keeps_every_block_and_says_so() {
     assert_eq!(count(outline(named(&g, "Page"))), 3);
     assert_eq!(report.source_blocks, 3);
     assert!(
-        report.warnings.iter().any(|w| w.detail.contains("parent cycle")),
+        report
+            .warnings
+            .iter()
+            .any(|w| w.detail.contains("parent cycle")),
         "{:?}",
         report.warnings
     );
@@ -139,15 +146,16 @@ fn a_hidden_page_is_skipped_by_name() {
     fx.tag(72, PAGE_CLASS);
     fx.raw(72, "logseq.property/hide?", "true");
     let (g, report) = parse_text(&fx.finish());
-    assert!(g.pages.iter().all(|p| p.name != PageName::Named("Secret".into())));
+    assert!(g
+        .pages
+        .iter()
+        .all(|p| p.name != PageName::Named("Secret".into())));
     assert!(report.skipped.iter().any(|s| s.path.contains("Secret")));
 }
 
 #[test]
 fn a_foreign_schema_major_warns_but_imports() {
-    let edn = base()
-        .finish()
-        .replace(":major 65", ":major 70");
+    let edn = base().finish().replace(":major 65", ":major 70");
     let (g, report) = parse_text(&edn);
     assert_eq!(g.pages.len(), 1);
     assert!(report

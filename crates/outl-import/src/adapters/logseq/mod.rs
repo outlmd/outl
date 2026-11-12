@@ -60,7 +60,9 @@ impl SourceAdapter for LogseqAdapter {
         // A DB-version graph holds db.sqlite and none of pages/ + journals/;
         // scanning it as a file graph would report 0 pages with no error.
         if super::logseq_db::is_db_graph_dir(src) {
-            return Err(ImportError::Parse(super::logseq_db::db_graph_dir_message(src)));
+            return Err(ImportError::Parse(super::logseq_db::db_graph_dir_message(
+                src,
+            )));
         }
 
         let mut graph = ImportGraph::default();
