@@ -18,6 +18,7 @@ use tracing::{debug, info, warn};
 use crate::engine::{
     delta_sync, try_acquire_in_flight, AppendLock, InFlightPeers, SharedWorkspaceId,
 };
+use crate::engine_force_sync::force_sync_all;
 use crate::health::PeerHealthMap;
 use crate::peers::PeersStore;
 
@@ -126,88 +127,6 @@ pub(crate) async fn catch_up_loop(
         true,
     )
     .await
-}
-
-/// Run a single forced delta-sync pass over the current peer set.
-///
-/// This backs `IrohSyncTransport::sync_now` (GUI pull-to-refresh / "sync now").
-/// Unlike [`catch_up_loop`], it does **not** keep a per-session `synced`
-/// dedup — the whole point of a manual sync is to re-dial *every* peer right
-/// now, including healthy ones the catch-up loop leaves to gossip. `delta_sync`
-/// is a cheap no-op when the vector clocks already match, so re-dialing a
-/// healthy peer just confirms convergence.
-///
-/// It still honors the shared safety machinery: the per-peer in-flight guard
-/// (skip a peer already being dialed by boot / catch-up / gossip), the
-/// process-wide append lock (threaded into `delta_sync`), and health recording
-/// for the status dot. Peers are resolved once from `peers.json` at call time.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn force_sync_all(
-    conns: crate::peer_conn::PeerConnections,
-    peers_path: PathBuf,
-    workspace_root: PathBuf,
-    workspace_id: SharedWorkspaceId,
-    actor: ActorId,
-    peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: PeerHealthMap,
-    append_lock: AppendLock,
-    in_flight: InFlightPeers,
-    progress: crate::progress::ProgressSink,
-) {
-    let addrs: Vec<iroh::EndpointAddr> = match PeersStore::load_or_default(&peers_path) {
-        Ok(store) => {
-            let ifaces = crate::peers::local_v4_ifaces();
-            store
-                .list()
-                .iter()
-                .filter_map(|p| p.iroh_endpoint_addr_with_ifaces(&ifaces).ok())
-                .collect()
-        }
-        Err(e) => {
-            debug!("sync-now: reload peers.json failed: {e}");
-            return;
-        }
-    };
-
-    let label = |nid| crate::peer_label::peer_log_label(&peers_path, nid);
-    for addr in addrs {
-        let nid = addr.id;
-        // Coordinate with boot / catch-up / gossip dials: skip if one is
-        // already running for this peer (its result lands anyway).
-        let Some(_in_flight) = try_acquire_in_flight(&in_flight, nid) else {
-            debug!(
-                "sync-now: sync to {} already in flight, skipping",
-                label(nid)
-            );
-            continue;
-        };
-        let started = Instant::now();
-        let wid_snapshot = workspace_id
-            .read()
-            .expect("workspace id rwlock poisoned")
-            .clone();
-        match delta_sync(
-            &conns,
-            addr,
-            &workspace_root,
-            &wid_snapshot,
-            actor,
-            peer_ready_tx.clone(),
-            &append_lock,
-            &progress,
-        )
-        .await
-        {
-            Ok(()) => {
-                info!("sync-now: sync to {} ok", label(nid));
-                health.record_success(nid, started);
-            }
-            Err(e) => {
-                warn!("sync-now: sync to {} failed: {e}", label(nid));
-                health.record_failure(nid);
-            }
-        }
-    }
 }
 
 /// Drain the `sync_now` trigger channel, running a forced [`force_sync_all`]
