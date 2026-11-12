@@ -332,18 +332,6 @@ fn namespaced_page_keeps_title_and_flattens_slug() {
 }
 
 #[test]
-fn slug_collision_gets_suffixed() {
-    let json = r#"[
-        {"title": "Foo Bar", "children": [{"string": "a", "uid": "a1", "children": []}]},
-        {"title": "foo bar", "children": [{"string": "b", "uid": "b1", "children": []}]}
-    ]"#;
-    let (ws, report) = import_fixture(json);
-    assert!(ws.root.join("pages/foo-bar.md").exists());
-    assert!(ws.root.join("pages/foo-bar-2.md").exists());
-    assert_eq!(report.slug_collisions, 1);
-}
-
-#[test]
 fn timestamps_dropped_by_default_kept_on_opt_in() {
     let json = r#"[
         {"title": "Stamped", "children": [

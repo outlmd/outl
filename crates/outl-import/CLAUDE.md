@@ -144,6 +144,7 @@ src/
 tests/
 ├── common/mod.rs      # shared harness: real Workspace over JsonlStorage in a tempdir
 ├── roam_e2e.rs
+├── roam_page_merge_e2e.rs  # pages sharing a slug / journal date merge
 ├── logseq_e2e.rs
 └── obsidian_e2e.rs    # ports every scenario the legacy pipeline covered
 ```

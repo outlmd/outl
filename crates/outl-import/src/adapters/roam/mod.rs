@@ -107,6 +107,12 @@ impl SourceAdapter for RoamAdapter {
             .sum::<usize>();
 
         let mut graph = ImportGraph::default();
+        // Whether each emitted page is a journal NOT titled the way Roam
+        // titles its own daily notes (`2024-03-19` next to `March 19th,
+        // 2024`). Both land on one outl journal; Roam's own daily page
+        // goes first so the merged page does not depend on the order the
+        // backup happened to list them in.
+        let mut secondary_journal: Vec<bool> = Vec::new();
         for (idx, page) in pages.iter().enumerate() {
             if page.title.trim().is_empty() {
                 // Roam can emit empty pages on edge cases. Dropping the
@@ -121,8 +127,14 @@ impl SourceAdapter for RoamAdapter {
                 continue;
             }
             let name = match outl_actions::parse_flexible_date(&page.title) {
-                Some(d) => PageName::Journal(d),
-                None => PageName::Named(page.title.clone()),
+                Some(d) => {
+                    secondary_journal.push(page.title.trim() != roam_daily_title(d));
+                    PageName::Journal(d)
+                }
+                None => {
+                    secondary_journal.push(false);
+                    PageName::Named(page.title.clone())
+                }
             };
             let mut blocks: Vec<ImportBlock> = page
                 .children
@@ -157,6 +169,15 @@ impl SourceAdapter for RoamAdapter {
                 edited: page.edit_time.and_then(ms_to_datetime),
             });
         }
+        // Stable: only same-date journals change places relative to
+        // each other, every other page keeps the backup's order.
+        let mut keyed: Vec<(bool, ImportPage)> = secondary_journal
+            .into_iter()
+            .zip(graph.pages.drain(..))
+            .collect();
+        keyed.sort_by_key(|(secondary, _)| *secondary);
+        graph.pages = keyed.into_iter().map(|(_, p)| p).collect();
+
         // One aggregate warning, never one per occurrence: a real graph
         // carries tens of thousands of `{{[[DONE]]}}` markers and a
         // per-hit warning would bury every other finding.
@@ -481,6 +502,20 @@ fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
             }
         }
     }
+}
+
+/// The title Roam gives the daily note of `d` (`March 19th, 2024`).
+fn roam_daily_title(d: chrono::NaiveDate) -> String {
+    use chrono::Datelike;
+    let day = d.day();
+    let suffix = match (day % 10, day % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{} {day}{suffix}, {}", d.format("%B"), d.year())
 }
 
 /// Roam timestamps are milliseconds since epoch.
