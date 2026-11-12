@@ -59,6 +59,7 @@ fn resolve_all(
     report: &mut ImportReport,
 ) -> HashMap<usize, String> {
     let mut links = HashMap::with_capacity(graph.assets.len());
+    let mut missing_local: Vec<&Path> = Vec::new();
     for (idx, asset) in graph.assets.iter().enumerate() {
         if !opts.import_assets {
             links.insert(idx, asset.original.clone());
@@ -79,11 +80,44 @@ fn resolve_all(
             }
             None => {
                 report.assets_missing += 1;
+                if let AssetSource::Local(path) = &asset.source {
+                    missing_local.push(path);
+                }
                 links.insert(idx, asset.original.clone());
             }
         }
     }
+    warn_missing_local(&missing_local, report);
     links
+}
+
+/// Local files the source links to and the import could not read, said
+/// once instead of once per file: an export that left its attachments
+/// behind misses hundreds, and a line each buried every other warning.
+/// Each path is still logged at `debug`.
+fn warn_missing_local(missing: &[&Path], report: &mut ImportReport) {
+    const NAMED: usize = 5;
+    if missing.is_empty() {
+        return;
+    }
+    let named: Vec<String> = missing
+        .iter()
+        .take(NAMED)
+        .map(|p| p.display().to_string())
+        .collect();
+    let more = missing.len().saturating_sub(NAMED);
+    let tail = if more > 0 {
+        format!(" and {more} more (RUST_LOG=debug lists every path)")
+    } else {
+        String::new()
+    };
+    let detail = format!(
+        "{} local file(s) linked from the source could not be read, links kept as written: {}{tail}",
+        missing.len(),
+        named.join(", ")
+    );
+    tracing::warn!("import: {detail}");
+    report.warn("(graph)", detail);
 }
 
 /// Whether `asset` is pulled into `assets/` (given `import_assets` is
@@ -120,7 +154,7 @@ fn pull_local(
             Some(asset.markdown)
         }
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "import: local asset skipped");
+            tracing::debug!(path = %path.display(), error = %e, "import: local asset skipped");
             None
         }
     }
