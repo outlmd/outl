@@ -68,8 +68,8 @@ fn refs_and_embeds_resolve_to_real_handles() {
         "embed not resolved to a handle:\n{referrer}"
     );
     assert!(
-        referrer.contains("((unresolved:nope-uid))"),
-        "unknown uid must stay greppable:\n{referrer}"
+        referrer.contains("dangling ((nope-uid)) ref"),
+        "an unknown uid keeps its source text:\n{referrer}"
     );
 
     // The handle written in referrer.md is exactly the source block's
@@ -244,8 +244,8 @@ fn markers_in_prop_values_and_post_prop_lines_never_survive() {
         "no marker may survive, prop values included:\n{page}"
     );
     assert!(
-        page.contains("note:: ((unresolved:missing-uid))"),
-        "unknown uid in a prop value stays greppable:\n{page}"
+        page.contains("note:: ((missing-uid))"),
+        "an unknown uid in a prop value keeps its source text:\n{page}"
     );
     let handle = read(&ws.root.join("pages/target.outl"))
         .split("\"ref_handle\": \"")

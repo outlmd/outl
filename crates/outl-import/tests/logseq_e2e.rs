@@ -53,8 +53,8 @@ fn refs_and_embeds_resolve_to_real_handles() {
         "embed not resolved:\n{referrer}"
     );
     assert!(
-        referrer.contains("((unresolved:deadbeef-0000-0000-0000-000000000000))"),
-        "unknown uid stays greppable:\n{referrer}"
+        referrer.contains("((deadbeef-0000-0000-0000-000000000000))"),
+        "an unknown uid keeps its source text:\n{referrer}"
     );
     assert_eq!(report.refs_resolved, 1);
     assert_eq!(report.embeds_resolved, 1);

@@ -66,8 +66,11 @@ pub(super) fn rewrite_placeholders(
         let replacement = lookup(uid, is_embed);
         // A resolved REF whose preceding user text ends in `!` would
         // read as `!((blk-…))` — outl's *embed* syntax. A space is the
-        // minimal faithful separator that keeps it a reference.
-        if !is_embed && out.ends_with('!') && replacement.starts_with("((") {
+        // minimal faithful separator that keeps it a reference. An
+        // unresolved ref goes back to its source text (`((uid))`), which
+        // outl does not read as a handle, so it needs no separator.
+        let handle_open = format!("(({}", outl_md::sidecar::REF_HANDLE_PREFIX);
+        if !is_embed && out.ends_with('!') && replacement.starts_with(&handle_open) {
             out.push(' ');
         }
         out.push_str(&replacement);
@@ -190,8 +193,9 @@ pub(super) fn apply(
     // op path couldn't rewrite — a page whose block count diverged from
     // the sidecar, an individual block whose text drifted, a marker the
     // parser lifted into a property value — is degraded in the file
-    // itself (`[[Title]]` / `((unresolved:uid))`) and reconciled back,
-    // the same external-edit path a hand-edited `.md` takes. Nothing
+    // itself (`[[Title]]`, or the source `((uid))` for a target the
+    // export does not have) and reconciled back, the same external-edit
+    // path a hand-edited `.md` takes. Nothing
     // references these blocks by handle (resolution into an unmappable
     // page already fell back), so a re-identification is harmless.
     for page in pages {
@@ -265,9 +269,15 @@ fn resolve_one(
                 format!("[[{}]]", loc.page_title)
             }
         },
+        // The target is not in the export (deleted in the source, or
+        // never part of it). Keep the source text as written, `((uid))`:
+        // outl does not read a source uid as one of its handles, so it
+        // stays inert text, and the uid is still there to search for.
+        // An embed keeps its `!` (already in the text), so it reads
+        // `!((uid))`.
         None => {
             report.refs_unresolved += 1;
-            format!("((unresolved:{uid}))")
+            format!("(({uid}))")
         }
     }
 }
