@@ -7,6 +7,7 @@
 //! handles. The two prefixes are distinct so resolve knows ref-vs-embed
 //! from the marker itself.
 
+use super::merge_names::{alias_entry, merged_warning};
 use crate::ir::{
     BlockContent, EmbedTarget, ImportBlock, ImportGraph, ImportPage, Inline, PageBody, PageName,
 };
@@ -195,10 +196,11 @@ pub fn render_graph(
             format!("{base}-{n}")
         };
         let path = pages_dir.join(format!("{stem}.md"));
-        let aliases: Vec<&str> = sources[1..]
+        let aliases: Vec<String> = sources[1..]
             .iter()
             .map(|p| page_title(p))
-            .filter(|t| *t != title && !t.contains(','))
+            .filter(|t| *t != title)
+            .filter_map(alias_entry)
             .collect();
         for other in sources[1..].iter().map(|p| page_title(p)) {
             report.warn(other, merged_warning(other, title, &stem));
@@ -219,22 +221,6 @@ pub fn render_graph(
     }
 
     (pages_out, uid_map)
-}
-
-/// What happened to `other`, a title merged into the page `title`.
-/// An `alias::` value is a comma-separated list, so a title with a comma
-/// can't be one; `[[other]]` still reaches the page, by its slug.
-fn merged_warning(other: &str, title: &str, stem: &str) -> String {
-    if other == title {
-        format!("shares the outl page `{stem}` with [[{title}]], merged")
-    } else if other.contains(',') {
-        format!(
-            "shares the outl page `{stem}` with [[{title}]], merged; not kept as an alias \
-             (an alias:: name can't contain a comma), links to it still resolve by slug"
-        )
-    } else {
-        format!("shares the outl page `{stem}` with [[{title}]], merged and kept as an alias")
-    }
 }
 
 /// A named page's title (journals never reach the callers).
@@ -280,7 +266,7 @@ struct Ctx<'a> {
 fn render_page(
     sources: &[&ImportPage],
     title: &str,
-    aliases: &[&str],
+    aliases: &[String],
     stem: String,
     path: PathBuf,
     is_journal: bool,

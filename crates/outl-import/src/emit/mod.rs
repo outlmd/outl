@@ -5,6 +5,7 @@
 //! stamped sidecars and applies the rewrite through the op log.
 
 mod assets;
+mod merge_names;
 pub mod render;
 mod resolve;
 

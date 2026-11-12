@@ -42,8 +42,10 @@ fn missing_local_files_are_one_warning_naming_the_first_paths() {
     assert!(page.contains("- ![](gone-6.png)\n"), "page:\n{page}");
 }
 
+/// A merged title with a comma is kept as a bracketed alias, the one
+/// form an `alias::` list can carry it in, and it resolves to the page.
 #[test]
-fn a_merged_title_with_a_comma_is_not_claimed_as_an_alias() {
+fn a_merged_title_with_a_comma_is_kept_as_a_bracketed_alias() {
     let json = r#"[
         {"title": "Plan v2", "children": [
             {"string": "a", "uid": "a1", "children": []},
@@ -55,31 +57,24 @@ fn a_merged_title_with_a_comma_is_not_claimed_as_an_alias() {
     let (ws, report) = import_fixture(json);
     let page = read(&ws.root.join("pages/plan-v2.md"));
     assert!(page.contains("title:: Plan v2\n"), "page:\n{page}");
-    assert!(page.contains("alias:: PLAN V2\n"), "page:\n{page}");
+    assert!(
+        page.contains("alias:: [[Plan, v2]], PLAN V2\n"),
+        "page:\n{page}"
+    );
     assert!(page.contains("- c\n"), "every block is kept:\n{page}");
 
-    let comma: Vec<_> = report
-        .warnings
-        .iter()
-        .filter(|w| w.page == "Plan, v2")
-        .collect();
-    assert_eq!(comma.len(), 1, "{:?}", report.warnings);
-    assert!(
-        comma[0].detail.contains("not kept as an alias")
-            && !comma[0].detail.contains("merged and kept as an alias"),
-        "{}",
-        comma[0].detail
-    );
-    let upper: Vec<_> = report
-        .warnings
-        .iter()
-        .filter(|w| w.page == "PLAN V2")
-        .collect();
-    assert_eq!(upper.len(), 1, "{:?}", report.warnings);
-    assert!(
-        upper[0].detail.contains("merged and kept as an alias"),
-        "{}",
-        upper[0].detail
-    );
+    let idx = outl_md::index::WorkspaceIndex::build(&ws.root);
+    assert_eq!(idx.by_title("Plan, v2").unwrap().slug, "plan-v2");
+    assert_eq!(idx.by_title("PLAN V2").unwrap().slug, "plan-v2");
+
+    for other in ["Plan, v2", "PLAN V2"] {
+        let hits: Vec<_> = report.warnings.iter().filter(|w| w.page == other).collect();
+        assert_eq!(hits.len(), 1, "{:?}", report.warnings);
+        assert!(
+            hits[0].detail.contains("merged and kept as an alias"),
+            "{}",
+            hits[0].detail
+        );
+    }
     assert_eq!(report.slug_collisions, 2);
 }
