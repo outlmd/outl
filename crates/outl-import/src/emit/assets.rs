@@ -6,7 +6,9 @@
 //! module runs once, right after render and **before** any file is
 //! written: for every [`AssetRef`] it copies the local file (or
 //! downloads the remote URL) into `<root>/assets/<hash>.<ext>` and maps
-//! the placeholder to the final `[name](assets/<hash>.<ext>)` link.
+//! the placeholder to the final `[name](assets/<hash>.<ext>)` link. A
+//! remote image is downloaded only on `download_remote_assets`; by
+//! default it keeps the link the source wrote.
 //!
 //! The substitution touches both the page text *and* every
 //! [`PlaceholderBlock`](super::render::PlaceholderBlock) text, so the
@@ -21,7 +23,7 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::ir::{AssetSource, ImportGraph, ASSET_PLACEHOLDER_PREFIX};
+use crate::ir::{AssetRef, AssetSource, ImportGraph, ASSET_PLACEHOLDER_PREFIX};
 use crate::report::ImportReport;
 use crate::ImportOptions;
 
@@ -62,6 +64,11 @@ fn resolve_all(
             links.insert(idx, asset.original.clone());
             continue;
         }
+        if !pulls(asset, opts) {
+            report.assets_remote_kept += 1;
+            links.insert(idx, asset.original.clone());
+            continue;
+        }
         let pulled = match &asset.source {
             AssetSource::Local(path) => pull_local(path, root, opts, report),
             AssetSource::Remote(url) => pull_remote(url, &asset.display_name, root, opts, report),
@@ -77,6 +84,25 @@ fn resolve_all(
         }
     }
     links
+}
+
+/// Whether `asset` is pulled into `assets/` (given `import_assets` is
+/// on). A local file always is. A remote image only on
+/// `download_remote_assets`, and never an encrypted upload: Roam keeps
+/// an encrypted graph's images as `….enc` objects whose bytes are
+/// ciphertext, so the download would store noise under an image link.
+pub(super) fn pulls(asset: &AssetRef, opts: &ImportOptions) -> bool {
+    match &asset.source {
+        AssetSource::Local(_) => true,
+        AssetSource::Remote(url) => opts.download_remote_assets && !is_encrypted_upload(url),
+    }
+}
+
+/// `true` for a URL whose path names an encrypted object (`….enc`,
+/// percent-encoded or not), like the files of an encrypted Roam graph.
+fn is_encrypted_upload(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".enc")
 }
 
 /// Copy a local file into `assets/`. `None` (→ missing) on a read error
@@ -104,7 +130,7 @@ fn pull_local(
 /// network / status / import failure; never aborts the import.
 fn pull_remote(
     url: &str,
-    display_name: &str,
+    alt: &str,
     root: &Path,
     opts: &ImportOptions,
     report: &mut ImportReport,
@@ -116,11 +142,15 @@ fn pull_remote(
             return None;
         }
     };
-    match outl_actions::import_asset_bytes(root, &bytes, &ext, display_name, opts.max_bytes) {
+    match outl_actions::import_asset_bytes(root, &bytes, &ext, alt, opts.max_bytes) {
         Ok(asset) => {
             report.assets_copied += 1;
             report.assets_bytes += bytes.len() as u64;
-            Some(asset.markdown)
+            // The alt text stays as the source wrote it, empty included:
+            // `import_asset_bytes` would label an empty one with the file
+            // name, which the source never said.
+            let prefix = if asset.is_image { "!" } else { "" };
+            Some(format!("{prefix}[{alt}]({})", asset.rel_path))
         }
         Err(e) => {
             tracing::warn!(url, error = %e, "import: remote asset import failed");
@@ -309,5 +339,15 @@ mod tests {
         );
         // No usable extension in the path.
         assert_eq!(ext_from_url("https://x.example/download"), None);
+    }
+
+    #[test]
+    fn encrypted_uploads_are_told_apart_by_the_path() {
+        assert!(is_encrypted_upload(
+            "https://h.invalid/o/a%2Fb.png.enc?alt=media&token=t"
+        ));
+        assert!(is_encrypted_upload("https://h.invalid/x.PNG.ENC#frag"));
+        assert!(!is_encrypted_upload("https://h.invalid/x.png?name=y.enc"));
+        assert!(!is_encrypted_upload("https://h.invalid/encoder.png"));
     }
 }

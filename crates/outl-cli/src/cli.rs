@@ -336,6 +336,13 @@ pub(crate) enum Command {
         /// original relative/remote links verbatim.
         #[arg(long)]
         no_assets: bool,
+        /// Also download remote images into `assets/`. Off by default:
+        /// a remote `![alt](url)` stays as written, URL included. With
+        /// this on, the link points at the local copy and the URL is
+        /// gone (the alt text is kept). Encrypted uploads (`.enc`) are
+        /// never downloaded.
+        #[arg(long)]
+        download_remote_assets: bool,
         /// Import even when the destination already holds content —
         /// overwrites those pages and discards anything written in outl,
         /// or received from a paired device, since the last import.

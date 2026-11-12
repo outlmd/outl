@@ -114,6 +114,9 @@ pub struct ImportReport {
     pub assets_missing: usize,
     /// Total bytes of the assets pulled in.
     pub assets_bytes: u64,
+    /// Remote images left as the source wrote them (`![alt](url)`):
+    /// not downloaded, see `ImportOptions::download_remote_assets`.
+    pub assets_remote_kept: usize,
     /// Source files skipped entirely, with the reason.
     pub skipped: Vec<SkippedFile>,
     /// Non-fatal fidelity warnings, with location.
@@ -352,6 +355,12 @@ impl ImportReport {
                 "  assets copied:       {} ({} KiB)",
                 self.assets_copied,
                 self.assets_bytes / 1024
+            );
+        }
+        if self.assets_remote_kept > 0 {
+            println!(
+                "  remote images kept:  {} (link left as written; --download-remote-assets pulls them)",
+                self.assets_remote_kept
             );
         }
         if self.assets_missing > 0 {
