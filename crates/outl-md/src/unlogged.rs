@@ -215,7 +215,11 @@ pub fn content_lines_missing_from_texts<'a>(
         // the TUI makes one), and normalises to the empty text its sidecar
         // entry carries.
         if let Some(body) = t.strip_prefix("- ") {
-            return Some(body.trim_start());
+            let body = body.trim_start();
+            // A fence opener the renderer escaped on a block's first
+            // line (`- \```yaml`, see `render::block_text_lines`) is
+            // logged without its backslash.
+            return Some(crate::render::unescaped_disk_body(body, true).unwrap_or(body));
         }
         if t == "-" {
             return Some("");
@@ -234,7 +238,9 @@ pub fn content_lines_missing_from_texts<'a>(
         if crate::parse::parse_property_line(t).is_some() {
             return None;
         }
-        Some(t)
+        // A continuation line the renderer escaped (`\- item`, `\```yaml`,
+        // see `render::block_text_lines`) is logged without its backslash.
+        Some(crate::render::unescaped_disk_body(t, false).unwrap_or(t))
     }
     /// A sidecar block's `text` split into the lines it occupies in the
     /// `.md`. No marker to strip and no property filtering: whatever is in

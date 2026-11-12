@@ -186,12 +186,11 @@ fn dry_run_writes_nothing_and_predicts_resolution() {
 }
 
 #[test]
-fn unmappable_page_placeholders_degrade_via_file_fallback() {
-    // The second block's string embeds a `- ` line, which outl's parser
-    // SPLITS into a child block — the page's block count diverges from
-    // the renderer's walk, so the whole page is unmappable for handle
-    // wiring. The ref on it must still degrade to a `[[Title]]` link
-    // (file fallback), never survive as a literal placeholder.
+fn unmappable_page_placeholders_resolve_via_file_fallback() {
+    // A page whose blocks the resolve pass cannot wire one by one still
+    // gets its markers rewritten by the file-fallback sweep, and a ref
+    // whose *target* is mappable resolves to that block's real handle
+    // instead of degrading to a `[[Title]]` link. No marker may survive.
     let json = r#"[
         {"title": "Source", "children": [
             {"string": "the original", "uid": "src-uid", "children": []}
@@ -207,11 +206,15 @@ fn unmappable_page_placeholders_degrade_via_file_fallback() {
         !tricky.contains("outl-import"),
         "no placeholder marker may survive on disk:\n{tricky}"
     );
+    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
+        &ws.root.join("pages/source.md"),
+    ))
+    .expect("source sidecar");
     assert!(
-        tricky.contains("see [[Source]] here"),
-        "unmappable ref must degrade to a page link:\n{tricky}"
+        tricky.contains(&format!("see (({})) here", sc.blocks[0].ref_handle)),
+        "a mappable target resolves to its handle:\n{tricky}"
     );
-    assert!(report.refs_page_fallback >= 1);
+    assert_eq!(report.refs_page_fallback, 0);
 }
 
 #[test]
@@ -567,4 +570,57 @@ fn midtext_task_markers_surface_in_the_final_report() {
         log.contains("shipped DONE the migration"),
         "literal text is kept:\n{log}"
     );
+}
+
+/// A Roam block whose text carries a `- item` line, and a fence that one
+/// block opens and a later block closes. Both used to change the block
+/// count on the way through outl's parser (one block in, two back; three
+/// in, one back), which broke the 1:1 mapping the resolve pass rests on:
+/// every ref into the page degraded to a `[[link]]` and its folds were
+/// lost.
+#[test]
+fn bullet_lines_and_cross_block_fences_keep_the_page_mappable() {
+    let json = r#"[
+        {"title": "Notes", "children": [
+            {"string": "head\n- item one\n- item two", "uid": "n1", "children": [], "open": false},
+            {"string": "config:\n\n```yaml", "uid": "n2", "children": [
+                {"string": "a: 1", "uid": "n3", "children": []},
+                {"string": "b: 2\n```", "uid": "n4", "children": []}
+            ]},
+            {"string": "after", "uid": "n5", "children": []}
+        ]},
+        {"title": "Refs", "children": [
+            {"string": "see ((n1)) and ((n4)) and ((n5))", "uid": "r1", "children": []},
+            {"string": "{{[[embed]]: ((n3))}}", "uid": "r2", "children": []}
+        ]}
+    ]"#;
+    let (ws, report) = import_fixture(json);
+
+    let sc = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(
+        &ws.root.join("pages/notes.md"),
+    ))
+    .expect("notes sidecar");
+    let texts: Vec<&str> = sc.blocks.iter().map(|b| b.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "head\n- item one\n- item two",
+            "config:\n\n```yaml",
+            "a: 1",
+            "b: 2\n```",
+            "after"
+        ]
+    );
+    assert_eq!(report.landed_blocks, report.blocks);
+
+    let refs = read(&ws.root.join("pages/refs.md"));
+    assert_eq!(report.refs_page_fallback, 0, "refs:\n{refs}");
+    assert_eq!(report.embeds_page_fallback, 0, "refs:\n{refs}");
+    assert_eq!(report.refs_resolved, 3, "refs:\n{refs}");
+    assert_eq!(report.embeds_resolved, 1, "refs:\n{refs}");
+    assert!(
+        refs.contains(&format!("(({}))", sc.blocks[0].ref_handle)),
+        "refs:\n{refs}"
+    );
+    assert!(ws.workspace.tree().is_collapsed(sc.blocks[0].id));
 }
