@@ -21,6 +21,17 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(deps)"
+    # The five RustPython ruff forks are pinned with `=0.16.5` in
+    # crates/outl-exec/Cargo.toml (see the comment there): rustpython 0.6.0
+    # is built against that version and must move as one family. A bump of
+    # any of them alone breaks the build (#507), so lift these ignores
+    # together with the pins.
+    ignore:
+      - dependency-name: "rustpython-ruff_python_ast"
+      - dependency-name: "rustpython-ruff_python_parser"
+      - dependency-name: "rustpython-ruff_python_trivia"
+      - dependency-name: "rustpython-ruff_source_file"
+      - dependency-name: "rustpython-ruff_text_size"
     groups:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
