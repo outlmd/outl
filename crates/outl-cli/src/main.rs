@@ -161,6 +161,7 @@ fn main() -> Result<()> {
             preserve_timestamps,
             no_assets,
             download_remote_assets,
+            keep_source_ids,
             force,
         }) => cmd::import::run(
             &format,
@@ -172,6 +173,7 @@ fn main() -> Result<()> {
                 preserve_timestamps,
                 no_assets,
                 download_remote_assets,
+                keep_source_ids,
                 force,
             },
         ),

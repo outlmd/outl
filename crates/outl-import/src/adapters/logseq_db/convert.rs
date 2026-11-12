@@ -341,6 +341,7 @@ impl Ctx<'_> {
             stem_override: None,
             created: ent.int("block/created-at").and_then(ms_to_datetime),
             edited: ent.int("block/updated-at").and_then(ms_to_datetime),
+            source_uid: None,
         }
     }
 

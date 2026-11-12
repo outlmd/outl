@@ -159,7 +159,7 @@ pub fn render_graph(
             stem,
             path,
             true,
-            opts,
+            (opts, graph.source_uid_key),
             report,
             &mut pages_out,
             &mut uid_map,
@@ -210,7 +210,7 @@ pub fn render_graph(
             stem,
             path,
             false,
-            opts,
+            (opts, graph.source_uid_key),
             report,
             &mut pages_out,
             &mut uid_map,
@@ -269,6 +269,7 @@ fn graph_position(graph: &ImportGraph, page: &ImportPage) -> usize {
 struct Ctx<'a> {
     report: &'a mut ImportReport,
     opts: &'a ImportOptions,
+    uid_key: Option<&'static str>,
     page_title: String,
     out: String,
     dfs: usize,
@@ -284,7 +285,7 @@ fn render_page(
     stem: String,
     path: PathBuf,
     is_journal: bool,
-    opts: &ImportOptions,
+    (opts, uid_key): (&ImportOptions, Option<&'static str>),
     report: &mut ImportReport,
     pages_out: &mut Vec<RenderedPage>,
     uid_map: &mut HashMap<String, UidLoc>,
@@ -292,6 +293,7 @@ fn render_page(
     let mut ctx = Ctx {
         report,
         opts,
+        uid_key,
         page_title: title.to_string(),
         out: String::new(),
         dfs: 0,
@@ -320,6 +322,13 @@ fn render_page(
     }
     if !aliases_written {
         header.push_str(&format!("alias:: {}\n", aliases.join(", ")));
+    }
+    let page_uids: Vec<&str> = sources
+        .iter()
+        .filter_map(|p| p.source_uid.as_deref())
+        .collect();
+    if let Some(key) = uid_key.filter(|_| !page_uids.is_empty()) {
+        header.push_str(&format!("{key}:: {}\n", page_uids.join(", ")));
     }
     // Page timestamps, same policy as block ones. A merged journal
     // (two source pages, one date) keeps the earliest creation and the
@@ -491,6 +500,9 @@ fn render_block(b: &ImportBlock, depth: usize, ctx: &mut Ctx<'_>) {
         props.push(("state".to_string(), state.to_string()));
     }
     props.extend(b.props.iter().cloned());
+    if let (Some(key), Some(uid)) = (ctx.uid_key, &b.uid) {
+        props.push((key.to_string(), uid.clone()));
+    }
     if b.created.is_some() || b.edited.is_some() {
         if ctx.opts.preserve_timestamps {
             // A `created::` / `edited::` the user wrote wins over the

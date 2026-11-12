@@ -57,4 +57,16 @@ pub trait SourceAdapter {
     /// Parse the source into an [`ImportGraph`]. Fidelity notes go
     /// into `report`; only unrecoverable failures return `Err`.
     fn parse(&self, src: &Path, report: &mut ImportReport) -> Result<ImportGraph, ImportError>;
+
+    /// [`Self::parse`] for an import run with `opts`. An adapter whose IR
+    /// depends on an option overrides this; the rest ignore the options.
+    fn parse_with(
+        &self,
+        src: &Path,
+        opts: &crate::ImportOptions,
+        report: &mut ImportReport,
+    ) -> Result<ImportGraph, ImportError> {
+        let _ = opts;
+        self.parse(src, report)
+    }
 }

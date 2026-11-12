@@ -194,6 +194,7 @@ fn convert_file(
         stem_override: (!is_journal).then_some(assigned_stem),
         created: None,
         edited: None,
+        source_uid: None,
     });
     Ok(())
 }
