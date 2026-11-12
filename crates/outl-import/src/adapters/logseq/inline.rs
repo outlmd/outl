@@ -21,7 +21,7 @@ use crate::ir::{ComponentKind, EmbedTarget, Inline};
 use crate::report::ImportReport;
 
 /// Tokenize one Logseq block text (task marker already stripped).
-pub(super) fn tokenize(text: &str, report: &mut ImportReport) -> Vec<Inline> {
+pub(crate) fn tokenize(text: &str, report: &mut ImportReport) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::new();
     let mut buf = String::new();
     let mut i = 0usize;

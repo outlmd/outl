@@ -1,11 +1,11 @@
 # Importing a graph
 
-`outl import roam|logseq|obsidian|auto <src> <dst>` runs the adapter-based pipeline in the `outl-import` crate.
+`outl import roam|logseq|logseq-db|obsidian|auto <src> <dst>` runs the adapter-based pipeline in the `outl-import` crate.
 
 Split out of [`cli.md`](cli.md), which is the command reference: the dialect translations, the reconciliation contract and the resumability rules are their own subject and had grown to a third of that document.
 `cli.md` carries the invocation; this page carries what the import actually does to your notes.
 
-`outl import` runs the adapter-based pipeline in the `outl-import` crate for every source (`roam` = JSON backup file, `logseq` = graph directory, `obsidian` = vault directory; `auto` detects from the source's shape).
+`outl import` runs the adapter-based pipeline in the `outl-import` crate for every source (`roam` = JSON backup file, `logseq` = graph directory, `logseq-db` = the EDN export of a Logseq DB graph, `obsidian` = vault directory; `auto` detects from the source's shape).
 `((uid))` block refs and `{{embed}}`s resolve to real `((blk-XXXXXX))` handles, not page-link fallbacks.
 Folded blocks (Roam `open: false`, Logseq `collapsed:: true`) land as `Op::SetCollapsed`.
 Each dialect is translated on the way in.
@@ -22,6 +22,41 @@ A real (non-dry) import paints a live progress line on stderr — phase, page co
 `--dry-run` parses and reports without writing a byte — run it against a real backup to measure fidelity before migrating.
 `--json` prints the full report (per-feature counts, warnings with location) as JSON.
 `--preserve-timestamps` keeps source create/edit times as `created::`/`edited::` block properties (dropped and counted by default).
+
+## Logseq DB graphs (`logseq-db`)
+
+Logseq 2.x keeps a graph in SQLite (`<graph>/db.sqlite`), not in `pages/` + `journals/` markdown.
+`outl import logseq` and `outl import auto` refuse such a directory with a message instead of reporting an empty import, and `outl import logseq-db` does not read `db.sqlite` directly either: it needs Logseq's own EDN export, the one export Logseq documents as fully capturing a graph.
+
+1. In Logseq open the graph, then the three-dots menu → **Export graph** → **Export EDN file**.
+2. `outl import logseq-db ~/Downloads/<graph>_<timestamp>.edn ~/notes` (`auto` picks it for an `.edn` file with the datoms format).
+
+Only the whole-graph datoms export is accepted.
+A page or block EDN snippet, the human-readable `:graph-human` shape and the "standard Markdown" zip fail with a message naming what was found.
+The format is read as Logseq 2.0.2 writes it (schema `65.x`); an export from another schema major imports with a warning.
+
+What lands:
+
+| In the export | In outl |
+| --- | --- |
+| Pages and journals | named pages, and `journals/YYYY-MM-DD.md` from `:block/journal-day` |
+| User tags (classes you created) | named pages; a block or page tagged with one gets `#tag` (page: a `tags::` property) |
+| Blocks | the outline: `:block/parent`, siblings ordered by `:block/order` (byte-wise, Logseq's fractional index); `:block/collapsed?` → `Op::SetCollapsed` |
+| `[[<uuid>]]` to a page, `#[[<uuid>]]` | `[[Page Title]]`, `#tag` (a multi-word tag becomes `[[Multi Word]]`, as for the other importers) |
+| `[[<uuid>]]` / `((<uuid>))` to a block | a real `((blk-XXXXXX))` handle |
+| Status | `TODO`/`DOING`/`DONE` prefixes; `Canceled` → `DONE` + `state:: canceled`; `Backlog` → `TODO` + `state:: backlog`; `In Review` → `DOING` + `state:: in-review` (outl has no state for those two) |
+| Priority | `priority:: low\|medium\|high\|urgent` |
+| Deadline, scheduled | `[[YYYY-MM-DD]]` link appended to the text, in the importing machine's time zone (the time of day is not kept) |
+| Code blocks | a fenced block with its language |
+| Quote blocks | `> ` lines |
+| Math, query, cards, template, PDF annotation and asset nodes | the text, kept; counted by kind under `components verbatim` |
+| User properties | `key:: value`, the key being the property's title lower-cased (`Reading status` → `reading-status`); several values are joined with `, `; a number, text, page link or date value is rendered, anything else is counted |
+| `:block/created-at` / `:block/updated-at` | `created::` / `edited::` with `--preserve-timestamps` |
+
+What is skipped, and where it is counted: built-in pages with no blocks (each one under `skipped:`), whiteboards (`skipped:`, with their blocks), built-in tags, property definitions, closed values and property value nodes, hidden blocks and blocks in the recycle bin (one aggregate `(graph)` warning with the counts), and built-in attributes outl has no equivalent for (`artifacts stripped`, named in a warning).
+A reference to a uuid that is not part of the import keeps its `[[<uuid>]]` text, counts under `unresolved` and is named in a warning.
+
+Not imported yet: reading `db.sqlite` directly, assets (the export carries no file bytes — the files sit in `assets/` next to `db.sqlite`), whiteboards, property history, what views and queries *do* (their text is kept), page-level and block-level EDN snippets, the `:graph-human` shape.
 
 **Importing twice is destructive, so it's opt-in.**
 An import overwrites every `.md` it emits and reconciles the result through the op log, so a second run against a workspace you've been using erases whatever you wrote there since the first import — there is no undo.

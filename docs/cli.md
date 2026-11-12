@@ -388,7 +388,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl sync`                                  | —                       |
 | `outl telemetry status\|on\|off`             | —                       |
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
-| `outl import roam\|logseq\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
+| `outl import roam\|logseq\|logseq-db\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
 
 `init`, `serve`, `reconcile`, `recover`, `compact`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
 `telemetry` is CLI-only for a different reason: it is a person's consent, and MCP is a program's surface rather than a person's.
@@ -781,7 +781,7 @@ No business logic lives in either layer — they format input and output, that's
 
 Shipping today:
 
-- `outl init`, `outl serve`, `outl doctor`, `outl reconcile`, `outl recover`, `outl import logseq|obsidian|roam`, `outl theme`.
+- `outl init`, `outl serve`, `outl doctor`, `outl reconcile`, `outl recover`, `outl import logseq|logseq-db|obsidian|roam`, `outl theme`.
 - `outl` (no subcommand) opens the TUI.
 - `outl page get|create|update|delete|list|rename|render` (`create` accepts `--content` to seed the outline in one call)
 - `outl block get|append|append-tree|insert|update|move|delete|toggle-todo|tree`

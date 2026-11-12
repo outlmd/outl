@@ -216,3 +216,18 @@ fn multiline_continuation_text_stays_with_the_block() {
         "first line\nsecond line of same block"
     );
 }
+
+/// A DB-version graph directory holds `db.sqlite` and none of the file
+/// layout; scanning it as a file graph reported 0 pages with no error.
+#[test]
+fn a_logseq_db_graph_directory_is_refused_instead_of_importing_zero_pages() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("db.sqlite"), b"SQLite format 3\0").expect("write");
+    let mut report = ImportReport::new("logseq");
+    let err = LogseqAdapter
+        .parse(dir.path(), &mut report)
+        .expect_err("a DB graph is refused")
+        .to_string();
+    assert!(err.contains("Export EDN file"), "{err}");
+    assert!(err.contains("outl import logseq-db"), "{err}");
+}
