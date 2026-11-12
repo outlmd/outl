@@ -74,6 +74,10 @@ Not imported yet: reading `db.sqlite` directly, assets (the export carries no fi
 An import overwrites every `.md` it emits and reconciles the result through the op log, so a second run against a workspace you've been using erases whatever you wrote there since the first import — there is no undo.
 `outl import` therefore refuses a destination that already holds content, naming what it found and pointing at the escape hatch.
 Pass `--force` when overwriting is exactly what you want; import into a fresh directory otherwise.
+`--force` **replaces** every page the import writes: the blocks a page already held are moved to the trash (each recorded in `.outl/orphans.log` first) and the page ends up with exactly what the source has, including a page that sat in the trash, which comes back without its old blocks.
+The page's own properties are replaced too: any page-level property the source no longer carries is cleared through the op log (the page's identity keys stay), and the ones it does carry are set fresh.
+The report's `replaced_blocks` and `replaced_props` count what was discarded.
+Pages the source does not have are left as they are; there is no whole-workspace wipe.
 `--dry-run` writes nothing and is never blocked.
 
 What counts as "already holds content" is read from the **op log's materialized tree**, not from the `.md` files on disk.
