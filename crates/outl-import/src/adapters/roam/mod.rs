@@ -23,6 +23,7 @@
 //! emission, handle resolution) is the shared emitter's business.
 
 mod inline;
+mod task;
 #[cfg(test)]
 mod tests;
 
@@ -31,12 +32,13 @@ use crate::adapters::asset_scan::scan_assets;
 use crate::adapters::scan::{parse_prop_line, parse_whole_fence};
 use crate::ir::{
     AssetRef, BlockContent, ComponentKind, ImportBlock, ImportGraph, ImportPage, Inline, PageBody,
-    PageName, TaskState,
+    PageName,
 };
 use crate::report::ImportReport;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use std::path::Path;
+use task::split_task_marker;
 
 /// Top-level Roam page from the JSON backup.
 #[derive(Debug, Deserialize)]
@@ -220,6 +222,7 @@ fn convert_block(
     if let Some(state) = task {
         report.count_task(state.report_key());
     }
+    let after_task = after_task.as_str();
 
     // A fenced block is opaque: its body legitimately carries `::`
     // (`foo::bar`, `use a::b`), so property extraction must skip it and
@@ -332,22 +335,6 @@ fn content_is_blank(content: &BlockContent) -> bool {
             .all(|t| matches!(t, Inline::Text(s) if s.trim().is_empty())),
         BlockContent::Code { .. } | BlockContent::Verbatim(_) => false,
     }
-}
-
-/// Strip a leading `{{[[TODO]]}}` / `{{[[DONE]]}}` marker.
-fn split_task_marker(raw: &str) -> (Option<TaskState>, &str) {
-    let trimmed = raw.trim_start();
-    for (marker, state) in [
-        ("{{[[TODO]]}}", TaskState::Todo),
-        ("{{TODO}}", TaskState::Todo),
-        ("{{[[DONE]]}}", TaskState::Done),
-        ("{{DONE}}", TaskState::Done),
-    ] {
-        if let Some(rest) = trimmed.strip_prefix(marker) {
-            return (Some(state), rest.trim_start());
-        }
-    }
-    (None, raw)
 }
 
 /// Roam block string → IR content.
