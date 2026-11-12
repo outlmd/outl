@@ -21,6 +21,7 @@ use crate::op::LogOp;
 use crate::storage::sidecar::{self, SidecarKind};
 use crate::storage::{NodeIndex, OffsetIndex, StorageError};
 
+use super::idx_lock::IdxLock;
 use super::{op_node, JsonlStorage};
 
 impl JsonlStorage {
@@ -72,6 +73,28 @@ impl JsonlStorage {
             .collect::<Result<_, _>>()?;
 
         let path = self.own_ops_path();
+        let own_dir = self.own_ops_dir();
+        let hlc_idx_path =
+            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Offset);
+        let node_idx_path =
+            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Node);
+        // One uncontended flock per batch. A second opener persisting a
+        // regrown sidecar pair takes the same lock, so it cannot rename over
+        // a sidecar between our jsonl write and our sidecar appends (that
+        // race left holes the freshness ladder accepted as exact). If the
+        // lock cannot be had (read-only directory) no persister can take it
+        // either, so nobody renames a sidecar and appending unlocked is as
+        // safe as it ever was.
+        let idx_lock = match IdxLock::acquire(&hlc_idx_path) {
+            Ok(lock) => Some(lock),
+            Err(e) => {
+                warn!(
+                    "could not lock index {}: {e}; appending to it unlocked",
+                    hlc_idx_path.display()
+                );
+                None
+            }
+        };
         // Open the file once (read + append): the single handle serves the
         // offset probe, the torn-tail check, and the writes — instead of a
         // separate `metadata` stat plus a read-only open before the append
@@ -137,11 +160,6 @@ impl JsonlStorage {
         // sidecar append) and the LRU. Sidecar failures are best-effort — the
         // index is a cache, a missing entry just means the next boot rebuilds
         // from the .jsonl.
-        let own_dir = self.own_ops_dir();
-        let hlc_idx_path =
-            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Offset);
-        let node_idx_path =
-            sidecar::path_for(&own_dir, self.actor, self.scope(), SidecarKind::Node);
         for (op, &offset) in ops.iter().zip(&offsets) {
             self.index.insert(op.actor, op.ts, offset);
             if let Err(e) = OffsetIndex::append_to(&hlc_idx_path, op.ts, offset) {
@@ -158,6 +176,7 @@ impl JsonlStorage {
             }
             self.cache.write().put(op.ts, op.clone());
         }
+        drop(idx_lock);
         Ok(())
     }
 }

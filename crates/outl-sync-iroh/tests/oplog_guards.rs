@@ -318,3 +318,91 @@ async fn the_ingest_waits_for_the_cross_process_append_flock() {
         .collect();
     assert!(nodes.contains(&node.to_string()));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SELF-HEAL — a holed own offset sidecar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Write `n` ops of `local` through the real appender, then drop two middle
+/// entries from its offset sidecar. The max-offset record is untouched, so the
+/// census trusts the sidecar and advertises `n - 2`.
+fn own_log_with_holed_sidecar(root: &Path, local: ActorId, n: usize) -> Vec<LogOp> {
+    use outl_core::storage::{sidecar, PageScope, SidecarKind};
+
+    let ops_dir = root.join("ops");
+    let ops: Vec<LogOp> = (0..n)
+        .map(|i| op_at(local, now_ms() - 1_000, i as u64).1)
+        .collect();
+    let mut storage = JsonlStorage::open(ops_dir.clone(), local).expect("open storage");
+    storage.append_ops(&ops).expect("append own ops");
+    drop(storage);
+
+    let idx = sidecar::path_for(&ops_dir, local, &PageScope::Global, SidecarKind::Offset);
+    let text = std::fs::read_to_string(&idx).expect("read sidecar");
+    let kept: Vec<&str> = text
+        .lines()
+        .enumerate()
+        .filter(|(i, _)| *i != 2 && *i != 3)
+        .map(|(_, l)| l)
+        .collect();
+    std::fs::write(&idx, kept.join("\n") + "\n").expect("write holed sidecar");
+    ops
+}
+
+fn own_jsonl_len(root: &Path, local: ActorId) -> usize {
+    std::fs::read_to_string(root.join("ops").join(format!("ops-{local}.jsonl")))
+        .expect("read own jsonl")
+        .lines()
+        .count()
+}
+
+/// SELF-HEAL. A peer resending our full actor log is refused, appends nothing,
+/// and repairs the sidecar so the next advertised clock is complete — which is
+/// what makes the peer stop resending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_peers_resend_of_our_own_log_rebuilds_a_holed_offset_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let local = ActorId::new();
+    let ops = own_log_with_holed_sidecar(dir.path(), local, 6);
+
+    assert_eq!(
+        test_support::advertised_op_count(dir.path(), local).expect("clock"),
+        4,
+        "fixture: the holed sidecar makes the census short"
+    );
+
+    let applied = test_support::ingest_ops(dir.path(), local, &ops)
+        .await
+        .expect("ingest");
+
+    assert_eq!(applied, 0, "our own ops are never appended from a peer");
+    assert_eq!(own_jsonl_len(dir.path(), local), 6, "the log is untouched");
+    assert_eq!(
+        test_support::advertised_op_count(dir.path(), local).expect("clock"),
+        6,
+        "the advertised clock must now count every op the log holds"
+    );
+}
+
+/// DENY, unchanged. An op under our actor whose HLC our log does not hold is
+/// still refused and still not written, whatever the self-heal does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_forged_own_actor_op_absent_from_our_log_is_still_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let local = ActorId::new();
+    let _ = own_log_with_holed_sidecar(dir.path(), local, 6);
+
+    let (forged_node, forged) = op_at(local, now_ms(), 99);
+    let applied = test_support::ingest_ops(dir.path(), local, &[forged])
+        .await
+        .expect("ingest");
+
+    assert_eq!(applied, 0);
+    assert_eq!(own_jsonl_len(dir.path(), local), 6, "nothing was written");
+    assert!(
+        !created_pairs(dir.path(), local)
+            .iter()
+            .any(|(_, n)| n == &forged_node.to_string()),
+        "the forged op reached our own log"
+    );
+}

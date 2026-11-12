@@ -140,6 +140,9 @@ fn write_deduped_batch(
     let mut per_actor: HashMap<ActorId, Vec<u8>> = HashMap::new();
     let mut applied = 0usize;
     let mut foreign_claims = 0usize;
+    // HLCs claimed under our actor that the census does not list. Normally a
+    // spoof; also what a holed own sidecar looks like (see `heal_own_index`).
+    let mut unlisted_own: Vec<Hlc> = Vec::new();
     for op in candidates {
         // A peer may not write OUR actor's file. This mirrors
         // `outl_core::storage::jsonl::append`'s `append_ops_inner`, which
@@ -168,6 +171,9 @@ fn write_deduped_batch(
         // how the loss above gets a legitimate-looking cover story.
         if op.actor == local_actor {
             foreign_claims += 1;
+            if !present.contains(&op.ts) {
+                unlisted_own.push(op.ts);
+            }
             continue;
         }
         // Already on disk, or a duplicate earlier in this same batch.
@@ -185,6 +191,10 @@ fn write_deduped_batch(
         entry.extend_from_slice(&line);
         entry.push(b'\n');
         applied += 1;
+    }
+
+    if !unlisted_own.is_empty() {
+        heal_own_index(ops_dir, local_actor, &unlisted_own);
     }
 
     if foreign_claims > 0 {
@@ -236,6 +246,70 @@ fn write_deduped_batch(
     }
 
     Ok(applied)
+}
+
+/// Minimum time between two verification passes over the same `ops/` dir.
+const OWN_INDEX_CHECK_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Heal a holed offset sidecar for OUR OWN actor, when a peer's resend proves
+/// one.
+///
+/// The census is read from the offset sidecar, and a sidecar can be missing
+/// entries mid-file while still passing the freshness ladder (which only
+/// checks the max-offset record). Our advertised count is then short, the
+/// peer holds more than we say, concludes we have a gap and resends our whole
+/// actor log every sync — which the guard above refuses every time, so the
+/// clock never moves. For a foreign actor a short count is the safe
+/// direction; for our own it is a loop.
+///
+/// `unlisted` are the HLCs peers claimed under our actor that the census did
+/// not list. Stream our own `.jsonl` (not the sidecar): if it holds any of
+/// them the sidecar is holed, and the rebuild persists a complete pair so the
+/// next advertised clock is right. Nothing is ever appended; an HLC absent
+/// from the log itself stays refused, so spoof protection is unchanged.
+///
+/// The stream costs a pass over the whole log, so it runs at most once per
+/// [`OWN_INDEX_CHECK_COOLDOWN`] per directory. A successful rebuild ends the
+/// condition; only a peer that keeps forging our actor can re-trigger it, and
+/// the cooldown bounds what that costs.
+fn heal_own_index(ops_dir: &std::path::Path, local_actor: ActorId, unlisted: &[Hlc]) {
+    use outl_core::storage::JsonlStorage;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+
+    static LAST_CHECK: OnceLock<Mutex<HashMap<std::path::PathBuf, Instant>>> = OnceLock::new();
+    {
+        let mut last = LAST_CHECK
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        match last.get(ops_dir) {
+            Some(at) if now.duration_since(*at) < OWN_INDEX_CHECK_COOLDOWN => return,
+            _ => {
+                last.insert(ops_dir.to_path_buf(), now);
+            }
+        }
+    }
+
+    let rebuilt = match JsonlStorage::rebuild_own_indexes(ops_dir, local_actor) {
+        Ok(index) => index,
+        Err(e) => {
+            warn!(
+                actor = %local_actor,
+                "could not verify our own op log against a peer's resend: {e}"
+            );
+            return;
+        }
+    };
+    let in_log = unlisted.iter().filter(|ts| rebuilt.get(ts).is_some()).count();
+    if in_log > 0 {
+        warn!(
+            actor = %local_actor,
+            missing = in_log,
+            "our own offset index was missing {in_log} op(s) the log holds; rebuilt it so the next advertised clock is complete"
+        );
+    }
 }
 
 /// Apply a batch of received ops: drop ones with a future HLC, dedup against

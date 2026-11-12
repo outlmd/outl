@@ -200,6 +200,20 @@ Two things it never does: it builds **no node index** (it has no use for "which 
 Persisting would advance the offset sidecar past the node sidecar, and the next real boot would reject the mismatched pair and rebuild both — a status poll arming a full reindex.
 A grown tail is re-scanned instead, which costs what was appended since the last write and nothing more.
 
+The ladder only checks the record at the sidecar's max offset, so it cannot see a hole in the middle.
+Two things keep one from forming, and one repairs one that exists:
+
+- **`ops/.idx-lock-<stem>`** (a dotfile, empty, recreated on demand) is an exclusive flock taken by `append_ops_inner` around one batch (jsonl write plus sidecar appends) and by whoever persists a sidecar pair (`persist_indexes_locked`).
+  A second opener that re-indexed a grown tail used to rename its copy over the sidecar while the live writer was appending to the old inode, losing those entries.
+  Under the lock the persister first indexes whatever tail appeared since it read the file, so what it renames covers all of it.
+  If the lock cannot be had it persists nothing: the sidecars are a cache, and the next boot rebuilds.
+- **Self-heal for our own actor.**
+  For a foreign actor a short count is the safe direction (a peer resends, ingest dedups).
+  For the device's own actor it is a loop, because ingest refuses every op claiming the local actor and the advertised clock never moves.
+  When `write_deduped_batch` refuses own-actor HLCs the census does not list, it streams the own `.jsonl` through `JsonlStorage::rebuild_own_indexes` and persists a complete pair under the same lock, so the next clock is right and the peer stops resending.
+  Nothing is appended, and an HLC the log does not hold stays refused.
+  The stream runs at most once per five minutes per `ops/` directory.
+
 `outl-sync-iroh`'s vector clock, its delta selection and its ingest dedup are the callers; see [`docs/iroh-internals.md`](iroh-internals.md#module-layout).
 
 ### The index sidecars: one owner, and a lifecycle

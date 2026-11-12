@@ -109,6 +109,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   A page present in the op log without its `.md` + sidecar (a paired replica, a server image) or sitting in the trash kept all its old blocks next to the imported ones, and a trashed page came back out of the trash with them.
   The old blocks are now moved to the trash (logged in `orphans.log` first), the import report counts them as `replaced_blocks`, page-level properties the source no longer has are cleared too (`replaced_props`), and pages the source does not contain are untouched.
 
+- **A hole in a device's own offset sidecar no longer makes every peer resend that actor's full log forever.**
+  A second opener persisting a regrown sidecar could rename it over the live writer's, dropping entries the writer had just appended; the freshness ladder then trusted the holed file, the device advertised a short op count for its own actor, and each peer resent the whole log on every sync, which ingest refuses by design.
+  Appends and sidecar persists now serialize on `ops/.idx-lock-<actor>`, and ingest rebuilds a holed own sidecar when a peer's resend proves one, so existing workspaces heal without peer changes.
+  See [docs/storage.md](docs/storage.md).
+
 - **A phone's background sync reaches a peer that is online even when another one is asleep.**
   The forced sync pass behind `sync_now` dialed paired devices one after another, and every iOS background window waits on that pass: 12s for `BGAppRefreshTask`, 20s for the processing task and the flush.
   An unreachable peer costs up to 15s (5s direct + 10s relay), so with a laptop asleep at the head of `peers.json` the refresh window ran out before the always-on peer behind it was ever dialed, and the phone fell behind until someone opened the app.
