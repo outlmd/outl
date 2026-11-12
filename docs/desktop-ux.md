@@ -28,6 +28,24 @@ The flow is two honest steps, no filler:
 
 Only the chrome is desktop-local; why the copy and the panel are shared rather than rebuilt is in [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md) → "First-run onboarding".
 
+## Application menu — File → Switch Workspace…
+
+The native menu is built in `src-tauri/src/menu.rs` rather than left to Tauri's default, whose File menu held only "Close Window".
+It keeps what the default offered on each platform (the macOS app menu, Edit with cut / copy / paste / select all, Window, and File → Close Window, plus Quit and About on Windows and Linux) and adds **File → Switch Workspace…** above Close Window.
+Undo and redo are menu items on macOS only.
+
+Clicking the item picks nothing in Rust; it emits `menu://switch-workspace`.
+`AppShell` listens (`onMenuSwitchWorkspace`) and runs `switchWorkspace` (`lib/switch-workspace.ts`):
+
+1. A folder dialog titled "Switch outl workspace".
+   Cancelling does nothing.
+2. `set_workspace(path)`, the command the first-run picker calls.
+3. The page, selection, backlinks and other slices tied to the old workspace are cleared, then today's journal of the new workspace is loaded.
+   A failure lands on the error toast and leaves the current page on screen.
+
+The item does nothing while `<Onboarding />` or the loading screen is up, because the picker is itself the screen then.
+It has no chord and no palette row: both would need a new `Action`, which every client has to declare a verdict for ([`client-parity.md`](client-parity.md)).
+
 ## Chrome toggle bar and quick capture
 
 `components/ChromeToggleBar.tsx` is a fixed bottom-left cluster, mounted by `AppShell`, carrying two visible mirrors of chords.

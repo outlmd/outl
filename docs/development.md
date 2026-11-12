@@ -96,12 +96,14 @@ crates/outl-desktop/
 │                             #     cascade) / cursor- (selection, day, zoom) /
 │                             #     block- (ops on the selected block) / page-
 │                             #     (delete, undo/redo, fold-all) / visual- (range) /
-│                             #     clipboard- (registers) / speed- handlers
+│                             #     clipboard- (registers) / speed- handlers,
+│                             #   switch-workspace.ts (File → Switch Workspace…)
 └── src-tauri/
     ├── Cargo.toml  build.rs  tauri.conf.json (app.outl.desktop)  capabilities/  icons/
     └── src/                   # main.rs, lib.rs (run() registers all commands),
                               #   settings.rs, state.rs, helpers.rs, workspace_open.rs,
                               #   plugin_service.rs, fs_watcher.rs,
+                              #   menu.rs (native menu, emits menu://switch-workspace),
                               #   commands/ (thin shims over outl_tauri_shared::commands)
 ```
 

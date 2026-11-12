@@ -364,7 +364,7 @@ export function SettingsModal() {
                   {draft()!.last_workspace ?? "(none)"}
                 </div>
                 <div class="mt-1 text-xs opacity-50">
-                  Use File → Switch workspace… to change.
+                  Use File → Switch Workspace… to change.
                 </div>
               </div>
 

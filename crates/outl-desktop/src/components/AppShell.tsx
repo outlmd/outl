@@ -28,6 +28,7 @@ import {
   onDeepLinkNavigate,
   onOpenFileImport,
   onQuickCaptureHotkey,
+  onMenuSwitchWorkspace,
   onPeerOpsChanged,
   onProjectionWriteFailed,
   onWorkspaceReady,
@@ -44,6 +45,7 @@ import { OutlineView } from "./OutlineView";
 import { Picker } from "./Picker";
 import { QuickCapture } from "./QuickCapture";
 import { openQuickCapture } from "../lib/quick-capture";
+import { switchWorkspace } from "../lib/switch-workspace";
 import { PluginMarketplace } from "./PluginMarketplace";
 import { PluginEffectLayer } from "./PluginEffectLayer";
 import { SettingsModal } from "./SettingsModal";
@@ -320,6 +322,13 @@ export function AppShell() {
       void loadTransformers();
     });
     onCleanup(() => unlistenReady());
+
+    // File → Switch Workspace… (native menu). `loadToday` runs after the
+    // store is reset, so the new workspace opens on its own journal.
+    const unlistenSwitch = await onMenuSwitchWorkspace(() => {
+      void switchWorkspace({ setError, reload: loadToday });
+    });
+    onCleanup(() => unlistenSwitch());
 
     const unlisten = await onPeerOpsChanged(() => {
       void onPeerChange();

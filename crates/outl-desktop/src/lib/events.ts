@@ -197,3 +197,13 @@ export function onPeerPairFailed(
 export function onQuickCaptureHotkey(handler: () => void): Promise<UnlistenFn> {
   return listen<null>("quick-capture://open", () => handler());
 }
+
+/**
+ * Register a handler for `menu://switch-workspace`, emitted when the user
+ * picks File → Switch Workspace… in the native menu (`menu.rs`). The
+ * backend only reports the click; the folder dialog and `set_workspace`
+ * call are the frontend's (`switch-workspace.ts`).
+ */
+export function onMenuSwitchWorkspace(handler: () => void): Promise<UnlistenFn> {
+  return listen<null>("menu://switch-workspace", () => handler());
+}
