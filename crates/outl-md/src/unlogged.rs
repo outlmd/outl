@@ -235,7 +235,8 @@ pub fn content_lines_missing_from_texts<'a>(
         // bullet whose own text looks like a property (`- note:: remember`)
         // is stored by the parser as the block's text, so skipping it here
         // would hide real content.
-        if crate::parse::parse_property_line(t).is_some() {
+        // An escaped one (`\key:: value`) is text, as the parser reads it.
+        if !crate::render::is_escaped_text(t) && crate::parse::parse_property_line(t).is_some() {
             return None;
         }
         // A continuation line the renderer escaped (`\- item`, `\```yaml`,

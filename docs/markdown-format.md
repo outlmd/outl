@@ -122,6 +122,11 @@ Continuation **ends** at the first line that is a block marker (`-`), a property
 After that, a line the grammar still can't place — over-indented, no open continuation to absorb it — is recovered as a **child block** at the depth it was written (see "Permissive parsing & warnings" below).
 Nothing is silently skipped, at any depth.
 
+**A text line shaped like structure is escaped with one backslash.**
+A continuation line that would otherwise parse as a block marker (`- item`), an unclosed fence opener (```` ```yaml ````) or a property (`source:: x`) is written as `\- item`, `` \```yaml `` or `\source:: x`, and the parser drops exactly that backslash.
+So a block whose text holds such a line comes back as one block with the same text, its lines in the order they were written; written bare, `source:: x` would be lifted out of the text into a property and land after it.
+A `key:: value` line written bare under a bullet is still a property, as above.
+
 In the TUI: `Alt+Enter` (or `Ctrl+J`, or `Shift+Enter` in kitty-protocol-aware terminals) inserts a soft newline inside the current block.
 Plain `Enter` commits and creates a sibling — unless the cursor is inside an open fenced code block, in which case `Enter` auto-detects and inserts a soft newline instead (see below).
 

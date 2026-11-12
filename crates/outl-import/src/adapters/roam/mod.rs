@@ -276,10 +276,10 @@ fn convert_block(
 ///   user attribute.
 /// - **User attributes** (`icon::`, `work::`, …) are lifted into `props`
 ///   **only when the block is nothing but attribute lines**. A block
-///   that still has prose keeps its attribute lines *in the text*: outl's
-///   own parser lifts trailing `key:: value` continuation lines into
-///   block properties AND resolves any `((uid))` in their values through
-///   the placeholder pass — extracting here would bypass that resolution
+///   that still has prose keeps its attribute lines *in the text*, in
+///   the order the user wrote them: outl's renderer escapes a
+///   `key:: value` continuation line, so it stays text, the way Roam
+///   shows it, and a `((uid))` in it resolves like any other in the text
 ///   (the Omnivore `note:: ((uid))` shape). Roam's page-attribute blocks
 ///   (`icon::` at the head of a contact page) are pure-attribute, so this
 ///   still captures the case that matters.

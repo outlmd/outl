@@ -368,7 +368,9 @@ fn parse_block_list(
                         node.text.push('\n');
                     }
                     consume_fence(lines, i, indent + 1, false, &mut node.text);
-                } else if let Some(kv) = parse_property_line(next_stripped) {
+                } else if let Some(kv) = parse_property_line(next_stripped)
+                    .filter(|_| !crate::render::is_escaped_text(next_stripped))
+                {
                     // A property does NOT close continuation.
                     //
                     // Properties are contiguous in the grammar at the top
