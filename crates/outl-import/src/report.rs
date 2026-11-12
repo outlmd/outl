@@ -51,6 +51,9 @@ pub struct ImportReport {
     pub components_verbatim: BTreeMap<String, usize>,
     /// Source queries translated to a ` ```query ` fence.
     pub queries_translated: usize,
+    /// Roam `{{[[pdf]]: url}}` components rewritten to a `[name](url)`
+    /// file link, outl's form for a file.
+    pub pdfs_linked: usize,
     /// Org-style `DEADLINE:`/`SCHEDULED:` timestamps converted to
     /// `[[YYYY-MM-DD]]` date links (issue #63 model).
     pub org_dates_converted: usize,
@@ -311,6 +314,12 @@ impl ImportReport {
         );
         if self.queries_translated > 0 {
             println!("  queries translated:  {}", self.queries_translated);
+        }
+        if self.pdfs_linked > 0 {
+            println!(
+                "  pdf embeds:          {} became file links",
+                self.pdfs_linked
+            );
         }
         if !self.components_verbatim.is_empty() {
             let kinds: Vec<String> = self
