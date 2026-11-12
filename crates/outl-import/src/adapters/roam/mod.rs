@@ -186,8 +186,8 @@ impl SourceAdapter for RoamAdapter {
             report.warn(
                 GRAPH_SCOPE,
                 format!(
-                    "{midtext} mid-block TODO/DONE markers became literal text \
-                     (task state not preserved)"
+                    "{midtext} mid-block TODO/DONE markers kept verbatim as text \
+                     (task state not preserved: outl tracks one task per block)"
                 ),
             );
         }
@@ -229,7 +229,7 @@ fn convert_block(
     let (props, collapsed_prop, text) = if is_fence {
         (Vec::new(), false, after_task.to_string())
     } else {
-        split_block_props(after_task, report)
+        split_block_props(after_task)
     };
 
     ImportBlock {
@@ -257,10 +257,13 @@ fn convert_block(
 ///
 /// Two classes of line are handled differently:
 ///
-/// - **Structural** (`id::`, `collapsed::`) is never user data and is
-///   *always* stripped from the text: `id::` is Logseq residue (the
-///   block's ref identity is the Roam JSON `uid`) dropped + counted;
+/// - **Structural** (`collapsed::`) is *always* stripped from the text:
 ///   `collapsed:: true` flips the returned fold flag (its own IR field).
+///   `id::` (Logseq residue: the block's ref identity is the Roam JSON
+///   `uid`) is **not** structural here. It is in the Roam block's text,
+///   Roam shows it as an attribute, and dropping it lost the only copy
+///   of the id that pre-Roam links point at, so it stays like any other
+///   user attribute.
 /// - **User attributes** (`icon::`, `work::`, …) are lifted into `props`
 ///   **only when the block is nothing but attribute lines**. A block
 ///   that still has prose keeps its attribute lines *in the text*: outl's
@@ -270,10 +273,7 @@ fn convert_block(
 ///   (the Omnivore `note:: ((uid))` shape). Roam's page-attribute blocks
 ///   (`icon::` at the head of a contact page) are pure-attribute, so this
 ///   still captures the case that matters.
-fn split_block_props(
-    raw: &str,
-    report: &mut ImportReport,
-) -> (Vec<(String, String)>, bool, String) {
+fn split_block_props(raw: &str) -> (Vec<(String, String)>, bool, String) {
     // Fast path: no `::` at all → nothing to lift, keep the string byte
     // for byte (the common case, and it preserves exact whitespace).
     if !raw.contains("::") {
@@ -285,7 +285,6 @@ fn split_block_props(
     let mut has_prose = false;
     for line in raw.split('\n') {
         match parse_prop_line(line.trim()) {
-            Some((k, _)) if k == "id" => report.artifacts_stripped += 1,
             Some((k, v)) if k == "collapsed" => collapsed |= v == "true",
             Some((k, v)) => {
                 user_props.push((k, v));
@@ -460,11 +459,18 @@ fn translate_query(raw: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-/// `DEADLINE: <2025-11-12 Wed>` / `SCHEDULED: <…>` → `[[2025-11-12]]`.
+/// `DEADLINE: <2025-11-12 Wed>` / `SCHEDULED: <…>` →
+/// `DEADLINE: [[2025-11-12]]` / `SCHEDULED: [[…]]`.
 ///
 /// Follows the issue #63 model: a date in the block text is a
 /// `[[date]]` link, surfacing the block in that day's journal via
 /// backlinks; notification scheduling is a separate opt-in property.
+///
+/// Only the `<…>` stamp is rewritten. The keyword stays (it is what
+/// says the date is a deadline and not a mention), and so does anything
+/// in the stamp past the date and weekday, such as a time or a repeater
+/// (`<2025-11-12 Wed 10:00 +1w>` → `[[2025-11-12]] 10:00 +1w`). The
+/// weekday alone is dropped: the date already names it.
 fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
@@ -484,15 +490,22 @@ fn convert_org_dates(raw: &str, report: &mut ImportReport) -> String {
             .and_then(|inner| inner.find('>').map(|close| &inner[..close]))
             .and_then(|stamp| {
                 let date_part = stamp.get(..10)?;
-                chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()
+                let date = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()?;
+                Some((date, stamp[10..].trim()))
             });
         match converted {
-            Some(date) => {
-                out.push_str(&rest[..pos]);
-                out.push_str(&format!("[[{date}]]"));
-                report.org_dates_converted += 1;
-                // Skip: keyword + whitespace + `<…>`.
+            Some((date, tail)) => {
+                // Keyword and the whitespace after it, as written.
                 let ws = after_kw.len() - after_sp.len();
+                out.push_str(&rest[..pos + kw.len() + ws]);
+                out.push_str(&format!("[[{date}]]"));
+                let extra = strip_weekday(tail, date);
+                if !extra.is_empty() {
+                    out.push(' ');
+                    out.push_str(extra);
+                }
+                report.org_dates_converted += 1;
+                // Skip: `<…>`.
                 let angle_len = after_sp.find('>').expect("checked above") + 1;
                 rest = &rest[pos + kw.len() + ws + angle_len..];
             }
@@ -516,6 +529,23 @@ fn roam_daily_title(d: chrono::NaiveDate) -> String {
         _ => "th",
     };
     format!("{} {day}{suffix}, {}", d.format("%B"), d.year())
+}
+
+/// Drop a leading weekday name (`Wed`, `Wednesday`, any case) from an
+/// org stamp's tail, but only when it is the weekday of `date`: a
+/// mismatched one is information, not redundancy.
+fn strip_weekday(tail: &str, date: chrono::NaiveDate) -> &str {
+    let word_end = tail
+        .find(|c: char| !c.is_alphabetic())
+        .unwrap_or(tail.len());
+    let word = &tail[..word_end];
+    let full = date.format("%A").to_string();
+    let short = date.format("%a").to_string();
+    if !word.is_empty() && (word.eq_ignore_ascii_case(&full) || word.eq_ignore_ascii_case(&short)) {
+        tail[word_end..].trim_start()
+    } else {
+        tail
+    }
 }
 
 /// Roam timestamps are milliseconds since epoch.

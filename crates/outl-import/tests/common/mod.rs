@@ -2,6 +2,8 @@
 //! `Workspace` over `JsonlStorage` in a tempdir, no CLI involved.
 #![allow(dead_code)]
 
+pub mod roam;
+
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::ActorId;
 use outl_core::storage::JsonlStorage;
