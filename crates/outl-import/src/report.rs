@@ -55,7 +55,8 @@ pub struct ImportReport {
     /// file link, outl's form for a file.
     pub pdfs_linked: usize,
     /// Org-style `DEADLINE:`/`SCHEDULED:` timestamps converted to
-    /// `[[YYYY-MM-DD]]` date links (issue #63 model).
+    /// `[[YYYY-MM-DD]]` date links (issue #63 model). Logseq only: org
+    /// syntax is Logseq's, and Roam keeps a stamp as the text it is.
     pub org_dates_converted: usize,
     /// Roam `{{[[table]]}}` blocks folded into one pipe-table block.
     pub tables_converted: usize,
