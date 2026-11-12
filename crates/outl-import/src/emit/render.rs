@@ -479,12 +479,25 @@ fn render_block(b: &ImportBlock, depth: usize, ctx: &mut Ctx<'_>) {
     props.extend(b.props.iter().cloned());
     if b.created.is_some() || b.edited.is_some() {
         if ctx.opts.preserve_timestamps {
-            if let Some(c) = b.created {
-                props.push(("created".to_string(), c.to_rfc3339()));
-            }
-            if let Some(e) = b.edited {
-                props.push(("edited".to_string(), e.to_rfc3339()));
-            }
+            // A `created::` / `edited::` the user wrote wins over the
+            // source's own timestamp, the same rule the page header
+            // follows. Writing both made the later line win in the op
+            // log, so the user's value was lost. It can sit in the
+            // lifted props or, for a block with prose, in the text.
+            let user_has = |key: &str| {
+                props.iter().any(|(k, _)| k.eq_ignore_ascii_case(key))
+                    || logical.lines().any(|l| {
+                        crate::adapters::scan::parse_prop_line(l.trim())
+                            .is_some_and(|(k, _)| k == key)
+                    })
+            };
+            let stamps = [("created", b.created), ("edited", b.edited)];
+            let keep: Vec<(String, String)> = stamps
+                .into_iter()
+                .filter(|(key, _)| !user_has(key))
+                .filter_map(|(key, ts)| ts.map(|t| (key.to_string(), t.to_rfc3339())))
+                .collect();
+            props.extend(keep);
         } else {
             ctx.report.timestamps_dropped += 1;
         }
