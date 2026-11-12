@@ -73,6 +73,8 @@ The rules that matter, each of which a first version got wrong:
    One capped symbol serves all three windows — each caller passes its own ceiling (12s refresh, 20s processing, `backgroundTimeRemaining` for the flush) and Rust clamps it, so an expired budget can't hang the thread.
    `wire_iroh_transport` registers a `Clone` of the live `IrohSyncTransport` **plus the workspace root** into a re-settable global.
    The sync FFIs fire `sync_now()` (a forced delta-sync against every peer, mobile side initiating, which is NAT-friendly).
+   The pass dials every peer **at once**, not one after another: an unreachable peer costs up to 15s, so a laptop asleep at the head of `peers.json` used to burn the whole 12s refresh window before the always-on peer behind it was dialed.
+   Concurrent, a pass costs the slowest single dial instead of the sum.
    They then poll `completed_sync_passes()` every 250ms, returning as soon as the pass lands — the cap is a fallback, not a fixed sleep.
 
 The FFI + Swift handler can only be validated with a **device build**.

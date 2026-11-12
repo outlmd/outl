@@ -434,6 +434,38 @@ pub async fn run_catch_up_loop<F>(
     .await
 }
 
+/// Drive one production forced sync pass (`sync_now`) over `addrs`, in that
+/// order, and return once every dial has succeeded or failed.
+///
+/// Takes the addresses directly instead of reading `peers.json`, so a test can
+/// hand it loopback addrs (the production resolver drops addrs on subnets no
+/// local interface belongs to). No health map; a fresh append guard and
+/// in-flight set, as a lone transport would have.
+pub async fn run_force_sync(
+    endpoint: iroh::Endpoint,
+    addrs: Vec<iroh::EndpointAddr>,
+    workspace_root: PathBuf,
+    workspace_id: WorkspaceId,
+    actor: ActorId,
+    peer_ready_tx: std::sync::mpsc::Sender<()>,
+) {
+    let peers_path = workspace_peers_path(&workspace_root);
+    crate::engine_force_sync::force_sync_addrs(
+        &crate::peer_conn::PeerConnections::new(endpoint),
+        addrs,
+        &workspace_root,
+        &Arc::new(RwLock::new(workspace_id)),
+        actor,
+        &peer_ready_tx,
+        None,
+        &std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        &Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        &crate::progress::ProgressSink::default(),
+        &|nid| crate::peer_label::peer_log_label(&peers_path, nid),
+    )
+    .await
+}
+
 /// The **real** gossip-topic derivation, exposed so an integration test can
 /// assert that two devices at DIFFERENT local paths but with the SAME
 /// [`WorkspaceId`] land on the SAME topic (and a different id → different topic).

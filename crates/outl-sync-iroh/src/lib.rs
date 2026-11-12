@@ -52,6 +52,7 @@ mod device;
 mod engine;
 mod engine_assets;
 mod engine_catchup;
+mod engine_force_sync;
 mod engine_gossip;
 mod engine_membership;
 mod engine_pairing;

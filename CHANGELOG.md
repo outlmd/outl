@@ -98,6 +98,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A phone's background sync reaches a peer that is online even when another one is asleep.**
+  The forced sync pass behind `sync_now` dialed paired devices one after another, and every iOS background window waits on that pass: 12s for `BGAppRefreshTask`, 20s for the processing task and the flush.
+  An unreachable peer costs up to 15s (5s direct + 10s relay), so with a laptop asleep at the head of `peers.json` the refresh window ran out before the always-on peer behind it was ever dialed, and the phone fell behind until someone opened the app.
+  The pass now dials every peer at once and still returns only when all of them have finished, so the completion the background windows wait on means the same thing it did.
+
 - **A property with an empty value keeps its `key::` line.**
   An imported graph that wrote `published::` with nothing after it lost the key on disk, because the projection skipped empty values.
   `render` now writes a bare `key::` for an empty or whitespace-only value, on a page and on a block, and the parser reads it back as `""`.
