@@ -235,7 +235,9 @@ fn compaction_leaves_no_index_sidecar_behind() {
 
     let leftovers: Vec<String> = names_in(&ops)
         .into_iter()
-        .filter(|n| n.contains(".idx"))
+        // `.idx-lock-<stem>` is the append/persist flock, not index data:
+        // it holds no offsets, and unlinking it could split a held lock.
+        .filter(|n| n.contains(".idx") && !n.starts_with(".idx-lock-"))
         .collect();
     assert!(
         leftovers.is_empty(),

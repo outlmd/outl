@@ -86,7 +86,7 @@ impl JsonlStorage {
     }
 
     /// Rebuild a device's OWN sidecar pair from its `.jsonl` and persist it,
-    /// under the [`IdxLock`] the writer appends under.
+    /// under the `IdxLock` the writer appends under.
     ///
     /// The self-heal for a sidecar that lost entries mid-file (the freshness
     /// ladder cannot see those). Streams the whole file, so call it only on
