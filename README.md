@@ -104,7 +104,7 @@ Logseq's new DB version stores a graph in SQLite; export it with **Export graph 
 
 The importers (Roam, Logseq, Logseq DB, Obsidian — or `auto` to detect) resolve `((uid))` block refs and `{{embed}}`s into real outl block references, keep folded state, and translate each dialect.
 Everything touched is counted in the import report — run with `--dry-run` first to measure fidelity against your backup.
-Anything unresolvable stays as `((unresolved:UID))` for manual triage.
+A ref whose target is not in the export stays as the source wrote it, `((UID))`, so it remains greppable for manual triage.
 
 ## Contributing
 
