@@ -55,7 +55,9 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   Seeds `templates/journal` as a **page** (`template:: journal`), not a `templates/journal.md` file (issue #146).
   A legacy file, if present, migrates into the page body best-effort.
   Opening today's journal then auto-instantiates it.
-- `outl serve [<path>] [--once] [--no-watch] [--no-sync]` — the background daemon: file watcher + P2P endpoint holder, both on by default.
+- `outl serve [<path>] [--once] [--no-watch] [--no-sync] [--no-mcp]` — the background daemon: file watcher + P2P endpoint holder, both on by default, plus an embedded MCP server on a Unix socket (`mcp/embedded.rs`, `mcp/socket.rs`; `--no-mcp` opts out, `--once` never starts it).
+  The watcher and every MCP session share **one** `Workspace` behind `mcp::SharedWs`: two writers under one actor would run independent HLC generators.
+  The embedded server never binds an iroh endpoint and never mints an actor (`OpenOptions::device_actor_only`, falling back to a read open); `outl mcp serve` bridges to the socket unless `--standalone`.
   `--once` reconciles every `.md` and exits (smoke tests, scripting) and implies neither half; `--no-watch` is endpoint-only, `--no-sync` is watcher-only, and both together is a usage error.
   `--no-watch` also **fails** (non-zero) when `[sync] transport` is `"file"`: with no watcher and no P2P it has no job, and exiting 0 would have a process manager restart it into that config forever. Plain `outl serve` only warns there.
   **Third job, opposite direction:** it sweeps `tree → .md` after the initial scan and after each peer-ops reload (30s floor), writing only pages whose re-projection removes nothing.

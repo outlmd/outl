@@ -151,6 +151,7 @@ Practical consequences:
   That is normal, not an error.
   (The device actor itself comes from the device store outside the workspace, not from `.outl/config.toml` — see [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).)
 - Ops you write while a long-lived outl process runs (a GUI, the TUI, `outl mcp serve`, `outl serve`) are picked up by its poller and shipped to peers by its transport.
+  An agent on the same machine no longer needs its own process: `outl serve` serves MCP over a local socket and `outl mcp serve` bridges to it (see [MCP](mcp.md#running-beside-outl-serve)).
   `outl serve --no-watch` is the headless case: it has a transport and no file watcher, and the transport is the half that ships your ops.
 - Ops written while nothing else runs sit on disk until any long-lived surface opens, then converge.
 - Reads see whatever the log held when you called `open`.

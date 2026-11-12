@@ -186,6 +186,10 @@ pub(crate) enum Command {
     /// `ops-<ulid>.jsonl`) on every launch. It still takes the P2P endpoint,
     /// though, and does not give it back, so a GUI opened after this daemon
     /// syncs through the shared ops/ dir until the daemon stops.
+    ///
+    /// It also serves MCP in-process by default, on a Unix socket, so agents
+    /// attach through `outl mcp serve` without a second process opening the
+    /// workspace. `--no-mcp` turns that off.
     Serve {
         /// Workspace path. Overrides the global `--workspace`.
         path: Option<PathBuf>,
@@ -202,6 +206,14 @@ pub(crate) enum Command {
         /// Skip P2P sync; only run the file watcher.
         #[arg(long)]
         no_sync: bool,
+        /// Do not serve MCP in-process.
+        ///
+        /// By default the daemon also answers MCP on a Unix socket in the
+        /// device directory (`<device dir>/run/mcp-<hash>.sock`, 0600), so
+        /// `outl mcp serve` can bridge to it instead of opening the workspace
+        /// a second time. Ignored by `--once`, which never serves.
+        #[arg(long)]
+        no_mcp: bool,
     },
     /// Check workspace integrity.
     Doctor {
@@ -481,7 +493,16 @@ pub enum WorkspaceSubcommand {
 pub enum McpSubcommand {
     /// Start the MCP stdio server. Targets the workspace at the global
     /// `--workspace` (or current directory if unset).
-    Serve {},
+    ///
+    /// When `outl serve` is running for the workspace, this process only
+    /// bridges stdin/stdout to its socket: no workspace open, no lock, no
+    /// actor. Otherwise it opens the workspace itself.
+    Serve {
+        /// Never bridge: open the workspace in this process even when
+        /// `outl serve` is running.
+        #[arg(long)]
+        standalone: bool,
+    },
 }
 
 #[cfg(test)]
@@ -521,6 +542,43 @@ mod tests {
             Some(Command::Reconcile {
                 allow_bulk_delete: false,
                 ..
+            })
+        ));
+    }
+
+    /// The embedded MCP server is on unless `--no-mcp` says otherwise, and
+    /// there is no `--mcp` to turn on.
+    #[test]
+    fn serve_embeds_mcp_unless_told_not_to() {
+        let cli = Cli::try_parse_from(["outl", "serve"]).expect("plain serve must parse");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Serve { no_mcp: false, .. })
+        ));
+        let cli = Cli::try_parse_from(["outl", "serve", "--no-mcp"]).expect("--no-mcp must parse");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Serve { no_mcp: true, .. })
+        ));
+        assert!(Cli::try_parse_from(["outl", "serve", "--mcp"]).is_err());
+        assert!(Cli::try_parse_from(["outl", "serve", "--once", "--no-mcp"]).is_ok());
+    }
+
+    #[test]
+    fn mcp_serve_takes_standalone() {
+        let cli = Cli::try_parse_from(["outl", "mcp", "serve", "--standalone"])
+            .expect("--standalone must parse");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Mcp {
+                sub: McpSubcommand::Serve { standalone: true }
+            })
+        ));
+        let cli = Cli::try_parse_from(["outl", "mcp", "serve"]).expect("plain mcp serve parses");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Mcp {
+                sub: McpSubcommand::Serve { standalone: false }
             })
         ));
     }

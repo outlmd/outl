@@ -27,10 +27,14 @@ use outl_actions::SyncTransport;
 use outl_md::index::WorkspaceIndex;
 use outl_sync_iroh::TransportOutcome;
 
+mod embedded;
 mod prompts;
 mod protocol;
 mod resources;
+mod socket;
 mod tools;
+
+pub(crate) use embedded::{start_embedded, EmbeddedServer, SharedWs};
 
 /// Protocol version this server speaks.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -41,20 +45,51 @@ pub const SERVER_NAME: &str = "outl";
 /// Server build version (mirrors the crate version).
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Run the stdio MCP loop. Returns when the client closes stdin.
-pub fn serve(workspace_path: PathBuf) -> anyhow::Result<()> {
+/// Run the stdio MCP server. Returns when the client closes stdin.
+///
+/// When `outl serve` already answers on this workspace's socket the session is
+/// a bridge to it: stdin and stdout are piped to the socket and this process
+/// opens no workspace, takes no lock and mints no actor. Otherwise (no server,
+/// a platform without sockets, or `standalone`) it owns the workspace itself,
+/// exactly as it always has. Which one was chosen goes to stderr through
+/// tracing; stdout is the protocol channel and is never written to here.
+pub fn serve(workspace_path: PathBuf, standalone: bool) -> anyhow::Result<()> {
+    if standalone {
+        tracing::info!("mcp: --standalone; opening the workspace in this process");
+    } else if embedded::bridge(&workspace_path)? {
+        return Ok(());
+    } else {
+        tracing::info!("mcp: no running `outl serve` for this workspace; running standalone");
+    }
     let ctx = Arc::new(ServerCtx::new(workspace_path));
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    let mut stdin = stdin.lock();
-    let mut stdout = stdout.lock();
+    serve_session(stdin.lock(), stdout.lock(), &ctx)?;
+    // Client closed the pipe — tear the P2P transport down cleanly so its
+    // endpoint releases the relay route for any other process on this device.
+    // Only this standalone path does it: an embedded session closing must not
+    // tear down state its siblings (and `outl serve` itself) still use.
+    ctx.shutdown_transport();
+    Ok(())
+}
+
+/// One MCP session: newline-delimited JSON-RPC from `reader`, replies to
+/// `writer`, until the reader hits EOF.
+///
+/// Generic so the stdio server and every socket connection of the embedded
+/// server run the same loop. It never touches shared teardown; see [`serve`].
+pub(crate) fn serve_session<R: BufRead, W: Write>(
+    mut reader: R,
+    mut writer: W,
+    ctx: &Arc<ServerCtx>,
+) -> std::io::Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        let n = stdin.read_line(&mut line)?;
+        let n = reader.read_line(&mut line)?;
         if n == 0 {
             // EOF — client closed the pipe.
-            break;
+            return Ok(());
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -64,7 +99,7 @@ pub fn serve(workspace_path: PathBuf) -> anyhow::Result<()> {
         // (it'd drop the iroh transport and every cached workspace mid-chain).
         // Catch it, reply with a JSON-RPC internal error, and keep serving.
         let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            handle_line(trimmed, &ctx)
+            handle_line(trimmed, ctx)
         })) {
             Ok(resp) => resp,
             Err(_) => {
@@ -76,14 +111,10 @@ pub fn serve(workspace_path: PathBuf) -> anyhow::Result<()> {
             }
         };
         if let Some(resp) = response {
-            writeln!(stdout, "{resp}")?;
-            stdout.flush()?;
+            writeln!(writer, "{resp}")?;
+            writer.flush()?;
         }
     }
-    // Client closed the pipe — tear the P2P transport down cleanly so its
-    // endpoint releases the relay route for any other process on this device.
-    ctx.shutdown_transport();
-    Ok(())
 }
 
 /// Shared per-server context.
@@ -104,6 +135,10 @@ pub(crate) struct ServerCtx {
     /// the MCP serves the peer's edits, not a stale replay. An `AtomicBool`
     /// keeps the drain thread off the `state` mutex.
     peer_dirty: Arc<AtomicBool>,
+    /// The workspace shared with `outl serve`, when this context is the
+    /// embedded server's. `None` is the standalone server, which opens and
+    /// owns its workspace through `state`.
+    shared: Option<Arc<SharedWs>>,
 }
 
 #[derive(Default)]
@@ -135,6 +170,20 @@ impl ServerCtx {
             workspace_path,
             state: Mutex::new(ServerState::default()),
             peer_dirty: Arc::new(AtomicBool::new(false)),
+            shared: None,
+        }
+    }
+
+    /// Context for the server embedded in `outl serve`: one writer, owned by
+    /// the daemon, shared by every session. It never builds a transport
+    /// (serve's sync supervisor owns the endpoint), and `peer_dirty` is the
+    /// shared flag serve's peer-ops signal and the file poller raise.
+    pub(crate) fn new_embedded(workspace_path: PathBuf, shared: Arc<SharedWs>) -> Self {
+        Self {
+            workspace_path,
+            state: Mutex::new(ServerState::default()),
+            peer_dirty: Arc::clone(&shared.peer_dirty),
+            shared: Some(shared),
         }
     }
 
@@ -147,6 +196,12 @@ impl ServerCtx {
     where
         F: FnOnce(&mut WsCtx) -> Result<R, ApiError>,
     {
+        // Embedded: the shared mutex is the serialization point, and `state`
+        // stays untouched so a tool that invalidates the index afterwards
+        // never waits on a lock ordered the other way round.
+        if let Some(shared) = &self.shared {
+            return shared.with_ws(&self.workspace_path, f);
+        }
         let mut state = self.state.lock();
         // A peer pushed ops since the last access — drop the cache so the
         // open below replays the freshly-arrived ops-*.jsonl.
@@ -307,6 +362,21 @@ impl ServerCtx {
         F: FnOnce(&WorkspaceIndex) -> R,
     {
         let mut state = self.state.lock();
+        if let Some(shared) = &self.shared {
+            // Lock order is `state` then the shared workspace, and nothing
+            // takes them the other way round.
+            if shared.index_stale.swap(false, Ordering::AcqRel) {
+                state.index = None;
+            }
+            if state.index.is_none() {
+                let derived = shared.with_ws(&self.workspace_path, |wc| {
+                    Ok(outl_actions::index::derive(&wc.workspace, &wc.root))
+                });
+                state.index =
+                    Some(derived.unwrap_or_else(|_| WorkspaceIndex::build(&self.workspace_path)));
+            }
+            return f(state.index.as_ref().expect("index just populated"));
+        }
         // A peer pushed ops since the last access — the cached index
         // describes the pre-push tree. Same invalidation
         // `with_workspace` performs, needed here because a read-only

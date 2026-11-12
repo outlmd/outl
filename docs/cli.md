@@ -377,12 +377,12 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | CLI                                          | MCP tool                |
 |----------------------------------------------|-------------------------|
 | `outl init <path> [--scope=global\|per-page] [--bare]` | —              |
-| `outl serve [<path>] [--once] [--no-watch] [--no-sync]` | —           |
+| `outl serve [<path>] [--once] [--no-watch] [--no-sync] [--no-mcp]` | —           |
 | `outl doctor [--json] [--repair] [--force]`  | `outl_workspace_doctor` |
 | `outl reconcile [--ahead-of-log] [--allow-bulk-delete]` | —             |
 | `outl recover [--apply] [--min-lines=N]`     | —                       |
 | `outl compact [--apply] [--no-horizon] [--force]` | —                  |
-| `outl mcp serve [--workspace=…]`             | —                       |
+| `outl mcp serve [--workspace=…] [--standalone]` | —                    |
 | `outl peer pair\|qr\|list\|remove\|status\|revoke-all` | —                 |
 | `outl plugin init\|search\|list\|install\|run\|config\|secret\|enable\|disable\|remove` | — |
 | `outl sync`                                  | —                       |
@@ -444,6 +444,13 @@ Two halves, both on by default:
 `--once` reconciles every `.md` and exits; it implies neither half and conflicts with both flags.
 Turning both halves off is a usage error rather than a process that runs and does nothing.
 
+**It also serves MCP, by default.**
+A Unix-domain-socket MCP server runs inside the daemon (`<device dir>/run/mcp-<hash>.sock`, directory 0700, socket 0600; no TCP), and `outl mcp serve` bridges to it when it is up (`outl mcp serve --standalone` opts out of the bridge).
+`--no-mcp` turns the embedded server off; `--once` never starts it.
+Every session shares the daemon's one workspace and the device actor, so agents no longer cost an ephemeral actor each or replay the op log themselves.
+A socket that cannot be set up is a warning, never a startup failure.
+See [MCP → Running beside `outl serve`](mcp.md#running-beside-outl-serve).
+
 **A third job, and it runs in the other direction.**
 The watcher carries `.md → tree`; nothing carried `tree → .md` in bulk, so when ops arrived by sync a page's `.md` stayed wrong until somebody opened it — **704 stale pages** on a real 2,574-page workspace.
 
@@ -475,6 +482,9 @@ So:
 
 - **`outl serve --no-watch`** — the mode to leave running beside a GUI you also use. No write lock, no ephemeral actors.
 - **`outl serve`** — both halves, for a headless box where nothing else opens the workspace.
+
+With `--no-watch` the embedded MCP opens the workspace once, lazily, under the device actor.
+If a GUI already holds that actor it serves reads only instead of minting an ephemeral one, so run `--no-mcp` there if you would rather not have it.
 
 That headless box is packaged: the repo ships a `Dockerfile` and a `docker-compose.yml` that run exactly this.
 See [Self-hosting an always-on peer](self-hosting.md) — the pairing direction and the two persistent volumes are the parts that are not guessable.

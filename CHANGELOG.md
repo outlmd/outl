@@ -7,6 +7,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **`outl serve` serves MCP in-process by default; `--no-mcp` opts out** ([#540](https://github.com/outlmd/outl/issues/540)).
+  A machine running `outl serve` as its daemon used to need a second process, `outl mcp serve`, which replayed the whole op log itself (about 28 s on a 720k-op workspace) and, when it lost the race for the device actor, minted an ephemeral actor and left an `ops-<ulid>.jsonl` plus a lock file behind forever.
+  The daemon now listens on a Unix domain socket (`<device dir>/run/mcp-<hash>.sock`, directory 0700, socket 0600, no TCP) and every connection is one MCP session sharing the daemon's single workspace and device actor.
+  `outl mcp serve` bridges to that socket when it is up and otherwise behaves exactly as before; `--standalone` forces the old behaviour.
+  A socket that cannot be set up (another `outl serve` already serving, permissions, a path too long, no Unix sockets) logs a warning and never stops serve; `--once` never starts it.
+  See [docs/mcp.md](docs/mcp.md#running-beside-outl-serve).
+
 - **`outl import logseq-db` imports a Logseq DB graph from its EDN export** ([#355](https://github.com/outlmd/outl/issues/355), partial).
   Logseq 2.x keeps a graph in `db.sqlite`; pointing `outl import logseq` at that directory used to report 0 pages and 0 blocks with no error.
   It now fails with the steps to export (**Export graph → Export EDN file**), and `outl import logseq-db <export.edn> <dst>` (or `auto`) reads that file: pages, journals, tags, the ordered outline, page and block refs, tasks, code blocks and user properties, with everything it cannot translate counted in the report.
