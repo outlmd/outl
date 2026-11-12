@@ -30,7 +30,7 @@ pub(crate) struct Cli {
     pub(crate) workspace: Option<PathBuf>,
 
     /// TUI theme preset (default-dark, light, logseq-light, dracula,
-    /// solarized-dark, nord, monokai, gruvbox). Overrides `[theme]
+    /// solarized-dark, nord, monokai, gruvbox, gruvbox-light). Overrides `[theme]
     /// preset` in workspace `config.toml` for this run.
     #[arg(long, global = true, value_name = "PRESET")]
     pub(crate) theme: Option<String>,

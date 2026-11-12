@@ -40,7 +40,7 @@ describe("mock backend", () => {
   it("serves every preset palette", () => {
     const names = fresh()("list_themes") as string[];
     expect(names).toContain("outl");
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
   });
 });
 
