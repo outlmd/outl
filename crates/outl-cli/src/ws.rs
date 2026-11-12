@@ -65,3 +65,28 @@ pub fn open_resident(path: &Path) -> Result<(WsCtx, bool), ApiError> {
         Err(e) => map_open(Err(e)).map(|wc| (wc, false)),
     }
 }
+
+/// Open the workspace for writing under the device actor and nothing else.
+///
+/// The on-demand counterpart of [`open_resident`]: when another process holds
+/// the device actor it fails with an explicit error instead of falling back
+/// to a read open, and it never mints an ephemeral actor. Used by the
+/// embedded MCP server of `outl serve --no-watch` when a mutating tool
+/// arrives.
+pub fn open_device_writer(path: &Path) -> Result<WsCtx, ApiError> {
+    let opts = outl_ws::OpenOptions {
+        write_snapshots: true,
+        writes: true,
+        device_actor_only: true,
+    };
+    match outl_ws::open_with(path, opts) {
+        Err(WsError::DeviceActorHeld) => Err(ApiError::new(
+            codes::INTERNAL,
+            "another outl process (a GUI, TUI or CLI) holds the device actor's write lock, \
+             so this write cannot run; close it or retry once it exits. \
+             Reads keep working."
+                .to_string(),
+        )),
+        other => map_open(other),
+    }
+}

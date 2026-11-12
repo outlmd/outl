@@ -102,7 +102,11 @@ pub fn call(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
         .ok_or_else(|| JsonRpcError::invalid_params("missing `name`"))?;
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-    let outcome: Result<Value, ApiError> = run_tool(name, &args, ctx);
+    let outcome: Result<Value, ApiError> = if MUTATING.contains(&name) {
+        ctx.prepare_write().and_then(|()| run_tool(name, &args, ctx))
+    } else {
+        run_tool(name, &args, ctx)
+    };
 
     if outcome.is_ok() && MUTATING.contains(&name) {
         ctx.invalidate_index();

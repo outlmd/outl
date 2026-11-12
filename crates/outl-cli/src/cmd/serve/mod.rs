@@ -31,7 +31,11 @@
 //! `op.actor` under `OpsDirAppendLock`, never through the `JsonlStorage::append`
 //! path that `ActorWriteLock` guards. So `--no-watch` resolves
 //! the device actor **read-only** and takes no write lock at all — the mode to
-//! run permanently next to a GUI you also use.
+//! run permanently next to a GUI you also use. The embedded MCP honours that:
+//! it reads through a read open and takes the device actor only while an MCP
+//! session is connected and has called a mutating tool, releasing it when the
+//! last session closes. If a GUI holds the actor, that write fails with an
+//! explicit error and no ephemeral actor is minted.
 
 mod projection;
 
@@ -364,12 +368,13 @@ fn stop_background(
 ///
 /// Takes no per-actor write lock (see the module doc), so it can run
 /// permanently beside a GUI without pushing that GUI onto a fresh ephemeral
-/// actor on every launch. The embedded MCP, when on, opens the workspace
-/// lazily under the device actor (warmed in the background) and never mints
-/// another; if the actor is taken it serves reads only.
+/// actor on every launch. The embedded MCP, when on, warms and serves reads
+/// from a read open, and takes the device actor only while a session may be
+/// writing (released when the last session closes). If another process holds
+/// the actor, a mutating tool errors; nothing is minted.
 fn run_sync_only(paths: &Paths, actor: outl_core::id::ActorId, mcp: bool) -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
-    let shared = SharedWs::empty();
+    let shared = SharedWs::on_demand();
     let (peer_tx, peer_rx) = channel::<()>();
     let (wake_tx, wake_rx) = channel::<()>();
     sync_supervisor::install_signal_handler(Arc::clone(&shutdown), wake_tx);

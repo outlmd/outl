@@ -20,12 +20,27 @@
 //! with the watcher's. Without the watcher (`--no-watch`), the slot starts
 //! empty and the first access opens it, writing under the device actor.
 //!
+//! # `--no-watch`: the writer is taken on demand
+//!
+//! `--no-watch` promises no per-actor write lock, so a daemon can run
+//! permanently next to a GUI without pushing it onto an ephemeral actor. The
+//! embedded MCP keeps that promise: the slot is a **read open** (warm-up and
+//! every read tool), and a tool in `MUTATING` first upgrades it to a writing
+//! open of the device actor only ([`SharedWs::upgrade_for_write`]). If another
+//! process holds that actor the tool fails with an explicit error; nothing is
+//! minted and there is no silent fallback. The lock is released again when the
+//! **last connected session closes** ([`SessionGuard`]), so a GUI started
+//! afterwards keeps the device actor. While any session is connected the
+//! writer stays, which keeps a burst of calls from reopening twice each.
+//! Switching reopens the workspace, because the lock lives inside the loaded
+//! context. Everything stays serialized on the one mutex.
+//!
 //! The embedded server never mints an actor: if another process holds the
 //! device actor it falls back to a read-only open (see
 //! [`crate::ws::open_resident`]) and retries on the next peer signal.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -52,17 +67,33 @@ pub(crate) struct SharedWs {
     /// yet. A session can consume the reload before the watcher sees the
     /// signal, so the watcher reads the fact here rather than from who reloaded.
     moved: AtomicBool,
+    /// `--no-watch`: hold the writer only while a session may be writing.
+    on_demand: bool,
+    /// Connected socket sessions, so the last one out can release the writer.
+    sessions: AtomicUsize,
 }
 
 impl SharedWs {
     /// An empty slot: the first access opens the workspace (`--no-watch`).
     pub(crate) fn empty() -> Arc<Self> {
+        Self::build(false)
+    }
+
+    /// An empty slot for `--no-watch`: reads open read-only, and the device
+    /// actor is taken only for a mutating tool (see the module doc).
+    pub(crate) fn on_demand() -> Arc<Self> {
+        Self::build(true)
+    }
+
+    fn build(on_demand: bool) -> Arc<Self> {
         Arc::new(Self {
             ws: Mutex::new(None),
             peer_dirty: Arc::new(AtomicBool::new(false)),
             index_stale: AtomicBool::new(false),
             read_only: AtomicBool::new(false),
             moved: AtomicBool::new(false),
+            on_demand,
+            sessions: AtomicUsize::new(0),
         })
     }
 
@@ -78,12 +109,17 @@ impl SharedWs {
     /// moved. Called with the lock held.
     fn refresh_locked(&self, slot: &mut Option<WsCtx>, root: &Path) -> Result<bool, ApiError> {
         let dirty = self.peer_dirty.swap(false, Ordering::AcqRel);
-        let retry_write = dirty && self.read_only.load(Ordering::Acquire);
+        // On demand, a read open is the resting state, not a lost race.
+        let retry_write = dirty && !self.on_demand && self.read_only.load(Ordering::Acquire);
         if slot.is_none() || retry_write {
             // Release the old read-only open first: it holds the shared
             // workspace lock and we are about to ask for the write lock.
             *slot = None;
-            let (wc, read_only) = ws::open_resident(root)?;
+            let (wc, read_only) = if self.on_demand {
+                (ws::open_read(root)?, true)
+            } else {
+                ws::open_resident(root)?
+            };
             self.read_only.store(read_only, Ordering::Release);
             *slot = Some(wc);
             self.index_stale.store(true, Ordering::Release);
@@ -136,6 +172,54 @@ impl SharedWs {
         out
     }
 
+    /// Make sure the slot holds the writer before a mutating tool runs.
+    /// A no-op unless `--no-watch`; fails (keeping the read open) when
+    /// another process holds the device actor.
+    pub(super) fn upgrade_for_write(&self, root: &Path) -> Result<(), ApiError> {
+        if !self.on_demand {
+            return Ok(());
+        }
+        let mut slot = self.ws.lock();
+        self.refresh_locked(&mut slot, root)?;
+        if !self.read_only.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let wc = ws::open_device_writer(root)?;
+        *slot = Some(wc);
+        self.read_only.store(false, Ordering::Release);
+        self.index_stale.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// A session ended; when it was the last one, give the device actor back.
+    fn session_closed(&self, root: &Path) {
+        if self.sessions.fetch_sub(1, Ordering::AcqRel) != 1 || !self.on_demand {
+            return;
+        }
+        let mut slot = self.ws.lock();
+        // A session may have connected while we waited for the lock.
+        if self.sessions.load(Ordering::Acquire) != 0
+            || slot.is_none()
+            || self.read_only.load(Ordering::Acquire)
+        {
+            return;
+        }
+        // Drop the writer first so its lock is gone even if the read open fails;
+        // the next access then reopens.
+        *slot = None;
+        match ws::open_read(root) {
+            Ok(wc) => {
+                *slot = Some(wc);
+                self.read_only.store(true, Ordering::Release);
+            }
+            Err(e) => warn!(
+                "mcp: reopening read-only after the last session: {}",
+                e.message
+            ),
+        }
+        self.index_stale.store(true, Ordering::Release);
+    }
+
     /// Run `f` as an MCP session: refresh, then act, under one lock hold.
     pub(super) fn with_ws<F, R>(&self, root: &Path, f: F) -> Result<R, ApiError>
     where
@@ -150,6 +234,28 @@ impl SharedWs {
             )
         })?;
         f(wc)
+    }
+}
+
+/// Counts one connected session; the last to drop releases the writer.
+struct SessionGuard {
+    shared: Arc<SharedWs>,
+    root: std::path::PathBuf,
+}
+
+impl SessionGuard {
+    fn new(shared: &Arc<SharedWs>, root: &Path) -> Self {
+        shared.sessions.fetch_add(1, Ordering::AcqRel);
+        Self {
+            shared: Arc::clone(shared),
+            root: root.to_path_buf(),
+        }
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        self.shared.session_closed(&self.root);
     }
 }
 
@@ -242,9 +348,15 @@ fn accept_loop(listener: socket::McpListener, ctx: Arc<ServerCtx>, shutdown: Arc
                 // Some platforms hand the accepted stream the listener's mode.
                 let _ = stream.set_nonblocking(false);
                 let ctx = Arc::clone(&ctx);
+                // Counted before the thread starts so the last-session check
+                // cannot miss a connection that is still being set up.
+                let guard = ctx
+                    .shared()
+                    .map(|s| SessionGuard::new(s, &ctx.workspace_path));
                 let _ = std::thread::Builder::new()
                     .name("outl-mcp-session".into())
                     .spawn(move || {
+                        let _guard = guard;
                         let reader = match stream.try_clone() {
                             Ok(r) => std::io::BufReader::new(r),
                             Err(e) => {

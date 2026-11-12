@@ -5,6 +5,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Fixed
+
+- **`outl serve --no-watch` no longer holds the device actor while the embedded MCP is idle** ([#540](https://github.com/outlmd/outl/issues/540)).
+  The MCP warm-up opened the workspace for writing, so a plain `--no-watch` daemon kept the write lock for its whole life and every GUI or TUI started later got an ephemeral actor.
+  It now reads through a read open, takes the device actor only for a mutating tool (failing with a clear error if another process holds it), and releases it when the last session closes.
+
 ### Added
 
 - **`outl serve` serves MCP in-process by default; `--no-mcp` opts out** ([#540](https://github.com/outlmd/outl/issues/540)).
