@@ -281,7 +281,7 @@ outl import roam ~/Downloads/avelino-backup.json ~/notes
 The importer strips `id::` lines (Logseq), resolves `((uid))` block refs to `[[Page Title]]` links, and converts Roam's `{{[[TODO]]}}` to outl's `TODO ` prefix.
 Filenames are slugified so `[[Meu Projeto]]` lands at `pages/meu-projeto.md` with `title:: Meu Projeto` preserved.
 
-Anything that can't be resolved stays in the file as `((unresolved:UID))` so you can `grep` and fix it manually.
+Anything that can't be resolved stays in the file as the source wrote it, `((UID))`, so you can `grep` and fix it manually.
 
 ---
 

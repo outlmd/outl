@@ -28,8 +28,8 @@ pub struct ImportReport {
     /// Refs whose target page couldn't be handle-mapped — degraded to
     /// a `[[Page Title]]` link.
     pub refs_page_fallback: usize,
-    /// Refs whose UID matches nothing in the source — left greppable
-    /// as `((unresolved:uid))`.
+    /// Refs whose UID matches nothing in the source, kept as the
+    /// source wrote them, `((uid))`, still greppable.
     pub refs_unresolved: usize,
     /// `{{embed}}` of a block resolved to `!((blk-XXXXXX))`.
     pub embeds_resolved: usize,
