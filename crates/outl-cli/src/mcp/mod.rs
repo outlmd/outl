@@ -187,6 +187,19 @@ impl ServerCtx {
         }
     }
 
+    pub(crate) fn shared(&self) -> Option<&Arc<SharedWs>> {
+        self.shared.as_ref()
+    }
+
+    /// Called before a mutating tool: under `--no-watch` this takes the
+    /// device actor's write lock, failing if another process holds it.
+    pub(crate) fn prepare_write(&self) -> Result<(), ApiError> {
+        match &self.shared {
+            Some(shared) => shared.upgrade_for_write(&self.workspace_path),
+            None => Ok(()),
+        }
+    }
+
     /// Run `f` against the cached workspace, opening it on first use.
     ///
     /// The lock is held for the whole call — fine because the MCP

@@ -91,6 +91,7 @@ const MUTATING: &[&str] = &[
     "outl_block_prop_delete",
     "outl_batch",
     "outl_template_apply",
+    "outl_template_run",
     "outl_trash_restore",
 ];
 
@@ -102,7 +103,12 @@ pub fn call(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
         .ok_or_else(|| JsonRpcError::invalid_params("missing `name`"))?;
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-    let outcome: Result<Value, ApiError> = run_tool(name, &args, ctx);
+    let outcome: Result<Value, ApiError> = if MUTATING.contains(&name) {
+        ctx.prepare_write()
+            .and_then(|()| run_tool(name, &args, ctx))
+    } else {
+        run_tool(name, &args, ctx)
+    };
 
     if outcome.is_ok() && MUTATING.contains(&name) {
         ctx.invalidate_index();
@@ -440,5 +446,15 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
             crate::output::codes::INVALID_ARG,
             format!("unknown tool `{other}`"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MUTATING;
+
+    #[test]
+    fn template_run_is_classified_as_mutating() {
+        assert!(MUTATING.contains(&"outl_template_run"));
     }
 }

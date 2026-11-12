@@ -296,6 +296,81 @@ fn concurrent_sessions_write_under_one_actor_without_the_watcher() {
     assert_eq!(b.actor_files(), before);
 }
 
+/// Create a page through a separate CLI process; returns success.
+fn cli_create(b: &Machine, slug: &str) -> bool {
+    b.outl()
+        .args(["page", "create", slug])
+        .output()
+        .expect("run outl page create")
+        .status
+        .success()
+}
+
+/// Wait until a CLI writer gets the device actor again: no new actor file.
+fn assert_cli_gets_device_actor(b: &Machine, slug: &str) {
+    let before = b.actor_files();
+    assert!(cli_create(b, slug), "CLI write failed");
+    assert_eq!(
+        b.actor_files(),
+        before,
+        "the CLI writer must use the device actor, not mint one"
+    );
+}
+
+#[test]
+fn no_watch_idle_mcp_leaves_the_device_actor_to_a_cli_writer() {
+    let b = Machine::new();
+    // Create the device actor's own files first so the baseline includes them.
+    assert!(cli_create(&b, "seed"));
+    let _serve = b.spawn("serve", &["serve", "--no-watch"]);
+    b.wait_for_socket();
+    // Let the warm-up finish.
+    std::thread::sleep(Duration::from_secs(2));
+    assert_cli_gets_device_actor(&b, "while-idle");
+}
+
+#[test]
+fn no_watch_releases_the_device_actor_when_the_last_session_closes() {
+    let b = Machine::new();
+    assert!(cli_create(&b, "seed"));
+    let _serve = b.spawn("serve", &["serve", "--no-watch"]);
+    let sock = b.wait_for_socket();
+    {
+        let mut s = Session::connect(&sock);
+        s.write_page("from-mcp");
+    } // disconnected
+      // The server notices the close on its session thread; poll the CLI.
+    let before = b.actor_files();
+    wait(|| {
+        let ok = cli_create(&b, &format!("after-{}", b.actor_files().len()));
+        (b.actor_files() == before && ok).then_some(())
+    });
+}
+
+#[test]
+fn no_watch_mutating_tool_errors_while_another_process_holds_the_actor() {
+    let b = Machine::new();
+    assert!(cli_create(&b, "seed"));
+    let _serve = b.spawn("serve", &["serve", "--no-watch"]);
+    let sock = b.wait_for_socket();
+    // A long-lived writer in another process: `outl serve` in watch mode takes
+    // the device actor's write lock (the socket stays with the first serve).
+    let mut holder = b.spawn("holder", &["serve", "--no-sync", "--no-mcp"]);
+    holder.wait_for_log("watching pages/");
+    assert!(holder.running(), "the holder must keep running");
+    let before = b.actor_files();
+    let mut s = Session::connect(&sock);
+    let v = s.call(
+        "tools/call",
+        json!({"name": "outl_page_create", "arguments": {"slug": "nope", "title": "x"}}),
+    );
+    assert_eq!(v["result"]["isError"], true, "{v}");
+    assert!(v.to_string().contains("holds the device actor"), "{v}");
+    s.tool("outl_page_list", json!({}));
+    assert_eq!(b.actor_files(), before, "no ephemeral actor may appear");
+    drop(holder);
+}
+
 /// Drive `outl mcp serve` over its stdio with one write.
 fn stdio_write(b: &Machine, name: &str, extra: &[&str]) -> Proc {
     let log = std::fs::File::create(b.log(name)).expect("log");

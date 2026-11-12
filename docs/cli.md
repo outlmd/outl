@@ -483,8 +483,8 @@ So:
 - **`outl serve --no-watch`** — the mode to leave running beside a GUI you also use. No write lock, no ephemeral actors.
 - **`outl serve`** — both halves, for a headless box where nothing else opens the workspace.
 
-With `--no-watch` the embedded MCP opens the workspace once, lazily, under the device actor.
-If a GUI already holds that actor it serves reads only instead of minting an ephemeral one, so run `--no-mcp` there if you would rather not have it.
+With `--no-watch` the embedded MCP holds no write lock while idle: it reads through a read open and takes the device actor only once a session calls a mutating tool, releasing it when the last session closes.
+If a GUI holds that actor, the mutating tool fails with an explicit error (reads keep working) instead of minting an ephemeral actor.
 
 That headless box is packaged: the repo ships a `Dockerfile` and a `docker-compose.yml` that run exactly this.
 See [Self-hosting an always-on peer](self-hosting.md) — the pairing direction and the two persistent volumes are the parts that are not guessable.

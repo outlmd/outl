@@ -142,7 +142,10 @@ On a machine that already runs `outl serve` as its daemon, you do not need a sec
   Each connection is one MCP session (the same newline-delimited JSON-RPC as stdio), served on its own thread.
   All sessions share the daemon's single open workspace, so they are serialized, replay the op log once (warmed in the background at startup), and write under **one** actor: the device actor.
   No session ever mints an ephemeral actor, so there is no `ops-<ulid>.jsonl` or lock file left per session.
-  If another process already holds the device actor (for example a GUI, with `--no-watch`), the embedded server serves reads only and says so, rather than minting one.
+  With the watcher, the daemon already holds the device actor and every session shares it.
+  With `--no-watch` the server holds **no** write lock while idle: warm-up and read tools use a read open, and a mutating tool takes the device actor (and only it) first.
+  The lock is released when the last connected session closes, so a GUI started later keeps the device actor.
+  If another process (for example a GUI) holds it, the mutating tool returns an error saying so, reads keep working, and no ephemeral actor is minted.
 - **Bridge.**
   `outl mcp serve` first looks for a live socket for the workspace.
   If one answers, it pipes stdin/stdout to it and opens nothing: no workspace load, no lock, no actor.
