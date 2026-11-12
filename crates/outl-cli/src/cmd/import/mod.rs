@@ -8,8 +8,8 @@
 //! handling, workspace bootstrap, report printing.
 //!
 //! `outl import auto <src> <dst>` picks the adapter from the source's
-//! shape (Roam = JSON file, Logseq = graph dir, Obsidian = vault with
-//! `.obsidian/`).
+//! shape (Roam = JSON file, Logseq DB = EDN graph export, Logseq =
+//! graph dir, Obsidian = vault with `.obsidian/`).
 //!
 //! Re-import safety (is this destination safe to write into, and is a
 //! half-finished import resumable) lives in [`guard`].
@@ -21,7 +21,8 @@ use guard::{
     clear_marker, guard_foreign_destination, guard_workspace, read_marker, recovery_hint,
     write_marker,
 };
-use outl_import::adapters::{LogseqAdapter, ObsidianAdapter, RoamAdapter};
+use outl_import::adapters::logseq_db::{db_graph_dir_message, is_db_graph_dir};
+use outl_import::adapters::{LogseqAdapter, LogseqDbAdapter, ObsidianAdapter, RoamAdapter};
 use outl_import::SourceAdapter;
 use std::path::Path;
 
@@ -46,10 +47,13 @@ pub fn run(source: &str, src: &Path, dst: &Path, flags: ImportFlags) -> Result<(
     let adapter: &dyn SourceAdapter = match source {
         "roam" => &RoamAdapter,
         "logseq" => &LogseqAdapter,
+        "logseq-db" => &LogseqDbAdapter,
         "obsidian" => &ObsidianAdapter,
         "auto" => auto_detect(src)?,
         other => {
-            anyhow::bail!("unknown import source: {other} (expected: roam, logseq, obsidian, auto)")
+            anyhow::bail!(
+                "unknown import source: {other} (expected: roam, logseq, logseq-db, obsidian, auto)"
+            )
         }
     };
     run_adapter(adapter, src, dst, flags)
@@ -66,15 +70,24 @@ fn auto_detect(src: &Path) -> Result<&'static dyn SourceAdapter> {
     if RoamAdapter::detect(src) {
         return Ok(&RoamAdapter);
     }
+    if LogseqDbAdapter::detect(src) {
+        return Ok(&LogseqDbAdapter);
+    }
     if ObsidianAdapter::detect(src) {
         return Ok(&ObsidianAdapter);
+    }
+    // A DB graph directory matches no file layout: without this it would
+    // fall through to the generic message, or (via `logseq`) import nothing.
+    if is_db_graph_dir(src) {
+        anyhow::bail!("{}", db_graph_dir_message(src));
     }
     if LogseqAdapter::detect(src) {
         return Ok(&LogseqAdapter);
     }
     anyhow::bail!(
         "could not auto-detect the source format of {} — pass it explicitly \
-         (roam = JSON backup file, logseq = graph directory, obsidian = vault directory)",
+         (roam = JSON backup file, logseq = graph directory, logseq-db = EDN graph export, \
+         obsidian = vault directory)",
         src.display()
     )
 }
@@ -262,5 +275,44 @@ mod tests {
         }
         let adapter = auto_detect(dir.path()).expect("detects");
         assert_eq!(adapter.id(), "obsidian");
+    }
+
+    /// A Logseq DB graph directory (db.sqlite, no pages/ + journals/)
+    /// used to import as 0 pages with no error. Every entry point must
+    /// now say how to export it instead.
+    #[test]
+    fn a_logseq_db_graph_directory_is_explained_by_every_entry_point() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("db.sqlite"), b"SQLite format 3\0").expect("write");
+        let dst = dir.path().join("dst");
+        let flags = ImportFlags {
+            dry_run: true,
+            ..ImportFlags::default()
+        };
+        for source in ["auto", "logseq", "logseq-db"] {
+            let err =
+                run(source, dir.path(), &dst, flags).expect_err("a DB graph directory is refused");
+            let msg = format!("{err:#}");
+            assert!(msg.contains("Export EDN file"), "{source}: {msg}");
+            assert!(msg.contains("outl import logseq-db"), "{source}: {msg}");
+        }
+    }
+
+    /// `auto` routes a datoms EDN export to the DB adapter, and a
+    /// page-level EDN snippet to the generic "pass it explicitly" error.
+    #[test]
+    fn auto_detect_picks_logseq_db_for_a_datoms_export_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let good = dir.path().join("graph.edn");
+        std::fs::write(
+            &good,
+            "{:logseq.db.sqlite.export/graph-format :datoms, :datoms []}",
+        )
+        .expect("write");
+        assert_eq!(auto_detect(&good).expect("detects").id(), "logseq-db");
+
+        let page = dir.path().join("page.edn");
+        std::fs::write(&page, "{:logseq.db.sqlite.export/export-type :page}").expect("write");
+        assert!(auto_detect(&page).is_err());
     }
 }

@@ -324,7 +324,7 @@ outl/
     ├── outl-exec/             # code-block runtime (desktop + mobile)
     ├── outl-plugins/          # plugin runtime, manifest, permission gating, host API
     ├── outl-sync-iroh/        # iroh QUIC transport: endpoint, pairing, op-log delta sync
-    ├── outl-import/           # adapter-based graph importers (Roam, Logseq, Obsidian + auto-detect)
+    ├── outl-import/           # adapter-based graph importers (Roam, Logseq, Logseq DB EDN export, Obsidian + auto-detect)
     ├── outl-config/           # `outl.toml` parsing + schema
     ├── outl-theme/            # palette + presets (TUI + desktop)
     ├── outl-telemetry/        # crash-report gate + payload scrubber (the one owner of what leaves the machine)

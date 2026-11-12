@@ -174,7 +174,7 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
   The predicate is six conditions because `Op::Create` is idempotent: an adjacent `Create`+`Move` pair reads as "the `Move` is inert" *or* as trashed-then-restored, where the `Move` is the op doing the work, and the file cannot tell you which.
   Full behaviour: [`docs/cli.md`](../../docs/cli.md#outl-compact), predicate and soundness: [RFC 0256](../../docs/rfcs/0256-op-log-compaction.md).
 - `outl migrate-to-shared [<path>]` — copy local sqlite log into shared `ops/` JSONL for cross-device sync.
-- `outl import roam|logseq|obsidian|auto <src> <dst>` — graph import.
+- `outl import roam|logseq|logseq-db|obsidian|auto <src> <dst>` — graph import.
   Every source routes through the adapter-based `outl-import` crate (`--dry-run`, `--json`, `--preserve-timestamps`; real `((blk-XXXXXX))` ref/embed resolution, `Op::SetCollapsed`).
   `auto` picks the adapter from the source's shape.
   A non-dry run **refuses a destination that already holds content** (`cmd/import/guard.rs`): re-importing overwrites those pages and reconciles the result, erasing anything written in outl since the last import.

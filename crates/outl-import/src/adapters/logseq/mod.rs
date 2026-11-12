@@ -22,7 +22,7 @@
 //! - filename decoding: `%2F` → `/`, `___` → space; journal stems
 //!   `2026_05_25` → ISO date
 
-mod inline;
+pub(crate) mod inline;
 #[cfg(test)]
 mod tests;
 
@@ -55,6 +55,13 @@ impl SourceAdapter for LogseqAdapter {
             return Err(ImportError::Parse(format!(
                 "logseq source must be the graph directory (got {})",
                 src.display()
+            )));
+        }
+        // A DB-version graph holds db.sqlite and none of pages/ + journals/;
+        // scanning it as a file graph would report 0 pages with no error.
+        if super::logseq_db::is_db_graph_dir(src) {
+            return Err(ImportError::Parse(super::logseq_db::db_graph_dir_message(
+                src,
             )));
         }
 
