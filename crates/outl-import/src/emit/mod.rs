@@ -119,9 +119,7 @@ fn discard_stale_page(
         .tree()
         .properties_of(page_id)
         .map(|(k, _)| k.to_string())
-        .filter(|k| {
-            !outl_actions::tree::is_page_model_key(k) && k != outl_actions::page::TITLE_KEY
-        })
+        .filter(|k| !outl_actions::tree::is_page_model_key(k) && k != outl_actions::page::TITLE_KEY)
         .collect();
     if children.is_empty() && stale_props.is_empty() {
         return Ok(());
