@@ -13,6 +13,7 @@ Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences.
 Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
 `LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
 A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
+A Roam `{{[[table]]}}` block becomes one [pipe-table](markdown-format.md#tables) block: its first row is the header, and a table with merged cells, multi-line or attribute cells, or a cell another block refers to keeps its subtree as it was.
 Obsidian: frontmatter → `key:: value` properties, wiki-link variants collapse to `[[Note]]`.
 Referenced local files are pulled into the workspace's `assets/` dir, content-addressed.
 A local attachment (`![](../assets/pic.png)`) is copied and its link is rewritten to `[name](assets/<hash>.<ext>)`.
@@ -102,7 +103,7 @@ So the report also carries a `reconciliation` block (Roam today; other adapters 
     in the op log:     12/12 emitted blocks confirmed on disk after reconcile
 ```
 
-Every legitimate reducer is subtracted by name — pages merged onto the same journal date, pages skipped (each listed under `skipped:` with the blocks that went down with it), and blocks promoted into page properties (`blocks_lifted_to_props`).
+Every legitimate reducer is subtracted by name — pages merged onto the same journal date, pages skipped (each listed under `skipped:` with the blocks that went down with it), blocks promoted into page properties (`blocks_lifted_to_props`), and Roam table cells folded into their table's block (`blocks_folded_into_tables`).
 Whatever is left over is unexplained loss, and the human output says so in a block you can't miss (`UNACCOUNTED CONTENT — the import does not add up`), with the same numbers available under `reconciliation` in `--json`.
 
 The `in the op log` line closes the other half of the contract.

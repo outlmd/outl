@@ -54,6 +54,11 @@ pub struct ImportReport {
     /// Org-style `DEADLINE:`/`SCHEDULED:` timestamps converted to
     /// `[[YYYY-MM-DD]]` date links (issue #63 model).
     pub org_dates_converted: usize,
+    /// Roam `{{[[table]]}}` blocks folded into one pipe-table block.
+    pub tables_converted: usize,
+    /// Cell blocks a table fold turned into rows of its table block.
+    /// Another legitimate reducer of the emitted block count.
+    pub blocks_folded_into_tables: usize,
     /// Blocks that stopped being blocks because their content was
     /// promoted to page properties (a leading pure-attribute block).
     /// A legitimate reducer of the emitted block count — tracked so the
@@ -159,9 +164,11 @@ pub struct Reconciliation {
     pub emitted_blocks: usize,
     /// Blocks promoted to page properties instead of staying blocks.
     pub blocks_lifted_to_props: usize,
+    /// Table cell blocks folded into their table's block.
+    pub blocks_folded_into_tables: usize,
     /// Blocks that belonged to a skipped page.
     pub blocks_skipped: usize,
-    /// `source − emitted − lifted − skipped`: blocks that vanished with
+    /// `source − emitted − lifted − folded − skipped`: blocks that vanished with
     /// no reported reason. Non-zero means the pipeline lost content.
     pub blocks_unaccounted: usize,
     /// Blocks confirmed in the destination's op log after the import.
@@ -233,7 +240,10 @@ impl ImportReport {
         let blocks_skipped: usize = self.skipped.iter().map(|s| s.blocks_dropped).sum();
         let emitted_pages = self.pages + self.journals;
         let pages_accounted = emitted_pages + self.pages_merged + pages_skipped;
-        let blocks_accounted = self.blocks + self.blocks_lifted_to_props + blocks_skipped;
+        let blocks_accounted = self.blocks
+            + self.blocks_lifted_to_props
+            + self.blocks_folded_into_tables
+            + blocks_skipped;
         // Downstream half of the contract: the counters above stop at
         // render, so they can't see a page that failed to write, failed
         // to reconcile, or lost blocks in the matcher. Only measured on
@@ -255,6 +265,7 @@ impl ImportReport {
             source_blocks: self.source_blocks,
             emitted_blocks: self.blocks,
             blocks_lifted_to_props: self.blocks_lifted_to_props,
+            blocks_folded_into_tables: self.blocks_folded_into_tables,
             blocks_skipped,
             blocks_unaccounted: self.source_blocks.saturating_sub(blocks_accounted),
             balanced: pages_accounted == self.source_pages
@@ -324,6 +335,12 @@ impl ImportReport {
             println!(
                 "  multi-word tags:     {} became [[page refs]]",
                 self.tags_multiword_to_page_ref
+            );
+        }
+        if self.tables_converted > 0 {
+            println!(
+                "  tables:              {} became pipe tables",
+                self.tables_converted
             );
         }
         if self.org_dates_converted > 0 {
@@ -417,6 +434,12 @@ impl ImportReport {
             "    blocks:            {}/{} emitted ({} lifted to page props, {} in skipped pages)",
             r.emitted_blocks, r.source_blocks, r.blocks_lifted_to_props, r.blocks_skipped
         );
+        if r.blocks_folded_into_tables > 0 {
+            println!(
+                "                       {} table cells folded into their table block",
+                r.blocks_folded_into_tables
+            );
+        }
         if r.landing_measured {
             println!(
                 "    in the op log:     {}/{} emitted blocks confirmed on disk after reconcile",

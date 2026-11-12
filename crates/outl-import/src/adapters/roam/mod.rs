@@ -91,7 +91,7 @@ impl SourceAdapter for RoamAdapter {
 
     fn parse(&self, src: &Path, report: &mut ImportReport) -> Result<ImportGraph, ImportError> {
         let text = std::fs::read_to_string(src).map_err(|e| ImportError::io(src, e))?;
-        let pages: Vec<RoamPage> = serde_json::from_str(&text)
+        let mut pages: Vec<RoamPage> = serde_json::from_str(&text)
             .map_err(|e| ImportError::Parse(format!("roam backup JSON: {e}")))?;
 
         // Roam images are firebase-hosted URLs, so relative resolution
@@ -105,6 +105,10 @@ impl SourceAdapter for RoamAdapter {
             .iter()
             .map(|p| count_blocks(&p.children))
             .sum::<usize>();
+
+        // After the source counts: a folded table's cells are reported
+        // as folded, not lost.
+        table::fold_tables(&mut pages, report);
 
         let mut graph = ImportGraph::default();
         // Whether each emitted page is a journal NOT titled the way Roam
@@ -194,6 +198,9 @@ impl SourceAdapter for RoamAdapter {
         Ok(graph)
     }
 }
+
+// `{{[[table]]}}` subtrees → one pipe-table block, run by `parse`.
+mod table;
 
 /// Warning scope for findings that belong to the whole import rather
 /// than to one page.
