@@ -23,7 +23,7 @@
       "@tauri-apps/plugin-opener": "^2.5.4",
       "@tauri-apps/plugin-os": "^2.3.2",
       "@types/node": "^26.6.6",
-      "@vitest/ui": "^4.1.10",
+      "@vitest/ui": "^5.1.0",
       "happy-dom": "^21.0.4",
       "solid-js": "^1.9.18",
       "tailwindcss": "^4.3.3",
