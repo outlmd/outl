@@ -28,6 +28,10 @@
 
 mod append;
 mod census;
+#[cfg(test)]
+mod idx_hole_tests;
+mod idx_lock;
+mod persist;
 mod read;
 #[cfg(test)]
 mod read_robustness;

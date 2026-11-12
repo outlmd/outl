@@ -327,6 +327,14 @@ pub async fn ingest_ops(
     Ok(applied)
 }
 
+/// How many distinct ops of `actor` this device advertises in its vector
+/// clock — the number a peer compares its own count against to decide
+/// whether we have a gap.
+pub fn advertised_op_count(workspace_root: &Path, actor: ActorId) -> Result<u64> {
+    let clock = crate::oplog_census::local_vector_clock(&workspace_root.join("ops"))?;
+    Ok(clock.get(&actor).map_or(0, |c| c.count))
+}
+
 /// [`run_delta_sync`] with a live progress sink, so a test can assert what the
 /// user is TOLD, not only whether the sync converged.
 ///
