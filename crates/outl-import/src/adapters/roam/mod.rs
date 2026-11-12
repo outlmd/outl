@@ -368,6 +368,7 @@ fn convert_content(
     }
 
     let pre = convert_org_dates(raw, report);
+    let pre = pdf::link_pdf_components(&pre, report);
     // Pull image/file links out to placeholders before tokenizing; a
     // remote `![](https://…)` becomes an `AssetSource::Remote` ref.
     let pre = scan_assets(&pre, base_dir, assets);
@@ -400,6 +401,9 @@ fn convert_content(
 
     BlockContent::Inline(toks)
 }
+
+// `{{[[pdf]]: url}}` → `[name](url)`, run by `convert_content`.
+mod pdf;
 
 /// `Some(raw)` when the token list is exactly one query component
 /// (plus whitespace).

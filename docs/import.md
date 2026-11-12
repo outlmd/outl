@@ -9,7 +9,7 @@ Split out of [`cli.md`](cli.md), which is the command reference: the dialect tra
 `((uid))` block refs and `{{embed}}`s resolve to real `((blk-XXXXXX))` handles, not page-link fallbacks.
 Folded blocks (Roam `open: false`, Logseq `collapsed:: true`) land as `Op::SetCollapsed`.
 Each dialect is translated on the way in.
-Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences.
+Roam: `__italic__` → `*italic*`, flat `{{[[query]]}}` → ` ```query ` fences, `{{[[pdf]]: url}}` → a `[name](url)` file link (counted as `pdf embeds`; a local path is copied into `assets/` like any attachment).
 Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
 `LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
 A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
