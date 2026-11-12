@@ -119,6 +119,11 @@ export function AppShell() {
     }
   }
 
+  /** Shared by the macOS menu item and the Settings button. */
+  function switchWorkspaceHere(): Promise<boolean> {
+    return switchWorkspace({ setError, reload: loadToday });
+  }
+
   async function loadToday() {
     try {
       const view = await openTodayJournal();
@@ -326,7 +331,7 @@ export function AppShell() {
     // File → Switch Workspace… (native menu). `loadToday` runs after the
     // store is reset, so the new workspace opens on its own journal.
     const unlistenSwitch = await onMenuSwitchWorkspace(() => {
-      void switchWorkspace({ setError, reload: loadToday });
+      void switchWorkspaceHere();
     });
     onCleanup(() => unlistenSwitch());
 
@@ -417,7 +422,7 @@ export function AppShell() {
       <Picker onPicked={applyView} handlers={handlers()} />
       <QuickCapture applyView={applyView} />
       <PluginMarketplace />
-      <SettingsModal />
+      <SettingsModal onSwitchWorkspace={switchWorkspaceHere} />
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
       <TasksPanel applyView={applyView} setError={setError} />

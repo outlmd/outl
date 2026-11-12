@@ -22,17 +22,22 @@ import { getSettings, updateSettings, type Settings } from "../lib/api";
 import { appState, setAppState } from "../lib/store";
 import { SyncPanel } from "./SyncPanel";
 import { rovingKeydown } from "../lib/keyboard-reach";
+import { switchWorkspaceHint } from "../lib/switch-workspace";
 
 /**
  * Settings modal, opened via `Cmd/Ctrl+,`.
  *
  * Edits the desktop-local preferences (vim mode, theme, font size).
  * `last_workspace` is shown read-only — it's swapped through the
- * file picker, not edited as text. The modal is unmounted while
+ * folder dialog (the "Switch…" button, plus File → Switch Workspace… on
+ * macOS), not edited as text. The modal is unmounted while
  * `appState.settingsOpen === false` so the resource load only fires
  * the first time the user opens it.
  */
-export function SettingsModal() {
+export function SettingsModal(props: {
+  /** Runs the switch flow; resolves `true` once the workspace changed. */
+  onSwitchWorkspace: () => Promise<boolean>;
+}) {
   const [draft, setDraft] = createSignal<Settings | null>(null);
   const [busy, setBusy] = createSignal(false);
   /**
@@ -148,6 +153,26 @@ export function SettingsModal() {
   });
 
   /**
+   * Keep the workspace path honest across a switch. The draft is read once
+   * at mount, and a switch (the button below or File → Switch Workspace…
+   * on macOS) happens outside it, so without this the modal would show the
+   * workspace just left and Save would write that path back. Only
+   * `last_workspace` is refreshed: the rest of the draft may hold edits
+   * the user has not saved.
+   */
+  createEffect(() => {
+    if (!appState.settingsOpen) return;
+    void (async () => {
+      try {
+        const { last_workspace } = await getSettings();
+        setDraft((d) => (d ? { ...d, last_workspace } : d));
+      } catch {
+        // The mount read reports a broken settings file; keep what we have.
+      }
+    })();
+  });
+
+  /**
    * Flip the crash-reporting flag, moving the checkbox only once the
    * write has landed.
    *
@@ -180,6 +205,17 @@ export function SettingsModal() {
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /**
+   * Close only once the workspace really changed. The draft still holds
+   * the old `last_workspace`, and Save writes that field back, so leaving
+   * the modal open over a new workspace would let the next Save point the
+   * app at the one just left. A cancelled dialog or a failure (already on
+   * the toast) keeps the modal and its unsaved edits as they were.
+   */
+  async function switchWorkspace() {
+    if (await props.onSwitchWorkspace()) close();
   }
 
   async function save() {
@@ -360,11 +396,20 @@ export function SettingsModal() {
 
               <div>
                 <div class="text-sm font-medium">Workspace</div>
-                <div class="mt-1 truncate rounded bg-(--color-outl-fg)/5 px-2 py-1 font-mono text-xs opacity-70">
-                  {draft()!.last_workspace ?? "(none)"}
+                <div class="mt-1 flex items-center gap-2">
+                  <div class="min-w-0 flex-1 truncate rounded bg-(--color-outl-fg)/5 px-2 py-1 font-mono text-xs opacity-70">
+                    {draft()!.last_workspace ?? "(none)"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void switchWorkspace()}
+                    class="shrink-0 rounded bg-(--color-outl-fg)/15 px-3 py-1 text-xs font-medium hover:bg-(--color-outl-fg)/25"
+                  >
+                    Switch…
+                  </button>
                 </div>
                 <div class="mt-1 text-xs opacity-50">
-                  Use File → Switch Workspace… to change.
+                  {switchWorkspaceHint()}
                 </div>
               </div>
 
