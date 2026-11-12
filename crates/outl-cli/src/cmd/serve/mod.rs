@@ -219,9 +219,7 @@ pub fn run(path: &Path, once: bool, watch: bool, sync: bool, mcp: bool) -> Resul
         // because the sweep renders every page, and a sync burst would
         // otherwise render the graph once per batch.
         if projection_due && last_projection.elapsed() >= PROJECTION_MIN_INTERVAL {
-            shared.run_locked(|wc| {
-                project_stale_pages(&wc.workspace, &paths.root, &mut reporter)
-            });
+            shared.run_locked(|wc| project_stale_pages(&wc.workspace, &paths.root, &mut reporter));
             projection_due = false;
             last_projection = std::time::Instant::now();
         }

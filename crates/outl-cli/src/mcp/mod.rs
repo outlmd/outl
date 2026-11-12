@@ -372,9 +372,8 @@ impl ServerCtx {
                 let derived = shared.with_ws(&self.workspace_path, |wc| {
                     Ok(outl_actions::index::derive(&wc.workspace, &wc.root))
                 });
-                state.index = Some(
-                    derived.unwrap_or_else(|_| WorkspaceIndex::build(&self.workspace_path)),
-                );
+                state.index =
+                    Some(derived.unwrap_or_else(|_| WorkspaceIndex::build(&self.workspace_path)));
             }
             return f(state.index.as_ref().expect("index just populated"));
         }
