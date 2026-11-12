@@ -353,9 +353,11 @@ fn no_watch_mutating_tool_errors_while_another_process_holds_the_actor() {
     assert!(cli_create(&b, "seed"));
     let _serve = b.spawn("serve", &["serve", "--no-watch"]);
     let sock = b.wait_for_socket();
-    // A long-lived writer (the TUI-like holder): `outl serve` in watch mode
-    // is not available (socket taken), so hold the lock with the library.
-    let guard = outl_ws::open(&b.ws).expect("hold the device actor");
+    // A long-lived writer in another process: `outl serve` in watch mode takes
+    // the device actor's write lock (the socket stays with the first serve).
+    let mut holder = b.spawn("holder", &["serve", "--no-sync", "--no-mcp"]);
+    holder.wait_for_log("watching pages/");
+    assert!(holder.running(), "the holder must keep running");
     let before = b.actor_files();
     let mut s = Session::connect(&sock);
     let v = s.call(
@@ -366,7 +368,7 @@ fn no_watch_mutating_tool_errors_while_another_process_holds_the_actor() {
     assert!(v.to_string().contains("holds the device actor"), "{v}");
     s.tool("outl_page_list", json!({}));
     assert_eq!(b.actor_files(), before, "no ephemeral actor may appear");
-    drop(guard);
+    drop(holder);
 }
 
 /// Drive `outl mcp serve` over its stdio with one write.

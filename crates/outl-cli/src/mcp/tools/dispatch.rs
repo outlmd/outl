@@ -91,6 +91,7 @@ const MUTATING: &[&str] = &[
     "outl_block_prop_delete",
     "outl_batch",
     "outl_template_apply",
+    "outl_template_run",
     "outl_trash_restore",
 ];
 
@@ -444,5 +445,15 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
             crate::output::codes::INVALID_ARG,
             format!("unknown tool `{other}`"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MUTATING;
+
+    #[test]
+    fn template_run_is_classified_as_mutating() {
+        assert!(MUTATING.contains(&"outl_template_run"));
     }
 }
