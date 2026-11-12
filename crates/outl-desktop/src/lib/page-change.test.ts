@@ -70,4 +70,39 @@ describe("installPageChangeEffect", () => {
     expect(appState.focusBlockId).toBeNull();
     expect(appState.selectedBlockId).toBe("x");
   });
+
+  it("applyView order (page, then outline) clears the zoom and selects the new first block", () => {
+    mount();
+    setAppState("focusBlockId", "a");
+    setAppState("selectedBlockId", "b");
+    setAppState("page", page("p2"));
+    setOutline([block("x"), block("y")]);
+    expect(appState.focusBlockId).toBeNull();
+    expect(appState.selectedBlockId).toBe("x");
+  });
+
+  it("snaps a stale selection to the first block on a same-id commit", () => {
+    mount();
+    setAppState("selectedBlockId", "b");
+    setAppState("page", page("p1"));
+    setOutline([block("a"), block("c")]);
+    expect(appState.selectedBlockId).toBe("a");
+  });
+
+  it("keeps a still-present selection on a same-id commit", () => {
+    mount();
+    setAppState("selectedBlockId", "b");
+    setOutline([block("a"), block("b"), block("c")]);
+    expect(appState.selectedBlockId).toBe("b");
+  });
+
+  it("keeps the zoom when a picker sets selection and focus after applying the view", () => {
+    mount();
+    setAppState("page", page("p2"));
+    setOutline([block("x", [block("x1")]), block("y")]);
+    setAppState("selectedBlockId", "x1");
+    setAppState("focusBlockId", "x");
+    expect(appState.focusBlockId).toBe("x");
+    expect(appState.selectedBlockId).toBe("x1");
+  });
 });
