@@ -14,9 +14,12 @@ Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state::
 `LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
 A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
 Obsidian: frontmatter → `key:: value` properties, wiki-link variants collapse to `[[Note]]`.
-Referenced files are pulled into the workspace's `assets/` dir, content-addressed.
-A local attachment (`![](../assets/pic.png)`) is copied and a remote image (Roam's firebase URLs) is downloaded; either way the link is rewritten to `[name](assets/<hash>.<ext>)`.
-A file that can't be pulled (missing, download failed, over `[assets] max_bytes`) keeps its original link and is counted in `assets missing` — never fatal.
+Referenced local files are pulled into the workspace's `assets/` dir, content-addressed.
+A local attachment (`![](../assets/pic.png)`) is copied and its link is rewritten to `[name](assets/<hash>.<ext>)`.
+A remote image (`![alt](https://…)`, such as Roam's firebase uploads) keeps the link the source wrote, URL and alt text included, and outl renders it from that URL; it is counted in `remote images kept`.
+`--download-remote-assets` downloads remote images into `assets/` too and points the link at the local copy, keeping the alt text as written; the URL is not kept, since a link holds one target.
+An encrypted upload (`….enc`, from an encrypted Roam graph) is never downloaded: its bytes are ciphertext, so its link always stays as written.
+A file that can't be pulled (missing, download failed, over `[assets] max_bytes`) keeps its original link and is counted in `assets missing`, never fatal.
 `--no-assets` skips all of that, keeping every original relative/remote link verbatim.
 A real (non-dry) import paints a live progress line on stderr — phase, page counter, percentage, current page, elapsed — TTY-only, so piped output stays clean.
 `--dry-run` parses and reports without writing a byte — run it against a real backup to measure fidelity before migrating.

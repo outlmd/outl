@@ -160,6 +160,7 @@ fn main() -> Result<()> {
             json,
             preserve_timestamps,
             no_assets,
+            download_remote_assets,
             force,
         }) => cmd::import::run(
             &format,
@@ -170,6 +171,7 @@ fn main() -> Result<()> {
                 json,
                 preserve_timestamps,
                 no_assets,
+                download_remote_assets,
                 force,
             },
         ),

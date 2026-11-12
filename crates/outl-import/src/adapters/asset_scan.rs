@@ -84,6 +84,7 @@ fn classify(
     if target.is_empty() {
         return None;
     }
+    let written_alt = alias;
     let alias = alias.trim();
 
     // Remote target. Only an **image embed** (`![](url)`) is an asset to
@@ -93,14 +94,11 @@ fn classify(
         if !is_embed {
             return None;
         }
-        let display = if alias.is_empty() {
-            url_leaf(target)
-        } else {
-            alias.to_string()
-        };
+        // The alt as written, empty included: a downloaded copy keeps
+        // it, never a label made up from the URL.
         return Some(AssetRef {
             source: AssetSource::Remote(target.to_string()),
-            display_name: display,
+            display_name: written_alt.to_string(),
             original: whole.to_string(),
         });
     }
@@ -194,17 +192,6 @@ fn path_leaf(target: &str) -> String {
     head.rsplit('/').next().unwrap_or(head).to_string()
 }
 
-/// Display name for a remote URL: the path leaf, or the raw URL when
-/// there's nothing better.
-fn url_leaf(url: &str) -> String {
-    let leaf = path_leaf(url);
-    if leaf.is_empty() {
-        url.to_string()
-    } else {
-        leaf
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,9 +247,9 @@ mod tests {
     }
 
     #[test]
-    fn remote_without_alias_uses_url_leaf() {
+    fn remote_without_alias_keeps_the_empty_alt() {
         let (_out, assets) = scan("![](https://host.example/path/photo.jpg)");
-        assert_eq!(assets[0].display_name, "photo.jpg");
+        assert_eq!(assets[0].display_name, "");
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub struct ImportFlags {
     pub preserve_timestamps: bool,
     /// Skip pulling referenced files into `assets/` — keep original links.
     pub no_assets: bool,
+    /// Also download remote images into `assets/` (off: keep the URL).
+    pub download_remote_assets: bool,
     /// Import into a destination that already holds content, overwriting
     /// it. Off by default — see [`guard::guard_workspace`].
     pub force: bool,
@@ -198,6 +200,7 @@ fn run_adapter(
     let opts = outl_import::ImportOptions {
         preserve_timestamps: flags.preserve_timestamps,
         import_assets: !flags.no_assets,
+        download_remote_assets: flags.download_remote_assets,
         max_bytes: outl_config::load().assets.max_bytes,
     };
 

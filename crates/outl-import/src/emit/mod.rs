@@ -133,6 +133,12 @@ pub fn dry_run(graph: &ImportGraph, opts: &ImportOptions, report: &mut ImportRep
     // It counts every referenced asset as "would copy" — the optimistic
     // estimate — rather than downloading or stat'ing anything.
     if opts.import_assets {
-        report.assets_copied += graph.assets.len();
+        for asset in &graph.assets {
+            if assets::pulls(asset, opts) {
+                report.assets_copied += 1;
+            } else {
+                report.assets_remote_kept += 1;
+            }
+        }
     }
 }

@@ -388,7 +388,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl sync`                                  | —                       |
 | `outl telemetry status\|on\|off`             | —                       |
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
-| `outl import roam\|logseq\|logseq-db\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--force]` | — |
+| `outl import roam\|logseq\|logseq-db\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--download-remote-assets] [--force]` | — |
 
 `init`, `serve`, `reconcile`, `recover`, `compact`, `import`, `mcp serve`, `peer`, `plugin`, and `sync` are CLI-only on purpose — they're either interactive, long-running, or bootstrap commands that don't fit a tool-call shape.
 `telemetry` is CLI-only for a different reason: it is a person's consent, and MCP is a program's surface rather than a person's.
