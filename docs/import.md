@@ -115,6 +115,8 @@ A gap prints as `CONTENT NEVER REACHED THE OP LOG` and makes `balanced` false.
 Warnings are listed in full under `--json`.
 The human output prints the first 20 and states how many it hid.
 
+A Roam task marker right after a list or quote prefix at the head of a block (`- {{[[TODO]]}} x`, `1. {{[[TODO]]}} x`, `> {{[[DONE]]}} x`) is the block's task, as Roam draws it: the block becomes `TODO - x`, `TODO 1. x` or `DONE > x`, with the prefix kept as written.
+
 One counted loss worth knowing about on Roam graphs: a `{{[[TODO]]}}` / `{{[[DONE]]}}` marker in the *middle* of a block keeps its literal `TODO`/`DONE` word but not its task state.
 outl models one task per block, driven by the marker at the block's head, so such a block won't answer `outl query --kind=task`.
 It's reported as `mid-block tasks` plus a single aggregate warning — one per import, not one per marker.

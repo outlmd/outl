@@ -1,7 +1,7 @@
 //! Golden tests for the Roam dialect — one case per fidelity-matrix row.
 
 use super::*;
-use crate::ir::{BlockContent, EmbedTarget, Inline};
+use crate::ir::{BlockContent, EmbedTarget, Inline, TaskState};
 use crate::report::ImportWarning;
 
 mod report;
