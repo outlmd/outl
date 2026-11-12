@@ -98,6 +98,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **`outl import --force` replaces pages instead of merging into them.**
+  A page present in the op log without its `.md` + sidecar (a paired replica, a server image) or sitting in the trash kept all its old blocks next to the imported ones, and a trashed page came back out of the trash with them.
+  The old blocks are now moved to the trash (logged in `orphans.log` first), the import report counts them as `replaced_blocks`, and pages the source does not contain are untouched.
+
 - **A phone's background sync reaches a peer that is online even when another one is asleep.**
   The forced sync pass behind `sync_now` dialed paired devices one after another, and every iOS background window waits on that pass: 12s for `BGAppRefreshTask`, 20s for the processing task and the flush.
   An unreachable peer costs up to 15s (5s direct + 10s relay), so with a laptop asleep at the head of `peers.json` the refresh window ran out before the always-on peer behind it was ever dialed, and the phone fell behind until someone opened the app.

@@ -350,6 +350,8 @@ pub(crate) enum Command {
         /// Import even when the destination already holds content —
         /// overwrites those pages and discards anything written in outl,
         /// or received from a paired device, since the last import.
+        /// Replaces every page the import writes; pages the source does
+        /// not have are left as they are.
         #[arg(long)]
         force: bool,
     },

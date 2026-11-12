@@ -15,6 +15,7 @@ use crate::progress::{ImportProgress, ProgressSink};
 use crate::report::ImportReport;
 use crate::{ImportDest, ImportOptions};
 use std::path::Path;
+use unicode_normalization::UnicodeNormalization;
 
 /// Full pipeline: render → write → reconcile → resolve.
 pub fn run(
@@ -54,6 +55,13 @@ pub fn run(
             total: pages.len(),
             page: &p.stem,
         });
+        if let Err(e) = discard_stale_page(&mut dest, p, report) {
+            report.warn(
+                &p.title,
+                format!("could not discard the previous content: {e}"),
+            );
+            continue;
+        }
         if let Err(e) =
             outl_md::reconcile_md(dest.workspace, dest.hlc, &p.path, Some(&dest.orphans))
         {
@@ -66,6 +74,74 @@ pub fn run(
 
     measure_landing(&pages, report);
     Ok(())
+}
+
+/// Make an emitted page replace, not merge into, what the workspace
+/// already holds under its slug.
+///
+/// `reconcile_md` on a `.md` with no sidecar derives the page id from
+/// the slug and starts with no known blocks, so every child the page
+/// node already has in the tree survives next to the freshly created
+/// ones — and a page node sitting in the trash is pulled back out with
+/// all of its old children. That suits ordinary reconcile; an import
+/// overwrites the pages it emits. With a sidecar beside the `.md` the
+/// matcher already trashes what the source dropped, so this is a no-op
+/// there (and on a resumed import, whose finished pages have sidecars).
+///
+/// The old children go to the trash through the op log, each recorded
+/// in `orphans.log` first (crate rule: logged before moved).
+fn discard_stale_page(
+    dest: &mut ImportDest<'_>,
+    page: &render::RenderedPage,
+    report: &mut ImportReport,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use outl_core::id::NodeId;
+    use std::io::Write;
+
+    if outl_md::sidecar::sidecar_path_for(&page.path).exists() {
+        return Ok(());
+    }
+    let stem = page
+        .path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let page_id = NodeId::from_slug(&stem.nfc().collect::<String>());
+    let children: Vec<NodeId> = outl_actions::tree::children_of(dest.workspace, page_id)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    if children.is_empty() {
+        return Ok(());
+    }
+    let mut discarded = 0usize;
+    for c in &children {
+        discarded += 1 + descendant_count(dest.workspace, *c);
+    }
+    if let Some(dir) = dest.orphans.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&dest.orphans)?;
+    let now = chrono::Local::now().to_rfc3339();
+    for c in &children {
+        writeln!(log, "{now}\tmd={}\tid={c}\thash=?", page.path.display())?;
+    }
+    log.flush()?;
+    for c in children {
+        outl_actions::block::delete(dest.workspace, dest.hlc, c)?;
+    }
+    report.replaced_blocks += discarded;
+    Ok(())
+}
+
+fn descendant_count(ws: &outl_core::workspace::Workspace, node: outl_core::id::NodeId) -> usize {
+    outl_actions::tree::children_of(ws, node)
+        .into_iter()
+        .map(|(id, _)| 1 + descendant_count(ws, id))
+        .sum()
 }
 
 /// Count what actually reached the destination's op log.
