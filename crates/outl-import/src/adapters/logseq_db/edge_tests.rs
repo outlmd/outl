@@ -205,7 +205,11 @@ fn a_block_with_only_a_code_display_type_is_a_code_block() {
 #[test]
 fn a_closed_value_code_display_type_is_a_code_block() {
     let mut fx = base();
-    fx.ent(50, Some("logseq.property.node/display-type.code"), Some("Code"));
+    fx.ent(
+        50,
+        Some("logseq.property.node/display-type.code"),
+        Some("Code"),
+    );
     fx.block(41, PROJECT, PROJECT, "a0", "let x = 1;");
     fx.raw(41, "logseq.property.node/display-type", "50");
     let (g, _) = parse_text(&fx.finish());

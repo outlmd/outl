@@ -140,7 +140,10 @@ fn the_page_lands_with_order_tasks_code_and_properties() {
     assert!(notes.contains("- TODO pack bags"), "{notes}");
     assert!(notes.contains("- DONE buy ticket"), "{notes}");
     // A fenced block's continuation lines sit two spaces under the bullet.
-    assert!(notes.contains("- ```rust\n  fn main() {}\n  ```"), "{notes}");
+    assert!(
+        notes.contains("- ```rust\n  fn main() {}\n  ```"),
+        "{notes}"
+    );
     assert!(notes.contains("reading-status:: In progress"), "{notes}");
     assert!(!notes.contains("outl-import:"), "no placeholders:\n{notes}");
 }
