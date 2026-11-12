@@ -315,15 +315,21 @@ fn stdio_write(b: &Machine, name: &str, extra: &[&str]) -> Proc {
                "params": {"name": name, "arguments": args}})
     };
     for (id, r) in [
-        req(
+        (
             1,
-            "outl_page_create",
-            json!({"slug": "via-stdio", "title": "x"}),
+            req(
+                1,
+                "outl_page_create",
+                json!({"slug": "via-stdio", "title": "x"}),
+            ),
         ),
-        req(
+        (
             2,
-            "outl_block_append",
-            json!({"page": "via-stdio", "text": "t"}),
+            req(
+                2,
+                "outl_block_append",
+                json!({"page": "via-stdio", "text": "t"}),
+            ),
         ),
     ] {
         writeln!(stdin, "{r}").expect("write");
