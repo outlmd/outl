@@ -1,7 +1,7 @@
 # CLAUDE.md — outl-import
 
 Adapter-based graph importers.
-Today: **Roam** (JSON backup), **Logseq** (graph dir), **Obsidian** (vault) — every source the CLI accepts routes through this crate; the legacy string pipeline in `outl-cli/src/cmd/import/` is gone.
+Today: **Roam** (JSON backup), **Logseq** (graph dir), **Logseq DB** (EDN graph export), **Obsidian** (vault) — every source the CLI accepts routes through this crate; the legacy string pipeline in `outl-cli/src/cmd/import/` is gone.
 `outl import auto <src> <dst>` picks the adapter via each adapter's `detect()`.
 
 ## Architecture: three stages, one owner each
@@ -139,6 +139,7 @@ src/
     ├── asset_scan.rs  # shared asset-link scanner: CommonMark link → AssetRef + placeholder
     ├── roam/          # mod.rs (JSON → IR) + inline.rs (dialect scanner) + tests.rs
     ├── logseq/        # mod.rs (outline parser) + inline.rs + tests.rs
+    ├── logseq_db/     # DB-version EDN export: edn/ (reader) + graph.rs (datoms → entities) + convert.rs / block.rs / props.rs / text.rs
     └── obsidian/      # mod.rs (frontmatter/wikilink policy) + stems.rs (collisions)
 
 tests/
@@ -146,8 +147,21 @@ tests/
 ├── roam_e2e.rs
 ├── roam_page_merge_e2e.rs  # pages sharing a slug / journal date merge
 ├── logseq_e2e.rs
+├── logseq_db_e2e.rs
 └── obsidian_e2e.rs    # ports every scenario the legacy pipeline covered
 ```
+
+## The Logseq DB adapter (`logseq_db/`)
+
+Reads `export-type :graph` / `graph-format :datoms` (Logseq 2.0.2: "Export graph > Export EDN file"), **not** `db.sqlite`.
+The module doc of `logseq_db/mod.rs` cites the Logseq sources the format was checked against; trust them over this summary.
+
+- A hand-written EDN reader (`edn.rs`, `edn/atoms.rs`) — no dependency, errors carry line/column.
+  The export's own types stay private to the module.
+- `graph.rs` validates the envelope (any other export shape fails with its name) and groups the `[e a v]` triples per entity.
+- `convert.rs` decides page / block / structural per entity and rebuilds each outline from `:block/parent` + `:block/order` (byte-wise); `block.rs` converts one block; `props.rs` owns status/priority/deadline and user properties; `text.rs` rewrites `[[<uuid>]]` / `#[[<uuid>]]` / `((<uuid>))` into the spellings the Logseq inline tokenizer (`logseq::inline::tokenize`, reused, not copied) already understands, so block refs reach the IR's `BlockRef`.
+- **The reconciliation closes by construction.** Every skip entry is a source page (`skipped.len()` is `pages_skipped`), so only things counted in `source_pages` get a `report.skip`; structural nodes (property definitions, closed values, built-in tags, value nodes, recycled / hidden blocks) go in **one aggregate `(graph)` warning** instead.
+- A DB graph *directory* is refused by `logseq`, `logseq-db` and `auto` through `logseq_db::db_graph_dir_message` — one owner for that wording.
 
 Dialect boundaries worth remembering:
 

@@ -7,6 +7,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **`outl import logseq-db` imports a Logseq DB graph from its EDN export** ([#355](https://github.com/outlmd/outl/issues/355), partial).
+  Logseq 2.x keeps a graph in `db.sqlite`; pointing `outl import logseq` at that directory used to report 0 pages and 0 blocks with no error.
+  It now fails with the steps to export (**Export graph → Export EDN file**), and `outl import logseq-db <export.edn> <dst>` (or `auto`) reads that file: pages, journals, tags, the ordered outline, page and block refs, tasks, code blocks and user properties, with everything it cannot translate counted in the report.
+  Reading `db.sqlite` directly, assets, whiteboards and the other EDN export shapes are not covered yet; [docs/import.md](docs/import.md#logseq-db-graphs-logseq-db) has the mapping.
+
 - **`#` opens the page picker on the desktop and the phone** ([#15](https://github.com/outlmd/outl/issues/15)).
   A tag is a page, so the trigger searches the same pages `[[` does.
   It accepts the **slug**, not the title: `#` has no closing delimiter, so the first space ends the tag, and inserting "Deep Work" would tag `#Deep` and leave "Work" sitting in the block as prose.

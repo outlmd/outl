@@ -313,11 +313,12 @@ pub(crate) enum Command {
     /// Import a graph from another outliner.
     Import {
         /// Source format: `roam` (JSON file), `logseq` (graph
-        /// directory), `obsidian` (vault directory), or `auto`
-        /// (detect from the source's shape).
+        /// directory), `logseq-db` (the EDN file from Logseq's "Export
+        /// graph > Export EDN file"), `obsidian` (vault directory), or
+        /// `auto` (detect from the source's shape).
         format: String,
-        /// Path to the Logseq graph directory, the Roam backup file,
-        /// or the Obsidian vault directory.
+        /// Path to the Logseq graph directory, the Logseq DB EDN export,
+        /// the Roam backup file, or the Obsidian vault directory.
         src: PathBuf,
         /// Destination workspace. Created if it doesn't exist yet.
         dst: PathBuf,
