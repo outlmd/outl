@@ -479,18 +479,13 @@ fn render_block(b: &ImportBlock, depth: usize, ctx: &mut Ctx<'_>) {
     props.extend(b.props.iter().cloned());
     if b.created.is_some() || b.edited.is_some() {
         if ctx.opts.preserve_timestamps {
-            // A `created::` / `edited::` the user wrote wins over the
-            // source's own timestamp, the same rule the page header
-            // follows. Writing both made the later line win in the op
-            // log, so the user's value was lost. It can sit in the
-            // lifted props or, for a block with prose, in the text.
-            let user_has = |key: &str| {
-                props.iter().any(|(k, _)| k.eq_ignore_ascii_case(key))
-                    || logical.lines().any(|l| {
-                        crate::adapters::scan::parse_prop_line(l.trim())
-                            .is_some_and(|(k, _)| k == key)
-                    })
-            };
+            // A `created::` / `edited::` property the user wrote wins
+            // over the source's own timestamp, the same rule the page
+            // header follows. Writing both made the later line win in
+            // the op log, so the user's value was lost. A line of that
+            // shape in a block with prose is text (the renderer escapes
+            // it), so it does not compete with the stamp.
+            let user_has = |key: &str| props.iter().any(|(k, _)| k.eq_ignore_ascii_case(key));
             let stamps = [("created", b.created), ("edited", b.edited)];
             let keep: Vec<(String, String)> = stamps
                 .into_iter()

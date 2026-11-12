@@ -31,7 +31,7 @@ fn projected(ws: &TestWs, rel: &str) -> String {
 #[test]
 fn a_user_created_attribute_beats_the_block_timestamp() {
     // A nested pure-attribute block (lifted to block properties) and a
-    // block with prose that carries its own `edited::` line.
+    // block with prose that carries an `edited::` line in its text.
     let json = r#"[
         {"title": "Clippings", "children": [
             {"string": "saved an article", "uid": "c0", "children": [
@@ -48,19 +48,24 @@ fn a_user_created_attribute_beats_the_block_timestamp() {
         projected(&ws, "pages/clippings.md"),
     ] {
         assert!(text.contains("created:: 2024-01-02\n"), "page:\n{text}");
-        assert!(text.contains("edited:: by hand\n"), "page:\n{text}");
         // Block c1 keeps its user `created::` and still gets Roam's
-        // `edited::`; block c2 keeps its user `edited::` and still gets
-        // Roam's `created::`. Block c0 has no stamps.
+        // `edited::`. Block c2's `edited:: by hand` is a line of its text
+        // (escaped so it stays text, as Roam shows it), so it does not
+        // compete with the stamps: c2 gets both. Block c0 has none.
+        assert!(
+            text.contains("- a note\n    \\edited:: by hand\n")
+                || text.contains("- a note\n  \\edited:: by hand\n"),
+            "page:\n{text}"
+        );
         assert_eq!(
             text.matches("created:: ").count(),
             2,
-            "one user value, one Roam stamp:\n{text}"
+            "c1's user value and c2's Roam stamp:\n{text}"
         );
         assert_eq!(
-            text.matches("edited:: ").count(),
+            text.matches("edited:: 2023-11-14T22:21:40").count(),
             2,
-            "one user value, one Roam stamp:\n{text}"
+            "Roam stamps on c1 and c2:\n{text}"
         );
     }
 }

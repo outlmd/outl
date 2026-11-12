@@ -8,6 +8,7 @@ Split out of [`cli.md`](cli.md), which is the command reference: the dialect tra
 `outl import` runs the adapter-based pipeline in the `outl-import` crate for every source (`roam` = JSON backup file, `logseq` = graph directory, `logseq-db` = the EDN export of a Logseq DB graph, `obsidian` = vault directory; `auto` detects from the source's shape).
 `((uid))` block refs and `{{embed}}`s resolve to real `((blk-XXXXXX))` handles, not page-link fallbacks.
 Folded blocks (Roam `open: false`, Logseq `collapsed:: true`) land as `Op::SetCollapsed`.
+A Roam block that is only `key:: value` lines becomes block properties; in a block that also has prose, those lines stay in the text, in the order written (Roam shows them as part of the block), escaped on disk as `\key:: value` so outl does not lift them out.
 Each dialect is translated on the way in.
 Roam: `__italic__` → `*italic*`, an org stamp (`DEADLINE: <2024-03-20 Wed>`, Logseq residue that Roam shows as plain text) kept exactly as written, flat `{{[[query]]}}` → ` ```query ` fences, `{{[[pdf]]: url}}` → a `[name](url)` file link (counted as `pdf embeds`; a local path is copied into `assets/` like any attachment).
 Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).

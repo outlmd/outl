@@ -99,12 +99,24 @@ fn is_fence_escapable(body: &str) -> bool {
 }
 
 /// A trimmed line whose leading backslash the parser drops on a
-/// continuation line: a bullet, a fence opener, or the escaped form of
-/// either.
+/// continuation line: a bullet, a fence opener, a `key:: value` line, or
+/// the escaped form of any of them.
 fn is_escapable(body: &str) -> bool {
     is_bullet_shaped(body)
         || crate::fence::fence_marker(body).is_some()
+        || is_property_shaped(body)
         || body.strip_prefix('\\').is_some_and(is_escapable)
+}
+
+/// `\key:: value`: a continuation line the renderer escaped, which the
+/// parser reads as text and not as a property.
+pub(crate) fn is_escaped_text(line: &str) -> bool {
+    line.strip_prefix('\\').is_some_and(is_escapable)
+}
+
+/// A line the parser would lift into a block property.
+fn is_property_shaped(body: &str) -> bool {
+    crate::property::parse_property_line(body.trim()).is_some()
 }
 
 /// Whether `line` closes a fence opened with `marker`, read the way
@@ -133,6 +145,10 @@ fn closes_fence(line: &str, marker: &str) -> bool {
 /// - A **fence opener with no closer in the same text** (`"intro\n```yaml"`,
 ///   with the YAML in the child blocks). Written verbatim the open fence
 ///   swallows the children, so several blocks come back as one.
+/// - A **continuation line shaped like a property** (`"intro\nsource:: x"`).
+///   Written verbatim the parser lifts it out of the text into a block
+///   property, so the line leaves the text and lands after it: the text
+///   and its order change on the first round trip.
 ///
 /// A line that already starts with a backslash in front of one of those
 /// shapes gets one more, so the unescape is a strict inverse. Lines
@@ -160,7 +176,10 @@ pub fn block_text_lines(text: &str) -> Vec<String> {
                 Some(_) => true,
                 None => body.strip_prefix('\\').is_some_and(is_fence_escapable),
             }
-        } else if is_bullet_shaped(body) || body.strip_prefix('\\').is_some_and(is_escapable) {
+        } else if is_bullet_shaped(body)
+            || is_property_shaped(body)
+            || body.strip_prefix('\\').is_some_and(is_escapable)
+        {
             true
         } else if let Some(m) = crate::fence::fence_marker(body) {
             if crate::parse::leading_indent(line) > 0 {
