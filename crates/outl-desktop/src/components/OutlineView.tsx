@@ -60,6 +60,7 @@ import {
   trackBacklinks,
 } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
+import { installPageChangeEffect } from "../lib/page-change";
 import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
 import { PageSections } from "./PageSections";
@@ -114,65 +115,9 @@ export function OutlineView() {
   const editingId = () => appState.editingBlockId;
   const setEditingId = (id: string | null) => setAppState("editingBlockId", id);
 
-  /**
-   * Auto-select the first visible block whenever the *page itself*
-   * changes (different journal, different page). We deliberately
-   * **don't** depend on `appState.selectedBlockId` here — including
-   * it would create a feedback loop where the j/k handlers'
-   * selection updates would re-trigger this effect, which would
-   * scan the outline and (under some Solid timing windows where the
-   * outline `.children` arrays haven't been re-attached yet) flip
-   * the selection back to `outline[0]`. That manifested as a "k
-   * skips one line" bug.
-   *
-   * `appState.page?.id` is the right dependency: it changes once
-   * per page navigation; on a navigation we reset to the first
-   * block; in between, j/k own the cursor uncontested.
-   */
-  createEffect(() => {
-    const pageId = appState.page?.id;
-    if (!pageId) {
-      setAppState("selectedBlockId", null);
-      setAppState("selectedBacklinkBlockId", null);
-      return;
-    }
-    // Navigating to a different page always lands the cursor on
-    // the outline (never on a stale backlink from the previous page)
-    // and drops any zoom held on the previous page's block.
-    setAppState("selectedBacklinkBlockId", null);
-    setAppState("focusBlockId", null);
-    const outline = appState.outline;
-    if (outline.length === 0) {
-      setAppState("selectedBlockId", null);
-      return;
-    }
-    // Untracked read: don't re-run when selectedBlockId changes.
-    // We use a peek via the store's underlying signal instead of a
-    // reactive read — for Solid stores, indexing into `appState`
-    // outside an effect doesn't track. Inside an effect we'd need
-    // `untrack`, but we can just compare against null + the current
-    // outline scan once per page change.
-    const current = appState.selectedBlockId;
-    if (current === null) {
-      setAppState("selectedBlockId", outline[0].id);
-      return;
-    }
-    // The page id changed and the previous cursor may not exist in
-    // the new outline; verify and snap to the first block when not.
-    const exists = (() => {
-      const walk = (bs: typeof outline): boolean => {
-        for (const b of bs) {
-          if (b.id === current) return true;
-          if (b.children.length > 0 && walk(b.children)) return true;
-        }
-        return false;
-      };
-      return walk(outline);
-    })();
-    if (!exists) {
-      setAppState("selectedBlockId", outline[0].id);
-    }
-  });
+  // Per-page reset (selection, zoom) fires only on a page id change;
+  // see `installPageChangeEffect` for why commits must not trigger it.
+  installPageChangeEffect();
 
   /**
    * Lazily fetch backlinks — but ONLY when the page slug changes
