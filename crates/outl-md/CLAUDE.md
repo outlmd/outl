@@ -297,7 +297,7 @@ tags:: #project
 
 - `key:: value` lines at top of file = page properties (frontmatter outliner-style).
 - `key:: value` lines nested as children of a block = block properties.
-- An empty or whitespace-only property value is not emitted. The parser still reads a bare `key::` as `""`.
+- An empty or whitespace-only property value is emitted as a bare `key::`, which the parser reads back as `""`. Removing a key is `SetProp` with no value, not an empty string.
 - `[[name]]` = page reference (bidirectional link).
 - `[[2026-05-24]]` = journal reference (renders as date).
 - `#tag` = tag (page reference with classification semantics).

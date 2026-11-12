@@ -49,8 +49,8 @@ The only thing a default run writes is its own stdout.
   The op log is append-only ([invariant 1](../CLAUDE.md#critical-invariants-never-violate)) and `--repair` writes projections and caches, never `ops/`.
   Dropping the orphaned op would also destroy the only surviving evidence that something is missing.
 - **Projection drift** — every page in the op log compared against its `.md` on disk: missing files, stale projections, missing sidecars.
-  A bare `key::` left by an older render of an empty value is a stale projection.
-  The empty value is already an op, so this is not content the log never saw, and `--repair` rewrites the page without that line.
+  An empty property value in the op log projects as a bare `key::` line, so a `.md` missing that line is a stale projection and `--repair` writes it back.
+  A `.md` that already has the line matches the projection.
 
   **Stale pages that lose nothing are counted, not listed.**
   A re-projection that only reorders properties or normalises whitespace has nothing for you to decide.

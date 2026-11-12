@@ -98,6 +98,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A property with an empty value keeps its `key::` line.**
+  An imported graph that wrote `published::` with nothing after it lost the key on disk, because the projection skipped empty values.
+  `render` now writes a bare `key::` for an empty or whitespace-only value, on a page and on a block, and the parser reads it back as `""`.
+  Deleting a key is unchanged: `outl page prop delete`, and a blank `outl page prop set key=`, append `Op::SetProp` with no value, so no line is left behind.
+
 - **`outl doctor` told you to file a bug about ops that a sync would have fetched** ([#301](https://github.com/outlmd/outl/issues/301)).
   It had one line for two defects with opposite remediations: a node whose `Create` never arrived from a peer, and a node the log did create that the replay then rejected.
   The first is fixed by running `outl sync` against the device that still holds the op, so the finding now names that device and that op.
