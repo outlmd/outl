@@ -39,6 +39,8 @@ pub struct ImportFlags {
     pub no_assets: bool,
     /// Also download remote images into `assets/` (off: keep the URL).
     pub download_remote_assets: bool,
+    /// Roam: write each block's and page's uid as `roam-uid::`.
+    pub keep_source_ids: bool,
     /// Import into a destination that already holds content, overwriting
     /// it. Off by default — see [`guard::guard_workspace`].
     pub force: bool,
@@ -202,6 +204,7 @@ fn run_adapter(
         import_assets: !flags.no_assets,
         download_remote_assets: flags.download_remote_assets,
         max_bytes: outl_config::load().assets.max_bytes,
+        keep_source_ids: flags.keep_source_ids,
     };
 
     let report = if flags.dry_run {

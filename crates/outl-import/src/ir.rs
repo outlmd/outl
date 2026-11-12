@@ -20,6 +20,11 @@ pub struct ImportGraph {
     /// has the destination root) copies / downloads the bytes and rewrites
     /// the placeholder to the final `[name](assets/<hash>.<ext>)` link.
     pub assets: Vec<AssetRef>,
+    /// Property key under which the emitter writes each page's and
+    /// block's source id ([`ImportPage::source_uid`], [`ImportBlock::uid`]),
+    /// so a later sync can map outl blocks back to the source. `None`
+    /// writes none. Roam sets `roam-uid` under `--keep-source-ids`.
+    pub source_uid_key: Option<&'static str>,
 }
 
 /// A file a source page references, to be imported into `assets/`.
@@ -83,6 +88,9 @@ pub struct ImportPage {
     pub created: Option<DateTime<Utc>>,
     /// Source page last-edit timestamp (same policy).
     pub edited: Option<DateTime<Utc>>,
+    /// Source page id (Roam's page `uid`), written only when
+    /// [`ImportGraph::source_uid_key`] is set.
+    pub source_uid: Option<String>,
 }
 
 /// Page body shapes.

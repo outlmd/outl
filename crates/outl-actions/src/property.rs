@@ -87,7 +87,7 @@ fn is_suggestable_key(key: &str) -> bool {
     }
     !matches!(
         key.to_lowercase().as_str(),
-        crate::template::FROM_TEMPLATE_KEY | "id" | "collapsed"
+        crate::template::FROM_TEMPLATE_KEY | "id" | "collapsed" | "roam-uid"
     )
 }
 

@@ -22,6 +22,7 @@
 //! translation lives in the `inline` submodule; everything downstream (placeholder
 //! emission, handle resolution) is the shared emitter's business.
 
+mod ids;
 mod inline;
 mod task;
 #[cfg(test)]
@@ -35,6 +36,7 @@ use crate::ir::{
     PageName,
 };
 use crate::report::ImportReport;
+use crate::ImportOptions;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use std::path::Path;
@@ -44,6 +46,8 @@ use task::split_task_marker;
 #[derive(Debug, Deserialize)]
 struct RoamPage {
     title: String,
+    #[serde(default)]
+    uid: String,
     #[serde(default)]
     children: Vec<RoamBlock>,
     /// Milliseconds since epoch. Roam stamps pages as well as blocks;
@@ -92,6 +96,16 @@ impl SourceAdapter for RoamAdapter {
     }
 
     fn parse(&self, src: &Path, report: &mut ImportReport) -> Result<ImportGraph, ImportError> {
+        self.parse_with(src, &ImportOptions::default(), report)
+    }
+
+    fn parse_with(
+        &self,
+        src: &Path,
+        opts: &ImportOptions,
+        report: &mut ImportReport,
+    ) -> Result<ImportGraph, ImportError> {
+        let keep_ids = opts.keep_source_ids;
         let text = std::fs::read_to_string(src).map_err(|e| ImportError::io(src, e))?;
         let mut pages: Vec<RoamPage> = serde_json::from_str(&text)
             .map_err(|e| ImportError::Parse(format!("roam backup JSON: {e}")))?;
@@ -109,8 +123,10 @@ impl SourceAdapter for RoamAdapter {
             .sum::<usize>();
 
         // After the source counts: a folded table's cells are reported
-        // as folded, not lost.
-        table::fold_tables(&mut pages, report);
+        // as folded, not lost. Keeping source ids keeps the cell blocks.
+        if !keep_ids {
+            table::fold_tables(&mut pages, report);
+        }
 
         let mut graph = ImportGraph::default();
         // Whether each emitted page is a journal NOT titled the way Roam
@@ -153,8 +169,8 @@ impl SourceAdapter for RoamAdapter {
             // pure-prop block that appears AFTER real content stays where the
             // user put it: promoting it would reorder the outline and pull
             // content out of place (the mid-page case the reviewer flagged).
-            let mut props: Vec<(String, String)> = Vec::new();
-            while blocks.first().is_some_and(is_pure_prop_block) {
+            let mut props: Vec<(String, String)> = ids::page_attributes(&blocks, keep_ids);
+            while !keep_ids && blocks.first().is_some_and(is_pure_prop_block) {
                 let mut b = blocks.remove(0);
                 // `title::` is the emitter's own header line (it owns the page
                 // name); a promoted `title::` attribute would emit a second,
@@ -173,6 +189,7 @@ impl SourceAdapter for RoamAdapter {
                 stem_override: None,
                 created: page.create_time.and_then(ms_to_datetime),
                 edited: page.edit_time.and_then(ms_to_datetime),
+                source_uid: (!page.uid.is_empty()).then(|| page.uid.clone()),
             });
         }
         // Stable: only same-date journals change places relative to
@@ -183,6 +200,7 @@ impl SourceAdapter for RoamAdapter {
             .collect();
         keyed.sort_by_key(|(secondary, _)| *secondary);
         graph.pages = keyed.into_iter().map(|(_, p)| p).collect();
+        graph.source_uid_key = keep_ids.then_some(ids::ROAM_UID_KEY);
 
         // One aggregate warning, never one per occurrence: a real graph
         // carries tens of thousands of `{{[[DONE]]}}` markers and a

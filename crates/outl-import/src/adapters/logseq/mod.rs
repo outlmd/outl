@@ -164,6 +164,7 @@ fn convert_file(
         stem_override,
         created: None,
         edited: None,
+        source_uid: None,
     });
     Ok(())
 }

@@ -343,6 +343,10 @@ pub(crate) enum Command {
         /// never downloaded.
         #[arg(long)]
         download_remote_assets: bool,
+        /// Roam: keep each block as one outl block carrying its Roam
+        /// uid as a `roam-uid::` property (pages too), for a sync back.
+        #[arg(long)]
+        keep_source_ids: bool,
         /// Import even when the destination already holds content —
         /// overwrites those pages and discards anything written in outl,
         /// or received from a paired device, since the last import.

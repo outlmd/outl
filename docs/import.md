@@ -30,6 +30,11 @@ A real (non-dry) import paints a live progress line on stderr — phase, page co
 `--json` prints the full report (per-feature counts, warnings with location) as JSON.
 `--preserve-timestamps` keeps source create/edit times as `created::`/`edited::` block properties (dropped and counted by default).
 
+`--keep-source-ids` (Roam) lands every source block as exactly one outl block that carries its Roam uid as a `roam-uid::` property, and writes the page's uid the same way in its header (a page merged from several Roam pages lists every uid, comma-separated).
+That is the mapping a sync back to Roam needs, and a property is the one place that travels with the block through every outl edit, move and peer sync.
+Two shapes that otherwise fold change with it: the attribute blocks at the head of a page (`icon::`, `alias::`, `type::`) stay blocks, with their uid and timestamps, and their attributes are also copied to the page header so outl's page features still read them; and a `{{[[table]]}}` keeps its cell blocks instead of becoming one pipe-table block.
+`roam-uid` is bookkeeping, so it is not offered as a key to add.
+
 ## Logseq DB graphs (`logseq-db`)
 
 Logseq 2.x keeps a graph in SQLite (`<graph>/db.sqlite`), not in `pages/` + `journals/` markdown.
