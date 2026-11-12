@@ -339,7 +339,7 @@ fn no_watch_releases_the_device_actor_when_the_last_session_closes() {
         let mut s = Session::connect(&sock);
         s.write_page("from-mcp");
     } // disconnected
-    // The server notices the close on its session thread; poll the CLI.
+      // The server notices the close on its session thread; poll the CLI.
     let before = b.actor_files();
     wait(|| {
         let ok = cli_create(&b, &format!("after-{}", b.actor_files().len()));

@@ -104,7 +104,8 @@ pub fn call(params: Value, ctx: &Arc<ServerCtx>) -> Result<Value, JsonRpcError> 
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
     let outcome: Result<Value, ApiError> = if MUTATING.contains(&name) {
-        ctx.prepare_write().and_then(|()| run_tool(name, &args, ctx))
+        ctx.prepare_write()
+            .and_then(|()| run_tool(name, &args, ctx))
     } else {
         run_tool(name, &args, ctx)
     };
