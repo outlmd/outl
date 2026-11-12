@@ -13,8 +13,8 @@ const memStore = () => {
 };
 
 describe("reading contrast", () => {
-  it("covers all ten presets", () => {
-    expect(presets).toHaveLength(10);
+  it("covers all eleven presets", () => {
+    expect(presets).toHaveLength(11);
   });
   it.each(presets.map((p) => [p.name, p] as const))("%s body text clears 4.5:1", (_n, p) => {
     expect(contrastRatio(p.fg, p.bg)).toBeGreaterThanOrEqual(4.5);
