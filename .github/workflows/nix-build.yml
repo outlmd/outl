@@ -56,7 +56,7 @@ jobs:
             label: linux-aarch64
             system: aarch64-linux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Nix
         uses: cachix/install-nix-action@v30
