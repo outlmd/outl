@@ -15,8 +15,8 @@
 # the warning. Once we wire an Apple Developer ID + notarisation
 # (release.yml step pending), this caveat goes away.
 cask "outl-desktop-beta" do
-  version "0.13.0-beta.299"
-  sha256 "8a0d6d3d3ddc3f268cfdde9e5de49b7598623ac904f59416377ec8b431c3e4ac" # anchor: macos
+  version "0.13.0-beta.301"
+  sha256 "4ba458f805e337ffec8dadd20d199612402976c4e5c456ec83b62bc4a035f599" # anchor: macos
 
   url "https://github.com/outlmd/outl/releases/download/v#{version}/outl-desktop-macos.dmg"
   name "outl Desktop"
