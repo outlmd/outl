@@ -283,6 +283,20 @@ In all three, **deny cases outnumber allow cases on purpose**, and the allows ar
 - On reconnect: bidirectional vector-clock delta sync.
   Both sides exchange a per-actor `ActorClock { max: Hlc, count: u64 }` — max + DISTINCT-op count — and stream missing ops.
   `oplog_census` owns every answer to "which ops do we hold" (clock, delta, ingest dedup) off `outl_core`'s offset index — **never route one back through `open` + `all_ops`**, see [Module layout](../../docs/iroh-internals.md#module-layout).
+- **One exchange carries a bounded delta, and the bound cuts oldest-first.**
+  `ops_missing_for` caps its selection at `MAX_OPS_PER_EXCHANGE` (20,000 ops, ~7 MB on the reference workspace) and reads only those ops through `JsonlStorage::read_ops_at`, off the offset index.
+  It used to ship the whole missing set as one frame and `all_ops` its way to the selection, so a first sync cost the entire log in memory on **both** ends.
+  On a real 723k-op workspace that is 719,785 ops / 253 MB against a (then) 256 MB frame ceiling: it cleared the guard by 1.2% and killed an Android phone instead of being refused, on every launch, because the ingest lands on disk before the process dies.
+  The cut is oldest-first for a reason that is not aesthetic: sorting the selection by HLC leaves every actor with a **contiguous prefix** of what it owed, so the receiver's `count` stays equal to what it holds below its own `max` and the next exchange reads as a fast path rather than provoking the very gap check below.
+  Regressions: `a_first_sync_is_capped_so_one_exchange_cannot_exhaust_memory`, `a_capped_first_sync_still_converges_over_repeated_exchanges`.
+
+- **A gap resend is the one selection the budget may NOT cut.**
+  A gap resend exists precisely because we cannot tell which ops below the peer's watermark are missing.
+  Truncate it and the slice we send may be one the peer already holds in full: its `(max, count)` comes back unchanged, the next round computes the same cut, and the repair never progresses — silent non-convergence, which is the failure mode this crate spends the most code refusing.
+  So it crosses whole, and an oversized one is refused by `MAX_FRAME_BODY` instead: loudly, which is strictly better than the crash it used to be.
+  **"The peer has never heard of this actor" is NOT the same case**, even though both send everything today: a peer holding zero ops cannot already have the slice we cut, so its prefix always lands. That is why the two live in separate piles in `ops_missing_for_capped` rather than one `full_resend` set — merging them back is how the budget turns into a stall.
+  Regression: `a_gap_resend_is_never_truncated_by_the_budget`.
+
 - **Gap detection (v2).**
   A bare max-HLC watermark assumes gapless delivery; an op landing ahead of a pending backlog made everything below the watermark permanently invisible (the Mac↔iPhone non-convergence).
   If the sender holds more distinct ops `<= max_r` than the receiver's `count`, it resends that actor's FULL log; the receiver's ingest dedup (present-set read under the append locks) absorbs the overlap and never appends an op twice.

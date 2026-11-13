@@ -73,6 +73,20 @@ mkdir -p "$lab/ws" "$lab/out"
 find "$lab/ws" -mindepth 1 -delete 2>/dev/null
 bash "$skill/battery/fixture.sh" "$lab/ws" || exit 1
 
+# The comment above binds this script; it cannot bind a hand. A `rm -rf`
+# of `ws` between two runs — recovering from a previous red, which is
+# exactly when someone reaches for it — leaves the ALREADY RUNNING
+# container bound to the deleted inode. The host then shows a perfect
+# fixture while `/ws` inside is `No such file or directory`, and the
+# battery reports "the outline never painted" for an app that was
+# pointed at nothing. Reuse is only safe while the mount still resolves,
+# so ask, and recycle the container when it does not.
+if docker ps --format '{{.Names}}' | grep -qx "$name" \
+   && ! docker exec "$name" test -d /ws/journals 2>/dev/null; then
+  say "workspace mount went stale (deleted inode) — recycling the container"
+  docker rm -f "$name" >/dev/null 2>&1
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
   docker rm -f "$name" >/dev/null 2>&1
   docker run -d --name "$name" --shm-size=512m \

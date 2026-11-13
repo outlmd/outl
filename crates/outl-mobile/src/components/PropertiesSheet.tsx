@@ -30,7 +30,7 @@ import {
 import { createSheetDrag } from "../lib/sheet-drag";
 import { haptic } from "../lib/haptics";
 import { HistorySheet } from "./HistorySheet";
-import { SwipeRow } from "./SwipeRow";
+import { PropertyFieldList } from "./PropertyFieldList";
 
 /** What the sheet is editing: one block's properties, or the page's. */
 export type PropertyScope = "block" | "page";
@@ -351,48 +351,13 @@ export function PropertiesSheet(props: PropertiesSheetProps): JSX.Element {
           <div class="ios-scroll max-h-[55vh] min-h-0 flex-1 overflow-y-auto">
             {/* ── List ──────────────────────────────────────────── */}
             <Show when={mode().kind === "list"}>
-              <button
-                type="button"
-                disabled={busy()}
-                aria-label="Add property"
-                onClick={startAdd}
-                class="flex w-full items-center gap-2 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left text-[16px] font-medium text-(--color-outl-accent) active:bg-(--color-outl-border)/30 disabled:opacity-50"
-              >
-                <span aria-hidden="true" class="text-[18px] leading-none">
-                  +
-                </span>
-                Add property
-              </button>
-
-              <For each={properties()}>
-                {([key, value]) => (
-                  <SwipeRow
-                    leftActionLabel="Delete"
-                    onSwipeLeft={() => void write(key, "")}
-                  >
-                    <button
-                      type="button"
-                      disabled={busy()}
-                      aria-label={`Edit ${key}`}
-                      onClick={() => startEdit(key, value)}
-                      class="flex w-full items-baseline gap-3 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30 disabled:opacity-50"
-                    >
-                      <span class="shrink-0 font-mono text-[13px] text-(--color-outl-fg-dim)">
-                        {key}
-                      </span>
-                      <span class="min-w-0 flex-1 truncate text-right text-[15px] text-(--color-outl-fg)">
-                        {value}
-                      </span>
-                    </button>
-                  </SwipeRow>
-                )}
-              </For>
-
-              <Show when={properties().length === 0}>
-                <div class="border-t border-(--color-outl-border)/30 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
-                  No properties yet.
-                </div>
-              </Show>
+              <PropertyFieldList
+                properties={properties()}
+                busy={busy()}
+                onEdit={startEdit}
+                onDelete={(key) => void write(key, "")}
+                onAdd={startAdd}
+              />
             </Show>
 
             {/* ── Key picker ────────────────────────────────────── */}

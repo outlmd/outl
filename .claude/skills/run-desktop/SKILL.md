@@ -176,6 +176,21 @@ module unset, `ctrl+p`, `Escape`, `j`/`k` and typing all behave.
 `run.sh` starts the WM and leaves `GTK_IM_MODULE` unset for that reason.
 If keys stop landing, check the WM is up before suspecting the app.
 
+**`Shift+Tab` is the one chord the lab cannot deliver.**
+Plain `Tab` reaches the DOM and indents the block being edited, so the
+path is wired; `Shift+Tab` does not, through `key shift+Tab`,
+`keydown shift` + `key Tab`, or a held `keydown shift` around the `Tab`
+keycode.
+X maps all three onto the `ISO_Left_Tab` keysym and WebKitGTK does not
+hand that to the page, so the textarea's handler never runs and the
+webview does its own backwards focus traversal instead — the textarea
+blurs, which commits, which **looks exactly like an outdent that did
+nothing**.
+Read that as the lab's limit, never as a verdict on the app: a
+`Shift+Tab` behaviour needs its regression test (`BlockRow`'s
+dispatcher tests mount the real row against the real dispatcher) or a
+real macOS window.
+
 Two worked examples: the `+ prop` reflow, reproduced at 18px and
 re-measured at 0px with mousemove alone; and keyboard navigation walking
 the cursor off the bottom of a long page, found by pressing `j` sixty

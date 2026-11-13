@@ -5,13 +5,147 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Changed
+
+- **A first sync no longer has to fit in one frame, and no longer has to fit in a phone.**
+  The delta exchange shipped every missing op as a single length-prefixed blob.
+  On a real 723k-op workspace that is 719,785 ops and 253 MB of JSONL, against a 256 MB frame ceiling — so it cleared the guard by 1.2% and allocated instead of being refused.
+  An Android phone answers that with `Scudo ERROR: internal map failure` across thirty threads, `std::bad_alloc`, and `SIGABRT` on a `tokio-rt-worker`.
+  Every launch, forever: the ingest reaches disk before the process dies, so each retry re-pulled a slightly smaller mountain and died again.
+  Both ends paid it. The sender read `all_ops` to filter the result back down, so selecting a slice cost the whole log in memory first.
+  `ops_missing_for` now picks HLCs off the offset index, caps the selection at `MAX_OPS_PER_EXCHANGE` (20,000 ops, ~7 MB), and reads only those through the new `JsonlStorage::read_ops_at`.
+  The whole history still crosses; it crosses over roughly 36 exchanges at the catch-up loop's cadence instead of one that cannot finish.
+  **The budget cuts oldest-first, which is what keeps it safe.** Sorting the selection by HLC leaves every actor with a contiguous prefix of what it owed, so the receiver's `count` stays equal to what it holds below its own `max` and the next exchange reads as a fast path instead of tripping the gap check.
+  **A gap resend is exempt, deliberately.** It exists because we cannot tell which ops below the peer's watermark are missing, so a cut slice may be one the peer already holds in full: unchanged `(max, count)`, identical next round, a repair that never progresses. Silent non-convergence is the one outcome this crate will not ship, so an oversized gap resend is refused by the frame cap instead — loudly, which is what it was already doing by crashing.
+
+- **The sync frame ceiling is 64 MB, not 256 MB.**
+  256 MB was sized so a gap-recovery full-actor-log resend always fit, which made it larger than anything the smallest client could hold.
+  A ceiling above that protects nobody: the 253 MB frame above passed it and killed the device.
+  64 MB is about 9x what a budgeted exchange produces and a refusal a phone survives.
+  The `0xFFFFFFFF` → 4 GiB claim from issue #155 is still refused before it sizes anything.
+
+- **Mobile stops opening the workspace and syncing at the same time.**
+  `wire_iroh_transport` started the transport the moment it was built, and starting it binds the endpoint and dials every known peer for an initial sync.
+  The background opener was concurrently replaying the op log.
+  Both peak in the hundreds of MB, and the launch that died above had no `boot phases:` line in its log at all — the open never got to finish.
+  The transport is still built during `setup` (identity and peer store, no socket) so `AppState` can hold it; `start` now waits on a channel the opener closes.
+  A channel rather than the `workspace-ready` event because a channel cannot be missed: the signal is buffered if the transport is not waiting yet, and a panicking opener drops the sender, which wakes the waiter just the same.
+  A transport that exists but has not started is already a supported state — `sync_now()` is a no-op and `peer_health()` is empty until `start()` — so the cost is inbound dials during the open, which peers retry.
+
+- **The index sidecars are fixed-width binary, not JSON Lines.**
+  Boot does not read the op log; it reads the `.ops-<actor>.idx` / `.ops-<actor>.nodes.idx` pair beside each one. On a real 723k-op workspace that pair is 170 MB across 23 actors and about 1.45 million records, and on an iPhone 17 Pro a launch spent **14.3 seconds** there — 12 MB/s on hardware that reads at over a gigabyte a second, so the cost was never the disk. It was a `String` allocated per record by `BufReader::lines`, handed to `serde_json`, carrying ULIDs decoded from 26 characters of base32.
+  Records are now a fixed number of little-endian bytes behind an 8-byte magic, so a load is a bounded read plus one `copy_from_slice` per entry. Measured on that workspace: **170 MB → 61 MB** on disk and **310 ms → 57 ms** to load, with the whole open going 795 ms → 446 ms.
+  The format change is free because a sidecar is a **local boot cache**: dot-prefixed so it never rides the sync surface, and already required to survive being missing or unreadable by rebuilding from the `.jsonl`. A file without the magic reads as absent, so the first launch after an upgrade rebuilds once and every later one is fast. No converter, no migration step.
+  **The ordering check is the integrity check.** JSON gave corruption detection for free — a flipped bit usually broke the parse and the caller rebuilt — and fixed-width binary has no parse to break, so a corrupted record would decode into a plausible offset and send `read_op_at` to the wrong place. Both sidecars are written in strictly increasing offset order (`NodeIndex::save` sorts for exactly this reason) and a load that sees them out of order rebuilds. What that does not catch is a flipped bit leaving the order intact, which `fresh_offset_index` still catches downstream by re-reading the `.jsonl` record at the index's max offset. Neither is a proof and neither has to be: the worst case of a cache this process rejects is one slower boot.
+  A trailing **partial** record — the signature of a crash mid-append — is now dropped rather than treated as corruption, so the freshness check indexes just the tail instead of rebuilding everything.
+
+- **A reload with nothing to read is free.**
+  A reload exists to pick up ops somebody else wrote, and it is O(whole log): on a real workspace it decodes a 48 MB snapshot, replays the delta and rehydrates 169,037 nodes, measured at 271-317 ms.
+  Mobile's poll runs `syncNow` then `reloadWorkspace` on a timer with no way to know whether the pass delivered anything, so on a device whose peers were unreachable that full rebuild ran **every tick, forever, while the user typed** — three of them in the first seven seconds of a launch, `delta_ops` identical across all three. That is the journal that never stops looking like it is loading.
+  `outl_tauri_shared::ops_watermark` answers the one question that decides it: a `(file name, length)` pair per `ops-*.jsonl`, compared against what this process last read. An op log is append-only, so a landed op always grows its actor's file, and compaction — the only rewrite — changes lengths too.
+  **This device's own file is excluded**, because our own appends are already in the resident log: replaying for them is waste, and it races `publish_replayed`'s local-op guard, so a steadily typing user could keep a reload spinning against their own keystrokes.
+  Fixed in the backend rather than in the poll, so it holds for every caller. Getting it wrong costs latency in one direction only: a fingerprint read from disk cannot call a file that grew "unchanged", so an arriving op is never hidden — at worst a reload waits for the next tick.
+
+- **A snapshot boot stops rebuilding every block a peer touched.**
+  Adopting a snapshot hydrates text as of its cutoff, then replays the delta on top, so every node the delta edited has a cached string that is present and wrong. Correcting one means reading its full `Edit` history back from storage, which is unchanged and still mandatory (#129) — what moved is *when*.
+  Doing it at boot made a launch pay for 2,298 nodes to paint a journal that shows about twenty, and it was the **only** thing on the boot path that read the per-node index at all, so it pulled 98 MB of sidecar in before the first frame.
+  `ContentStore` now keeps that set apart from the full-replay path's, because the two resolve from different places: a pending node rebuilds from the resident log, and after a snapshot boot the resident log holds only the delta. `block_text` checks it *before* the cache, and `force_materialize_pending` drains it before a snapshot body can be written — a body built from those strings would publish the pre-delta text as settled, and the next boot would adopt it with a cutoff claiming the newer edit was already folded in. Pinned by `deferred_text_settles_before_a_snapshot.rs`.
+
+- **Boot stops reading the whole workspace to paint today's journal.**
+  The app's premise is that its text input is live when it opens, and on a 723k-op / 2,874-page workspace opening it took 977 ms before the journal could paint, at 508 MB resident. Measured per phase, almost none of that was the journal: 450 ms went to the per-actor index sidecars and 312 ms to choosing a snapshot.
+  Three changes, none of which alter what boot produces:
+  **The adopt slot is decided from each candidate's header.** `cutoff` is a snapshot's third field and a few hundred bytes; the `block_text` map behind it is the file. Ranking used to decode every `snap-*.bin` in the directory — 124 MB on a real four-snapshot one — to pick 48 MB of it. `snapshot::read_header_from_disk` reads a bounded prefix instead, and only the winner is decoded. `snapshot::select` owns the ranking for both the boot selector and the GC, so the cheap read cannot become a second policy.
+  **`decode` verifies the digest against the buffer**, instead of cloning the decoded body and re-encoding it. `content_hash` is the final field and a fixed-size `[u8; 32]`, so the two encodings share every byte before it. On a 48 MB snapshot the old form was ~150 MB of cloned `String`s plus another 48 MB of re-encoded bytes, per decode, on the launch path. `the_buffer_hash_equals_the_body_hash` pins the layout that makes them equal.
+  **Each actor's index sidecars load in parallel.** One actor's pair says nothing about another's, so the sequential loop bought only an ordering nothing reads. 169 MB across 23 actors, 450 ms → 294 ms. The ceiling here is one file and not the thread count: a single actor holds 114.7 MB of that 169 MB, so no distribution of whole files beats ~1.45x. Going below it means reading **less** — the node index is 97 MB of the total and a snapshot boot needs it for a handful of nodes — which is not in this change.
+  Net: 977 ms → 736 ms. `std::thread::scope`, no new dependency: `outl-core` is published for embedding, so a direct dependency here is public surface.
+
+- **A block's `key:: value` properties are an attribute line on mobile, not a row of pills.**
+  A pill is a *tag*: a flat label you tap to filter. A property is a **field**, a named attribute with a value, and drawing one as a pill promised an action the tap did not perform — so the two read as the same thing while behaving differently.
+  They now render the way every mobile app renders an item's fields (Things, Linear, Apple Reminders, GitHub mobile): one quiet line under the block, key in `fg_dimmer`, value in `fg_dim`, `·` between them, truncated, never more than a line.
+  Colour is spent only on a field that **acts on you** — today just `remind::`, which gets the accent and a bell. `auto-run::` executes code and still stays quiet, because it does not interrupt.
+  Past two fields the rest collapses into `+N more`, and the whole line opens the properties sheet, which is now a two-column field list (label, value, chevron) in the shape of iOS Settings or Notion's property panel. Editing left the outline: a row that looks like a form row opens a form.
+  The page's own property strip above the outline was a second hand-written copy of the same thing and is now the same component.
+
+- **An importer's own stamps no longer render in any outline.**
+  `outl import` writes `roam-uid` under `--keep-source-ids` so a re-import matches what it already landed, and `created` / `edited` under `--preserve-timestamps`, copied off the source graph's clocks.
+  On a migrated graph that is a row under essentially every block carrying a value nobody reads while writing notes. They stay in the `.md`, and the property editors still list them — one step dimmer, and sorted below what the user wrote — because you have to see one to delete it.
+  `outl_actions::property::is_import_stamp` is the single owner, mirrored in TypeScript for the GUI clients. **`roam-uid` is decided by its key; `created` / `edited` by their value** — those two are ordinary English words, so only an ISO-8601 instant counts and a `created:: by Roberta` the user wrote still renders. Hiding that by key alone would silently swallow their metadata, which reads as data loss.
+  `is_suggestable_key` stops offering all three as keys to add: on a migrated graph they were the top of the frequency ranking, so the add-a-property menu opened on three keys nobody would pick.
+
+- **Mobile's missing `/` menu is recorded instead of just absent.**
+  `Capability::SlashCommandMenu` joins the per-client catalog: full on the TUI and desktop, missing on mobile, with the sentence a user gets — plugin commands are behind the plugins button in the top bar, templates under "Insert template" on a long-press.
+  `docs/shortcuts.md` had been claiming `/` as a Normal-mode chord on all three clients, which was true only of the TUI; the desktop's menu is inline inside a block and mobile has none.
+
 ### Fixed
+
+- **A refused sync says why, in the log and not only in the panel.**
+  `close_refusal_reason` already renders the sentence a user can act on ("this device is not paired with it"), and it reached the progress sink and stopped there.
+  The line every headless client actually has is the catch-up `WARN`, and that prints the outermost context of an `anyhow` chain and nothing under it — so an unpaired device and a flaky link both read as `read sync response`.
+  `outl serve` has no panel; neither does a mobile client's logcat, and both were on the ends of a real failure that took reading `peers.json` on two devices to identify.
+  `protocol::close::read_failure_context` now decides which label wins, pinned by `a_refusal_outranks_the_generic_read_label`.
+
+- **An unreadable own snapshot no longer hides a usable peer's.**
+  The boot selector read this device's own snapshot first, purely to catch an unusable one and drop it — and then returned that error, so one corrupt local file sent the boot to a full op-log replay with a healthy peer snapshot sitting in the same directory. On the workspace this was measured against that is 722,943 ops replayed to avoid adopting 48 MB that was right there, which on iOS is a jetsam kill rather than a slow launch.
+  A snapshot is a cache: one unreadable entry means skip that entry, never skip the cache. Candidates are now tried best-first until one decodes, and a file whose **header** will not parse is ranked last rather than filtered out — it is exactly the rubble that has to reach a decode before `drop_own_if_unusable` is allowed to delete it.
+  Pinned by `an_unreadable_own_snapshot_does_not_hide_a_usable_peer` and `a_directory_of_corrupt_snapshots_reports_an_error`.
+
+- **Typing `/` in the desktop editor opens a real command list.**
+  Two separate defects, both of which looked like "nothing happens".
+  The trigger only fired when `/` was the block's **first** character, so `nota /` opened nothing while the identical keystrokes opened the menu in the terminal — `@outl/shared`'s detector claims to mirror the TUI's `detect_trigger`, which has always fired on any word-initial `/` (block start, or straight after whitespace). It is the TUI's rule now, so `http://host` and `see docs/api` still stay literal.
+  And when it did open, its whole universe was `/upload` plus the workspace's templates and plugin commands — **no native commands at all**. On a workspace with no templates and no plugins installed, that is a popup with one row in it, against the 31 built-ins the TUI's `/` lists.
+  The menu now offers this client's own commands too, taken from the same list the `Cmd+K` palette builds and run through the same handler the chord fires, so a command cannot behave one way from the keyboard and another from the menu. `/today` finds `open-today`, `/sidebar` finds `toggle-sidebar`.
+
+- **Opening a page no longer blinks a backlinks section in and back out.**
+  Backlinks are an `O(blocks-in-workspace)` scan that lands after the page paints, and both GUI clients let that late reply decide whether the section exists at all — so they drew something and then took it away.
+  The desktop mounted a header + skeleton the moment the scan started and unmounted it when the answer came back empty: measured in the running client, 95px appearing and leaving ~1.2s later, on a page that ends with nothing. On a workspace where most journal days have no backlinks, that was most journal days, and every peer refresh re-armed it.
+  Mobile had the mirror: the card mounted immediately on a regular page and said "Linked from 0" / "No backlinks yet" while the scan ran, then contradicted itself. `0` is a wrong answer, not a pending one.
+  A section fed by a late reply now **never appears and then disappears**. A first load draws nothing, the section appears once and complete below the last block, and a page with no references never draws anything — so there is no placeholder to take away and no reserved gap left under the page either.
+  Reserving the space, which was the first idea, fixes neither half: a reservation that collapses still blinks, and one that does not is permanent dead space under every page.
+  A **refetch** is the opposite case and keeps every row it has, marked `loading…` beside the count. That is the one moment the mark is owed, because the user is looking at something that is about to change.
+
+- **Mobile no longer shows the previous page's backlinks under the page you just opened.**
+  Solid's `createResource` keeps its last value through a source change, and `Journal.tsx` handed that straight down — so for the whole scan, a navigation left the old page's backlinks, nested pages and namespace mentions sitting under the new one.
+
+- **A `text-*` class on a mobile `<button>` is dead, and two property surfaces were relying on one.**
+  `src/styles.css` carries an unlayered `button, input, textarea { font-size: inherit }`; an unlayered rule outranks every `@layer utilities` one, so the `text-[11px]` on each chip resolved to nothing and the pill painted at the block body's 17px — centred, because a `<button>` centres by UA default, and wrapping, because nothing capped it. On the reported block that was nine lines of grey above one line of text.
+  The type scale now sits on the row, where `inherit` resolves. **24 other tags in that client still carry a dead `text-*`**; clearing those means deleting the declaration and re-reading every sheet, which is a typography change across the app and is not in this one.
+
+- **A device's own snapshot no longer shadows a peer's that covers more of the log.**
+  The boot selector returned this device's own snapshot the moment it decoded, on the grounds that it has the tightest cutoff for its local ops — true, and not what decides the cost of a boot.
+  An actor missing from a snapshot's cutoff reads as "seen none of your ops", so its entire history goes into the delta.
+  A phone writes a snapshot on its first launch whose cutoff names one actor (itself), and that body then shadowed the desktop's naming twenty: the delta became the whole op log, the convergence guard refused it, and the boot full-replayed into an iOS jetsam kill — with the snapshot it needed sitting in the same directory.
+  Snapshots are now ranked on `(actors covered, newest cutoff, filename)` and this device's own competes like any other.
+  The GC still ranks peers only, so a body the selector skips today is kept for the boot after an actor rotation.
+
+- **`save_snapshot` honours `[snapshot] enabled = false`.**
+  It checked only whether a snapshot directory existed, and `enabled = false` leaves that set, so a user who had switched snapshots off still got one written on every TUI exit.
+
+- **A boot that adopts a snapshot now refreshes it, so opening a large workspace stops getting slower.**
+  Every caller gated the re-persist on "this boot full-replayed", which meant the remedy disarmed itself the moment it worked: a boot that adopted a snapshot never rewrote it, and nothing else does on a device that receives most of its ops over sync — the in-band writer only fires on a local mutation, while synced ops are written straight into `ops-<actor>.jsonl`.
+  The delta replayed on top therefore grew without bound.
+  On a 722,943-op workspace the adopted snapshot covered a third of the log and each open replayed the other 488,651 ops: 9.1s and ~670 MB on the desktop, and on an iPhone a 3.45 GB jetsam kill that showed up as "Couldn't open the workspace".
+  After the fix the same workspace replays 0 ops and opens in 0.57s, for a one-off 210 ms snapshot write.
+  `Workspace::snapshot_refresh_due` is the single owner of that decision now, shared by the GUI open and `SyncEngine::reload_workspace`.
+
+- **Zooming into a block on the desktop renders its title as markdown, not as raw source.**
+  The zoom header promotes the focused block to a page-like `<h1>`, and that `<h1>` interpolated the block's text verbatim, so a title holding a `#tag`, a `[[ref]]` or a `[label](url)` showed the brackets, the hash and the whole URL.
+  It is the same renderer every row uses now, so the ref and the tag navigate from the title too.
+  Mobile and the TUI never had it: both draw the zoom root as an ordinary block.
+
+- **`Shift+Tab` in the desktop editor outdents one level, not two.**
+  The block editor and the global shortcut dispatcher both handled the keystroke: committing an unchanged draft unmounts the textarea synchronously, so by the time the event reached the window listener nothing was focused and the keystroke resolved a second time as a view-mode command.
+  `Tab` had the same double-fire and usually hid it, because the second indent had no previous sibling to move under and was swallowed.
 
 - **`outl serve --no-watch` no longer holds the device actor while the embedded MCP is idle** ([#540](https://github.com/outlmd/outl/issues/540)).
   The MCP warm-up opened the workspace for writing, so a plain `--no-watch` daemon kept the write lock for its whole life and every GUI or TUI started later got an ephemeral actor.
   It now reads through a read open, takes the device actor only for a mutating tool (failing with a clear error if another process holds it), and releases it when the last session closes.
 
 ### Added
+
+- **The workspace open reports where its time went, and the mobile backend has a log you can read.**
+  The app's premise is that its text input is live when it opens, and that premise is a number nobody could take. `outl_core::boot_timing` puts one `info!` line per open — index, replay, each boot repair, plus the delta size and resident block count that explain them — at a cost of one `Instant::now()` per phase, cheap enough to leave on in release. A measurement you have to rebuild to collect is one nobody takes on the device where it matters.
+  That was blocked by a second problem: **the iOS backend was mute**. The subscriber wrote to stderr with a comment claiming it surfaces in `idevicesyslog` / Xcode, and it does not — a release build on the simulator emits nothing to `simctl launch --console`, `--console-pty` or `log stream`. Every `info!`/`warn!` the backend produced (the sync transport, the workspace opener, every boot repair, every projection refusal) was invisible on the one platform that is hardest to debug and has no `outl doctor` to fall back on.
+  `outl-mobile`'s `backend_log` gives it a sink: `$HOME/Library/Logs/outl-backend.log` inside the app sandbox, truncated per launch, still mirrored to stderr. Truncating rather than rotating is deliberate — what you want from a backend log on a phone is what *this* launch did, and a file holding one launch cannot grow unbounded on a device nobody prunes.
 
 - **`outl serve` serves MCP in-process by default; `--no-mcp` opts out** ([#540](https://github.com/outlmd/outl/issues/540)).
   A machine running `outl serve` as its daemon used to need a second process, `outl mcp serve`, which replayed the whole op log itself (about 28 s on a 720k-op workspace) and, when it lost the race for the device actor, minted an ephemeral actor and left an `ops-<ulid>.jsonl` plus a lock file behind forever.

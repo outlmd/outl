@@ -39,6 +39,7 @@
 mod android_globals;
 #[cfg(target_os = "android")]
 mod android_jni;
+mod backend_log;
 mod bg_sync;
 #[cfg(test)]
 mod capability_parity;
@@ -207,13 +208,17 @@ pub fn run() {
     // leaves the `log` crate's slot free for the plugin, which owns the
     // frontend + file/webview targets. A double-init just returns `Err`, so
     // `.ok()` keeps it a no-op.
+    let backend_log_file = backend_log::open();
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                 tracing_subscriber::EnvFilter::new("info,outl_sync_iroh=debug,iroh=info")
             }),
         )
-        .with_writer(outl_telemetry::lossy_stderr)
+        // stderr **and** a file in the sandbox. On iOS stderr reaches
+        // nothing a developer can read — see `backend_log`, which is
+        // where that was measured and why the sink exists.
+        .with_writer(move || backend_log::Tee::for_event(backend_log_file.as_ref()))
         .log_internal_errors(false)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
@@ -313,6 +318,8 @@ pub fn run() {
                 global_cfg.backup.interval_minutes,
             );
 
+            // Gate on the opener finishing: see `iroh_sync::wire_iroh_transport`.
+            let (open_done_tx, open_done_rx) = std::sync::mpsc::channel();
             spawn_workspace_opener(
                 workspace.clone(),
                 workspace_guards.clone(),
@@ -320,6 +327,7 @@ pub fn run() {
                 storage_root.clone(),
                 hlc.clone(),
                 app.handle().clone(),
+                open_done_tx,
             );
 
             let registry = Arc::new(RuntimeRegistry::with_builtins());
@@ -331,8 +339,12 @@ pub fn run() {
             // `transport = "file"`. A bind/identity failure logs and
             // returns `None` — the app still runs on the native iCloud
             // watcher, so iroh trouble never blocks startup.
-            let iroh =
-                iroh_sync::wire_iroh_transport(&app.handle().clone(), storage_root.clone(), actor);
+            let iroh = iroh_sync::wire_iroh_transport(
+                &app.handle().clone(),
+                storage_root.clone(),
+                actor,
+                open_done_rx,
+            );
 
             // Plugin host runs on its own thread (Boa `Context` is
             // `!Send`, so it can't live in `AppState`). It shares the same

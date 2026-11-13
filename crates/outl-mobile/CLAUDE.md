@@ -125,6 +125,8 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
 - **`PageSections.tsx`** — everything below the outline, in order: the backlinks card (`<BacklinksSection />`) and the nested-pages list (`<NestedPages />` from `@outl/shared/namespace`, issue #275).
   The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
   `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
+  **Nothing here draws until the scan answers for the page on screen** (`lateSectionVisible`, `@outl/shared/outline`).
+  `Journal` is what makes that true: `createResource` keeps its last value through a source change, so the raw accessor left the page the user just left answering for the one they opened, while the card said "No backlinks yet" over a scan still running.
 
 - **`Journal.boot.ts`** — `createJournalBoot`: the two workspace-open paths (`loadTodayWithRetry`, `pullAndReload`).
   Every await in here is capped. The open is the one the journal's skeleton waits on, so an uncapped call there is not a slow page, it is a page that never comes back.
@@ -322,6 +324,23 @@ Nine sections moved out: how a ref that does not exist yet is opened, the page s
 
 They are reference — you look one up when you touch that feature — and this file is loaded into context on every session in this crate, where the budget belongs to the rules you must not break.
 [`docs/mobile-ux.md`](../../docs/mobile-ux.md) is their owner now.
+
+## Properties are fields, not tags
+
+A pill is a **tag**: a flat label you tap to filter.
+A `key:: value` property is a **field**, a named attribute with a value, and this client drew one as the other — so two different things read as the same thing while behaving differently, and the tap a pill promises was not the tap it performed.
+
+The outline now draws **one attribute line** per block: key dim, value a step darker, `·` between, truncated, never more than a line, and past two fields the rest is `+N more`.
+Both the block row (`BlockBody.tsx`) and the page strip (`Journal.tsx`) are the same `<BlockProperties />` now — the strip was a second hand-written copy, which is how the same dead `text-[11px]` came to be written twice.
+`@outl/shared/markdown` owns the shape; what is left here is where the line sits and what a tap means.
+
+**Colour is spent only on a field that acts on the user.**
+`remind::` gets the accent and a bell because it will interrupt you; `auto-run::` runs code and stays quiet, because it does not. That criterion is *interruption*, not importance, and it is what stops the line from becoming decoration again.
+
+**Editing left the outline.**
+The line is one tap target that opens `<PropertiesSheet />`, which is a two-column field list (`PropertyFieldList.tsx`) in the shape of iOS Settings or Notion's property panel. A row that looks like a form row opens a form; a row that looked like a button did not.
+
+An importer's stamps (`created`, `edited`, `roam-uid`) render nowhere in an outline and are still listed in the sheet, dimmer and sorted last — you have to see one to delete it. The policy is `outl_actions::property::is_import_stamp`, mirrored in TS.
 
 ## Properties (`key:: value`) — the sheet (issue #13)
 
@@ -536,6 +555,11 @@ The `color` line is gone (Tailwind's preflight already sets it in `@layer base`,
 `font-family` / `font-size` are still unlayered there and still beat `text-[16px]` on a button — if you need a button's font size to take, that is why.
 Paint a fill with `bg-(--color-outl-accent)` and its text with `text-(--color-outl-accent-fg)`, never with `text-(--color-outl-bg)` (root `CLAUDE.md` invariant 13, and [`DESIGN.md`](../../DESIGN.md) owns the pairing).
 
+**So the property line sizes the row, not the chip inside it.**
+Both `key:: value` strips here carried a `text-[11px]` on a `<button>` that resolved to nothing: they painted at the body's 17px, centred (a `<button>` centres by UA default) and wrapping, so a Roam-imported block showed nine lines of grey chrome above one line of its own text.
+The size moved to the container — where `inherit` resolves — and `property-line.test.ts` pins both call sites, asserting the unlayered rule is still in `styles.css` so the pin retires with the trap rather than outliving it.
+**24 other `<button>` / `<input>` tags in this client still carry a dead `text-*`**, measured; clearing those means deleting the declaration and re-reading every sheet, which is the typography change the comment above defers.
+
 ## Logging (device console)
 
 `run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, then calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
@@ -607,3 +631,39 @@ The two layers (Rust commands + storage, frontend pure logic), their tooling and
 - Focus mode is the capsule button between the sync dot and Settings, same as desktop. Header and `BottomBar` carry `outl-focus-hide` and fade to 0.18, never to 0, so the button stays tappable.
 - `PageSections` gets `blank` from `Journal` and shows `<FirstRunTips client="mobile" />`; `JournalEmpty` shows it on the start and empty-page states. The tip names the indent keys, never a swipe: a swipe deletes a row here.
 - Refs, tags and links in block text and backlinks use `MarkdownInline` `variant="inline"`, the same underlined look as desktop, not pills. The 44pt touch target comes from `.outl-ref::after` in `src/styles.css`; keep it if you touch either. The TODO box in `BlockMarkers` is a square (`rounded-[4px]`) inside a 44pt button, matching desktop.
+
+## The backend's log, and why it needed one
+
+`src-tauri/src/lib.rs` installs a `tracing` subscriber writing to stderr, with a comment saying that on iOS stderr "surfaces in idevicesyslog / Xcode".
+It does not.
+A release build on the simulator emits **nothing** to `simctl launch --console`, `--console-pty` or `log stream`; the only lines that arrive come from dylibs using `NSLog`, which goes through `os_log`.
+Rust's `io::stderr()` is not wired to anything on either simulator or device.
+
+So every `info!` / `warn!` the backend produced — the sync transport, the workspace opener, every boot repair, every projection refusal — was invisible on the one platform where the app is hardest to debug and where there is no `outl doctor` to fall back on.
+A blank-screen report could only be narrowed by elimination, which is exactly as slow as it sounds.
+
+`backend_log` is the sink: `$HOME/Library/Logs/outl-backend.log` inside the app sandbox, **truncated on every launch**, still mirrored to stderr so a desktop-style run is unchanged.
+Truncating rather than rotating is the right trade on a phone: what you want from a backend log there is "what did *this* launch do", and a file holding one launch cannot grow without bound on a device nobody prunes.
+
+`tauri_plugin_log` owns the `log` crate's slot and writes the **frontend's** lines to its own rotating file; our `tracing::` events deliberately bypass it (see `lib.rs` on why the two logger slots are kept apart), which is why they need a sink of their own.
+
+Read it with:
+
+```sh
+cat "$(xcrun simctl get_app_container <udid> app.outl.mobile-app data)/Library/Logs/outl-backend.log"
+```
+
+`outl_core::boot_timing` is what makes that worth reading on a launch: one line per workspace open, naming each phase plus the delta size and resident block count that explain them.
+
+## The workspace open and the first sync must not run at the same time
+
+`wire_iroh_transport` **builds** the transport during `setup` (identity + peer store, no socket) and hands it to `AppState`, but **starts** it only after the background opener signals through a `std::sync::mpsc` channel.
+
+Starting the transport binds the endpoint and immediately dials every known peer for an initial sync.
+On a device meeting a large history for the first time that dial pulls the op log while `spawn_workspace_opener` is replaying it, and both peak in the hundreds of MB.
+On a 723k-op workspace that killed the Android app with `Scudo ERROR: internal map failure` and a `SIGABRT` on a `tokio-rt-worker` — and the tell is that the launch had **no `boot phases:` line at all**, because the open never finished.
+
+It is a channel and not the `workspace-ready` event on purpose: a channel cannot be missed.
+The signal is buffered if the transport is not waiting on it yet (a small workspace opens faster than `setup` reaches the wiring), and a panicking opener drops the `Sender`, which wakes the waiter just the same rather than leaving the device with no sync at all.
+
+A transport that exists but has not started is an already-supported state — `sync_now()` is a no-op and `peer_health()` is empty until `start()` runs — so the only cost is inbound dials during the open, which peers retry.

@@ -469,10 +469,35 @@ describe("detectSlashContext", () => {
   it("does NOT trigger on a mid-text slash (path / URL)", () => {
     expect(detectSlashContext("see docs/api", 12)).toBeNull();
     expect(detectSlashContext("a/b", 3)).toBeNull();
+    expect(detectSlashContext("http://x", 8)).toBeNull();
   });
 
   it("closes the trigger once a space is typed", () => {
     expect(detectSlashContext("/stats now", 10)).toBeNull();
+  });
+
+  // The TUI's `detect_trigger` fires the slash menu on any WORD-initial
+  // `/` — start of the block or preceded by whitespace. This file is
+  // the mirror of that rule, and it used to read `value[0] !== "/"`, so
+  // `nota /` opened nothing on the desktop while the identical
+  // keystrokes opened the menu in the terminal.
+  it("triggers on a slash that follows whitespace, like the TUI", () => {
+    expect(detectSlashContext("nota /", 6)).toEqual({
+      query: "",
+      openIndex: 5,
+      replaceEnd: 6,
+    });
+    expect(detectSlashContext("nota /sta", 9)).toEqual({
+      query: "sta",
+      openIndex: 5,
+      replaceEnd: 9,
+    });
+  });
+
+  it("walks back to the slash that opened the run, not the first one", () => {
+    // `/a` is closed by the `/` that follows it; the live trigger is
+    // the second slash, whose own preceding char is not whitespace.
+    expect(detectSlashContext("/a/b", 4)).toBeNull();
   });
 });
 

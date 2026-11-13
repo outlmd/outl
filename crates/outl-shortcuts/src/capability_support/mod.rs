@@ -267,6 +267,23 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
+        // The TUI's Insert-mode `/` (`detect_trigger` →
+        // `candidates_for_slash`) and the desktop's inline popup
+        // (`block-suggest.ts`) both answer the key: word-initial `/`,
+        // this client's own commands plus every plugin's, filtered as
+        // you type. Mobile has the *commands* — `PluginSheet`'s
+        // Commands tab, `TemplateSheet` — and no `/` in the editor, so
+        // the verdict is about the trigger, not about reach.
+        //
+        // `Missing`, not `NotApplicable`: a soft keyboard types `/`
+        // perfectly well, so this is a surface nobody built rather
+        // than a question the input device makes meaningless (the
+        // distinction `NO_SOFT_KEYBOARD_BAR` draws).
+        Capability::SlashCommandMenu => ClientSupport {
+            tui: Full,
+            desktop: Full,
+            mobile: Missing(why::NO_SLASH_MENU_ON_THE_PHONE),
+        },
         Capability::ToolbarOrderLock => ClientSupport {
             tui: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
             desktop: NotApplicable(why::NO_SOFT_KEYBOARD_BAR),
@@ -364,7 +381,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 19, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 20, "Capability::ALL changed size");
     }
 
     #[test]

@@ -33,6 +33,36 @@ struct NodeEntry {
     offset: u64,
 }
 
+impl NodeIndex {
+    /// Bytes one persisted entry occupies. Exposed so a test can count
+    /// records without restating the layout.
+    #[cfg(test)]
+    pub(crate) const RECORD_WIDTH: usize = <NodeEntry as sidecar::Record>::WIDTH;
+}
+
+impl sidecar::Record for NodeEntry {
+    const WIDTH: usize = 16 + sidecar::wire::HLC + 8;
+
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    fn encode(&self, out: &mut Vec<u8>) {
+        sidecar::wire::put_u128(out, self.node.0 .0);
+        sidecar::wire::put_hlc(out, &self.ts);
+        sidecar::wire::put_u64(out, self.offset);
+    }
+
+    fn decode(b: &[u8]) -> Self {
+        const TS: usize = 16 + sidecar::wire::HLC;
+        Self {
+            node: NodeId(ulid::Ulid(sidecar::wire::get_u128(&b[..16]))),
+            ts: sidecar::wire::get_hlc(&b[16..TS]),
+            offset: sidecar::wire::get_u64(&b[TS..]),
+        }
+    }
+}
+
 /// Secondary index mapping each `NodeId` to every `(Hlc, offset)` that
 /// ever touched it. Powers `JsonlStorage::ops_for_node` without
 /// scanning the whole `.jsonl`.
@@ -107,16 +137,24 @@ impl NodeIndex {
 
     /// Persist the full index to `path` atomically.
     pub fn save(&self, path: &Path) -> Result<(), StorageError> {
-        sidecar::save_entries(
-            path,
-            self.entries.iter().flat_map(|(node, entries)| {
+        // **Sorted by offset**, which `load_entries` requires and uses as
+        // its integrity check: a fixed-width record has no parse to fail,
+        // so out-of-order offsets are what tells a reader the file is
+        // damaged. Grouping by node (what this used to emit) produced a
+        // file every reader would have had to reject.
+        let mut flat: Vec<NodeEntry> = self
+            .entries
+            .iter()
+            .flat_map(|(node, entries)| {
                 entries.iter().map(|(ts, offset)| NodeEntry {
                     node: *node,
                     ts: *ts,
                     offset: *offset,
                 })
-            }),
-        )
+            })
+            .collect();
+        flat.sort_by_key(|e| e.offset);
+        sidecar::save_entries(path, flat.into_iter())
     }
 
     /// Append one entry to `path` (hot path from `append_op`).

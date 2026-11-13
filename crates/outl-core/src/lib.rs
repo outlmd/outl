@@ -13,6 +13,7 @@
 #![warn(missing_docs)]
 
 pub mod block;
+pub mod boot_timing;
 mod content;
 pub mod device;
 pub mod fractional;

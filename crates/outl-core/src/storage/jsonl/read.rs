@@ -21,6 +21,7 @@ use crate::storage::sidecar::{self, SidecarKind};
 use crate::storage::{NodeIndex, OffsetIndex, PageScope, StorageError};
 
 use super::census::{self, Coverage};
+use super::index_load;
 use super::{
     parse_actor_from_ops_filename, parse_log_line, read_log_record, JsonlStorage, RecordRead,
 };
@@ -147,6 +148,9 @@ impl JsonlStorage {
 
     fn reload_global(&mut self) -> Result<(), StorageError> {
         let mut per_file: Vec<(String, u64, usize, usize)> = Vec::new();
+        // Collected first, loaded below: the scan is a readdir, the load
+        // is 169 MB on a real workspace and is what gets parallelized.
+        let mut jobs: Vec<index_load::IndexJob> = Vec::new();
         let dir = std::fs::read_dir(&self.ops_dir)
             .map_err(|e| StorageError::Backend(format!("read {}: {e}", self.ops_dir.display())))?;
 
@@ -192,23 +196,15 @@ impl JsonlStorage {
                     continue;
                 }
             };
+            jobs.push((name, path, file_actor, file_size));
+        }
 
-            // Load the persisted sidecars when they exactly cover the
-            // `.jsonl`; rebuild via parse-lite otherwise. The `.idx` bytes are
-            // the ~4.3s reload win — we skip re-tokenizing every `text_op`.
-            let hlc_path = sidecar::path_for(
-                &self.ops_dir,
-                file_actor,
-                &PageScope::Global,
-                SidecarKind::Offset,
-            );
-            let node_path = sidecar::path_for(
-                &self.ops_dir,
-                file_actor,
-                &PageScope::Global,
-                SidecarKind::Node,
-            );
-            let (hlc_idx, node_idx) = Self::load_actor_indexes(&path, &hlc_path, &node_path);
+        // One actor's sidecar pair says nothing about another's, so
+        // they load in parallel. See `index_load` for the measurement
+        // that made this worth doing, and for its ceiling.
+        let loaded = index_load::load_in_parallel(&self.ops_dir, &jobs);
+
+        for (name, file_size, file_actor, hlc_idx, node_idx) in loaded {
             let ops_indexed = hlc_idx.len();
             seen_hlc.insert(file_actor, hlc_idx);
             seen_node.insert(file_actor, node_idx);
@@ -293,7 +289,7 @@ impl JsonlStorage {
     /// the metadata-only read ([`Self::actor_timestamps`]) asks the same
     /// question and a second opinion about what a sidecar covers is how a
     /// stale index turns into a wrong read.
-    fn load_actor_indexes(
+    pub(super) fn load_actor_indexes(
         jsonl_path: &Path,
         idx_path: &Path,
         node_idx_path: &Path,

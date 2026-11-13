@@ -80,8 +80,10 @@ export function BlockBody(props: {
   onTagClick?: (tag: string) => void;
   /** External `[label](url)` link tap — opens in the system browser. */
   onLinkClick?: (href: string) => void;
-  /** Commit a `key:: value` property edit; empty value clears it. */
-  onSetProperty?: (blockId: string, key: string, value: string) => void;
+  /** Open the properties sheet on this block. The attribute line
+   *  under the text is the tap target; editing a field is the
+   *  sheet's job, never the outline's. */
+  onOpenProperties?: (blockId: string) => void;
   /** Resolved `((blk-…))` / `!((blk-…))` sources, keyed by handle. */
   embeds?: EmbedMap;
   onTextareaMount?: (el: HTMLTextAreaElement) => void;
@@ -313,6 +315,7 @@ export function BlockBody(props: {
                   ? split.body.length
                   : props.block.text.length;
                 return (
+                  <>
                   <p
                     class="break-words text-[17px] leading-(--outl-block-leading)"
                     classList={{
@@ -338,18 +341,27 @@ export function BlockBody(props: {
                         onLinkClick={tap(props.onLinkClick)}
                       />
                     </Show>
-                    {/* `remind::` was invisible here: the long-press
-                        menu wrote the rule and the block looked
-                        untouched. Tapping a chip reopens it. */}
-                    <BlockProperties
-                      properties={props.block.properties}
-                      onCommit={(key, value) =>
-                        props.onSetProperty?.(props.block.id, key, value)
-                      }
-                      chipClass="rounded-full bg-(--color-outl-border)/40 px-2 py-0.5 text-[11px] text-(--color-outl-fg-dim)"
-                      inputClass="rounded-full border border-(--color-outl-accent)/50 bg-(--color-outl-bg-elev) px-2 py-0.5 text-[11px] text-(--color-outl-fg) outline-none"
-                    />
                   </p>
+                  {/* `remind::` was invisible in the outline, which is
+                      why this row exists at all. It is a sibling of
+                      the `<p>` and not a child: the line is a `<div>`,
+                      and a `<div>` inside a `<p>` is invalid markup
+                      that only survives because nothing re-parses it.
+
+                      It owns its own type scale — see the component.
+                      A `text-*` here would be dead anyway, since
+                      `styles.css`'s unlayered `font-size: inherit`
+                      outranks it on the button inside. */}
+                  <BlockProperties
+                    properties={props.block.properties}
+                    label="Block properties"
+                    onOpen={
+                      props.onOpenProperties
+                        ? () => props.onOpenProperties?.(props.block.id)
+                        : undefined
+                    }
+                  />
+                  </>
                 );
               })()}
             >

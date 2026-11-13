@@ -40,7 +40,7 @@ use tracing::{debug, info, warn};
 
 use outl_actions::SyncProgress;
 
-use crate::engine_sync::read_frame_reporting;
+use crate::protocol::read_frame_reporting;
 use crate::protocol::{encode_blob_frame, SNAPSHOT_ALPN};
 
 /// Bound on a single snapshot connect attempt. Mirrors the sync path's

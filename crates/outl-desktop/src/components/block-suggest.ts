@@ -25,6 +25,11 @@ import {
 
 import { handlePopupNav } from "../lib/popup-nav";
 import {
+  nativeSlashCommands,
+  runNativeSlashCommand,
+} from "../lib/shortcuts";
+import {
+  NATIVE_ACTION_PLUGIN_ID,
   assetSlashCommands,
   rankSlashCommands,
   templateSlashCommands,
@@ -62,7 +67,7 @@ export interface BlockSuggest {
   emojiSuggestions: Accessor<EmojiHit[]>;
   emojiIndex: Accessor<number>;
   setEmojiIndex: Setter<number>;
-  /** Block-initial `/command` hits. */
+  /** Word-initial `/command` hits. */
   slashCommands: Accessor<PluginCommand[]>;
   slashIndex: Accessor<number>;
   setSlashIndex: Setter<number>;
@@ -81,7 +86,7 @@ export interface BlockSuggest {
 
 /**
  * The four inline autocomplete triggers, in one place: `[[page]]`,
- * `((block))`, `:emoji:` and block-initial `/command`.
+ * `((block))`, `:emoji:` and `/command`.
  *
  * They are one module because they are one question asked four ways —
  * *what is the caret sitting inside, and what replaces that span when
@@ -126,31 +131,44 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
   const [blockSuggestions, setBlockSuggestions] = createSignal<BlockHit[]>([]);
   const [blockIndex, setBlockIndex] = createSignal(0);
   // ── `/command` inline slash menu ─────────────────────────────────
-  // Block-initial `/` opens a filterable list of plugin commands —
-  // the desktop's inline equivalent of the TUI's `/` slash overlay
-  // (the `⧉` palette is the other surface). Trigger detection +
-  // token removal reuse the shared `@outl/shared/autocomplete`
-  // helpers; the command universe comes from `pluginList()`, loaded
-  // once on the first `/` and filtered client-side as the user types.
+  // A word-initial `/` opens a filterable command list — the desktop's
+  // inline equivalent of the TUI's `/` slash overlay (the `⧉` palette
+  // is the other surface). Trigger detection + token removal reuse the
+  // shared `@outl/shared/autocomplete` helpers. The universe is this
+  // client's own actions plus `/upload`, the workspace's templates and
+  // every plugin command; only the last three are fetched, and they are
+  // fetched once on the first `/` and filtered client-side as the user
+  // types.
   const [slashCommands, setSlashCommands] = createSignal<PluginCommand[]>([]);
   const [slashIndex, setSlashIndex] = createSignal(0);
   // Lazily-loaded, cached command list (null until the first `/`).
   // Native `/template <name>` entries (structural templates, no plugin
   // needed) are merged ahead of plugin commands so the core feature is
   // reachable from the same popup — see `templateSlashCommands`.
-  let allSlashCommands: PluginCommand[] | null = null;
+  let fetchedSlashCommands: PluginCommand[] | null = null;
   async function ensureSlashCommands(): Promise<PluginCommand[]> {
-    if (allSlashCommands) return allSlashCommands;
-    const [plugins, templates] = await Promise.all([
-      pluginList().catch(() => []),
-      listTemplates().catch(() => []),
-    ]);
-    allSlashCommands = [
-      ...assetSlashCommands(),
-      ...templateSlashCommands(templates),
-      ...plugins,
-    ];
-    return allSlashCommands;
+    if (!fetchedSlashCommands) {
+      const [plugins, templates] = await Promise.all([
+        pluginList().catch(() => []),
+        listTemplates().catch(() => []),
+      ]);
+      fetchedSlashCommands = [
+        ...assetSlashCommands(),
+        ...templateSlashCommands(templates),
+        ...plugins,
+      ];
+    }
+    // The client's own actions are appended, not cached with the rest:
+    // they come from the live dispatcher, which re-installs on a
+    // workspace swap. Caching them would pin the first workspace's
+    // handler map — and an empty list cached before the dispatcher
+    // installed would leave the menu permanently short.
+    //
+    // Without this half the menu's whole universe was `/upload` plus
+    // whatever templates and plugins a workspace happened to have, so a
+    // workspace with neither opened a one-row popup while the TUI's `/`
+    // listed 31 built-ins.
+    return [...fetchedSlashCommands, ...nativeSlashCommands()];
   }
   // `query` last sent to the backend — skip redundant round-trips when
   // the caret moves without changing the in-ref text (mirrors mobile's
@@ -191,10 +209,10 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     const ta = deps.textarea();
     if (!ta) return closeSuggest();
     const cursor = ta.selectionStart ?? 0;
-    // Block-initial `/` opens the slash menu. Checked first: it only
-    // fires when `/` is the very first character (never mid-prose), so
-    // it can't shadow the `:`/`[[` triggers below — but when it IS
-    // active those are irrelevant.
+    // A word-initial `/` opens the slash menu (TUI parity — start of
+    // the block or straight after whitespace). Checked first: its
+    // opener and its name alphabet share no character with `:`, `[[`,
+    // `((` or `#`, so the two can't both be live at one caret.
     const slashCtx = detectSlashContext(ta.value, cursor);
     if (slashCtx) {
       const key = `slash:${slashCtx.query}`;
@@ -426,6 +444,13 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     // just fires.
     void (async () => {
       await deps.commit();
+      // A native row is one of this client's own actions, so it runs
+      // through the dispatcher's handler map — the same function the
+      // chord and the `Cmd+K` palette call. A second dispatcher here
+      // is how a command starts meaning two things.
+      if (cmd.plugin_id === NATIVE_ACTION_PLUGIN_ID) {
+        if (await runNativeSlashCommand(cmd.command_id)) return;
+      }
       await deps.runPluginCommand(cmd.plugin_id, cmd.command_id);
     })();
   }
@@ -435,7 +460,7 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     // (arrows cycle, Enter/Tab accept, Esc close) via `handlePopupNav`.
     // They never co-exist — one trigger is active at a time — so the
     // first non-empty one consumes the key. Checking slash first is safe
-    // (block-initial `/` vs. `:` / `((` / `[[`).
+    // (a `/` opener vs. `:` / `((` / `[[`).
     return (
       handlePopupNav(e, {
         items: slashCommands(),

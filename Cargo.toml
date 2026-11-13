@@ -143,7 +143,15 @@ walkdir = "2"
 fs2 = "0.4"
 
 # Concurrency
-parking_lot = "0.13"
+# TEMPORARY, paired with the libc pin below — NOT a considered downgrade.
+# parking_lot 0.13 pulls parking_lot_core 0.10, which requires
+# libc ^0.2.191. libc 0.2.190 moved `sockaddr_ctl`, `AF_SYS_CONTROL`,
+# `SYSPROTO_CONTROL`, `UTUN_OPT_IFNAME` and `in6_ifreq` behind
+# `cfg(target_os = "macos")`, and nix / netdev / netwatch all still
+# reach for them on every Apple target — so the iOS device build dies
+# in three crates we do not own. 0.12 is what lets libc stay at 0.2.189.
+# Lift both the moment those three ship the narrowed gates.
+parking_lot = "0.12"
 lru = "0.19"
 
 # Misc

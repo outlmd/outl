@@ -48,8 +48,9 @@ interface BlockRowProps {
   onTagClick?: (tag: string) => void;
   /** External `[label](url)` link tap — opens in the system browser. */
   onLinkClick?: (href: string) => void;
-  /** Commit a `key:: value` property edit; empty value clears it. */
-  onSetProperty?: (blockId: string, key: string, value: string) => void;
+  /** Open the properties sheet on a block — the attribute line under
+   *  its text is the tap target. Editing a field is the sheet's job. */
+  onOpenProperties?: (blockId: string) => void;
   /**
    * Resolved `((blk-…))` / `!((blk-…))` sources, keyed by handle.
    * Handed straight to `MarkdownInline`, which prints the raw handle
@@ -160,7 +161,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           }
           onDraftChange={props.onDraftChange}
           onCommitEdit={props.onCommitEdit}
-          onSetProperty={props.onSetProperty}
+          onOpenProperties={props.onOpenProperties}
           embeds={props.embeds}
           onDeleteEmpty={() => {
             // Backspace on an already-empty block (RFC 0254 phase 4b,
@@ -238,7 +239,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
                 onLinkClick={props.onLinkClick}
                 onTextareaMount={props.onTextareaMount}
                 onPasteMarkdown={props.onPasteMarkdown}
-                onSetProperty={props.onSetProperty}
+                onOpenProperties={props.onOpenProperties}
                 embeds={props.embeds}
                 selectionMode={props.selectionMode}
                 selectionSet={props.selectionSet}

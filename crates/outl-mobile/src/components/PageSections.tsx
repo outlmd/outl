@@ -2,12 +2,21 @@ import { JSX, Show } from "solid-js";
 
 import type { PageBacklinks, PageMeta } from "@outl/shared/api/types";
 import { NamespaceMentions, NestedPages } from "@outl/shared/namespace";
+import { lateSectionVisible } from "@outl/shared/outline";
 import { FirstRunTips } from "@outl/shared/polish";
 
 import { BacklinksSection } from "./BacklinksSection";
 
 export interface PageSectionsProps {
-  /** The lazy `page_backlinks` reply; `undefined` while it loads. */
+  /**
+   * The lazy `page_backlinks` reply for the page on screen, or
+   * `undefined` when there is no answer for it yet.
+   *
+   * `undefined` is the contract, and the host is what makes it true:
+   * Solid's `createResource` keeps its last value through a source
+   * change, so `Journal.tsx` blanks it while `loading` rather than
+   * leaving the **previous** page's rows under the new page.
+   */
   backlinks: PageBacklinks | undefined;
   /** Kind of the open page — decides whether an empty backlinks box shows. */
   pageKind: PageMeta["kind"] | undefined;
@@ -35,6 +44,13 @@ export interface PageSectionsProps {
  * hidden when empty, because the daily flow is busy enough without an
  * empty box every day. Nested pages render nothing when there are
  * none — there is no concept to discover in an empty list.
+ *
+ * **"Empty" is an answer, never a guess.** `lateSectionVisible`
+ * (`@outl/shared/outline`) owns that rule and the measurement behind
+ * it; this is the surface it was written for. Until the scan replies,
+ * every section here draws nothing — the box that said "No backlinks
+ * yet" over a scan still running was telling the user something it
+ * then took back.
  */
 export function PageSections(props: PageSectionsProps): JSX.Element {
   return (
@@ -45,10 +61,13 @@ export function PageSections(props: PageSectionsProps): JSX.Element {
         </div>
       </Show>
       <Show
-        when={
-          props.pageKind === "page" ||
-          (props.backlinks?.backlinks.length ?? 0) > 0
-        }
+        when={lateSectionVisible({
+          answered: props.backlinks !== undefined,
+          count: props.backlinks?.backlinks.length ?? 0,
+          // A regular page keeps the discoverability box once the scan
+          // says zero; a journal does not.
+          keepWhenEmpty: props.pageKind === "page",
+        })}
       >
         <BacklinksSection
           backlinks={props.backlinks?.backlinks ?? []}

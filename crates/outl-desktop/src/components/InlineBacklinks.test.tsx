@@ -186,7 +186,7 @@ describe("InlineBacklinks task state — #144", () => {
  * one unnecessary.
  */
 describe("backlinks load behind the page", () => {
-  it("shows the section's own pending state and leaves the editor alone", async () => {
+  it("leaves the editor alone while a first load runs", async () => {
     let settle: (r: PageBacklinks) => void = () => {};
     vi.mocked(pageBacklinks).mockReturnValue(
       new Promise<PageBacklinks>((resolve) => {
@@ -198,8 +198,6 @@ describe("backlinks load behind the page", () => {
 
     const done = trackBacklinks(pageBacklinks("project"));
 
-    // The section says it is loading, by itself — no page-wide state.
-    expect(host.querySelector("[data-backlinks-pending]")).not.toBeNull();
     // The input the user is in is untouched: mounted, enabled, caret kept.
     expect(document.activeElement).toBe(editor);
     expect(editor.disabled).toBe(false);
@@ -207,7 +205,6 @@ describe("backlinks load behind the page", () => {
     settle(backlinksReply([backlink("todo", "TODO")]));
     await done;
 
-    expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
     expect(host.querySelector('[data-todo="TODO"]')?.textContent).toBe("▢");
     expect(document.activeElement).toBe(editor);
   });
@@ -235,12 +232,87 @@ describe("backlinks load behind the page", () => {
 
   it("clears the pending state when the fetch fails", async () => {
     vi.mocked(pageBacklinks).mockRejectedValue(new Error("page not found"));
-    const host = mount([]);
+    // Mounted with rows, so the assertion is about the mark and not
+    // about a section that was never on screen in the first place.
+    const host = mount([backlink("todo", "TODO")]);
 
     await trackBacklinks(pageBacklinks("project"));
 
-    // A swallowed failure that leaves the placeholder up is a section
-    // that loads forever.
+    // A swallowed failure that leaves the mark up is a section that
+    // loads forever; the rows it already had stay.
+    expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
+    expect(host.querySelector('[data-todo="TODO"]')).not.toBeNull();
+  });
+});
+
+/**
+ * The blink (`UX.md` → Never block a keystroke, root `CLAUDE.md` →
+ * "Putting the page in a load state for work that is not the page").
+ *
+ * The section used to mount the moment the scan started and unmount
+ * when it came back empty, so every page with no references drew 95px
+ * of header + skeleton and then took it away. Measured in the running
+ * desktop client: two geometry changes, ~1.2s apart, on a page that
+ * ends with nothing.
+ *
+ * The rule these pin is `lateSectionVisible`'s
+ * (`@outl/shared/outline`): a section fed by a reply that lands after
+ * the first paint never appears and then disappears.
+ */
+describe("the backlinks section never appears and then disappears", () => {
+  it("draws nothing while a first load runs on a page with no backlinks", async () => {
+    let settle: (r: PageBacklinks) => void = () => {};
+    vi.mocked(pageBacklinks).mockReturnValue(
+      new Promise<PageBacklinks>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const host = mount([]);
+
+    const done = trackBacklinks(pageBacklinks("project"));
+    expect(host.querySelector("section")).toBeNull();
+
+    settle(backlinksReply([]));
+    await done;
+    expect(host.querySelector("section")).toBeNull();
+  });
+
+  it("appears once, complete, when the first load finds rows", async () => {
+    let settle: (r: PageBacklinks) => void = () => {};
+    vi.mocked(pageBacklinks).mockReturnValue(
+      new Promise<PageBacklinks>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const host = mount([]);
+
+    const done = trackBacklinks(pageBacklinks("project"));
+    expect(host.querySelector("section")).toBeNull();
+
+    settle(backlinksReply([backlink("todo", "TODO")]));
+    await done;
+
+    expect(host.querySelector("section")).not.toBeNull();
+    // A count, never `0 refs` standing in for a pending scan.
+    expect(host.querySelector("header")?.textContent).toContain("1 ref");
+  });
+
+  it("says it is refetching only once there are rows to say it about", async () => {
+    let settle: (r: PageBacklinks) => void = () => {};
+    vi.mocked(pageBacklinks).mockReturnValue(
+      new Promise<PageBacklinks>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const host = mount([backlink("todo", "TODO")]);
+
+    const done = trackBacklinks(pageBacklinks("project"));
+    // The user is looking at a section that is about to change: the
+    // mark is owed here, and only here.
+    expect(host.querySelector("[data-backlinks-pending]")).not.toBeNull();
+
+    settle(backlinksReply([backlink("todo", "DONE")]));
+    await done;
     expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
   });
 });

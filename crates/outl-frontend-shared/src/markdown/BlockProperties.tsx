@@ -1,141 +1,159 @@
-import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createMemo, type JSX } from "solid-js";
 
-import { propertyChips } from "./properties";
+import { BellIcon } from "../icons";
+import { attributeFields } from "./properties";
 
 export interface BlockPropertiesProps {
   /** The block's `(key, value)` pairs, alpha-sorted by the backend. */
   properties?: ReadonlyArray<readonly [string, string]>;
   /**
-   * Commit a new value for `key`. An empty string clears the property.
+   * Open the properties sheet for this block or page.
    *
-   * Omit to render inert chips. Wiring it turns each chip into an
-   * inline editor — the same interaction on both clients, because an
-   * `<input>` is an input whether it's driven by a keyboard or by the
-   * iOS one.
+   * Omit and the line renders as inert text. It deliberately does
+   * **not** fall back to a `<button>` that does nothing: a control
+   * that cannot deliver the tap it advertises is the defect the pills
+   * had, and a phone gives no hover to discover the difference.
    */
-  onCommit?: (key: string, value: string) => void | Promise<void>;
-  /**
-   * Surface a failed commit. Omit and a rejection is dropped, which is
-   * why this exists: the chip repaints with the new value either way,
-   * so a silent failure reads as a successful edit.
-   */
-  onError?: (message: string) => void;
-  /** Theme tokens for a chip. Tailwind literals so JIT sees them. */
-  chipClass?: string;
-  /** Theme tokens for the editing input. */
-  inputClass?: string;
+  onOpen?: () => void;
+  /** Accessible name for the tap target. */
+  label?: string;
+  /** Host classes for the line — padding, margins. Not the type scale. */
+  rowClass?: string;
 }
 
 /**
- * A block's `key:: value` properties, rendered as chips under its text
- * and editable in place.
+ * The line's own layout, including its **type scale**.
  *
- * Both GUI clients showed nothing here, so a `remind::` written by a
- * chord or the long-press menu left the block looking untouched — the
- * rule existed, fired on schedule, and was invisible. Read-only chips
- * fixed half of that; without editing you could see `priority:: high`
- * and still have to open the `.md` to change it.
+ * The scale is here and not in a host string because of a cascade
+ * fact: mobile's `styles.css` carries an unlayered
+ * `button, input, textarea { font-size: inherit }`, which outranks
+ * every `@layer utilities` rule, so a `text-*` on the inner
+ * `<button>` resolves to nothing and the line paints at the block
+ * body's 17px. The container holds the size; the button inherits it.
+ * That bug is what this whole shape replaced.
+ */
+const LINE_LAYOUT =
+  "mt-px flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12.5px] leading-[1.35]";
+
+/** The tap target inside the line, sized by the line above it. */
+const INNER_LAYOUT = "flex min-w-0 items-center gap-1.5 overflow-hidden";
+
+/**
+ * A block's `key:: value` properties as an **attribute line** under
+ * its text.
  *
- * Presentational: no store, no command. The client passes `onCommit`
- * and decides what writing means.
+ * This shipped as a row of pills, to fix a real problem: `remind::`
+ * was invisible in the outline, so a rule written by a chord left the
+ * block looking untouched. The pills fixed that and introduced a
+ * category error. A pill means *flat label you tap to filter* — that
+ * is a tag. A `key:: value` is a **field**: a named attribute with a
+ * value. Drawing fields as pills put a row of things that looked like
+ * buttons, were not buttons, and could not be told from `#tag`s, under
+ * every block of a Roam-imported graph.
+ *
+ * The shape now is what Things, Linear, Apple Reminders and GitHub
+ * mobile do with an item's metadata: one quiet subtitle line, key
+ * receding behind value, colour spent only on the field that will
+ * actually interrupt you. The pill goes back to meaning one thing.
+ *
+ * **Editing is not here.** The chips edited a value in place, which
+ * is why each one had to be a control. One tap on the line opens the
+ * properties sheet instead — a two-column form, which is where
+ * editing a field belongs and where creating and deleting one already
+ * lived. Presentational: no store, no command.
  */
 export function BlockProperties(props: BlockPropertiesProps): JSX.Element {
-  // Which key is being edited, and its in-flight text. One at a time:
-  // a row of simultaneously-open inputs is noise, and committing on
-  // blur means opening a second would commit the first anyway.
-  const [editing, setEditing] = createSignal<string | null>(null);
-  const [draft, setDraft] = createSignal("");
+  const line = createMemo(() => attributeFields(props.properties));
 
-  // Memoised: `<Show>` and `<For>` below both read it, so a plain
-  // function allocated the projection twice per render of every block.
-  const chips = createMemo(() => propertyChips(props.properties));
+  const Fields = () => (
+    <>
+      <For each={line().fields}>
+        {(field, i) => (
+          <>
+            <Show when={i() > 0}>
+              <span class="text-(--color-outl-border)" aria-hidden="true">
+                ·
+              </span>
+            </Show>
+            {/* `fg-dimmer` / `fg-dim`, **not** the dedicated
+                `property_key_fg` / `property_value_fg`, and that is a
+                recorded divergence rather than an oversight.
 
-  function open(key: string, value: string) {
-    if (!props.onCommit) return;
-    setDraft(value);
-    setEditing(key);
-  }
+                The key matches: every preset sets `property_key_fg`
+                to `fg_dimmer`. The value does not — the brand pair
+                sets `property_value_fg` to `accent_soft`, so the TUI
+                paints *every* property value lavender. That is the
+                over-signalling this redesign removed: accent here
+                means "this will interrupt you", and a colour spent on
+                `status waiting` spends it on nothing.
 
-  function commit(key: string) {
-    // Read before clearing: `setEditing` re-renders and the input is
-    // gone by the time an async `onCommit` resolves.
-    const value = draft();
-    setEditing(null);
-    // A failed commit has to reach the host. Swallowing it left the
-    // chip showing the new value while the backend still held the old
-    // one, and the only trace was an unhandled rejection in a console
-    // the user never opens.
-    //
-    // The callback runs *inside* the chain, not as an argument to
-    // `Promise.resolve`: an argument is evaluated before the promise
-    // exists, so a synchronous throw escapes past the `.catch` and out
-    // of the blur handler. Both failure modes have to land here.
-    void Promise.resolve()
-      .then(() => props.onCommit?.(key, value))
-      .catch((e) => {
-        props.onError?.(e instanceof Error ? e.message : String(e));
-      });
-  }
-
-  return (
-    <Show when={chips().length > 0}>
-      <div class="mt-0.5 flex flex-wrap items-center gap-1">
-        <For each={chips()}>
-          {(chip) => (
+                So the two clients disagree about that one token on
+                purpose, and converging them is a change to the
+                **preset**, not to this component — it would restyle
+                the TUI for every user. Until someone decides that,
+                `property_value_fg` means "the TUI's property value",
+                which is narrower than its name (root `CLAUDE.md`
+                invariant 13). Recorded in `docs/theming.md`. */}
             <Show
-              when={editing() === chip.key}
+              when={field.live}
               fallback={
-                <Show
-                  when={props.onCommit}
-                  fallback={
-                    <span class={props.chipClass} title={`${chip.key}:: ${chip.value}`}>
-                      {chip.icon ? `${chip.icon} ${chip.value}` : `${chip.key}: ${chip.value}`}
-                    </span>
-                  }
-                >
-                  <button
-                    type="button"
-                    class={props.chipClass}
-                    title={`${chip.key}:: ${chip.value} — click to edit`}
-                    onClick={(e) => {
-                      // The row underneath selects / edits the block; a
-                      // chip click means "edit this property", not both.
-                      e.stopPropagation();
-                      open(chip.key, chip.value);
-                    }}
-                  >
-                    {chip.icon ? `${chip.icon} ${chip.value}` : `${chip.key}: ${chip.value}`}
-                  </button>
-                </Show>
+                <span class="min-w-0 truncate">
+                  <span class="text-(--color-outl-fg-dimmer)">{field.key}</span>{" "}
+                  <span class="text-(--color-outl-fg-dim)">{field.value}</span>
+                </span>
               }
             >
-              <input
-                class={props.inputClass ?? props.chipClass}
-                value={draft()}
-                autofocus
-                aria-label={`${chip.key} value`}
-                placeholder={`${chip.key}…`}
-                onClick={(e) => e.stopPropagation()}
-                onInput={(e) => setDraft(e.currentTarget.value)}
-                onBlur={() => commit(chip.key)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    // Blur would fire commit a second time.
-                    e.currentTarget.blur();
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    // Drop the draft, keep the stored value.
-                    setEditing(null);
-                  }
-                  // Otherwise let the key reach the input; the outline's
-                  // vim bindings must not eat characters being typed.
-                  e.stopPropagation();
-                }}
-              />
+              {/* The one field that acts on the user: accent, icon, and
+                  no key — the icon already says what it is, and the
+                  schedule is the part worth the width. An SVG rather
+                  than the ⏰ the TUI draws, because `DESIGN.md` keeps
+                  emoji out of GUI chrome; the emoji map in
+                  `properties.ts` stays for the terminal to mirror. */}
+              <span class="flex min-w-0 items-center gap-1 font-medium text-(--color-outl-accent)">
+                <BellIcon size={12} />
+                <span class="truncate">{field.value}</span>
+              </span>
             </Show>
-          )}
-        </For>
+          </>
+        )}
+      </For>
+      <Show when={line().overflow > 0}>
+        <span class="text-(--color-outl-border)" aria-hidden="true">
+          ·
+        </span>
+        <span class="shrink-0 text-(--color-outl-fg-dimmer)">
+          +{line().overflow} more
+        </span>
+      </Show>
+    </>
+  );
+
+  return (
+    <Show when={line().fields.length > 0}>
+      <div class={`${LINE_LAYOUT} ${props.rowClass ?? ""}`}>
+        <Show
+          when={props.onOpen}
+          fallback={
+            <span class={INNER_LAYOUT}>
+              <Fields />
+            </span>
+          }
+        >
+          <button
+            type="button"
+            class={`${INNER_LAYOUT} text-left`}
+            aria-label={props.label ?? "Properties"}
+            onClick={(e) => {
+              // The row underneath selects / edits the block. A tap on
+              // the attribute line means "show me these fields", never
+              // both.
+              e.stopPropagation();
+              props.onOpen?.();
+            }}
+          >
+            <Fields />
+          </button>
+        </Show>
       </div>
     </Show>
   );

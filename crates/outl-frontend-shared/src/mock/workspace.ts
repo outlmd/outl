@@ -11,6 +11,17 @@ import { tokenize } from "./tokenize";
 interface Seed {
   text: string;
   children?: Seed[];
+  /**
+   * `key:: value` pairs, so the property line has something to draw.
+   *
+   * The mock exists so a client runs in a plain browser for
+   * screenshots, which means a surface with no fixture data cannot be
+   * looked at — and the property line is the surface that most needed
+   * looking at. One seed carries an import stamp on purpose: it must
+   * render *nothing*, so a regression that unhides it is visible here
+   * rather than only in a unit test.
+   */
+  props?: Array<[string, string]>;
 }
 
 interface Page {
@@ -31,7 +42,7 @@ function block(seed: Seed): BlockNode {
     todo,
     tokens: tokenize(text),
     collapsed: false,
-    properties: [],
+    properties: seed.props ?? [],
     children: (seed.children ?? []).map(block),
   };
 }
@@ -56,9 +67,23 @@ export class MockWorkspace {
         { text: "Journal title reads as a day, not as an ISO date" },
         { text: "One popover surface everywhere" },
       ] },
-      { text: "TODO Review the command palette sketch" },
+      {
+        text: "TODO Review the command palette sketch",
+        props: [
+          ["created", "2026-11-12T09:14:07.690+00:00"],
+          ["priority", "high"],
+          ["remind", "9am every 1h"],
+          ["status", "waiting on Ana"],
+        ],
+      },
       { text: "DONE Ship the browser mock for screenshots" },
-      { text: "Call with [[Ana]] about **sync** on iOS" },
+      {
+        text: "Call with [[Ana]] about **sync** on iOS",
+        props: [
+          ["owner", "Mario"],
+          ["roam-uid", "callana-20261112-0611"],
+        ],
+      },
     ]);
     this.add("journal", shiftDay(t, -1), [
       { text: "Read about daily notes in [[outl]]" },

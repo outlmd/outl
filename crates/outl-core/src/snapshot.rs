@@ -48,8 +48,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 pub mod gc;
+mod header;
+pub mod select;
+
+pub use header::{read_header_from_disk, SnapshotHeader};
 
 /// Current snapshot wire format. Bump it on any breaking change to
 /// [`SnapshotBody`] **or to the encoder**; `decode` rejects every other
@@ -206,6 +211,14 @@ impl SnapshotBody {
     /// Accepting an older number would let a future schema that keeps
     /// postcard and merely appends a field half-parse into a partial tree.
     pub fn decode(bytes: &[u8]) -> Result<Self, SnapshotError> {
+        // Hash the buffer we were handed, rather than re-deriving one
+        // from the decoded body. Same number, and the body form cost a
+        // full `clone()` plus a second `to_stdvec` on every decode — on
+        // a 48 MB snapshot that is ~150 MB of cloned `String`s and
+        // another 48 MB of re-encoded bytes, paid on the boot path, to
+        // check a digest of bytes already in memory. See
+        // `hash_of_encoded` for why the two agree.
+        let recomputed = hash_of_encoded(bytes).ok_or(SnapshotError::HashMismatch)?;
         let body: Self =
             postcard::from_bytes(bytes).map_err(|e| SnapshotError::Decode(e.to_string()))?;
         if body.schema_version != SCHEMA_VERSION {
@@ -214,7 +227,6 @@ impl SnapshotBody {
                 found: body.schema_version,
             });
         }
-        let recomputed = compute_hash(&body)?;
         if recomputed != body.content_hash {
             return Err(SnapshotError::HashMismatch);
         }
@@ -244,6 +256,33 @@ fn compute_hash(body: &SnapshotBody) -> Result<[u8; 32], SnapshotError> {
     let mut arr = [0u8; 32];
     arr.copy_from_slice(out.as_slice());
     Ok(arr)
+}
+
+/// [`compute_hash`]'s answer, read straight off an encoded buffer.
+///
+/// `content_hash` is the **last** field of [`SnapshotBody`] and a
+/// `[u8; 32]`, which postcard writes as 32 raw bytes with no length
+/// prefix. The format is sequential, so the encoding of a body is the
+/// encoding of that same body with the hash zeroed, with the final 32
+/// bytes swapped — identical prefix, different tail. Hashing
+/// `bytes[..n-32] ++ [0; 32]` therefore produces exactly what
+/// `compute_hash` produces, without materializing a second body.
+///
+/// That equality is a property of the current encoder and of the field
+/// order above, not a guarantee postcard makes us. It is pinned by
+/// `the_buffer_hash_equals_the_body_hash`, which fails loudly if either
+/// moves — a bump of `SCHEMA_VERSION` that reorders fields, or a
+/// postcard release that starts length-prefixing fixed arrays.
+///
+/// `None` for a buffer too short to carry the field at all: nothing that
+/// small decodes into a body either, and the caller reads it as the
+/// mismatch it is.
+fn hash_of_encoded(bytes: &[u8]) -> Option<[u8; 32]> {
+    let body = bytes.len().checked_sub(32)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes[..body]);
+    hasher.update([0u8; 32]);
+    Some(hasher.finalize().into())
 }
 
 /// Write `body` to `snapshots_dir/snap-<actor>.bin` atomically.
@@ -407,181 +446,56 @@ pub fn read_best_from_disk(
     snapshots_dir: &Path,
     prefer_actor: ActorId,
 ) -> Result<Option<SnapshotBody>, SnapshotError> {
-    // This device's own snapshot has the tightest cutoff for its local
-    // ops, so prefer it and skip the directory scan entirely.
-    match read_from_disk(snapshots_dir, prefer_actor) {
-        Ok(Some(body)) => return Ok(Some(body)),
-        Ok(None) => {}
-        Err(e) => {
-            // Read end to end and refused by the decoder: a cache entry
-            // that can never be read again, sitting in the one slot this
-            // selector consults on *every* boot. Drop it, then report the
-            // failure exactly as before — this boot still full-replays,
-            // the next one does not have to.
-            gc::drop_own_if_unusable(snapshots_dir, prefer_actor, &e);
-            return Err(e);
+    // Read this device's own first — but only to catch an unusable one
+    // and drop it. It no longer short-circuits the choice: `survey` ranks
+    // it against the peers like any other candidate. Returning it
+    // unconditionally is what stranded a freshly paired device, whose own
+    // first-launch snapshot names a single actor and shadowed a peer's
+    // covering every actor in the workspace.
+    // Rank on headers, then decode only what won. `gc::adopt_order`
+    // reads a few hundred bytes per candidate instead of the whole body,
+    // which is the difference between 124 MB and 16 KB on a real
+    // four-snapshot directory — paid at launch, every launch.
+    let own_name = format!("snap-{prefer_actor}.bin");
+    let mut last_err: Option<SnapshotError> = None;
+
+    for path in select::adopt_order(snapshots_dir)? {
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("snapshot {} unreadable: {e}", path.display());
+                last_err = Some(SnapshotError::Io(format!("read {}: {e}", path.display())));
+                continue;
+            }
+        };
+        match SnapshotBody::decode(&bytes) {
+            Ok(body) => return Ok(Some(body)),
+            Err(e) => {
+                // A cache entry that can never be read again. Drop it
+                // when it is ours — nobody else will, and the selector
+                // would keep paying for it. A peer's stays: the GC
+                // sweep judges those, and it runs where it can afford
+                // the full decode.
+                if path.file_name().and_then(|n| n.to_str()) == Some(own_name.as_str()) {
+                    gc::drop_own_if_unusable(snapshots_dir, prefer_actor, &e);
+                }
+                // **Skip the entry, never the cache.** Returning here is
+                // what let one unreadable own snapshot send the boot to
+                // a full replay of 722,943 ops with a healthy peer body
+                // in the same directory.
+                warn!("snapshot {} unusable, trying the next: {e}", path.display());
+                last_err = Some(e);
+            }
         }
     }
 
-    // Adopt the most up-to-date peer snapshot; `survey` ranks on (max
-    // cutoff HLC, filename) so two boots pick the same one, and a
-    // snapshot that fails to decode is skipped, never fatal. No prune
-    // here: see the doc comment.
-    Ok(gc::survey(snapshots_dir, prefer_actor)?.into_best())
+    // Nothing adoptable. An empty directory and a directory of rubble
+    // both end in a full replay, but only the second is worth reporting.
+    match last_err {
+        Some(e) => Err(e),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::id::NodeId;
-    use tempfile::TempDir;
-
-    /// See `crates/outl-core/fixtures/README.md`.
-    const LEGACY_BINCODE_SCHEMA_3: &[u8] =
-        include_bytes!("../fixtures/legacy-snapshot-schema3.bin");
-
-    fn empty_body() -> SnapshotBody {
-        SnapshotBody::from_parts(
-            ActorId::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeSet::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
-        .expect("empty body encodes")
-    }
-
-    #[test]
-    fn roundtrips_empty_body() {
-        let body = empty_body();
-        let bytes = body.encode().expect("encode");
-        let decoded = SnapshotBody::decode(&bytes).expect("decode");
-        assert_eq!(decoded.schema_version, SCHEMA_VERSION);
-        assert_eq!(decoded.nodes, body.nodes);
-        assert_eq!(decoded.content_hash, body.content_hash);
-    }
-
-    #[test]
-    fn detects_tampered_hash() {
-        let mut bytes = empty_body().encode().expect("encode");
-        // Flip one byte near the end (hash field is last in serialization
-        // order). Mismatch between stored and recomputed hash must trip
-        // HashMismatch, not silently accept.
-        let last = bytes.len() - 1;
-        bytes[last] ^= 0xff;
-        let err = SnapshotBody::decode(&bytes).unwrap_err();
-        assert!(matches!(err, SnapshotError::HashMismatch), "got {err:?}");
-    }
-
-    /// A snapshot written by a pre-#207 build (schema 3, bincode) must be
-    /// rejected, never half-parsed. Either outcome the decoder can reach —
-    /// a parse failure or a `content_hash` mismatch — routes the caller to
-    /// the full op-log replay it already had for corrupt snapshots, so the
-    /// upgrade costs one slower boot and nothing else.
-    #[test]
-    fn rejects_legacy_bincode_snapshot() {
-        let err =
-            SnapshotBody::decode(LEGACY_BINCODE_SCHEMA_3).expect_err("legacy must not decode");
-        assert!(
-            matches!(err, SnapshotError::Decode(_) | SnapshotError::HashMismatch),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn rejects_future_schema_version() {
-        let mut body = empty_body();
-        body.schema_version = SCHEMA_VERSION + 1;
-        // Re-stamp the hash so the only thing wrong is the schema.
-        body.content_hash = compute_hash(&body).expect("test body encodes");
-        let bytes = body.encode().expect("encode");
-        let err = SnapshotBody::decode(&bytes).unwrap_err();
-        assert!(
-            matches!(err, SnapshotError::SchemaMismatch { found, .. } if found == SCHEMA_VERSION + 1),
-            "got {err:?}"
-        );
-    }
-
-    /// The `<=` this check used to be would have accepted this body — a
-    /// well-formed, correctly-hashed buffer claiming an *older* schema.
-    /// Harmless today (a real schema-3 file is bincode and dies in the
-    /// parser), but the moment a schema bump keeps postcard and merely
-    /// appends a field, that is a partial tree read as if it were whole.
-    #[test]
-    fn rejects_past_schema_version() {
-        let mut body = empty_body();
-        body.schema_version = SCHEMA_VERSION - 1;
-        body.content_hash = compute_hash(&body).expect("test body encodes");
-        let bytes = body.encode().expect("encode");
-        let err = SnapshotBody::decode(&bytes).unwrap_err();
-        assert!(
-            matches!(err, SnapshotError::SchemaMismatch { found, .. } if found == SCHEMA_VERSION - 1),
-            "got {err:?}"
-        );
-    }
-
-    /// A multi-MB body, so a writer's `create` → `write` → `fsync`
-    /// window is wide enough for a second writer to land inside it. A
-    /// real snapshot of the maintainer's workspace is ~13 MB; this is
-    /// the same shape, two orders of magnitude smaller.
-    fn big_body(actor: ActorId, tag: usize, round: usize) -> SnapshotBody {
-        let mut cutoff = BTreeMap::new();
-        cutoff.insert(actor, Hlc::new(1_000 + tag as u64, round as u32, actor));
-        let mut text = BTreeMap::new();
-        for i in 0..3_000 {
-            text.insert(
-                NodeId::new(),
-                format!("{tag}-{round}-{i}-{}", "x".repeat(1_000)),
-            );
-        }
-        SnapshotBody::from_parts(
-            actor,
-            cutoff,
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeSet::new(),
-            BTreeMap::new(),
-            text,
-        )
-        .expect("test body encodes")
-    }
-
-    /// Every writer for one actor used to compose in the same
-    /// `snap-<actor>.bin.tmp`. Two of them overlap and the loser is
-    /// still writing into the inode the winner already renamed into
-    /// place, so the *published* snapshot is torn — and the loser's own
-    /// `rename` finds nothing left to publish.
-    ///
-    /// The cost is a slow boot, never lost notes: the op log is the
-    /// source of truth and a snapshot that fails to decode falls back to
-    /// a full replay. That is exactly why it has to be pinned — nothing
-    /// else in the system complains.
-    #[test]
-    fn concurrent_writers_for_one_actor_never_publish_a_torn_snapshot() {
-        let tmp = TempDir::new().unwrap();
-        let dir = tmp.path().join(".outl").join("snapshots");
-        let actor = ActorId::new();
-        let published = dir.join(format!("snap-{actor}.bin"));
-
-        let handles: Vec<_> = (0..4)
-            .map(|tag| {
-                let dir = dir.clone();
-                let published = published.clone();
-                std::thread::spawn(move || {
-                    for round in 0..4 {
-                        write_to_disk(&dir, &big_body(actor, tag, round))
-                            .expect("a concurrent publish must not fail");
-                        let bytes = std::fs::read(&published).expect("published snapshot readable");
-                        SnapshotBody::decode(&bytes)
-                            .expect("a published snapshot is always a whole body");
-                    }
-                })
-            })
-            .collect();
-        for h in handles {
-            h.join().expect("writer thread");
-        }
-    }
-}
+mod tests;

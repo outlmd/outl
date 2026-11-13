@@ -36,7 +36,9 @@ import { PropertiesSheet, type PropertyScope } from "./PropertiesSheet";
 const PAGE_ID = "page-1";
 const BLOCK_ID = "blk-1";
 
-function pageView() {
+function pageView(
+  blockProps: Array<[string, string]> = [["icon", "🔥"]],
+) {
   return {
     page: {
       id: PAGE_ID,
@@ -51,7 +53,7 @@ function pageView() {
         todo: null,
         tokens: [],
         collapsed: false,
-        properties: [["icon", "🔥"]] as Array<[string, string]>,
+        properties: blockProps,
         children: [],
       },
     ],
@@ -64,7 +66,11 @@ function pageView() {
 let dispose: (() => void) | undefined;
 let host: HTMLElement;
 
-function mount(scope: PropertyScope, blockId: string | null = BLOCK_ID) {
+function mount(
+  scope: PropertyScope,
+  blockId: string | null = BLOCK_ID,
+  blockProps?: Array<[string, string]>,
+) {
   host = document.createElement("div");
   document.body.appendChild(host);
   const onView = vi.fn();
@@ -75,7 +81,7 @@ function mount(scope: PropertyScope, blockId: string | null = BLOCK_ID) {
         blockId,
         scope,
         pageId: PAGE_ID,
-        view: pageView() as never,
+        view: pageView(blockProps) as never,
         onClose: () => {},
         onMessage,
         onView,
@@ -350,5 +356,92 @@ describe("PropertiesSheet — the value is usually a page link", () => {
     await settle();
 
     expect(searchPages).toHaveBeenCalledWith("");
+  });
+});
+
+/**
+ * The list screen is a **field list**, not a chip row.
+ *
+ * A `key:: value` property is a named attribute with a value, which is
+ * what every mobile app renders as a two-column row — iOS Settings,
+ * Notion's property panel, a contact card. The sheet used to render it
+ * as `key` hugging the left edge and the value pushed hard right, so
+ * two rows of different key lengths had their values in different
+ * places and nothing lined up. A pill, which is what the outline used
+ * to draw, promises a tap that filters; a field promises a tap that
+ * edits. Only one of those is true here.
+ */
+describe("PropertiesSheet — a field list, not a chip row", () => {
+  /** The label / value / chevron columns of one row. */
+  function fieldRow(key: string) {
+    const btn = button(`Edit ${key}`);
+    const spans = [...btn.querySelectorAll("span")] as HTMLElement[];
+    return { btn, label: spans[0], value: spans[1], chevron: spans[2] };
+  }
+
+  it("puts the key in a label column of its own fixed width", async () => {
+    mount("block");
+    await settle();
+    const { label } = fieldRow("icon");
+    // Fixed, so every value in the list starts at the same x. A column
+    // that sizes to its key is what made the old list look ragged.
+    expect(label.className).toMatch(/\bw-\[\d+px\]|\bw-2[0-9]\b/);
+    expect(label.className).toContain("--color-outl-fg-dimmer");
+  });
+
+  it("never pushes the value to the right edge", async () => {
+    mount("block");
+    await settle();
+    // The old shape, and the thing a field list is not: `text-right`
+    // left each value hanging off a different column.
+    expect(fieldRow("icon").value.className).not.toContain("text-right");
+  });
+
+  it("ends a row with a chevron the screen reader never says", async () => {
+    mount("block");
+    await settle();
+    const { chevron } = fieldRow("icon");
+    expect(chevron).toBeTruthy();
+    // It is the "this opens something" affordance iOS taught, and it
+    // carries no information the label does not already give.
+    expect(chevron.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("puts Add property at the end, after the fields", async () => {
+    mount("block");
+    await settle();
+    const buttons = [...document.querySelectorAll("button")];
+    const add = buttons.indexOf(button("Add property"));
+    const row = buttons.indexOf(button("Edit icon"));
+    // A list you add to reads top-to-bottom and ends with the way to
+    // grow it. Leading with the action buries the data it acts on.
+    expect(add).toBeGreaterThan(row);
+  });
+
+  it("renders an import stamp dimmer than a property the user wrote", async () => {
+    // `created::` is listed so it can be deleted, not so it can be
+    // read — it is on every block of a migrated graph. The outline
+    // hides it outright; here it has to be visibly secondary.
+    mount("block", BLOCK_ID, [
+      ["created", "2026-11-12T09:14:07.690+00:00"],
+      ["status", "waiting"],
+    ]);
+    await settle();
+    expect(fieldRow("created").value.className).not.toBe(
+      fieldRow("status").value.className,
+    );
+    expect(fieldRow("created").value.className).toContain(
+      "--color-outl-fg-dim)",
+    );
+    expect(fieldRow("status").value.className).toContain("--color-outl-fg)");
+  });
+
+  it("gives every row a thumb-sized target", async () => {
+    mount("block");
+    await settle();
+    // 44pt is the floor Apple documents and the one a 13px label would
+    // otherwise undercut.
+    expect(fieldRow("icon").btn.className).toMatch(/min-h-\[44px\]/);
+    expect(button("Add property").className).toMatch(/min-h-\[44px\]/);
   });
 });

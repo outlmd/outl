@@ -50,6 +50,33 @@ struct IndexEntry {
     offset: u64,
 }
 
+impl OffsetIndex {
+    /// Bytes one persisted entry occupies. Exposed so a test can count
+    /// records without restating the layout.
+    #[cfg(test)]
+    pub(crate) const RECORD_WIDTH: usize = <IndexEntry as sidecar::Record>::WIDTH;
+}
+
+impl sidecar::Record for IndexEntry {
+    const WIDTH: usize = sidecar::wire::HLC + 8;
+
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    fn encode(&self, out: &mut Vec<u8>) {
+        sidecar::wire::put_hlc(out, &self.ts);
+        sidecar::wire::put_u64(out, self.offset);
+    }
+
+    fn decode(b: &[u8]) -> Self {
+        Self {
+            ts: sidecar::wire::get_hlc(&b[..sidecar::wire::HLC]),
+            offset: sidecar::wire::get_u64(&b[sidecar::wire::HLC..]),
+        }
+    }
+}
+
 /// In-memory offset index for a single actor's `.jsonl`.
 ///
 /// Keyed by HLC (total order), so range queries ("every op after this

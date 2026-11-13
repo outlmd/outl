@@ -67,6 +67,7 @@ pub(crate) fn wire_iroh_transport(
     app: &tauri::AppHandle,
     workspace_root: PathBuf,
     actor: ActorId,
+    open_done: std::sync::mpsc::Receiver<()>,
 ) -> Option<IrohSyncTransport> {
     let dir = match iroh_dir(app) {
         Ok(d) => d,
@@ -96,22 +97,38 @@ pub(crate) fn wire_iroh_transport(
         }
     };
 
-    // Bridge each "peer ops landed" signal to the `workspace-ready`
-    // Tauri event so the frontend reloads.
-    start_with_reload_bridge(
-        &transport,
-        workspace_root.clone(),
-        actor,
-        app.clone(),
-        "workspace-ready",
-    );
+    // Bridge each "peer ops landed" signal to the `workspace-ready` Tauri
+    // event so the frontend reloads — but not until the background opener
+    // says it is done.
+    //
+    // Building the transport above is cheap (identity + peer store, no
+    // socket); STARTING it binds the endpoint and immediately dials every
+    // known peer for an initial sync. On a device meeting a large history
+    // for the first time that dial pulls the whole op log, and the opener is
+    // concurrently replaying it. Both peak in the hundreds of MB, and
+    // together they took the Android app out with `Scudo ERROR: internal map
+    // failure` and a `SIGABRT` on every launch — the log had no
+    // `boot phases:` line at all, because the open never got to finish.
+    //
+    // A transport that exists but has not started is an already-supported
+    // state: `sync_now()` is a no-op and `peer_health()` is empty until
+    // `start()` runs, so `AppState` can hold it from here. What the wait
+    // costs is inbound dials during the open, which peers retry.
+    let starting = transport.clone();
+    let root = workspace_root.clone();
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        // Err means the opener thread died without signalling; start anyway
+        // rather than leave the device with no sync at all.
+        let _ = open_done.recv();
+        start_with_reload_bridge(&starting, root, actor, handle, "workspace-ready");
+        info!("iroh sync transport started");
+    });
 
     // Expose the live transport + workspace root to the iOS background-task
     // FFIs: a background window drives a forced sync pass, and the peer-count
     // gate reads `<root>/.outl/peers.json` to decide whether scheduling a
     // window is worth it at all (see `bg_sync`).
     crate::bg_sync::register(&transport, workspace_root);
-
-    info!("iroh sync transport started");
     Some(transport)
 }

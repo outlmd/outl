@@ -17,6 +17,26 @@
 
 use super::*;
 
+/// Open the workspace the way a process that **outlives the command**
+/// does, which is the only kind allowed to write a snapshot.
+///
+/// `crate::ws::open` is a short-lived opener, so it leaves
+/// `write_snapshots: false` and `save_snapshot` is a no-op through it —
+/// the opt-out binds direct callers, not just the in-band threshold
+/// writer. These tests need a real file on disk to have anything for
+/// the doctor to judge, so they ask for the resident opener's terms.
+fn open_writing_snapshots(path: &Path) -> outl_ws::WsCtx {
+    outl_ws::open_with(
+        path,
+        outl_ws::OpenOptions {
+            write_snapshots: true,
+            writes: true,
+            device_actor_only: false,
+        },
+    )
+    .expect("open")
+}
+
 /// A device store this test owns, so two `doctor` runs are the same
 /// device and `snap-<own actor>.bin` means something.
 fn owned_store() -> (tempfile::TempDir, outl_core::device::DeviceStore) {
@@ -47,7 +67,7 @@ fn three_snapshots(
 ) -> (PathBuf, PathBuf, PathBuf) {
     seed_page(root, "notes", &["hello"]);
     let cfg = crate::workspace_layout::read_config(paths).unwrap();
-    let mut ws = crate::ws::open(root).expect("open");
+    let mut ws = open_writing_snapshots(root);
     ws.workspace.save_snapshot().expect("write snapshot");
     drop(ws);
 
@@ -385,7 +405,7 @@ fn a_valid_snapshot_passes() {
     let cfg = crate::workspace_layout::read_config(&paths).unwrap();
     let actor = cfg.actor().unwrap();
 
-    let mut ws = crate::ws::open(&root).expect("open");
+    let mut ws = open_writing_snapshots(&root);
     ws.workspace.save_snapshot().expect("write snapshot");
     drop(ws);
 

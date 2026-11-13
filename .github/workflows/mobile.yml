@@ -126,6 +126,29 @@ jobs:
         run: cargo clippy -p outl-mobile --all-targets -- -D warnings
       - name: cargo test (mobile)
         run: cargo test -p outl-mobile --all-targets
+      # A host build cannot see an iOS-only compile break, because the
+      # device target is what resolves the `cfg(target_os = "ios")`
+      # halves of the dependency graph. The job that would catch one
+      # (`ios-build`) needs a `workflow_dispatch` or an `ios-build`
+      # label, so it runs on no ordinary PR — and the release build
+      # runs later still. That gap is not theoretical: bumping `libc`
+      # to 0.2.191 restricted `AF_SYS_CONTROL` and friends to
+      # `cfg(target_os = "macos")` (correctly — the iPhoneOS SDK ships
+      # no `sys/kern_control.h`), while `nix 0.31.3` still reaches for
+      # them under `cfg(apple_targets)`. Every device build has been
+      # dead since, with nothing in CI to say so until TestFlight.
+      #
+      # This is the cheap half of the iOS job: it resolves and
+      # compiles the same graph without building the app, the bundle
+      # or the Swift side. Flags mirror what `cargo tauri ios build`
+      # invokes, so the two cannot disagree about which features are
+      # on.
+      - name: Install iOS device target
+        run: rustup target add aarch64-apple-ios
+      - name: cargo check (iOS device target)
+        run: >
+          cargo check -p outl-mobile --target aarch64-apple-ios
+          --lib --no-default-features
 
   # 2 vCPU: vitest + a Vite build finish in ~12s and never saturated
   # 4 vCPU. Half the SKU, half the bill, same wall clock.

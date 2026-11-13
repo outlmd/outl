@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 
 use outl_actions::backup::BackupRoot;
 use outl_actions::{migrate_legacy_into_today, open_today};
+use outl_core::boot_timing::BootTimer;
 use outl_core::device::DeviceStore;
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::ActorId;
@@ -264,6 +265,10 @@ pub fn open_workspace_at(
     }
 
     backup_root.set(Some(path.to_path_buf()));
+    // The open just read the whole log, so the first poll after it has
+    // nothing to pick up. Without this the very first reload is a full
+    // rebuild of what boot already built (`ops_watermark`).
+    crate::ops_watermark::note_current(&path.join("ops"), actor);
     Ok(workspace)
 }
 
@@ -276,9 +281,16 @@ fn boot(
     path: &Path,
     lru_cap: usize,
 ) -> anyhow::Result<Workspace> {
+    // The open reports its own breakdown; see `boot_timing`. The phase
+    // names below are what a launch is actually spent on, and the two
+    // that dominate on a large workspace are the first two.
+    let mut timer = BootTimer::start();
+
     let storage = JsonlStorage::open(path.join("ops"), actor)?;
+    timer.phase("index");
     let mut workspace =
         Workspace::open_with_storage(actor, Box::new(storage), Some(path.to_path_buf()))?;
+    timer.phase("replay");
 
     // Register per-page shards + reboot BEFORE running boot helpers so
     // the materialized tree is complete (migrated workspaces have an
@@ -292,6 +304,7 @@ fn boot(
     if workspace.has_page_storages() {
         workspace.reboot_with_all_storages()?;
     }
+    timer.phase("shards");
 
     // Raise the generator above everything the log already holds, before
     // the boot helpers below emit their first op (see
@@ -306,10 +319,12 @@ fn boot(
     // storage read failing here says the boot that just succeeded cannot
     // be re-read a statement later.
     workspace.seed_clock(hlc)?;
+    timer.phase("seed_clock");
 
     if let Err(e) = migrate_legacy_into_today(&mut workspace, hlc) {
         warn!("legacy migration: {e}");
     }
+    timer.phase("migrate_legacy");
     // Repair split-brain page/journal roots (two roots sharing one slug, e.g. a
     // sidecar-less `.md` reconciled to a fresh id before the deterministic-id
     // fix). Merges every duplicate's children under the canonical root and
@@ -320,9 +335,11 @@ fn boot(
         Ok(n) => warn!("merged {n} duplicate slug root(s) on boot"),
         Err(e) => warn!("duplicate-slug-root repair: {e}"),
     }
+    timer.phase("merge_dupe_roots");
     if let Err(e) = open_today(&mut workspace, hlc) {
         warn!("could not pre-open today: {e}");
     }
+    timer.phase("open_today");
 
     // Shed cold history AFTER boot + helpers finish. Boot needs every
     // op in RAM to rebuild Yrs `Doc`s; afterwards cold ops come back
@@ -348,23 +365,26 @@ fn boot(
     // disk, so the next boot and that reload are O(delta). Best-effort; a
     // stale/corrupt snapshot is always safe — boot silently falls back to a
     // full replay — so this can never corrupt state, only save work.
-    // Re-persist a fresh snapshot whenever this boot FULL-REPLAYED (snapshot
-    // absent, stale, or rejected by the convergence guard). A stale snapshot
-    // the guard keeps rejecting would otherwise full-replay on every open, and
-    // the resident 200k-op log is fine to render now (block_text is index-
-    // driven) — but the NEXT boot should adopt a snapshot instead of replaying.
-    // `save_snapshot` is O(log) now (the block-text index makes
-    // `force_materialize_pending` cheap), not the old O(blocks × log), so this
-    // is safe to do after a full replay.
-    if snap_cfg.enabled
-        && !workspace.booted_from_snapshot()
-        && workspace.log().len() as u32 >= snap_cfg.op_threshold
-    {
+    // Re-persist whenever `Workspace::snapshot_refresh_due` says so: after a
+    // full replay (there was no usable snapshot), and — the arm this used to
+    // be missing — after a boot that ADOPTED one whose delta has grown past
+    // the threshold. `save_snapshot` is O(log) now (the block-text index
+    // makes `force_materialize_pending` cheap), not the old O(blocks × log),
+    // so this is safe on either path.
+    let refresh_due = workspace.snapshot_refresh_due();
+    if refresh_due {
         if let Err(e) = workspace.save_snapshot() {
             warn!("boot: could not persist snapshot: {e}");
         }
     }
+    timer.phase("snapshot_write");
 
+    timer.finish(&format!(
+        "adopted={} delta_ops={} blocks_resident={} snapshot_written={refresh_due}",
+        workspace.booted_from_snapshot(),
+        workspace.log().len(),
+        workspace.resident_text_count(),
+    ));
     Ok(workspace)
 }
 

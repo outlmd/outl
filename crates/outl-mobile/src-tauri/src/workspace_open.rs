@@ -151,6 +151,7 @@ pub(crate) fn spawn_workspace_opener(
     storage_root: PathBuf,
     hlc: HlcGenerator,
     app: tauri::AppHandle,
+    open_done: std::sync::mpsc::Sender<()>,
 ) {
     let actor = hlc.actor();
     // Mobile pins the LRU cap to 5k ops (≈ 1 MB of cache) regardless of
@@ -173,6 +174,8 @@ pub(crate) fn spawn_workspace_opener(
                 return;
             }
         };
+        // Held until here on purpose: dropping it is what releases the sync
+        // transport, and a failed open above drops it on the way out.
         // Publish + fire `workspace-ready` FIRST so today's journal paints
         // immediately; the orphan reconcile runs after (see below).
         *workspace_slot.lock() = Some(workspace);
@@ -180,6 +183,15 @@ pub(crate) fn spawn_workspace_opener(
             warn!("emit workspace-ready: {e}");
         }
         info!("background workspace opener complete");
+        // Let the sync transport start. It is a MEMORY gate, not a readiness
+        // one: the open and a first sync both peak in the hundreds of MB, and
+        // on a 723k-op workspace the two running together is what killed the
+        // Android app — a launch with no `boot phases:` line in its log,
+        // because the open never finished. A `Sender` rather than the
+        // `workspace-ready` event because a channel cannot be missed: the
+        // signal is buffered if the transport is not waiting yet, and a
+        // panicking opener drops it, which wakes the waiter just the same.
+        let _ = open_done.send(());
 
         // Reconcile orphan `.md` + repair doubled journal titles off the
         // boot path, on its own thread (mirrors desktop). The workspace is

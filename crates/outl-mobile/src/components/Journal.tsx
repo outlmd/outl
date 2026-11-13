@@ -41,7 +41,6 @@ import {
   searchPersons,
   setBacklinksOrder,
   setBlockCollapsed,
-  setBlockProperty,
   setBlockRemind,
   splitBlock,
   undoPage,
@@ -104,7 +103,7 @@ import { BlockRow } from "./BlockRow";
 import { SkeletonOutline } from "./Skeleton";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
-import { editableProperties } from "../lib/properties";
+import { BlockProperties } from "@outl/shared/markdown";
 import { haptic } from "../lib/haptics";
 import { armKeyboard, installKeyboardKeeper } from "../lib/keyboard-keeper";
 import { createEmbedResolver } from "./Journal.embeds";
@@ -1445,28 +1444,19 @@ export function Journal() {
       <main class="outl-reading ios-scroll flex-1 pb-32">
         <PullToRefresh onRefresh={handleRefresh}>
         <div class="min-h-[60vh]">
-        {/* The page's own `key:: value` metadata (`icon::`, `type::`).
-            Mobile showed none of it before — it existed only in the
-            `.md` and the TUI. Tapping a chip opens the same properties
-            sheet the block long-press does, on the Page side. */}
-        <Show when={(view()?.page_properties ?? []).length > 0}>
-          <div class="ios-scroll flex gap-1.5 overflow-x-auto px-4 pt-2">
-            <For each={editableProperties(view()!.page_properties)}>
-              {([key, value]) => (
-                <button
-                  type="button"
-                  onClick={() => {
-                    haptic("light");
-                    setPropertiesTarget({ blockId: null, scope: "page" });
-                  }}
-                  class="shrink-0 rounded-full bg-(--color-outl-border)/40 px-2.5 py-1 text-[11px] text-(--color-outl-fg-dim) active:opacity-60"
-                >
-                  <span class="font-mono">{key}</span>: {value}
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
+        {/* The page's own `key:: value` metadata (`icon::`, `type::`),
+            which lived only in the `.md` and the TUI before. Same
+            attribute line the blocks draw, so page and block metadata
+            cannot read as two different kinds of thing. */}
+        <BlockProperties
+          properties={view()?.page_properties}
+          label="Page properties"
+          rowClass="px-4 pt-2"
+          onOpen={() => {
+            haptic("light");
+            setPropertiesTarget({ blockId: null, scope: "page" });
+          }}
+        />
         <section class="mt-1 pb-1">
           <Show
             when={loaded() && view() && view()!.outline.length > 0}
@@ -1546,15 +1536,9 @@ export function Journal() {
                   onToggleCollapse={handleToggleCollapse}
                   onFocusBlock={handleFocusBlock}
                   onContextMenu={(id) => setContextMenuBlockId(id)}
-                  onSetProperty={(blockId, key, value) => {
-                    const pid = pageId();
-                    if (!pid) return;
-                    void setBlockProperty(pid, blockId, key, value)
-                      .then(applyView)
-                      .catch((e) =>
-                        setError(e instanceof Error ? e.message : String(e)),
-                      );
-                  }}
+                  onOpenProperties={(id) =>
+                    setPropertiesTarget({ blockId: id, scope: "block" })
+                  }
                   onRefClick={handleRefClick}
                   onTagClick={handleTagClick}
                   onLinkClick={handleLinkClick}
@@ -1573,7 +1557,7 @@ export function Journal() {
         </section>
 
         <PageSections
-          backlinks={backlinks()}
+          backlinks={backlinks.loading ? undefined : backlinks()}
           pageKind={view()?.page.kind}
           blank={isBlankOutline(outlineRoots())}
           onToggleOrder={async () => {

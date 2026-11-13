@@ -122,10 +122,29 @@ pub fn replay_from_disk(root: PathBuf, hlc: HlcGenerator) -> Result<Workspace, S
 pub async fn reload_workspace_into<S: AppHost>(state: &S) -> Result<(), String> {
     let root = state.storage_root()?;
     let hlc = state.hlc().clone();
-    publish_replayed(state, RELOAD_ATTEMPTS, move || {
+    let ops_dir = root.join("ops");
+
+    // Nothing to read, nothing to replay. Mobile's poll calls this on a
+    // timer with no way to know whether its sync pass delivered anything,
+    // so without this the whole O(log) rebuild ran every tick against an
+    // untouched log — three times in the first seven seconds of a launch,
+    // `delta_ops` identical each time. See `ops_watermark`.
+    let Some(watermark) = crate::ops_watermark::read_needed(&ops_dir, hlc.actor()) else {
+        return Ok(());
+    };
+
+    let replayed = publish_replayed(state, RELOAD_ATTEMPTS, move || {
         replay_from_disk(root.clone(), hlc.clone())
     })
-    .await
+    .await;
+
+    // Only once the tree is published. A failed or abandoned reload has
+    // read nothing, and recording the watermark there would mark a peer's
+    // ops as seen while no tree holds them.
+    if replayed.is_ok() {
+        crate::ops_watermark::note(&ops_dir, watermark);
+    }
+    replayed
 }
 
 /// Run `replay` off the calling thread and publish its result only if no

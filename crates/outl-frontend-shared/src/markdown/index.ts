@@ -10,8 +10,12 @@ export {
 export { QuoteWrap, isBlockQuoted, type QuoteWrapProps } from "./QuoteWrap";
 export { BlockProperties, type BlockPropertiesProps } from "./BlockProperties";
 export {
+  ATTRIBUTE_LINE_LIMIT,
+  attributeFields,
+  isImportStamp,
   isInternalKey,
   propertyChips,
   remindRule,
   type PropertyChip,
+  type PropertyField,
 } from "./properties";

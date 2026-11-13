@@ -65,6 +65,7 @@ import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
 import { PageSections } from "./PageSections";
 import { PageTitle } from "./PageTitle";
+import { ZoomTitle } from "./ZoomTitle";
 import { PropertyEditor } from "./PropertyEditor";
 
 /**
@@ -782,14 +783,16 @@ export function OutlineView() {
                   </For>
                 </nav>
 
-                {/* Title = the focused block itself. */}
+                {/* Title = the focused block itself, rendered the way
+                 *  every other surface renders a block — see
+                 *  `<ZoomTitle />` for why it is not `root.text`. */}
                 <h1 class="text-[24px] font-semibold leading-[1.2] tracking-[-0.011em]">
-                  <Show
-                    when={fv().root.text}
-                    fallback={<span class="opacity-40">(empty block)</span>}
-                  >
-                    {fv().root.text}
-                  </Show>
+                  <ZoomTitle
+                    root={fv().root}
+                    onRefClick={handleRefClick}
+                    onTagClick={handleTagClick}
+                    onLinkClick={handleLinkClick}
+                  />
                 </h1>
               </>
             )}

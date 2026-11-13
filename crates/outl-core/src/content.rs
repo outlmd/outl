@@ -197,6 +197,20 @@ pub(crate) struct ContentStore {
     /// Nodes with `Edit` history whose string hasn't been materialized
     /// yet (deferred by the full-replay boot path). Drained on read.
     pending: RefCell<HashSet<NodeId>>,
+    /// Nodes whose cached string is **older than the log**: the snapshot
+    /// body carries their text as of its cutoff, and the delta replayed
+    /// on top holds an `Edit` for each.
+    ///
+    /// Distinct from `pending` because the *source* differs, and that is
+    /// the whole point. A pending node rebuilds from the resident log; a
+    /// snapshot boot's resident log holds only the delta, so rebuilding
+    /// one of these from it would drop every pre-cutoff edit and produce
+    /// wrong text (#129). These resolve through
+    /// `Storage::ops_for_node`, which reads the full history from disk.
+    ///
+    /// A node in here has a cached string that must NOT be served, so
+    /// every reader checks this set before the cache.
+    stale: RefCell<HashSet<NodeId>>,
 }
 
 impl Default for ContentStore {
@@ -205,6 +219,7 @@ impl Default for ContentStore {
             text: RefCell::new(HashMap::new()),
             cache: DocCache::new(DOC_CACHE_CAP),
             pending: RefCell::new(HashSet::new()),
+            stale: RefCell::new(HashSet::new()),
         }
     }
 }
@@ -223,6 +238,25 @@ impl ContentStore {
     /// any `Edit` (reads back as `None`).
     pub(crate) fn is_pending(&self, node: NodeId) -> bool {
         self.pending.borrow().contains(&node)
+    }
+
+    /// Whether `node`'s cached string predates an `Edit` in the snapshot
+    /// delta, so the cache must not be served for it.
+    pub(crate) fn is_stale(&self, node: NodeId) -> bool {
+        self.stale.borrow().contains(&node)
+    }
+
+    /// Record the nodes the snapshot delta edited. Their cached string is
+    /// the snapshot's, which is now behind the log.
+    pub(crate) fn set_stale(&mut self, nodes: HashSet<NodeId>) {
+        *self.stale.borrow_mut() = nodes;
+    }
+
+    /// The still-unresolved stale nodes, for the one caller that cannot
+    /// defer: building a snapshot body, which must not persist a string
+    /// the log has already moved past.
+    pub(crate) fn stale_snapshot(&self) -> Vec<NodeId> {
+        self.stale.borrow().iter().copied().collect()
     }
 
     /// Snapshot of the still-deferred nodes, so a caller can materialize each
@@ -247,6 +281,9 @@ impl ContentStore {
         let s = doc_string(&build_doc(updates));
         self.text.borrow_mut().insert(node, s.clone());
         self.pending.borrow_mut().remove(&node);
+        // A rebuild settles the node whichever set sent it here: the
+        // string now in the cache came from its full `Edit` history.
+        self.stale.borrow_mut().remove(&node);
         s
     }
 
@@ -256,19 +293,6 @@ impl ContentStore {
     /// rebuilds each string on first read.
     pub(crate) fn set_pending(&mut self, nodes: HashSet<NodeId>) {
         *self.pending.borrow_mut() = nodes;
-    }
-
-    /// Materialize a node's text from its `Edit` updates without caching
-    /// the `Doc`. Used during open so the memory peak stays at a single
-    /// live doc instead of one per block.
-    pub(crate) fn materialize<'a>(
-        &mut self,
-        node: NodeId,
-        updates: impl Iterator<Item = &'a [u8]>,
-    ) {
-        let doc = build_doc(updates);
-        self.text.borrow_mut().insert(node, doc_string(&doc));
-        self.pending.borrow_mut().remove(&node);
     }
 
     /// Ensure `node`'s `Doc` is resident in the cache, rebuilding it from
@@ -420,14 +444,19 @@ impl ContentStore {
 
     /// Rebuild a `ContentStore` from a pre-materialized text map. The
     /// LRU `Doc` cache starts empty; cold blocks rebuild on demand from
-    /// the op log via `ensure_doc`. `pending` starts empty — the snapshot
-    /// map already carries every block's string, so no lazy materialization
-    /// is needed on this boot path. Used by the snapshot boot path.
+    /// the op log via `ensure_doc`.
+    ///
+    /// `pending` starts empty — the snapshot map already carries every
+    /// block's string, so nothing has to be rebuilt from the resident
+    /// log. `stale` starts empty too and the snapshot boot path fills it
+    /// straight after, with the nodes its delta edited: those strings are
+    /// present but behind the log. Used by the snapshot boot path.
     pub(crate) fn from_text_map(text: HashMap<NodeId, String>) -> Self {
         Self {
             text: RefCell::new(text),
             cache: DocCache::new(DOC_CACHE_CAP),
             pending: RefCell::new(HashSet::new()),
+            stale: RefCell::new(HashSet::new()),
         }
     }
 }

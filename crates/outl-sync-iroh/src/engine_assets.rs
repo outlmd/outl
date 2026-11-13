@@ -48,10 +48,10 @@ use tracing::{debug, info, warn};
 use outl_actions::{assets_dir, SyncProgress};
 use outl_md::asset::is_safe_asset_name;
 
-use crate::engine_sync::{read_frame, read_frame_reporting};
 use crate::protocol::{
     decode_asset_manifest, encode_asset_manifest, encode_blob_frame, ASSET_ALPN,
 };
+use crate::protocol::{read_frame, read_frame_reporting};
 
 /// Bound on a single asset-transfer connect attempt. Mirrors
 /// [`crate::engine_snapshot`]'s `SNAPSHOT_CONNECT_TIMEOUT`: iroh 1.0.0 multipath

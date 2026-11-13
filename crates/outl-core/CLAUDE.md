@@ -104,6 +104,19 @@ Treat every change as production-bound.
     Keeping it local removes that vector, leaving only universal local bit-rot, which is recoverable (a bad parse → rebuild, or the next full replay).
     A stale/missing/corrupt index is always safe: it triggers a full rebuild from the `.jsonl`.
     See `ActorIndex::sidecar_path` and `docs/storage.md` → "Boot reads an index, not the whole log".
+  - **The sidecars are fixed-width binary (`storage/sidecar`), not JSON Lines.**
+    They were JSON, and on a real workspace that is 170 MB across 23 actors and ~1.45M records, each one a `String` allocated by `BufReader::lines`, parsed by `serde_json`, carrying ULIDs decoded from base32 text.
+    An iPhone spent **14.3 s** of a launch there: 12 MB/s on hardware that reads at over a gigabyte, so the cost was never the disk.
+    Records are now a fixed number of little-endian bytes behind an 8-byte magic — 170 MB → 61 MB, 310 ms → 57 ms on the same workspace.
+    Changing the format needed no converter precisely because this is a cache that must already survive being unreadable: a file without the magic reads as absent and is rebuilt from the `.jsonl`, once per device.
+    **`sidecar::Record` is the one place the layout lives**, and `OffsetIndex`/`NodeIndex` each implement it; a test counts records through `sidecar::test_support` rather than restating the width.
+    The **offset ordering** is what replaces the parse as a corruption detector (see `load_entries`' doc), which is why `NodeIndex::save` sorts instead of emitting grouped by node.
+  - **Each actor's pair loads in parallel (`storage/jsonl/index_load.rs`).**
+    One actor's sidecars say nothing about another's, so the sequential loop bought only an ordering nothing reads — the results land in a map keyed by actor.
+    It is worth doing because this is the most expensive phase of a launch: 23 actors, **169 MB** of sidecar (72 MB offset, 97 MB node), 450 ms of the 977 ms before today's journal could paint.
+    **The ceiling is one file, not the thread count.** A single actor holds 114.7 MB of that 169 MB, so no distribution of *whole files* across lanes beats ~1.45x, and that is what it measures (450 ms → 294 ms).
+    Going below it means reading **less**, not reading wider: the node index is 97 MB of the total and a snapshot boot needs it for a handful of nodes (`census.rs` already demonstrates the metadata-only read).
+    `std::thread::scope`, never a thread-pool crate — a direct dependency here is public surface (see "This crate's dependency graph is public surface").
 - Domain models: `Workspace`, `Page`, `Journal`, `Block`, `Property`, `Tag`
 - `Tree::nodes_with_property(key)` — the transpose of `properties_of`: every node carrying a key, without a tree walk.
   `O(total properties)` and touches no block text, so an index-like reader (the `remind::` scan) can find its handful of carriers without forcing a lazy-boot vault to materialize.
@@ -201,6 +214,55 @@ They never met: snapshot boot was inert in production, while every test (which u
 The fix removed snapshot I/O from the `Storage` trait entirely: storage owns the op log, the workspace owns the snapshot cache, and there is now a single path derivation.
 Never re-add `save_snapshot` / `load_snapshot` to `Storage` — that reintroduces the two-owners divergence.
 
+#### `Workspace::snapshot_refresh_due` is the single owner of "write one now?"
+
+Three call sites ask it — the GUI open (`outl-tauri-shared`'s `boot`), `SyncEngine::reload_workspace`, and the TUI's shutdown flush — and each used to decide for itself with `!booted_from_snapshot()`.
+
+That form covers only the full-replay half, so **the remedy disarmed itself the moment it worked**: a boot that *adopted* a snapshot never refreshed it.
+Nothing else does either on a receive-heavy device — the in-band writer in `apply` fires only on a local mutation, and ops arriving over sync are written straight into `ops-<actor>.jsonl`.
+So the delta grew without bound and every boot replayed all of it.
+Measured on a real 722,943-op workspace: the adopted snapshot covered a third of the log and each boot replayed the other **488,651 ops**, which is the desktop's slow open and the iPhone's 3.45 GB jetsam kill.
+
+The rule is two cases, and conflating them is what broke:
+
+- **Full replay** → always write.
+  There was no usable snapshot, so there is no size to compare against.
+  Gating *this* on a threshold is a bug the codebase already paid for once (`SyncEngine::reload_workspace`'s comment carries it): a workspace under the threshold whose snapshot the convergence guard rejected never got a fresh cutoff and full-replayed on every later reload, forever.
+- **Adopted** → write once the delta passes `threshold`, because the delta is exactly what the next boot replays.
+
+It takes **no threshold argument**: the workspace already holds its policy (`set_snapshot_policy`), and a caller passing a second copy is a second owner of one number.
+Regression net: `tests/snapshot_refresh_on_adoption.rs`, which pins both directions (an adopted snapshot with a big delta is refreshed; one with a small delta is left alone, so the fix cannot become "write on every boot").
+
+#### The adopt slot is won on coverage, not on being ours
+
+`read_best_from_disk` used to return this device's own snapshot the moment it decoded ("it has the tightest cutoff for its local ops").
+True, and not the question: what sets the cost of a boot is how much of the log the body already holds, and the cutoff answers that **per actor**.
+An actor missing from the cutoff reads as "seen none of your ops", so its whole history lands in the delta.
+A phone's first-launch snapshot names one actor and shadowed a desktop's naming twenty — the delta became the entire log, the convergence guard refused it, and the boot full-replayed 722,943 ops into an iOS jetsam kill, with the snapshot it needed sitting in the same directory.
+`selection_key` ranks `(actors covered, newest cutoff, filename)` now and the own body competes like any other.
+The **GC** still ranks peers only (`peer_best`): a peer body the selector would never pick while our own exists is still the one it picks after an actor rotation, so collecting it would strand the rotated device.
+
+**And it ranks on headers, not on bodies.**
+`cutoff` is a snapshot's third field and a few hundred bytes; the `block_text` map behind it is essentially the whole file.
+Decoding every candidate to choose one cost 124 MB of reads on a real four-snapshot directory, at launch, to pick 48 MB of it.
+`snapshot::read_header_from_disk` reads a bounded prefix, `snapshot::select::adopt_order` ranks on that, and only the winner reaches `SnapshotBody::decode`.
+`snapshot::select` is the single owner of the ranking for **both** the boot selector and the GC, which is what keeps the cheap read from becoming a second policy — they differ only in what they rank over, and deliberately: the collector judges bodies that decode, because its output is a delete.
+
+Two things that are easy to undo and should not be:
+
+- **A file whose header will not parse is ranked last, never filtered out.**
+  Rubble is precisely what has to reach a decode before `drop_own_if_unusable` may delete it, and a device whose own snapshot is garbage pays for it on every boot until something proves it dead.
+  Filtering those is the one way this optimization could have made a boot permanently slower.
+- **One unreadable entry skips that entry, not the cache.**
+  The selector used to read the own snapshot first and *return* its error, so a single corrupt local file sent the boot to a full replay with a healthy peer body in the same directory — 722,943 ops replayed to avoid adopting 48 MB that was right there.
+  Candidates are tried best-first until one decodes.
+  Regression net: `tests/snapshot_own_does_not_shadow_peer.rs`.
+
+**`decode` verifies the digest against the buffer it was handed**, rather than cloning the decoded body and re-encoding it to hash.
+`content_hash` is the final field and a fixed-size `[u8; 32]`, so the encoding of a body and the encoding of that body with the hash zeroed share every byte before the last 32 — the two numbers are the same one.
+The old form was ~150 MB of cloned `String`s plus another 48 MB of re-encoded bytes per decode, on the launch path, to check a digest of bytes already in memory.
+That equality is a property of **this field order** and of postcard's fixed-array encoding, neither of which is ours to promise: `the_buffer_hash_equals_the_body_hash` fails loudly if a schema bump reorders the fields or postcard starts length-prefixing arrays, rather than every snapshot quietly failing to verify and every boot falling back to a replay.
+
 #### The snapshot cache has a GC, and its rule is about the reader
 
 `snapshot/gc.rs` answers invariant 9's *what cleans it up?* — nothing did (54 MB in four files on a real workspace).
@@ -239,6 +301,24 @@ It records which nodes carry `Edit` history in a `pending` set, and `block_text`
 A block never touched since boot reads back byte-identical to the old eager pass; a never-edited node reads back as `None`.
 The snapshot boot path is unchanged — it hydrates the full text map up front (already materialized strings, not a replay) and leaves `pending` empty.
 The snapshot **writer** (`build_snapshot_body`) force-materializes any still-deferred block first, so a snapshot always carries every block's string.
+
+**A snapshot boot defers its rebuilds too, against a different source.**
+Adopting a snapshot hydrates text as of its cutoff and replays the delta on top, so every node the delta edited has a cached string that is present and **wrong**.
+Correcting one means reading its full `Edit` history back from storage and replaying all of it through a fresh `Doc` — unchanged, and still mandatory (#129), because the resident log after a snapshot boot holds **only the delta** and rebuilding from that would drop every pre-cutoff edit.
+What moved is *when*: doing it at boot made a launch pay for 2,298 nodes to paint a journal that shows about twenty, and it was the only thing on the boot path that read the per-node index at all, so it pulled 98 MB of sidecar in before the first frame.
+
+`ContentStore` therefore keeps **two** deferred sets, and they must not be merged: `pending` resolves from the resident log, `stale` resolves from storage.
+Two rules follow, and both are load-bearing:
+
+- **`block_text` checks `stale` before the cache.**
+  For these the cache is not a miss, it is a wrong hit.
+- **`force_materialize_pending` drains both.**
+  `build_snapshot_body` reads that same cache, so a body written after a boot where nobody happened to read the block would publish the **pre-delta** string as settled — and the next boot would adopt it with a cutoff claiming the newer edit was already folded in. No later replay corrects that. Silent content loss produced by a cache, which is the one thing a cache may never do.
+
+Regression net: `tests/snapshot_equivalence.rs`'s `snapshot_and_delta_match_full_replay` catches a stale read, and `tests/deferred_text_settles_before_a_snapshot.rs` catches the write — nothing in the suite caught the second one until it was written.
+
+The two boot paths live in `workspace/boot.rs`, split out because they are the one part of `Workspace` a user *waits on*, and `boot_timing` puts one `info!` line per open naming each phase.
+A measurement you have to rebuild to collect is one nobody takes on the device where it matters.
 
 `Workspace::resident_text_count()` (thin wrapper over `ContentStore::resident_text_count`) is `pub` — the observability window into this lazy path.
 It reports how many block strings are currently materialized, so a downstream crate's regression test can assert a read path (e.g. `outl-actions`' backlinks index build) does **not** force the whole workspace to materialize.

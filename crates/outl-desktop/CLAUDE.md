@@ -112,9 +112,14 @@ Journals are refused, and the body is the shared `outl_tauri_shared::commands::p
 `OutlineView.tsx` refetches backlinks via `createEffect(on(slug, …))` — per navigation, not per commit (the "Esc is slow" fix).
 All three fetch sites (that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`) go through `trackBacklinks` in `lib/store.ts`, none of them awaited on a render or keystroke path.
 It owns `appState.backlinksLoading`, which `<InlineBacklinks />` is the **only** reader of.
-The scan is `O(blocks-in-workspace)`, so the section carries its own `loading…` mark and placeholder rows while the outline keeps the caret.
-A page-wide load state here is the regression [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) now names; `InlineBacklinks.test.tsx` → "backlinks load behind the page" is the net.
-A refetch keeps the rows it already has — blanking them reads as "this page lost its references" — so only a first load shows the placeholder.
+A page-wide load state here is the regression [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) names; `InlineBacklinks.test.tsx` → "backlinks load behind the page" is the net.
+
+**The section's own pending state had the mirror defect, and reserving space is not the fix.**
+It mounted a 95px header + skeleton when the scan started and unmounted it when the answer came back empty — on a workspace where most journal days have no backlinks, a blink on most journal days, re-armed by every peer refresh.
+A reservation that collapses still blinks, and one that does not is permanent dead space under every page.
+`lateSectionVisible` (`@outl/shared/outline`) owns the rule and the measurement: a **first load draws nothing**.
+A **refetch** keeps its rows — blanking them reads as "this page lost its references" — and is the one case that still shows the `loading…` mark.
+Net: "the backlinks section never appears and then disappears" (`InlineBacklinks.test.tsx`).
 
 **Toggling a task from a backlink row (issue #144)** mutates the *source* page, and the backlink effect is keyed on the slug, which didn't change.
 So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
@@ -259,6 +264,8 @@ Load-bearing notes a contributor needs:
   That holds whether the move landed, was a backend no-op (`indent_block` / `outdent_block` swallow `NoPreviousSibling` / `AlreadyAtRoot`), or the command rejected outright.
   The caret survives the remount through `appState.caretIntent`, widened from the `"end"` / `"start"` sentinels to also carry a codepoint offset.
   The Tab handler captures it before `commit()` runs; the fresh `<BlockEditor />` applies it on mount and clears it, the same contract `EnterInsertAtEnd` already had.
+  **The handler calls `stopImmediatePropagation`, and removing it moves the block twice** — the editor unmounts itself mid-dispatch, so `window` then resolves the same keystroke as the catalog's Normal row.
+  The handler's comment carries the mechanism; `BlockRow.tab-dispatch.test.tsx` is the net, in both directions.
 - `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
   Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
 - Bracket auto-pairing lives in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity), never here.
@@ -266,6 +273,14 @@ Load-bearing notes a contributor needs:
   `Shift+Tab` outdents on every popup now (the page-ref one used to accept it).
 - What each popup is triggered by and inserts: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#inline-autocomplete-popups).
   How a clicked `[label](url)` or `assets/…` link is routed (scheme guard, OS default app, the two import paths): [same page](../../docs/desktop-ux.md#opening-an-external-labelurl-link).
+- **The `/` menu lists this client's own actions, plus `/upload`, the workspace's templates and every plugin command.**
+  Without the native half it was only those last three, so a workspace with no templates and no plugins opened a **one-row** popup while the TUI's `/` listed 31 built-ins.
+  The rows come from `paletteActions` (`lib/palette-results.ts`) — the `Cmd+K` palette's own list, so "what can this client run" is answered once.
+  `actionSlug` turns `OpenToday` into the `/open-today` a user types, found by `rankSlashCommands`' id-*substring* score.
+  **A native pick runs through `runNativeSlashCommand` (`lib/shortcuts.ts`), never a dispatcher of its own**, so a command cannot mean one thing from a chord and another from the menu.
+  `installShortcuts` publishes that list and drops it on teardown, for the reason `loadPluginBindings` is not module-cached: a workspace swap brings a new handler map.
+  Only the plugin / template half is cached in `block-suggest.ts` — an empty native list cached before the dispatcher installed would leave the menu short forever.
+  Net: `BlockRow.slash-menu.test.tsx`, a real `<BlockRow />` against a real dispatcher.
 
 ### Vim parity (Normal + Visual)
 

@@ -53,6 +53,16 @@ tempfile = { workspace = true, optional = true }
 # is how a plugin reads a binary body at all.
 base64 = { version = "0.23", optional = true }
 
+# `keyring`'s `v1` feature turns on `apple-native-keyring-store/keychain`,
+# which is the *file* keychain — macOS only. iOS has only the
+# data-protection keychain, so `apple-native-keyring-store` refuses to
+# build there with `compile_error!("The `protected` feature is required
+# on iOS")`. Naming the store directly on iOS is what turns that feature
+# on; `keyring` itself offers it only through `cli`, which would also
+# drag in every other platform's backend.
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["protected"] }
+
 [features]
 default = ["js"]
 # The Boa-backed plugin engine. Without it the crate still parses manifests,

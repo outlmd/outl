@@ -89,6 +89,12 @@ The backend command is the shared `outl_tauri_shared::commands::page::delete_pag
 
 `BacklinksSection.tsx`'s `order`/`onToggleOrder` flips order via `setBacklinksOrder` (returns `PageBacklinks`); backlinks are lazy in `Journal.tsx` via `createResource(slug, pageBacklinks)` since `PageView.backlinks` is empty.
 
+**Every section below the outline stays blank until the scan answers for the page on screen.**
+The backlinks card used to mount immediately on a regular page and say "Linked from 0" / "No backlinks yet" while the scan ran, then contradict itself — `0` is a wrong answer, not a pending one.
+A navigation showed the page the user just left answering for the one they opened, because Solid's `createResource` keeps its last value through a source change; `Journal.tsx` blanks it while `loading` for that reason.
+Once the scan replies, a regular page keeps the empty box (a newcomer discovers that pages can cite each other) and a journal stays hidden.
+`lateSectionVisible` (`@outl/shared/outline`) owns the rule; `PageSections.test.tsx` is the net.
+
 ## Opening an external `[label](url)` link
 
 Tapping an external link opens it in the system browser via **`tauri-plugin-opener`** (registered in `lib.rs`, capability `opener:allow-open-url` for `http(s)`/`mailto`).
@@ -98,6 +104,23 @@ An `assets/…` link routes instead (via `isAssetLink`) to `openAsset` — `open
 The block long-press **Attach file** action picks a file (`@tauri-apps/plugin-dialog`) → `attachAsset` (shared `commands::asset`).
 On iPad, dragging a file onto a block imports it the same way via the shared `installFileDrop` + `importAssetFile` (`@outl/shared/drag-drop`), best-effort — iPhone rarely delivers a webview drop, so long-press stays the only import path there.
 `[[ref]]`/`#tag` taps still route through `openRef`; backlink rows stay inert.
+
+## Properties (`key:: value`) on a block
+
+A block's properties render as **one attribute line** under its text: key in a dim grey, value a step darker, `·` between fields, truncated, never more than a line.
+Past two fields the rest reads `+N more`.
+
+Tapping anywhere on the line opens the properties sheet for that block; the page's own properties sit in the same kind of line above the outline and open the sheet on its Page side.
+There is no inline editing in the outline — the sheet is a two-column field list, and a row that looks like a form row is the one that opens a form.
+
+**Only a field that acts on you gets colour.**
+Today that is `remind::`, which shows a bell and the accent and drops its key, since the icon already says what it is.
+`auto-run::` runs code and still renders quiet: the criterion is whether it will interrupt you, not whether it matters.
+
+**An importer's stamps do not render here at all.**
+`created`, `edited` and `roam-uid` arrive from `outl import` and are on essentially every block of a migrated graph.
+They are still in the `.md` and still listed in the sheet — dimmer, and below what you wrote — because deleting one means seeing it first.
+A `created:: by Roberta` you typed yourself is not a stamp and renders normally; only an ISO-8601 value counts.
 
 ## Blockquote chrome
 

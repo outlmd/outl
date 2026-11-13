@@ -1,5 +1,8 @@
 import type { PluginCommand, TemplateDto } from "@outl/shared/api/types";
 
+import type { Chord } from "./api";
+import type { PaletteActionRow } from "./palette-results";
+
 /**
  * Reserved `plugin_id` for the native `/template <name>` slash entries.
  * Structural templates ship in the core (reachable via TUI/CLI/MCP), so
@@ -51,6 +54,55 @@ export function templateSlashCommands(
     plugin_id: NATIVE_TEMPLATE_PLUGIN_ID,
     command_id: t.name,
     title: `template: ${t.name}${t.duplicate ? " (duplicate name)" : ""}`,
+  }));
+}
+
+/**
+ * Reserved `plugin_id` for the client's **own** commands in the slash
+ * menu — the actions `lib/action-handlers.ts` already dispatches from a
+ * chord and the `Cmd+K` palette.
+ *
+ * Without them the menu's whole universe was `/upload` plus whatever
+ * templates and plugins a workspace happened to have, so on one with
+ * neither it opened listing a single row while the TUI's `/` listed 31
+ * built-ins. Same sentinel trick as {@link NATIVE_TEMPLATE_PLUGIN_ID},
+ * and `block-suggest.ts` runs this one through
+ * `lib/shortcuts.ts::runNativeSlashCommand` — the same handler map the
+ * keyboard and the palette fire, never a second dispatcher.
+ */
+export const NATIVE_ACTION_PLUGIN_ID = "@outl/action";
+
+/**
+ * `OpenToday` → `open-today`: the name a user types after `/`.
+ *
+ * Kebab because that is the shape every other slash command has (the
+ * TUI's `date-today`, `prop-block`, `plugin-settings`), and because
+ * `rankSlashCommands` scores an id **substring** — so `/today` finds
+ * `open-today` without anyone memorising which verb a kind starts with.
+ */
+export function actionSlug(kind: string): string {
+  return kind
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+}
+
+/**
+ * Project the client's own actions onto slash-menu rows.
+ *
+ * The input is {@link PaletteActionRow}, so the universe and the
+ * wording are decided exactly once — `paletteActions` already answers
+ * "which actions does this client have a handler for", and the label is
+ * the catalog's own description. A second filter here would be a second
+ * opinion about what the desktop can do (invariant 12).
+ */
+export function actionSlashCommands(
+  rows: PaletteActionRow<Chord>[],
+): PluginCommand[] {
+  return rows.map((r) => ({
+    plugin_id: NATIVE_ACTION_PLUGIN_ID,
+    command_id: actionSlug(r.action),
+    title: r.label,
   }));
 }
 

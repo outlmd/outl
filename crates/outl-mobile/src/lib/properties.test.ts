@@ -112,3 +112,51 @@ describe("editableProperties", () => {
     expect(editableProperties(undefined)).toEqual([]);
   });
 });
+
+/**
+ * A stamp is listed so it can be deleted, not so it can be read — so
+ * it must not be the first thing the sheet shows.
+ *
+ * The backend sorts alphabetically, which put `created` at the top of
+ * every block's sheet on a migrated graph: the dimmest, least useful
+ * row opened the list. The outline's own line already ranks by what
+ * the user can act on (`attributeFields` puts a live field first);
+ * this is the same rule on the other surface.
+ */
+describe("editableProperties ranking", () => {
+  it("sinks an import stamp below what the user wrote", () => {
+    const rows = editableProperties([
+      ["created", "2026-11-12T09:14:07.690+00:00"],
+      ["priority", "high"],
+      ["remind", "9am every 1h"],
+      ["roam-uid", "abc-123"],
+      ["status", "waiting on Ana"],
+    ]);
+    expect(rows.map(([k]) => k)).toEqual([
+      "priority",
+      "remind",
+      "status",
+      "created",
+      "roam-uid",
+    ]);
+  });
+
+  it("keeps the backend's order inside each group", () => {
+    // Stable, so the sheet does not reshuffle between two reads of
+    // the same block.
+    const rows = editableProperties([
+      ["zeta", "1"],
+      ["alpha", "2"],
+    ]);
+    expect(rows.map(([k]) => k)).toEqual(["zeta", "alpha"]);
+  });
+
+  it("leaves a `created::` the user wrote where it was", () => {
+    // Judged by value, like everywhere else: this one is not a stamp.
+    const rows = editableProperties([
+      ["created", "by Roberta"],
+      ["status", "doing"],
+    ]);
+    expect(rows.map(([k]) => k)).toEqual(["created", "status"]);
+  });
+});

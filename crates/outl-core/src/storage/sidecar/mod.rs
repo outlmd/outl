@@ -55,11 +55,10 @@ pub mod gc;
 mod tests;
 
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::id::ActorId;
 use crate::storage::{PageScope, StorageError};
@@ -296,13 +295,77 @@ fn tmp_path_for(path: &Path) -> PathBuf {
 /// Lines are streamed with [`serde_json::Deserializer`] rather than
 /// parsed one-per-line so glued entries — two appends interleaving with
 /// no separating newline — recover both sides instead of losing the line.
+/// A sidecar record with a **fixed** on-disk width.
+///
+/// The sidecars used to be JSON Lines. On the workspace this was
+/// measured against that is 170 MB across 23 actors and roughly 1.45
+/// million records, each one a `String` allocated by `BufReader::lines`,
+/// handed to `serde_json`, carrying ULIDs decoded from 26 characters of
+/// base32. A launch spent **14.3 seconds** there — 12 MB/s on hardware
+/// that reads at over a gigabyte, so the cost was never the disk.
+///
+/// Fixed-width records make a load a bounded read plus `copy_from_slice`
+/// per entry: no allocation, no parser, no base32, and about a third of
+/// the bytes.
+///
+/// Changing the format is free because a sidecar is a **local boot
+/// cache**: dot-prefixed so it never rides the sync surface, and already
+/// required to survive being missing or unreadable by rebuilding from
+/// the `.jsonl`. A file without [`MAGIC`] reads as absent, so the first
+/// launch after an upgrade rebuilds once and every later one is fast.
+pub(crate) trait Record: Sized {
+    /// Bytes one record occupies. Every record of a type is this long.
+    const WIDTH: usize;
+    /// Byte offset into the `.jsonl` this record points at. Read on load
+    /// to check the file is ordered — see [`load_entries`].
+    fn offset(&self) -> u64;
+    fn encode(&self, out: &mut Vec<u8>);
+    fn decode(bytes: &[u8]) -> Self;
+}
+
+/// Header every binary sidecar starts with. The trailing digit is the
+/// format version: bump it and every existing sidecar reads as absent
+/// and is rebuilt, which is the whole migration.
+pub(crate) const MAGIC: &[u8; 8] = b"outlidx1";
+
+/// Records decoded per read. Keeps the peak off a 98 MB sidecar while
+/// still reading in chunks big enough that the syscall is not the cost.
+const BATCH: usize = 4096;
+
+/// Stream every record in `path` into `sink`, returning how many there
+/// were — or `Ok(None)` when the caller must rebuild from the `.jsonl`.
+///
+/// `Ok(None)` covers a missing file, a foreign or older format (no
+/// [`MAGIC`]), and a file whose records are not in non-decreasing
+/// `offset` order.
+///
+/// **That ordering check is the integrity check**, and it is deliberate.
+/// JSON gave corruption detection for free: a flipped bit usually broke
+/// the parse and the caller rebuilt. Fixed-width binary has no parse to
+/// break, so a corrupted record would otherwise decode into a plausible
+/// offset and send `read_op_at` to the wrong place. Both sidecars are
+/// written in strictly increasing offset order (see
+/// [`NodeIndex::save`](crate::storage::NodeIndex::save), which sorts for
+/// exactly this reason), so corruption that moves an offset almost
+/// always breaks the order. What it does **not** catch is a flipped bit
+/// that leaves the order intact; that one is caught downstream, where
+/// `fresh_offset_index` re-reads the record at the index's max offset
+/// out of the `.jsonl` and refuses a sidecar whose entries disagree with
+/// it. Neither is a proof, and neither has to be: the worst case of a
+/// cache this process rejects is one slower boot.
+///
+/// A trailing **partial** record is dropped rather than rejected. That is
+/// the signature of a crash mid-append, and the records before it are
+/// still good: the freshness check then sees the sidecar covering less
+/// than the `.jsonl` and indexes only the tail, instead of rebuilding
+/// everything.
 pub(crate) fn load_entries<T, F>(
     path: &Path,
     label: &str,
     mut sink: F,
 ) -> Result<Option<usize>, StorageError>
 where
-    T: serde::de::DeserializeOwned,
+    T: Record,
     F: FnMut(T),
 {
     let file = match std::fs::File::open(path) {
@@ -315,86 +378,183 @@ where
             )))
         }
     };
-    let mut recovered = 0usize;
-    for (lineno, line) in BufReader::new(file).lines().enumerate() {
-        let raw = match line {
-            Ok(l) if !l.is_empty() => l,
-            Ok(_) => continue,
-            Err(e) => {
-                warn!("{label} io error {}:{}: {e}", path.display(), lineno + 1);
-                return Ok(None);
-            }
-        };
-        let mut saw_any = false;
-        for item in serde_json::Deserializer::from_str(&raw).into_iter::<T>() {
-            match item {
-                Ok(entry) => {
-                    sink(entry);
-                    recovered += 1;
-                    saw_any = true;
-                }
-                Err(e) => {
-                    warn!(
-                        "{label} parse {}:{}: {e} — rebuilding from .jsonl",
-                        path.display(),
-                        lineno + 1
-                    );
-                    return Ok(None);
-                }
-            }
-        }
-        if !saw_any {
-            warn!(
-                "{label} empty line {}:{} — rebuilding",
-                path.display(),
-                lineno + 1
+    let mut reader = BufReader::with_capacity(T::WIDTH * BATCH, file);
+
+    let mut header = [0u8; MAGIC.len()];
+    match reader.read_exact(&mut header) {
+        Ok(()) if &header == MAGIC => {}
+        // Too short to carry a header, or written by another format —
+        // a pre-binary JSON sidecar lands here. Rebuild.
+        _ => {
+            debug!(
+                "{label} {} is not a binary sidecar; rebuilding",
+                path.display()
             );
             return Ok(None);
         }
     }
-    if recovered == 0 {
-        return Ok(None);
+
+    let block = T::WIDTH * BATCH;
+    let mut buf: Vec<u8> = Vec::with_capacity(block);
+    let mut count = 0usize;
+    let mut last_offset = 0u64;
+    loop {
+        buf.clear();
+        if let Err(e) = (&mut reader).take(block as u64).read_to_end(&mut buf) {
+            warn!("{label} io error {}: {e} — rebuilding", path.display());
+            return Ok(None);
+        }
+        if buf.len() < T::WIDTH {
+            // Either the end, or a torn final record. Both stop here.
+            break;
+        }
+        // `chunks_exact` drops a trailing partial record on its own, which
+        // is the torn-append case the doc above describes.
+        for chunk in buf.chunks_exact(T::WIDTH) {
+            let entry = T::decode(chunk);
+            if entry.offset() < last_offset {
+                warn!(
+                    "{label} {} is out of order at record {count}; rebuilding",
+                    path.display()
+                );
+                return Ok(None);
+            }
+            last_offset = entry.offset();
+            sink(entry);
+            count += 1;
+        }
+        if buf.len() < block {
+            break;
+        }
     }
-    Ok(Some(recovered))
+    Ok(Some(count))
 }
 
-/// Persist a whole sidecar atomically, one JSON value per line.
+/// Rewrite a sidecar from scratch, atomically.
 ///
-/// The `writeln!` below lands in [`write_atomic`]'s buffer, not in a
-/// syscall — see [`WRITE_BUF_BYTES`] for what that is worth.
-pub(crate) fn save_entries<T: Serialize>(
+/// `entries` must come in non-decreasing `offset` order — [`load_entries`]
+/// rejects a file that is not, and treats that as corruption.
+pub(crate) fn save_entries<T: Record>(
     path: &Path,
     entries: impl Iterator<Item = T>,
 ) -> Result<(), StorageError> {
     write_atomic(path, |file, tmp| {
+        let mut out = Vec::with_capacity(MAGIC.len() + T::WIDTH * BATCH);
+        out.extend_from_slice(MAGIC);
         for entry in entries {
-            let line = serde_json::to_string(&entry)
-                .map_err(|e| StorageError::Serialize(e.to_string()))?;
-            writeln!(file, "{line}")
-                .map_err(|e| StorageError::Backend(format!("write {}: {e}", tmp.display())))?;
+            entry.encode(&mut out);
+            if out.len() >= T::WIDTH * BATCH {
+                file.write_all(&out)
+                    .map_err(|e| StorageError::Backend(format!("write {}: {e}", tmp.display())))?;
+                out.clear();
+            }
         }
+        file.write_all(&out)
+            .map_err(|e| StorageError::Backend(format!("write {}: {e}", tmp.display())))?;
         Ok(())
     })
 }
 
 /// Append one entry to a sidecar. The hot path from `append_ops_inner`.
 ///
-/// Deliberately **not** buffered: this is one line per call into a file
-/// it opens and closes, so a buffer would have nothing to batch and
-/// would only add a flush that can fail. The buffering in
-/// [`write_atomic`] exists for the bulk rebuild, which is a different
-/// shape — hundreds of thousands of lines in one pass.
+/// Deliberately **not** buffered: this is one record per call into a file
+/// it opens and closes, so a buffer would have nothing to batch and would
+/// only add a flush that can fail.
 ///
-/// No fsync: the caller has just fsynced the `.jsonl`, and the index is a
-/// cache — a lost tail entry costs the next boot a rebuild, never an op.
-pub(crate) fn append_entry<T: Serialize>(path: &Path, entry: &T) -> Result<(), StorageError> {
-    let line = serde_json::to_string(entry).map_err(|e| StorageError::Serialize(e.to_string()))?;
+/// Writes [`MAGIC`] first when the file is new or empty, so a sidecar
+/// created by an append is readable by [`load_entries`] — without that
+/// the first append after a sidecar is deleted would produce a headerless
+/// file that reads as absent forever.
+pub(crate) fn append_entry<T: Record>(path: &Path, entry: &T) -> Result<(), StorageError> {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
         .map_err(|e| StorageError::Backend(format!("open {}: {e}", path.display())))?;
-    writeln!(file, "{line}")
+    let mut out = Vec::with_capacity(MAGIC.len() + T::WIDTH);
+    let empty = file
+        .metadata()
+        .map(|m| m.len() == 0)
+        .map_err(|e| StorageError::Backend(format!("stat {}: {e}", path.display())))?;
+    if empty {
+        out.extend_from_slice(MAGIC);
+    }
+    entry.encode(&mut out);
+    file.write_all(&out)
         .map_err(|e| StorageError::Backend(format!("write {}: {e}", path.display())))?;
     Ok(())
+}
+
+/// Fixed-width codec for the one composite field both records carry.
+pub(crate) mod wire {
+    use crate::hlc::Hlc;
+    use crate::id::ActorId;
+
+    /// `physical_ms` + `logical` + `actor`.
+    pub(crate) const HLC: usize = 8 + 4 + 16;
+
+    pub(crate) fn put_u64(out: &mut Vec<u8>, v: u64) {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+
+    pub(crate) fn put_u128(out: &mut Vec<u8>, v: u128) {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+
+    pub(crate) fn get_u64(b: &[u8]) -> u64 {
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&b[..8]);
+        u64::from_le_bytes(a)
+    }
+
+    pub(crate) fn get_u32(b: &[u8]) -> u32 {
+        let mut a = [0u8; 4];
+        a.copy_from_slice(&b[..4]);
+        u32::from_le_bytes(a)
+    }
+
+    pub(crate) fn get_u128(b: &[u8]) -> u128 {
+        let mut a = [0u8; 16];
+        a.copy_from_slice(&b[..16]);
+        u128::from_le_bytes(a)
+    }
+
+    pub(crate) fn put_hlc(out: &mut Vec<u8>, ts: &Hlc) {
+        put_u64(out, ts.physical_ms);
+        out.extend_from_slice(&ts.logical.to_le_bytes());
+        put_u128(out, ts.actor.0 .0);
+    }
+
+    pub(crate) fn get_hlc(b: &[u8]) -> Hlc {
+        Hlc {
+            physical_ms: get_u64(&b[0..8]),
+            logical: get_u32(&b[8..12]),
+            actor: ActorId(ulid::Ulid(get_u128(&b[12..28]))),
+        }
+    }
+}
+
+/// Reading a binary sidecar the way a test needs to, without restating
+/// the layout anywhere else.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::Path;
+
+    /// How many records the sidecar at `path` holds.
+    pub(crate) fn records(path: &Path, width: usize) -> usize {
+        let len = std::fs::metadata(path).unwrap().len() as usize;
+        (len - super::MAGIC.len()) / width
+    }
+
+    /// Drop the last record, the way a crash between the two sidecar
+    /// appends leaves one behind.
+    pub(crate) fn drop_last_record(path: &Path, width: usize) {
+        let len = std::fs::metadata(path).unwrap().len();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_len(len - width as u64)
+            .unwrap();
+    }
 }

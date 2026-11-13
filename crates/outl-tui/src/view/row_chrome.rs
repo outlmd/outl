@@ -39,12 +39,25 @@ pub(crate) fn push_body_indent(
     }
 }
 
-/// Emit one `key:: value` row under the block that carries it.
+/// Emit one `key:: value` row under the block that carries it, unless
+/// the pair is an importer's own stamp.
 ///
 /// Single owner for the property row, because there are two callers
 /// (the outline and the backlinks mini-outline) and they had already
 /// drifted: backlinks never drew the property glyph, so the same
 /// `remind::` read differently depending on which pane you saw it in.
+///
+/// **The skip lives here for that same reason**, rather than in each
+/// caller's loop. Both callers are a bare `for (k, v) in &properties`,
+/// so a filter written twice is the drift this function exists to
+/// remove, and a third caller added later inherits nothing. The policy
+/// itself is [`outl_actions::property::is_import_stamp`] — one owner
+/// across the clients, mirrored in TypeScript for the GUIs.
+///
+/// A migrated graph carries `created` / `edited` / `roam-uid` on
+/// essentially every block, so this is three rows per block of values
+/// nobody reads while writing. They stay in the `.md` and in the
+/// `g p` editor, which is where you go to delete one.
 ///
 /// The row wraps like any block row — a long `template::` used to run
 /// off the right edge and get clipped with nothing to say it had been.
@@ -60,6 +73,9 @@ pub(crate) fn push_property_row(
     out: &mut Vec<Line<'static>>,
     text_width: u16,
 ) {
+    if outl_actions::property::is_import_stamp(key, value) {
+        return;
+    }
     let mut guides: Vec<Span<'static>> = Vec::new();
     for _ in 0..indent {
         guides.push(Span::styled("│ ", app.theme.dim));
@@ -94,7 +110,69 @@ pub(crate) enum FoldMarker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::App;
     use outl_config::TuiIconStyle;
+    use outl_core::id::ActorId;
+    use outl_core::workspace::Workspace;
+    use tempfile::TempDir;
+
+    fn test_app() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// The policy itself is `outl_actions`' and tested there. This is
+    /// the render-path half: the predicate passes whether or not this
+    /// function asks it, so without this the skip is deletable with a
+    /// green suite.
+    #[test]
+    fn an_importers_stamp_draws_no_row() {
+        let (app, _dir) = test_app();
+        let mut out = Vec::new();
+        push_property_row(
+            0,
+            "created",
+            "2026-11-12T09:14:07.690+00:00",
+            false,
+            &app,
+            &mut out,
+            0,
+        );
+        push_property_row(
+            0,
+            "roam-uid",
+            "radartech-20261112-0611",
+            false,
+            &app,
+            &mut out,
+            0,
+        );
+        assert!(
+            out.is_empty(),
+            "an import stamp reached the outline: {out:?}"
+        );
+    }
+
+    /// The other direction, so the skip cannot become "draw nothing".
+    /// A `created::` the user wrote is theirs and still renders.
+    #[test]
+    fn a_property_the_user_wrote_still_draws() {
+        let (app, _dir) = test_app();
+        let mut out = Vec::new();
+        push_property_row(0, "remind", "9am", false, &app, &mut out, 0);
+        push_property_row(0, "created", "by Roberta", false, &app, &mut out, 0);
+        assert_eq!(out.len(), 2, "{out:?}");
+    }
 
     /// The blank stand-in has to measure what the glyph measures, or
     /// every row that doesn't draw the marker sits a column off the

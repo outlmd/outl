@@ -7,7 +7,7 @@ import {
   toggleTodo,
 } from "@outl/shared/api/commands";
 import { MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
-import { sameCrumbTrail } from "@outl/shared/outline";
+import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
@@ -39,8 +39,11 @@ function backlinkTodoLabel(todo: Backlink["todo"]): string {
  *
  * - `appState.backlinksOpen === false` (toggled with
  *   `Cmd/Ctrl+Shift+B`), or
- * - there are no backlinks for the current page (empty section
- *   doesn't earn its space).
+ * - `lateSectionVisible` says no (`@outl/shared/outline`, which owns
+ *   the rule and the measurement): there are no rows in hand, so a
+ *   first load draws nothing at all and an empty answer leaves nothing
+ *   to take away. An empty section doesn't earn its space here, and a
+ *   skeleton that collapses into one is the blink.
  *
  * Each backlink row is **navigable**: vim `j/k` extends past the
  * outline's last block into this section (cursor lives at
@@ -148,7 +151,14 @@ export function InlineBacklinks() {
     <Show
       when={
         appState.backlinksOpen &&
-        (appState.backlinksLoading || appState.backlinks.length > 0)
+        lateSectionVisible({
+          // The one fetch owner flips this flag, so "a reply for this
+          // page has landed" needs no second signal.
+          answered: !appState.backlinksLoading,
+          count: appState.backlinks.length,
+          // The desktop never draws an empty backlinks box.
+          keepWhenEmpty: false,
+        })
       }
     >
       <section class="mt-6">
@@ -157,17 +167,18 @@ export function InlineBacklinks() {
 
         <header class="mt-3 mb-2 flex items-baseline justify-between gap-2">
           <span class="flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wide opacity-60">
-            {/* No count while the scan runs: `0 refs` is a wrong answer,
-                not a pending one. */}
-            <Show when={appState.backlinks.length > 0} fallback={<span>Backlinks</span>}>
-              <span>
-                Backlinks · {appState.backlinks.length} ref
-                {appState.backlinks.length === 1 ? "" : "s"}
-              </span>
-            </Show>
-            {/* The only thing on screen that waits for the scan. The
-                outline keeps the caret and the keystrokes throughout
-                (`UX.md` → Never block a keystroke). */}
+            {/* Always a real count: the section is only on screen once
+                a scan has produced rows, so this never stands in for a
+                pending one (`0 refs` would be a wrong answer). */}
+            <span>
+              Backlinks · {appState.backlinks.length} ref
+              {appState.backlinks.length === 1 ? "" : "s"}
+            </span>
+            {/* Reachable only on a refetch, which is the one moment the
+                mark is owed: the rows are up, the user is looking at
+                them, and they are about to change. The outline keeps
+                the caret and the keystrokes throughout (`UX.md` →
+                Never block a keystroke). */}
             <Show when={appState.backlinksLoading}>
               <span
                 data-backlinks-pending
@@ -199,13 +210,6 @@ export function InlineBacklinks() {
         </header>
 
         <div class="space-y-4">
-          {/* Only a first load (the section is up, nothing in it yet)
-              stands in for the rows. A refetch keeps the ones it already
-              has: blanking them would read as "this page lost its
-              references". */}
-          <Show when={appState.backlinks.length === 0}>
-            <PendingRows />
-          </Show>
           <For each={groupedBySource()}>
             {(group) => (
               <div>
@@ -332,21 +336,5 @@ export function InlineBacklinks() {
         </div>
       </section>
     </Show>
-  );
-}
-
-/**
- * The shape the first load stands in for: one source-page header plus
- * two rows. It holds the section's height so the outline above it does
- * not shift when the real rows land, which would move the line the
- * user is typing in.
- */
-function PendingRows() {
-  return (
-    <div class="animate-pulse space-y-2" aria-hidden="true">
-      <div class="h-3.5 w-32 rounded bg-(--color-outl-fg)/10" />
-      <div class="ml-6 h-3 w-3/5 rounded bg-(--color-outl-fg)/8" />
-      <div class="ml-6 h-3 w-2/5 rounded bg-(--color-outl-fg)/8" />
-    </div>
   );
 }

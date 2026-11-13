@@ -2,6 +2,7 @@ use super::*;
 use crate::fractional::Fractional;
 use crate::hlc::HlcGenerator;
 use crate::op::Op;
+use crate::storage::sidecar::test_support::{drop_last_record, records};
 use crate::storage::Storage;
 use tempfile::TempDir;
 
@@ -324,10 +325,7 @@ fn reload_uses_fresh_idx_without_reparse() {
     let node_before = std::fs::read(&node_idx_path).unwrap();
     // The sidecar covers all 5 ops.
     assert_eq!(
-        String::from_utf8(idx_before.clone())
-            .unwrap()
-            .lines()
-            .count(),
+        records(&idx_path, crate::storage::OffsetIndex::RECORD_WIDTH),
         5
     );
 
@@ -425,7 +423,7 @@ fn reload_reindexes_appended_tail() {
     let idx_path = dir.join(format!(".ops-{actor}.idx"));
     let node_idx_path = dir.join(format!(".ops-{actor}.nodes.idx"));
     assert_eq!(
-        std::fs::read_to_string(&idx_path).unwrap().lines().count(),
+        records(&idx_path, crate::storage::OffsetIndex::RECORD_WIDTH),
         5,
         "grew branch must persist the tail into the sidecar"
     );
@@ -576,10 +574,7 @@ fn reload_rebuilds_on_node_offset_asymmetry() {
     // died after appending `.idx` and before finishing `.nodes.idx`. Dropping
     // the tail line makes `NodeIndex::max_offset()` lag `OffsetIndex`'s.
     let node_idx_path = dir.join(format!(".ops-{actor}.nodes.idx"));
-    let content = std::fs::read_to_string(&node_idx_path).unwrap();
-    let mut lines: Vec<&str> = content.lines().collect();
-    lines.pop();
-    std::fs::write(&node_idx_path, format!("{}\n", lines.join("\n"))).unwrap();
+    drop_last_record(&node_idx_path, crate::storage::NodeIndex::RECORD_WIDTH);
 
     // Reboot: the asymmetry must trigger a full rebuild, and every op that
     // touched `target` — including the one whose node entry was dropped — must

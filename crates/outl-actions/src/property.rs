@@ -71,13 +71,89 @@ pub fn known_keys(workspace: &Workspace) -> Vec<(String, usize)> {
     out
 }
 
+/// The three keys `outl import` writes for itself.
+///
+/// `roam-uid` under `--keep-source-ids`, so a re-import matches what
+/// it already landed; `created` / `edited` under
+/// `--preserve-timestamps`, copied off the source graph's own clocks.
+const IMPORT_STAMP_KEYS: [&str; 3] = ["created", "edited", "roam-uid"];
+
+/// Is this pair an import's leftover rather than the user's metadata?
+///
+/// All three round-trip through the `.md` and belong there. None
+/// belongs in an **outline**: a property row exists so an authored
+/// `remind::` is visible at the point of use, and on a migrated graph
+/// these put a row under every block carrying a value nobody reads
+/// while writing notes. Measured on a 2,874-page Roam import: three
+/// extra rows on essentially every block.
+///
+/// **`roam-uid` is decided by its key, `created` / `edited` by their
+/// value**, and the asymmetry is the whole point. The first is
+/// namespaced, so nothing a user writes can collide with it. The other
+/// two are ordinary English words a user may well want — `created:: by
+/// Roberta` is metadata, not a stamp — and hiding those by key alone
+/// would silently swallow what the user wrote, which reads as data
+/// loss. So only an ISO-8601 instant counts, because that is what a
+/// machine wrote.
+///
+/// Mirrored in TypeScript by `@outl/shared/markdown::isImportStamp`,
+/// which the GUI clients filter their property row with. A const
+/// cannot cross the Rust/TS boundary, so the two are edited together —
+/// the same arrangement the glyph table has with
+/// `outl_tui::icons::property_glyph`.
+///
+/// This hides a property from a **render**, never from the op log, the
+/// `.md`, or a property editor: the user has to be able to see one to
+/// delete it.
+pub fn is_import_stamp(key: &str, value: &str) -> bool {
+    let key = key.to_lowercase();
+    if key == "roam-uid" {
+        return true;
+    }
+    if key != "created" && key != "edited" {
+        return false;
+    }
+    is_iso_instant(value.trim())
+}
+
+/// `YYYY-MM-DD`, optionally followed by a time and an offset.
+///
+/// Hand-rolled rather than `chrono::parse`: this answers "did a
+/// machine write this", and a lenient parser that accepts `2026` or
+/// `12/11/2026` would start hiding things a person typed.
+fn is_iso_instant(v: &str) -> bool {
+    let b = v.as_bytes();
+    if b.len() < 10 {
+        return false;
+    }
+    let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
+    if !digits(0..4) || b[4] != b'-' || !digits(5..7) || b[7] != b'-' || !digits(8..10) {
+        return false;
+    }
+    match b.len() {
+        10 => true,
+        // A date followed by anything has to start that remainder with
+        // the separator a timestamp uses, so `2026-11-12 era o prazo`
+        // stays the user's text.
+        _ => (b[10] == b'T' || b[10] == b' ') && b.len() >= 16 && digits(11..13) && b[13] == b':',
+    }
+}
+
 /// Whether a key belongs in an "add a property" menu.
 ///
 /// Excludes the page model's own fields (via
 /// [`crate::tree::is_page_model_key`]) plus the bookkeeping a user
 /// never authors by hand: `from-template` (how a template instance is
-/// traced back), and `id` / `collapsed`, which arrive with imported
-/// Logseq graphs and mean nothing to outl's own model.
+/// traced back), `id` / `collapsed`, which arrive with imported Logseq
+/// graphs and mean nothing to outl's own model, and the three
+/// [`IMPORT_STAMP_KEYS`].
+///
+/// The stamps are asked **by key** here, unlike [`is_import_stamp`],
+/// and that is the right reading: the question is "would anyone add
+/// this?", and there is no value yet to judge. On a migrated graph
+/// they are the top of the frequency ranking — they are on every
+/// block — so without this the menu opens on three keys nobody would
+/// pick.
 ///
 /// This is about *suggesting*, not about permission: a user who types
 /// `collapsed` still gets it written. The menu just does not propose it.
@@ -85,9 +161,13 @@ fn is_suggestable_key(key: &str) -> bool {
     if crate::tree::is_page_model_key(key) {
         return false;
     }
+    let lower = key.to_lowercase();
+    if IMPORT_STAMP_KEYS.contains(&lower.as_str()) {
+        return false;
+    }
     !matches!(
-        key.to_lowercase().as_str(),
-        crate::template::FROM_TEMPLATE_KEY | "id" | "collapsed" | "roam-uid"
+        lower.as_str(),
+        crate::template::FROM_TEMPLATE_KEY | "id" | "collapsed"
     )
 }
 
@@ -179,6 +259,43 @@ mod tests {
         let n = append_block(ws, hlc, None, Some("a block")).unwrap();
         for (k, v) in props {
             set_property(ws, hlc, n, k, Some(PropValue::Text((*v).into()))).unwrap();
+        }
+    }
+
+    /// The outline shows what the user wrote, not what the importer
+    /// stamped. Mirrored in TypeScript by
+    /// `@outl/shared/markdown::isImportStamp`, which the GUI clients
+    /// filter their chip row with — the two are edited together, like
+    /// the glyph table above them.
+    #[test]
+    fn an_importers_stamp_is_not_the_users_metadata() {
+        assert!(is_import_stamp("created", "2026-11-12T09:14:07.690+00:00"));
+        assert!(is_import_stamp("edited", "2026-11-12"));
+        assert!(is_import_stamp("Created", "2026-11-12T09:14:07Z"));
+        // Namespaced, so no value can make it the user's.
+        assert!(is_import_stamp("roam-uid", "radartech-20261112-0611"));
+    }
+
+    /// The key is an ordinary English word, so the rule is about the
+    /// **value**. Hiding every `created::` would swallow metadata the
+    /// user wrote by hand, which is the failure this policy exists to
+    /// avoid — a property that silently stops rendering reads as data
+    /// loss.
+    #[test]
+    fn a_created_the_user_wrote_is_still_theirs() {
+        assert!(!is_import_stamp("created", "by Roberta"));
+        assert!(!is_import_stamp("edited", "ontem de noite"));
+        assert!(!is_import_stamp("priority", "2026-11-12"));
+    }
+
+    /// Nobody adds `created::` by hand, so the catalogue must not
+    /// offer it. On a migrated graph these three are the *top* of the
+    /// frequency ranking — they are on every block — so without this
+    /// the add-a-property menu opens on three keys no one would pick.
+    #[test]
+    fn the_catalogue_never_offers_an_import_stamp() {
+        for key in ["created", "edited", "roam-uid"] {
+            assert!(!is_suggestable_key(key), "{key} was offered");
         }
     }
 

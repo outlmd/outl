@@ -1,11 +1,18 @@
 /**
- * `<BlockProperties />`'s commit path — specifically that a failed
- * commit reaches the host.
+ * `<BlockProperties />` is an **attribute line**, not a row of pills.
  *
- * The chip repaints with the new value the moment the input closes,
- * regardless of whether the write landed. So a failure that doesn't
- * surface reads to the user as a successful edit, with the backend
- * still holding the old value.
+ * It shipped as chips because `remind::` was invisible in the outline.
+ * That fixed the visibility and introduced a category error: a pill
+ * means "flat label you tap to filter", which is a tag, and a
+ * `key:: value` is a field. So the outline grew a row of things that
+ * looked like buttons, were not buttons, and sat on every block of a
+ * Roam-imported graph.
+ *
+ * The shape now follows what Things, Linear, Apple Reminders and
+ * GitHub mobile do with item metadata: one quiet subtitle line, key
+ * dimmer than value, colour reserved for the field that will actually
+ * interrupt you. Editing left the outline entirely — the line is one
+ * tap target that opens the properties sheet, which is a real form.
  */
 
 import { render } from "solid-js/web";
@@ -26,78 +33,156 @@ function mount(node: () => unknown) {
   };
 }
 
-/**
- * Open the first chip's editor, type `value`, commit with Enter.
- *
- * The explicit `focus()` matters: Enter's handler commits by calling
- * `blur()`, and an unfocused element doesn't emit one.
- */
-function editFirstChip(host: HTMLElement, value: string) {
-  (host.querySelector("button") as HTMLButtonElement).click();
-  const input = host.querySelector("input") as HTMLInputElement;
-  input.focus();
-  input.value = value;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-  );
-}
+const FIELDS = [
+  ["priority", "high"],
+  ["status", "waiting"],
+] as ReadonlyArray<readonly [string, string]>;
 
-const PROPS = [["priority", "high"]] as ReadonlyArray<
-  readonly [string, string]
->;
-
-describe("BlockProperties commit failures", () => {
-  it("routes a rejected onCommit to onError", async () => {
-    const onError = vi.fn();
+describe("BlockProperties", () => {
+  it("renders nothing when the block carries no visible field", () => {
+    // An import stamp is not a visible field, so a migrated block with
+    // only `created::` / `roam-uid::` must draw no line at all — not an
+    // empty one taking vertical space.
     const m = mount(() => (
-      <BlockProperties
-        properties={PROPS}
-        onCommit={() => Promise.reject(new Error("backend said no"))}
-        onError={onError}
-      />
+      <BlockProperties properties={[["roam-uid", "radartech-0611"]]} />
     ));
-
-    editFirstChip(m.host, "low");
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
-    expect(onError).toHaveBeenCalledWith("backend said no");
+    expect(m.host.textContent).toBe("");
     m.dispose();
   });
 
-  it("routes a synchronously thrown onCommit to onError too", async () => {
-    // The failure mode `Promise.resolve(onCommit(...))` could not
-    // catch: the call is evaluated as an argument, before the promise
-    // exists, so the throw escapes past `.catch` and out of the
-    // keydown handler entirely.
-    const onError = vi.fn();
-    const m = mount(() => (
-      <BlockProperties
-        properties={PROPS}
-        onCommit={() => {
-          throw new Error("threw before awaiting");
-        }}
-        onError={onError}
-      />
-    ));
-
-    expect(() => editFirstChip(m.host, "low")).not.toThrow();
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
-    expect(onError).toHaveBeenCalledWith("threw before awaiting");
+  it("writes the key and the value as separate elements", () => {
+    // Baked into one string they cannot be styled apart, and the whole
+    // point of the line is that the key recedes behind the value.
+    const m = mount(() => <BlockProperties properties={FIELDS} />);
+    const text = m.host.textContent ?? "";
+    expect(text).toContain("priority");
+    expect(text).toContain("high");
+    // Not the chip's `key: value` — no colon glued to the key.
+    expect(text).not.toContain("priority:");
     m.dispose();
   });
 
-  it("commits without an onError wired", async () => {
-    // Both clients pass handlers that already catch internally, so
-    // `onError` is optional and a successful commit must not depend
-    // on it being there.
-    const onCommit = vi.fn(() => Promise.resolve());
-    const m = mount(() => (
-      <BlockProperties properties={PROPS} onCommit={onCommit} />
-    ));
+  it("dims the key below the value", () => {
+    const m = mount(() => <BlockProperties properties={FIELDS} />);
+    const html = m.host.innerHTML;
+    expect(html).toContain("--color-outl-fg-dimmer");
+    expect(html).toContain("--color-outl-fg-dim)");
+    m.dispose();
+  });
 
-    editFirstChip(m.host, "low");
-    await vi.waitFor(() => expect(onCommit).toHaveBeenCalledOnce());
-    expect(onCommit).toHaveBeenCalledWith("priority", "low");
+  it("gives the live field accent colour and drops its key", () => {
+    // `remind::` is the one field that acts on the user, so it is the
+    // one that earns colour. Its key is noise next to the schedule —
+    // the icon already says what it is.
+    const m = mount(() => (
+      <BlockProperties properties={[["remind", "9am every 1h"]]} />
+    ));
+    expect(m.host.innerHTML).toContain("--color-outl-accent");
+    expect(m.host.textContent).toContain("9am every 1h");
+    expect(m.host.textContent).not.toContain("remind");
+    m.dispose();
+  });
+
+  it("draws the live field's icon as an SVG, never an emoji", () => {
+    // `DESIGN.md`: no emoji in chrome. It brings its own colours,
+    // renders differently per OS and reads as content. The TUI keeps
+    // its glyph — a terminal has no SVG — which is why the emoji map
+    // in `properties.ts` stays put for `property_glyph` to mirror.
+    const m = mount(() => <BlockProperties properties={[["remind", "9am"]]} />);
+    expect(m.host.querySelector("svg")).not.toBeNull();
+    expect(m.host.textContent).not.toContain("⏰");
+    m.dispose();
+  });
+
+  it("stays on one line", () => {
+    const m = mount(() => <BlockProperties properties={FIELDS} />);
+    const row = m.host.firstElementChild as HTMLElement;
+    expect(row.className).toContain("whitespace-nowrap");
+    expect(row.className).toContain("overflow-hidden");
+    m.dispose();
+  });
+
+  it("collapses the overflow into a count rather than wrapping", () => {
+    const m = mount(() => (
+      <BlockProperties
+        properties={[
+          ["a", "1"],
+          ["b", "2"],
+          ["c", "3"],
+          ["d", "4"],
+        ]}
+      />
+    ));
+    expect(m.host.textContent).toContain("+2 more");
+    m.dispose();
+  });
+
+  it("opens the sheet when the line is tapped", () => {
+    const onOpen = vi.fn();
+    const m = mount(() => (
+      <BlockProperties properties={FIELDS} onOpen={onOpen} />
+    ));
+    (m.host.querySelector("button") as HTMLButtonElement).click();
+    expect(onOpen).toHaveBeenCalledOnce();
+    m.dispose();
+  });
+
+  it("does not let the tap reach the row underneath", () => {
+    // The row selects / edits the block. A tap on the attribute line
+    // means "show me these fields", never both.
+    const onRow = vi.fn();
+    const m = mount(() => (
+      <div onClick={onRow}>
+        <BlockProperties properties={FIELDS} onOpen={() => {}} />
+      </div>
+    ));
+    (m.host.querySelector("button") as HTMLButtonElement).click();
+    expect(onRow).not.toHaveBeenCalled();
+    m.dispose();
+  });
+
+  it("is inert, not a dead button, when no handler is wired", () => {
+    // A button that does nothing promises a tap it cannot deliver —
+    // the exact defect the pills had.
+    const m = mount(() => <BlockProperties properties={FIELDS} />);
+    expect(m.host.querySelector("button")).toBeNull();
+    m.dispose();
+  });
+
+  it("names the action for a screen reader", () => {
+    const m = mount(() => (
+      <BlockProperties properties={FIELDS} onOpen={() => {}} />
+    ));
+    const button = m.host.querySelector("button") as HTMLButtonElement;
+    expect(button.getAttribute("aria-label")).toMatch(/propert/i);
+    m.dispose();
+  });
+
+  it("sizes the line on the container, never on the button", () => {
+    // Mobile's `styles.css` carries an unlayered
+    // `button, input, textarea { font-size: inherit }`. An unlayered
+    // rule outranks every layered one, and Tailwind's utilities live
+    // in `@layer utilities` — so a `text-*` on the `<button>` resolves
+    // to nothing and the line paints at the block body's 17px. That is
+    // the bug this whole redesign started from. The container holds
+    // the scale; the button inherits it.
+    const m = mount(() => (
+      <BlockProperties properties={FIELDS} onOpen={() => {}} />
+    ));
+    const row = m.host.firstElementChild as HTMLElement;
+    const button = m.host.querySelector("button") as HTMLButtonElement;
+    expect(row.className).toMatch(/text-\[/);
+    expect(button.className).not.toMatch(/text-\[\d/);
+    m.dispose();
+  });
+
+  it("lets the host add its own classes to the line", () => {
+    const m = mount(() => (
+      <BlockProperties properties={FIELDS} rowClass="px-4" />
+    ));
+    expect((m.host.firstElementChild as HTMLElement).className).toContain(
+      "px-4",
+    );
     m.dispose();
   });
 });

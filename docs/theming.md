@@ -116,8 +116,17 @@ If you add a new field to `Theme`, **every preset must set it** — the compiler
 | `selected_bullet` | The `- ` glyph on the focused block |
 | `cursor_block` | Vim-style block cursor (char under cursor in Normal) |
 | `cursor_caret` | Insert-mode caret: underlines the character it precedes, drawn as a thin `▏` past end-of-line |
-| `property_key` / `property_value` | `key:: value` lines |
+| `property_key` / `property_value` | `key:: value` lines — **TUI only**, see below |
 | `heading` | Page title in the header |
+
+**`property_value_fg` is the one token the clients read differently, on purpose.**
+The TUI paints every property value with it, and the brand pair sets it to `accent_soft`, so every `status:: waiting` is lavender.
+The GUI clients draw their property line with `fg_dimmer` / `fg_dim` instead, because accent there means *this will interrupt you* and only a live `remind::` earns it — a colour spent on every value is a colour that signals nothing.
+`property_key_fg` does not diverge: every preset already sets it to `fg_dimmer`, which is what the GUI uses.
+
+Converging them is a change to the **presets**, not to a client: set `property_value_fg` to `fg_dim` and the TUI stops over-signalling too.
+That restyles every theme for every terminal user, which is why it is written down here instead of done quietly.
+Until then the token's name is wider than its meaning (root [`CLAUDE.md`](../CLAUDE.md) invariant 13), and that is the recorded gap rather than a discovered one.
 
 ### Inline tokens
 

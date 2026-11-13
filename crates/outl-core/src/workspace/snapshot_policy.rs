@@ -70,6 +70,64 @@ impl SnapshotPolicy {
         self.threshold > 0 && self.dir.is_some()
     }
 
+    /// Whether the user asked for snapshots at all, ignoring whether
+    /// there is a directory to write them to.
+    ///
+    /// Separate from [`Self::is_armed`] on purpose: this answers the
+    /// *setting*, which is what a caller deciding whether to re-persist
+    /// on boot needs. `save_snapshot` already no-ops without a dir.
+    pub(crate) fn enabled(&self) -> bool {
+        self.threshold > 0
+    }
+
+    /// Should the caller re-persist the snapshot now that a boot or
+    /// reload has settled? The single owner of that question for the two
+    /// callers that *ask* it: the GUI open and
+    /// `SyncEngine::reload_workspace`, both through
+    /// `Workspace::snapshot_refresh_due`.
+    ///
+    /// The TUI's shutdown flush (`App::drop`) deliberately does not ask —
+    /// it is the last moment that process has, so "always" is the right
+    /// answer there and asking could only talk it out of a free write.
+    ///
+    /// `resident_ops` is the workspace's in-memory log length, which is
+    /// **the delta** after a snapshot boot and the whole log after a full
+    /// replay — the one number that answers "how much would the next boot
+    /// have to replay".
+    ///
+    /// Two cases, and conflating them is what broke:
+    ///
+    /// - **Full replay**: always write. There was no usable snapshot, so
+    ///   there is nothing to compare a size against. Gating this on a
+    ///   threshold is a bug this codebase already paid for once — a
+    ///   workspace under the threshold whose snapshot the convergence
+    ///   guard rejected never got a fresh cutoff and full-replayed on
+    ///   *every* later reload, forever.
+    /// - **Adopted a snapshot**: write only once the delta has grown past
+    ///   `threshold`, since the delta is what the next boot replays.
+    ///
+    /// The adopted arm is the one that was missing. Every caller required
+    /// `!booted_from_snapshot()`, so **the remedy disarmed itself the
+    /// moment it worked**: a boot that adopted a snapshot never refreshed
+    /// it, and nothing else does either — the in-band writer below fires
+    /// only on a local mutation, while ops arriving over sync are written
+    /// straight into `ops-<actor>.jsonl`. On a receive-heavy device the
+    /// delta only ever grew.
+    ///
+    /// Measured on a real 722,943-op workspace: the adopted snapshot
+    /// covered a third of the log and each boot replayed the other
+    /// **488,651 ops** (9.1s on a desktop; a 3.45 GB jetsam kill on iOS).
+    /// After the refresh the same workspace replays 0 and opens in 0.57s.
+    pub(crate) fn refresh_due(&self, booted_from_snapshot: bool, resident_ops: usize) -> bool {
+        if !self.enabled() {
+            return false;
+        }
+        if !booted_from_snapshot {
+            return true;
+        }
+        resident_ops as u64 >= u64::from(self.threshold)
+    }
+
     /// Configure cadence. `enabled = false` opts out; a threshold below
     /// 1 is clamped so we never snapshot on literally every op.
     pub(crate) fn set_policy(&mut self, enabled: bool, threshold: u32) {

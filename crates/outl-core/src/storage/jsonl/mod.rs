@@ -31,6 +31,7 @@ mod census;
 #[cfg(test)]
 mod idx_hole_tests;
 mod idx_lock;
+mod index_load;
 mod persist;
 mod read;
 #[cfg(test)]
@@ -90,6 +91,25 @@ pub struct JsonlStorage {
 }
 
 impl JsonlStorage {
+    /// Read exactly these `(actor, ts)` ops, in the order given.
+    ///
+    /// The bounded read the sync sender needs. It already knows which HLCs
+    /// have to cross — the offset index answers that without touching an op
+    /// body — so paying [`Storage::all_ops`] to filter the result back down
+    /// is the sender's half of a first-sync blowup: on a 719k-op / 253 MB
+    /// log that read is the whole log, in memory, to select a slice of it.
+    ///
+    /// A pick the index lists but the file will not return is an **error**,
+    /// never a silent omission, for the reason spelled out on
+    /// `Self::read_op_or_missing`: a short read here is indistinguishable
+    /// from a healthy one, and the receiver would record the gap as settled.
+    pub fn read_ops_at(&self, picks: &[(ActorId, Hlc)]) -> Result<Vec<LogOp>, StorageError> {
+        picks
+            .iter()
+            .map(|(actor, ts)| self.read_op_or_missing(*actor, *ts))
+            .collect()
+    }
+
     /// Open the storage rooted at `ops_dir` for the given `actor`, with
     /// the legacy unbounded cache and `PageScope::Global`. The directory
     /// is created if missing. The merged op log is loaded into memory

@@ -187,6 +187,32 @@ So they return the **complete** op set — the same set + HLC order as before �
 The LRU is purely a RAM bound now; the index is the complete logical view.
 `last_ts_per_actor` and `ops_since_per_actor` (the snapshot-boot delta) answer straight from the index keys, so the common boot touches only the index and the recent tail, never the full log.
 
+#### The sidecars are fixed-width binary
+
+They were JSON Lines, and the shape of that cost only became visible on a phone.
+
+On a 723k-op workspace the pair is 170 MB across 23 actors and roughly 1.45 million records.
+Each one was a `String` allocated by `BufReader::lines`, handed to `serde_json`, carrying ULIDs decoded from 26 characters of base32.
+An iPhone 17 Pro spent **14.3 seconds** of a launch loading them — 12 MB/s on hardware that reads at over a gigabyte a second, so the bottleneck was never the disk.
+
+A record is now a fixed number of little-endian bytes behind an 8-byte magic, so a load is a bounded read plus one `copy_from_slice` per entry: **170 MB → 61 MB** on disk, **310 ms → 57 ms** to load on a developer machine.
+
+Three things worth knowing before touching the format again:
+
+- **No converter was needed, and none ever will be.**
+  A sidecar is a local boot cache: dot-prefixed so it never rides the sync surface, and already required to survive being missing or unreadable by rebuilding from the `.jsonl`.
+  A file without the magic reads as absent. The first launch after an upgrade rebuilds once; every later one is fast.
+  Bumping the trailing digit of the magic is the whole migration story.
+- **The offset ordering is the integrity check.**
+  JSON detected corruption for free — a flipped bit usually broke the parse, and a failed parse meant rebuild.
+  Fixed-width binary has no parse to break, so a corrupted record would decode into a plausible offset and send `read_op_at` somewhere wrong.
+  Both sidecars are therefore written in strictly increasing offset order (`NodeIndex::save` sorts for this, rather than emitting grouped by node) and a load that sees them out of order rebuilds.
+  What that misses — a flipped bit that leaves the order intact — `census::fresh_offset_index` still catches, by re-reading the `.jsonl` record at the index's max offset and refusing a sidecar whose entries disagree with it.
+  Neither is a proof, and neither has to be: the worst case of a cache this process rejects is one slower boot.
+- **A torn tail is no longer corruption.**
+  A trailing partial record is the signature of a crash mid-append; the records before it are still good.
+  It is dropped, the freshness check sees the sidecar covering less than the `.jsonl`, and only the tail is indexed.
+
 #### A question about the index is not a question for `Storage`
 
 `JsonlStorage::actor_timestamps(ops_dir)` returns every distinct HLC the op log holds, grouped by the actor inside it — the whole of what a sync vector clock is.

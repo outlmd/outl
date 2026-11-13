@@ -7,6 +7,7 @@
 //! three doctor tests flaky).
 
 use super::*;
+use crate::hlc::Hlc;
 use crate::snapshot::{write_to_disk, SCHEMA_VERSION};
 use std::collections::{BTreeMap, BTreeSet};
 use tempfile::TempDir;

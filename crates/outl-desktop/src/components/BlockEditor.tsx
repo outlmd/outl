@@ -234,6 +234,18 @@ export function BlockEditor(props: {
     }
     if (e.key === "Tab") {
       e.preventDefault();
+      // `stopImmediatePropagation` is load-bearing, for the same reason
+      // as `Cmd/Ctrl+Shift+Enter` above: `keydown` is one of Solid's
+      // delegated events, so this handler runs from a listener on
+      // `document` — one node below the `window` listener
+      // `installShortcuts` adds. `commit()` below flips `editingBlockId`
+      // to `null`, which unmounts this textarea, so without this the
+      // event reaches `window` with nothing focused, `detectMode()`
+      // answers `normal`, and the catalog's Normal rows (`Tab` →
+      // `IndentBlock`, `Shift+Tab` → `OutdentBlock`) fire a *second*
+      // move on the same keystroke. The textarea owns this chord in
+      // Insert mode; the dispatcher must not get a turn.
+      e.stopImmediatePropagation();
       // Capture the caret before `commit()`: it flips `editingBlockId`
       // to `null` (directly, or via the `onCommit` round-trip), which
       // tears this component down. `onIndent` / `onOutdent` put the

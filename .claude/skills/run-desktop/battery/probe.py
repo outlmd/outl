@@ -14,6 +14,10 @@ through the GTK input method without producing a JS `keydown`, so
 document-level handlers never fire and a keyboard assertion here would
 pass or fail for reasons that have nothing to do with the app.
 """
+
+import datetime
+import pathlib
+import socket
 import subprocess
 import sys
 import time
@@ -23,13 +27,15 @@ from PIL import Image
 
 DISPLAY = ":99"
 OUT = "/out"
-PARK = (1450, 760)          # off the content column, over empty chrome
-SETTLE = 0.45               # a hover transition is ~150ms; this clears it
+PARK = (1450, 760)  # off the content column, over empty chrome
+SETTLE = 0.45  # a hover transition is ~150ms; this clears it
 
 
 def sh(*args: str) -> str:
     return subprocess.run(
-        args, capture_output=True, text=True,
+        args,
+        capture_output=True,
+        text=True,
         env={"DISPLAY": DISPLAY, "PATH": "/usr/bin:/bin"},
     ).stdout.strip()
 
@@ -43,8 +49,11 @@ def window() -> str:
 
 def shot(win: str, name: str) -> Image.Image:
     path = f"{OUT}/{name}.png"
-    subprocess.run(["import", "-window", win, path], check=True,
-                   env={"DISPLAY": DISPLAY, "PATH": "/usr/bin:/bin"})
+    subprocess.run(
+        ["import", "-window", win, path],
+        check=True,
+        env={"DISPLAY": DISPLAY, "PATH": "/usr/bin:/bin"},
+    )
     return Image.open(path).convert("RGB")
 
 
@@ -66,12 +75,13 @@ def ink_profile(im: Image.Image) -> np.ndarray:
     return np.abs(a - np.median(a, axis=1, keepdims=True)).sum(axis=1)
 
 
-def vertical_shift(before: np.ndarray, after: np.ndarray, lo: int,
-                   span: int = 140, limit: int = 60) -> int:
+def vertical_shift(
+    before: np.ndarray, after: np.ndarray, lo: int, span: int = 140, limit: int = 60
+) -> int:
     """How far the band starting at `lo` moved down between the two."""
     best, best_d = 0, None
     for s in range(limit):
-        a, b = before[lo:lo + span], after[lo + s:lo + s + span]
+        a, b = before[lo : lo + span], after[lo + s : lo + s + span]
         if len(b) < len(a):
             break
         d = float(np.abs(a - b).sum())
@@ -111,13 +121,96 @@ def wait_for_outline(win: str, timeout: float = 90.0):
     while time.time() < deadline:
         im = shot(win, "battery-base")
         profile = ink_profile(im)
-        rows = row_centres(profile, int(im.size[1] * 0.12),
-                           int(im.size[1] * 0.62))
+        rows = row_centres(profile, int(im.size[1] * 0.12), int(im.size[1] * 0.62))
         if len(rows) >= 4 and len(rows) == previous:
             return im, profile, rows
         previous = len(rows)
         time.sleep(1.5)
     return None, None, []
+
+
+def _port_open(port: int) -> bool:
+    """Is anything accepting on `port`, over either address family?
+
+    `socket.socket()` defaults to AF_INET, so a bare 127.0.0.1 probe
+    reports "nothing is listening" against a server bound to ::1 only
+    — which is what Vite 8 does. That false negative is worse than no
+    check: it names a cause with a confident fix and sends the reader
+    away from the real one, which is the exact failure this whole
+    function exists to stop.
+    """
+    try:
+        addrs = socket.getaddrinfo("localhost", port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+    for family, kind, proto, _canon, sockaddr in addrs:
+        with socket.socket(family, kind, proto) as s:
+            s.settimeout(1.0)
+            if s.connect_ex(sockaddr) == 0:
+                return True
+    return False
+
+
+def why_blank() -> list[str]:
+    """Name which of the three blank-page states this run is in.
+
+    They look identical in a screenshot and have opposite fixes, so the
+    battery used to report all three as "the outline never painted" and
+    send the reader to the wrong one. The probe runs *inside* the lab,
+    so it can ask the workspace and the dev server directly instead of
+    inferring from pixels.
+
+    Ordered by what has to be true first: a workspace that is not there
+    makes the other two unanswerable.
+    """
+    journals = pathlib.Path("/ws/journals")
+
+    if not journals.is_dir():
+        return [
+            "the workspace is not mounted. `/ws/journals` does not exist",
+            "inside the lab, so the app opened nothing and painted its",
+            "empty state. A bind mount follows the inode: deleting and",
+            "recreating `ws` on the host while this container runs leaves",
+            "it bound to the old one, and the host still shows a perfect",
+            "fixture. `run.sh` recycles the container when it sees this —",
+            "if you are reading it anyway, that check was bypassed.",
+        ]
+
+    seeded = sorted(p.stem for p in journals.glob("*.md"))
+    if not seeded:
+        return [
+            "the workspace is mounted but empty: `/ws/journals` holds no",
+            "`.md`. `fixture.sh` did not run, or wrote somewhere else.",
+        ]
+
+    # The app opens *its own* today, which is the container's clock —
+    # UTC here. `fixture.sh` runs on the host. A developer behind UTC
+    # therefore seeds one day and the app opens the next, empty, for as
+    # many hours as the offset. The fixture seeds today and tomorrow to
+    # cover it; this says so when something still lands outside both.
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    if today not in seeded:
+        return [
+            f"the app opened {today} (this container's clock, UTC) and the",
+            f"fixture seeded {', '.join(seeded)} — so it opened an empty",
+            "day and painted it correctly. `fixture.sh` runs on the HOST,",
+            "whose date can differ by the UTC offset. It seeds today and",
+            "tomorrow for that reason; this fell outside both.",
+        ]
+
+    if not _port_open(1421):
+        return [
+            "nothing is listening on :1421. A debug build reads `devUrl`",
+            "from tauri.conf.json rather than the bundled `dist`, so the",
+            "window renders one line: 'Could not connect to localhost'.",
+            "See /tmp/vite.log in the container.",
+        ]
+
+    return [
+        f"the workspace is mounted, {today}.md is seeded and vite is up,",
+        "so this is the app itself: still opening, or opening slower than",
+        "the 90s budget. See /tmp/app.log in the container.",
+    ]
 
 
 def main() -> int:
@@ -126,10 +219,9 @@ def main() -> int:
     base, base_p, rows = wait_for_outline(win)
 
     if base is None:
-        print("FAIL: the outline never painted. Two things look identical")
-        print("      here: a workspace still opening, and a debug build")
-        print("      whose `devUrl` (vite on :1421) is not up — that one")
-        print("      renders 'Could not connect to localhost'.")
+        print("FAIL: the outline never painted.")
+        for line in why_blank():
+            print(f"      {line}")
         print("      /out/battery-base.png has the last frame.")
         return 1
 

@@ -26,11 +26,12 @@
 //! owner of reading it off disk.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::ops::Bound;
 
 use anyhow::{Context, Result};
 use outl_core::hlc::Hlc;
 use outl_core::id::ActorId;
-use outl_core::storage::{JsonlStorage, Storage};
+use outl_core::storage::JsonlStorage;
 use outl_core::LogOp;
 use tracing::info;
 
@@ -68,90 +69,130 @@ pub(crate) fn local_vector_clock(
         .collect())
 }
 
-/// Collect the ops the peer is missing, given the peer's vector clock.
+/// Most ops one exchange may carry, when the selection is one a budget may
+/// safely cut.
 ///
-/// Per actor in OUR log:
-/// - peer has no entry → send everything we hold for that actor;
-/// - peer has `(max_r, count_r)` → let `below` = how many DISTINCT ops of
-///   that actor we hold with `ts <= max_r`. If `below > count_r` the peer
-///   has a GAP below its own watermark (an op landed ahead of a pending
-///   backlog, so the bare max lies about what's underneath) → send the
-///   actor's FULL log; the receiver's ingest dedup absorbs the overlap.
-///   Otherwise → fast path, send only `ts > max_r`.
+/// A first sync used to cross as ONE frame: 719,785 ops / 253 MB against a
+/// 256 MB frame cap, so it passed the guard by 1.2% and allocated instead of
+/// failing. On an Android phone that is `Scudo ERROR: internal map failure`
+/// across thirty threads and a `SIGABRT` on a `tokio-rt-worker`, every
+/// launch, forever — the ingest lands on disk before the process dies, so
+/// each retry re-pulls a slightly smaller mountain and dies again.
 ///
-/// Theoretical limitation (accepted): two replicas holding EQUAL counts of
-/// DIFFERENT subsets below the same max are indistinguishable to this check,
-/// so the fast path under-sends between them. Convergence is still
-/// guaranteed via the origin: each op's authoring device holds its own
-/// actor's complete log, so any replica with a partial subset trips the
-/// `below > count` check the next time it syncs (directly or transitively)
-/// with the origin's full prefix.
+/// 20,000 ops is ~7 MB of JSONL on the reference workspace, which is a frame
+/// a phone can hold while it is also opening a workspace. The whole history
+/// still crosses; it crosses over roughly 36 exchanges at the catch-up
+/// loop's cadence instead of one that cannot finish.
+pub(crate) const MAX_OPS_PER_EXCHANGE: usize = 20_000;
+
+/// Collect the ops the peer is missing, given the peer's vector clock,
+/// bounded to [`MAX_OPS_PER_EXCHANGE`] where bounding is safe.
 pub(crate) fn ops_missing_for(
     ops_dir: &std::path::Path,
     actor: ActorId,
     peer_clock: &HashMap<ActorId, ActorClock>,
 ) -> Result<Vec<LogOp>> {
+    ops_missing_for_capped(ops_dir, actor, peer_clock, MAX_OPS_PER_EXCHANGE)
+}
+
+/// [`ops_missing_for`] with the budget spelled out, so a test can reach a
+/// cut without writing twenty thousand ops.
+///
+/// Per actor in OUR log:
+/// - peer has a GAP below its watermark (it holds fewer distinct ops `<=
+///   max_r` than we do) → send that actor's FULL log, **never truncated**;
+/// - peer has no entry → send everything we hold for that actor, budgeted;
+/// - otherwise → send `ts > max_r`, budgeted.
+///
+/// **Why the gap resend is exempt.** A budget cuts the OLDEST ops, and a gap
+/// resend exists precisely because we cannot tell which ops below the peer's
+/// watermark are missing. Cut it, and the slice we send may be one the peer
+/// already holds in full: its `(max, count)` comes back unchanged, the next
+/// round computes the same cut, and the repair never progresses — silent
+/// non-convergence, which is the one outcome this crate will not ship. An
+/// oversized gap resend instead fails loudly on the frame cap, exactly as it
+/// did before any budget existed. Pinned by
+/// `a_gap_resend_is_never_truncated_by_the_budget`.
+///
+/// "Peer has no entry" looks identical to a gap resend today — both send
+/// everything — and is **not** the same under a budget: a peer holding zero
+/// ops of an actor cannot already have the slice we cut, so the oldest-first
+/// prefix always lands. That difference is why the two are separate piles
+/// here rather than one `full_resend` set.
+///
+/// Theoretical limitation (accepted, pre-dates the budget): two replicas
+/// holding EQUAL counts of DIFFERENT subsets below the same max are
+/// indistinguishable to this check, so the fast path under-sends between
+/// them. Convergence still lands via the origin: each op's authoring device
+/// holds its own actor's complete log, so any replica with a partial subset
+/// trips the `below > count` check the next time it syncs with that origin.
+pub(crate) fn ops_missing_for_capped(
+    ops_dir: &std::path::Path,
+    actor: ActorId,
+    peer_clock: &HashMap<ActorId, ActorClock>,
+    budget: usize,
+) -> Result<Vec<LogOp>> {
     let census = actor_census(ops_dir)?;
 
-    // Actors whose FULL log must cross (unknown to the peer, or gap detected
-    // below the peer's watermark).
-    let full_resend: HashSet<ActorId> = census
+    let gap_resend: HashSet<ActorId> = census
         .iter()
-        .filter_map(|(actor_id, hlcs)| match peer_clock.get(actor_id) {
-            None => Some(*actor_id),
-            Some(peer) => {
-                let below = hlcs.range(..=peer.max).count() as u64;
-                (below > peer.count).then(|| {
-                    info!(
-                        actor = %actor_id,
-                        below,
-                        peer_count = peer.count,
-                        "gap below peer watermark detected; resending full actor log"
-                    );
-                    *actor_id
-                })
-            }
+        .filter_map(|(actor_id, hlcs)| {
+            let peer = peer_clock.get(actor_id)?;
+            let below = hlcs.range(..=peer.max).count() as u64;
+            (below > peer.count).then(|| {
+                info!(
+                    actor = %actor_id,
+                    below,
+                    peer_count = peer.count,
+                    "gap below peer watermark detected; resending full actor log"
+                );
+                *actor_id
+            })
         })
         .collect();
 
-    // Nothing to send? Then read nothing. The census already answers the
-    // question per actor — its sets are ordered, so "do we hold anything
-    // above the peer's max" is one comparison against the last element — and
-    // "nothing" is the answer on a converged workspace, which is the state
-    // the catch-up loop asks about every 8s per peer and `sync_now` asks
-    // about on every pull-to-refresh. Reading the whole log into a
-    // `Vec<LogOp>` and filtering it down to empty is the standing cost of a
-    // quiet device.
-    let sends_anything = census.iter().any(|(actor_id, hlcs)| match hlcs.last() {
-        None => false,
-        Some(max) => {
-            full_resend.contains(actor_id)
-                || peer_clock.get(actor_id).is_none_or(|peer| *max > peer.max)
+    let mut whole: Vec<(ActorId, Hlc)> = Vec::new();
+    let mut budgeted: Vec<(ActorId, Hlc)> = Vec::new();
+    for (actor_id, hlcs) in &census {
+        if gap_resend.contains(actor_id) {
+            whole.extend(hlcs.iter().map(|ts| (*actor_id, *ts)));
+            continue;
         }
-    });
-    if !sends_anything {
+        let owed = match peer_clock.get(actor_id) {
+            None => hlcs.iter().copied().collect::<Vec<Hlc>>(),
+            Some(peer) => hlcs
+                .range((Bound::Excluded(peer.max), Bound::Unbounded))
+                .copied()
+                .collect(),
+        };
+        budgeted.extend(owed.into_iter().map(|ts| (*actor_id, ts)));
+    }
+
+    // Oldest first, then cut. Sorting the whole selection by HLC leaves each
+    // actor with a CONTIGUOUS prefix of what it owed, and that is the part
+    // that matters: the receiver's `count` stays equal to what it holds below
+    // its own `max`, so the next exchange reads as a fast path rather than
+    // tripping the gap check this budget must never provoke.
+    budgeted.sort_unstable_by_key(|(_, ts)| *ts);
+    budgeted.truncate(budget);
+
+    let mut picks = whole;
+    picks.extend(budgeted);
+    // Nothing to send? Then read nothing, and above all do not OPEN. The
+    // census already answered the question off the offset index, and
+    // "nothing" is the answer on a converged workspace — which is what the
+    // catch-up loop asks every 8s per peer and what every pull-to-refresh
+    // asks. Opening storage here is a full index load for an empty result.
+    if picks.is_empty() {
         return Ok(Vec::new());
     }
+    picks.sort_unstable_by_key(|(_, ts)| *ts);
 
     let storage =
         JsonlStorage::open(ops_dir.to_path_buf(), actor).context("open storage for delta")?;
-    let all_ops = storage.all_ops().context("load all ops")?;
-    Ok(all_ops
-        .into_iter()
-        .filter(|op| {
-            // `op.ts.actor`, not `op.actor`: the same value (`LogOp::actor`
-            // is documented as "also embedded inside `ts`"), but the census
-            // above can only see the one inside the HLC, and the early-out
-            // is only sound if both sides key on the same field.
-            if full_resend.contains(&op.ts.actor) {
-                return true;
-            }
-            match peer_clock.get(&op.ts.actor) {
-                None => true,
-                Some(peer) => op.ts > peer.max,
-            }
-        })
-        .collect())
+    storage
+        .read_ops_at(&picks)
+        .context("read the ops this peer is missing")
 }
 
 #[cfg(test)]
@@ -301,5 +342,114 @@ mod tests {
 
         let sent = ops_missing_for(&ops_dir, actor, &peer_clock).expect("delta");
         assert_eq!(sent.len(), ops.len(), "the whole actor log must cross");
+    }
+
+    /// The vector clock a peer would report after holding exactly `held`.
+    fn clock_of(held: &BTreeSet<Hlc>) -> ActorClock {
+        ActorClock {
+            max: *held.last().expect("a non-empty holding"),
+            count: held.len() as u64,
+        }
+    }
+
+    /// A first sync is the whole log, and the whole log does not fit in a
+    /// phone. 719,785 ops crossed as ONE frame killed the Android app with
+    /// `Scudo ERROR: internal map failure` and a `SIGABRT` on a
+    /// `tokio-rt-worker`, every launch, forever — the op log is 253 MB
+    /// against a 256 MB frame cap, so it squeaked under the guard and
+    /// allocated instead of failing.
+    ///
+    /// The cap is on the SELECTION, not on the frame, because the sender
+    /// blew up too: `ops_missing_for` read `all_ops` to filter it down.
+    #[test]
+    fn a_first_sync_is_capped_so_one_exchange_cannot_exhaust_memory() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ops_dir = tmp.path().join("ops");
+        let actor = ActorId::new();
+        let ops = write_log(&ops_dir, actor, 50);
+
+        let sent = ops_missing_for_capped(&ops_dir, actor, &HashMap::new(), 10).expect("delta");
+
+        assert_eq!(sent.len(), 10, "one exchange must carry at most the budget");
+        let sent_ts: Vec<Hlc> = sent.iter().map(|op| op.ts).collect();
+        let oldest: Vec<Hlc> = ops[..10].iter().map(|op| op.ts).collect();
+        assert_eq!(
+            sent_ts, oldest,
+            "the budget must take the OLDEST ops: a contiguous prefix per actor is what \
+             keeps the receiver's (max, count) honest, so the next exchange reads as a \
+             clean fast path instead of a gap"
+        );
+    }
+
+    /// Capping is only safe if the remainder still crosses. Each exchange
+    /// advances the receiver's clock, so the next one picks up where this
+    /// one stopped — that is what makes a bounded frame converge instead of
+    /// stalling a device halfway through its history.
+    #[test]
+    fn a_capped_first_sync_still_converges_over_repeated_exchanges() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ops_dir = tmp.path().join("ops");
+        let (a, b) = (ActorId::new(), ActorId::new());
+        let ops_a = write_log(&ops_dir, a, 23);
+        let ops_b = write_log(&ops_dir, b, 17);
+        let everything: BTreeSet<Hlc> = ops_a.iter().chain(&ops_b).map(|op| op.ts).collect();
+
+        let mut held: HashMap<ActorId, BTreeSet<Hlc>> = HashMap::new();
+        for round in 0..100 {
+            let peer_clock: HashMap<ActorId, ActorClock> = held
+                .iter()
+                .map(|(actor, hlcs)| (*actor, clock_of(hlcs)))
+                .collect();
+            let sent = ops_missing_for_capped(&ops_dir, a, &peer_clock, 7).expect("delta");
+            if sent.is_empty() {
+                let got: BTreeSet<Hlc> = held.values().flatten().copied().collect();
+                assert_eq!(
+                    got, everything,
+                    "a round that sends nothing must mean convergence, not a stall \
+                     (round {round})"
+                );
+                return;
+            }
+            assert!(sent.len() <= 7, "every round stays inside the budget");
+            for op in sent {
+                held.entry(op.ts.actor).or_default().insert(op.ts);
+            }
+        }
+        panic!("the capped exchange never converged");
+    }
+
+    /// The one selection a budget must NOT touch.
+    ///
+    /// A gap resend exists because the peer is missing ops BELOW its own
+    /// watermark, and we cannot tell which. Truncating it sends the oldest
+    /// slice — which the peer may already hold in full, leaving its `(max,
+    /// count)` unchanged and the next round identical. That is a silent
+    /// non-convergence loop, and silence is the one failure this crate
+    /// refuses. An oversized gap resend fails loudly at the frame cap
+    /// instead, which is what it already did before the budget existed.
+    #[test]
+    fn a_gap_resend_is_never_truncated_by_the_budget() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let ops_dir = tmp.path().join("ops");
+        let actor = ActorId::new();
+        let ops = write_log(&ops_dir, actor, 30);
+
+        // Holds the newest op but only 2 ops in total: a gap underneath.
+        let peer_clock: HashMap<ActorId, ActorClock> = [(
+            actor,
+            ActorClock {
+                max: ops.last().expect("op").ts,
+                count: 2,
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let sent = ops_missing_for_capped(&ops_dir, actor, &peer_clock, 5).expect("delta");
+        assert_eq!(
+            sent.len(),
+            ops.len(),
+            "a gap resend crosses whole or the repair can make no progress"
+        );
     }
 }

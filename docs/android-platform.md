@@ -6,6 +6,37 @@ The user-facing background-sync behaviour is [sync.md → Background sync on And
 
 ---
 
+## Building: set `JAVA_HOME`, or Tauri picks a JDK Gradle cannot run on
+
+`cargo tauri android dev` prints this on its first line when `JAVA_HOME` is unset:
+
+```text
+Info Using Android Studio's default Java installation: /Applications/Android Studio.app/Contents/jbr/Contents/Home
+```
+
+That bundled runtime is **OpenJDK 25**, and the Gradle wrapper this project pins (8.14.3) does not support it.
+The build dies before it compiles anything, during settings evaluation, with a message that names neither Java nor the JDK it chose:
+
+```text
+Settings file '.../gen/android/settings.gradle' line: 3
+> BUG! exception in phase 'semantic analysis' in source unit '_BuildScript_' Unsupported class file major version 69
+```
+
+Major version 69 **is** Java 25. That is the only place the cause appears.
+
+Point `JAVA_HOME` at a JDK Gradle 8.14 supports (17 through 24) and it builds:
+
+```sh
+JAVA_HOME=/Library/Java/JavaVirtualMachines/graalvm-21.jdk/Contents/Home cargo tauri android dev
+```
+
+Two things worth keeping in mind:
+
+- **`java` on `PATH` is not what decides this.** The Tauri CLI reaches for Android Studio's bundled runtime on its own when `JAVA_HOME` is empty, so a shell whose `java -version` says 21 still gets 25.
+- **Android Studio has the same problem, from the other side.** It runs Gradle under that JBR by default, so its own builds hit the ceiling too. Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK is where to point it at the same JDK, which also keeps one build cache instead of two.
+
+The durable fix is raising the Gradle wrapper to a release that supports the JDK people actually have, which also means moving the Android Gradle Plugin. That is release plumbing and belongs with the rest of it, not in a developer's shell profile.
+
 ## Where the Android-specific code lives
 
 Fourteen files, none of which holds business logic — the same rule as every other client.

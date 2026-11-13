@@ -15,7 +15,7 @@
  * `outl_actions::known_keys`.
  */
 
-import { isInternalKey } from "@outl/shared/markdown";
+import { isImportStamp, isInternalKey } from "@outl/shared/markdown";
 
 import type { PropertyKey } from "./api";
 
@@ -34,6 +34,29 @@ const PAGE_IDENTITY_KEYS = new Set(["page-slug", "page-kind"]);
  * what the other clients hide.
  */
 function neverSuggest(key: string): boolean {
+  if (PAGE_IDENTITY_KEYS.has(key.toLowerCase()) || isInternalKey(key)) {
+    return true;
+  }
+  // An import's `created` / `edited` / `roam-uid` are the top of the
+  // frequency ranking on a migrated graph — they are on every block —
+  // so without this the Add step's first chips are three keys nobody
+  // would ever author. `isImportStamp` wants a value and a key the
+  // user has not typed a value for yet is judged by its key alone,
+  // which is the right reading here: the question is "would anyone
+  // add this?", not "is this one a machine's".
+  return isImportStamp(key, "1970-01-01");
+}
+
+/**
+ * Keys the sheet never *offers*, but still *lists* when they exist.
+ *
+ * Only outl's own model state and the page's identity are hidden
+ * outright: editing `collapsed` corrupts a fold, and renaming is
+ * `page_rename`. An import stamp is the user's to delete, so the sheet
+ * shows it even though the outline does not — hiding it in both places
+ * would leave `created::` visible only in the `.md`.
+ */
+function neverList(key: string): boolean {
   return PAGE_IDENTITY_KEYS.has(key.toLowerCase()) || isInternalKey(key);
 }
 
@@ -100,7 +123,17 @@ export function editableProperties(
   properties: ReadonlyArray<readonly [string, string]> | undefined,
 ): Array<[string, string]> {
   if (!properties) return [];
-  return properties
-    .filter(([key]) => !neverSuggest(key))
+  const rows = properties
+    .filter(([key]) => !neverList(key))
     .map(([key, value]) => [key, value] as [string, string]);
+  // An import stamp is listed so it can be deleted, not so it can be
+  // read. Alphabetical order put `created` at the top of every block's
+  // sheet on a migrated graph, which opens the list on its least
+  // useful row. `sort` is stable in every engine these clients run on,
+  // so the backend's order survives inside each group and the sheet
+  // does not reshuffle between two reads of the same block.
+  return rows.sort(
+    (a, b) =>
+      Number(isImportStamp(a[0], a[1])) - Number(isImportStamp(b[0], b[1])),
+  );
 }

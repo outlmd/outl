@@ -29,6 +29,11 @@ export {
   detectEmojiContext,
   type EmojiContext,
 } from "./emoji";
+export {
+  applySlashContext,
+  detectSlashContext,
+  type SlashContext,
+} from "./slash";
 
 export interface PairCompletion {
   /** Full textarea value after the completion. */
@@ -531,47 +536,3 @@ export function refReplacement(
   return page.kind === "journal" && !opts.mention ? page.slug : page.title;
 }
 
-/** An active `/command` slash trigger inside a block's textarea. */
-export interface SlashContext {
-  /** Text after the `/`, up to the caret — the command filter. */
-  query: string;
-  /** Index of the `/` (always 0 today: Notion-style, block-initial). */
-  openIndex: number;
-  /** Caret position (no closer — equals `selection`). */
-  replaceEnd: number;
-}
-
-/**
- * Detect a `/command` slash trigger, mirroring the TUI's slash menu but
- * inline inside a block. Deliberately **block-initial only** (`/` is the
- * first character): a mid-text slash is a path / URL / fraction, never a
- * command, so triggering there would fire the menu constantly. The run
- * between the `/` and the caret must be command-name chars (`[A-Za-z0-9_-]`);
- * a space or any other character closes the trigger (Notion behaviour).
- *
- * Returns `null` when no trigger is active.
- */
-export function detectSlashContext(
-  value: string,
-  selection: number,
-): SlashContext | null {
-  if (selection < 1 || value[0] !== "/") return null;
-  const query = value.slice(1, selection);
-  if (!/^[A-Za-z0-9_-]*$/.test(query)) return null;
-  return { query, openIndex: 0, replaceEnd: selection };
-}
-
-/**
- * Remove the `/query` token when a slash command is accepted, keeping any
- * text after the token. The block that hosted the command is left with its
- * non-command remainder (usually empty) and the caret at the open index.
- */
-export function applySlashContext(
-  value: string,
-  ctx: SlashContext,
-): PairCompletion {
-  let end = ctx.openIndex + 1;
-  while (end < value.length && /[A-Za-z0-9_-]/.test(value[end])) end++;
-  const next = value.slice(0, ctx.openIndex) + value.slice(end);
-  return { value: next, caret: ctx.openIndex };
-}

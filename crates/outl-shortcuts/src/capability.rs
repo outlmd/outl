@@ -159,6 +159,19 @@ pub enum Capability {
     /// on those two. The TUI has no diagram surface and keeps the
     /// fence as source either way.
     DiagramRendering,
+    /// Typing `/` inside a block to get a filterable list of commands,
+    /// and running one from there without leaving the keyboard.
+    ///
+    /// Distinct from whether the client can *run* the things that list
+    /// offers. [`Capability::Templates`] and [`Capability::Assets`] ask
+    /// that, and both are `Full` everywhere; a client can have every
+    /// command behind a sheet and still have no `/`. This row is only
+    /// whether the editor itself answers the key.
+    ///
+    /// It is also not the command palette. That has an
+    /// [`crate::Action`] (`OpenCommandPalette`) and is tracked there —
+    /// a second entry for one fact is the drift RFC 0253 prevents.
+    SlashCommandMenu,
     /// Turning crash reporting off.
     ///
     /// Reports are **on by default** (RFC 0377), so a client without
@@ -223,6 +236,7 @@ impl Capability {
         Capability::CaptureOutsideTheApp,
         Capability::TaskList,
         Capability::DiagramRendering,
+        Capability::SlashCommandMenu,
         Capability::CrashReportingOptOut,
         Capability::CrashReportingDisclosure,
     ];
@@ -236,7 +250,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_19: usize = 19;
+    const EXPECTED_20: usize = 20;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -257,6 +271,7 @@ mod tests {
             Capability::CaptureOutsideTheApp => "CaptureOutsideTheApp",
             Capability::TaskList => "TaskList",
             Capability::DiagramRendering => "DiagramRendering",
+            Capability::SlashCommandMenu => "SlashCommandMenu",
             Capability::CrashReportingOptOut => "CrashReportingOptOut",
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
         }
@@ -275,9 +290,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_19,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_19} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_19)",
+            EXPECTED_20,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_20} variants \
+             — add the new variant to Capability::ALL (and bump EXPECTED_20)",
             names.len(),
         );
     }

@@ -450,7 +450,7 @@ impl SyncEngine {
         // `late_low_hlc_op_from_unseen_actor_survives_snapshot_boot`) never
         // got a fresh cutoff and full-replayed on *every* subsequent
         // incremental reload, forever.
-        if !workspace.booted_from_snapshot() {
+        if workspace.snapshot_refresh_due() {
             if let Err(e) = workspace.save_snapshot() {
                 tracing::warn!("reload: could not persist boot snapshot: {e}");
             }

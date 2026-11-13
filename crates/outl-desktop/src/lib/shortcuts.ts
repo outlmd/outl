@@ -15,6 +15,7 @@
  */
 
 import { pluginRun } from "@outl/shared/api/commands";
+import type { PluginCommand } from "@outl/shared/api/types";
 
 import {
   type Action,
@@ -33,7 +34,9 @@ import {
 } from "./api";
 
 import { detectMode } from "./mode";
+import { paletteActions } from "./palette-results";
 import { playPluginViews } from "./plugin-views";
+import { actionSlashCommands, actionSlug } from "./slash-commands";
 import { appState, setAppState, setOutline } from "./store";
 
 // ---------------------------------------------------------------------------
@@ -282,6 +285,7 @@ export async function installShortcuts(
 ): Promise<() => void> {
   const bindings = await loadBindings();
   const support = await loadSupport();
+  publishSlashActions(bindings, handlers);
 
   // Plugin-contributed chords, folded in as a Global overlay. They are
   // always single-chord and `global` (the backend stamps the mode), so we
@@ -415,7 +419,66 @@ export async function installShortcuts(
   return () => {
     window.removeEventListener("keydown", onKey);
     resetPending();
+    liveSlashActions = null;
   };
+}
+
+// ---------------------------------------------------------------------------
+// The client's own commands, for the inline `/` menu
+// ---------------------------------------------------------------------------
+
+/**
+ * The native rows the `/` menu offers, plus how to run one.
+ *
+ * Published here rather than prop-drilled because this is where the
+ * handler map already lives: the slash menu, the `Cmd+K` palette and a
+ * chord then fire the *same* function, so a command cannot behave one
+ * way from the keyboard and another from the menu.
+ *
+ * Rebuilt on every `installShortcuts` and dropped on teardown, for the
+ * reason `loadPluginBindings` is not module-cached: the dispatcher
+ * re-installs on a workspace swap, and the handler map is a new one.
+ */
+let liveSlashActions: {
+  commands: PluginCommand[];
+  // `PaletteActionRow.action` is a bare `string` in `@outl/shared`
+  // (the phone has no `Action` union to narrow against), so the cast
+  // happens at the one place that dispatches — the same shape
+  // `Picker.tsx` uses for an action row.
+  run: Map<string, string>;
+  handlers: ActionHandlers;
+} | null = null;
+
+function publishSlashActions(bindings: Binding[], handlers: ActionHandlers) {
+  const rows = paletteActions(bindings, (k) => Boolean(handlers[k]));
+  liveSlashActions = {
+    commands: actionSlashCommands(rows),
+    run: new Map(rows.map((r) => [actionSlug(r.action), r.action])),
+    handlers,
+  };
+}
+
+/**
+ * The client's own commands as slash-menu rows, or empty before the
+ * dispatcher has installed.
+ */
+export function nativeSlashCommands(): PluginCommand[] {
+  return liveSlashActions?.commands ?? [];
+}
+
+/**
+ * Run a native slash row by the name the user typed. `false` when
+ * nothing owns it, so the caller can fall through to the plugin path
+ * instead of swallowing the pick.
+ */
+export async function runNativeSlashCommand(
+  commandId: string,
+): Promise<boolean> {
+  const live = liveSlashActions;
+  const kind = live?.run.get(commandId) as Action["kind"] | undefined;
+  if (!live || !kind) return false;
+  await dispatch({ kind } as Action, live.handlers);
+  return true;
 }
 
 // ---------------------------------------------------------------------------

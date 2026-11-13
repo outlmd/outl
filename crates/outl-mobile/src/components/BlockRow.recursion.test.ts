@@ -11,10 +11,11 @@
  *   markdown table into anything but a root block produced a wall of
  *   tabs instead of a table ([#329](https://github.com/outlmd/outl/issues/329)
  *   is where this surfaced).
- * - **`onSetProperty`**. `Journal.tsx` passes it, `BlockBody` declares
- *   it, `BlockProperties` calls it — and `BlockRow`'s own `<BlockBody>`
+ * - **`onOpenProperties`** (`onSetProperty` when the defect was found).
+ *   `Journal.tsx` passes it, `BlockBody` declares it,
+ *   `BlockProperties` calls it — and `BlockRow`'s own `<BlockBody>`
  *   call site never forwarded it either, so tapping a `key:: value`
- *   chip on mobile was a no-op on *every* block.
+ *   on mobile was a no-op on *every* block.
  *
  * So the invariant is checked structurally rather than by rendering:
  * every prop the component accepts is either forwarded to the recursive
@@ -109,20 +110,20 @@ describe("BlockRow recursion", () => {
     // a set difference.
     const forwarded = new Set(forwardedProps());
     expect(forwarded.has("onPasteMarkdown")).toBe(true);
-    expect(forwarded.has("onSetProperty")).toBe(true);
+    expect(forwarded.has("onOpenProperties")).toBe(true);
   });
 
   it("hands embeds to the body that renders them", () => {
-    // Same half as `onSetProperty` below, for the resolved-ref map.
+    // Same half as `onOpenProperties` below, for the resolved-ref map.
     // Without it `MarkdownInline` has nothing to resolve `((blk-…))`
     // against and falls back to printing the raw handle, which is the
     // whole of [#16](https://github.com/outlmd/outl/issues/16).
     expect(SOURCE).toContain("embeds={props.embeds}");
   });
 
-  it("hands onSetProperty to the body that calls it", () => {
+  it("hands onOpenProperties to the body that calls it", () => {
     // The other half: `BlockBody` declares and uses it, so a forward to
     // the children is not enough if the row itself withholds it.
-    expect(SOURCE).toContain("onSetProperty={props.onSetProperty}");
+    expect(SOURCE).toContain("onOpenProperties={props.onOpenProperties}");
   });
 });

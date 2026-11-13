@@ -117,8 +117,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use super::select::{selection_key, SelectionKey};
 use super::{SnapshotBody, SnapshotError};
-use crate::hlc::Hlc;
 use crate::id::ActorId;
 
 /// How long a leftover `snap-*.bin.tmp` is kept before it counts as
@@ -231,7 +231,7 @@ struct Candidate {
     stamp: Option<(u64, SystemTime)>,
     /// The boot selector's ranking key, when the file decoded into a body
     /// the selector would consider at all.
-    key: Option<(Hlc, String)>,
+    key: Option<SelectionKey>,
     /// Read end to end and rejected by the decoder.
     dead: bool,
     /// Decoded cleanly, whatever its cutoff said.
@@ -267,7 +267,8 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
 
     let own_name = format!("snap-{own}.bin");
     let mut candidates: Vec<Candidate> = Vec::new();
-    let mut best: Option<((Hlc, String), SnapshotBody)> = None;
+    let mut best: Option<(SelectionKey, SnapshotBody)> = None;
+    let mut peer_best: Option<SelectionKey> = None;
 
     for entry in read.flatten() {
         let path = entry.path();
@@ -292,15 +293,30 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
             match SnapshotBody::decode(&bytes) {
                 Ok(body) => {
                     c.decoded = true;
-                    c.key = selection_key(&body, &c.name);
-                    // The device's own snapshot is read first and
-                    // unconditionally by the selector, so it never
-                    // competes for the adopt slot.
-                    if c.name != own_name {
-                        if let Some(key) = c.key.clone() {
-                            if best.as_ref().is_none_or(|(b, _)| key > *b) {
-                                best = Some((key, body));
-                            }
+                    c.key = selection_key(&body.cutoff, &c.name);
+                    // The device's own snapshot competes like any
+                    // other. It used to be excluded here because the
+                    // selector returned it unconditionally — and that is
+                    // precisely what stranded a freshly paired device: a
+                    // phone writes a snapshot on its first launch whose
+                    // cutoff names one actor (itself), and that tiny body
+                    // then shadowed a peer's covering twenty. Every actor
+                    // the cutoff omits puts its WHOLE history in the
+                    // delta, so the shadow turned a 0-op boot into a
+                    // full replay of the entire log.
+                    if let Some(key) = c.key.clone() {
+                        // The peer-only winner, which is what the GC
+                        // reads. Keeping it separate from `best` is
+                        // deliberate: a peer body the selector would
+                        // never pick *while this device's own exists*
+                        // is still the one it would pick after an actor
+                        // rotation, so collecting it would strand the
+                        // rotated device on a full replay.
+                        if c.name != own_name && peer_best.as_ref().is_none_or(|b| key > *b) {
+                            peer_best = Some(key.clone());
+                        }
+                        if best.as_ref().is_none_or(|(b, _)| key > *b) {
+                            best = Some((key, body));
                         }
                     }
                 }
@@ -310,7 +326,8 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
         candidates.push(c);
     }
 
-    let winner = best.as_ref().map(|(k, _)| k.clone());
+    // The GC asks about peers only — see `peer_best` above.
+    let winner = peer_best;
     let mut entries: Vec<SnapshotEntry> = candidates
         .into_iter()
         .map(|c| {
@@ -535,17 +552,6 @@ fn proves_dead(err: &SnapshotError) -> bool {
         SnapshotError::SchemaMismatch { expected, found } => found < expected,
         SnapshotError::Encode(_) | SnapshotError::Io(_) => false,
     }
-}
-
-/// The boot selector's ranking key for a body: highest cutoff HLC, then
-/// filename. A body with an empty cutoff has no key — the selector skips
-/// it outright, since adopting it would save no replay.
-fn selection_key(body: &SnapshotBody, name: &str) -> Option<(Hlc, String)> {
-    body.cutoff
-        .values()
-        .copied()
-        .max()
-        .map(|hlc| (hlc, name.to_string()))
 }
 
 #[cfg(test)]

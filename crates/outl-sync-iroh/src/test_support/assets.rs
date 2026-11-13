@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use iroh::protocol::Router;
 
 use super::authorize_peer;
-use crate::engine_sync::read_frame;
+use crate::protocol::read_frame;
 use crate::protocol::{encode_blob_frame, ASSET_ALPN};
 
 /// Mount the production `AssetProtocolHandler` on a `Router` and return it.

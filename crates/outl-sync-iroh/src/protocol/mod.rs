@@ -66,11 +66,11 @@ mod frame;
 pub use alpn::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};
 pub(crate) use asset::{decode_asset_manifest, encode_asset_manifest};
 pub(crate) use close::{
-    classify_close, close_refusal_reason, CloseVerdict, CLOSE_NORMAL, CLOSE_UNKNOWN_PEER,
-    CLOSE_WORKSPACE_MISMATCH,
+    classify_close, close_refusal_reason, read_failure_context, CloseVerdict, CLOSE_NORMAL,
+    CLOSE_UNKNOWN_PEER, CLOSE_WORKSPACE_MISMATCH,
 };
 pub(crate) use delta::{
     decode_ops_blob, decode_request, decode_response, encode_op, encode_ops_blob, encode_request,
     encode_response, ActorClock, SyncRequest, SyncResponse, ACK_DURABLE,
 };
-pub(crate) use frame::encode_blob_frame;
+pub(crate) use frame::{encode_blob_frame, read_frame, read_frame_reporting, FRAME_PREFIX_LEN};

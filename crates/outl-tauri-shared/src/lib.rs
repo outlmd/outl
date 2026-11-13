@@ -40,6 +40,7 @@ pub mod host;
 pub mod iroh_sync;
 pub mod merges;
 pub mod offload;
+pub mod ops_watermark;
 pub mod plugin_dto;
 pub mod plugin_service;
 mod plugin_thread;

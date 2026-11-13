@@ -88,6 +88,20 @@ pub(crate) fn close_refusal_reason(conn: &iroh::endpoint::Connection) -> Option<
     }
 }
 
+/// What a failed pre-payload read should be blamed on: the peer's refusal
+/// when there was one, the generic read label otherwise.
+///
+/// [`close_refusal_reason`] already renders the sentence a user can act on,
+/// and it used to reach the progress sink and nothing else. The log line that
+/// every headless client actually has — the catch-up `WARN` — prints the
+/// OUTERMOST context of an `anyhow` chain and nothing under it, so a device
+/// refused for being unpaired and a device on a flaky link both read as
+/// `read sync response`. `outl serve` has no panel, and neither does a mobile
+/// client's logcat; this is how the diagnosis reaches them.
+pub(crate) fn read_failure_context(reason: Option<&'static str>) -> &'static str {
+    reason.unwrap_or("read sync response")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +163,18 @@ mod tests {
         // with something this version has no meaning for, and guessing is how
         // the desktop→mobile "synced ok but nothing arrived" bug happened.
         assert_eq!(classify_close(&app_close(9)), CloseVerdict::Failed);
+    }
+
+    /// The refusal has to WIN over the generic label, because only the
+    /// outermost context reaches the log line. Flip this and an unpaired
+    /// device is indistinguishable from a dropped connection in every
+    /// headless client we ship.
+    #[test]
+    fn a_refusal_outranks_the_generic_read_label() {
+        assert_eq!(
+            read_failure_context(Some("peer refused: this device is not paired with it")),
+            "peer refused: this device is not paired with it"
+        );
+        assert_eq!(read_failure_context(None), "read sync response");
     }
 }

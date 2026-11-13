@@ -156,7 +156,7 @@ The TUI is vim-style by definition.
 | Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | long-press → "Copy block ref" |
 | Enter Visual | `V` _(the catalog spells this `v`; the TUI binds `V` only — [known divergence](../crates/outl-shortcuts/tests/tui_catalog_divergence.rs))_ | `v` | — |
 | Open command palette | `:` | `:` / `Cmd/Ctrl+K` _(the quick switcher opened on `>`: actions with their chords)_ | — |
-| Open slash menu | `/` | `/` | `/` |
+| Open slash menu | `/` _(overlay)_ | — _(the desktop's slash menu is inline, inside a block — see Insert mode below)_ | — _([#parity](client-parity.md): `SlashCommandMenu`)_ |
 
 > **About `a` / `*` / `#` on the desktop.** The desktop's Normal mode has only a selected block id — no character cursor inside the block. So `a` collapses to `i` (the textarea's own caret takes over), and `*` / `#` seed the picker with the first few words of the selected block's text instead of doing a word-under-cursor search. The catalog still ships these chords so muscle memory from the TUI carries over.
 
@@ -206,7 +206,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Ref autocomplete | `[[` triggers picker | `[[` triggers picker | `[[` triggers picker |
 | Tag autocomplete | `#` triggers picker | `#` triggers picker | `#` triggers chip strip |
 | Block ref autocomplete | `((` triggers picker | `((` triggers picker | — |
-| Slash command autocomplete | `/` | `/` | — |
+| Slash command autocomplete | `/` _(word-initial)_ | `/` _(word-initial)_ | — _([#parity](client-parity.md): `SlashCommandMenu`)_ |
 | Cycle task state on current (`TODO` → `DOING` → `DONE` → none) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox / long-press menu |
 | Cut / copy / paste **text** (native) | — | `Cmd/Ctrl+X` / `Cmd/Ctrl+C` / `Cmd/Ctrl+V` | native |
 | Run code block | `g x` chord | _(commit with `Esc`, then `Cmd/Ctrl+Shift+X`)_ | tap "Run" |

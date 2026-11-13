@@ -99,11 +99,21 @@ fn workspace_info_reports_total_ops_after_snapshot_boot() {
         .output()
         .unwrap());
 
-    // The CLI never writes a snapshot of its own — its threshold is 0,
-    // so the fixture writes one the way a GUI client does and lets the
-    // next open adopt it.
+    // The CLI never writes a snapshot of its own — snapshot writes are
+    // opt-in and a short-lived opener leaves them off, which binds a
+    // direct `save_snapshot` too and not just the in-band threshold
+    // writer. So the fixture asks on the terms a long-lived client
+    // opens under, and lets the next open adopt what it wrote.
     {
-        let mut ctx = outl_ws::open(ws.path()).expect("the workspace opens for writing");
+        let mut ctx = outl_ws::open_with(
+            ws.path(),
+            outl_ws::OpenOptions {
+                write_snapshots: true,
+                writes: true,
+                device_actor_only: false,
+            },
+        )
+        .expect("the workspace opens for writing");
         assert!(
             !ctx.workspace.log().is_empty(),
             "the fixture has to hold ops for a snapshot to hide any"

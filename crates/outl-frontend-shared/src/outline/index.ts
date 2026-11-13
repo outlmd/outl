@@ -15,6 +15,11 @@
 import { QUOTE_PREFIX } from "../markdown/quote";
 import type { BlockNode, InlineToken } from "../api/types";
 
+// When a section *below* the outline is allowed on screen, for work
+// that lands after the first paint. Its own file because the rule is
+// prose, not a walk.
+export { lateSectionVisible, type LateSection } from "./late-section";
+
 /**
  * Reconstruct the wire-format text of a block (TODO/DONE prefix
  * reattached). The API splits the TODO state out of `text` so the

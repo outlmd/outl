@@ -95,6 +95,12 @@ The backend is the shared `outl_tauri_shared::commands::page::delete_page` body,
 `InlineBacklinks.tsx`'s header direction button calls `setBacklinksOrder` to flip newest / oldest; `appState.backlinksOrder` hydrates at boot.
 Contract: [`clients.md` → Backlinks order](clients.md#backlinks-order-issue-142).
 
+The scan lands after the first paint, so **the section is on screen only once it has rows**.
+A first load draws nothing at all, and the section then appears once, complete, below the last block.
+A page with no references never draws anything, so there is no placeholder to take away and no reserved gap left under the page either.
+A **refetch** is the opposite case and keeps everything it has, marked `loading…` beside the count — that is the one moment the mark is owed, because the rows are up and about to change.
+`lateSectionVisible` (`@outl/shared/outline`) owns that rule, the measurement behind it and what each case costs.
+
 A backlink row carries its own `▢` / `▣` / `•` indicator ahead of the text.
 Clicking the indicator toggles the **source** block's TODO without leaving the page; clicking the text navigates.
 They are two buttons in one flex row, so the gestures cannot collide.
@@ -156,6 +162,7 @@ Convention: [`clients.md` → Blockquote convention](clients.md#blockquote-conve
 Click a neutral `•` bullet, or fire `ZoomIn` (`z i` / `Cmd/Ctrl+Shift+]`), to zoom into the selected block; `ZoomOut` (`z o` / `Cmd/Ctrl+Shift+[`) pops one level.
 
 The header becomes the focused block's own **page-like header**, Roam-style, with the block's text as the `<h1>` title.
+The title is **rendered markdown** (`<ZoomTitle />`), not the raw source: a `#tag`, a `[[ref]]` and a `[label](url)` read as they do in the row the user zoomed out of, and the ref and the tag navigate from there too.
 The eyebrow is a clickable **zoom path**: a leading page crumb (page glyph plus `<slug>` or `<title>`) exits the zoom back to the journal or page, then one crumb per ancestor re-focuses it.
 The outline body renders the focused block's **children** (`rootBlocks()` → `fv.root.children`), so the block is not duplicated as both title and first row.
 `navBlocks()` traverses the same children, so `j` / `k` stay in the body.
@@ -173,9 +180,10 @@ Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoo
 | `[[…]]` | `RefSuggestPopup` | `search_pages`, the same command the `Cmd+P` picker calls | the page title, or the ISO slug for a journal |
 | `((…))` | `BlockSuggestPopup` | `search_blocks`, from disk, debounced ~150 ms | the ref handle `((blk-XXXXXX))` |
 | `#…` (word-initial, one word) | `RefSuggestPopup` | `search_pages` — a tag *is* a page | the page **slug**, never the title: `#` has no closer, so the first space would end the tag and leave the rest as prose |
-| block-initial `/` | slash menu | `templateSlashCommands` (`lib/slash-commands.ts`) plus the shared command set | runs the row, e.g. `instantiateTemplateAt` for `template: <name>` |
+| word-initial `/` | slash menu | this client's own actions (`actionSlashCommands`, from the `Cmd+K` palette's list), plus `/upload`, the workspace's templates and every plugin command — all in `lib/slash-commands.ts` | runs the row: a native one through the dispatcher's handler, `instantiateTemplateAt` for `template: <name>`, the file picker for `upload`, else `pluginRun` |
 
-Detection and span replacement are `@outl/shared/autocomplete`'s (`detectRefContext`, `detectEmojiContext`, `applySuggestion`, `applyEmojiSuggestion`), which the TUI and mobile run too.
+Word-initial means the block's start **or** straight after whitespace, which is the TUI's rule — `nota /` opens the menu, `http://host` and `see docs/api` stay literal.
+Detection and span replacement are `@outl/shared/autocomplete`'s (`detectRefContext`, `detectEmojiContext`, `detectSlashContext`, `applySuggestion`, `applyEmojiSuggestion`, `applySlashContext`), which the TUI and mobile run too.
 When more than one trigger could fire, an open `[[`/`((` wins over `#` and `@`, and `#` wins over `@` — a tag is one word, so it is always the closer trigger when it matches.
 
 `((blk-…))` handles also **resolve** at render (issue #147, TUI parity).
