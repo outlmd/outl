@@ -22,10 +22,12 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 vi.mock("@outl/shared/api/commands", () => ({
   copyBlockMarkdown: vi.fn(),
+  copyMarkdown: vi.fn(),
   createBlock: vi.fn(),
   deleteBlock: vi.fn(),
   deletePage: vi.fn(),
   editBlock: vi.fn(),
+  indentBlock: vi.fn(),
   markBlockDone: vi.fn(),
   moveBlockAfter: vi.fn(),
   moveBlockDown: vi.fn(),
@@ -36,11 +38,14 @@ vi.mock("@outl/shared/api/commands", () => ({
   openTodayJournal: vi.fn(),
   outdentBlock: vi.fn(),
   pasteBlockAfter: vi.fn(),
+  pluginSyncHooks: vi.fn(),
   previousDay: vi.fn(),
+  runCodeBlock: vi.fn(),
   setBlockCollapsed: vi.fn(),
+  setBlockRemind: vi.fn(),
+  snoozeReminder: vi.fn(),
   todaySlug: vi.fn(),
   toggleTodo: vi.fn(),
-  pluginSyncHooks: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
