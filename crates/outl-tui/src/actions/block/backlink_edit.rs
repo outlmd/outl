@@ -165,6 +165,35 @@ impl App {
         // doesn't lag the TODO/DONE flip until a full rebuild.
         self.save_page_with(&source_path, &source_page, true);
     }
+
+    /// Cross-page "mark done", mirroring [`Self::toggle_todo_backlink`]
+    /// exactly except for landing on DONE outright instead of cycling
+    /// one step — see [`App::mark_done`] for why those are different asks.
+    pub(super) fn mark_done_backlink(&mut self, idx: usize, sub_path: &[usize]) {
+        let (source_path, abs_path) = {
+            let backlinks = self.backlinks_for_current();
+            let Some(bl) = backlinks.get(idx) else {
+                return;
+            };
+            let Some(path) = bl.source_path.clone() else {
+                return;
+            };
+            let mut full = bl.source_block_path.clone();
+            full.extend_from_slice(sub_path);
+            (path, full)
+        };
+        let Ok(text) = std::fs::read_to_string(&source_path) else {
+            self.status = format!("cannot read backlink source: {}", source_path.display());
+            return;
+        };
+        let mut source_page = parse(&text);
+        let Some(node) = node_at_path_mut(&mut source_page.blocks, &abs_path) else {
+            self.status = "backlink source block missing — index may be stale".into();
+            return;
+        };
+        node.text = super::done_todo_state(&node.text);
+        self.save_page_with(&source_path, &source_page, true);
+    }
 }
 
 #[cfg(test)]

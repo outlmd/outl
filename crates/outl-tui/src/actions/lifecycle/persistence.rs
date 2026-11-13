@@ -53,13 +53,25 @@ impl App {
     /// the index by hand and the call would just redo the same work.
     ///
     /// Whether or not the index is patched, `App.backlinks_cache` is
-    /// invalidated unconditionally because backlinks live outside
-    /// the index now.
-    pub(crate) fn save_page_with(&mut self, path: &Path, page: &ParsedPage, rebuild_index: bool) {
+    /// invalidated unconditionally because backlinks live outside the
+    /// index now.
+    ///
+    /// Returns `false` when the write or reconcile failed — the failure
+    /// is already surfaced via `self.status`. Callers that go on to
+    /// overwrite `self.status` with their own success line (e.g.
+    /// `cycle_embed_source_status`) must gate that on this, or a silent
+    /// disk error gets buried under a confident "it worked" message
+    /// that isn't true.
+    pub(crate) fn save_page_with(
+        &mut self,
+        path: &Path,
+        page: &ParsedPage,
+        rebuild_index: bool,
+    ) -> bool {
         let md = render(page);
         if let Err(e) = outl_md::write_atomic(path, md.as_bytes()) {
             self.status = format!("save (source) failed: {e}");
-            return;
+            return false;
         }
         if let Err(e) = reconcile_md(
             &mut self.workspace,
@@ -68,7 +80,7 @@ impl App {
             Some(&self.orphans_log),
         ) {
             self.status = format!("reconcile (source) failed: {e}");
-            return;
+            return false;
         }
         self.status.clear();
         if rebuild_index {
@@ -98,6 +110,7 @@ impl App {
             let hlc = self.hlc.next();
             transport.announce_local_ops(&slug, hlc);
         }
+        true
     }
 
     /// Mark the in-memory `page` as changed and repaint — **without**

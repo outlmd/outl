@@ -180,6 +180,13 @@ The rendered structure under the ` ```query ` block looks like:
 When the page is opened in the TUI or desktop, each `!((blk-…))` expands to show the original block's text and subtree.
 Because these are embeds — not copies — toggling a TODO on the original block updates the query result on the next page load.
 
+### Cycling a result's state in place (TUI)
+
+In the TUI a result row is a block whose whole text is one `!((blk-…))` embed token.
+`Ctrl+T` on such a row cycles the **source** block's task state (`none → TODO → DOING → DONE → none`) rather than prefixing the token itself — prefixing it would turn the reference into `TODO !((blk-…))` and destroy it.
+The source page is saved through the normal reconcile path (stable IDs), then the page's auto-run blocks re-run against the freshly-patched index, so the list reflects the change on the spot: a `status: todo` query drops a just-completed item without a reload.
+`Enter` on a result row is unchanged — it opens the source page and lands the cursor on the referenced block.
+
 ## Architecture
 
 | Component | Location | Role |

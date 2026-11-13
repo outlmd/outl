@@ -131,12 +131,25 @@ impl App {
     /// directly; backlink blocks route through
     /// [`Self::toggle_todo_backlink`] which loads the source page off
     /// disk.
+    ///
+    /// A query-result row is a special outline block: its whole text is a
+    /// single `!((blk-…))` embed token. Cycling it in place would prefix
+    /// the token (`TODO !((blk-…))`) and destroy the ref, so when the
+    /// selected block *is* an embed we instead cycle the **source** block's
+    /// state — the same cross-page path backlinks use.
     pub(crate) fn toggle_todo(&mut self) {
         match self.focus.clone() {
             Focus::Outline => {
                 let Some(path) = path_for_index(&self.page.blocks, self.selected) else {
                     return;
                 };
+                let embed_handle = node_at_path(&self.page.blocks, &path)
+                    .and_then(|node| crate::view::embed_only_handle(&node.text))
+                    .map(str::to_owned);
+                if let Some(handle) = embed_handle {
+                    self.cycle_embed_source_status(&handle);
+                    return;
+                }
                 self.snapshot_for_undo();
                 if let Some(node) = node_at_path_mut(&mut self.page.blocks, &path) {
                     node.text = super::cycle_todo_state(&node.text);
@@ -146,6 +159,156 @@ impl App {
             Focus::Backlink { idx, sub_path } => {
                 self.toggle_todo_backlink(idx, &sub_path);
             }
+        }
+    }
+
+    /// Cycle the task state of the *source* block behind a query-result
+    /// embed row. The row itself is one `!((blk-…))` token, so we resolve
+    /// the handle to its origin page, load that page, flip the referenced
+    /// block's prefix, and save through [`Self::save_page_with`] so
+    /// reconcile keeps IDs stable — mirroring [`Self::toggle_todo_backlink`].
+    ///
+    /// After the source page lands we re-run the current page's auto-run
+    /// blocks (the query fence) against the freshly-patched index, so the
+    /// result list reflects the new state: a `DONE` item drops off a
+    /// `status: todo` query on the spot.
+    ///
+    /// No undo snapshot — same rationale as the backlink path: undo here
+    /// shouldn't silently flip a TODO in a different file.
+    fn cycle_embed_source_status(&mut self, handle: &str) {
+        // The source block may live on the *current* page, whose in-memory
+        // AST can hold a coalesced edit not yet on disk. Flush first so the
+        // read below sees post-edit state — otherwise we'd cycle a stale
+        // snapshot and the later `persist()` in `load_current_no_autorun`
+        // would revert the flip. Same "readers flush first" rule as every
+        // other path that reads a `.md` after an edit.
+        self.flush_pending_save();
+        let (source_path, source_block_path) = match self.index.resolve_block_ref(handle) {
+            Some(entry) => (entry.source_path.clone(), entry.source_block_path.clone()),
+            None => {
+                self.status = format!("orphan ref: {handle}");
+                return;
+            }
+        };
+        let text = match outl_md::read_for_rewrite(&source_path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("cannot read source {}: {e}", source_path.display());
+                return;
+            }
+        };
+        let mut source_page = outl_md::parse::parse(&text);
+        let Some(node) = node_at_path_mut(&mut source_page.blocks, &source_block_path) else {
+            self.status = "source block missing — index may be stale".into();
+            return;
+        };
+        let new_text = super::cycle_todo_state(&node.text);
+        let (state, body) = outl_actions::todo::split_todo(&new_text);
+        let label = match state {
+            Some(outl_actions::TodoState::Todo) => "TODO",
+            Some(outl_actions::TodoState::Doing) => "DOING",
+            Some(outl_actions::TodoState::Done) => "DONE",
+            None => "unmarked",
+        };
+        let status_msg = format!("{label} · {}", body.trim());
+        node.text = new_text;
+        let saved = self.save_page_with(&source_path, &source_page, true);
+        // A same-page source leaves `self.page` on the pre-flip AST. A
+        // page with an auto-run fence reloads inside
+        // `run_auto_run_blocks`; a hand-written embed row has none, so
+        // nothing reloads and the next `persist()` renders the stale AST
+        // back over the flip. Reload from disk (which now carries it)
+        // whenever the source is the page on screen.
+        if saved && source_path == self.current_path() {
+            self.load_current_no_autorun();
+        }
+        self.run_auto_run_blocks();
+        // Surface the new state unless the save failed or the auto-run
+        // pass reported an error — each of those messages names what went
+        // wrong and must not be buried under a false "it worked" line.
+        if saved && !self.status.starts_with("auto-run skipped") {
+            self.status = status_msg;
+        }
+    }
+
+    /// Land the focused block on `DONE` outright, whatever its state was.
+    /// Dispatch mirrors [`Self::toggle_todo`] exactly — outline blocks edit
+    /// `app.page` directly, backlink blocks route through
+    /// [`Self::mark_done_backlink`], and an embed-only row resolves to its
+    /// source page rather than prefixing the token in place.
+    ///
+    /// Bound to `g D`. Unlike `Ctrl+T`, this never cycles: pressing it on a
+    /// block already `DONE` is a no-op on the content, and pressing it from
+    /// any other state (or none) lands `DONE` in one press rather than
+    /// walking `TODO → DOING → DONE`.
+    pub(crate) fn mark_done(&mut self) {
+        match self.focus.clone() {
+            Focus::Outline => {
+                let Some(path) = path_for_index(&self.page.blocks, self.selected) else {
+                    return;
+                };
+                let embed_handle = node_at_path(&self.page.blocks, &path)
+                    .and_then(|node| crate::view::embed_only_handle(&node.text))
+                    .map(str::to_owned);
+                if let Some(handle) = embed_handle {
+                    self.mark_embed_source_done(&handle);
+                    return;
+                }
+                self.snapshot_for_undo();
+                if let Some(node) = node_at_path_mut(&mut self.page.blocks, &path) {
+                    node.text = super::done_todo_state(&node.text);
+                }
+                self.save();
+            }
+            Focus::Backlink { idx, sub_path } => {
+                self.mark_done_backlink(idx, &sub_path);
+            }
+        }
+    }
+
+    /// Land the *source* block behind a query-result embed row on `DONE`.
+    /// Same cross-page save path as [`Self::cycle_embed_source_status`], and
+    /// the same reasons for every step of it (flush first so a coalesced
+    /// edit isn't read from a stale snapshot, re-run auto-run blocks so the
+    /// query result reflects the change, no undo snapshot).
+    fn mark_embed_source_done(&mut self, handle: &str) {
+        self.flush_pending_save();
+        let (source_path, source_block_path) = match self.index.resolve_block_ref(handle) {
+            Some(entry) => (entry.source_path.clone(), entry.source_block_path.clone()),
+            None => {
+                self.status = format!("orphan ref: {handle}");
+                return;
+            }
+        };
+        let text = match outl_md::read_for_rewrite(&source_path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("cannot read source {}: {e}", source_path.display());
+                return;
+            }
+        };
+        let mut source_page = outl_md::parse::parse(&text);
+        let Some(node) = node_at_path_mut(&mut source_page.blocks, &source_block_path) else {
+            self.status = "source block missing — index may be stale".into();
+            return;
+        };
+        let new_text = super::done_todo_state(&node.text);
+        let (_, body) = outl_actions::todo::split_todo(&new_text);
+        let status_msg = format!("DONE · {}", body.trim());
+        node.text = new_text;
+        let saved = self.save_page_with(&source_path, &source_page, true);
+        // Same-page reload as [`Self::cycle_embed_source_status`] — a
+        // hand-written embed row has no auto-run fence to reload the
+        // view, and `self.page` would render its pre-flip AST back.
+        if saved && source_path == self.current_path() {
+            self.load_current_no_autorun();
+        }
+        self.run_auto_run_blocks();
+        // Same save-failure masking guard as
+        // [`Self::cycle_embed_source_status`] — never bury a disk error
+        // under a confident "DONE · …".
+        if saved && !self.status.starts_with("auto-run skipped") {
+            self.status = status_msg;
         }
     }
 }
@@ -275,3 +438,5 @@ mod property_edit_tests {
         );
     }
 }
+#[cfg(test)]
+mod tests;

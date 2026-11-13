@@ -23,6 +23,7 @@ import {
   deleteBlock,
   editBlock,
   indentBlock,
+  markBlockDone,
   moveBlockDown,
   moveBlockUp,
   outdentBlock,
@@ -34,7 +35,7 @@ import {
   toggleTodo as toggleTodoCmd,
 } from "@outl/shared/api/commands";
 import type { PageView } from "@outl/shared/api/types";
-import { previousVisibleId } from "@outl/shared/outline";
+import { embedOnlyHandle, previousVisibleId } from "@outl/shared/outline";
 
 import { type HandlerCtx, lookupBlock, targetBlockId } from "./handler-context";
 import { cycleTodoInDraft, insertLink, wrapSelection } from "./markdown-wrap";
@@ -217,6 +218,50 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
       // `await` (see the outl async-writes principle). A TODO toggle is an
       // op; a `ui-render` plugin emits HTML here (e.g. confetti on DONE).
       // Blocking the toggle on the plugin JS just delayed the checkbox.
+      void safeCall(pluginSyncHooks(pageId)).then((hooked) => {
+        if (hooked?.view) deps.applyView(hooked.view);
+        for (const err of hooked?.errors ?? []) deps.setError(err);
+        if (hooked) playPluginViews(hooked.views);
+      });
+    },
+
+    // ── block mark-done (`g D`) ──────────────────────────────────
+    //
+    // Sets DONE outright rather than cycling: unlike `Cmd+T`, `g D` is a
+    // completion gesture that lands on DONE from any state (unmarked /
+    // TODO / DOING). The chord is shifted so it can't be fat-fingered
+    // instead of `g d` (delete the page) — a near-miss between "finish
+    // this task" and "delete this whole page".
+    //
+    // A query-result row (one `!((blk-…))` token) is refused, not
+    // prefixed: `markBlockDone` targets the row's own block, so
+    // forwarding it would write `DONE !((blk-…))` and destroy the
+    // reference — the trap the TUI path resolves by rewriting the
+    // *source* block. Desktop cannot do that yet: the embed wire
+    // (`ResolvedBlock`) carries text/page_slug but no source page_id or
+    // block id, so there is nothing to send `mark_block_done` for. The
+    // honest answer is a message pointing at the source until that
+    // resolution lands.
+    MarkDone: async () => {
+      const pageId = appState.page?.id;
+      if (!pageId) return;
+      const id = targetBlockId();
+      if (!id) {
+        deps.setError(
+          "Select or click a block first, then g D marks it done",
+        );
+        return;
+      }
+      const row = lookupBlock(id);
+      if (row && embedOnlyHandle(row.tokens) !== null) {
+        deps.setError(
+          "This row is a query result — open the source block and mark it done there",
+        );
+        return;
+      }
+      await runOn(markBlockDone(pageId, id));
+      // Same fire-and-forget sweep as ToggleTodo: a `ui-render` plugin
+      // (confetti on DONE) must not delay the checkbox.
       void safeCall(pluginSyncHooks(pageId)).then((hooked) => {
         if (hooked?.view) deps.applyView(hooked.view);
         for (const err of hooked?.errors ?? []) deps.setError(err);

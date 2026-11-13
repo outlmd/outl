@@ -54,6 +54,7 @@ If a row below disagrees with what you observe in the app, **the code is right a
 | Quick switcher (fuzzy pages + journals) | `Ctrl+P` | `Cmd/Ctrl+P` _(pages, then blocks, then matching actions; type `>` for actions only)_ | tap toolbar |
 | Open today's **j**ournal | `t` / `g j` (chord) | `Cmd/Ctrl+J` | toolbar |
 | Cycle task state on focused or selected block — `(none) → TODO → DOING → DONE → (none)`, one stop per press (T for **t**ask) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox |
+| Mark the focused or selected block **DONE** outright from any state, idempotent when already done (D for **d**one). TUI on a query-result embed row (`!((blk-…))`): resolves the handle and completes the *source* block; desktop refuses the row with a pointer to the source | `g D` (chord) | `g D` (Normal) | _(no chord — tap the checkbox through to DONE)_ |
 | Run code block under cursor / selected block (X for e**x**ecute). TUI: when the block isn't code, `g x` instead opens the markdown link `[text](url)` under the cursor — an asset link in the OS default app, anything else in the browser (issue #183) | `g x` chord / `:run` | `Cmd/Ctrl+Shift+X` (inside a textarea the Insert-mode strikethrough wins — commit first or use the Run button; plain `Cmd+X` is the OS cut / block cut) | tap "Run" button |
 | Previous journal day | `[` | `Cmd/Ctrl+[` | swipe right |
 | Next journal day | `]` | `Cmd/Ctrl+]` | swipe left |
@@ -68,6 +69,8 @@ If a row below disagrees with what you observe in the app, **the code is right a
 | Quit | `q q` (chord) / `Z Z` (vim alias) / `Ctrl+C` | `Cmd/Ctrl+Q` (OS) | — |
 
 > **Why `Cmd+J` and not `Cmd+T` for today's journal?** Every outliner ecosystem uses `T` for *task* / TODO — TUI's `Ctrl+T`, Logseq's `Cmd+T`, the universal Markdown checkbox shortcut. Re-training that muscle memory would be hostile. `J` for **journal** is unambiguous and lines up with the TUI's `g j` chord.
+
+> **`Ctrl+T` on a query-result row (TUI).** A [query](query.md) result is a block whose whole text is one `!((blk-…))` embed. Cycling it acts on the *source* block — never prefixing the token, which would destroy the reference — then re-runs the page's query so the list updates on the spot.
 
 **Defaults the user often asks about.**
 Both clients ship with **sidebar and backlinks panel HIDDEN** (`show_sidebar: false`, `show_backlinks: false`).

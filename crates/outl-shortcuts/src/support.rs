@@ -290,6 +290,19 @@ pub fn support(action: Action) -> ClientSupport {
         Action::DeleteBlock => row!(Full, Full, Full),
         Action::ToggleCollapsed => row!(Full, Full, Full),
         Action::ToggleTodo => row!(Full, Full, Full),
+        // `g D` marks a task DONE outright instead of cycling one
+        // step. Mobile reaches the same endpoint by tapping through
+        // `Action::ToggleTodo`'s cycle, so the row's verdict stays
+        // honest: it names what is missing (a one-tap finish), not
+        // that tasks can't be finished at all on that client.
+        Action::MarkDone => row!(
+            Full,
+            Full,
+            Missing(
+                "A one-tap finish isn't wired on mobile yet — tap the checkbox \
+                 through to DONE instead."
+            )
+        ),
         // RFC 0254 phase 4b closes issue #18 for mobile only — the
         // long-press menu's "Copy block ref" reads the same
         // `((blk-XXXXXX))` handle the TUI's `y r` copies (off the
@@ -528,7 +541,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 82, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 83, "Action::ALL changed size");
     }
 
     #[test]

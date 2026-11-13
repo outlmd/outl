@@ -57,7 +57,7 @@ mod split;
 
 pub(crate) use create::create_with_explicit_id;
 pub use create::{append_block, create_under};
-pub use edit::{edit_text, toggle_quote, toggle_todo};
+pub use edit::{edit_text, mark_done, toggle_quote, toggle_todo};
 pub use forest::{append_forest, append_tree, BlockTreeOutcome, BlockTreeSpec};
 pub(crate) use moves::move_to;
 pub use moves::{delete, indent, move_after, move_down, move_under, move_up, outdent};

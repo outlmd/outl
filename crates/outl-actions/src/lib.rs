@@ -110,9 +110,9 @@ pub use backlinks_index::{
 pub use backlinks_sort::sort_backlinks;
 pub use block::{
     append_block, append_forest, append_tree, create_after, create_after_or_append, create_before,
-    create_before_or_append, create_under, delete, edit_text, indent, move_after, move_down,
-    move_under, move_up, outdent, split_block, toggle_quote, toggle_todo, BlockTreeOutcome,
-    BlockTreeSpec,
+    create_before_or_append, create_under, delete, edit_text, indent, mark_done, move_after,
+    move_down, move_under, move_up, outdent, split_block, toggle_quote, toggle_todo,
+    BlockTreeOutcome, BlockTreeSpec,
 };
 pub use clipboard::{copy_markdown, copy_markdown_nodes};
 pub use collapsed::{set_block_collapsed, toggle_block_collapsed};
@@ -171,7 +171,9 @@ pub use template::{
     TemplateEntry, FROM_TEMPLATE_KEY, JOURNAL_TEMPLATE_NAME, PARAMS_KEY, TEMPLATE_KEY,
 };
 pub use timeline::{block_timeline, page_timeline, Change, PageTimeline, TimelineEvent};
-pub use todo::{cycle_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX};
+pub use todo::{
+    cycle_todo, set_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX,
+};
 pub use tree::{
     children_of, enclosing_page_id, is_trashed, page_slug_of, position_after,
     position_for_new_last_child, walk_subtree,

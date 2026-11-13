@@ -132,6 +132,21 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::ToggleTodo,
             "Toggle TODO / DONE (TUI alt)",
         ),
+        // Mark this task DONE outright — the "finish it" gesture,
+        // distinct from the cycle above (`Ctrl+T` walks none→TODO→DOING→DONE).
+        // Bound to the `g D` chord in the `g<action>` family (`g d` delete,
+        // `g p` properties), with `D` for *done*. Deliberately **not** a
+        // shifted-Ctrl combo: a terminal frequently cannot distinguish
+        // `Ctrl+Shift+T` from `Ctrl+T` (the #63 lesson), so that spelling
+        // would silently fire the cycle-toggle here instead of marking done.
+        // A literal second char never suffers that fold, so both clients get
+        // one reliable chord. Same handler on every client.
+        Binding::new(
+            pair_shift_second('g', 'D'),
+            Normal,
+            Action::MarkDone,
+            "Mark this task done",
+        ),
         // Run the fenced code block under the cursor / focused
         // block. Desktop: `Cmd+Shift+X`, bound **Global** so it fires
         // in view mode and in Visual — inside a textarea the

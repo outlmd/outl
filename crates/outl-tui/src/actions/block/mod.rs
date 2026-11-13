@@ -12,7 +12,7 @@
 //! | `insert`        | `enter_insert`, `commit_insert`, `abort_insert`             |
 //! | `structural`    | create / indent / outdent / delete / move block             |
 //! | `backlink_edit` | `apply_to_backlink_source`, `toggle_todo_backlink`          |
-//! | `metadata`      | property writes, `toggle_pinned`, `toggle_todo`             |
+//! | `metadata`      | property writes, `toggle_pinned`, `toggle_todo`, `mark_done` |
 //! | `mod.rs` (here) | TODO-prefix cycle helpers shared with `input::insert`       |
 
 use crate::edit_buffer::EditBuffer;
@@ -32,6 +32,18 @@ pub(crate) use insert::InsertCursor;
 /// mobile client share the exact same rule for cycling state.
 pub(crate) fn cycle_todo_state(text: &str) -> String {
     outl_actions::cycle_todo(text)
+}
+
+/// Land a block on `DONE ` outright, whatever state it was in.
+///
+/// A "finish this" gesture means *arrived*, not *one step closer* —
+/// cycling is wrong here: on a block carrying a rule but no marker
+/// (`remind:: 3pm` needs no task prefix) one cycle would arm `TODO `
+/// instead of settling the task, which is the bug [`outl_actions::set_todo`]
+/// exists to prevent. Same delegation as [`cycle_todo_state`] so the
+/// TUI and the mobile client share one rule for what DONE means.
+pub(crate) fn done_todo_state(text: &str) -> String {
+    outl_actions::set_todo(text, Some(outl_actions::TodoState::Done))
 }
 
 /// Cycle the task prefix directly on an [`EditBuffer`], preserving the
