@@ -141,9 +141,10 @@ pub enum Action {
     /// Mark the current block DONE outright, rather than stepping one
     /// state at a time like [`Action::ToggleTodo`]. Idempotent from any
     /// starting state (plain, `TODO`, or already `DONE`). On a
-    /// query-result embed row it marks the **source** block done, never
-    /// prefixing the `!((blk-…))` token. The "finish this task" gesture
-    /// distinct from the cycle.
+    /// query-result embed row (`!((blk-…))`) the TUI marks the **source**
+    /// block done, never prefixing the token; desktop refuses the row
+    /// with a pointer to the source until embed resolution lands there.
+    /// The "finish this task" gesture distinct from the cycle.
     MarkDone,
     /// Copy the current block's `((blk-…))` ref handle to clipboard.
     CopyBlockRef,

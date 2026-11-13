@@ -89,21 +89,9 @@ pub fn mark_done(
     hlc: &HlcGenerator,
     node: NodeId,
 ) -> Result<(), ActionError> {
-    ensure_live(workspace, node)?;
     let current = workspace.block_text(node).unwrap_or_default();
     let next = set_todo(&current, Some(TodoState::Done));
-    let update = workspace.build_text_replace_update(node, &next);
-    if update.is_empty() {
-        return Ok(());
-    }
-    workspace.apply(wrap(
-        hlc,
-        Op::Edit {
-            node,
-            text_op: update,
-        },
-    ))?;
-    Ok(())
+    edit_text(workspace, hlc, node, &next)
 }
 
 /// Toggle the block's blockquote marker: adds or removes the

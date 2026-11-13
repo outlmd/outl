@@ -54,7 +54,7 @@ If a row below disagrees with what you observe in the app, **the code is right a
 | Quick switcher (fuzzy pages + journals) | `Ctrl+P` | `Cmd/Ctrl+P` _(pages, then blocks, then matching actions; type `>` for actions only)_ | tap toolbar |
 | Open today's **j**ournal | `t` / `g j` (chord) | `Cmd/Ctrl+J` | toolbar |
 | Cycle task state on focused or selected block — `(none) → TODO → DOING → DONE → (none)`, one stop per press (T for **t**ask) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox |
-| Mark the focused or selected block **DONE** outright from any state, idempotent when already done (D for **d**one). On a query-result embed row (`!((blk-…))`) it resolves the handle and completes the *source* block | `g D` (chord) | `g D` (Normal) | _(no chord — tap the checkbox through to DONE)_ |
+| Mark the focused or selected block **DONE** outright from any state, idempotent when already done (D for **d**one). TUI on a query-result embed row (`!((blk-…))`): resolves the handle and completes the *source* block; desktop refuses the row with a pointer to the source | `g D` (chord) | `g D` (Normal) | _(no chord — tap the checkbox through to DONE)_ |
 | Run code block under cursor / selected block (X for e**x**ecute). TUI: when the block isn't code, `g x` instead opens the markdown link `[text](url)` under the cursor — an asset link in the OS default app, anything else in the browser (issue #183) | `g x` chord / `:run` | `Cmd/Ctrl+Shift+X` (inside a textarea the Insert-mode strikethrough wins — commit first or use the Run button; plain `Cmd+X` is the OS cut / block cut) | tap "Run" button |
 | Previous journal day | `[` | `Cmd/Ctrl+[` | swipe right |
 | Next journal day | `]` | `Cmd/Ctrl+]` | swipe left |
