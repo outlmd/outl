@@ -233,6 +233,13 @@ The rule is two cases, and conflating them is what broke:
 It takes **no threshold argument**: the workspace already holds its policy (`set_snapshot_policy`), and a caller passing a second copy is a second owner of one number.
 Regression net: `tests/snapshot_refresh_on_adoption.rs`, which pins both directions (an adopted snapshot with a big delta is refreshed; one with a small delta is left alone, so the fix cannot become "write on every boot").
 
+**A test that wants an adopted snapshot has to shape the peer's clock, and a fresh `HlcGenerator` is not that shape.**
+It restarts the logical counter at 0, so when our own ops all landed in one millisecond — the counter climbing 0, 1, 2, … instead of resetting per op — the peer's first op sorts *below* the body and the convergence guard refuses, correctly.
+Whether that happened was decided by `save_snapshot`'s fsync: macOS pays `F_FULLFSYNC` (~4ms) and gives every op its own millisecond, Linux does not.
+So the headline test passed on a laptop and failed on every CI run, on a clock detail unrelated to what it tests.
+`peer_clock_after` seeds the peer from our newest op, which is what a real peer's clock is (it received our ops before writing its own).
+`an_adopted_snapshot_survives_a_packed_millisecond` runs the CI shape with explicit HLCs so a regression fails everywhere, and `a_delta_that_sorts_below_the_body_is_not_adopted` / `a_delta_above_the_body_is_adopted` pin the guard itself — so the next flake here is fixed in the setup and never by relaxing the guard.
+
 #### The adopt slot is won on coverage, not on being ours
 
 `read_best_from_disk` used to return this device's own snapshot the moment it decoded ("it has the tightest cutoff for its local ops").

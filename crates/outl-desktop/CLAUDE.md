@@ -166,6 +166,25 @@ What the condition means and why it has to reach the user: [`docs/clients.md` �
 `appState.mdAheadOfLog` is sticky per page (`stickyAheadOfLog`), because only the open commands carry the flag — a mutation reply would otherwise clear the banner on the user's first edit, the very action it warns against.
 Sticky stops at `PageView.md_ahead_of_log_checked`: a reply that ran the check is authoritative both ways, so the next open after a reconcile clears the banner instead of leaving a healthy page marked broken.
 
+## Which day it is
+
+`<AppShell />` wires `createDayClock` (`@outl/shared/journal`) into `appState.todaySlug`, and **every surface that names a day reads that field**: `<PageTitle />`, the sidebar calendar's today ring, `<TasksPanel />`'s journal headings.
+
+It exists because the desktop held two frozen copies of the day instead.
+`<PageTitle />` had a `createResource` keyed on the page slug, so it re-asked on navigation and never otherwise; the sidebar calendar had a `new Date()` in a component body, read once at mount **and** on the browser clock rather than the configured `[calendar] timezone`.
+A window left open overnight therefore called yesterday "Today" in the header, in the accent colour, over the page the user was about to write into, and ringed yesterday on the calendar.
+
+Three rules a contributor will trip on:
+
+- **The day comes from the backend, the schedule comes from the browser.**
+  `today_slug` resolves in `outl_actions::clock`'s timezone; `nextDayCheckDelay` only decides *when to ask*, and is capped at an hour precisely because that schedule can be wrong.
+  A `new Date()` used as the answer is the bug, not a shortcut.
+- **Midnight relabels; it does not navigate.**
+  The user may be looking at the window. Returning to today happens on the way *back* in (`focus` / `visibilitychange`), under `shouldWakeToToday` — the same rule the phone uses, so the two clients cannot disagree about when a session counts as "opening the app".
+- **The clock is created in the component body**, not in `AppShell`'s `async onMount`: it registers an `onCleanup`, and the owner is gone once that body awaits.
+
+Net: `PageTitle.test.tsx` → "stops calling it Today once the day rolls over under an untouched window", plus `day-clock.test.ts` in `@outl/shared`.
+
 ## Theme tokens
 
 `applyPaletteToRoot` (`@outl/shared/theme`) writes only the canonical `--color-outl-*` namespace, and `src/styles.css`'s `@theme` block declares only that one.

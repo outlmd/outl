@@ -293,12 +293,25 @@ export interface AppStateShape {
    * an Op.
    */
   dropTargetBlockId: string | null;
+  /**
+   * Today's journal slug, from the backend's `today_slug` (configured
+   * timezone, never the browser clock). `null` until it answers.
+   *
+   * One owner, because a window left open overnight used to carry two
+   * stale copies of this fact: the header's own `createResource` keyed
+   * on the page slug, which only re-ran on navigation, and the sidebar
+   * calendar's `new Date()`, frozen at mount *and* on the wrong clock.
+   * `<AppShell />` wires `createDayClock` (`@outl/shared/journal`) to
+   * this field; nothing else writes it.
+   */
+  todaySlug: string | null;
   /** Last error surfaced to the user (status line). */
   lastError: string | null;
 }
 
 const [state, setState] = createStore<AppStateShape>({
   workspace: null,
+  todaySlug: null,
   page: null,
   outline: [],
   backlinks: [],

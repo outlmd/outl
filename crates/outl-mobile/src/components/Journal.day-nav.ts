@@ -14,9 +14,9 @@
 import { createSignal, onCleanup } from "solid-js";
 import type { PageView } from "@outl/shared/api/types";
 import { nextDay, openJournalFor, openTodayJournal, previousDay, todaySlug } from "@outl/shared/api/commands";
+import { shouldWakeToToday } from "@outl/shared/journal";
 
 import { haptic } from "../lib/haptics";
-import { shouldWakeToToday } from "../lib/wake-to-today";
 
 export interface DayNavDeps {
   view: () => PageView | null;

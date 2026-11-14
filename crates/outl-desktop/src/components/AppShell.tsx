@@ -7,9 +7,11 @@ import {
   openTodayJournal,
   pageBacklinks,
   reloadWorkspace,
+  todaySlug,
 } from "@outl/shared/api/commands";
 import type { PageView } from "@outl/shared/api/types";
 import { installForegroundRefresh } from "@outl/shared/capture";
+import { createDayClock } from "@outl/shared/journal";
 import { flattenAll } from "@outl/shared/outline";
 import { CrashReportsNotice } from "@outl/shared/polish";
 
@@ -266,6 +268,33 @@ export function AppShell() {
   // F6 cycles sidebar / outline / chrome, Esc returns to the outline.
   onMount(() => onCleanup(installRegionKeys()));
   followSelection(() => appState.selectedBlockId);
+
+  /**
+   * Which day it is, for a window that is open for days.
+   *
+   * It feeds `appState.todaySlug`, which the header and the sidebar
+   * calendar read — both used to answer from their own frozen copy, so
+   * a window left open overnight called yesterday "Today" and ringed
+   * yesterday on the calendar.
+   *
+   * The `wake` half is the same rule the phone uses: come back to a
+   * window that sat on another day and it opens today, but never on the
+   * midnight tick itself (the user may be looking at the page) and
+   * never while they are in a block.
+   *
+   * Created in the component body, not in `onMount`: it registers an
+   * `onCleanup`, and that one is `async`, so the owner is gone by the
+   * time the body resumes.
+   */
+  const dayClock = createDayClock({
+    resolve: todaySlug,
+    wake: {
+      currentSlug: () => appState.page?.slug ?? null,
+      editing: () => appState.editingBlockId !== null,
+      jumpToday: () => void loadToday(),
+    },
+  });
+  createEffect(() => setAppState("todaySlug", dayClock.today()));
 
   onMount(async () => {
     // Subscribe BEFORE draining. `take_pending_open_file` is what tells
