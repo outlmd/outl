@@ -80,6 +80,10 @@ targets:
       path: outl-mobile_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        # Export compliance. Mirrors the committed Info.plist. True because
+        # sync ships its own standard crypto (iroh/QUIC over rustls + ring,
+        # ed25519 device identity), not only the Apple OS's.
+        ITSAppUsesNonExemptEncryption: true
         # Camera access string for the QR pairing scanner
         # (tauri-plugin-barcode-scanner). Required or iOS hard-crashes
         # the first time `scan()` requests the camera.

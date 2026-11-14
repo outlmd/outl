@@ -17,6 +17,8 @@ The user-facing background-sync behaviour is [sync.md → Background sync on iOS
 - Display name (Files.app / iCloud Drive): `outl`
 - Category: `public.app-category.productivity`
 - Entitlements: `com.apple.developer.icloud-services` + `icloud-container-identifiers` + `ubiquity-container-identifiers`
+- Export compliance: the main app's `Info.plist` (`crates/outl-mobile/src-tauri/gen/apple/outl-mobile_iOS/Info.plist`) sets `ITSAppUsesNonExemptEncryption` to `true`, because sync uses rustls/ring and an ed25519 node identity rather than only Apple OS crypto.
+  `ITSEncryptionExportComplianceCode` is added only if App Store Connect later issues a documentation key.
 
 Bundle ID + iCloud container are **global** in the Apple Developer ecosystem.
 If you change either, also update:
