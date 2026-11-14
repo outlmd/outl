@@ -7,6 +7,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **TestFlight uploads stopped being refused over export compliance.**
+  The app declared `ITSAppUsesNonExemptEncryption = true`, which is not "this app uses encryption" — it is "Apple has approved encryption documentation for this app, and its code is in `ITSEncryptionExportComplianceCode`".
+  outl has no approved documentation and therefore no code, so every upload came back as `Invalid Export Compliance Code ... key value []`, where the empty value is the missing **code**, not the missing flag.
+  The key is now absent, which is the state that is actually true: App Store Connect asks the export questions per build.
+  `testflight.yml` reads the pair out of the IPA before uploading and fails on the one incoherent combination, so a mismatch costs seconds instead of a 70MB transfer and a refusal that `altool` reports with `exit 0`.
+  Which export exception outl's iroh/QUIC over rustls + ring falls under is a regulatory question, so neither the project file nor the docs answers it; [`docs/ios-platform.md`](docs/ios-platform.md) carries the three states and how to leave this one.
+
+
+### Fixed
+
 - **A desktop window left open overnight no longer calls yesterday "Today".**
   At 08:29 on the 14th, a window opened on the 13th still read `Today · November 13, 2026` in the header, in the accent colour, over the page the user was about to write into — and the sidebar calendar still ringed the 13th.
   Nothing was stale in the "needs a refetch" sense: the app was asserting a falsehood about the day, on the one surface where believing it means writing into the wrong journal.

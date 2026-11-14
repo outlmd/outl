@@ -17,8 +17,7 @@ The user-facing background-sync behaviour is [sync.md → Background sync on iOS
 - Display name (Files.app / iCloud Drive): `outl`
 - Category: `public.app-category.productivity`
 - Entitlements: `com.apple.developer.icloud-services` + `icloud-container-identifiers` + `ubiquity-container-identifiers`
-- Export compliance: the main app's `Info.plist` (`crates/outl-mobile/src-tauri/gen/apple/outl-mobile_iOS/Info.plist`) sets `ITSAppUsesNonExemptEncryption` to `true`, because sync uses rustls/ring and an ed25519 node identity rather than only Apple OS crypto.
-  `ITSEncryptionExportComplianceCode` is added only if App Store Connect later issues a documentation key.
+- Export compliance: **not declared**, deliberately. See below.
 
 Bundle ID + iCloud container are **global** in the Apple Developer ecosystem.
 If you change either, also update:
@@ -30,6 +29,43 @@ If you change either, also update:
 5. `gen/apple/project.yml` → `bundleIdPrefix` and `PRODUCT_BUNDLE_IDENTIFIER`
 
 There is no sixth entry in Rust: `lib.rs` holds no `ICLOUD_CONTAINER_ID`, because the Rust-side iCloud path was removed.
+
+### Export compliance: the flag is about the paperwork, not about the code
+
+`ITSAppUsesNonExemptEncryption` has three states, and only one of them reads as "do you use encryption":
+
+| state | meaning | upload |
+|---|---|---|
+| `true` | Apple has **approved encryption documentation** for this app, and its code is in `ITSEncryptionExportComplianceCode` | refused without that code |
+| `false` | the encryption is exempt | accepted |
+| absent | no claim; App Store Connect asks the export questions **per build** | accepted |
+
+outl declares nothing, which is the honest state: there is no approved documentation, so there is no code to carry.
+The cost is one answer per build in App Store Connect, and it is the only state that is true today.
+
+**This was `true` for one build and every upload was refused**, with:
+
+```
+Invalid Export Compliance Code. The export compliance key value []
+in the app's Info.plist doesn't match the key value of the app's
+export compliance documentation.
+```
+
+The empty `[]` is the missing **code**, not the missing flag — the flag was present and correct-looking.
+Reading it as "the app does not declare encryption" sends you to re-add a key that is already there, which is the wrong half of the pair.
+
+Two things make this expensive to discover, and both are now handled:
+
+- **`altool` exits 0 while refusing.** The upload step greps its log for `ERROR:` for exactly that reason; without that grep the job goes green and nothing reaches TestFlight.
+- **The answer arrives after the upload.** A 70MB transfer, then the refusal. `testflight.yml`'s *Check export compliance keys* step reads the pair out of the IPA's `Info.plist` first and fails on the one incoherent combination (`true` with no code), so the loop is seconds instead of twenty minutes.
+
+To leave the undeclared state, set it in **both** `gen/apple/project.yml` and `gen/apple/outl-mobile_iOS/Info.plist` — the Info.plist is committed, so the two must agree:
+
+- **exempt** → `ITSAppUsesNonExemptEncryption: false`
+- **documented** → `ITSAppUsesNonExemptEncryption: true` plus `ITSEncryptionExportComplianceCode: <code from App Store Connect>`
+
+What outl ships is iroh/QUIC over rustls + ring, with an ed25519 device identity.
+Which export exception that falls under is a regulatory question rather than a code one, which is why neither the project file nor this page answers it.
 
 ---
 

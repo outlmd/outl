@@ -80,10 +80,33 @@ targets:
       path: outl-mobile_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
-        # Export compliance. Mirrors the committed Info.plist. True because
-        # sync ships its own standard crypto (iroh/QUIC over rustls + ring,
-        # ed25519 device identity), not only the Apple OS's.
-        ITSAppUsesNonExemptEncryption: true
+        # Export compliance is DELIBERATELY NOT DECLARED here. The key has
+        # three states and only one of them is "I use encryption":
+        #
+        #   true    -> Apple has APPROVED encryption documentation for this
+        #              app, and its code is in ITSEncryptionExportComplianceCode.
+        #              The flag is a claim about the paperwork, not about the
+        #              code, which is what made `true` the wrong answer here.
+        #   false   -> the encryption is exempt.
+        #   absent  -> no claim; App Store Connect asks the export questions
+        #              per build.
+        #
+        # We shipped `true` without the code (it is issued only on approved
+        # documentation, and outl has none), so every upload was refused with
+        # `Invalid Export Compliance Code ... key value []` — the empty value
+        # being the missing code, not the missing flag. Absent is the honest
+        # state while that is true, and it costs one answer per build in App
+        # Store Connect.
+        #
+        # To leave this state, pick one and set it in BOTH this file and
+        # outl-mobile_iOS/Info.plist, since the Info.plist is committed:
+        #   - exempt      -> ITSAppUsesNonExemptEncryption: false
+        #   - documented  -> ITSAppUsesNonExemptEncryption: true
+        #                    ITSEncryptionExportComplianceCode: <code from ASC>
+        # What outl actually ships is iroh/QUIC over rustls + ring plus an
+        # ed25519 device identity. Which exception that falls under is a
+        # regulatory call, not a code one, which is why this file does not
+        # make it.
         # Camera access string for the QR pairing scanner
         # (tauri-plugin-barcode-scanner). Required or iOS hard-crashes
         # the first time `scan()` requests the camera.

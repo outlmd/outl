@@ -166,6 +166,45 @@ jobs:
           echo "path=$IPA" >> "$GITHUB_OUTPUT"
           ls -lh "$IPA"
 
+      # The export compliance pair, checked here because altool answers
+      # it at the END of a 70MB upload — and answers `exit 0` while it
+      # does (the guard on the upload step is what catches that).
+      #
+      # `ITSAppUsesNonExemptEncryption = true` is a claim that Apple has
+      # APPROVED encryption documentation for this app, and the approval
+      # code belongs in `ITSEncryptionExportComplianceCode`. We shipped
+      # the flag without the code, so every upload was refused with
+      # `Invalid Export Compliance Code ... key value []`, where the
+      # empty value is the missing code.
+      #
+      # So the only incoherent state is true-without-a-code. `false` and
+      # an absent key are both fine: absent means App Store Connect asks
+      # the questions per build, which is where outl sits today.
+      - name: Check export compliance keys
+        shell: bash
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
+        run: |
+          set -euo pipefail
+          WORK=$(mktemp -d)
+          unzip -q -o "$IPA_PATH" 'Payload/*.app/Info.plist' -d "$WORK"
+          PLIST=$(find "$WORK/Payload" -maxdepth 2 -name Info.plist | head -1)
+          if [[ -z "$PLIST" ]]; then
+            echo "::error::no app Info.plist inside $IPA_PATH"
+            exit 1
+          fi
+          read_key() {
+            /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST" 2>/dev/null || true
+          }
+          NON_EXEMPT=$(read_key ITSAppUsesNonExemptEncryption)
+          CODE=$(read_key ITSEncryptionExportComplianceCode)
+          echo "ITSAppUsesNonExemptEncryption=${NON_EXEMPT:-<absent>}"
+          echo "ITSEncryptionExportComplianceCode=${CODE:+<set>}${CODE:-<absent>}"
+          if [[ "$NON_EXEMPT" == "true" && -z "$CODE" ]]; then
+            echo "::error::ITSAppUsesNonExemptEncryption is true but ITSEncryptionExportComplianceCode is missing. That pair is what App Store Connect refuses as 'Invalid Export Compliance Code'. Either add the approved code from App Store Connect, or drop the flag (and answer the export questions per build). Both halves live in crates/outl-mobile/src-tauri/gen/apple/project.yml and outl-mobile_iOS/Info.plist."
+            exit 1
+          fi
+
       # `altool --upload-app` is the documented App Store Connect
       # ingestion path. It ships inside Xcode so we need an Xcode
       # install on the runner (any version works for upload; this
