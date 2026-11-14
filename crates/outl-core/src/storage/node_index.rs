@@ -27,7 +27,7 @@ use crate::storage::sidecar;
 use crate::storage::StorageError;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-struct NodeEntry {
+pub(crate) struct NodeEntry {
     node: NodeId,
     ts: Hlc,
     offset: u64,

@@ -108,14 +108,7 @@ fn a_holed_sidecar_is_rebuilt_from_the_jsonl() {
     writer.append_ops(&batch(&g, 6)).unwrap();
     drop(writer);
 
-    let text = std::fs::read_to_string(&idx_path).unwrap();
-    let kept: Vec<&str> = text
-        .lines()
-        .enumerate()
-        .filter(|(i, _)| *i != 2 && *i != 3)
-        .map(|(_, l)| l)
-        .collect();
-    std::fs::write(&idx_path, kept.join("\n") + "\n").unwrap();
+    sidecar::drop_records(&idx_path, SidecarKind::Offset, &[2, 3]);
 
     assert_eq!(
         census_count(&dir, actor),

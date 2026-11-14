@@ -338,14 +338,7 @@ fn own_log_with_holed_sidecar(root: &Path, local: ActorId, n: usize) -> Vec<LogO
     drop(storage);
 
     let idx = sidecar::path_for(&ops_dir, local, &PageScope::Global, SidecarKind::Offset);
-    let text = std::fs::read_to_string(&idx).expect("read sidecar");
-    let kept: Vec<&str> = text
-        .lines()
-        .enumerate()
-        .filter(|(i, _)| *i != 2 && *i != 3)
-        .map(|(_, l)| l)
-        .collect();
-    std::fs::write(&idx, kept.join("\n") + "\n").expect("write holed sidecar");
+    sidecar::drop_records(&idx, SidecarKind::Offset, &[2, 3]);
     ops
 }
 

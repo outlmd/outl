@@ -326,6 +326,34 @@ pub(crate) trait Record: Sized {
 /// Header every binary sidecar starts with. The trailing digit is the
 /// format version: bump it and every existing sidecar reads as absent
 /// and is rebuilt, which is the whole migration.
+/// Drop the records at `indices` from a sidecar, leaving a HOLE in it.
+///
+/// A deliberately damaged sidecar is a fixture several suites need, inside
+/// this crate and outside it, and where a record starts is this module's
+/// fact. A JSON Lines sidecar let a test do this with `lines()`; a
+/// fixed-width binary one has no lines, so the alternative is every caller
+/// re-deriving the record width and the magic.
+///
+/// The survivors keep their original order, so the file still passes
+/// `load_entries`'s ordering check. That is the point: a hole shaped
+/// this way is the one corruption that check cannot see, which is why the
+/// freshness ladder trusts the file and advertises a short count.
+pub fn drop_records(path: &Path, kind: SidecarKind, indices: &[usize]) {
+    let width = match kind {
+        SidecarKind::Offset => <crate::storage::index::IndexEntry as Record>::WIDTH,
+        SidecarKind::Node => <crate::storage::node_index::NodeEntry as Record>::WIDTH,
+    };
+    let bytes = std::fs::read(path).expect("read sidecar");
+    let (magic, body) = bytes.split_at(MAGIC.len());
+    let mut out = magic.to_vec();
+    for (i, record) in body.chunks_exact(width).enumerate() {
+        if !indices.contains(&i) {
+            out.extend_from_slice(record);
+        }
+    }
+    std::fs::write(path, out).expect("write holed sidecar");
+}
+
 pub(crate) const MAGIC: &[u8; 8] = b"outlidx1";
 
 /// Records decoded per read. Keeps the peak off a 98 MB sidecar while

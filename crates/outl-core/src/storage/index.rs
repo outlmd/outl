@@ -45,7 +45,7 @@ use crate::storage::StorageError;
 /// One indexed entry: the HLC of an op + its byte offset inside the
 /// `.jsonl` for that op's actor.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-struct IndexEntry {
+pub(crate) struct IndexEntry {
     ts: Hlc,
     offset: u64,
 }
