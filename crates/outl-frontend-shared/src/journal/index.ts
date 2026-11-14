@@ -12,6 +12,21 @@
  * the `±1` themselves.
  */
 
+// `day-clock.ts` is re-exported rather than inlined: it is the one
+// stateful piece of this area (a Solid signal, a timer, window
+// listeners), and it hit this file's size ratchet. One import path
+// stays `@outl/shared/journal`.
+export {
+  createDayClock,
+  MAX_DAY_CHECK_MS,
+  nextDayCheckDelay,
+  shouldWakeToToday,
+  WAKE_AFTER_MS,
+  type DayClock,
+  type DayClockDeps,
+  type DayClockWake,
+} from "./day-clock";
+
 /** Parsed journal slug. `monthIndex` is 0-based (JS `Date` convention). */
 export interface JournalDateParts {
   year: number;

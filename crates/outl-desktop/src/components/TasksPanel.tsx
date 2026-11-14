@@ -20,7 +20,7 @@
 
 import { For, Show, createMemo, createResource } from "solid-js";
 
-import { openPageBySlug, todaySlug } from "@outl/shared/api/commands";
+import { openPageBySlug } from "@outl/shared/api/commands";
 import { listOpenTasks, type OpenTasks, type TaskHit } from "@outl/shared/api/overview";
 import type { PageView } from "@outl/shared/api/types";
 import { journalHeading } from "@outl/shared/journal";
@@ -49,13 +49,14 @@ export function TasksPanel(props: TasksPanelDeps) {
       return { total: 0, tasks: [] } as OpenTasks;
     }
   });
-  // Journal headings are relative ("Yesterday"), so they need today.
-  const [today] = createResource(open, () => todaySlug().catch(() => null));
 
   const groups = createMemo(() => groupTasksByPage(data()?.tasks ?? []));
 
   const label = (slug: string) => {
-    const h = journalHeading(slug, today() ?? null);
+    // Journal headings are relative ("Yesterday"), so they need today.
+    // From the shell's day clock, so a panel reopened after midnight
+    // cannot label a row differently from the page header behind it.
+    const h = journalHeading(slug, appState.todaySlug);
     return h ? `${h.title}, ${h.date}` : slug;
   };
 

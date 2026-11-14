@@ -1,9 +1,9 @@
-import { Show, createResource } from "solid-js";
-
-import { todaySlug } from "@outl/shared/api/commands";
+import { Show } from "solid-js";
 
 import type { PageMeta } from "@outl/shared/api/types";
 import { journalHeading } from "@outl/shared/journal";
+
+import { appState } from "../lib/store";
 
 /**
  * The words inside the page header's `<h1>`. A journal reads as a day
@@ -11,13 +11,20 @@ import { journalHeading } from "@outl/shared/journal";
  * ISO slug is the file name and lives in the eyebrow instead. A page
  * shows its title. Today takes the accent, the one place the header
  * uses it.
+ *
+ * The day anchor is `appState.todaySlug`, written by `<AppShell />`'s
+ * day clock. It used to be a `createResource` keyed on the page slug,
+ * which re-asked on navigation and never otherwise — so a window left
+ * open past midnight kept calling yesterday "Today" until the user
+ * navigated somewhere. Never re-derive the day from `new Date()` here:
+ * the slug is resolved in the configured `[calendar] timezone`, which
+ * the browser clock does not know about.
  */
 export function PageTitle(props: { page: PageMeta }) {
-  // The configured-timezone day, refetched per page so a session that
-  // crosses midnight relabels on the next navigation.
-  const [today] = createResource(() => props.page.slug, () => todaySlug());
   const heading = () =>
-    props.page.kind === "journal" ? journalHeading(props.page.slug, today() ?? null) : null;
+    props.page.kind === "journal"
+      ? journalHeading(props.page.slug, appState.todaySlug)
+      : null;
   return (
     <Show when={heading()} fallback={props.page.title || props.page.slug}>
       {(h) => (

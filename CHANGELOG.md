@@ -5,6 +5,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Fixed
+
+- **A desktop window left open overnight no longer calls yesterday "Today".**
+  At 08:29 on the 14th, a window opened on the 13th still read `Today · November 13, 2026` in the header, in the accent colour, over the page the user was about to write into — and the sidebar calendar still ringed the 13th.
+  Nothing was stale in the "needs a refetch" sense: the app was asserting a falsehood about the day, on the one surface where believing it means writing into the wrong journal.
+  Two frozen copies of one fact caused it. The header resolved the day in a `createResource` **keyed on the page slug**, so it re-asked on navigation and never otherwise; the sidebar calendar called `new Date()` in a component body, read once at mount **and** on the browser clock rather than the configured `[calendar] timezone`, so that one could be wrong at any hour of any day.
+  `createDayClock` (`@outl/shared/journal`) is the single owner now, and the header, the calendar ring and the task list's journal headings all read it.
+  **The value is still the backend's `today_slug`; the browser clock only decides when to ask**, and because a configured timezone puts midnight somewhere the browser cannot predict, that delay is capped at an hour.
+  **Midnight relabels, it does not navigate** — the user may be looking at the window.
+  Returning to today happens on the way back in (`focus` / `visibilitychange`), under the same `shouldWakeToToday` rule the phone already used, which is now shared rather than mobile-only: never mid-edit, never when today is already on screen.
+
 ### Changed
 
 - **A first sync no longer has to fit in one frame, and no longer has to fit in a phone.**

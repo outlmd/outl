@@ -1,7 +1,7 @@
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openPageBySlug, todaySlug } from "@outl/shared/api/commands";
+import { openPageBySlug } from "@outl/shared/api/commands";
 import { listOpenTasks, type TaskHit } from "@outl/shared/api/overview";
 import type { PageView } from "@outl/shared/api/types";
 
@@ -10,7 +10,6 @@ import { appState, setAppState } from "../lib/store";
 
 vi.mock("@outl/shared/api/commands", () => ({
   openPageBySlug: vi.fn(),
-  todaySlug: vi.fn(),
 }));
 vi.mock("@outl/shared/api/overview", () => ({
   listOpenTasks: vi.fn(),
@@ -34,7 +33,8 @@ function view(slug: string): PageView {
 async function mount(tasks: TaskHit[], applyView = vi.fn()) {
   // Fresh objects per call, like the real command, so a refetch really replaces the rows.
   vi.mocked(listOpenTasks).mockImplementation(async () => ({ total: tasks.length, tasks: [...tasks] }));
-  vi.mocked(todaySlug).mockResolvedValue("2026-10-23");
+  // The shell's day clock owns this; the panel only reads it.
+  setAppState("todaySlug", "2026-10-23");
   const host = document.createElement("div");
   document.body.appendChild(host);
   dispose = render(() => <TasksPanel applyView={applyView} setError={vi.fn()} />, host);
@@ -133,7 +133,7 @@ describe("TasksPanel", () => {
     vi.mocked(openPageBySlug).mockRejectedValue(new Error("page not found"));
     const setError = vi.fn();
     vi.mocked(listOpenTasks).mockResolvedValue({ total: 1, tasks: [task("c", "gone", "orphan")] });
-    vi.mocked(todaySlug).mockResolvedValue("2026-10-23");
+    setAppState("todaySlug", "2026-10-23");
     const host = document.createElement("div");
     document.body.appendChild(host);
     dispose = render(() => <TasksPanel applyView={vi.fn()} setError={setError} />, host);

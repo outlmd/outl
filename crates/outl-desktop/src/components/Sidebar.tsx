@@ -299,12 +299,14 @@ export function Sidebar(props: {
       weekStart() === "sunday"
         ? [...DAY_LABELS_MONDAY_FIRST.slice(6), ...DAY_LABELS_MONDAY_FIRST.slice(0, 6)]
         : [...DAY_LABELS_MONDAY_FIRST];
-    const today = new Date();
-    const todaySlug = formatJournalSlug(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate(),
-    );
+    /** Today, from the day clock in `<AppShell />`.
+     *
+     *  Two bugs in the three lines this replaced: `new Date()` in a
+     *  component body is read once and never again, so a window open
+     *  past midnight kept the ring on yesterday; and the browser clock
+     *  is not the configured `[calendar] timezone`, so a user who set
+     *  one could see the ring on the wrong day at any hour. */
+    const todaySlug = () => appState.todaySlug;
 
     function stepMonth(delta: number) {
       const cur = month();
@@ -368,7 +370,7 @@ export function Sidebar(props: {
             {(cell) => {
               if (!cell) return <div class="h-6" aria-hidden="true" />;
               const hasJournal = () => journalSlugSet().has(cell.slug);
-              const isToday = () => cell.slug === todaySlug;
+              const isToday = () => cell.slug === todaySlug();
               const isViewing = () =>
                 appState.page?.kind === "journal" &&
                 appState.page.slug === cell.slug;
