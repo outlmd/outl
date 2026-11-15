@@ -27,7 +27,9 @@ fn workspace_with_a_big_page() -> TempDir {
     let text = "x".repeat(120_000);
     for args in [
         vec!["page", "create", "big", "--json"],
-        vec!["block", "append", "--page", "big", "--text", &text, "--json"],
+        vec![
+            "block", "append", "--page", "big", "--text", &text, "--json",
+        ],
     ] {
         let out = outl()
             .arg("--workspace")
