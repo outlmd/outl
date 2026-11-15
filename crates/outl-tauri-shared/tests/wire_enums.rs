@@ -245,7 +245,7 @@ fn rename_page_reply_matches_its_union() {
         skipped_namespace_refs: 1,
     };
     let variants = wire_variants!(R;
-        R::Renamed { .. } => R::Renamed { view: wire_fixtures::page_view(), report: report() },
+        R::Renamed { .. } => R::Renamed { view: Box::new(wire_fixtures::page_view()), report: report() },
         R::Exists { .. } => R::Exists { existing: wire_fixtures::page_meta() },
     );
     assert_tagged_enum(&variants, "RenamePageReply", "status");

@@ -107,8 +107,9 @@ pub struct RenamePageReport {
 pub enum RenamePageReply {
     /// The page now lives under the new name.
     Renamed {
-        /// The renamed page, refreshed.
-        view: PageView,
+        /// The renamed page, refreshed. Boxed so the `Exists` reply does
+        /// not pay for a whole `PageView` (`clippy::large_enum_variant`).
+        view: Box<PageView>,
         report: RenamePageReport,
     },
     /// Another page already owns the new name. **Nothing was written.**
@@ -372,7 +373,7 @@ fn rename_locked(
     let mut announce = report.touched_pages.clone();
     announce.push(report.old_slug.clone());
     let reply = RenamePageReply::Renamed {
-        view,
+        view: Box::new(view),
         report: RenamePageReport::from(&report),
     };
     Ok((reply, projected.touched_ids, announce))
