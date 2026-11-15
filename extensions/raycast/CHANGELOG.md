@@ -6,3 +6,4 @@
 - Search — search blocks and pages, open the result in the outl app
 - Open Today — jump to today's journal in the outl app
 - New Page — create a page and open it in the outl app
+- Merge Pages: fold one page into another (blocks move, references are rewritten, the source is trashed) after a confirmation

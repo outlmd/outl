@@ -46,6 +46,13 @@
       "subtitle": "outl",
       "description": "Create a new page and open it in the outl app.",
       "mode": "view"
+    },
+    {
+      "name": "merge-pages",
+      "title": "Merge Pages",
+      "subtitle": "outl",
+      "description": "Merge one page into another: blocks move, references are rewritten, and the source is trashed.",
+      "mode": "view"
     }
   ],
   "preferences": [

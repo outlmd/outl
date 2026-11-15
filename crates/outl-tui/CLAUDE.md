@@ -104,7 +104,7 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   A one-shot enum (mutually exclusive with `pending_chord`) consumed by the next `Char(c)` keystroke.
   Any other keystroke cancels.
 - **`*` / `#` reuse the workspace search.** `search_word_under_cursor` extracts the word the cursor sits on (whitespace-bounded), opens the `/` overlay machinery, accepts the first hit, persists the rest into `last_search` so `n` / `N` walk them.
-- **Sidebar intercept.** With the sidebar open (`\` / `Ctrl+E`), `j` / `k` move the row selection, `Tab` cycles the section (Today / Pinned / Recent / Calendar), and `Enter` opens the focused page. `d` on a **regular page** arms a `delete page '<title>'? y/n` confirmation in the status line (`App::pending_sidebar_delete: Option<PendingSidebarDelete>`); `y` / `Y` confirms and runs `outl_actions::delete_page` + `remove_page_projection` + `spawn_index_rebuild`, navigates to today if the deleted page was current, and announces to peers. Any other key cancels (and is swallowed, matching the `pending_input_op` contract). Calendar rows are a no-op, and journals pinned/recent are excluded — only regular pages can be deleted from the sidebar. The `g d` chord (Normal mode) routes through the same confirmation flow via `App::delete_page_from_chord`: with the sidebar focused it delegates to `sidebar_delete_current`, otherwise it arms the confirmation against the current page (refusing journals).
+- **Sidebar intercept.** With the sidebar open (`\` / `Ctrl+E`), `j` / `k` move the row selection, `Tab` cycles the section (Today / Pinned / Recent / Calendar), and `Enter` opens the focused page. `d` on a **regular page** arms a `delete page '<title>'? y/n` confirmation in the status line (`App::pending_sidebar_delete: Option<PendingSidebarDelete>`); `y` / `Y` confirms and runs `outl_actions::delete_page` + `remove_page_projection` + `spawn_index_rebuild`, navigates to today if the deleted page was current, and announces to peers. Any other key cancels (and is swallowed, matching the `pending_input_op` contract). The same prompt carries `/merge` (see "Merge" below). Calendar rows are a no-op, and journals pinned/recent are excluded, so only regular pages can be deleted from the sidebar. The `g d` chord (Normal mode) routes through the same confirmation flow via `App::delete_page_from_chord`: with the sidebar focused it delegates to `sidebar_delete_current`, otherwise it arms the confirmation against the current page (refusing journals).
 - **Visual range capture.**
   Every Visual exit (`Esc`, `y`, `d`) routes through `remember_visual_range` so `g v` can restore the last range.
 - **Visual range reorder (`Alt+↑` / `Alt+↓`).**
@@ -149,6 +149,20 @@ Six contracts, each of which was the alternative:
 - **The refusal is the backend's sentence, and it can arrive twice.** The row's own `refusal` is a snapshot of a verdict that reads the live tree, so `r` can be declined on a row that looked restorable. `trash::restore` re-asks `refusal_for` and its answer is the *same* string, which lands on the overlay's status line while the list re-reads itself. Nothing here phrases a refusal.
 
 Recorded as `Capability::Trash` → `Full` on the TUI column; mobile is the one client left without a surface.
+
+### Merge (`/merge <page>`)
+
+`actions/merge/` folds the open page into another and asks first; the merge itself is `outl_actions::merge_pages` (RFC 0557).
+User-facing behaviour is in [`docs/tui.md`](../../docs/tui.md) under "Pages".
+
+Four contracts, each of which was the alternative:
+
+- **Opened from the command registry, not a chord, and recorded as `Capability::PageMerge`.** One `MergeCommand` registration serves `/merge` and `:merge`. All three columns are `Full`: the desktop and mobile apps reach the same `merge_pages` through their own merge picker.
+- **The confirmation is the page delete's, not a second modal.** `PendingSidebarDelete` carries `merge_into: Option<String>`; `Some` makes the existing `y/n` intercept in `input/normal.rs` run `confirm_page_merge` instead of the delete. `state.rs` sits at its size baseline, so the struct gained a field rather than the `App` growing a second pending slot.
+- **Projection is the CLI's order.** The mutation runs once, then `commit_page` (an empty mutation, for its guarded projection and announce) on every `touched_pages` slug through `CaptureCommit`, and the source's `.md` is removed only once the target itself projected. A withheld projection is classified like the trash restore's: `AheadOfLog` carries `refusal::ahead_of_log_notice`'s sentence, and a retryable one is said once too, because the source file stays behind in that case.
+- **The undo and redo entries of every touched page are dropped, and that is the point.** A snapshot of the target from before the merge, restored by `u`, would render the merged blocks away and reconcile that as a delete. The status line says `can't be undone here` up front rather than leaving `u` to do something surprising.
+
+There is no rename prompt: this client has no page rename. When one lands, `ActionError::PageExists` is the signal to arm this same confirmation, with `rename_or_merge` behind the `y`.
 
 ### Properties (`g p`)
 

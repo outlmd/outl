@@ -49,7 +49,7 @@ These never mutate the workspace and never need confirmation:
 - `outl_block_get` / `outl_block_tree` — block reads.
 - `outl_trash_list` — what has been deleted, and whether it can be put back.
 
-Destructive tools (`outl_page_delete`, `outl_block_delete`) require `confirm: true` and should almost never appear in a drafting command.
+Destructive tools (`outl_page_delete`, `outl_page_merge`, `outl_block_delete`) require `confirm: true` and should almost never appear in a drafting command.
 
 `outl_trash_restore` mutates but does not destroy — it moves a block back where it was deleted from, so the worst case is a block reappearing.
 It takes no `confirm`, and an agent that deleted something should be able to undo it without asking twice.

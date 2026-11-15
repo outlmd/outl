@@ -4,7 +4,7 @@
 //! trait from the parent `commands` module. They're grouped into
 //! sibling modules by concern so this file stays a glance-able index:
 //!
-//! - `page` — block / page property mutations, including `pin`
+//! - `page`: block / page property mutations, including `pin`, and `merge`
 //! - `workspace` — navigation, save, reload, help, quit, open
 //! - `exec` — search overlay, code-block runner, theme swap
 //! - `dates` — date / time / ISO / week-tag inserters
@@ -37,7 +37,7 @@ use super::CommandRegistry;
 use asset::UploadCommand;
 use dates::all as date_commands;
 use exec::{RunCommand, SearchCommand, ThemeCommand};
-use page::{PinCommand, PropBlockCommand, PropPageCommand};
+use page::{MergeCommand, PinCommand, PropBlockCommand, PropPageCommand};
 use refer::{ReferCommand, ReferEmbedCommand};
 use template::TemplateCommand;
 use workspace::{
@@ -47,10 +47,11 @@ use workspace::{
 
 /// Hook for `super::CommandRegistry::with_builtins`.
 pub(super) fn register_all(reg: &mut CommandRegistry) {
-    // page — properties and the pinned toggle
+    // page: properties, the pinned toggle and merge
     reg.register(PropBlockCommand);
     reg.register(PropPageCommand);
     reg.register(PinCommand);
+    reg.register(MergeCommand);
 
     // workspace — chrome verbs
     reg.register(TodayCommand);

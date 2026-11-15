@@ -105,7 +105,7 @@ There is **no undo** for either action, and a merge in particular does not come 
 The blocks stay under the target, the links stay rewritten and the old name stays as an alias: see "The opposite direction" in the RFC.
 
 The two actions have no chord on any client.
-`Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md): full on desktop and mobile, missing in the TUI.
+`Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md): rename is missing in the TUI, merge is full on every client.
 The warning about an alias that another page shadows (`alias_conflicts`) is deliberately not part of this change, so no GUI client shows it yet.
 
 ## Backlinks and nested pages below the outline

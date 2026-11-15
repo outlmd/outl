@@ -341,6 +341,22 @@ Unknown commands surface in the status line as `unknown command: <name>`.
 The `g p` overlay above is the same two writers behind a list you can browse.
 Use the commands when you know the key, the overlay when you don't.
 
+#### Pages
+
+| Command | Aliases | Action |
+|---------|---------|--------|
+| `merge <page name>` | none | Merge the open page into another existing page, after a `y/n` |
+
+`/merge Beta` on the page `Alpha` asks `merge 'Alpha' into 'Beta'? can't be undone here. y/n`.
+`y` confirms and any other key cancels, the same prompt `g d` uses for a page delete.
+The blocks of `Alpha` move under `Beta` (ids and subtrees intact), `Alpha`'s properties and names carry over as aliases, links that named `Alpha` are rewritten to `Beta`, and `Alpha` goes to the trash.
+You land on `Beta`, and a toast says what moved, for example `merged 'Alpha' into 'Beta': 2 blocks, links updated in 1 block`.
+Where both pages set the same property to different values the target's value is kept and the toast says how many clashed.
+The target has to exist (the command never creates a page), a journal cannot be the source, and a page cannot be merged into itself.
+`u` does not take a merge back, and the undo history of every page the merge touched is dropped so an older snapshot cannot undo half of it.
+The merge itself is `outl_actions::merge_pages`, shared with `outl page merge`; see [RFC 0557](rfcs/0557-page-merge-and-rename.md).
+The TUI has no page rename, so there is no rename-onto-an-existing-name prompt yet.
+
 #### Block references
 
 | Command | Aliases | Action |

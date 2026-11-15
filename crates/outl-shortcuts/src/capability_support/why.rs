@@ -55,19 +55,11 @@ pub const TUI_TABLE_NO_SCROLL: &str =
 /// The TUI has no rename surface. `outl page rename` does the same
 /// thing from a terminal (`outl_actions::rename_page`, links
 /// rewritten), and the MCP tool `outl_page_rename` is the same route
-/// for an agent. It refuses a name another page owns rather than
-/// offering the merge.
+/// for an agent. Onto a name another page owns it refuses unless
+/// given `--merge`.
 pub const NO_TUI_PAGE_RENAME: &str =
     "Renaming a page isn't in the TUI yet. Run `outl page rename <old> <new>` from a \
      terminal, or rename it in the desktop or mobile app. Links to the page follow the new name.";
-
-/// No terminal route merges either: `outl page rename` onto a name
-/// another page owns stops with `SLUG_CONFLICT` and says a merge is
-/// possible, and no command or MCP tool performs one yet (RFC 0557).
-/// So the nudge names the apps and does not invent a command.
-pub const NO_TUI_PAGE_MERGE: &str =
-    "Merging pages isn't in the TUI, and no terminal command does it yet. Open this workspace \
-     in the desktop or mobile app and merge the page there.";
 
 /// The TUI has no marketplace UI at all — installing an
 /// unlisted or registry plugin from inside the terminal client

@@ -39,9 +39,10 @@ pub enum Capability {
     /// surface. A journal cannot be renamed on any client: its slug is
     /// its date.
     PageRename,
-    /// Merging one page into another from the app: pick the target,
+    /// Merging one page into another: pick or type the target,
     /// confirm, and the source's blocks move under it with its links
-    /// rewritten and a summary of what moved and what conflicted.
+    /// rewritten and a summary of what moved and what conflicted
+    /// (RFC 0557).
     ///
     /// Distinct from [`Capability::PageRename`], which only reaches a
     /// merge when the new name is taken. This one starts from the

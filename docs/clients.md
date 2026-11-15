@@ -292,7 +292,7 @@ A `.md` still showing blocks the log holds *in the trash* is re-projected withou
 `outl_actions::rename_page` and `outl_actions::merge_pages` own both operations, including the rewrite of every `[[old]]` and `#old` mention ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
 The desktop and mobile apps reach them through the `rename_page` and `merge_pages` commands, and the caller projects every page in `report.touched_pages` and removes the old projection last, as `outl page rename` does.
 `@outl/shared/pages/rename-merge` owns the flow (rename, confirm a merge when the name is taken, merge) and the wording of the confirmations and summaries, so the two clients do not each invent it.
-Which clients can do it is recorded as `Capability::PageRename` and `Capability::PageMerge`: full on desktop and mobile, missing in the TUI, whose terminal route is `outl page rename` (rename only: no terminal command merges yet).
+Which clients can do it is recorded as `Capability::PageRename` and `Capability::PageMerge`: rename is full on desktop and mobile and missing in the TUI, whose terminal route is `outl page rename`; merge is full on every client (the TUI through `/merge <page>`), and `outl page merge` / `outl page rename --merge` reach it from a terminal.
 Neither has a chord, so there is no `Action`.
 
 ## Running code blocks

@@ -67,8 +67,14 @@ The journal reads do not: `outl_daily_today` / `outl_daily_get` keep their JSON 
 An error keeps the `{ ok: false, error }` envelope in `structuredContent` for `error.data`.
 Full shape in [`docs/cli.md`](cli.md#commands-by-domain).
 
-Destructive tools (`outl_page_delete`, `outl_block_delete`) require `confirm: true` in the input.
+Destructive tools (`outl_page_delete`, `outl_page_merge`, `outl_block_delete`) require `confirm: true` in the input.
 Without it they return a recoverable `CONFIRM_REQUIRED` error and the workspace is untouched.
+
+`outl_page_merge` folds `source` into `target`: it moves the source's blocks, merges properties (the target's value wins on a clash and the pair is listed in `property_conflicts`), rewrites `[[source]]` and `#source` mentions, keeps the source's names as aliases of the target and trashes the source.
+Running it again is safe and reports `nothing_changed: true`.
+`outl_page_rename` takes an optional `merge: true` that does the same when `new_slug` is already a page (the existing page keeps its name); without it that case is `SLUG_CONFLICT`.
+There is no dry run.
+See [RFC 0557](rfcs/0557-page-merge-and-rename.md).
 
 Block properties are `outl_block_prop_set`, `outl_block_prop_get`, `outl_block_prop_list`, and `outl_block_prop_delete`.
 `id` is the block id.
