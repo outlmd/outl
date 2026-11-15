@@ -25,7 +25,7 @@ outl is a local-first outliner and daily journal. It is a personal productivity 
 HOW TO REVIEW (about 2 minutes, one device, no setup)
 1. Launch the app. First run shows two onboarding screens.
 2. Tap "Keep on this device". On the next screen tap "Start writing". (Skip "Pair a device": it is optional and only needed to sync a second device of the same person.)
-3. You land on today's journal. A one-line crash reports notice may show above it: tap "Got it" to dismiss it. Tap "Tap to start writing" (or the + button) and type a few bullets. Use the keyboard toolbar to indent a bullet and to toggle a TODO.
+3. You land on today's journal. A one-line crash reports notice may appear at the bottom of the screen: tap "Got it" to dismiss it. Tap "Tap to start writing" (or the + button) and type a few bullets. Use the keyboard toolbar to indent a bullet and to toggle a TODO.
 4. Use the week strip at the top to open the calendar, and the gear icon in the header to open Settings > Privacy > Crash reports.
 The screen recording attached to this submission shows exactly this flow on a physical iPhone.
 
