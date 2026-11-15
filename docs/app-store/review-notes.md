@@ -25,7 +25,7 @@ outl is a local-first outliner and daily journal. It is a personal productivity 
 HOW TO REVIEW (about 2 minutes, one device, no setup)
 1. Launch the app. First run shows two onboarding screens.
 2. Tap "Keep on this device". On the next screen tap "Start writing". (Skip "Pair a device": it is optional and only needed to sync a second device of the same person.)
-3. You land on today's journal. Tap "Tap to start writing" (or the + button) and type a few bullets. Use the keyboard toolbar to indent a bullet and to toggle a TODO.
+3. You land on today's journal. A one-line crash reports notice may show above it: tap "Got it" to dismiss it. Tap "Tap to start writing" (or the + button) and type a few bullets. Use the keyboard toolbar to indent a bullet and to toggle a TODO.
 4. Use the week strip at the top to open the calendar, and the gear icon in the header to open Settings > Privacy > Crash reports.
 The screen recording attached to this submission shows exactly this flow on a physical iPhone.
 
@@ -78,15 +78,20 @@ Steps, in order:
 4. On "Sync with another device?", do **not** open "Pair a device".
    Tap **Start writing** (or "Skip for now"; both land on the same screen).
 5. Today's journal is open and empty.
+   A crash reports strip ("When outl crashes, it sends the crash to us...") shows on a fresh install.
+   It is not a modal.
+   Pause about two seconds so it is readable, then tap **Got it** to dismiss it.
    Tap "Tap to start writing" and type:
    `Plan the week`
 6. Press return and type:
    `Buy oat milk and apples`
-   Tap **Indent** in the keyboard toolbar so it nests under the first bullet.
+   Tap the indent icon in the keyboard toolbar (lines with a right-pointing arrow; VoiceOver label "Indent") so it nests under the first bullet.
+   The toolbar is a row of icons, not text.
+   On a fresh install the order is: **+** first, then indent, outdent, `[[`, the checkmark-circle icon, bold and the rest, with hide-keyboard last.
 7. Press return and type:
    `Pick up the dry cleaning`
-   Tap **Toggle TODO** in the toolbar, so the bullet becomes a task.
-8. Press return, tap **Outdent**, and type:
+   Tap the checkmark-circle icon (VoiceOver label "Toggle TODO") in the toolbar, so the bullet becomes a task.
+8. Press return, tap the outdent icon (lines with a left-pointing arrow; VoiceOver label "Outdent"), and type:
    `Read chapter 3 of [[Reading list]]`
 9. Close the keyboard, tap the `Reading list` link to open that page, and type:
    `Finished chapter 2 on Sunday`
