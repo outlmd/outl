@@ -81,8 +81,8 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // Desktop and mobile both call `rename_page` (sidebar row
         // action and page header on the desktop, the page switcher's
         // long-press sheet on mobile). The TUI has no rename surface;
-        // the terminal route is `outl page rename`, which is also how
-        // a terminal user merges.
+        // the terminal route is `outl page rename` (`--merge` when the
+        // new name is taken).
         Capability::PageRename => ClientSupport {
             tui: Missing(why::NO_TUI_PAGE_RENAME),
             desktop: Full,
@@ -90,9 +90,12 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         },
 
         // Same two client surfaces as `PageRename`, started from the
-        // merge side (a target picker and a mandatory confirm).
+        // merge side (a target picker and a mandatory confirm). The
+        // TUI's `/merge <page>` (`commands::builtins::MergeCommand`,
+        // confirmed with y/n) runs the same `outl_actions::merge_pages`;
+        // the CLI and MCP reach it as `outl page merge`.
         Capability::PageMerge => ClientSupport {
-            tui: Missing(why::NO_TUI_PAGE_MERGE),
+            tui: Full,
             desktop: Full,
             mobile: Full,
         },

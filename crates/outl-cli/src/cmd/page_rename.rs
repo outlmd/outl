@@ -6,26 +6,50 @@
 
 use serde_json::{json, Value};
 
-use outl_actions::find_by_slug;
+use outl_actions::{find_by_slug, OnExisting, RenameOutcome};
 
 use super::page::{page_meta_inner, resolve, write_projection};
+use super::page_merge;
 use crate::output::ApiError;
 use crate::ws::WsCtx;
 
 /// Rename a page's slug and rewrite every mention of the old name.
 ///
-/// The CRDT half lives in [`outl_actions::rename_page`], which also
+/// The CRDT half lives in [`outl_actions::rename_or_merge`], which also
 /// rewrites `[[old]]` / `#old` / person mentions in every block through
 /// ordinary edit ops. This wrapper owns the projection of every page the
 /// rewrite touched, the removal of the old `.md` + sidecar, and the JSON
 /// envelope.
 ///
 /// A new slug already owned by another page is `SLUG_CONFLICT`, and the
-/// message says a merge is possible: the page can be folded into the
-/// existing one instead (`outl_actions::rename_or_merge`).
-pub fn rename(ctx: &mut WsCtx, old_slug: &str, new_slug: &str) -> Result<Value, ApiError> {
+/// message says how to merge instead. With `merge` the page is folded into
+/// the existing one (the existing page keeps its name) and the reply is the
+/// merge report, see [`super::page_merge`].
+pub fn rename(
+    ctx: &mut WsCtx,
+    old_slug: &str,
+    new_slug: &str,
+    merge: bool,
+) -> Result<Value, ApiError> {
     let id = resolve(ctx, old_slug)?;
-    let report = outl_actions::rename_page(&mut ctx.workspace, &ctx.hlc, old_slug, new_slug, None)?;
+    let on_existing = if merge {
+        OnExisting::MergeInto
+    } else {
+        OnExisting::Refuse
+    };
+    let outcome = outl_actions::rename_or_merge(
+        &mut ctx.workspace,
+        &ctx.hlc,
+        old_slug,
+        new_slug,
+        None,
+        on_existing,
+    )
+    .map_err(page_merge::refusal)?;
+    let report = match outcome {
+        RenameOutcome::Renamed(report) => report,
+        RenameOutcome::Merged(report) => return page_merge::finish(ctx, &report),
+    };
 
     // Project the renamed page and every page whose blocks were
     // rewritten. The old projection is only removed once the renamed
@@ -64,6 +88,7 @@ pub fn rename(ctx: &mut WsCtx, old_slug: &str, new_slug: &str) -> Result<Value, 
     // child, for one) stays visible so the caller can decide.
     let affected = outl_actions::backlinks_for_target(&ctx.workspace, &ctx.root, old_slug);
     Ok(json!({
+        "outcome": "renamed",
         "meta": page_meta_inner(ctx, id)?,
         "old_slug": old_slug,
         "rewritten_refs": report.rewritten_blocks,

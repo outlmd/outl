@@ -1,0 +1,30 @@
+diff a/docs/rfcs/0557-page-merge-and-rename.md b/docs/rfcs/0557-page-merge-and-rename.md	(rejected hunks)
+@@ -159,11 +159,11 @@ These are real, they are recorded here so they are not discovered one at a time,
+    This is how the CLI rename already behaved.
+    It is now documented and pinned by `known_limit_reopening_the_old_slug_renames_the_page_back`, so a fix has to be deliberate.
+    A merge has no such problem, because the merged-away root is trashed under its own slug.
+-6. **No client reaches a merge yet.**
+-   There is no `outl page merge`, no MCP tool, no batch op, no TUI or GUI affordance in this change.
+-   They follow as separate changes and are thin wrappers over `merge_pages` and `MergeReport`.
+-   `rename_or_merge` exists for them, and no surface calls it with `OnExisting::MergeInto` yet.
+-   Until then no command runs a merge, and `outl page rename` onto a taken name keeps refusing with `SLUG_CONFLICT`.
++6. **Only the command line, the batch op and the MCP tool reach a merge.**
++   `outl page merge <source> <target> --confirm`, `outl page rename --merge`, the batch op `page_merge` and the MCP tools `outl_page_merge` and `outl_page_rename` with `merge` are thin wrappers over `merge_pages` and `MergeReport`, and share one tail (`cmd/page_merge.rs::finish`).
++   There is no `--dry-run`, because `merge_pages` applies its ops inside one batch and a preview would be a second implementation of the merge.
++   The TUI reaches it through `/merge <page>` (a typed target and a `y/n` prompt), and the capability catalog records `Capability::PageMerge` as `Missing` on the desktop and mobile apps, with the reason text owned by the catalog.
++   The TUI has no page rename, so there is no rename-onto-an-existing-name prompt there.
+ 7. **A title given to a rename that turns into a merge has nowhere to go.**
+    The target keeps its own title.
+ 
+@@ -184,8 +184,9 @@ These are real, they are recorded here so they are not discovered one at a time,
+ 
+ ## Scope
+ 
+-**Not covered: a `page merge` command, MCP tool, batch op, or any TUI or GUI surface.**
+-They are separate changes over `merge_pages` and `MergeReport`, and each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
++**Not covered: a desktop or mobile surface for merging pages.**
++The `outl page merge` command, the `page_merge` batch op, the MCP tool and the TUI's `/merge` exist.
++The graphical clients are separate changes over `merge_pages` and `MergeReport`, and each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
+ 
+ **Not covered: showing a shadowed alias to the user.**
+ `alias_conflicts` is the function a client calls.

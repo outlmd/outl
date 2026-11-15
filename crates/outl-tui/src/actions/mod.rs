@@ -16,6 +16,7 @@
 //! - `overlay` — quick switcher, workspace search, command palette
 //! - `autocomplete` — Insert-mode inline `[[`/`#`/`((`/`/`/`@` popup
 //! - `properties` — the `g p` property editor overlay
+//! - `merge`: `/merge <page>`, fold the open page into another, after a `y/n`
 //! - `namespace` — which pages live under the open one (read-only;
 //!   `view::namespace` draws what it returns)
 //!
@@ -28,6 +29,7 @@ pub(crate) mod collapsed;
 pub(crate) mod exec;
 pub(crate) mod history;
 pub(crate) mod lifecycle;
+pub(crate) mod merge;
 pub(crate) mod mouse;
 pub(crate) mod namespace;
 pub(crate) mod nav;

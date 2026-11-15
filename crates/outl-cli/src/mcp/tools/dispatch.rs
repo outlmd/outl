@@ -47,8 +47,9 @@ use serde_json::{json, Value};
 use crate::cmd::{
     asset as asset_cmd, backlinks as bl_cmd, batch as batch_cmd, block as block_cmd,
     block_prop as block_prop_cmd, daily as daily_cmd, doctor as doctor_cmd, export_v2 as exp_cmd,
-    page as page_cmd, prop as prop_cmd, query as query_cmd, search as search_cmd, tag as tag_cmd,
-    template as tpl_cmd, trash as trash_cmd, workspace_info as wi_cmd,
+    page as page_cmd, page_merge as page_merge_cmd, prop as prop_cmd, query as query_cmd,
+    search as search_cmd, tag as tag_cmd, template as tpl_cmd, trash as trash_cmd,
+    workspace_info as wi_cmd,
 };
 use crate::mcp::protocol::JsonRpcError;
 use crate::mcp::ServerCtx;
@@ -74,6 +75,7 @@ const MUTATING: &[&str] = &[
     "outl_page_update",
     "outl_page_delete",
     "outl_page_rename",
+    "outl_page_merge",
     "outl_block_append",
     "outl_block_append_tree",
     "outl_block_insert",
@@ -183,7 +185,23 @@ fn run_tool(name: &str, args: &Value, ctx: &Arc<ServerCtx>) -> Result<Value, Api
         "outl_page_rename" => {
             let old = require_str(args, "old_slug")?.to_string();
             let new = require_str(args, "new_slug")?.to_string();
-            ctx.with_workspace(|wc| page_cmd::rename(wc, &old, &new))
+            let merge = args.get("merge").and_then(Value::as_bool).unwrap_or(false);
+            ctx.with_workspace(|wc| page_cmd::rename(wc, &old, &new, merge))
+        }
+        "outl_page_merge" => {
+            let source = require_str(args, "source")?.to_string();
+            let target = require_str(args, "target")?.to_string();
+            let confirm = args
+                .get("confirm")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !confirm {
+                return Err(ApiError::new(
+                    crate::output::codes::CONFIRM_REQUIRED,
+                    format!("refusing to merge `{source}` into `{target}` without confirm:true"),
+                ));
+            }
+            ctx.with_workspace(|wc| page_merge_cmd::merge(wc, &source, &target))
         }
         "outl_page_render" => {
             let slug = require_str(args, "slug")?.to_string();

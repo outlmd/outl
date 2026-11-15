@@ -173,3 +173,88 @@ fn rename_over_mcp_reports_the_rewritten_blocks() {
         "SLUG_CONFLICT"
     );
 }
+
+#[test]
+fn rename_with_merge_folds_into_the_existing_page() {
+    let ws = workspace_with_mentions();
+    ok(run(&ws, &["page", "create", "delta", "--json"]));
+    ok(run(
+        &ws,
+        &[
+            "block",
+            "append",
+            "--page",
+            "delta",
+            "--text",
+            "ref [[beta]] here",
+            "--json",
+        ],
+    ));
+    ok(run(
+        &ws,
+        &[
+            "block",
+            "append",
+            "--page",
+            "beta",
+            "--text",
+            "from beta",
+            "--json",
+        ],
+    ));
+
+    let args = ["page", "rename", "beta", "alpha", "--merge", "--json"];
+    let env = ok(run(&ws, &args));
+    let data = &env["data"];
+    assert_eq!(data["outcome"], "merged", "{env}");
+    assert_eq!(data["source"]["slug"], "beta");
+    assert_eq!(
+        data["target"]["slug"], "alpha",
+        "the existing page keeps its name"
+    );
+    assert_eq!(data["moved_blocks"], 1);
+    assert!(
+        data["rewritten_refs"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()),
+        "mentions of the old name are rewritten: {env}"
+    );
+
+    let alpha = page_md(&ws, "alpha");
+    assert!(alpha.contains("from beta"), "blocks moved: {alpha}");
+    assert!(
+        alpha.contains("`[[beta]]`"),
+        "a code span is not a mention and stays as written: {alpha}"
+    );
+    assert!(
+        page_md(&ws, "delta").contains("ref [[alpha]] here"),
+        "refs now name the target"
+    );
+
+    assert!(
+        !ws.path().join("pages/beta.md").exists(),
+        "the old projection must be gone"
+    );
+    assert!(
+        !ws.path().join("pages/beta.outl").exists(),
+        "the old sidecar must be gone"
+    );
+}
+
+#[test]
+fn rename_reports_how_many_references_it_rewrote() {
+    let ws = workspace_with_mentions();
+
+    let out = run(&ws, &["page", "rename", "beta", "gamma"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("renamed: gamma"), "{stdout}");
+    assert!(
+        stdout.contains("rewrote 1 reference(s) to the old name"),
+        "{stdout}"
+    );
+}

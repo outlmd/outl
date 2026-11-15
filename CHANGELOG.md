@@ -66,13 +66,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Merge asks you to pick the target and always confirms first.
   Either way the app opens the resulting page and shows what happened: blocks moved, links updated, and any property both pages held with different values (the target's is kept, the other is named).
   There is no undo, and a merge does not come apart: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md) lists what stays.
-  The TUI has neither (`outl page rename` still renames from a terminal), and no client shows the warning about an alias that another page shadows yet.
+  The TUI has no rename (`outl page rename` renames from a terminal) and merges with `/merge` (the entry below), and no client shows the warning about an alias that another page shadows yet.
+
+- **`outl page merge`, `outl page rename --merge`, the `page_merge` batch op and the `outl_page_merge` MCP tool.**
+  `outl page merge <source> <target> --confirm` folds one page into another: the blocks move under the target with their ids, properties merge (the target's value wins on a clash and the dropped one is listed in `property_conflicts`), every `[[source]]` and `#source` mention is rewritten, the source's names become aliases of the target, and the source goes to the trash.
+  `--confirm` is required, with `--yes` as an alias, and without it the command fails with `CONFIRM_REQUIRED`.
+  There is no `--dry-run`: `merge_pages` has no preview path, and a preview would be a second implementation of the merge.
+  Running it again is safe: it moves any block that reached the trashed source late and otherwise reports `nothing_changed`.
+  `outl page rename <old> <new> --merge` does the same when `<new>` is already a page (the existing page keeps its name), and without the flag that case is still `SLUG_CONFLICT`, now naming `--merge` and `outl page merge` as the way out.
+  A journal cannot be merged away (`INVALID_ARG`); a journal can be the target.
+  The batch op `page_merge` takes `source`, `target` and `confirm: true`, `page_rename` takes an optional `merge`, and the MCP tools are `outl_page_merge` (`confirm: true` required) and `outl_page_rename` with `merge`.
+  The TUI has `/merge <page>`, which asks `y/n` first and drops the undo entries of the pages it changed, and the Raycast extension has a "Merge Pages" command.
+  The desktop and mobile apps merge from their own surfaces (the entry above).
+  What a merge does not undo: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md), and the reply shape in [`docs/cli.md`](docs/cli.md#merging-pages).
 
 - **Merging one page into another exists in `outl-actions`.**
   `outl_actions::merge_pages` moves the source's top-level blocks under the target with their ids intact, unions `alias::` and `tags`, copies properties the target lacks (on a conflict the target wins and the dropped value is reported), makes the source's slug and title aliases of the target, rewrites every mention of the source, and moves the source to the trash.
   `rename_or_merge` turns a taken name into a merge.
   Running a merge twice is safe, and a block a peer appended to the source late is moved by the re-run.
-  There is no `outl page merge`, MCP tool or TUI affordance yet; they arrive in later releases as wrappers over this.
+  The command line, the batch op, the MCP tool, the TUI and the Raycast extension wrap it, and so do the desktop and mobile apps (the entries above).
   Known limits and what is not undone: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md).
 
 - **A launch reports its own frontend half.**

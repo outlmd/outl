@@ -223,7 +223,12 @@ See `outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace canno
 These are the surface called by scripts, agents, and the MCP shim.
 Each handler returns a `serde_json::Value` so the same code path serves both the CLI and `outl mcp serve`.
 
-- `outl page get|create|update|delete|list|rename|render|history` (`create` takes `--content=<JSON|->` to seed the outline in one call)
+- `outl page get|create|update|delete|list|rename|merge|render|history` (`create` takes `--content=<JSON|->` to seed the outline in one call)
+  `page merge <source> <target> --confirm` and `page rename --merge` are glue over `outl_actions::merge_pages` / `rename_or_merge` ([RFC 0557](../../docs/rfcs/0557-page-merge-and-rename.md); flags and reply shape in [`docs/cli.md`](../../docs/cli.md#merging-pages)).
+  `cmd/page_merge.rs::finish` is the shared tail of both: it projects every page in `touched_pages`, removes the source's `.md` + sidecar last and only once the target projected, and builds the reply (`outcome: "merged"`).
+  **No `--dry-run`**: `merge_pages` applies its ops in one batch and has no preview path, so a preview would be a second implementation of the merge.
+  `page_merge::refusal` maps `PageNotFound` locally because the merge source may already be in the trash, so it cannot go through `page::resolve` first, and it words `PageExists` as an offer to merge (`SLUG_CONFLICT`).
+  The MCP tool `outl_page_merge` and the batch op `page_merge` call the same `page_merge::merge`, behind `confirm: true`.
   `page history` / `block history` are the **read-only** window on the op log's past (issue #241): what changed on a page, when, by whom, and the text on either side.
   `cmd/history.rs` renders both — glue only, `outl_actions::timeline` owns what an event is.
   Two things the renderer must not lose: `--limit` caps the listing and never the count (a capped list that reports its own length as the total reads as the whole history), and a `deleted` row always prints the text the deletion took, since that is what someone opens a history to find.
@@ -394,6 +399,8 @@ src/
 │   ├── export_v2.rs       # outl export {hugo,md,json}
 │   ├── asset.rs          # outl asset add … (+ shared add_asset for MCP)
 │   ├── page.rs            # outl page …
+│   ├── page_rename.rs     # outl page rename [--merge]
+│   ├── page_merge.rs      # outl page merge + finish(), the tail shared with rename --merge
 │   ├── plugin.rs          # outl plugin …
 │   ├── block.rs           # outl block …
 │   ├── block_print.rs     # human printers for `outl block`

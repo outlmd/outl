@@ -18,6 +18,7 @@ pub mod import;
 pub mod init;
 pub mod migrate_to_per_page_ops;
 pub mod page;
+pub mod page_merge;
 pub mod page_rename;
 pub mod peer_qr;
 pub mod plugin;

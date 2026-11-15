@@ -1,0 +1,23 @@
+diff a/crates/outl-shortcuts/src/capability.rs b/crates/outl-shortcuts/src/capability.rs	(rejected hunks)
+@@ -250,7 +263,7 @@ mod tests {
+     /// what makes forgetting impossible: it will not compile once a
+     /// new variant exists until this function's `match` grows an arm
+     /// for it too.
+-    const EXPECTED_20: usize = 20;
++    const EXPECTED_21: usize = 21;
+ 
+     fn name(cap: Capability) -> &'static str {
+         match cap {
+@@ -290,9 +304,9 @@ mod tests {
+         );
+         assert_eq!(
+             names.len(),
+-            EXPECTED_20,
+-            "Capability::ALL has {} entries but the enum has {EXPECTED_20} variants \
+-             — add the new variant to Capability::ALL (and bump EXPECTED_20)",
++            EXPECTED_21,
++            "Capability::ALL has {} entries but the enum has {EXPECTED_21} variants \
++             (add the new variant to Capability::ALL and bump EXPECTED_21)",
+             names.len(),
+         );
+     }

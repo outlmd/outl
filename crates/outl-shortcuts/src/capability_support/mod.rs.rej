@@ -1,0 +1,10 @@
+diff a/crates/outl-shortcuts/src/capability_support/mod.rs b/crates/outl-shortcuts/src/capability_support/mod.rs	(rejected hunks)
+@@ -381,7 +391,7 @@ mod tests {
+                 let _ = s.get(client);
+             }
+         }
+-        assert_eq!(Capability::ALL.len(), 20, "Capability::ALL changed size");
++        assert_eq!(Capability::ALL.len(), 21, "Capability::ALL changed size");
+     }
+ 
+     #[test]
