@@ -119,6 +119,24 @@ export class MockWorkspace {
     return this.pages.get(key) ?? [...this.pages.values()].find((p) => p.meta.title.toLowerCase() === key);
   }
 
+  /** A page by slug or id, the two spellings the rename and merge commands accept. */
+  byRef(ref: string): Page | undefined {
+    return this.byId(ref) ?? this.bySlug(ref);
+  }
+
+  /** Re-key a page under a new slug and title. The fixture has no links to rewrite. */
+  rename(page: Page, slug: string, title: string) {
+    this.pages.delete(page.meta.slug);
+    page.meta = { ...page.meta, slug, title };
+    this.pages.set(slug, page);
+  }
+
+  /** Append the source's blocks to the target and drop the source. */
+  merge(source: Page, target: Page) {
+    target.blocks.push(...source.blocks);
+    this.pages.delete(source.meta.slug);
+  }
+
   byId(pageId: string): Page | undefined {
     return [...this.pages.values()].find((p) => p.meta.id === pageId);
   }

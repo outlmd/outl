@@ -78,6 +78,25 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             mobile: Full,
         },
 
+        // Desktop and mobile both call `rename_page` (sidebar row
+        // action and page header on the desktop, the page switcher's
+        // long-press sheet on mobile). The TUI has no rename surface;
+        // the terminal route is `outl page rename`, which is also how
+        // a terminal user merges.
+        Capability::PageRename => ClientSupport {
+            tui: Missing(why::NO_TUI_PAGE_RENAME),
+            desktop: Full,
+            mobile: Full,
+        },
+
+        // Same two client surfaces as `PageRename`, started from the
+        // merge side (a target picker and a mandatory confirm).
+        Capability::PageMerge => ClientSupport {
+            tui: Missing(why::NO_TUI_PAGE_MERGE),
+            desktop: Full,
+            mobile: Full,
+        },
+
         // Desktop `PluginMarketplace.tsx` and mobile `PluginSheet.tsx`
         // ("Browse" tab) both fetch the official registry and install
         // from it. The TUI's plugin settings overlay only configures
@@ -381,7 +400,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 20, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 22, "Capability::ALL changed size");
     }
 
     #[test]

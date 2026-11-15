@@ -109,6 +109,14 @@ Folding the toggles together would hide one when the user muted the other.
 `g d` routes through `DeletePage`, which runs the same `window.confirm` + `deletePage(slug)` path as the sidebar row's hover `×` ([gesture](../../docs/desktop-ux.md#sidebar--hover--to-delete-a-page)).
 Journals are refused, and the body is the shared `outl_tauri_shared::commands::page::delete_page` — no desktop logic on either door.
 
+**Rename and merge are the same two doors, and the same flow.**
+The sidebar row's hover `✎` (rename) and `⇥` (merge into) sit beside the `×`; journals get none of the three.
+Both open `PageActionDialog.tsx` (a name field prefilled with the title, or a page search that leaves the source out), because the webview has no `window.prompt`; the questions that follow are `window.confirm`, like delete.
+The flow itself is `@outl/shared/pages/rename-merge` (a taken name asks before merging, a merge **always** asks, the wording is owned there), wrapped by `lib/page-actions.ts`, which only adds the confirm, the toast and the error surface.
+Declining a confirm writes nothing and leaves the dialog open; the outcome (blocks moved, links updated, every property conflict) goes to `<NoticeToast />` via `appState.notice`, because a dropped property value the user never saw is the failure the report exists to prevent.
+There is no chord and no menu entry: delete has none in `menu.rs` either, so these did not get one.
+The sidebar list is keyed on the page id **and** slug and title, since a rename keeps the id.
+
 `OutlineView.tsx` refetches backlinks via `createEffect(on(slug, …))` — per navigation, not per commit (the "Esc is slow" fix).
 All three fetch sites (that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`) go through `trackBacklinks` in `lib/store.ts`, none of them awaited on a render or keystroke path.
 It owns `appState.backlinksLoading`, which `<InlineBacklinks />` is the **only** reader of.

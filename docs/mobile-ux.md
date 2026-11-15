@@ -95,6 +95,21 @@ A navigation showed the page the user just left answering for the one they opene
 Once the scan replies, a regular page keeps the empty box (a newcomer discovers that pages can cite each other) and a journal stays hidden.
 `lateSectionVisible` (`@outl/shared/outline`) owns the rule; `PageSections.test.tsx` is the net.
 
+## Page switcher - rename and merge
+
+The long-press sheet that offers delete also offers **Rename page** and **Merge into...**, for regular pages only: journals are excluded, because a journal's slug is its date.
+The commands are the shared `rename_page` / `merge_pages` bodies, so every link to the page is rewritten in the same batch ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
+
+- **Rename** opens a text prompt prefilled with the current title.
+  When the new name already belongs to another page, nothing is written and a confirm asks "A page named X already exists. Merge this page into X?".
+  Accepting runs the merge, cancelling leaves both pages as they were.
+- **Merge into...** opens a page picker without the source page, and always asks for a confirmation before writing.
+- **Afterwards** the app opens the resulting page (renamed, or the merge target) and shows a summary with blocks moved, links updated and any property conflicts (the target's value is kept, the dropped one is named).
+
+There is no undo for either action, and a merge does not come apart: see "The opposite direction" in the RFC.
+Neither has a keyboard chord, so the long-press sheet is the only trigger on touch devices.
+`Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md).
+
 ## Opening an external `[label](url)` link
 
 Tapping an external link opens it in the system browser via **`tauri-plugin-opener`** (registered in `lib.rs`, capability `opener:allow-open-url` for `http(s)`/`mailto`).

@@ -67,6 +67,7 @@ import { deliverDueReminders } from "@outl/shared/api/commands";
 const REMINDER_POLL_MS = 30_000;
 import { ChromeToggleBar } from "./ChromeToggleBar";
 import { ErrorToast } from "./ErrorToast";
+import { NoticeToast } from "./NoticeToast";
 
 /**
  * 2-pane shell rendered once a workspace is loaded.
@@ -485,6 +486,7 @@ export function AppShell() {
       <CrashReportsNotice />
       {/* Mounted last so the notification toast sits above every chrome
        *  element (ChromeToggleBar, overlays) in the stacking order. */}
+      <NoticeToast />
       <ErrorToast />
     </>
   );

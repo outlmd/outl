@@ -59,11 +59,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Rename and merge pages from the desktop and mobile apps.**
+  The desktop sidebar, and the page switcher's long-press sheet on mobile, gain **Rename page...** and **Merge into...** for regular pages (a journal's slug is its date, so journals are left out).
+  Rename opens a prompt prefilled with the current title and rewrites every `[[old]]` and `#old` mention in the same batch.
+  When the new name already belongs to another page, the app asks "A page named X already exists. Merge this page into X?" and writes nothing until you accept.
+  Merge asks you to pick the target and always confirms first.
+  Either way the app opens the resulting page and shows what happened: blocks moved, links updated, and any property both pages held with different values (the target's is kept, the other is named).
+  There is no undo, and a merge does not come apart: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md) lists what stays.
+  The TUI has neither (`outl page rename` still renames from a terminal), and no client shows the warning about an alias that another page shadows yet.
+
 - **Merging one page into another exists in `outl-actions`.**
   `outl_actions::merge_pages` moves the source's top-level blocks under the target with their ids intact, unions `alias::` and `tags`, copies properties the target lacks (on a conflict the target wins and the dropped value is reported), makes the source's slug and title aliases of the target, rewrites every mention of the source, and moves the source to the trash.
   `rename_or_merge` turns a taken name into a merge.
   Running a merge twice is safe, and a block a peer appended to the source late is moved by the re-run.
-  There is no `outl page merge`, MCP tool, TUI or desktop affordance yet; they arrive in later releases as wrappers over this.
+  There is no `outl page merge`, MCP tool or TUI affordance yet; they arrive in later releases as wrappers over this.
   Known limits and what is not undone: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md).
 
 - **A launch reports its own frontend half.**

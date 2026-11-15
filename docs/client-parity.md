@@ -164,6 +164,8 @@ the drift this RFC exists to prevent.
 | Capability | TUI | Desktop | Mobile |
 |---|---|---|---|
 | `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ✅ |
+| `PageRename` | ❌ Renaming a page isn't in the TUI yet. Run `outl page rename <old> <new>` from a terminal, or rename it in the desktop or mobile app. Links to the page follow the new name. | ✅ | ✅ |
+| `PageMerge` | ❌ Merging pages isn't in the TUI, and no terminal command does it yet. Open this workspace in the desktop or mobile app and merge the page there. | ✅ | ✅ |
 | `PluginMarketplace` | ❌ Browsing and installing plugins from a marketplace isn't in the TUI — install by id from a terminal with `outl plugin install <id>`, or use the desktop or mobile app. | ✅ | ✅ |
 | `Calendar` | ⚠️ The TUI's month grid shows which days have journals but can't open one — press `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date (YYYY-MM-DD) to jump straight there. | ✅ | ✅ |
 | `Templates` | ✅ | ✅ | ✅ |
