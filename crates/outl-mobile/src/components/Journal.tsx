@@ -1330,6 +1330,8 @@ export function Journal() {
   /** What each palette action opens (`lib/palette-actions.ts`). */
   const paletteHandlers = (): Record<MobileAction, () => void> => ({
     OpenToday: () => void dayNav.jumpToday(),
+    OpenYesterday: () => void dayNav.yesterday(),
+    OpenTomorrow: () => void dayNav.tomorrow(),
     QuickCapture: () => setCaptureOpen(true),
     TaskList: () => setTasksOpen(true),
     OpenReminders: () => setRemindersOpen(true),

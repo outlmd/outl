@@ -188,6 +188,8 @@ pub fn support(action: Action) -> ClientSupport {
 
         // ── navigation ───────────────────────────────────────────
         Action::OpenToday => row!(Full, Full, Full),
+        Action::OpenYesterday => row!(Full, Full, Full),
+        Action::OpenTomorrow => row!(Full, Full, Full),
         Action::PrevDay => row!(Full, Full, Full),
         Action::NextDay => row!(Full, Full, Full),
         Action::SelectionDown => row!(Full, Full, NotApplicable(why::TOUCH_ONLY)),
@@ -541,7 +543,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 83, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 85, "Action::ALL changed size");
     }
 
     #[test]

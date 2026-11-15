@@ -70,6 +70,7 @@ pub mod exec;
 pub mod export_md;
 pub mod history;
 pub mod index;
+pub mod insert;
 pub mod journal;
 pub mod mentions;
 pub mod merges;

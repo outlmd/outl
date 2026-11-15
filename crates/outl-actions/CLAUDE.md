@@ -201,6 +201,23 @@ Its module doc owns the rest; three rules from it:
 
 `TrashParentTrashed` is deliberately absent: "restore the ancestor first" works on every surface, since that ancestor is its own row in the same listing.
 
+## Text-inserting slash commands (`insert`)
+
+`insert.rs` is the catalog behind `/date-today`, `/time-now` and `/week-num`: nineteen entries, each a name, aliases, a description and the string it produces.
+`resolve` takes `now` rather than reading `clock` itself, so every case is testable against a fixed instant.
+
+It is here because it was in `outl-tui`, in nineteen `SlashCommand` structs, which made the terminal the owner of *what `/date-today` inserts*.
+A desktop user typing it got nothing, and the obvious repair was to write the nineteen strings again in TypeScript.
+Same shape as `outl_shortcuts::command_name`, one layer over: that one owns the **names**, this one owns the **text**.
+
+Three rules:
+
+- **A client renders the list and splices the answer.** It holds no date format of its own, and the `/date` usage line is the catalog's too, so a terminal and a webview refuse an unreadable argument in the same words.
+- **`needs_args` is a real filter, not a hint.** Only `/date` takes one, and a client whose `/` trigger closes on the first space (the desktop's) leaves it out rather than offering a command that can only fail.
+- **Aliases are part of the catalog.** The TUI's `:` palette has always taken `:dt` for `:date-today`; dropping them on the way through a shared catalog would be a silent regression in the client that had the feature.
+
+Surfaces: the TUI's `builtins/dates.rs` (wiring onto an `EditBuffer`), and `outl_tauri_shared::commands::insert` for both GUI clients.
+
 ## The capture inbox
 
 `capture.rs` is both halves of RFC 0363: the writer a capture gesture calls, and the **only** path from an inbox into the op log.

@@ -241,6 +241,8 @@ export type Action =
   | { kind: "OpenSettings" }
   | { kind: "Quit" }
   | { kind: "OpenToday" }
+  | { kind: "OpenYesterday" }
+  | { kind: "OpenTomorrow" }
   | { kind: "PrevDay" }
   | { kind: "NextDay" }
   | { kind: "SelectionDown" }

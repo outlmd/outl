@@ -59,6 +59,8 @@ It is the string the client shows when the user reaches for the action, so it is
 | `ToggleFocusMode` | ✅ | ✅ | ✅ |
 | `Quit` | ✅ | ✅ | — _Mobile apps are backgrounded by the OS, not quit from inside._ |
 | `OpenToday` | ✅ | ✅ | ✅ |
+| `OpenYesterday` | ✅ | ✅ | ✅ |
+| `OpenTomorrow` | ✅ | ✅ | ✅ |
 | `PrevDay` | ✅ | ✅ | ✅ |
 | `NextDay` | ✅ | ✅ | ✅ |
 | `SelectionDown` | ✅ | ✅ | — _Not on mobile — tap the block you want instead of moving a selection._ |

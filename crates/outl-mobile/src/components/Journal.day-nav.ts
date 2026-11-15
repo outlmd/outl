@@ -58,6 +58,18 @@ export function createDayNav(deps: DayNavDeps) {
     if (slug) await open(slug);
   }
 
+  /** One day either side of **today**, whatever page is open.
+   *  `step` walks from the open journal, which on a 2020 page means
+   *  2020 — `/yesterday` has to mean yesterday there too. */
+  async function dayFromToday(by: -1 | 1) {
+    const anchor = today() ?? (await refreshToday());
+    if (!anchor) return;
+    const slug = await deps.withError(() =>
+      by < 0 ? previousDay(anchor) : nextDay(anchor),
+    );
+    if (slug) await open(slug);
+  }
+
   async function jumpToday() {
     haptic("light");
     const next = await deps.withError(openTodayJournal);
@@ -98,6 +110,8 @@ export function createDayNav(deps: DayNavDeps) {
     today,
     prevDay: () => step(-1),
     nextDay: () => step(1),
+    yesterday: () => dayFromToday(-1),
+    tomorrow: () => dayFromToday(1),
     jumpToday,
     /** Open a day; `open_journal_for` creates it, so any date lands. */
     pickDay: open,

@@ -11,6 +11,8 @@ import type { PaletteActionRow } from "@outl/shared/palette";
 
 export const MOBILE_ACTIONS = [
   { kind: "action", action: "OpenToday", label: "Open today's journal", chord: null, keywords: "journal day" },
+  { kind: "action", action: "OpenYesterday", label: "Open yesterday's journal", chord: null, keywords: "journal day back previous" },
+  { kind: "action", action: "OpenTomorrow", label: "Open tomorrow's journal", chord: null, keywords: "journal day next forward" },
   { kind: "action", action: "QuickCapture", label: "Quick capture to today", chord: null, keywords: "add note" },
   { kind: "action", action: "TaskList", label: "Open task list", chord: null, keywords: "todo doing" },
   { kind: "action", action: "OpenReminders", label: "Open reminders", chord: null, keywords: "remind notifications" },

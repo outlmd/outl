@@ -96,9 +96,9 @@ use crate::commands::{
 };
 use crate::commands::{
     device_activity, drain_capture_inbox, export_markdown, journal_days_with_content,
-    list_action_support, list_open_tasks, list_shortcut_bindings, list_trash, merged_edits,
-    page_timeline, resolve_embeds, restore_trash_entry, run_auto_run_blocks, run_code_block,
-    undo_merged_edit,
+    list_action_support, list_insert_commands, list_open_tasks, list_shortcut_bindings, list_trash,
+    merged_edits, page_timeline, resolve_embeds, resolve_insert_command, restore_trash_entry,
+    run_auto_run_blocks, run_code_block, undo_merged_edit,
 };
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
@@ -486,7 +486,9 @@ pub fn run() {
             get_telemetry_enabled,
             set_telemetry_enabled,
             // Theme
+            list_insert_commands,
             list_themes,
+            resolve_insert_command,
             get_theme,
             get_theme_config,
             delete_page,

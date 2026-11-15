@@ -209,6 +209,20 @@ pub fn default_bindings() -> Vec<Binding> {
         ),
         Binding::new(ch('['), Normal, Action::PrevDay, "Previous journal day"),
         Binding::new(ch(']'), Normal, Action::NextDay, "Next journal day"),
+        // The `g` pair anchors on **today**; the bare bracket steps
+        // from the open journal, so on a 2020 page `[` means 2020.
+        Binding::new(
+            pair('g', '['),
+            Normal,
+            Action::OpenYesterday,
+            "Yesterday's journal",
+        ),
+        Binding::new(
+            pair('g', ']'),
+            Normal,
+            Action::OpenTomorrow,
+            "Tomorrow's journal",
+        ),
         Binding::new(
             pair('g', 'j'),
             Normal,

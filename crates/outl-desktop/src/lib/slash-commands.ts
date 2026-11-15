@@ -1,4 +1,5 @@
 import type { PluginCommand, TemplateDto } from "@outl/shared/api/types";
+import type { InsertCommandDto } from "@outl/shared/api/commands";
 
 import type { Chord } from "./api";
 import type { PaletteActionRow } from "./palette-results";
@@ -74,6 +75,42 @@ export function templateSlashCommands(
  * never from a derivation here: see {@link actionSlashCommands}.
  */
 export const NATIVE_ACTION_PLUGIN_ID = "@outl/action";
+
+/**
+ * Reserved `plugin_id` for a command that writes **text at the caret**
+ * rather than acting — `/date-today`, `/time-now`, `/week-num`.
+ *
+ * They are not `Action`s and never will be: they take no chord, mutate
+ * nothing and answer one question, *what string goes where the cursor
+ * is?* `outl_actions::insert` is the catalog, shared with the TUI, so
+ * `/date-today` produces the same `[[YYYY-MM-DD]]` in a terminal and
+ * in a webview — and this client holds no date format of its own.
+ *
+ * Same sentinel trick as {@link NATIVE_TEMPLATE_PLUGIN_ID}, and
+ * `block-suggest.ts` runs this one through `resolveInsertCommand`,
+ * splicing the reply over the `/token` instead of deleting it.
+ */
+export const NATIVE_INSERT_PLUGIN_ID = "@outl/insert";
+
+/**
+ * Project the text-inserting commands onto slash-menu rows.
+ *
+ * A command needing an argument is **left out**: the `/` trigger
+ * closes on the first space (`detectSlashContext`), so `/date +3d` is
+ * unreachable here and a row for it could only ever fail. The TUI
+ * collects the argument through its `:` palette and keeps the command.
+ */
+export function insertSlashCommands(
+  commands: InsertCommandDto[],
+): PluginCommand[] {
+  return commands
+    .filter((c) => !c.needs_args)
+    .map((c) => ({
+      plugin_id: NATIVE_INSERT_PLUGIN_ID,
+      command_id: c.name,
+      title: c.description,
+    }));
+}
 
 /**
  * Project the client's own actions onto slash-menu rows.

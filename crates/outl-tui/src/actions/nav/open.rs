@@ -23,6 +23,21 @@ impl App {
         Ok(())
     }
 
+    /// Open the journal `days` away from **today**, whatever page is
+    /// open.
+    ///
+    /// Distinct from [`App::shift_journal`], which steps from the open
+    /// journal: on a 2020 page that means 2020, and `/yesterday` has
+    /// to mean yesterday there too.
+    pub(crate) fn go_relative_day(&mut self, days: i64) -> Result<()> {
+        self.view = View::Journal(clock::today() + Duration::days(days));
+        self.selected = 0;
+        self.cursor_col = 0;
+        self.ensure_view_file_exists()?;
+        self.load_current();
+        Ok(())
+    }
+
     pub(crate) fn shift_journal(&mut self, days: i64) -> Result<()> {
         let new_date = match self.view {
             View::Journal(d) => d + Duration::days(days),

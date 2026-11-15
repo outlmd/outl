@@ -248,6 +248,34 @@ export function listTemplates(): Promise<TemplateDto[]> {
 }
 
 /**
+ * One text-inserting slash command (`/date-today`, `/time-now`,
+ * `/week-num`), mirroring `InsertCommandDto`. Names, descriptions and
+ * the strings produced are `outl_actions::insert`'s — a client renders
+ * the list and splices the answer, holding no date format of its own.
+ * `needs_args` is the filter a client with no argument prompt applies.
+ */
+export interface InsertCommandDto {
+  name: string;
+  description: string;
+  aliases: string[];
+  needs_args: boolean;
+}
+
+/** Every text-inserting slash command, in menu order. */
+export function listInsertCommands(): Promise<InsertCommandDto[]> {
+  return invoke<InsertCommandDto[]>("list_insert_commands");
+}
+
+/**
+ * The text `name` inserts right now, resolved in the backend's
+ * `[calendar] timezone` — never the webview's `new Date()`, whose zone
+ * is not the user's journal day.
+ */
+export function resolveInsertCommand(name: string, args?: string): Promise<string> {
+  return invoke<string>("resolve_insert_command", { name, args });
+}
+
+/**
  * Deep-copy the template `name` under `targetBlockId`, applying built-in
  * variable substitution (`{{date}}`, `{{page}}`, …) and stamping
  * `from-template:: <slug>` on each root clone. Returns a refreshed

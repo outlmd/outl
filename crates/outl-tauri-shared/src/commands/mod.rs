@@ -57,6 +57,7 @@ pub mod block;
 pub mod boot;
 pub mod exec;
 pub mod history;
+pub mod insert;
 pub mod journal_days;
 pub mod open_with;
 pub mod page;

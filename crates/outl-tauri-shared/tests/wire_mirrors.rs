@@ -24,6 +24,7 @@ mod wire_pin;
 use std::collections::BTreeSet;
 
 use outl_shortcuts::{Chord, ChordSequence, Key, Modifiers, Support};
+use outl_tauri_shared::commands::insert::list_insert_commands;
 use outl_tauri_shared::commands::shortcuts::SupportDto;
 use outl_tauri_shared::commands::tasks::{OpenTasks, TaskHit};
 use outl_tauri_shared::plugin_dto::PluginKeybindingDto;
@@ -121,6 +122,17 @@ fn binding_matches_its_interface() {
         "Next day",
     );
     assert_wire_shape(&dto, "Binding", &[]);
+}
+
+/// `InsertCommandDto`'s fields are private, so the pin takes a row out
+/// of the command body — the value a client actually receives. The
+/// catalog is never empty, which `outl_actions::insert`'s own tests
+/// pin from the other side.
+#[test]
+fn insert_command_matches_its_interface() {
+    let rows = list_insert_commands();
+    let row = rows.first().expect("the insert catalog is never empty");
+    assert_wire_shape(row, "InsertCommandDto", &[]);
 }
 
 /// The lesser `Support` states carry the sentence shown to the user

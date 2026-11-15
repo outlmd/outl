@@ -212,6 +212,14 @@ Recently added — check these before writing a parallel template helper (catalo
 | Content-hash an uploaded file's bytes / build its workspace-relative link target / test whether a link points at a workspace asset / test whether a name is a safe asset basename (anti-traversal, the one owner the P2P transport validates peer-sent names through) — all pure, no filesystem | `outl_md::hash_bytes` / `outl_md::asset_rel_path` / `outl_md::is_asset_link` / `outl_md::is_safe_asset_name` (+ `outl_md::ASSETS_DIR`) | `crates/outl-md/src/asset.rs` |
 | Copy an uploaded file into `<root>/assets/<hash>.<ext>` (content-addressed, atomic, size-capped by `[assets] max_bytes`; `import_asset_bytes` takes already-in-memory bytes for a remote image downloaded during a Roam import) and resolve a `[name](assets/…)` link back to an on-disk path (traversal-safe) — the bytes never enter the op log, only the link does | `outl_actions::import_asset` / `outl_actions::import_asset_bytes` / `outl_actions::resolve_asset_path` | `crates/outl-actions/src/asset.rs` |
 
+Recently added — a slash command that **inserts text** (catalog: `docs/primitives-actions.md` → "Pages and journals").
+**Block any PR that spells a date format in a client.**
+`/date-today` lived in nineteen `SlashCommand` structs inside `outl-tui`, which made the terminal the owner of what it inserts and left every GUI with nothing to type.
+
+| Intent | Use this | File |
+|---|---|---|
+| The catalog of text-inserting slash commands — name, aliases, description, and the string each produces. `resolve` takes `now`, so a test fixes the instant; `needs_args` is the filter a client without an argument prompt applies | `outl_actions::insert::ALL` / `resolve` / `resolve_named` / `find` | `crates/outl-actions/src/insert.rs` |
+
 Recently added — ingesting an op written by someone else's clock (catalog: `docs/primitives-core.md` §1).
 **Block any PR that calls `HlcGenerator::observe` on an op that arrived from outside this device without gating it first.**
 `observe` is monotonic, so one op from the year 584 million raises the local clock and *keeps* it there; every op the device writes afterwards is past its peers' own skew gate and gets dropped by them, silently and permanently.

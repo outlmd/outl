@@ -181,7 +181,11 @@ Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoo
 | `[[…]]` | `RefSuggestPopup` | `search_pages`, the same command the `Cmd+P` picker calls | the page title, or the ISO slug for a journal |
 | `((…))` | `BlockSuggestPopup` | `search_blocks`, from disk, debounced ~150 ms | the ref handle `((blk-XXXXXX))` |
 | `#…` (word-initial, one word) | `RefSuggestPopup` | `search_pages` — a tag *is* a page | the page **slug**, never the title: `#` has no closer, so the first space would end the tag and leave the rest as prose |
-| word-initial `/` | slash menu | this client's own actions (`actionSlashCommands`, from the `Cmd+K` palette's list), plus `/upload`, the workspace's templates and every plugin command — all in `lib/slash-commands.ts` | runs the row: a native one through the dispatcher's handler, `instantiateTemplateAt` for `template: <name>`, the file picker for `upload`, else `pluginRun` |
+| word-initial `/` | slash menu | this client's own actions (`actionSlashCommands`, from the `Cmd+K` palette's list), the text inserters (`insertSlashCommands`, from `outl_actions::insert`), plus `/upload`, the workspace's templates and every plugin command — all in `lib/slash-commands.ts` | a text inserter splices its answer over the `/token` and stays in the block; everything else runs the row: a native one through the dispatcher's handler, `instantiateTemplateAt` for `template: <name>`, the file picker for `upload`, else `pluginRun` |
+
+**`/date-today` writes a date into the block; `/today` opens a journal.**
+The first family is `outl_actions::insert` ([`docs/tui.md`](tui.md#date--time-inserters) owns the table), and accepting one splices its text over the `/token` without leaving the block or committing it.
+`/date` is the one entry the desktop leaves out: the `/` trigger closes on the first space, so there is no way to type its argument here.
 
 **A slash command is called the same thing here and in the TUI.**
 The name comes from `outl_shortcuts::command_name`, which both clients read — `/today`, `/help`, `/run`, `/pin`, `/refer`, `/open`, `/quit`.

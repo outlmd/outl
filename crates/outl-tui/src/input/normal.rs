@@ -192,6 +192,17 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.go_today()?;
                 return Ok(false);
             }
+            // `g [` / `g ]` anchor on **today**; the bare `[` / `]`
+            // step from the open journal, so on a 2020 page they mean
+            // 2020 and these still mean yesterday / tomorrow.
+            ('g', KeyCode::Char('[')) => {
+                app.go_relative_day(-1)?;
+                return Ok(false);
+            }
+            ('g', KeyCode::Char(']')) => {
+                app.go_relative_day(1)?;
+                return Ok(false);
+            }
             ('g', KeyCode::Char('x')) => {
                 // `gx` = run the code block under the cursor.
                 // Mnemonic: "go execute".

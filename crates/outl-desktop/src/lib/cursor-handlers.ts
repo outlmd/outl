@@ -77,6 +77,17 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     await runOn(openJournalFor(slug));
   };
 
+  /** One day either side of **today**, ignoring the open page. The
+   *  anchor is the difference from `stepDay`, and it is the whole
+   *  reason `/yesterday` is not `PrevDay` under another name. */
+  const dayFromToday = async (step: (slug: string) => Promise<string>) => {
+    const today = await safeCall(todaySlug());
+    if (!today) return;
+    const slug = await safeCall(step(today));
+    if (!slug) return;
+    await runOn(openJournalFor(slug));
+  };
+
   return {
     // ── page-level navigation ────────────────────────────────────
     OpenToday: async () => {
@@ -84,6 +95,11 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     },
     PrevDay: () => stepDay(previousDay),
     NextDay: () => stepDay(nextDay),
+    // Anchored on today, where `PrevDay` / `NextDay` step from the
+    // open journal. On a 2020 page `[` means 2020; `/yesterday` has
+    // to mean yesterday there too.
+    OpenYesterday: () => dayFromToday(previousDay),
+    OpenTomorrow: () => dayFromToday(nextDay),
 
     // ── selection (vim j/k/↑/↓) ──────────────────────────────────
     //

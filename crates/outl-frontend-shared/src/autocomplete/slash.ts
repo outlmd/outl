@@ -77,16 +77,24 @@ export function detectSlashContext(
 }
 
 /**
- * Remove the `/query` token when a slash command is accepted, keeping any
- * text after the token. The block that hosted the command is left with its
- * non-command remainder (usually empty) and the caret at the open index.
+ * Replace the `/query` token with `text` when a slash command is
+ * accepted, keeping anything after the token and leaving the caret at
+ * the end of what was written.
+ *
+ * `text` is `""` for a command that *acts* (`/today` navigates), and
+ * the resolved string for one that *inserts* (`/date-today` writes
+ * `[[2026-11-18]]`). One function for both, because the span to
+ * replace is the same question either way — and a second walk over
+ * {@link SLASH_NAME_CHAR} is how an accept erases a different span
+ * than the popup matched on.
  */
 export function applySlashContext(
   value: string,
   ctx: SlashContext,
+  text = "",
 ): PairCompletion {
   let end = ctx.openIndex + 1;
   while (end < value.length && SLASH_NAME_CHAR.test(value[end])) end++;
-  const next = value.slice(0, ctx.openIndex) + value.slice(end);
-  return { value: next, caret: ctx.openIndex };
+  const next = value.slice(0, ctx.openIndex) + text + value.slice(end);
+  return { value: next, caret: ctx.openIndex + text.length };
 }

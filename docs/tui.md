@@ -372,6 +372,7 @@ Use the commands when you know the key, the overlay when you don't.
 
 These write text **at the cursor** (Insert mode only).
 They skip the auto-commit step the other commands do, so your in-flight edit stays alive while the text lands.
+The names and the strings they produce come from `outl_actions::insert`, shared with the desktop, so `/date-today` writes the same thing in a terminal and in the app.
 
 | Command | Aliases | Inserts |
 |---------|---------|---------|

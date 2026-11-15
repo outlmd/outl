@@ -4,7 +4,9 @@ import type { PageMeta, PluginCommand } from "@outl/shared/api/types";
 import {
   type BlockHit,
   type EmojiHit,
+  listInsertCommands,
   listTemplates,
+  resolveInsertCommand,
   openRef,
   pluginList,
   searchBlocks,
@@ -33,6 +35,8 @@ import {
   assetSlashCommands,
   rankSlashCommands,
   templateSlashCommands,
+  NATIVE_INSERT_PLUGIN_ID,
+  insertSlashCommands,
 } from "../lib/slash-commands";
 
 /**
@@ -148,12 +152,14 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
   let fetchedSlashCommands: PluginCommand[] | null = null;
   async function ensureSlashCommands(): Promise<PluginCommand[]> {
     if (!fetchedSlashCommands) {
-      const [plugins, templates] = await Promise.all([
+      const [plugins, templates, inserts] = await Promise.all([
         pluginList().catch(() => []),
         listTemplates().catch(() => []),
+        listInsertCommands().catch(() => []),
       ]);
       fetchedSlashCommands = [
         ...assetSlashCommands(),
+        ...insertSlashCommands(inserts),
         ...templateSlashCommands(templates),
         ...plugins,
       ];
@@ -425,10 +431,51 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
     ta.focus();
   }
 
-  /** Accept a slash command: strip the `/query` token from the block,
-   *  commit the cleaned text, then hand the run to the parent (which
-   *  owns `pluginRun` + view/overlay application, same as the palette). */
+  /** Resolve a text-inserting command and splice its answer over the
+   *  `/token`.
+   *
+   *  The text comes from the backend, which reads the configured
+   *  `[calendar] timezone`; a `new Date()` here would be the webview's
+   *  zone, which is not the user's journal day. The trigger is
+   *  re-detected after the round-trip because the caret can move while
+   *  it is in flight, and the block is **not** committed — the user is
+   *  still typing, and this is a splice like any keystroke. */
+  async function acceptInsertCommand(name: string) {
+    let text: string;
+    try {
+      text = await resolveInsertCommand(name);
+    } catch {
+      // The catalog refuses with its own wording, but a date command
+      // with no argument cannot reach that path. Close rather than
+      // leave a popup over a block nothing is going to change.
+      return closeSuggest();
+    }
+    const ta = deps.textarea();
+    if (!ta) return closeSuggest();
+    const ctx = detectSlashContext(ta.value, ta.selectionStart ?? 0);
+    if (!ctx) return closeSuggest();
+    const completion = applySlashContext(ta.value, ctx, text);
+    deps.setText(completion.value);
+    ta.value = completion.value;
+    ta.setSelectionRange(completion.caret, completion.caret);
+    closeSuggest();
+    ta.focus();
+  }
+
+  /** Accept a slash command.
+   *
+   *  Two shapes, and the difference is whether the `/query` token is
+   *  replaced by something. A command that **inserts** (`/date-today`)
+   *  resolves its text first and splices it over the token, leaving
+   *  the caret after it and never leaving the block. A command that
+   *  **acts** (`/today`, a plugin) clears the token, commits the
+   *  cleaned text and hands the run to the parent — which owns
+   *  `pluginRun` + view/overlay application, same as the palette. */
   function acceptSlashCommand(cmd: PluginCommand) {
+    if (cmd.plugin_id === NATIVE_INSERT_PLUGIN_ID) {
+      void acceptInsertCommand(cmd.command_id);
+      return;
+    }
     const ta = deps.textarea();
     if (!ta) return;
     const ctx = detectSlashContext(ta.value, ta.selectionStart ?? 0);

@@ -64,6 +64,8 @@ pub fn command_name(action: Action) -> &'static str {
         // `today` is the TUI's `TodayCommand`, and the reason this
         // module exists.
         Action::OpenToday => "today",
+        Action::OpenYesterday => "yesterday",
+        Action::OpenTomorrow => "tomorrow",
         Action::PrevDay => "prev-day",
         Action::NextDay => "next-day",
         Action::SelectionDown => "selection-down",

@@ -60,6 +60,14 @@ vi.mock("@outl/shared/api/commands", () => ({
   searchPages: vi.fn().mockResolvedValue([]),
   searchPersons: vi.fn().mockResolvedValue([]),
   listTemplates: vi.fn().mockResolvedValue([]),
+  // The text-inserting half of the menu (`/date-today`), from
+  // `outl_actions::insert`. Two rows is enough to pin that the
+  // `needs_args` one is filtered out.
+  listInsertCommands: vi.fn().mockResolvedValue([
+    { name: "date-today", description: "Insert today's journal ref", aliases: ["dt"], needs_args: false },
+    { name: "date", description: "Insert a journal ref by offset", aliases: [], needs_args: true },
+  ]),
+  resolveInsertCommand: vi.fn().mockResolvedValue("[[2026-11-18]]"),
 }));
 vi.mock("@outl/shared/plugins/transformer-registry", () => ({
   runTransform: vi.fn(),
@@ -213,6 +221,47 @@ describe("the inline /command menu", () => {
     await settle();
 
     expect(openToday).toHaveBeenCalled();
+  });
+
+  /**
+   * The defect this file's `/date-today` half exists for: the menu
+   * listed the command and accepting it put nothing in the block,
+   * because every row was treated as something to *run*. A
+   * text-inserting row splices its answer over the `/token` instead,
+   * and never leaves the block.
+   */
+  it("writes the date into the block instead of running something", async () => {
+    const { host, ta } = mountEditing("");
+    ta.setSelectionRange(0, 0);
+    for (const ch of "/date-today") typeChar(ta, ch);
+    await settle();
+
+    const row = Array.from(host.querySelectorAll('[role="option"] button')).find(
+      (b) => b.textContent?.startsWith("/date-today"),
+    );
+    row?.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+    await settle();
+
+    expect(ta.value).toBe("[[2026-11-18]]");
+    expect(ta.selectionStart).toBe("[[2026-11-18]]".length);
+  });
+
+  /**
+   * `/date +3d` is unreachable here — the `/` trigger closes on the
+   * first space — so a row for it could only ever fail. The TUI keeps
+   * the command, because its `:` palette collects the argument.
+   */
+  it("leaves out a command it has no way to pass an argument to", async () => {
+    const { host, ta } = mountEditing("");
+    ta.setSelectionRange(0, 0);
+    for (const ch of "/date") typeChar(ta, ch);
+    await settle();
+
+    const rows = rowsOf(host);
+    expect(rows.some((r) => r.startsWith("/date-today"))).toBe(true);
+    expect(rows.some((r) => r.startsWith("/dateInsert a journal ref"))).toBe(false);
   });
 
   /**

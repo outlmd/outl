@@ -310,6 +310,8 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("[", Mode::Normal, Action::PrevDay),
     ("]", Mode::Normal, Action::NextDay),
     ("g j", Mode::Normal, Action::OpenToday),
+    ("g [", Mode::Normal, Action::OpenYesterday),
+    ("g ]", Mode::Normal, Action::OpenTomorrow),
     ("g d", Mode::Normal, Action::DeletePage),
     ("g r", Mode::Normal, Action::InsertRemind),
     ("g Shift+r", Mode::Normal, Action::InsertRemindNag),

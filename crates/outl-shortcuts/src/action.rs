@@ -43,6 +43,16 @@ pub enum Action {
     // ── navigation ───────────────────────────────────────────────
     /// Open today's journal.
     OpenToday,
+    /// Open yesterday's journal.
+    ///
+    /// Anchored on **today**, unlike [`Action::PrevDay`], which steps
+    /// back from whatever journal is open. On a 2020 page `PrevDay`
+    /// means 2020; this always means the day before today.
+    OpenYesterday,
+    /// Open tomorrow's journal. The forward twin of
+    /// [`Action::OpenYesterday`], and anchored on today for the same
+    /// reason.
+    OpenTomorrow,
     /// Open the previous day's journal (only meaningful on a journal page).
     PrevDay,
     /// Open the next day's journal.
@@ -319,6 +329,8 @@ impl Action {
         Action::ToggleFocusMode,
         Action::Quit,
         Action::OpenToday,
+        Action::OpenYesterday,
+        Action::OpenTomorrow,
         Action::PrevDay,
         Action::NextDay,
         Action::SelectionDown,
@@ -418,6 +430,8 @@ mod all_tests {
             Action::ToggleFocusMode => "ToggleFocusMode",
             Action::Quit => "Quit",
             Action::OpenToday => "OpenToday",
+            Action::OpenYesterday => "OpenYesterday",
+            Action::OpenTomorrow => "OpenTomorrow",
             Action::PrevDay => "PrevDay",
             Action::NextDay => "NextDay",
             Action::SelectionDown => "SelectionDown",
@@ -506,14 +520,14 @@ mod all_tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_83,
-            "Action::ALL has {} entries but the enum has {EXPECTED_83} variants \
-             — add the new variant to Action::ALL (and bump EXPECTED_83)",
+            EXPECTED_85,
+            "Action::ALL has {} entries but the enum has {EXPECTED_85} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_85)",
             names.len(),
         );
     }
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_83: usize = 83;
+    const EXPECTED_85: usize = 85;
 }
