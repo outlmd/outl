@@ -350,7 +350,7 @@ mod tests {
         ] {
             let out = resolve_named(name, "", at(9, 0)).unwrap();
             assert_eq!(weekday_of(&out), Some(want), "/{name} produced {out}");
-            assert!(out > "[[2026-11-18]]".to_string(), "/{name} is not ahead");
+            assert!(out.as_str() > "[[2026-11-18]]", "/{name} is not ahead");
         }
     }
 
