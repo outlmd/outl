@@ -888,9 +888,11 @@ The TUI declares the gap rather than guessing — a permanent behaviour, recorde
 
 ## App icon
 
-One master, `assets/source-icon.png`, and one generator, `scripts/gen-icons.py`.
-Everything else under `assets/` is generated from it: the inset macOS master, the opaque square iOS and
-the App Store take, and the monochrome variant.
+The source is the geometry of the outl mark: `MARK_BODY` and `MARK_TIP` on a 91x128 grid in `scripts/gen-icons.py`.
+Every master is drawn from it as SVG and rasterised with resvg: `assets/source-icon.png`, `assets/logo.png`,
+`assets/app-store-icon-1024.png`, `assets/macos-icon-1024.png` and `assets/icon-mono-1024.png`.
+`assets/brand/` exports the same geometry as plain SVG for use outside the repo.
+The site keeps the same numbers in `src/lib/brand.js` of outlmd/outl-site.
 
 The platforms do not want the same picture, which is the reason a generator exists rather than a copy.
 macOS draws app icons on a 1024 canvas where the tile occupies 824 and the rest is transparent margin, so
@@ -903,6 +905,14 @@ bleed.
 iOS and the App Store take an opaque square with no alpha channel at all, because the OS applies its own
 mask and an icon that arrives pre-rounded gets rounded twice.
 
+Android takes an adaptive icon: a gradient background layer and the white mark as the foreground layer.
+The mark is sized to stay inside the 66dp guaranteed area of the 108dp canvas.
+A monochrome layer is added, which Android 13+ tints for themed icons.
+The legacy `ic_launcher` and `ic_launcher_round` bitmaps remain for launchers older than Android 8.
+All of it, including the XML layers, is written by the generator.
+
+To regenerate, run `uv run --with pillow --with resvg-py scripts/gen-icons.py`, then `python3 scripts/check-icons.py`.
+
 **The generated sets stay inside the client that ships them**, and the duplication is deliberate rather
 than unresolved.
 The two Tauri sets are byte-identical and `scripts/check-icons.py` fails in CI if they stop being, which
@@ -913,7 +923,7 @@ these files are consumed by Xcode (`Assets.xcassets`), Gradle (`mipmap-*`), a we
 (`outl-mobile/public/`) and the README, none of which can reference a Rust crate's directory.
 The masters already live one level broader than that, at the repo root, which is the scope that covers
 every consumer.
-Two copies of a generated artifact with a check on them is not two sources of truth; the master is, and
+Two copies of a generated artifact with a check on them is not two sources of truth; the mark's geometry is, and
 there is one.
 
 ## Platform divergence, and why each one exists
