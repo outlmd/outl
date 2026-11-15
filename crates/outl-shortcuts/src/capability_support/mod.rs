@@ -78,6 +78,27 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             mobile: Full,
         },
 
+        // Desktop and mobile both call `rename_page` (sidebar row
+        // action and page header on the desktop, the page switcher's
+        // long-press sheet on mobile). The TUI has no rename surface;
+        // the terminal route is `outl page rename`, which is also how
+        // a terminal user renames onto a taken name (`--merge`).
+        Capability::PageRename => ClientSupport {
+            tui: Missing(why::NO_TUI_PAGE_RENAME),
+            desktop: Full,
+            mobile: Full,
+        },
+
+        // Same two GUI surfaces as `PageRename`, started from the
+        // merge side (a target picker and a mandatory confirm). The
+        // TUI's `/merge <page>` (`commands::builtins::MergeCommand`,
+        // confirmed with y/n) runs the same `merge_pages`.
+        Capability::PageMerge => ClientSupport {
+            tui: Full,
+            desktop: Full,
+            mobile: Full,
+        },
+
         // Desktop `PluginMarketplace.tsx` and mobile `PluginSheet.tsx`
         // ("Browse" tab) both fetch the official registry and install
         // from it. The TUI's plugin settings overlay only configures
@@ -328,16 +349,6 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
-        // The TUI's `/merge <page>` (`commands::builtins::MergeCommand`,
-        // confirmed with y/n) runs `outl_actions::merge_pages` and
-        // projects what it touched. The two GUI clients have no surface
-        // over that function yet: the CLI and MCP reach it as
-        // `outl page merge`, which is why both nudges name a way there.
-        Capability::PageMerge => ClientSupport {
-            tui: Full,
-            desktop: Missing(why::NO_DESKTOP_PAGE_MERGE),
-            mobile: Missing(why::NO_MOBILE_PAGE_MERGE),
-        },
     }
 }
 
@@ -391,7 +402,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 21, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 22, "Capability::ALL changed size");
     }
 
     #[test]

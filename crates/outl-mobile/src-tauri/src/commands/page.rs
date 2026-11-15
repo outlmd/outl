@@ -13,6 +13,7 @@ use outl_tauri_shared::commands::page as shared;
 use outl_tauri_shared::helpers::{with_ws, with_ws_mut};
 
 outl_tauri_shared::page_commands!(crate::state::AppState);
+outl_tauri_shared::page_merge_commands!(crate::state::AppState);
 
 /// Open whatever a `[[ref]]` / `((block-ref))` points at.
 #[tauri::command]

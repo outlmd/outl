@@ -1619,7 +1619,6 @@ export function Journal() {
           setErrorRetry(null);
         }}
       />
-
       <PageSwitcher
         open={switcherOpen()}
         currentSlug={view()?.page.slug ?? null}
@@ -1627,6 +1626,7 @@ export function Journal() {
         onPick={handlePickPage}
         onJumpToBlock={handleJumpToBlock}
         onAction={(a) => paletteHandlers()[a]()}
+        onNotice={(m) => (setErrorRetry(null), setError(m))}
       />
 
       <TasksSheet

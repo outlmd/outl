@@ -9,7 +9,6 @@ import {
 import type { PageMeta } from "@outl/shared/api/types";
 import {
   type BlockHit,
-  deletePage,
   listPages,
   searchBlocks,
   searchPages,
@@ -28,6 +27,12 @@ import { PageGlyph } from "@outl/shared/icons";
 import { createSheetDrag } from "../lib/sheet-drag";
 import { MOBILE_ACTIONS, type MobileAction } from "../lib/palette-actions";
 import { useKeyboardInset } from "../lib/viewport";
+import {
+  MergeBanner,
+  PageActionOverlays,
+  createPageActions,
+  longPressHandlers,
+} from "./PageSwitcher.page-actions";
 
 interface PageSwitcherProps {
   open: boolean;
@@ -40,6 +45,9 @@ interface PageSwitcherProps {
   onJumpToBlock: (hit: BlockHit) => void;
   /** Runs a palette action; the sheet closes first. */
   onAction?: (action: MobileAction) => void;
+  /** A rename or merge finished: the summary to show (lines joined by
+   *  `\n`, property conflicts included). The caller owns the toast. */
+  onNotice?: (message: string) => void;
 }
 
 /** Debounced like the desktop's palette (`Picker.tsx`): per call,
@@ -72,10 +80,16 @@ const EXPANDED_STEP = 25;
  * than a highlighted row somewhere in one. `Enter` opens the first row,
  * swipe down on the handle dismisses.
  *
- * Long-press a **page** row (not a journal) to surface a delete
- * confirmation. Journals are excluded: deleting a daily note by
- * accident from the picker would be a hostile surprise, and there's no
- * trash UI to recover from today.
+ * Long-press a **page** row (not a journal) to open its actions:
+ * rename, merge into another page, delete. Journals are excluded:
+ * deleting, renaming or merging a daily note by accident from the
+ * picker would be a hostile surprise, and the backend refuses a
+ * journal as the source of either.
+ *
+ * "Merge into..." turns this same sheet into a target picker (same
+ * search box, pages only, the source left out). Merge always asks for
+ * confirmation; a rename onto a name that is taken asks the same
+ * question, and either answer other than "Merge" writes nothing.
  */
 export function PageSwitcher(props: PageSwitcherProps) {
   const [query, setQuery] = createSignal("");
@@ -83,6 +97,16 @@ export function PageSwitcher(props: PageSwitcherProps) {
   const [blockHits, setBlockHits] = createSignal<BlockHit[]>([]);
   // Rows each section has been grown by, one `EXPANDED_STEP` per "N more" tap.
   const [grown, setGrown] = createSignal<ReadonlyMap<PaletteSection, number>>(new Map());
+  // Rename / merge / delete of one page, and the merge target picking mode.
+  const actions = createPageActions({
+    get open() {
+      return props.open;
+    },
+    onPick: (slug, kind) => props.onPick(slug, kind),
+    onNotice: (message) => props.onNotice?.(message),
+    reload: () => reloadPages(),
+    clearQuery: () => setQuery(""),
+  });
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   // A slower, older search must not overwrite a newer one.
   let searchToken = 0;
@@ -104,6 +128,7 @@ export function PageSwitcher(props: PageSwitcherProps) {
   createEffect(() => {
     const q = query().trim();
     const open = props.open;
+    const picking = actions.mergeSource() !== null;
     const token = ++searchToken;
     clearTimeout(searchTimer);
     setGrown(new Map());
@@ -117,7 +142,8 @@ export function PageSwitcher(props: PageSwitcherProps) {
     if (!q) return void loadPages(q, token);
     searchTimer = setTimeout(() => {
       void loadPages(q, token);
-      if (q.length < BLOCK_QUERY_MIN) return;
+      // Picking a merge target is about pages only.
+      if (picking || q.length < BLOCK_QUERY_MIN) return;
       void searchBlocks(q)
         .then((hits) => {
           if (token === searchToken) setBlockHits(hits);
@@ -153,14 +179,15 @@ export function PageSwitcher(props: PageSwitcherProps) {
     // Pinned pages surface first (RFC 0254 phase 4b, `TogglePin`) —
     // `Array.prototype.sort` is stable (ES2019+), so everything else
     // keeps the backend's ranking.
-    const ranked = [...pages()].sort(
-      (a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false),
-    );
+    const source = actions.mergeSource();
+    const ranked = [...pages()]
+      .filter((p) => p.slug !== source?.slug)
+      .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
     return paletteResults({
       query: query(),
       pages: ranked,
-      blocks: blockHits(),
-      actions: props.onAction ? [...MOBILE_ACTIONS] : [],
+      blocks: source ? [] : blockHits(),
+      actions: props.onAction && !source ? [...MOBILE_ACTIONS] : [],
       limits: {
         pages: limit("pages"),
         tasks: limit("tasks"),
@@ -186,7 +213,7 @@ export function PageSwitcher(props: PageSwitcherProps) {
   function choose(item: PaletteItem) {
     switch (item.kind) {
       case "page":
-        props.onPick(item.page.slug, item.page.kind);
+        actions.openPage(item.page);
         break;
       case "action":
         // The rows come from `MOBILE_ACTIONS`, typed to `MobileAction`.
@@ -204,39 +231,12 @@ export function PageSwitcher(props: PageSwitcherProps) {
   }
 
   /**
-   * Delete a page after confirmation. Journals are rejected at the
-   * call site (long-press only fires for `kind === "page"`). The
-   * shared `deletePage` wrapper calls the backend, which returns
-   * today's journal — we pass it to `onPick` so the caller navigates
-   * away from the deleted page, then refetch the list to drop the
-   * row from the picker.
-   */
-  async function handleDelete(p: PageMeta) {
-    const label = p.title || p.slug;
-    // `window.confirm` maps to a native dialog on iOS WKWebView —
-    // a real "Delete / Cancel" sheet, not a web alert.
-    const ok = window.confirm(
-      `Delete page "${label}"?\n\nThis removes the page and all its blocks. ` +
-        `The deletion syncs to paired devices.`,
-    );
-    if (!ok) return;
-    try {
-      const view = await deletePage(p.slug);
-      props.onPick(view.page.slug, view.page.kind);
-      reloadPages();
-    } catch (e) {
-      // Surface as a brief alert — the picker is already modal.
-      window.alert(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  /**
    * Pin / unpin a page (`TogglePin`, RFC 0254 phase 4b). Journals are
    * excluded at the call site — `toggle_pin` refuses them backend-side
    * too (a journal auto-rotates daily and would dilute the pinned
    * group with date-shaped junk). Refetches rather than patching the
    * `pages` resource in place: the list is small and a full re-list
-   * keeps this in one code path with `handleDelete` above.
+   * keeps this in one code path with the delete in `PageSwitcher.page-actions`.
    */
   async function handleTogglePin(p: PageMeta) {
     try {
@@ -245,69 +245,6 @@ export function PageSwitcher(props: PageSwitcherProps) {
     } catch (e) {
       window.alert(e instanceof Error ? e.message : String(e));
     }
-  }
-
-  /**
-   * Long-press detector for page rows (not journals). iOS context
-   * menus fire on a sustained touch (~500ms) without significant
-   * movement — the same gesture UIKit uses for interactive menus.
-   * Returns Solid `onPointer*` handlers to spread onto the row.
-   */
-  function longPressHandlers(p: PageMeta) {
-    if (p.kind === "journal") return {};
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let start: { x: number; y: number } | undefined;
-    // Set when the long-press fires so the subsequent `click` event
-    // (the browser always emits one when the finger lifts, even
-    // after a sustained hold) is suppressed. Without this, both
-    // `handleDelete` and `props.onPick` fire on the same gesture.
-    let suppressedClick = false;
-    const LONG_PRESS_MS = 500;
-    const MOVE_TOLERANCE = 10;
-    return {
-      onPointerDown(e: PointerEvent) {
-        start = { x: e.clientX, y: e.clientY };
-        timer = setTimeout(() => {
-          timer = undefined;
-          suppressedClick = true;
-          void handleDelete(p);
-        }, LONG_PRESS_MS);
-      },
-      onPointerMove(e: PointerEvent) {
-        if (!start || !timer) return;
-        const dx = Math.abs(e.clientX - start.x);
-        const dy = Math.abs(e.clientY - start.y);
-        if (dx > MOVE_TOLERANCE || dy > MOVE_TOLERANCE) {
-          clearTimeout(timer);
-          timer = undefined;
-        }
-      },
-      onPointerUp() {
-        if (timer) {
-          clearTimeout(timer);
-          timer = undefined;
-        }
-      },
-      onPointerCancel() {
-        if (timer) {
-          clearTimeout(timer);
-          timer = undefined;
-        }
-      },
-      // Solid ignores `onClickCapture`; `on:click` with `capture` is the
-      // way to run before the row's delegated `onClick`. Eats the click
-      // that follows a long-press so `onPick` doesn't also run.
-      "on:click": {
-        capture: true,
-        handleEvent(e: MouseEvent) {
-          if (suppressedClick) {
-            e.preventDefault();
-            e.stopPropagation();
-            suppressedClick = false;
-          }
-        },
-      },
-    };
   }
 
   /** One row of the sectioned list. `item` is a plain value (the `<For>`
@@ -320,8 +257,8 @@ export function PageSwitcher(props: PageSwitcherProps) {
         <div class="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => props.onPick(page.slug, page.kind)}
-            {...longPressHandlers(page)}
+            onClick={() => actions.openPage(page)}
+            {...(actions.mergeSource() ? {} : longPressHandlers(page, actions.openActions))}
             class="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left active:bg-(--color-outl-bg-elev)/60"
             classList={{
               "bg-(--color-outl-bg-elev)/40":
@@ -346,7 +283,7 @@ export function PageSwitcher(props: PageSwitcherProps) {
               (same "two buttons in one flex row" convention the
               desktop's backlink TODO toggle uses). Journals are
               excluded: `toggle_pin` refuses them backend-side. */}
-          <Show when={page.kind !== "journal"}>
+          <Show when={page.kind !== "journal" && !actions.mergeSource()}>
             <button
               type="button"
               aria-label={page.pinned ? "Unpin page" : "Pin page"}
@@ -497,7 +434,11 @@ export function PageSwitcher(props: PageSwitcherProps) {
               ref={searchInput}
               type="text"
               autofocus
-              placeholder="Search pages, tasks and blocks, > for actions"
+              placeholder={
+                actions.mergeSource()
+                  ? "Search for the page to merge into"
+                  : "Search pages, tasks and blocks, > for actions"
+              }
               value={query()}
               onInput={(e) => setQuery(e.currentTarget.value)}
               onFocus={() => setSearchFocused(true)}
@@ -557,6 +498,7 @@ export function PageSwitcher(props: PageSwitcherProps) {
             </button>
           </Show>
         </div>
+        <MergeBanner actions={actions} />
         <div class="ios-scroll flex-1 px-2 pb-4">
           <For each={results().items}>
             {(item, idx) => {
@@ -594,6 +536,7 @@ export function PageSwitcher(props: PageSwitcherProps) {
           </Show>
         </div>
       </div>
+      <PageActionOverlays actions={actions} />
     </Show>
   );
 }

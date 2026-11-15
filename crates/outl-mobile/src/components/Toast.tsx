@@ -29,13 +29,17 @@ export interface ToastProps {
 export function Toast(props: ToastProps): JSX.Element {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
+  // A summary with several lines (a merge report) has to show all of them,
+  // since a property conflict is the line the user most needs to read.
+  const multiline = () => (props.message ?? "").includes("\n");
+
   createEffect(() => {
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
     }
     if (!props.message) return;
-    const ms = props.autoDismissMs ?? 5000;
+    const ms = props.autoDismissMs ?? (multiline() ? 12000 : 5000);
     // If there's a retry, keep it pinned — the affordance is the
     // whole point of the toast.
     if (ms <= 0 || props.onRetry) return;
@@ -86,7 +90,8 @@ export function Toast(props: ToastProps): JSX.Element {
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           onTouchCancel={onTouchEnd}
-          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 rounded-full bg-(--color-outl-destructive)/95 px-4 py-2.5 text-(--color-outl-destructive-fg) shadow-[var(--shadow-capsule)] backdrop-blur-xl"
+          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 bg-(--color-outl-destructive)/95 px-4 py-2.5 text-(--color-outl-destructive-fg) shadow-[var(--shadow-capsule)] backdrop-blur-xl"
+          classList={{ "rounded-full": !multiline(), "rounded-3xl": multiline() }}
         >
           <svg
             width="18"
@@ -103,7 +108,10 @@ export function Toast(props: ToastProps): JSX.Element {
             <circle cx="12" cy="12" r="10" />
             <path d="M12 8v4M12 16h.01" />
           </svg>
-          <p class="flex-1 truncate text-[14px] leading-snug">
+          <p
+            class="flex-1 text-[14px] leading-snug"
+            classList={{ truncate: !multiline(), "whitespace-pre-line": multiline() }}
+          >
             {props.message}
           </p>
           <Show when={props.onRetry}>

@@ -307,6 +307,13 @@ export interface AppStateShape {
   todaySlug: string | null;
   /** Last error surfaced to the user (status line). */
   lastError: string | null;
+  /**
+   * What a page rename / merge did, one line per fact (blocks moved,
+   * links updated, each property conflict). Read by `<NoticeToast />`
+   * only; written by `lib/page-actions.ts`. A property conflict is data
+   * the user chose to drop without seeing it, so it has to be on screen.
+   */
+  notice: string[] | null;
 }
 
 const [state, setState] = createStore<AppStateShape>({
@@ -349,6 +356,7 @@ const [state, setState] = createStore<AppStateShape>({
   focusBlockId: null,
   dropTargetBlockId: null,
   lastError: null,
+  notice: null,
 });
 
 export { state as appState, setState as setAppState };

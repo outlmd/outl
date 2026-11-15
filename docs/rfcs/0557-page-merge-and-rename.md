@@ -119,7 +119,7 @@ Be precise about what is and is not true.
 This is the fix for the stolen backlinks, and it has a mirror.
 Someone who wrote `alias:: Beta` on `alpha` on purpose, to collect every `[[Beta]]` mention on `alpha`, no longer gets them there.
 They are listed under the page titled `Beta`, which is where navigation already sent the reader.
-Nothing on screen tells the author their alias went quiet: `alias_conflicts` exists for clients, and no client calls it in this change.
+Nothing on screen tells the author their alias went quiet: `alias_conflicts` exists for clients, and no client calls it, the GUI rename and merge included.
 `doctor`'s alias check names names shared between pages, which is a different question.
 
 **Rename now writes to other pages.**
@@ -159,11 +159,12 @@ These are real, they are recorded here so they are not discovered one at a time,
    This is how the CLI rename already behaved.
    It is now documented and pinned by `known_limit_reopening_the_old_slug_renames_the_page_back`, so a fix has to be deliberate.
    A merge has no such problem, because the merged-away root is trashed under its own slug.
-6. **Only the command line, the batch op and the MCP tool reach a merge.**
+6. **Every client reaches a merge.**
    `outl page merge <source> <target> --confirm`, `outl page rename --merge`, the batch op `page_merge` and the MCP tools `outl_page_merge` and `outl_page_rename` with `merge` are thin wrappers over `merge_pages` and `MergeReport`, and share one tail (`cmd/page_merge.rs::finish`).
    There is no `--dry-run`, because `merge_pages` applies its ops inside one batch and a preview would be a second implementation of the merge.
-   The TUI reaches it through `/merge <page>` (a typed target and a `y/n` prompt), and the capability catalog records `Capability::PageMerge` as `Missing` on the desktop and mobile apps, with the reason text owned by the catalog.
-   The TUI has no page rename, so there is no rename-onto-an-existing-name prompt there.
+   The TUI reaches it through `/merge <page>` (a typed target and a `y/n` prompt).
+   The desktop and mobile apps call `rename_page` and `merge_pages` (rename, a merge target picker, and a confirm when a rename lands on a taken name), composing the two themselves rather than calling `rename_or_merge` with `OnExisting::MergeInto`.
+   The TUI has no page rename, so there is no rename-onto-an-existing-name prompt there, and `outl_shortcuts::capability_support` records `PageRename` as missing in the TUI.
 7. **A title given to a rename that turns into a merge has nowhere to go.**
    The target keeps its own title.
 
@@ -184,13 +185,12 @@ These are real, they are recorded here so they are not discovered one at a time,
 
 ## Scope
 
-**Not covered: a desktop or mobile surface for merging pages.**
-The `outl page merge` command, the `page_merge` batch op, the MCP tool and the TUI's `/merge` exist.
-The graphical clients are separate changes over `merge_pages` and `MergeReport`, and each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
+**Not covered: a page rename in the TUI.**
+The `outl page merge` command, the `page_merge` batch op, the MCP tool, the TUI's `/merge` and the desktop and mobile rename and merge all exist over `merge_pages` and `MergeReport`, and each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
 
 **Not covered: showing a shadowed alias to the user.**
 `alias_conflicts` is the function a client calls.
-No client does yet.
+No client does yet, and the GUI change that added rename and merge deliberately left the alias warning out.
 
 **Not covered: fixing the renamed-page-flips-back limit.**
 It needs `open_or_create` to notice that the deterministic id is live under a different slug, and every caller of `page_id_from_slug` leans on the id being a function of the slug.

@@ -31,6 +31,24 @@ pub enum Capability {
     /// `TimelinePanel`, the page header's `⏱` button). Read-only —
     /// it shows the past, it does not restore it.
     PageHistory,
+    /// Renaming a page from the app: a text prompt, every `[[old]]` and
+    /// `#old` mention respelled in the same batch, and a confirm to
+    /// merge when the new name already belongs to another page.
+    ///
+    /// The route is `outl_actions::rename_page`, shared by every
+    /// surface. A journal cannot be renamed on any client: its slug is
+    /// its date.
+    PageRename,
+    /// Merging one page into another: pick or type the target,
+    /// confirm, and the source's blocks move under it with its links
+    /// rewritten and a summary of what moved and what conflicted
+    /// (RFC 0557).
+    ///
+    /// Distinct from [`Capability::PageRename`], which only reaches a
+    /// merge when the new name is taken. This one starts from the
+    /// merge. The route is `outl_actions::merge_pages`. A journal
+    /// cannot be the source.
+    PageMerge,
     /// Browsing the official plugin registry and installing from it
     /// (as opposed to configuring an already-installed plugin, which
     /// every client can do).
@@ -207,18 +225,6 @@ pub enum Capability {
     /// rather than `Full`. `docs/privacy.md` is disclosure too, and it
     /// is not in the product.
     CrashReportingDisclosure,
-    /// Folding one page into another: its blocks land under the
-    /// target, its properties and names carry over as aliases, and
-    /// every link that named it follows (RFC 0557).
-    ///
-    /// Distinct from deleting a page, which every client can do and
-    /// which leaves the links pointing at nothing. This keeps the
-    /// content and the links, and the source goes to the trash.
-    ///
-    /// The merge itself is `outl_actions::merge_pages`, one owner for
-    /// every client; this row is only whether the client has a way to
-    /// ask for it.
-    PageMerge,
 }
 
 impl Capability {
@@ -232,6 +238,8 @@ impl Capability {
     /// list exists to close (see `Action::ALL`'s identical contract).
     pub const ALL: &'static [Capability] = &[
         Capability::PageHistory,
+        Capability::PageRename,
+        Capability::PageMerge,
         Capability::PluginMarketplace,
         Capability::Calendar,
         Capability::Templates,
@@ -251,7 +259,6 @@ impl Capability {
         Capability::SlashCommandMenu,
         Capability::CrashReportingOptOut,
         Capability::CrashReportingDisclosure,
-        Capability::PageMerge,
     ];
 }
 
@@ -263,11 +270,13 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_21: usize = 21;
+    const EXPECTED_22: usize = 22;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
             Capability::PageHistory => "PageHistory",
+            Capability::PageRename => "PageRename",
+            Capability::PageMerge => "PageMerge",
             Capability::PluginMarketplace => "PluginMarketplace",
             Capability::Calendar => "Calendar",
             Capability::Templates => "Templates",
@@ -287,7 +296,6 @@ mod tests {
             Capability::SlashCommandMenu => "SlashCommandMenu",
             Capability::CrashReportingOptOut => "CrashReportingOptOut",
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
-            Capability::PageMerge => "PageMerge",
         }
     }
 
@@ -304,9 +312,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_21,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_21} variants \
-             (add the new variant to Capability::ALL and bump EXPECTED_21)",
+            EXPECTED_22,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_22} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_22)",
             names.len(),
         );
     }

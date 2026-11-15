@@ -164,6 +164,8 @@ the drift this RFC exists to prevent.
 | Capability | TUI | Desktop | Mobile |
 |---|---|---|---|
 | `PageHistory` | ❌ Page history isn't in the TUI — open the same page in the desktop app and use the ⏱ button to see what the op log recorded. | ✅ | ✅ |
+| `PageRename` | ❌ Renaming a page isn't in the TUI yet. Run `outl page rename <old> <new>` from a terminal, or rename it in the desktop or mobile app. Links to the page follow the new name. | ✅ | ✅ |
+| `PageMerge` | ✅ | ✅ | ✅ |
 | `PluginMarketplace` | ❌ Browsing and installing plugins from a marketplace isn't in the TUI — install by id from a terminal with `outl plugin install <id>`, or use the desktop or mobile app. | ✅ | ✅ |
 | `Calendar` | ⚠️ The TUI's month grid shows which days have journals but can't open one — press `[` / `]` to step a day, or open the quick switcher (Ctrl+P) and type the date (YYYY-MM-DD) to jump straight there. | ✅ | ✅ |
 | `Templates` | ✅ | ✅ | ✅ |
@@ -183,7 +185,6 @@ the drift this RFC exists to prevent.
 | `SlashCommandMenu` | ✅ | ✅ | ❌ Typing `/` doesn't open a command list on the phone yet — plugin commands are behind the plugins button in the top bar, and templates are under "Insert template" when you long-press a block. |
 | `CrashReportingOptOut` | ❌ Crash reporting is switched from the terminal here — run `outl telemetry off` to stop sending reports, or `outl telemetry status` to see where it stands. | ✅ | ✅ |
 | `CrashReportingDisclosure` | ❌ Crash reporting is on, and the terminal does not announce it the way the apps do — run `outl telemetry status` to see where it stands, or read the full list of what a report carries at outl.app/privacy. | ✅ | ✅ |
-| `PageMerge` | ✅ | ❌ Merging one page into another isn't in the desktop app yet: run `outl page merge <page> <into>` from a terminal, or use `/merge <page>` in the TUI. | ❌ Merging one page into another isn't on the phone yet: open this workspace on your computer and merge the pages there. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

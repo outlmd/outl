@@ -19,17 +19,22 @@
 //! (and should not) depend on.
 
 mod ts_parser;
+mod wire_fixtures;
 mod wire_pin;
 
 use std::collections::BTreeSet;
 
 use outl_shortcuts::{Chord, ChordSequence, Key, Modifiers, Support};
 use outl_tauri_shared::commands::insert::list_insert_commands;
+use outl_tauri_shared::commands::page_merge::{
+    MergePagesReply, MergePagesReport, PropertyConflictView, RenamePageReport,
+};
 use outl_tauri_shared::commands::shortcuts::SupportDto;
 use outl_tauri_shared::commands::tasks::{OpenTasks, TaskHit};
 use outl_tauri_shared::plugin_dto::PluginKeybindingDto;
 use outl_tauri_shared::state::{BlockHit, RefProjectionFailed};
 
+use wire_fixtures::page_view;
 use wire_pin::assert_wire_shape;
 
 // --- @outl/shared/api/commands.ts -----------------------------------------
@@ -82,6 +87,65 @@ fn open_tasks_match_their_interfaces() {
         tasks: vec![hit],
     };
     assert_wire_shape(&dto, "OpenTasks", &[]);
+}
+
+// --- @outl/shared/api/page-merge.ts ----------------------------------------
+//
+// `RenamePageReply` is a tagged union and is pinned in `wire_enums.rs`;
+// what is left here is the structs it and `MergePagesReply` carry.
+
+#[test]
+fn property_conflict_view_matches_its_interface() {
+    let dto = PropertyConflictView {
+        key: "status".into(),
+        kept: "active".into(),
+        dropped: "draft".into(),
+    };
+    assert_wire_shape(&dto, "PropertyConflictView", &[]);
+}
+
+#[test]
+fn rename_page_report_matches_its_interface() {
+    let dto = RenamePageReport {
+        old_slug: "alpha".into(),
+        old_title: "Alpha".into(),
+        rewritten_blocks: 3,
+        skipped_namespace_refs: 1,
+    };
+    assert_wire_shape(&dto, "RenamePageReport", &[]);
+}
+
+#[test]
+fn merge_pages_report_matches_its_interface() {
+    assert_wire_shape(&merge_report(), "MergePagesReport", &[]);
+}
+
+#[test]
+fn merge_pages_reply_matches_its_interface() {
+    let dto = MergePagesReply {
+        view: page_view(),
+        report: merge_report(),
+    };
+    assert_wire_shape(&dto, "MergePagesReply", &[]);
+}
+
+fn merge_report() -> MergePagesReport {
+    MergePagesReport {
+        source_slug: "draft".into(),
+        source_title: "Draft".into(),
+        target_slug: "main".into(),
+        target_title: "Main".into(),
+        moved_blocks: 2,
+        rewritten_blocks: 1,
+        skipped_namespace_refs: 0,
+        property_conflicts: vec![PropertyConflictView {
+            key: "status".into(),
+            kept: "active".into(),
+            dropped: "draft".into(),
+        }],
+        aliases_added: vec!["draft".into()],
+        already_merged: false,
+    }
 }
 
 // --- outl-desktop/src/lib/api.ts (the shortcut catalog) -------------------

@@ -148,5 +148,6 @@ pub mod capture;
 pub mod catalog;
 pub mod insert;
 pub mod merges;
+pub mod page_merge;
 pub mod telemetry;
 pub mod trash;

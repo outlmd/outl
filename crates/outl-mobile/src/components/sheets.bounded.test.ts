@@ -73,6 +73,7 @@ const SHEETS: Sheet[] = [
   { file: "TasksSheet.tsx", bound: "top-anchored" },
   { file: "PageSwitcher.tsx", bound: "top-anchored" },
   { file: "DevicesSheet.tsx", bound: "vh-cap" },
+  { file: "PageNameSheet.tsx", bound: "vh-cap" },
   {
     file: "PluginSheet.tsx",
     bound: "vh-cap",

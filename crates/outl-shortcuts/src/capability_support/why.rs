@@ -52,6 +52,15 @@ pub const TUI_TABLE_NO_SCROLL: &str =
      there, the columns just stop lining up. Widen the terminal, or open the page in the \
      desktop app.";
 
+/// The TUI has no rename surface. `outl page rename` does the same
+/// thing from a terminal (`outl_actions::rename_page`, links
+/// rewritten), and the MCP tool `outl_page_rename` is the same route
+/// for an agent. Onto a name another page owns it refuses unless
+/// given `--merge`.
+pub const NO_TUI_PAGE_RENAME: &str =
+    "Renaming a page isn't in the TUI yet. Run `outl page rename <old> <new>` from a \
+     terminal, or rename it in the desktop or mobile app. Links to the page follow the new name.";
+
 /// The TUI has no marketplace UI at all — installing an
 /// unlisted or registry plugin from inside the terminal client
 /// goes through the CLI, not a browse-and-tap surface.
@@ -238,18 +247,3 @@ pub const NO_SLASH_MENU_ON_THE_PHONE: &str =
 pub const DESKTOP_HOSTS_ONLY: &str =
     "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
      to join an existing workspace from a desktop, run `outl peer pair` in a terminal.";
-
-/// The desktop has no merge surface: `merge_pages` is reached today
-/// from the CLI (`outl page merge`, and `outl page rename --merge`),
-/// the MCP tools and the TUI's `/merge`. The terminal is on the same
-/// workspace, so the nudge names both routes rather than apologising.
-pub const NO_DESKTOP_PAGE_MERGE: &str =
-    "Merging one page into another isn't in the desktop app yet: run `outl page merge \
-     <page> <into>` from a terminal, or use `/merge <page>` in the TUI.";
-
-/// Mobile has no merge surface either, and no `outl` binary to point
-/// at: the honest route is the computer that shares the workspace, the
-/// same reason `NO_MOBILE_TRASH_SHEET` does not name a command.
-pub const NO_MOBILE_PAGE_MERGE: &str =
-    "Merging one page into another isn't on the phone yet: open this workspace on your \
-     computer and merge the pages there.";

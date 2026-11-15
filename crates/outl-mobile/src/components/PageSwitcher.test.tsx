@@ -259,6 +259,10 @@ describe("PageSwitcher: page rows", () => {
     await vi.advanceTimersByTimeAsync(600);
     row.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     row.click();
+    // The long-press opens the page's actions; delete is one of them
+    // and still asks before it writes anything.
+    rowContaining("Delete page").click();
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Inbox"));
     // The click that follows a long-press must not also open the page.

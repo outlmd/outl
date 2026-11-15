@@ -88,6 +88,26 @@ Journals are excluded, so only regular pages show the affordance.
 The `g d` chord ("go delete", Normal mode) routes through the `DeletePage` handler and runs the same flow.
 The backend is the shared `outl_tauri_shared::commands::page::delete_page` body, with no desktop-specific logic.
 
+## Renaming and merging a page
+
+Two more page actions sit beside the sidebar's delete `×`: **Rename page...** and **Merge into...**.
+Journals are excluded, so only regular pages show them: a journal's slug is its date.
+Both call the shared `outl_actions` functions through the `rename_page` / `merge_pages` Tauri commands, so every link to the page is rewritten in the same batch as the move ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
+
+- **Rename** opens a text prompt prefilled with the current title.
+  When the new name already belongs to another page, nothing is written yet and a confirm asks "A page named X already exists. Merge this page into X?".
+  Accepting runs the merge, cancelling leaves both pages as they were.
+- **Merge into...** opens the page picker, which leaves out the page itself.
+  It always asks for a confirmation before anything is written, because a merge has no undo.
+- **Afterwards** the app opens the resulting page (the renamed one, or the merge target) and shows a summary toast: blocks moved, links updated, and one line per property both pages held with different values (the target's value is kept, the dropped one is named).
+
+There is **no undo** for either action, and a merge in particular does not come apart.
+The blocks stay under the target, the links stay rewritten and the old name stays as an alias: see "The opposite direction" in the RFC.
+
+The two actions have no chord on any client.
+`Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md): rename is missing in the TUI, merge is full on every client.
+The warning about an alias that another page shadows (`alias_conflicts`) is deliberately not part of this change, so no GUI client shows it yet.
+
 ## Backlinks and nested pages below the outline
 
 `components/PageSections.tsx` is what `OutlineView` mounts below the outline: `<InlineBacklinks />`, then `<NestedPages />` (`@outl/shared/namespace`, issue #275).

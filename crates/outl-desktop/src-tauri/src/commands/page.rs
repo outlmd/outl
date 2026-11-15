@@ -10,6 +10,7 @@ use crate::state::{AppState, PageView};
 use outl_tauri_shared::commands::page as shared;
 
 outl_tauri_shared::page_commands!(crate::state::AppState);
+outl_tauri_shared::page_merge_commands!(crate::state::AppState);
 
 /// Open whatever a `[[ref]]` / `((block-ref))` points at.
 #[tauri::command]
