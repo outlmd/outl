@@ -14,6 +14,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `testflight.yml` reads the pair out of the IPA before uploading and fails on the one incoherent combination, so a mismatch costs seconds instead of a 70MB transfer and a refusal that `altool` reports with `exit 0`.
   Which export exception outl's iroh/QUIC over rustls + ring falls under is a regulatory question, so neither the project file nor the docs answers it; [`docs/ios-platform.md`](docs/ios-platform.md) carries the three states and how to leave this one.
 
+### Changed
+
+- **The app icon is the new outl mark on every client.**
+  macOS, Windows, Linux, iOS, Android, both webviews, the Raycast extension and the DMG backdrop all carry the octopus mark on the violet tile.
+  `scripts/gen-icons.py` now draws every master from the mark's vector geometry with resvg instead of reading a hand-exported PNG, so there is one source for the picture; `assets/brand/` carries the same geometry as plain SVG.
+  Android gains a real adaptive icon: a gradient background, the white mark inside the safe zone, and a monochrome layer for themed icons.
+  The 1024 App Store slot `AppIcon-512@2x.png` is now regenerated too, which the old filename match skipped.
+
 
 ### Fixed
 
