@@ -80,3 +80,10 @@ jobs:
       # suite fails if the pin script or the publish job stops doing that.
       - name: publish dep pin
         run: python3 scripts/tests/test_pin_workspace_deps.py
+
+      # The Discussions mirror posts to a public forum from untrusted text.
+      # Its suite pins the guarantees that matter there: no payload can ping
+      # anyone, a post never exceeds Discord's limits, and a comment never
+      # opens a second thread for a discussion that already has one.
+      - name: discussions mirror
+        run: python3 .github/scripts/test_discussions_to_discord.py
