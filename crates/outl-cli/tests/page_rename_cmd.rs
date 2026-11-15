@@ -92,7 +92,10 @@ fn rename_rewrites_refs_and_tags_on_other_pages_and_moves_the_file() {
     assert!(env["data"]["affected_refs"].is_array());
 
     let alpha = page_md(&ws, "alpha");
-    assert!(alpha.contains("see [[gamma]] and #gamma for more"), "{alpha}");
+    assert!(
+        alpha.contains("see [[gamma]] and #gamma for more"),
+        "{alpha}"
+    );
     assert!(
         alpha.contains("`[[beta]]`"),
         "a code span is not a mention and stays as written: {alpha}"
@@ -118,7 +121,10 @@ fn rename_onto_an_existing_page_is_slug_conflict_and_says_merge_is_possible() {
     let env: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(env["error"]["code"], "SLUG_CONFLICT");
     let message = env["error"]["message"].as_str().unwrap_or_default();
-    assert!(message.contains("merge"), "message must offer a merge: {message}");
+    assert!(
+        message.contains("merge"),
+        "message must offer a merge: {message}"
+    );
 
     // Nothing moved.
     assert!(ws.path().join("pages/beta.md").exists());

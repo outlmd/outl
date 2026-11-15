@@ -71,8 +71,7 @@ pub(super) fn plan(
 
 /// A value's text when it says something: blank counts as absent.
 fn meaningful(workspace: &Workspace, node: NodeId, key: &str) -> Option<String> {
-    read_text_prop(workspace, node, key)
-        .filter(|text| !text.trim().is_empty())
+    read_text_prop(workspace, node, key).filter(|text| !text.trim().is_empty())
 }
 
 fn merge_scalar(

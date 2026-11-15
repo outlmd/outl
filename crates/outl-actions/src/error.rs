@@ -413,7 +413,9 @@ pub enum ActionError {
     /// A rename wants a slug that another page already owns. Carries
     /// the slug of that page so a caller can offer to merge into it
     /// instead of failing.
-    #[error("page `{existing}` already exists, so it cannot be a rename target; merge into it instead")]
+    #[error(
+        "page `{existing}` already exists, so it cannot be a rename target; merge into it instead"
+    )]
     PageExists {
         /// Slug of the page that already holds the name.
         existing: String,

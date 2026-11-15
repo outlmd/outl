@@ -192,5 +192,8 @@ fn a_name_holding_a_comma_is_written_in_brackets_and_reads_back_whole() {
         prop(&w, beta, "alias").unwrap(),
         "Bee, alpha, [[Alpha, the first]]"
     );
-    assert_eq!(report.target.aliases, vec!["Bee", "alpha", "Alpha, the first"]);
+    assert_eq!(
+        report.target.aliases,
+        vec!["Bee", "alpha", "Alpha, the first"]
+    );
 }

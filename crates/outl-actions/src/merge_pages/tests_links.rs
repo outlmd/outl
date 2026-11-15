@@ -131,8 +131,14 @@ fn an_old_name_written_after_the_merge_is_a_backlink_of_the_target() {
         .into_iter()
         .map(|b| b.block_id)
         .collect();
-    assert!(found.contains(&by_title.to_string()), "title alias: {found:?}");
-    assert!(found.contains(&by_slug.to_string()), "slug alias: {found:?}");
+    assert!(
+        found.contains(&by_title.to_string()),
+        "title alias: {found:?}"
+    );
+    assert!(
+        found.contains(&by_slug.to_string()),
+        "slug alias: {found:?}"
+    );
 }
 
 #[test]

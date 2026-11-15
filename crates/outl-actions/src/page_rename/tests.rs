@@ -34,7 +34,10 @@ fn ops(w: &Workspace) -> usize {
 }
 
 fn slugs(w: &Workspace) -> Vec<String> {
-    crate::page::list_all(w).into_iter().map(|m| m.slug).collect()
+    crate::page::list_all(w)
+        .into_iter()
+        .map(|m| m.slug)
+        .collect()
 }
 
 /// A page `alpha` titled `Alpha Project`, the setup most tests rename.

@@ -141,7 +141,8 @@ impl BacklinkIndex {
     /// Number of backlinks for `meta`'s page **without cloning** the
     /// list — for count-only callers like a footer chip.
     pub fn count_for_page(&self, workspace: &Workspace, meta: &PageMeta) -> usize {
-        self.hit_ids(&keys_for_page(workspace, meta, &self.claims)).len()
+        self.hit_ids(&keys_for_page(workspace, meta, &self.claims))
+            .len()
     }
 
     /// Total number of referencing blocks across the whole workspace.

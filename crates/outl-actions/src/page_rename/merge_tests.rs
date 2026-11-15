@@ -34,8 +34,7 @@ fn refuse_returns_page_exists_and_writes_nothing() {
     block(&mut w, &hlc, src, "kept");
     let before = w.log().len();
 
-    let err =
-        rename_or_merge(&mut w, &hlc, "alpha", "beta", None, OnExisting::Refuse).unwrap_err();
+    let err = rename_or_merge(&mut w, &hlc, "alpha", "beta", None, OnExisting::Refuse).unwrap_err();
 
     assert!(matches!(err, ActionError::PageExists { existing } if existing == "beta"));
     assert_eq!(w.log().len(), before);
@@ -103,12 +102,12 @@ fn other_refusals_pass_through_under_merge_into() {
     let (mut w, hlc) = ws();
     page(&mut w, &hlc, "alpha", "Alpha");
 
-    let unknown = rename_or_merge(&mut w, &hlc, "ghost", "beta", None, OnExisting::MergeInto)
-        .unwrap_err();
+    let unknown =
+        rename_or_merge(&mut w, &hlc, "ghost", "beta", None, OnExisting::MergeInto).unwrap_err();
     assert!(matches!(unknown, ActionError::PageNotFound(s) if s == "ghost"));
 
-    let invalid = rename_or_merge(&mut w, &hlc, "alpha", "a/b", None, OnExisting::MergeInto)
-        .unwrap_err();
+    let invalid =
+        rename_or_merge(&mut w, &hlc, "alpha", "a/b", None, OnExisting::MergeInto).unwrap_err();
     assert!(matches!(invalid, ActionError::InvalidSlug(_)));
 }
 
@@ -117,8 +116,7 @@ fn the_outcome_serialises_with_a_tag() {
     let (mut w, hlc) = ws();
     page(&mut w, &hlc, "alpha", "Alpha");
 
-    let outcome =
-        rename_or_merge(&mut w, &hlc, "alpha", "beta", None, OnExisting::Refuse).unwrap();
+    let outcome = rename_or_merge(&mut w, &hlc, "alpha", "beta", None, OnExisting::Refuse).unwrap();
     let json = serde_json::to_value(&outcome).unwrap();
 
     assert_eq!(json["outcome"], "renamed");

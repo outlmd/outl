@@ -217,7 +217,10 @@ fn block_refs_and_embeds_are_untouched() {
 
 #[test]
 fn a_name_that_only_contains_the_slug_is_untouched() {
-    assert_eq!(rewrite("[[alphabet]] and [[alpha beta]] and [[the alpha]]"), None);
+    assert_eq!(
+        rewrite("[[alphabet]] and [[alpha beta]] and [[the alpha]]"),
+        None
+    );
     assert_eq!(rewrite("#alpha-two and #alphabet and #xalpha"), None);
 }
 
@@ -383,7 +386,12 @@ fn a_namespace_child_is_skipped_and_reported() {
 #[test]
 fn a_second_run_rewrites_nothing() {
     let mut s = world();
-    block(&mut s.w, &s.hlc, s.notes, "[[alpha]] #alpha **[[Alpha Project]]**");
+    block(
+        &mut s.w,
+        &s.hlc,
+        s.notes,
+        "[[alpha]] #alpha **[[Alpha Project]]**",
+    );
     block(&mut s.w, &s.hlc, s.notes, "[[alpha/child]]");
     let first = s.run();
     assert_eq!(first.rewritten_blocks.len(), 1);
@@ -414,7 +422,12 @@ fn a_case_only_rename_is_stable_on_a_second_run() {
 #[test]
 fn identical_names_are_a_no_op() {
     let mut s = world();
-    block(&mut s.w, &s.hlc, s.notes, "[[alpha]] #alpha [[alpha/child]]");
+    block(
+        &mut s.w,
+        &s.hlc,
+        s.notes,
+        "[[alpha]] #alpha [[alpha/child]]",
+    );
     let ops = s.w.log().len();
     s.to = s.from.clone();
     let report = s.run();
@@ -427,7 +440,12 @@ fn identical_names_are_a_no_op() {
 #[test]
 fn one_edit_op_per_changed_block() {
     let mut s = world();
-    block(&mut s.w, &s.hlc, s.notes, "[[alpha]] twice [[alpha]] and #alpha");
+    block(
+        &mut s.w,
+        &s.hlc,
+        s.notes,
+        "[[alpha]] twice [[alpha]] and #alpha",
+    );
     block(&mut s.w, &s.hlc, s.notes, "untouched [[beta]]");
     block(&mut s.w, &s.hlc, s.notes, "[[alpha]]");
     let before = s.w.log().len();
@@ -501,7 +519,10 @@ fn rewritten_blocks_name_their_pages_once_and_sorted() {
 
     let report = rewrite_mentions(&mut w, &hlc, &from, &to).unwrap();
 
-    assert_eq!(report.touched_pages, vec!["ann".to_string(), "zed".to_string()]);
+    assert_eq!(
+        report.touched_pages,
+        vec!["ann".to_string(), "zed".to_string()]
+    );
     let mut ids = report.rewritten_blocks.clone();
     ids.sort();
     let mut expected = vec![z1.to_string(), z2.to_string(), n2.to_string()];
