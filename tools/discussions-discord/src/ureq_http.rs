@@ -124,7 +124,9 @@ mod tests {
         assert_eq!(resp.header("location"), Some("http://127.0.0.1:1/blob"));
         let seen = server.join().expect("server");
         assert!(seen[0].to_lowercase().contains("authorization: bearer t"));
-        assert!(seen[0].to_lowercase().contains("user-agent: outl-discussions-sync"));
+        assert!(seen[0]
+            .to_lowercase()
+            .contains("user-agent: outl-discussions-sync"));
     }
 
     #[test]
@@ -148,6 +150,8 @@ mod tests {
     #[test]
     fn a_refused_connection_is_an_error() {
         let http = UreqHttp::new();
-        assert!(http.request("GET", "http://127.0.0.1:1/", &[], None).is_err());
+        assert!(http
+            .request("GET", "http://127.0.0.1:1/", &[], None)
+            .is_err());
     }
 }

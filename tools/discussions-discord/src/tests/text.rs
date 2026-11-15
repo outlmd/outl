@@ -41,7 +41,12 @@ fn truncate_handles_tiny_limits() {
 #[test]
 fn content_never_exceeds_2000_and_keeps_the_link() {
     let link = "Reply on GitHub: <https://github.com/outlmd/outl/discussions/42>";
-    for body in ["y".repeat(50_000), "😀".repeat(5000), String::new(), "line\n".repeat(900)] {
+    for body in [
+        "y".repeat(50_000),
+        "😀".repeat(5000),
+        String::new(),
+        "line\n".repeat(900),
+    ] {
         let mut value = discussion_json();
         value["body"] = Value::String(body);
         let discussion: Discussion = serde_json::from_value(value).expect("discussion");

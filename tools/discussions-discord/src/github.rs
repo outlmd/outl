@@ -74,7 +74,8 @@ fn get(ctx: &Ctx, url: &str, authed: bool) -> Result<Response> {
 }
 
 fn api<'a>(ctx: &Ctx<'a>) -> &'a str {
-    ctx.var("GITHUB_API_URL").unwrap_or("https://api.github.com")
+    ctx.var("GITHUB_API_URL")
+        .unwrap_or("https://api.github.com")
 }
 
 fn repository<'a>(ctx: &Ctx<'a>) -> Result<&'a str> {
