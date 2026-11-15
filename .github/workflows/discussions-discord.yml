@@ -20,6 +20,20 @@ name: Discussions to Discord
 # race across discussions. The `#<number>` prefix in the thread name keeps a
 # post findable by hand.
 #
+# Provenance. Any workflow run in this repo can upload an artifact with any
+# name, and a run started from a fork PR could upload a forged
+# `discord-thread-<number>` that points a discussion at the wrong thread. The
+# tool therefore only believes an artifact that is not expired, whose run
+# belongs to this repository (head and base repository id both equal
+# GITHUB_REPOSITORY_ID), ran on the default branch, is a run of this very
+# workflow file, and was started by one of this workflow's own events. The
+# newest artifact that passes wins; the others are skipped with a notice.
+# `actions: read` is all of that needs.
+#
+# The logic is the Rust crate in tools/discussions-discord, built here with the
+# pinned toolchain and the locked dependencies. Its tests run in ci.yml with
+# the rest of the workspace.
+#
 # Limitation: the artifact is re-uploaded on every event with 90 days of
 # retention, so the clock restarts with each comment. A discussion silent for
 # more than 90 days loses its mapping and the next comment opens a new Discord
@@ -62,14 +76,30 @@ jobs:
     # Forks have no webhook secret and no business posting to our forum.
     if: github.repository == 'outlmd/outl'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    # A cold compile of the crate and its HTTP stack; a warm cache is ~1 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/scripts
           persist-credentials: false
 
-      # The script reads the event from GITHUB_EVENT_PATH itself. Titles and
+      - name: Install toolchain
+        run: rustup show
+
+      # Its own cache key, so a build of this one package neither evicts nor
+      # is evicted by the CI caches. Only the default branch saves it.
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: discussions-discord
+          save-if: ${{ github.ref_name == github.event.repository.default_branch }}
+
+      # Built before the secret is in the environment: no build script or
+      # dependency ever sees it.
+      - name: build
+        run: cargo build --locked -p discussions-discord
+
+      # The tool reads the event from GITHUB_EVENT_PATH itself. Titles and
       # bodies are attacker-controlled text, so none of it is interpolated
       # into this `run:` line.
       - name: mirror to Discord
@@ -77,7 +107,10 @@ jobs:
         env:
           DISCORD_DISCUSSIONS_WEBHOOK: ${{ secrets.DISCORD_DISCUSSIONS_WEBHOOK }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 .github/scripts/discussions_to_discord.py
+          # Set by Actions already; spelled out because the provenance check
+          # fails closed without it.
+          GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+        run: ./target/debug/discussions-discord
 
       # `always()` so a thread that was created before a later step failed
       # still gets its mapping stored, instead of being duplicated next time.

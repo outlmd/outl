@@ -19,6 +19,7 @@ members = [
     "crates/outl-mobile/src-tauri",
     "crates/outl-desktop/src-tauri",
     "xtask",
+    "tools/discussions-discord",
 ]
 
 [workspace.package]
