@@ -58,7 +58,7 @@ Body for the *why* if it's not obvious from the diff.
   Include repro steps and what you expected.
 - **Security issue:** see [SECURITY.md](SECURITY.md).
   Don't open a public issue.
-- **Question or half-formed idea:** start a thread in [Discussions](https://github.com/outlmd/outl/discussions) or ask on [Discord](https://discord.gg/dnfAbCYWv).
+- **Question or half-formed idea:** start a thread in [Discussions](https://github.com/outlmd/outl/discussions) or ask on [Discord](https://discord.gg/fDDXRtFhA6).
 - **Design discussion:** open an issue with the `discussion` label or a draft PR labeled `RFC`.
 
 ## Where to start

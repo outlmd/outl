@@ -5,7 +5,7 @@
 <h1 align="center">outl</h1>
 
 <p align="center">
-  <a href="https://discord.gg/dnfAbCYWv">
+  <a href="https://discord.gg/fDDXRtFhA6">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" />
   </a>
 </p>
