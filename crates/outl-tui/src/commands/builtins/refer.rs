@@ -13,6 +13,7 @@
 //! capability a discoverable, typeable name.
 
 use anyhow::Result;
+use outl_shortcuts::{command_name, Action};
 
 use super::super::SlashCommand;
 use crate::state::App;
@@ -21,7 +22,7 @@ use crate::state::App;
 pub struct ReferCommand;
 impl SlashCommand for ReferCommand {
     fn name(&self) -> &'static str {
-        "refer"
+        command_name(Action::CopyBlockRef)
     }
     fn description(&self) -> &'static str {
         "Capture ((blk-XXXXXX)) of the current block (stash + status, no insert)"

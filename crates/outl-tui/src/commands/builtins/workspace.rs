@@ -5,6 +5,7 @@
 //! the *editor*" verbs.
 
 use anyhow::Result;
+use outl_shortcuts::{command_name, Action};
 
 use super::super::SlashCommand;
 use crate::state::{App, ToastKind};
@@ -16,7 +17,7 @@ use crate::state::{App, ToastKind};
 pub struct TodayCommand;
 impl SlashCommand for TodayCommand {
     fn name(&self) -> &'static str {
-        "today"
+        command_name(Action::OpenToday)
     }
     fn description(&self) -> &'static str {
         "Jump to today's journal"
@@ -78,7 +79,7 @@ impl SlashCommand for WriteCommand {
 pub struct HelpCommand;
 impl SlashCommand for HelpCommand {
     fn name(&self) -> &'static str {
-        "help"
+        command_name(Action::ToggleHelp)
     }
     fn description(&self) -> &'static str {
         "Toggle the help popup"
@@ -104,7 +105,7 @@ impl SlashCommand for HelpCommand {
 pub struct QuitCommand;
 impl SlashCommand for QuitCommand {
     fn name(&self) -> &'static str {
-        "quit"
+        command_name(Action::Quit)
     }
     fn description(&self) -> &'static str {
         "Close the TUI (commits any pending Insert first)"
@@ -124,7 +125,7 @@ impl SlashCommand for QuitCommand {
 pub struct OpenCommand;
 impl SlashCommand for OpenCommand {
     fn name(&self) -> &'static str {
-        "open"
+        command_name(Action::OpenPicker)
     }
     fn description(&self) -> &'static str {
         "Open (or create) a page by name — `open <name>`"

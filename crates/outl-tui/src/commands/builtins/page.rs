@@ -5,6 +5,7 @@
 //! "mutate AST → save → reconcile" code path through `App`.
 
 use anyhow::Result;
+use outl_shortcuts::{command_name, Action};
 
 use super::super::SlashCommand;
 use crate::state::App;
@@ -78,7 +79,7 @@ impl SlashCommand for PropPageCommand {
 pub struct PinCommand;
 impl SlashCommand for PinCommand {
     fn name(&self) -> &'static str {
-        "pin"
+        command_name(Action::TogglePin)
     }
     fn description(&self) -> &'static str {
         "Toggle pinned:: on the current page (shows in sidebar Pinned)"

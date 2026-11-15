@@ -51,6 +51,14 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   A capability that already has an `Action` (backlinks, block properties, reminders) stays tracked there only — a `Capability` entry for the same fact would be two catalogs disagreeing about one thing.
   Rendered as a second table in [`docs/client-parity.md`](../../docs/client-parity.md), inside its own `<!-- BEGIN/END GENERATED: capability-parity -->` markers, by the same `the_parity_doc_matches_the_code` test.
   See [RFC 0253](../../docs/rfcs/0253-client-capability-catalog.md).
+- **`command_name`** (`src/command.rs`) — **what the user types** to reach an action in a `/` menu.
+  A fourth question about the same [`Action`], with the same exhaustive-`match` shape as `support`, so a new variant does not compile until its name is declared.
+  It exists because that fact had two owners that could never agree: the TUI's `SlashCommand::name()` (one literal per built-in) and the desktop's `actionSlug()` (kebab-case of the variant).
+  Of 31 TUI built-ins and 66 desktop action rows, **two** names coincided — `quit` and `upload`, both by accident — so a user who learned `/today` in the terminal typed it on the desktop and got a row called `open-today`.
+  **An established TUI name wins** when one exists (`today`, `help`, `run`, `pin`, `refer`, `open`, `quit`); everything else is the kebab-case the desktop already showed.
+  Names are unique across the catalog, because a `/` menu dispatches on this string.
+  The TUI's shared built-ins read it directly, and `outl-tui`'s `catalog_name_tests` pins the overlap in both directions.
+  It rides the wire on `ActionSupportDto.command` (`outl-tauri-shared`), not on `Binding`: the name is per-action and a binding is per-chord, so a field there would ship `OpenToday`'s name three times.
 - **`CLI_ONLY`** (`src/capability_support.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
   That test is right in general: a capability no client reaches is normally a feature that does not exist, and recording it would be noise.
   A **CLI-only** capability is the case where "missing on all three" is a true and useful statement instead — the feature ships, the surface does not.

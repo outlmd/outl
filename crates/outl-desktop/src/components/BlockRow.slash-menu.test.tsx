@@ -29,10 +29,23 @@ vi.mock("../lib/api", async (importOriginal) => {
       description: "Open today's journal",
     },
   ] as Binding[];
+  // `list_action_support` is where the name the user types comes
+  // from (`outl_shortcuts::command_name`). A row without it is
+  // dropped, so the stub has to carry it — the real backend always
+  // does, for every action in the catalog.
+  const support = [
+    {
+      action: { kind: "OpenToday" },
+      command: "today",
+      tui: { kind: "full", why: null },
+      desktop: { kind: "full", why: null },
+      mobile: { kind: "full", why: null },
+    },
+  ] as Awaited<ReturnType<typeof real.listActionSupport>>;
   return {
     ...real,
     listShortcutBindings: vi.fn(async () => bindings),
-    listActionSupport: vi.fn(async () => []),
+    listActionSupport: vi.fn(async () => support),
     pluginKeybindings: vi.fn(async () => []),
   };
 });
@@ -178,7 +191,7 @@ describe("the inline /command menu", () => {
     typeChar(ta, "/");
     await settle();
 
-    expect(rowsOf(host)).toContain("/open-todayOpen today's journal");
+    expect(rowsOf(host)).toContain("/todayOpen today's journal");
   });
 
   it("runs a native row through the dispatcher's own handler", async () => {
@@ -188,11 +201,11 @@ describe("the inline /command menu", () => {
 
     const { host, ta } = mountEditing("");
     ta.setSelectionRange(0, 0);
-    for (const ch of "/open-today") typeChar(ta, ch);
+    for (const ch of "/today") typeChar(ta, ch);
     await settle();
 
     const row = Array.from(host.querySelectorAll('[role="option"] button')).find(
-      (b) => b.textContent?.startsWith("/open-today"),
+      (b) => b.textContent?.startsWith("/today"),
     );
     row?.dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }),

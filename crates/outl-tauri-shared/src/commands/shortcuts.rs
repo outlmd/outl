@@ -54,6 +54,18 @@ pub struct ActionSupportDto {
     /// frontend can key off the same discriminant its handler map
     /// uses.
     action: outl_shortcuts::Action,
+    /// What the user types to reach this action in a `/` menu
+    /// (`outl_shortcuts::command_name`).
+    ///
+    /// It rides this row rather than `Binding` because the name is
+    /// per-action and a binding is per-chord: `OpenToday` has three,
+    /// and a field there would ship the same string three times and
+    /// invite a client to pick whichever it saw first.
+    ///
+    /// The desktop used to derive this locally by kebab-casing the
+    /// variant, which is how `/today` became `/open-today` there
+    /// while staying `/today` in the TUI.
+    command: &'static str,
     tui: SupportDto,
     desktop: SupportDto,
     mobile: SupportDto,
@@ -77,6 +89,7 @@ pub fn list_action_support() -> Vec<ActionSupportDto> {
             let s = outl_shortcuts::support(*action);
             ActionSupportDto {
                 action: *action,
+                command: outl_shortcuts::command_name(*action),
                 tui: s.tui.into(),
                 desktop: s.desktop.into(),
                 mobile: s.mobile.into(),

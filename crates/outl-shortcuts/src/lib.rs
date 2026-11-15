@@ -41,6 +41,11 @@
 //!   for a feature with no chord (page history, the plugin
 //!   marketplace, a calendar grid, …), reusing [`Support`] /
 //!   [`ClientSupport`] / [`Client`] unchanged.
+//! - [`command_name`] — the name the user **types** to reach an
+//!   action in a `/` menu. A fourth question about the same
+//!   [`Action`], with the same exhaustive-`match` shape, because the
+//!   TUI's built-in names and the desktop's kebab-cased variant
+//!   names agreed on two rows out of 66.
 //!
 //! ## What this crate does NOT own
 //!
@@ -57,6 +62,7 @@ mod binding;
 mod capability;
 mod capability_support;
 mod chord;
+mod command;
 mod defaults;
 mod support;
 
@@ -65,6 +71,7 @@ pub use binding::{Binding, Mode};
 pub use capability::Capability;
 pub use capability_support::{capability_support, CLI_ONLY};
 pub use chord::{Chord, ChordSequence, Key, Modifiers};
+pub use command::command_name;
 pub use defaults::default_bindings;
 pub use support::{support, Client, ClientSupport, Support};
 

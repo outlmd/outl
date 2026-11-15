@@ -69,39 +69,36 @@ export function templateSlashCommands(
  * and `block-suggest.ts` runs this one through
  * `lib/shortcuts.ts::runNativeSlashCommand` — the same handler map the
  * keyboard and the palette fire, never a second dispatcher.
+ *
+ * The **name** on each row comes from `outl_shortcuts::command_name`,
+ * never from a derivation here: see {@link actionSlashCommands}.
  */
 export const NATIVE_ACTION_PLUGIN_ID = "@outl/action";
 
 /**
- * `OpenToday` → `open-today`: the name a user types after `/`.
- *
- * Kebab because that is the shape every other slash command has (the
- * TUI's `date-today`, `prop-block`, `plugin-settings`), and because
- * `rankSlashCommands` scores an id **substring** — so `/today` finds
- * `open-today` without anyone memorising which verb a kind starts with.
- */
-export function actionSlug(kind: string): string {
-  return kind
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
-    .toLowerCase();
-}
-
-/**
  * Project the client's own actions onto slash-menu rows.
  *
- * The input is {@link PaletteActionRow}, so the universe and the
- * wording are decided exactly once — `paletteActions` already answers
- * "which actions does this client have a handler for", and the label is
- * the catalog's own description. A second filter here would be a second
- * opinion about what the desktop can do (invariant 12).
+ * Two facts, neither decided here:
+ *
+ * - **Which actions** is `paletteActions`' answer — it already knows
+ *   which ones this client has a handler for, and the label is the
+ *   catalog's own description. A second filter here would be a second
+ *   opinion about what the desktop can do (invariant 12).
+ * - **What the user types** is `name`, resolved by the caller from
+ *   `outl_shortcuts::command_name`.
+ *
+ * This used to kebab-case the variant locally (`OpenToday` →
+ * `open-today`) while the TUI carried its own literal (`today`). Of 31
+ * TUI built-ins and 66 action rows, exactly two names coincided, so a
+ * user who learned `/today` in the terminal typed it here and got a
+ * row with another name on it.
  */
 export function actionSlashCommands(
-  rows: PaletteActionRow<Chord>[],
+  rows: (PaletteActionRow<Chord> & { name: string })[],
 ): PluginCommand[] {
   return rows.map((r) => ({
     plugin_id: NATIVE_ACTION_PLUGIN_ID,
-    command_id: actionSlug(r.action),
+    command_id: r.name,
     title: r.label,
   }));
 }

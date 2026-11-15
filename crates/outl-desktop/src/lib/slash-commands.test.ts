@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   NATIVE_ACTION_PLUGIN_ID,
   actionSlashCommands,
-  actionSlug,
   rankSlashCommands,
 } from "./slash-commands";
 import type { PluginCommand } from "@outl/shared/api/types";
@@ -62,31 +61,30 @@ describe("rankSlashCommands", () => {
  * client already dispatches from the keyboard and the palette.
  */
 describe("actionSlashCommands", () => {
+  // `name` is what `outl_shortcuts::command_name` answered — the
+  // same string the TUI's own built-ins read their names from. The
+  // caller resolves it; nothing here derives one.
   const row = (
     action: string,
+    name: string,
     label: string,
-  ): PaletteActionRow<Chord> => ({
+  ): PaletteActionRow<Chord> & { name: string } => ({
     kind: "action",
     action: action as PaletteActionRow<Chord>["action"],
     label,
     chord: null,
+    name,
   });
 
-  it("turns an action kind into the name the user types", () => {
-    expect(actionSlug("OpenToday")).toBe("open-today");
-    expect(actionSlug("ToggleSidebar")).toBe("toggle-sidebar");
-    expect(actionSlug("Quit")).toBe("quit");
-  });
-
-  it("lists one row per action, under the native sentinel", () => {
+  it("lists one row per action, named by the catalog", () => {
     const out = actionSlashCommands([
-      row("OpenToday", "Open today's journal"),
-      row("ToggleSidebar", "Toggle the sidebar"),
+      row("OpenToday", "today", "Open today's journal"),
+      row("ToggleSidebar", "toggle-sidebar", "Toggle the sidebar"),
     ]);
     expect(out).toEqual([
       {
         plugin_id: NATIVE_ACTION_PLUGIN_ID,
-        command_id: "open-today",
+        command_id: "today",
         title: "Open today's journal",
       },
       {
@@ -97,14 +95,15 @@ describe("actionSlashCommands", () => {
     ]);
   });
 
-  it("is reachable by the word a user actually types", () => {
-    // `/today` has to find `OpenToday`, the way `/today` does in the
-    // TUI. `rankSlashCommands` scores an id *substring*, which is what
-    // makes the kebab slug typeable without memorising the prefix.
+  it("calls it what the TUI calls it", () => {
+    // The reason `command_name` exists. This client used to derive
+    // the name from the variant and list `/open-today`, so a user who
+    // learned `/today` in the terminal found a row with another name
+    // on it. Nothing here may re-derive it.
     const out = rankSlashCommands(
-      actionSlashCommands([row("OpenToday", "Open today's journal")]),
+      actionSlashCommands([row("OpenToday", "today", "Open today's journal")]),
       "today",
     );
-    expect(out.map((c) => c.command_id)).toEqual(["open-today"]);
+    expect(out.map((c) => c.command_id)).toEqual(["today"]);
   });
 });

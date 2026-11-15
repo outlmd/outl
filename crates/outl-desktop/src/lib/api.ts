@@ -339,6 +339,15 @@ export interface SupportDto {
 /** Per-client support for one action in the catalog. */
 export interface ActionSupport {
   action: Action;
+  /**
+   * What the user types to reach this action in the `/` menu.
+   *
+   * Comes from `outl_shortcuts::command_name`, never derived here:
+   * this client used to kebab-case the variant locally, which is how
+   * `/today` became `/open-today` on the desktop while the TUI kept
+   * calling it `today`.
+   */
+  command: string;
   tui: SupportDto;
   desktop: SupportDto;
   mobile: SupportDto;

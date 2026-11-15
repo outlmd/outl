@@ -146,7 +146,8 @@ That sentence is the backend's, so it reads the same here, in `outl trash list` 
 **A refusal can also arrive on a row that looked fine**, because the verdict is computed against the live tree and the list is a snapshot — another device can trash the landing parent in between.
 The panel puts that sentence in the row rather than in a toast, keeps itself open, and re-reads the listing so the row settles into the state it should have been in.
 
-No chord yet. A chord needs an `Action` in `outl-shortcuts`, whose per-client `support()` match is at its frozen size baseline, which is the same reason the page-history panel has none.
+No chord yet.
+A chord needs an `Action` in `outl-shortcuts`, whose per-client `support()` match is at its frozen size baseline, which is the same reason the page-history panel has none.
 Per-client reach is `Capability::Trash` in [`client-parity.md`](client-parity.md).
 
 Contract, the three refusals and why a page cannot come back: [`clients.md` → Restoring a deleted block](clients.md#restoring-a-deleted-block).
@@ -181,6 +182,12 @@ Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoo
 | `((…))` | `BlockSuggestPopup` | `search_blocks`, from disk, debounced ~150 ms | the ref handle `((blk-XXXXXX))` |
 | `#…` (word-initial, one word) | `RefSuggestPopup` | `search_pages` — a tag *is* a page | the page **slug**, never the title: `#` has no closer, so the first space would end the tag and leave the rest as prose |
 | word-initial `/` | slash menu | this client's own actions (`actionSlashCommands`, from the `Cmd+K` palette's list), plus `/upload`, the workspace's templates and every plugin command — all in `lib/slash-commands.ts` | runs the row: a native one through the dispatcher's handler, `instantiateTemplateAt` for `template: <name>`, the file picker for `upload`, else `pluginRun` |
+
+**A slash command is called the same thing here and in the TUI.**
+The name comes from `outl_shortcuts::command_name`, which both clients read — `/today`, `/help`, `/run`, `/pin`, `/refer`, `/open`, `/quit`.
+It used to be derived per client: the desktop kebab-cased the `Action` variant, the TUI carried a literal per built-in.
+Of 31 TUI built-ins and 66 desktop action rows exactly two names coincided, so `/today` in the terminal was `/open-today` here.
+An action the catalog does not name is left out of the menu rather than named locally.
 
 Word-initial means the block's start **or** straight after whitespace, which is the TUI's rule — `nota /` opens the menu, `http://host` and `see docs/api` stay literal.
 Detection and span replacement are `@outl/shared/autocomplete`'s (`detectRefContext`, `detectEmojiContext`, `detectSlashContext`, `applySuggestion`, `applyEmojiSuggestion`, `applySlashContext`), which the TUI and mobile run too.

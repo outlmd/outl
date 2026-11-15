@@ -322,7 +322,9 @@ Load-bearing notes a contributor needs:
 - **The `/` menu lists this client's own actions, plus `/upload`, the workspace's templates and every plugin command.**
   Without the native half it was only those last three, so a workspace with no templates and no plugins opened a **one-row** popup while the TUI's `/` listed 31 built-ins.
   The rows come from `paletteActions` (`lib/palette-results.ts`) — the `Cmd+K` palette's own list, so "what can this client run" is answered once.
-  `actionSlug` turns `OpenToday` into the `/open-today` a user types, found by `rankSlashCommands`' id-*substring* score.
+  **The name on each row is `outl_shortcuts::command_name`, read off `ActionSupportDto.command`, never derived here.**
+  This client kebab-cased the variant (`/open-today`) while the TUI carried its own literal (`today`); two of 66 names coincided.
+  An action the catalog did not name is **dropped** rather than named locally — the variant is not typeable after a `/`, so a fallback row would be visible and unreachable.
   **A native pick runs through `runNativeSlashCommand` (`lib/shortcuts.ts`), never a dispatcher of its own**, so a command cannot mean one thing from a chord and another from the menu.
   `installShortcuts` publishes that list and drops it on teardown, for the reason `loadPluginBindings` is not module-cached: a workspace swap brings a new handler map.
   Only the plugin / template half is cached in `block-suggest.ts` — an empty native list cached before the dispatcher installed would leave the menu short forever.

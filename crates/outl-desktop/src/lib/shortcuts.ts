@@ -36,7 +36,7 @@ import {
 import { detectMode } from "./mode";
 import { paletteActions } from "./palette-results";
 import { playPluginViews } from "./plugin-views";
-import { actionSlashCommands, actionSlug } from "./slash-commands";
+import { actionSlashCommands } from "./slash-commands";
 import { appState, setAppState, setOutline } from "./store";
 
 // ---------------------------------------------------------------------------
@@ -167,10 +167,18 @@ export type ActionHandlers = Partial<
 /** Desktop support column, keyed by action, fetched once per session. */
 let cachedSupport: Map<Action["kind"], SupportDto> | null = null;
 
+/**
+ * Command names, keyed by action, from the same row as the support
+ * column — `list_action_support` is the one call that carries a
+ * record per action, so neither needs a round-trip of its own.
+ */
+let cachedCommandNames: Map<Action["kind"], string> | null = null;
+
 async function loadSupport(): Promise<Map<Action["kind"], SupportDto>> {
   if (cachedSupport) return cachedSupport;
   const rows = await listActionSupport();
   cachedSupport = new Map(rows.map((r) => [r.action.kind, r.desktop]));
+  cachedCommandNames = new Map(rows.map((r) => [r.action.kind, r.command]));
   return cachedSupport;
 }
 
@@ -450,10 +458,23 @@ let liveSlashActions: {
 } | null = null;
 
 function publishSlashActions(bindings: Binding[], handlers: ActionHandlers) {
-  const rows = paletteActions(bindings, (k) => Boolean(handlers[k]));
+  // `loadSupport` fills this cache, and `installShortcuts` awaits it
+  // before calling us — a failure there rejects the whole install.
+  const names = cachedCommandNames ?? new Map<Action["kind"], string>();
+  // An action the catalog did not name is dropped rather than named
+  // here. The variant itself (`OpenToday`) is not typeable after a
+  // `/` — the trigger's alphabet stops at the capital — so a fallback
+  // row would be one the user can see and never reach, which is worse
+  // than a row that is absent.
+  const named = paletteActions(bindings, (k) => Boolean(handlers[k])).flatMap(
+    (row) => {
+      const name = names.get(row.action as Action["kind"]);
+      return name === undefined ? [] : [{ ...row, name }];
+    },
+  );
   liveSlashActions = {
-    commands: actionSlashCommands(rows),
-    run: new Map(rows.map((r) => [actionSlug(r.action), r.action])),
+    commands: actionSlashCommands(named),
+    run: new Map(named.map((r) => [r.name, r.action])),
     handlers,
   };
 }

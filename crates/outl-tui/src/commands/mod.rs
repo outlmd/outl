@@ -129,3 +129,65 @@ impl CommandRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod catalog_name_tests {
+    use super::CommandRegistry;
+    use outl_shortcuts::{command_name, Action};
+
+    /// The built-ins that are a second door onto a catalog
+    /// [`Action`]. Each pair is a name a user can type in *both*
+    /// clients, so the two must resolve it to the same verb.
+    ///
+    /// Declared rather than derived: a `SlashCommand` has no
+    /// `Action`, on purpose — most built-ins (`date-today`,
+    /// `theme`, `sync`) have no chord and never will. This list is
+    /// the overlap, and it is what fails when one side renames.
+    const SHARED_WITH_THE_CATALOG: &[(&str, Action)] = &[
+        ("today", Action::OpenToday),
+        ("help", Action::ToggleHelp),
+        ("quit", Action::Quit),
+        ("open", Action::OpenPicker),
+        ("pin", Action::TogglePin),
+        ("run", Action::RunCodeBlock),
+        ("refer", Action::CopyBlockRef),
+    ];
+
+    /// A user who learned `/today` here types it on the desktop and
+    /// reaches the same thing. Before `command_name` existed the
+    /// desktop called it `open-today`, because it kebab-cased the
+    /// variant while this crate carried its own literal.
+    #[test]
+    fn a_shared_builtin_is_named_by_the_catalog() {
+        let registry = CommandRegistry::with_builtins();
+        for (name, action) in SHARED_WITH_THE_CATALOG {
+            assert_eq!(
+                command_name(*action),
+                *name,
+                "the catalog renamed {action:?}; this built-in still answers to `{name}`"
+            );
+            assert!(
+                registry.get(name).is_some(),
+                "`/{name}` is no longer registered, so the catalog's name reaches nothing here"
+            );
+        }
+    }
+
+    /// The other direction: a built-in that is *not* in the list
+    /// above must not squat a catalog name, or `/run` would mean one
+    /// thing in the TUI and another on the desktop.
+    #[test]
+    fn no_unlisted_builtin_squats_a_catalog_name() {
+        let registry = CommandRegistry::with_builtins();
+        for cmd in registry.all() {
+            let Some(action) = Action::ALL.iter().find(|a| command_name(**a) == cmd.name()) else {
+                continue;
+            };
+            assert!(
+                SHARED_WITH_THE_CATALOG.contains(&(cmd.name(), *action)),
+                "`/{}` collides with {action:?} in the catalog but is not declared as the same verb",
+                cmd.name()
+            );
+        }
+    }
+}
