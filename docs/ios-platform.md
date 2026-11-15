@@ -7,6 +7,8 @@ Every item here can only be validated with a **device or simulator build** — a
 The crate contract (what stays thin, what delegates to `outl-actions`) lives in [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
 The user-facing background-sync behaviour is [sync.md → Background sync on iOS](sync.md#background-sync-on-ios); the build + release commands are [development.md](development.md#mobile-ios-simulator).
 
+The text App Review needs for a submission (App Review Information > Notes, plus the screen recording script) lives in [App Store review notes](app-store/review-notes.md).
+
 ---
 
 ## Bundle / signing
