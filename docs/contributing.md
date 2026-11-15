@@ -426,6 +426,7 @@ Map of canonical homes (extend as new ones are minted):
 | Outl markdown dialect + sidecar spec | [`docs/markdown-format.md`](markdown-format.md) | `outl-md/CLAUDE.md` |
 | Query code block DSL + syntax | [`docs/markdown-format.md`](markdown-format.md) § Query code blocks | `outl-exec/CLAUDE.md` |
 | CRDT algorithm + invariants | [`docs/crdt.md`](crdt.md) | `outl-core/CLAUDE.md` |
+| What a launch does between the window appearing and a usable screen: the phase order, who may wait for what, the budgets, the boot marks | [`docs/boot-performance.md`](boot-performance.md) | `outl-core/CLAUDE.md`, `outl-cli/CLAUDE.md`, `outl-tui/CLAUDE.md`, `outl-desktop/CLAUDE.md`, `outl-mobile/CLAUDE.md`, `outl-tauri-shared/CLAUDE.md` |
 | Storage trait + JSONL backend | [`docs/storage.md`](storage.md) | `outl-core/CLAUDE.md` |
 | Sync model (iCloud / Syncthing / iroh roadmap) | [`docs/sync.md`](sync.md) | `outl-mobile/CLAUDE.md`, `outl-desktop/CLAUDE.md` |
 | iroh transport internals (pinned iroh 1.0.0 API surface, the named regression + chaos test catalog) | [`docs/iroh-internals.md`](iroh-internals.md) | `outl-sync-iroh/CLAUDE.md` |

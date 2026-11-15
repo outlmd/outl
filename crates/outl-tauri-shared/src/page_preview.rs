@@ -18,6 +18,21 @@
 //! So the opener reads that pair first and emits it, and the client
 //! paints real text while the open runs behind it.
 //!
+//! # It holds no lock, so it writes nothing
+//!
+//! The preview runs **before** `open_workspace_at` takes the workspace
+//! and actor locks — that is the point of it — so every read here goes
+//! through `outl_actions::read_page_outline_readonly`. The ordinary
+//! read resolves the sidecar through a path that *renames* a legacy
+//! dotted `.<name>.outl` to its modern name, which is a write into a
+//! workspace no process has claimed yet.
+//!
+//! What remains, and is accepted: the `.md` and its sidecar are read as
+//! an unlocked pair, so a concurrent `outl serve` replacing both can be
+//! observed mid-projection. The cost is a preview whose block ids do
+//! not match its text for one frame. Nothing mutable reads those ids,
+//! and the real view replaces the whole thing.
+//!
 //! # Why this is safe to show
 //!
 //! Markdown is the source of truth for what the user last saw
@@ -124,7 +139,10 @@ fn page_preview(root: &Path, slug: &str, kind: PageKind) -> Option<PageView> {
         aliases: Vec::new(),
         pinned: false,
     };
-    let outline = match outl_actions::read_page_outline(root, &meta) {
+    // `_readonly`: this runs before `open_workspace_at` installs the
+    // workspace guards, so it must not take the legacy-sidecar rename
+    // that the ordinary read performs. See that function's doc.
+    let outline = match outl_actions::read_page_outline_readonly(root, &meta) {
         Ok(page) => page,
         Err(e) => {
             // Expected on a fresh workspace and on the first visit to a
@@ -220,6 +238,29 @@ mod tests {
     /// Block ids come from the sidecar when there is one; with none, the
     /// preview still renders (transient ids), because showing the text
     /// is the job.
+    /// The preview runs before any lock exists, so it must not perform
+    /// the legacy-sidecar migration the ordinary read does. A rename
+    /// here is a write into a workspace no process has claimed.
+    #[test]
+    fn a_legacy_sidecar_is_read_but_never_renamed() {
+        let dir = workspace_with_journal("2026-11-15", "- from the legacy sidecar\n");
+        let legacy = dir.path().join("journals").join(".2026-11-15.outl");
+        // Shape does not matter: an unreadable sidecar degrades to
+        // transient ids, and what is asserted is the filesystem.
+        std::fs::write(&legacy, "{}").expect("write legacy sidecar");
+
+        let preview = page_preview(dir.path(), "2026-11-15", PageKind::Journal).expect("preview");
+        assert_eq!(preview.outline[0].text, "from the legacy sidecar");
+        assert!(
+            legacy.exists(),
+            "the preview renamed a legacy sidecar while holding no workspace lock"
+        );
+        assert!(
+            !dir.path().join("journals").join("2026-11-15.outl").exists(),
+            "the preview created the modern sidecar path"
+        );
+    }
+
     #[test]
     fn a_page_with_no_sidecar_still_previews() {
         let dir = workspace_with_journal("2026-11-15", "- no sidecar here\n");

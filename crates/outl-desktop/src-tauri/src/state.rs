@@ -116,7 +116,9 @@ pub(crate) struct AppState {
     pub first_paint: Arc<outl_tauri_shared::FirstPaintGate>,
     /// Latched "the workspace is published", so `wait_workspace_ready`
     /// is a wait rather than the 500 ms poll `App.tsx` used to run.
-    /// The boot opener and `set_workspace` are its only publishers.
+    /// The boot opener and `set_workspace` are its only publishers, and
+    /// both call `publish()` **after** filling the slot — a waiter that
+    /// wakes to `ERR_LOADING` is the poll this replaced.
     pub workspace_ready: Arc<outl_tauri_shared::WorkspaceReady>,
 
     /// `[calendar] week_start` from the global config, read once at boot

@@ -69,7 +69,8 @@ pub use remind::{
 };
 pub use render::render;
 pub use sidecar::{
-    content_hash, file_hash, resolve_sidecar_path, sidecar_path_for, Sidecar, SidecarBlock,
+    content_hash, file_hash, readable_sidecar_path, resolve_sidecar_path, sidecar_path_for,
+    Sidecar, SidecarBlock,
 };
 pub use slug::{slugify, UNTITLED_SLUG};
 // `is_delimiter_row` and `split_cells` are deliberately not re-exported

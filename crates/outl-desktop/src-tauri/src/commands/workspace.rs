@@ -45,6 +45,32 @@ pub(crate) fn set_workspace(
 
     *state.workspace.lock() = Some(workspace);
     *state.storage_root.lock() = Some(path.clone());
+    // The latch is for the boot opener's waiters, but a switch is also
+    // a workspace becoming available, and `state.rs` documents both as
+    // publishers. Idempotent.
+    state.workspace_ready.publish();
+    // Re-persist the boot cache for the workspace we just opened.
+    //
+    // `boot()` deliberately no longer writes one, and the first-paint
+    // gate only carries the job for the **boot** opener — so without
+    // this a switch left nothing writing a snapshot for the whole
+    // session. On a 722k-op graph with no usable snapshot that means
+    // the next launch full-replays the entire log, which is the
+    // unbounded-delta regression `snapshot_refresh_due` exists to close.
+    //
+    // Off-thread because the body build takes the workspace mutex and
+    // the window is already painted: a switch must not freeze it.
+    {
+        let slot = state.workspace.clone();
+        let spawned = std::thread::Builder::new()
+            .name("outl-snapshot-after-switch".to_string())
+            .spawn(move || {
+                outl_tauri_shared::workspace_open::snapshot_after_first_paint(&slot);
+            });
+        if let Err(e) = spawned {
+            warn!("snapshot refresh after workspace switch did not start: {e}");
+        }
+    }
     // Undo snapshots belong to the previous workspace.
     state.history.lock().clear();
     // As does the backlinks index — drop it so the next `page_backlinks`

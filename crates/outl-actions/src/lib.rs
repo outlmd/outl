@@ -140,8 +140,9 @@ pub use namespace::{descendants as namespace_descendants, NamespaceChild};
 pub use outl_md::parse::{ParseWarning, ParseWarningKind};
 pub use outline::{
     flat_index_for_block, flatten_subtree_paths, project_outline, project_outline_node,
-    project_parsed_subtree, read_page_outline, read_page_outline_with_workspace, read_page_view,
-    read_page_view_with_workspace, OutlineNode, PageOutline,
+    project_parsed_subtree, read_page_outline, read_page_outline_readonly,
+    read_page_outline_with_workspace, read_page_view, read_page_view_with_workspace, OutlineNode,
+    PageOutline,
 };
 pub use page::{
     delete as delete_page, find_by_slug, is_valid_slug, list_all as list_pages,

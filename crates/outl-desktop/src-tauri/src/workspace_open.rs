@@ -64,26 +64,32 @@ pub(crate) fn spawn_background_reconcile(
 }
 
 /// How long the interactive phase waits for a painted frame before
-/// starting anyway.
+/// starting anyway, counted **from the moment the workspace is
+/// published**.
 ///
-/// Well past a cold open on a large workspace, and far short of a user
-/// noticing that sync is late. It exists because the painted signal
-/// arrives over IPC: a webview that failed to load, or a frontend built
-/// before `boot_mark` existed, leaves it unsent, and without a deadline
-/// that is a window which syncs with nobody and says nothing.
+/// It exists because the painted signal arrives over IPC: a webview
+/// that failed to load, or a frontend built before `boot_mark` existed,
+/// leaves it unsent, and without a deadline that is a window which
+/// syncs with nobody and says nothing.
+///
+/// **Armed at publish, not at `setup`.** Armed at `setup` it raced the
+/// *open* rather than the paint: on the 722,943-op workspace this work
+/// was measured against, the open takes 9s, so a 4s deadline fired
+/// while the gate was still empty and every job the opener registered
+/// afterwards ran immediately — in front of the first paint, which is
+/// the stall the gate exists to move. Counting from publish measures
+/// the thing the gate is actually waiting for: how long after the
+/// workspace is available the client takes to draw.
 const FIRST_PAINT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// Build the two boot signals `AppState` carries, with the gate's
-/// deadline already armed.
+/// Build the two boot signals `AppState` carries.
 ///
-/// One function so a caller cannot construct the gate without arming
-/// it — which is the obligation `FirstPaintGate`'s own docs put on a
-/// host, and the kind of obligation that is kept by not offering the
-/// other path.
+/// The gate's deadline is **not** armed here; [`spawn_interactive_phase`]
+/// arms it once the jobs exist, for the reason on
+/// [`FIRST_PAINT_DEADLINE`]. A workspace that never opens never arms
+/// one, which is correct: there is nothing deferred to release.
 pub(crate) fn start_boot_phase() -> (Arc<FirstPaintGate>, Arc<WorkspaceReady>) {
-    let gate = FirstPaintGate::new();
-    gate.arm_deadline(FIRST_PAINT_DEADLINE);
-    (gate, Arc::new(WorkspaceReady::new()))
+    (FirstPaintGate::new(), Arc::new(WorkspaceReady::new()))
 }
 
 /// Start the process's one automatic-backup thread and return the cell
@@ -249,6 +255,9 @@ pub(crate) struct InteractivePhase {
 /// lose a notification, so it closes its own window (below) and then
 /// the expensive three follow.
 pub(crate) fn spawn_interactive_phase(gate: &Arc<FirstPaintGate>, phase: InteractivePhase) {
+    // Armed first, so a panic registering a job below cannot leave the
+    // gate closed forever. Idempotent if the client already painted.
+    gate.arm_deadline(FIRST_PAINT_DEADLINE);
     let InteractivePhase {
         workspace_slot,
         fs_watcher_slot,

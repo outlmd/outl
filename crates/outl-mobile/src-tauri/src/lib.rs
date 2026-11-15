@@ -320,13 +320,11 @@ pub fn run() {
 
             // The interactive phase: the orphan sweep, the snapshot
             // refresh and the signal that lets iroh bind all wait for the
-            // frontend's `first_content` mark. The deadline is not
-            // optional — a webview that never reports would otherwise be
-            // a phone that syncs with nobody, silently. 6s is past a cold
-            // open on a large graph on a phone (measured in seconds, not
-            // hundreds of ms) and short of a user noticing.
+            // frontend's `first_content` mark. The deadline that bounds
+            // that wait is armed by the opener, once the jobs exist —
+            // armed here it would race the *open* instead of the paint.
+            // See `workspace_open::FIRST_PAINT_DEADLINE`.
             let first_paint = outl_tauri_shared::FirstPaintGate::new();
-            first_paint.arm_deadline(std::time::Duration::from_secs(6));
             let workspace_ready = Arc::new(outl_tauri_shared::WorkspaceReady::new());
 
             // Gate on the opener finishing: see `iroh_sync::wire_iroh_transport`.

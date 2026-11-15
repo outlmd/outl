@@ -49,11 +49,25 @@ pub fn open(path: &Path) -> Result<WsCtx, ApiError> {
     // `write_to_disk` uses a per-write scratch, so a concurrent GUI
     // writer is no longer a shared inode; and `WsCtx::drop` waits out
     // the worker, so a 200ms command cannot exit mid-fsync.
+    //
+    // **The user's `[snapshot]` section decides, not this function.**
+    // `outl-ws` has no `outl-config` dependency, so enabling writes
+    // there would run on `SnapshotPolicy`'s hardcoded default threshold
+    // and ignore `enabled = false` outright — a documented opt-out
+    // silently overridden, on the first op, because `seed_from_log_len`
+    // leaves the counter at the threshold after a full replay. So the
+    // policy is applied here, by the crate that already reads config.
+    let snapshot = outl_config::load().snapshot;
     let opts = outl_ws::OpenOptions {
-        write_snapshots: true,
+        write_snapshots: snapshot.enabled,
         ..Default::default()
     };
-    map_open(outl_ws::open_with(path, opts))
+    let mut ctx = map_open(outl_ws::open_with(path, opts))?;
+    if snapshot.enabled {
+        ctx.workspace
+            .set_snapshot_policy(snapshot.enabled, snapshot.op_threshold);
+    }
+    Ok(ctx)
 }
 
 /// Open the workspace at `path` for reading.

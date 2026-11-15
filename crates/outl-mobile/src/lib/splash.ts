@@ -46,10 +46,38 @@ export function dismissBootSplash(): void {
   dismissed = true;
   const el = document.getElementById(SPLASH_ID);
   if (!el) return;
+  // **Already gone: remove it, never animate it out again.**
+  //
+  // `.is-leaving` sets a *different* `animation-name` than the 4s
+  // failsafe, and swapping the name cancels the failsafe's `forwards`
+  // fill. `boot-splash-out` declares only a `to` keyframe, so its
+  // implicit 0% is the element's underlying `opacity: 1` — the opaque
+  // splash snaps back over a journal the user is already reading, then
+  // fades a second time.
+  //
+  // Asking the computed style is what tells the two cases apart, and it
+  // is the honest question: "is this still visible to the user".
+  if (isHidden(el)) {
+    el.remove();
+    return;
+  }
   el.classList.add(LEAVING_CLASS);
   // Removed rather than left faded: `visibility: hidden` already stops
   // it taking touches, but an element at `z-index: 2147483647` sitting
   // over the whole app is the kind of thing a later change breaks by
   // accident.
   window.setTimeout(() => el.remove(), FADE_MS);
+}
+
+/**
+ * Whether the element is already invisible, by either animation having
+ * run to its `forwards` fill.
+ *
+ * `getComputedStyle` throws in no runtime this ships on, but it returns
+ * an empty string in a detached document, which reads as "not hidden"
+ * and keeps the old behaviour.
+ */
+function isHidden(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  return style.visibility === "hidden" || style.opacity === "0";
 }

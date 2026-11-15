@@ -16,6 +16,7 @@ import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { onPagePreview, PreviewOutline } from "@outl/shared/boot";
 
 import type { PageView } from "@outl/shared/api/types";
+import { dismissBootSplash } from "../lib/splash";
 
 /**
  * Subscribe to the backend's pre-workspace page preview and expose it.
@@ -40,7 +41,21 @@ function createJournalPreview(): () => PageView | null {
   const [preview, setPreview] = createSignal<PageView | null>(null);
   let unlisten: (() => void) | undefined;
   let cancelled = false;
-  void onPagePreview(setPreview).then((un) => {
+  void onPagePreview((view) => {
+    setPreview(view);
+    // **The splash has to go, or the preview is invisible.**
+    //
+    // `#boot-splash` is `position: fixed` at `z-index: 2147483647` with
+    // an opaque background, and it lives outside `#root`. Painting
+    // today's journal underneath it delivers nothing: before this call
+    // the preview sat behind the logo until the 4s failsafe animation
+    // fired, which is every launch this feature was built for.
+    //
+    // Dismissing here rather than in `finishLoad` alone is the whole
+    // point — `finishLoad` runs after the workspace opens, which is the
+    // wait the preview exists to fill.
+    dismissBootSplash();
+  }).then((un) => {
     if (cancelled) un();
     else unlisten = un;
   });

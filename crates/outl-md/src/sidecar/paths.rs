@@ -42,6 +42,32 @@ fn legacy_sidecar_path_for(md_path: &Path) -> PathBuf {
     parent.join(format!(".{stem}.outl"))
 }
 
+/// Where the sidecar for `md_path` can be **read** from, without
+/// migrating anything.
+///
+/// The twin of [`resolve_sidecar_path`] for a caller that has no right
+/// to write: it returns the legacy dotted path as-is instead of
+/// renaming it.
+///
+/// That distinction is not cosmetic. `resolve_sidecar_path` performs a
+/// `std::fs::rename`, so every caller of it is a *writer*, and a writer
+/// has to hold the workspace guards. The pre-workspace page preview
+/// runs before `open_workspace_at` installs them by construction — it
+/// exists to paint before the workspace opens — so it reads through
+/// here instead.
+///
+/// `None` when neither form exists, which a caller reads as "no
+/// sidecar": block ids fall back to transient ones, the text still
+/// renders.
+pub fn readable_sidecar_path(md_path: &Path) -> Option<PathBuf> {
+    let modern = sidecar_path_for(md_path);
+    if modern.exists() {
+        return Some(modern);
+    }
+    let legacy = legacy_sidecar_path_for(md_path);
+    legacy.exists().then_some(legacy)
+}
+
 /// Find the path the caller should use right now to read or write the
 /// sidecar for `md_path`.
 ///

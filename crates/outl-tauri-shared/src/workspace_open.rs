@@ -392,11 +392,12 @@ fn boot(
 ///
 /// Three properties, each of which was the alternative:
 ///
-/// - **It asks under the lock, and writes off-thread.**
+/// - **It settles first, then asks under the lock, and writes off-thread.**
 ///   `Workspace::refresh_snapshot_in_background` builds the body on this
 ///   thread (it reads the tree) and hands the encode + fsync + rename to a
-///   worker. Taking the whole write under the workspace mutex is the stall
-///   this moved out of `boot`, one layer down.
+///   worker. The build still needs the mutex, so it waits out the launch
+///   window rather than contending with the user's first keystrokes —
+///   see the sleep's own comment.
 /// - **It asks late, rather than carrying a verdict from `boot`.**
 ///   Sync ingest appends to `ops-*.jsonl` without going through
 ///   `Workspace::apply`, so the delta `snapshot_refresh_due` measures can
@@ -406,6 +407,22 @@ fn boot(
 ///   The slot is empty when the open failed, and the opener has already
 ///   reported that. A snapshot is a cache; there is nothing to say here.
 pub fn snapshot_after_first_paint(workspace: &Mutex<Option<Workspace>>) {
+    // Settle before taking the lock.
+    //
+    // Only the encode, the fsync and the rename moved off-thread;
+    // **building the body still runs under the workspace mutex**, and it
+    // drains every deferred and stale block through the per-node index
+    // (2,298 nodes on a real workspace). Before this change that hold
+    // sat inside `boot()`, in front of the publish, where no keystroke
+    // could contend with it. Firing on `first_content` moved the same
+    // hold into the one window where the journal is on screen and the
+    // user is typing into it, which is `UX.md`'s "never block a
+    // keystroke" with extra steps.
+    //
+    // The same answer `reconcile` gives its unchunkable phases: nothing
+    // here needs the first seconds of a launch. The snapshot is read by
+    // the *next* one.
+    std::thread::sleep(crate::reconcile::SETTLE_BEFORE_WHOLE_WORKSPACE);
     let mut slot = workspace.lock();
     let Some(ws) = slot.as_mut() else {
         return;

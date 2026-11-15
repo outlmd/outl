@@ -165,7 +165,13 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     let mut timer = BootTimer::start();
     enable_raw_mode().context("enabling raw mode")?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("entering alt screen")?;
+    // From here to `Terminal::new` the shell is in raw mode with no
+    // prompt, so every failure has to undo that itself: there is no
+    // `Terminal` yet for `restore_terminal` to take.
+    if let Err(e) = execute!(stdout, EnterAlternateScreen) {
+        let _ = disable_raw_mode();
+        return Err(e).context("entering alt screen");
+    }
     // Ask the terminal to deliver pastes as a single `Event::Paste`
     // instead of streaming the clipboard contents as keystrokes (which
     // would interleave `\n` with the user's keymap and produce
@@ -184,7 +190,22 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     }
 
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("creating terminal")?;
+    // `Terminal::new` reads the window size and can fail (`TIOCGWINSZ`
+    // on a pty that went away). Returning straight out would leave the
+    // user in raw mode inside the alternate screen, with no prompt.
+    let mut terminal = match Terminal::new(backend) {
+        Ok(t) => t,
+        Err(e) => {
+            let mut out = std::io::stdout();
+            if mouse_capture {
+                let _ = execute!(out, DisableMouseCapture);
+            }
+            let _ = execute!(out, DisableBracketedPaste);
+            let _ = disable_raw_mode();
+            let _ = execute!(out, LeaveAlternateScreen);
+            return Err(e).context("creating terminal");
+        }
+    };
     timer.phase("terminal");
 
     // The skeleton, before the workspace. Everything below this line

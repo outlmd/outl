@@ -30,7 +30,7 @@ import type { BlockNode } from "../api/types";
 import { MarkdownInline } from "../markdown";
 
 interface PreviewOutlineProps {
-  /** The preview's blocks, straight from `PagePreview.view.outline`. */
+  /** The preview's blocks, straight from the `page-preview` payload. */
   outline: BlockNode[];
   /** Nesting depth, used internally by the recursion. */
   depth?: number;

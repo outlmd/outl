@@ -341,6 +341,41 @@ pub fn read_page_view(root: &Path, meta: &PageMeta) -> Result<Vec<OutlineNode>, 
 /// status-line hint for "this file has lines that don't match the
 /// outl dialect". The bare [`read_page_view`] discards them.
 pub fn read_page_outline(root: &Path, meta: &PageMeta) -> Result<PageOutline, ActionError> {
+    read_page_outline_inner(root, meta, SidecarAccess::Migrating)
+}
+
+/// Whether reading the sidecar may also migrate a legacy dotted one to
+/// its modern name.
+#[derive(Clone, Copy)]
+enum SidecarAccess {
+    /// `outl_md::resolve_sidecar_path`, which renames a legacy sidecar
+    /// in place. Every ordinary caller: they run inside an open
+    /// workspace, so the guards are held.
+    Migrating,
+    /// `outl_md::readable_sidecar_path`, which never writes.
+    ReadOnly,
+}
+
+/// [`read_page_outline`] for a caller that holds no workspace guards.
+///
+/// The page preview is the one such caller: it runs **before**
+/// `open_workspace_at` takes the workspace lock, which is the whole
+/// point of it, so it must not perform the legacy-sidecar rename that
+/// the ordinary read does. A rename there is a write into a workspace
+/// no process has claimed, and the `.md` + sidecar pair can be observed
+/// torn by a concurrent `outl serve` or TUI mid-projection.
+pub fn read_page_outline_readonly(
+    root: &Path,
+    meta: &PageMeta,
+) -> Result<PageOutline, ActionError> {
+    read_page_outline_inner(root, meta, SidecarAccess::ReadOnly)
+}
+
+fn read_page_outline_inner(
+    root: &Path,
+    meta: &PageMeta,
+    access: SidecarAccess,
+) -> Result<PageOutline, ActionError> {
     let md_path = page_md_path(root, meta);
     // A page whose `.md` isn't on disk yet legitimately reads as empty;
     // an unreadable one does not. Rendering an empty outline for a page
@@ -348,8 +383,14 @@ pub fn read_page_outline(root: &Path, meta: &PageMeta) -> Result<PageOutline, Ac
     // next commit writes that emptiness back. See `read_for_rewrite`.
     let md_text = outl_md::read_for_rewrite(&md_path)?;
     let parsed = outl_md::parse::parse(&md_text);
-    let sidecar_path = outl_md::resolve_sidecar_path(&md_path);
-    let sidecar = outl_md::sidecar::read(&sidecar_path).ok();
+    let sidecar = match access {
+        SidecarAccess::Migrating => {
+            outl_md::sidecar::read(&outl_md::resolve_sidecar_path(&md_path)).ok()
+        }
+        SidecarAccess::ReadOnly => {
+            outl_md::readable_sidecar_path(&md_path).and_then(|p| outl_md::sidecar::read(&p).ok())
+        }
+    };
 
     let mut nodes = Vec::with_capacity(parsed.blocks.len());
     let mut iter = sidecar

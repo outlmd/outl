@@ -23,7 +23,7 @@ mod payload;
 pub use digest::{
     content_hash, derive_ref_handle, file_hash, REF_HANDLE_PREFIX, REF_HANDLE_TAIL_LEN,
 };
-pub use paths::{resolve_sidecar_path, sidecar_path_for};
+pub use paths::{readable_sidecar_path, resolve_sidecar_path, sidecar_path_for};
 pub use payload::{
     Sidecar, SidecarBlock, SidecarError, CURRENT_PIPELINE_VERSION, MIN_READABLE_SIDECAR_VERSION,
     SIDECAR_VERSION,

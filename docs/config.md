@@ -208,7 +208,7 @@ See [theming.md](theming.md) for the look of each.
 
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
-| `enabled` | bool | `true` | TUI / desktop / mobile | Master switch for materialised-state snapshots on disk. The CLI ignores this (always off — its work is ephemeral). When `true`, `Workspace::apply` writes a snapshot every `op_threshold` ops so the next boot skips the full op-log replay. |
+| `enabled` | bool | `true` | TUI / desktop / mobile | Master switch for materialised-state snapshots on disk. A **writing** CLI command honours it (`outl block append`, `outl batch`, …); a read (`outl page get`, `outl workspace info`) never writes one whatever this says. When `true`, `Workspace::apply` writes a snapshot every `op_threshold` ops so the next boot skips the full op-log replay. |
 | `op_threshold` | integer (ops) | `10_000` | TUI / desktop / mobile | How many ops between snapshot writes. Lower = faster boot, more disk churn; higher = less churn, slower boot. |
 
 #### `[storage]`

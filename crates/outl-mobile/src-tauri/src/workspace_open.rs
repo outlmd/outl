@@ -197,6 +197,13 @@ pub(crate) fn spawn_workspace_opener(
         workspace_ready.publish();
         info!("background workspace opener complete");
 
+        // Armed here, not in `run()`: counted from `setup` it would race
+        // the *open* rather than the paint, and on a graph large enough
+        // to need the gate the open is the longer of the two. 6s is past
+        // a cold paint on a phone and short of a user noticing sync is
+        // late.
+        first_paint.arm_deadline(std::time::Duration::from_secs(6));
+
         // Everything below waits for the frontend's painted frame.
         //
         // The sync transport's gate was already here and is **not**

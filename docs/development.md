@@ -461,7 +461,7 @@ Fix: drop the brackets, keep the backticks.
 | Integration | `crates/*/tests/*.rs` | Public surface of one crate. Real `MemoryStorage` (or `tempfile` + `JsonlStorage`). |
 | CRDT invariants | `crates/outl-core/tests/crdt_*.rs` | Convergence, idempotency, cycle no-op, replay determinism. |
 | Roundtrip | `crates/outl-md/tests/roundtrip_*.rs` | `md → parse → render → md` is byte-stable. `md → ops → md` preserves ids via sidecar. |
-| Bench | `crates/outl-md/benches/*.rs` (criterion) + `xtask/src/bin/gen-10k.rs` for CLI hyperfine | Hot-path regression detection. Run weekly + per PR via `bench.yml`. |
+| Bench | `crates/outl-md/benches/*.rs` + `crates/outl-core/benches/*.rs` (criterion) + `xtask/src/bin/gen-10k.rs` for CLI hyperfine | Hot-path regression detection. Run weekly + per PR via `bench.yml`. `outl-core`'s `boot` is the one a user feels; budgets in [boot performance](boot-performance.md). |
 | Frontend | `crates/outl-mobile/src/**/*.test.ts`, `crates/outl-desktop/src/**/*.test.ts`, `crates/outl-frontend-shared/**/*.test.ts` (`bun run test`) | Pure helpers and DTO conversions. |
 | Swift (`OutlKit`) | `crates/outl-mobile/swift/OutlKit/Tests/OutlKitTests/` (`swift test`) | Pure native helpers — brand color, suggester chip parser, toolbar MFU, peer-file predicates, JS escape. **Required** for new pure Swift logic. |
 | Native iOS bridges (`gen/apple/.../*.swift`, `main.mm`) | None (yet) — observed via `NSLog` probes on boot | UIKit / Foundation glue that needs the iOS runtime. If you add a piece that *can* be tested without UIKit, extract it into `OutlKit` first. |
@@ -718,7 +718,16 @@ Anything outside those is a correctness conversation, not a perf one.
 
 ### Running benches locally
 
-The criterion suite lives under `crates/outl-md/benches/`:
+The criterion suite lives under `crates/outl-md/benches/` and `crates/outl-core/benches/`:
+
+```bash
+# Boot — the latency a user actually waits on. Four modes
+# (replay_memory / replay_cold / replay_warm_index / snapshot) at
+# three sizes; `10k` is what CI runs per PR.
+cargo bench -p outl-core --bench boot
+cargo bench -p outl-core --bench boot -- "10k"
+```
+
 
 ```bash
 # Whole suite (small + medium + large fixtures, sub-second each):
