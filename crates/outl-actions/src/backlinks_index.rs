@@ -80,7 +80,7 @@ struct IndexedEntry {
 ///
 /// `claims` is the set of names every live page answers to, built with
 /// the index. A page's lookup keys are derived at query time and drop an
-/// `alias::` another page already names (see [`crate::alias_conflicts`]),
+/// `alias::` another page already names (see [`crate::alias_conflicts()`]),
 /// so the index has to carry the claims the lookup is judged against.
 #[derive(Debug, Clone, Default)]
 pub struct BacklinkIndex {

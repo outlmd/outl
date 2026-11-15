@@ -8,7 +8,7 @@
 //! clicking a `[[Beta]]` and reading the backlinks panel cannot disagree
 //! about which page owns the mention.
 //!
-//! **One owner of the verdict.** [`PageClaims::shadowed_by`] answers "is
+//! **One owner of the verdict.** `PageClaims::shadowed_by` answers "is
 //! this alias taken by another page". The backlink keys
 //! (`crate::backlinks_keys::keys_for_page`) and the public
 //! [`alias_conflicts`] listing both ask it, so what the user is warned
@@ -160,7 +160,7 @@ pub struct AliasConflict {
 /// they were written.
 ///
 /// Asks the same predicate as the backlink index
-/// ([`PageClaims::shadowed_by`]), so what this lists is exactly what the
+/// (`PageClaims::shadowed_by`), so what this lists is exactly what the
 /// index ignores. Trashed pages do not count: they are not in
 /// `list_all`.
 pub fn alias_conflicts(workspace: &Workspace, page: &PageMeta) -> Vec<AliasConflict> {
