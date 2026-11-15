@@ -68,6 +68,7 @@
 * [Desktop UX behaviour](desktop-ux.md)
 * [Mobile UX behaviour](mobile-ux.md)
 * [iOS platform integration](ios-platform.md)
+* [iOS App Store review notes](app-store/review-notes.md)
 * [Android platform integration](android-platform.md)
 * [Contributing & code review](contributing.md)
 
