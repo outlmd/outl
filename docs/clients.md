@@ -287,6 +287,14 @@ The page's `.md` is the caller's business as usual.
 A revive emits `Op::Move`s only, so a `.md` holding lines the op log never saw still refuses to be overwritten — see [Surfacing a page that stopped syncing](#surfacing-a-page-that-stopped-syncing).
 A `.md` still showing blocks the log holds *in the trash* is re-projected without them, which is the delete reaching the file.
 
+## Renaming and merging pages
+
+`outl_actions::rename_page` and `outl_actions::merge_pages` own both operations, including the rewrite of every `[[old]]` and `#old` mention ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
+The desktop and mobile apps reach them through the `rename_page` and `merge_pages` commands, and the caller projects every page in `report.touched_pages` and removes the old projection last, as `outl page rename` does.
+`@outl/shared/pages/rename-merge` owns the flow (rename, confirm a merge when the name is taken, merge) and the wording of the confirmations and summaries, so the two clients do not each invent it.
+Which clients can do it is recorded as `Capability::PageRename` and `Capability::PageMerge`: full on desktop and mobile, missing in the TUI, whose terminal route is `outl page rename` (rename only: no terminal command merges yet).
+Neither has a chord, so there is no `Action`.
+
 ## Running code blocks
 
 Every client that lets the user execute a `` ```lang ``` `` block (TUI `g x`, desktop `Cmd+Shift+X` / Run button, mobile long-press → "Run code") goes through **one** shared entry point:

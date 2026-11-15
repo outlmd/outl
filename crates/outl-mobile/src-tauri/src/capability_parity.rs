@@ -55,6 +55,27 @@ mod tests {
              feature that is right there",
         );
 
+        // Rename and merge are reached from the page switcher's
+        // long-press sheet (RFC 0557). The catalog says `Full` for this
+        // client, so both commands the sheet calls must still exist.
+        let _ = crate::commands::rename_page;
+        assert_eq!(
+            capability_support(Capability::PageRename).mobile,
+            Support::Full,
+            "outl-mobile registers rename_page (the page switcher's \
+             \"Rename page\" action) - the catalog's PageRename verdict for \
+             mobile must track that.",
+        );
+
+        let _ = crate::commands::merge_pages;
+        assert_eq!(
+            capability_support(Capability::PageMerge).mobile,
+            Support::Full,
+            "outl-mobile registers merge_pages (the page switcher's \
+             \"Merge into\" action) - the catalog's PageMerge verdict for \
+             mobile must track that.",
+        );
+
         let _ = crate::commands::plugin_registry_list;
         assert_eq!(
             capability_support(Capability::PluginMarketplace).mobile,

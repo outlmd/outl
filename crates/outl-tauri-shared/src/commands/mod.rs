@@ -15,6 +15,9 @@
 //! - [`page`] — navigate pages and journals, search, refs,
 //!   `toggle_pin` (RFC 0254 phase 4: flips the `pinned::` page
 //!   property, already op-log-backed), `delete_page`.
+//! - [`page_merge`]: `rename_page` and `merge_pages`: the IPC adapter
+//!   over `outl_actions::rename_page` / `merge_pages` (RFC 0557), which
+//!   re-projects every touched page and retires the stale projection last.
 //! - [`page_open`] — the three *open* commands. Split out because they
 //!   are a concurrency problem rather than navigation logic: each takes
 //!   the workspace mutex that the background reconcile pass holds for
@@ -62,6 +65,7 @@ pub mod journal_days;
 pub mod open_with;
 pub mod page;
 mod page_backlinks;
+pub mod page_merge;
 pub mod page_open;
 pub mod peers;
 pub mod plugin;

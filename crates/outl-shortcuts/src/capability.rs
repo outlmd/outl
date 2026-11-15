@@ -31,6 +31,23 @@ pub enum Capability {
     /// `TimelinePanel`, the page header's `⏱` button). Read-only —
     /// it shows the past, it does not restore it.
     PageHistory,
+    /// Renaming a page from the app: a text prompt, every `[[old]]` and
+    /// `#old` mention respelled in the same batch, and a confirm to
+    /// merge when the new name already belongs to another page.
+    ///
+    /// The route is `outl_actions::rename_page`, shared by every
+    /// surface. A journal cannot be renamed on any client: its slug is
+    /// its date.
+    PageRename,
+    /// Merging one page into another from the app: pick the target,
+    /// confirm, and the source's blocks move under it with its links
+    /// rewritten and a summary of what moved and what conflicted.
+    ///
+    /// Distinct from [`Capability::PageRename`], which only reaches a
+    /// merge when the new name is taken. This one starts from the
+    /// merge. The route is `outl_actions::merge_pages`. A journal
+    /// cannot be the source.
+    PageMerge,
     /// Browsing the official plugin registry and installing from it
     /// (as opposed to configuring an already-installed plugin, which
     /// every client can do).
@@ -220,6 +237,8 @@ impl Capability {
     /// list exists to close (see `Action::ALL`'s identical contract).
     pub const ALL: &'static [Capability] = &[
         Capability::PageHistory,
+        Capability::PageRename,
+        Capability::PageMerge,
         Capability::PluginMarketplace,
         Capability::Calendar,
         Capability::Templates,
@@ -250,11 +269,13 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_20: usize = 20;
+    const EXPECTED_22: usize = 22;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
             Capability::PageHistory => "PageHistory",
+            Capability::PageRename => "PageRename",
+            Capability::PageMerge => "PageMerge",
             Capability::PluginMarketplace => "PluginMarketplace",
             Capability::Calendar => "Calendar",
             Capability::Templates => "Templates",
@@ -290,9 +311,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_20,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_20} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_20)",
+            EXPECTED_22,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_22} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_22)",
             names.len(),
         );
     }

@@ -342,6 +342,21 @@ The flag is held in `Journal.tsx`'s own `aheadOfLog` signal, **not** read off `v
 It is cleared by a reply carrying `md_ahead_of_log_checked` with no notice (the next open / refresh once the page is healthy again), so the banner can't outlive the condition — same rule as desktop.
 Convention: [`docs/clients.md` → Surfacing a page that stopped syncing](../../docs/clients.md#surfacing-a-page-that-stopped-syncing).
 
+## Page switcher: rename and merge (RFC 0557)
+
+A long-press on a **page** row (never a journal) opens the same menu component the block long-press uses, with three rows: **Rename page...**, **Merge into...**, **Delete page**.
+`PageSwitcher.tsx` keeps the search list and the wiring; everything one page can be asked to do lives in `PageSwitcher.page-actions.tsx` (`createPageActions`, the long-press recogniser, `<MergeBanner />`, `<PageActionOverlays />`), split out when the switcher would otherwise have crossed the 600-line ratchet.
+
+- **The flow is not written here.** `renameOrMerge` / `mergeInto` and every sentence (`nameTakenMessage`, `mergeConfirmMessage`, `renameSummary`, `mergeSummary`) come from `@outl/shared/pages/rename-merge`, so the desktop runs the same steps and says the same words.
+  This crate owns only the chrome: `PageNameSheet.tsx` (a prefilled one-line sheet, 48pt targets) for the name and `ConfirmDialog` for the question.
+- **A merge is never reached without a confirmation.** "Merge into..." turns the switcher's own list into a target picker (pages only, the source left out, no pin toggles, no long-press) and a tap on a row asks first.
+  Cancelling that question stays in the picker so another target can be chosen; the banner's Cancel leaves it.
+  A rename onto a taken name asks the same question, and any answer but "Merge" writes nothing.
+- **On success** the switcher navigates to the resulting page through `onPick` (delete does the same) and hands the summary to `onNotice`, which `Journal.tsx` routes into its toast.
+  A summary with several lines (a merge with property conflicts) makes `Toast.tsx` show every line and stay 12 s, because the conflict line is the one the user has to read.
+- Not done on mobile: a keyboard shortcut (there is no chord surface) and the optional alias-conflict warning.
+- Pinned by `PageSwitcher.page-actions.test.tsx` (the shared flow runs for real over stubbed `api/page-merge` commands) and `sheets.bounded.test.ts` (the name sheet declares its bound).
+
 ## Per-feature behaviour lives in `docs/mobile-ux.md`
 
 Nine sections moved out: how a ref that does not exist yet is opened, the page switcher's long-press delete, external links, blockquote chrome, zoom / focus, paste from external apps, the keyboard accessory bar, code execution, and template insertion.

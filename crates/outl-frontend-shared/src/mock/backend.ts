@@ -7,6 +7,13 @@ type Handler = (args: Args) => unknown;
 
 const palettes = presets as Palette[];
 
+/** A stand-in for `outl_md::slug::slugify`: lowercase words joined by `-`. */
+const slugify = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}/]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+
 /**
  * A handful of the catalog's chrome bindings, so the palette and the
  * keyboard have something to work with. The real catalog is
@@ -227,6 +234,45 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
     take_pending_deep_link: () => null,
     take_pending_open_file: () => null,
 
+    rename_page: (a) => {
+      const p = ws.byRef(String(a.page));
+      if (!p) throw new Error(`mock: no page ${String(a.page)}`);
+      if (p.meta.kind === "journal") throw new Error("journal pages cannot be renamed");
+      const title = String(a.newName).trim();
+      const slug = slugify(title);
+      if (!slug) throw new Error("page name is empty");
+      const taken = ws.pages.get(slug);
+      if (taken && taken !== p) return { status: "exists", existing: taken.meta };
+      const old = { slug: p.meta.slug, title: p.meta.title };
+      ws.rename(p, slug, title);
+      return {
+        status: "renamed",
+        view: ws.view(p),
+        report: { old_slug: old.slug, old_title: old.title, rewritten_blocks: 0, skipped_namespace_refs: 0 },
+      };
+    },
+    merge_pages: (a) => {
+      const source = ws.byRef(String(a.source));
+      const target = ws.byRef(String(a.target));
+      if (!source || !target) throw new Error("mock: no such page");
+      if (source === target) throw new Error("cannot merge a page into itself");
+      if (source.meta.kind === "journal") throw new Error("journal pages cannot be merged");
+      const moved = source.blocks.length;
+      const report = {
+        source_slug: source.meta.slug,
+        source_title: source.meta.title,
+        target_slug: target.meta.slug,
+        target_title: target.meta.title,
+        moved_blocks: moved,
+        rewritten_blocks: 0,
+        skipped_namespace_refs: 0,
+        property_conflicts: [],
+        aliases_added: [source.meta.title],
+        already_merged: false,
+      };
+      ws.merge(source, target);
+      return { view: ws.view(target), report };
+    },
     edit_block: (a) => {
       const p = page(a);
       const at = ws.locate(p, String(a.id));

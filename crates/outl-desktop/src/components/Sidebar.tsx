@@ -29,6 +29,7 @@ import { CalendarIcon, PageGlyph, SearchIcon } from "@outl/shared/icons";
 import { rovingKeydown } from "../lib/keyboard-reach";
 import { isMac } from "../lib/palette-results";
 import { appState, setAppState } from "../lib/store";
+import { PageActionDialog, type PageAction } from "./PageActionDialog";
 
 /**
  * Left pane — mirrors the TUI's `view::sidebar`.
@@ -54,7 +55,10 @@ export function Sidebar(props: {
   onToday: () => void;
   onPickPage: (view: PageView) => void;
 }) {
-  const pageKey = () => appState.page?.id ?? "(none)";
+  // Slug and title ride the key: a rename keeps the page id, and the
+  // list must still refetch to show the new name.
+  const pageKey = () =>
+    `${appState.page?.id ?? "(none)"}:${appState.page?.slug}:${appState.page?.title}`;
   const [pages, { refetch }] = createResource(pageKey, async () => {
     try {
       return await listPages();
@@ -218,17 +222,31 @@ export function Sidebar(props: {
     }
   }
 
+  // ── rename / merge ────────────────────────────────────────────
+
+  const [pageAction, setPageAction] = createSignal<PageAction | null>(null);
+
+  function handlePageActionDone(view: PageView) {
+    setPageAction(null);
+    props.onPickPage(view);
+    // A merge can leave the active page unchanged (merging into the
+    // page being viewed), so the key above would not refetch.
+    void refetch();
+  }
+
   // ── presentation primitives ───────────────────────────────────
 
   /** A list row. Active state shows a soft accent bar on the left
    *  instead of a full-row highlight — quieter, more Bear-like.
-   *  Shows a hover-only × button when `onDelete` is provided. */
+   *  Shows hover-only rename / merge / × buttons when their callback is provided. */
   function Row(props: {
     label: string;
     icon?: JSX.Element;
     active: boolean;
     onClick: () => void;
     onDelete?: () => void;
+    onRename?: () => void;
+    onMerge?: () => void;
   }) {
     return (
       <div class="group relative">
@@ -256,20 +274,50 @@ export function Sidebar(props: {
             {props.label}
           </span>
         </button>
-        <Show when={props.onDelete}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              props.onDelete?.();
-            }}
-            aria-label={`Delete page "${props.label}"`}
-            title="Delete page"
-            class="absolute top-1/2 right-1.5 -translate-y-1/2 rounded px-1 text-[13px] text-(--color-outl-fg-dimmer) opacity-0 transition-opacity hover:text-(--color-outl-destructive) group-hover:opacity-100 focus:opacity-100"
-          >
-            ×
-          </button>
-        </Show>
+        <div class="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <Show when={props.onRename}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onRename?.();
+              }}
+              aria-label={`Rename page "${props.label}"`}
+              title="Rename page..."
+              class="rounded px-1 text-[12px] text-(--color-outl-fg-dimmer) hover:text-(--color-outl-fg)"
+            >
+              ✎
+            </button>
+          </Show>
+          <Show when={props.onMerge}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onMerge?.();
+              }}
+              aria-label={`Merge page "${props.label}" into another page`}
+              title="Merge into..."
+              class="rounded px-1 text-[12px] text-(--color-outl-fg-dimmer) hover:text-(--color-outl-fg)"
+            >
+              ⇥
+            </button>
+          </Show>
+          <Show when={props.onDelete}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onDelete?.();
+              }}
+              aria-label={`Delete page "${props.label}"`}
+              title="Delete page"
+              class="rounded px-1 text-[13px] text-(--color-outl-fg-dimmer) hover:text-(--color-outl-destructive)"
+            >
+              ×
+            </button>
+          </Show>
+        </div>
       </div>
     );
   }
@@ -453,6 +501,16 @@ export function Sidebar(props: {
                   onDelete={
                     p.kind === "journal" ? undefined : () => void handleDelete(p)
                   }
+                  onRename={
+                    p.kind === "journal"
+                      ? undefined
+                      : () => setPageAction({ kind: "rename", page: p })
+                  }
+                  onMerge={
+                    p.kind === "journal"
+                      ? undefined
+                      : () => setPageAction({ kind: "merge", page: p })
+                  }
                 />
               )}
             </For>
@@ -476,6 +534,16 @@ export function Sidebar(props: {
                   onDelete={
                     p.kind === "journal" ? undefined : () => void handleDelete(p)
                   }
+                  onRename={
+                    p.kind === "journal"
+                      ? undefined
+                      : () => setPageAction({ kind: "rename", page: p })
+                  }
+                  onMerge={
+                    p.kind === "journal"
+                      ? undefined
+                      : () => setPageAction({ kind: "merge", page: p })
+                  }
                 />
               )}
             </For>
@@ -489,6 +557,12 @@ export function Sidebar(props: {
           </div>
         </Show>
       </div>
+
+      <PageActionDialog
+        action={pageAction()}
+        onClose={() => setPageAction(null)}
+        onDone={handlePageActionDone}
+      />
     </aside>
   );
 }
