@@ -1,4 +1,4 @@
-//! `outl page merge`: the wrapper around [`outl_actions::merge_pages`].
+//! `outl page merge`: the wrapper around [`outl_actions::merge_pages()`].
 //!
 //! Glue only. What a merge does (blocks, properties, aliases, link
 //! rewrite, trashing the source) is owned by `outl-actions`
