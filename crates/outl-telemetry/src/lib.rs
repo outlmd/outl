@@ -38,7 +38,7 @@ mod redact;
 mod stdio;
 
 pub use redact::{redact, FILE_MARKER, ID_MARKER, PATH_MARKER, TEXT_MARKER};
-pub use stdio::{install_panic_hook, lossy_stderr, LossyStderr};
+pub use stdio::{install_panic_hook, lossy_stderr, print_stdout, LossyStderr};
 
 #[cfg(feature = "sentry")]
 mod fingerprint;

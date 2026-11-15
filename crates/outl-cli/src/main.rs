@@ -15,6 +15,11 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 
+// First, and `macro_use`: its `print!` / `println!` shadow the prelude's in
+// every module below.
+#[macro_use]
+mod stdout;
+
 mod cli;
 mod cmd;
 mod human;

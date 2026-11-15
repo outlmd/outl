@@ -63,6 +63,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **`outl <cmd> | head -1` no longer crashes.**
+  A reader that closed stdout early made the standard `print!` / `println!` panic with `failed printing to stdout` (Unix `EPIPE`, Windows `ERROR_NO_DATA`), and the crash reporter filed it as fatal (OUTL-4).
+  The CLI's print macros now drop output on a broken pipe and let the command finish, with the command's own exit status.
+  Finishing rather than exiting is deliberate: a mutating command such as `outl doctor --repair` is not abandoned half way because its reader went away.
+  Any other stdout error is still a panic and still reported.
+
 - **TestFlight uploads stopped being refused over export compliance.**
   The app declared `ITSAppUsesNonExemptEncryption = true`, which is not "this app uses encryption" — it is "Apple has approved encryption documentation for this app, and its code is in `ITSEncryptionExportComplianceCode`".
   outl has no approved documentation and therefore no code, so every upload came back as `Invalid Export Compliance Code ... key value []`, where the empty value is the missing **code**, not the missing flag.
