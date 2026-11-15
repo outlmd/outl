@@ -69,7 +69,11 @@ fn workspace_with_two_notes_pages(client: &mut McpClient) {
         ("notes", "the kept block"),
         ("third", "see [[oldnotes]] and #oldnotes for more"),
     ] {
-        tool_ok(client, "outl_block_append", json!({ "page": page, "text": text }));
+        tool_ok(
+            client,
+            "outl_block_append",
+            json!({ "page": page, "text": text }),
+        );
     }
     for (page, value) in [("oldnotes", "open"), ("notes", "done")] {
         tool_ok(
@@ -153,7 +157,10 @@ fn merge_moves_blocks_rewrites_refs_and_reports_what_it_did() {
     assert!(notes.contains("second old block"), "{notes}");
     assert!(notes.contains("the kept block"), "{notes}");
     let third = page_md(&ws, "third");
-    assert!(third.contains("see [[notes]] and #notes for more"), "{third}");
+    assert!(
+        third.contains("see [[notes]] and #notes for more"),
+        "{third}"
+    );
     assert!(
         !ws.path().join("pages/oldnotes.md").exists(),
         "the source's projection must be gone"
@@ -222,12 +229,21 @@ fn the_catalog_advertises_the_merge_tool_and_its_confirm_gate() {
         .expect("outl_page_merge must be registered");
     let description = merge["description"].as_str().unwrap_or_default();
     assert!(description.contains("confirm:true"), "{description}");
-    assert_eq!(merge["inputSchema"]["required"], json!(["source", "target"]));
-    assert_eq!(merge["inputSchema"]["properties"]["confirm"]["type"], "boolean");
+    assert_eq!(
+        merge["inputSchema"]["required"],
+        json!(["source", "target"])
+    );
+    assert_eq!(
+        merge["inputSchema"]["properties"]["confirm"]["type"],
+        "boolean"
+    );
 
     let rename = tools
         .iter()
         .find(|t| t["name"] == "outl_page_rename")
         .expect("outl_page_rename must be registered");
-    assert_eq!(rename["inputSchema"]["properties"]["merge"]["type"], "boolean");
+    assert_eq!(
+        rename["inputSchema"]["properties"]["merge"]["type"],
+        "boolean"
+    );
 }

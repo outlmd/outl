@@ -38,8 +38,8 @@ pub fn run(path: &Path, source: &str, target: &str, confirm: bool, json: bool) -
 /// `source` may already be in the trash (a re-run that moves blocks that
 /// arrived late), which is why it is not resolved with `page::resolve`.
 pub fn merge(ctx: &mut WsCtx, source: &str, target: &str) -> Result<Value, ApiError> {
-    let report = outl_actions::merge_pages(&mut ctx.workspace, &ctx.hlc, source, target)
-        .map_err(refusal)?;
+    let report =
+        outl_actions::merge_pages(&mut ctx.workspace, &ctx.hlc, source, target).map_err(refusal)?;
     finish(ctx, &report)
 }
 
@@ -87,7 +87,10 @@ fn reply(report: &MergeReport) -> Result<Value, ApiError> {
             map.insert("rewritten_refs".to_string(), blocks);
         }
         map.insert("outcome".to_string(), json!("merged"));
-        map.insert("nothing_changed".to_string(), json!(report.nothing_changed()));
+        map.insert(
+            "nothing_changed".to_string(),
+            json!(report.nothing_changed()),
+        );
     }
     Ok(value)
 }

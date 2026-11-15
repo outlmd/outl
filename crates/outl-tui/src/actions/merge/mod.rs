@@ -248,7 +248,10 @@ impl App {
             ProjectionRefusal::AheadOfLog { lines, sample, .. } => {
                 let notice =
                     outl_actions::refusal::ahead_of_log_notice(Surface::Tui, lines, &sample);
-                self.toast(ToastKind::Warning, format!("`{slug}`: {}", notice.one_line()));
+                self.toast(
+                    ToastKind::Warning,
+                    format!("`{slug}`: {}", notice.one_line()),
+                );
             }
         }
     }
@@ -259,7 +262,10 @@ impl App {
 /// Only the nonzero parts, so the common merge reads `merged 'a' into
 /// 'b': 3 blocks`.
 fn merge_summary(report: &MergeReport) -> String {
-    let head = format!("merged '{}' into '{}'", report.source.title, report.target.title);
+    let head = format!(
+        "merged '{}' into '{}'",
+        report.source.title, report.target.title
+    );
     if report.nothing_changed() {
         return format!("{head}: nothing left to move");
     }

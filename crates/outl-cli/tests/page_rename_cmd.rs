@@ -209,13 +209,14 @@ fn rename_with_merge_folds_into_the_existing_page() {
     assert_eq!(data["outcome"], "merged", "{env}");
     assert_eq!(data["source"]["slug"], "beta");
     assert_eq!(
-        data["target"]["slug"],
-        "alpha",
+        data["target"]["slug"], "alpha",
         "the existing page keeps its name"
     );
     assert_eq!(data["moved_blocks"], 1);
     assert!(
-        data["rewritten_refs"].as_array().is_some_and(|r| !r.is_empty()),
+        data["rewritten_refs"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()),
         "mentions of the old name are rewritten: {env}"
     );
 

@@ -4,7 +4,9 @@
 use super::*;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use outl_actions::{append_block, apply_page_md_with_sidecar_guarded, open_or_create_page, PageKind};
+use outl_actions::{
+    append_block, apply_page_md_with_sidecar_guarded, open_or_create_page, PageKind,
+};
 use outl_core::{ActorId, Workspace};
 use tempfile::TempDir;
 
@@ -57,7 +59,10 @@ fn merge_arms_the_prompt_and_writes_nothing() {
 
     app.arm_page_merge("Beta");
 
-    let pending = app.pending_sidebar_delete.as_ref().expect("a prompt is armed");
+    let pending = app
+        .pending_sidebar_delete
+        .as_ref()
+        .expect("a prompt is armed");
     assert_eq!(pending.slug, "alpha");
     assert_eq!(pending.merge_into.as_deref(), Some("beta"));
     assert!(
@@ -78,7 +83,10 @@ fn the_slash_command_reaches_the_same_prompt() {
     let registry = app.command_registry.clone();
     registry.dispatch(&mut app, "merge Beta").unwrap();
 
-    let pending = app.pending_sidebar_delete.as_ref().expect("a prompt is armed");
+    let pending = app
+        .pending_sidebar_delete
+        .as_ref()
+        .expect("a prompt is armed");
     assert_eq!(pending.merge_into.as_deref(), Some("beta"));
 }
 
@@ -90,7 +98,11 @@ fn an_unknown_target_is_refused_not_created() {
     app.arm_page_merge("Nowhere");
 
     assert!(app.pending_sidebar_delete.is_none());
-    assert!(app.status.contains("no page 'Nowhere'"), "got {:?}", app.status);
+    assert!(
+        app.status.contains("no page 'Nowhere'"),
+        "got {:?}",
+        app.status
+    );
     assert!(
         !app.workspace_root.join("pages/nowhere.md").exists(),
         "merging into a page that is not there must not create it"
@@ -147,7 +159,10 @@ fn confirming_moves_the_blocks_and_lands_on_the_target() {
     assert!(
         toasted(&app, "merged 'Alpha' into 'Beta': 2 blocks"),
         "got {:?}",
-        app.toasts.iter().map(|t| t.message.as_str()).collect::<Vec<_>>()
+        app.toasts
+            .iter()
+            .map(|t| t.message.as_str())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -165,7 +180,10 @@ fn confirming_drops_undo_entries_of_the_pages_it_changed() {
 
     app.sidebar_confirm_delete().unwrap();
 
-    assert!(app.undo.is_empty(), "a stale snapshot of the target would undo the merge");
+    assert!(
+        app.undo.is_empty(),
+        "a stale snapshot of the target would undo the merge"
+    );
     assert!(app.redo.is_empty());
 }
 
@@ -194,7 +212,10 @@ fn any_other_key_cancels_and_changes_nothing() {
 
     press(&mut app, 'x');
 
-    assert!(app.pending_sidebar_delete.is_none(), "the prompt is dropped");
+    assert!(
+        app.pending_sidebar_delete.is_none(),
+        "the prompt is dropped"
+    );
     let alpha = outl_actions::find_by_slug(&app.workspace, "alpha").unwrap();
     assert!(!outl_actions::is_trashed(&app.workspace, alpha));
     assert!(app.workspace_root.join("pages/alpha.md").exists());
