@@ -394,4 +394,30 @@ pub enum ActionError {
     /// silently is the failure RFC 0363 exists to avoid.
     #[error("there's nothing to save — the shared text is empty")]
     EmptyCapture,
+
+    /// `merge_pages` was asked to merge a page into itself.
+    #[error("cannot merge `{0}` into itself")]
+    MergeIntoSelf(String),
+
+    /// `merge_pages` was asked to use a journal day as the source. A
+    /// journal's identity is its date, so folding one into another page
+    /// would leave the day without its journal.
+    #[error("cannot merge `{0}`: a journal day is identified by its date and cannot be folded into another page")]
+    CannotMergeJournal(String),
+
+    /// `rename_page` was asked to rename a journal day, whose slug is
+    /// its date.
+    #[error("cannot rename `{0}`: a journal day is identified by its date")]
+    CannotRenameJournal(String),
+
+    /// A rename wants a slug that another page already owns. Carries
+    /// the slug of that page so a caller can offer to merge into it
+    /// instead of failing.
+    #[error(
+        "page `{existing}` already exists, so it cannot be a rename target; merge into it instead"
+    )]
+    PageExists {
+        /// Slug of the page that already holds the name.
+        existing: String,
+    },
 }

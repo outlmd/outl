@@ -80,7 +80,7 @@ pub fn list() -> Vec<Value> {
         ),
         tool_def(
             "outl_page_rename",
-            "Rename a page slug. Does not rewrite `[[old_slug]]` references — they appear in `affected_refs`.",
+            "Rename a page slug and rewrite `[[old_slug]]` / `#old_slug` mentions in every block (`rewritten_refs` lists the edited blocks; namespace children are listed in `skipped_namespace_refs`, not rewritten). Fails with SLUG_CONFLICT when `new_slug` is another page.",
             json!({
                 "type": "object",
                 "properties": {

@@ -166,6 +166,13 @@ impl From<outl_actions::ActionError> for ApiError {
                 format!("cannot outdent {s}: parent has no grandparent"),
             ),
             InvalidSlug(s) => ApiError::new(codes::INVALID_ARG, format!("invalid page slug `{s}`")),
+            // The `Display` of `PageExists` already says a merge is the
+            // way out, and the code stays the one callers matched on
+            // before merging existed.
+            PageExists { .. } => ApiError::new(codes::SLUG_CONFLICT, message),
+            MergeIntoSelf(_) | CannotMergeJournal(_) | CannotRenameJournal(_) => {
+                ApiError::new(codes::INVALID_ARG, message)
+            }
             PageMarkdownAheadOfLog {
                 path,
                 lines,

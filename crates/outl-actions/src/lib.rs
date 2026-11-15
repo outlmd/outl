@@ -50,6 +50,7 @@
 #![warn(missing_docs)]
 
 pub mod activity;
+pub mod alias_conflicts;
 pub mod asset;
 pub mod backlinks;
 pub mod backlinks_index;
@@ -72,13 +73,16 @@ pub mod history;
 pub mod index;
 pub mod insert;
 pub mod journal;
+pub mod link_rewrite;
 pub mod mentions;
+pub mod merge_pages;
 pub mod merges;
 pub mod namespace;
 pub mod open_with;
 pub mod outline;
 pub mod page;
 pub mod page_merge;
+pub mod page_rename;
 pub mod page_repair_namespaces;
 pub mod page_repair_titles;
 mod page_revive;
@@ -101,6 +105,7 @@ pub mod trash;
 pub mod tree;
 
 pub use activity::{device_activity, ActorActivity, DeviceActivity};
+pub use alias_conflicts::{alias_conflicts, AliasConflict, ConflictingPage};
 pub use asset::{assets_dir, import_asset, import_asset_bytes, resolve_asset_path, ImportedAsset};
 pub use backlinks::{
     backlinks_for_page, backlinks_for_target, extract_refs, Backlink, BacklinkCrumb,
@@ -137,6 +142,7 @@ pub use journal::{
     reproject_stale_md, sidecar_can_answer, sidecar_can_vouch_for, write_md_atomic,
     ProjectionFailure, ProjectionRefusal, ProjectionSweep,
 };
+pub use merge_pages::{merge_pages, MergeReport, PropertyConflict};
 pub use namespace::{descendants as namespace_descendants, NamespaceChild};
 pub use outl_md::parse::{ParseWarning, ParseWarningKind};
 pub use outline::{
@@ -151,6 +157,7 @@ pub use page::{
     open_or_create as open_or_create_page, open_today, page_meta, read_text_prop, set_property,
     today, PageKind, PageMeta,
 };
+pub use page_rename::{rename_or_merge, rename_page, OnExisting, RenameOutcome, RenameReport};
 pub use page_repair_namespaces::{repair_namespaced_titles, NamespaceTitleRepair};
 pub use page_repair_titles::repair_doubled_journal_titles;
 pub use paste::{

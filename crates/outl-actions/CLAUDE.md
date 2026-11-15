@@ -321,6 +321,18 @@ It refuses a page that already has a title, and reports a slug two spellings cla
 `descendants` returns rows with `depth` and `label` already computed, so the TUI's `view/namespace.rs` and the desktop / mobile `<NestedPages />` render the same list without three copies of the split rule.
 Per-client coverage is recorded as `Capability::NestedPages` (the TUI lists them but has no cursor in the list).
 
+## Merging and renaming pages
+
+Single owners, [RFC 0557](../../docs/rfcs/0557-page-merge-and-rename.md):
+
+- `link_rewrite::rewrite_mentions` owns "what is a mention of page X, and how is it respelled".
+- `alias_conflicts::PageClaims::shadowed_by` owns "is this alias taken by another live page", for the backlink index and for `alias_conflicts`.
+- `merge_pages` and `rename_page` (`rename_or_merge` for the collision) own the actions, and neither projects.
+
+The caller runs `commit_page` over each of `touched_pages`, then removes the stale projection (`MergeReport::source`, `RenameReport::stale_projection`).
+The merge source is trashed, never left as a stub page: its slug and title become aliases of the target.
+A second page-name matcher, in any crate or client, is the thing to refuse in review.
+
 ## Opening an external file (`open_with`)
 
 `open_with.rs` owns the "Open With → outl" import: an OS gesture hands a client a `.md` / `.txt` that lives outside the workspace, and what lands is an ordinary page.

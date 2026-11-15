@@ -121,8 +121,24 @@ The MCP tool column is the name Claude Desktop (or any MCP host) sees.
 
 `page get` returns page meta plus the outline tree.
 `page render` returns the projected `.md` string (clean, no sidecar fields).
-`page rename` updates the `page-slug` property and renames the on-disk `.md`/`.outl` — it does **not** rewrite `[[old_slug]]` references in other pages.
-Affected blocks come back in `affected_refs` so the caller can decide whether to bulk-rewrite.
+`page rename` updates the `page-slug` property, renames the on-disk `.md`/`.outl`, and rewrites every mention of the page so it names the new one.
+That covers `[[old]]`, `[[@old]]` for a person page, and `#old`, written as one edit per block in the same op-log batch.
+Code spans, fenced code, link text and urls, block refs, and names that only contain the old slug are left alone.
+A page keeps its blocks and its id.
+
+The output carries:
+
+- `rewritten_refs`: the ids of the blocks whose text was edited.
+- `skipped_namespace_refs`: mentions of a sub-page (`[[old/child]]`), which are reported and not rewritten, because that sub-page is not being renamed.
+- `touched_pages`: every page that was re-projected, the renamed one included.
+- `affected_refs`: blocks that still name the old slug after the rewrite, so the caller can decide what to do with them.
+
+Properties are not rewritten: a page ref inside a `key:: value` stays as written.
+
+A new slug that another page already owns fails with `SLUG_CONFLICT`, and the message says the page could be merged into the existing one.
+Nothing is written.
+No command merges pages yet.
+A journal cannot be renamed, because its slug is its date.
 
 `page create --content` accepts a forest of `[{text, children?}, ...]` (or a single `{text, children?}` for ergonomics) so a brand-new page lands with its full outline in one op-log session instead of a chain of `block append` calls.
 Pass `--content -` to read the JSON from stdin.

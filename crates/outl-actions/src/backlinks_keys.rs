@@ -16,6 +16,7 @@
 
 use outl_core::workspace::Workspace;
 
+use crate::alias_conflicts::PageClaims;
 use crate::mentions::extract_refs_and_tags;
 use crate::page::PageMeta;
 
@@ -105,7 +106,18 @@ pub(crate) fn mentions_of(text: &str, from_template: Option<&str>) -> Vec<Target
 /// literal `Ref` and the `Tag` slug, exactly like the old
 /// `TargetMatcher::refs`. A template page additionally looks itself
 /// up under its callable name and its own slug (provenance).
-pub(crate) fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<TargetKey> {
+///
+/// An alias that another live page already names is **not** a key for
+/// this page: navigation sends that name to the other page (titles win
+/// over aliases), so the backlinks must too. `claims` answers that, and
+/// it covers the `@`-prefixed person forms because they are derived from
+/// the same surviving alias list.
+pub(crate) fn keys_for_page(
+    workspace: &Workspace,
+    meta: &PageMeta,
+    claims: &PageClaims,
+) -> Vec<TargetKey> {
+    let aliases: Vec<&String> = claims.live_aliases(meta).collect();
     let mut keys: Vec<TargetKey> = Vec::new();
     let mut add_target = |t: &str| {
         keys.push(TargetKey::Ref(t.to_string()));
@@ -115,7 +127,7 @@ pub(crate) fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<Targe
     if meta.title != meta.slug {
         add_target(&meta.title);
     }
-    for alias in &meta.aliases {
+    for alias in &aliases {
         add_target(alias);
     }
     if meta.page_type.as_deref() == Some(crate::person::PERSON_TYPE) {
@@ -123,7 +135,7 @@ pub(crate) fn keys_for_page(workspace: &Workspace, meta: &PageMeta) -> Vec<Targe
         if meta.title != meta.slug {
             add_target(&format!("@{}", meta.title));
         }
-        for alias in &meta.aliases {
+        for alias in &aliases {
             add_target(&format!("@{}", alias));
         }
     }
