@@ -96,6 +96,7 @@ Silently changing pinned behaviour is the regression this process exists to catc
 | [0357](0357-managed-config-file.md) | A managed config file is owned by the package manager, and no client rewrites it | Proposed | PR #357 (#356) |
 | [0362](0362-journal-stream.md) | The journal is a stream of days, and each day keeps its own undo | Draft | PR #362 |
 | [0363](0363-ios-quick-capture.md) | Capture from outside the iOS app lands through an inbox the app drains | Accepted | #363 |
+| [0557](0557-page-merge-and-rename.md) | Merging pages: move the blocks, trash the source, leave its names behind as aliases | Proposed | PR #557 |
 
 ## How the retroactive set was chosen
 

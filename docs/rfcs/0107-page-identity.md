@@ -83,6 +83,9 @@ Issue #302 added a fourth spelling: `alias:: Big Apple, NYC` on the New York pag
 Aliases are not a fourth identity — they are extra keys for the title identity, and the ladder treats them exactly like the title: case-insensitive comparison inside the same `list_all` walk, and the same `title → slug` map in `WorkspaceIndex` with one row per alias.
 No second lookup method, no second index: `by_title` answers for titles and aliases alike, so a client that resolves refs today resolves aliases without changing.
 Backlinks get the same treatment — `keys_for_page` emits a `Ref` and a `Tag` key for each alias, and a person page additionally gets the `@`-prefixed forms — so `[[NYC]]` lands in the New York page's backlinks without the alias ever touching the log as anything but the `alias::` property itself.
+The one exception is an alias that names another live page (by slug, by title case-insensitively, or by slugified form).
+It is no longer a backlink key for the page that declared it: titles win over aliases for navigation, and backlinks send the name to the same page.
+`outl_actions::alias_conflicts` lists those shadowed aliases, asking the same predicate the index uses.
 
 The name space gets smaller, so collisions get louder.
 Two pages claiming `NYC` still resolve deterministically (the ladder's first match wins, in `list_all` order), which is the same behaviour two titles sharing a spelling already has.

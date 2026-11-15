@@ -34,6 +34,7 @@ use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use tracing::warn;
 
+use crate::alias_conflicts::PageClaims;
 use crate::backlinks::{Backlink, BacklinkCrumb};
 use crate::backlinks_keys::{keys_for_page, mentions_of, TargetKey};
 use crate::journal::page_md_path;
@@ -76,11 +77,17 @@ struct IndexedEntry {
 /// A block mentioning a page several ways (`[[avelino]] #avelino`) has
 /// one `IndexedEntry` reachable from several keys; deduping by id
 /// collapses it.
+///
+/// `claims` is the set of names every live page answers to, built with
+/// the index. A page's lookup keys are derived at query time and drop an
+/// `alias::` another page already names (see [`crate::alias_conflicts`]),
+/// so the index has to carry the claims the lookup is judged against.
 #[derive(Debug, Clone, Default)]
 pub struct BacklinkIndex {
     by_block: HashMap<String, IndexedEntry>,
     by_key: HashMap<TargetKey, HashSet<String>>,
     by_page: HashMap<String, HashSet<String>>,
+    claims: PageClaims,
 }
 
 impl BacklinkIndex {
@@ -88,7 +95,7 @@ impl BacklinkIndex {
     /// by block and returned in DFS order (within a page). Display order
     /// is still the caller's job via [`crate::sort_backlinks`].
     pub fn for_page(&self, workspace: &Workspace, meta: &PageMeta) -> Vec<Backlink> {
-        self.collect_by_keys(&keys_for_page(workspace, meta))
+        self.collect_by_keys(&keys_for_page(workspace, meta, &self.claims))
     }
 
     /// Backlinks split by **how they reached this page**: the ones that
@@ -107,7 +114,7 @@ impl BacklinkIndex {
     /// A block that does both — names the page *and* mentions a
     /// descendant — belongs to `direct`, which is the stronger claim.
     pub fn for_page_split(&self, workspace: &Workspace, meta: &PageMeta) -> SplitBacklinks {
-        let all = keys_for_page(workspace, meta);
+        let all = keys_for_page(workspace, meta, &self.claims);
         let (namespace_keys, direct_keys): (Vec<TargetKey>, Vec<TargetKey>) = all
             .into_iter()
             .partition(|k| matches!(k, TargetKey::Namespace(_)));
@@ -134,7 +141,7 @@ impl BacklinkIndex {
     /// Number of backlinks for `meta`'s page **without cloning** the
     /// list — for count-only callers like a footer chip.
     pub fn count_for_page(&self, workspace: &Workspace, meta: &PageMeta) -> usize {
-        self.hit_ids(&keys_for_page(workspace, meta)).len()
+        self.hit_ids(&keys_for_page(workspace, meta, &self.claims)).len()
     }
 
     /// Total number of referencing blocks across the whole workspace.
@@ -157,6 +164,10 @@ impl BacklinkIndex {
     /// what made the TUI's Esc slow. The page's `.md` must already be
     /// projected (callers do this before calling).
     pub fn reindex_page_from_disk(&mut self, meta: &PageMeta, root: &Path) {
+        // The page's own names may have changed too (a new title, a page
+        // that did not exist when the index was built), and an alias
+        // elsewhere is shadowed or freed by that.
+        self.claims.add_page(meta);
         self.remove_page(&meta.slug);
         let outline = match read_page_outline(root, meta) {
             Ok(o) => o,
@@ -251,17 +262,20 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
     let Some(pages) = children.get(&NodeId::root()) else {
         return index;
     };
-    for &page_id in pages {
-        let Some(meta) = page_meta(workspace, page_id) else {
-            continue;
-        };
-        let source_path = page_md_path(root, &meta);
+    let metas: Vec<(NodeId, PageMeta)> = pages
+        .iter()
+        .filter_map(|&id| page_meta(workspace, id).map(|meta| (id, meta)))
+        .collect();
+    index.claims = PageClaims::from_metas(metas.iter().map(|(_, m)| m));
+    for (page_id, meta) in &metas {
+        let page_id = *page_id;
+        let source_path = page_md_path(root, meta);
         let mut path: Vec<usize> = Vec::new();
         let mut ancestors: Vec<BacklinkCrumb> = Vec::new();
         walk_page(
             workspace,
             page_id,
-            &meta,
+            meta,
             &source_path,
             &mut path,
             &mut ancestors,
@@ -289,7 +303,10 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
 /// no `Workspace` at all and stays `Send` for a worker thread.
 pub fn build_backlink_index_from_disk(metas: &[PageMeta], root: &Path) -> BacklinkIndex {
     let started = std::time::Instant::now();
-    let mut index = BacklinkIndex::default();
+    let mut index = BacklinkIndex {
+        claims: PageClaims::from_metas(metas),
+        ..BacklinkIndex::default()
+    };
     for meta in metas {
         let outline = match read_page_outline(root, meta) {
             Ok(o) => o,

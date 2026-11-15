@@ -7,6 +7,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Changed
 
+- **`outl page rename` and `outl_page_rename` now rewrite every mention of the page, and refuse journals.**
+  The command moved the file and left `[[old]]` and `#old` in every other page pointing at a page that no longer existed, handing the list back in `affected_refs`.
+  The rename now lives in `outl_actions::rename_page` and respells each mention through `outl_actions::link_rewrite::rewrite_mentions`, one edit per block, in the same batch.
+  The output gains `rewritten_refs`, `skipped_namespace_refs` and `touched_pages`, and `affected_refs` stays and lists what still names the old slug (namespace children, for one).
+  A journal cannot be renamed any more: its slug is its date.
+  A new slug that another page already owns is still `SLUG_CONFLICT`, and the message now says the page could be merged into it instead.
+  [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md).
+
 - **Today's journal is on screen before the workspace opens.**
   The screen a user waited on said "Opening your workspace…", and what it was waiting for was the op log: the index sidecars, the snapshot decode, the delta replay, the boot repairs.
   None of that is needed to *show* today's journal, because the `.md` on disk is the projection of exactly that page and the sidecar beside it carries the block ids.
@@ -51,6 +59,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Merging one page into another exists in `outl-actions`.**
+  `outl_actions::merge_pages` moves the source's top-level blocks under the target with their ids intact, unions `alias::` and `tags`, copies properties the target lacks (on a conflict the target wins and the dropped value is reported), makes the source's slug and title aliases of the target, rewrites every mention of the source, and moves the source to the trash.
+  `rename_or_merge` turns a taken name into a merge.
+  Running a merge twice is safe, and a block a peer appended to the source late is moved by the re-run.
+  There is no `outl page merge`, MCP tool, TUI or desktop affordance yet; they arrive in later releases as wrappers over this.
+  Known limits and what is not undone: [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md).
+
 - **A launch reports its own frontend half.**
   `outl_core::boot_timing` covered the workspace open; nothing in Rust could see when the webview painted, so the measured launch stopped at about half of what the user waited for.
   Clients now report `html_parsed`, `theme_applied`, `first_content` and `interactive` through `boot_mark`, logged on arrival and summarised on one line, with the same numbers in CI, in a simulator and in production.
@@ -62,6 +77,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   This is a trend line rather than a gate; a real gate needs instruction counts and absolute budgets, which [`docs/boot-performance.md`](docs/boot-performance.md) records as open work along with page-first boot, the persistent backlink index and the remaining full-replay cliffs.
 
 ### Fixed
+
+- **An `alias::` that names another page no longer takes that page's backlinks.**
+  Navigation sends `[[Beta]]` to the page titled `Beta`, even when another page lists `Beta` as an alias.
+  The backlink index sent the same mention to the alias owner, so the link and the backlinks panel disagreed about which page held it.
+  One predicate, `PageClaims::shadowed_by`, now decides, and the index drops an alias another live page already answers to, including the `@` forms of a person page.
+  `outl_actions::alias_conflicts` lists those aliases for a client to show.
 
 - **`outl <cmd> | head -1` no longer crashes.**
   A reader that closed stdout early made the standard `print!` / `println!` panic with `failed printing to stdout` (Unix `EPIPE`, Windows `ERROR_NO_DATA`), and the crash reporter filed it as fatal (OUTL-4).

@@ -9,7 +9,6 @@ use std::path::Path;
 use clap::Subcommand;
 use serde_json::{json, Value};
 
-use outl_actions::page::SLUG_KEY;
 use outl_actions::{
     find_by_slug, list_pages, open_or_create_page, page_meta, project_outline, read_text_prop,
     render_page_md, set_property, walk_subtree, BlockTreeSpec, PageKind,
@@ -17,6 +16,7 @@ use outl_actions::{
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 
+pub use super::page_rename::rename;
 use crate::human::print_outline_tree;
 use crate::output::{codes, emit, ApiError};
 use crate::ws::{self, WsCtx};
@@ -96,8 +96,9 @@ pub enum PageCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Rename a page slug. Does not rewrite `[[old_slug]]` references —
-    /// they appear in `affected_refs` so the caller can decide.
+    /// Rename a page slug and rewrite `[[old_slug]]` / `#old_slug`
+    /// mentions in every block (`rewritten_refs` lists the blocks).
+    /// Fails with `SLUG_CONFLICT` when the new slug is another page.
     Rename {
         /// Current slug.
         old_slug: String,
@@ -213,7 +214,16 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
             json,
         } => {
             let result = ws::open(path).and_then(|mut ctx| rename(&mut ctx, old_slug, new_slug));
-            emit(*json, result, |v| print_page_meta("renamed", v))
+            emit(*json, result, |v| {
+                print_page_meta("renamed", v);
+                let rewritten = v
+                    .get("rewritten_refs")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len);
+                if rewritten > 0 {
+                    println!("rewrote {rewritten} reference(s) to the old name");
+                }
+            })
         }
         PageCommand::Render { slug, json } => {
             let result = ws::open_read(path).and_then(|ctx| render(&ctx, slug));
@@ -235,7 +245,7 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
 // ---------------------------------------------------------------------------
 
 /// Resolve a slug to a page node id or return [`codes::PAGE_NOT_FOUND`].
-fn resolve(ctx: &WsCtx, slug: &str) -> Result<NodeId, ApiError> {
+pub(super) fn resolve(ctx: &WsCtx, slug: &str) -> Result<NodeId, ApiError> {
     find_by_slug(&ctx.workspace, slug)
         .ok_or_else(|| ApiError::new(codes::PAGE_NOT_FOUND, format!("page `{slug}` not found")))
 }
@@ -433,47 +443,6 @@ pub fn list(ctx: &WsCtx, filter: Option<&str>) -> Result<Value, ApiError> {
     Ok(json!({ "pages": kept }))
 }
 
-/// Rename a page's slug. Updates the `page-slug` property, renames
-/// the on-disk `.md`, and returns the list of blocks still referencing
-/// the old slug so the caller can decide whether to rewrite them.
-pub fn rename(ctx: &mut WsCtx, old_slug: &str, new_slug: &str) -> Result<Value, ApiError> {
-    if find_by_slug(&ctx.workspace, new_slug).is_some() {
-        return Err(ApiError::new(
-            codes::SLUG_CONFLICT,
-            format!("page `{new_slug}` already exists"),
-        ));
-    }
-    let id = resolve(ctx, old_slug)?;
-    let old_meta = page_meta(&ctx.workspace, id)
-        .ok_or_else(|| ApiError::new(codes::INTERNAL, "page meta missing".to_string()))?;
-
-    write_page_property(ctx, id, SLUG_KEY, Some(new_slug))?;
-    write_projection(ctx, id)?;
-
-    // Remove the old md/sidecar so the workspace doesn't keep a stale
-    // copy. Logged on failure for the same reason as in `delete`.
-    let old_md = outl_actions::page_md_path(&ctx.root, &old_meta);
-    remove_or_warn(&old_md, "old page md");
-    let old_sidecar = outl_md::resolve_sidecar_path(&old_md);
-    remove_or_warn(&old_sidecar, "old page sidecar");
-
-    // Affected backlinks: keep the old textual form so the caller can
-    // grep / rewrite.
-    let affected = outl_actions::backlinks_for_target(&ctx.workspace, &ctx.root, old_slug);
-    Ok(json!({
-        "meta": page_meta_inner(ctx, id)?,
-        "old_slug": old_slug,
-        "affected_refs": affected
-            .iter()
-            .map(|b| json!({
-                "block_id": b.block_id,
-                "block_text": b.block_text,
-                "source_page": b.source_page,
-            }))
-            .collect::<Vec<_>>(),
-    }))
-}
-
 /// Render a page's outline to clean markdown.
 pub fn render(ctx: &WsCtx, slug: &str) -> Result<Value, ApiError> {
     let id = resolve(ctx, slug)?;
@@ -489,7 +458,7 @@ fn page_meta_value(ctx: &WsCtx, id: NodeId) -> Result<Value, ApiError> {
     Ok(json!({ "meta": page_meta_inner(ctx, id)? }))
 }
 
-fn page_meta_inner(ctx: &WsCtx, id: NodeId) -> Result<Value, ApiError> {
+pub(super) fn page_meta_inner(ctx: &WsCtx, id: NodeId) -> Result<Value, ApiError> {
     let meta = page_meta(&ctx.workspace, id)
         .ok_or_else(|| ApiError::new(codes::INTERNAL, "page meta missing".to_string()))?;
     serde_json::to_value(&meta).map_err(ApiError::internal)
@@ -527,29 +496,13 @@ fn write_page_property(
 /// append` (and every other CLI mutation) used the unconditional
 /// writer, so the CLI/MCP surface was the one place invariant 8's
 /// guard was never wired in (RFC 0255).
-fn write_projection(ctx: &mut WsCtx, id: NodeId) -> Result<(), ApiError> {
+pub(super) fn write_projection(ctx: &mut WsCtx, id: NodeId) -> Result<(), ApiError> {
     // The mutation already ran at the call site, so this commits an
     // empty one purely for the projection and the steps around it. The
     // shape is worth keeping: when this context grows a transport, the
     // announce lands here for every caller at once.
     ctx.commit(id)?;
     Ok(())
-}
-
-/// Try to delete `path`. If it doesn't exist, nothing to do. Any
-/// other failure is logged through `tracing::warn!` so the operator
-/// sees it even though the calling op (delete / rename) succeeds at
-/// the op-log level.
-fn remove_or_warn(path: &std::path::Path, label: &str) {
-    match std::fs::remove_file(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!(
-            target: "outl::cmd::page",
-            "could not remove {label} at {}: {e}",
-            path.display()
-        ),
-    }
 }
 
 /// True when any block in `page`'s subtree mentions `#tag` as a whole
