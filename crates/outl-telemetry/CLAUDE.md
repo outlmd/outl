@@ -9,7 +9,7 @@ Three decisions, and nothing else:
 
 1. **Whether anything is sent at all** — `init`, `suppressed_by_ci`, and the private `report_target` gate.
 2. **What a sent event may contain** — `redact` (one string) and `scrub_event` (one event).
-3. **A closed stderr does not abort the process** — `install_panic_hook` and `lossy_stderr`.
+3. **A closed stderr or stdout does not abort the process** — `install_panic_hook`, `lossy_stderr` and `print_stdout`.
 
 The third one lives here because the panic integration and the tracing subscriber both end in a print, and a print that panics is the event Sentry then records.
 Each binary doing it itself is four chances to leave `eprintln!` on that path.
@@ -70,6 +70,11 @@ A caller that installs its own hook afterwards (the TUI restores the terminal, t
 A broken pipe (`ErrorKind::BrokenPipe`) is reported as a successful write.
 That kind is Unix `EPIPE` and Windows `ERROR_BROKEN_PIPE` (109) / `ERROR_NO_DATA` (232).
 Windows error 32 is `ERROR_SHARING_VIOLATION`, so the check is the kind alone.
+`print_stdout` is the same rule for stdout, and the `outl` CLI's `print!` / `println!` shadows call it (`outl-cli/src/stdout.rs`).
+`outl <cmd> | head -1` closes the read end, the standard macros panic with `failed printing to stdout`, and the panic integration records it as fatal (OUTL-4's other cause; Windows reports it as `ERROR_NO_DATA`, os error 232).
+Unlike the stderr writer it also remembers the closure, so a long listing stops issuing syscalls.
+It deliberately does **not** exit the process: a mutating command (`outl doctor --repair | head`) must not be abandoned half way because its reader left, so the command finishes and its exit status is its own.
+Only a broken pipe is forgiven; any other error is the standard panic with the standard message, so it still reaches the reporter.
 Callers also set `.log_internal_errors(false)`: the fmt layer's own failure report is an `eprintln!`, which is the panic this writer exists to stop.
 
 ## Reading the scrubber
@@ -211,6 +216,9 @@ They are the gate.
 - `a_closed_stderr_does_not_panic` (`tests/closed_stderr.rs`) — spawns this test binary with stderr piped, drops the read end, then logs and panics.
   Exit 0 is the assertion. A printer panic exits 101; a hook that panics again aborts, and `catch_unwind` hides neither.
   The file has no libtest harness because the harness would capture the pipe the parent is reading.
+- `a_closed_stdout_does_not_panic_and_exits_cleanly` and `an_open_stdout_still_gets_every_byte` (`outl-cli/tests/closed_stdout.rs`) — the real `outl` binary with the read end of stdout closed: no `panicked` on stderr, exit 0, and the open-pipe control proving the swallow is not eating output nobody closed.
+- `a_closed_stdout_is_remembered_and_not_a_panic`, `the_os_errors_a_closed_stdout_arrives_as_are_forgiven`, `any_other_stdout_error_is_still_the_standard_panic`, `another_error_does_not_mark_stdout_closed` (`src/stdio.rs`) — the stdout half without a process.
+  The last two are the direction that matters: a real stdout failure must still panic, and Windows error 32 (sharing violation) is not a closed pipe.
 - `a_broken_pipe_counts_as_a_finished_write`, `the_os_error_for_epipe_counts_too`, `any_other_write_error_is_returned` — the writer, without a process.
   A closed pipe is absorbed. A permission error is not, so the writer is not a sink that hides every failure.
 - `the_panic_itself_survives_the_scrubber` and `a_debug_image_keeps_its_id_and_loses_its_path` — the over-scrubbing direction.

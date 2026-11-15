@@ -1,4 +1,4 @@
-//! Stderr writes that survive a closed pipe.
+//! Stdio writes that survive a closed pipe.
 //!
 //! Rust's runtime sets `SIGPIPE` to `SIG_IGN`, so a write to a closed stderr
 //! returns `EPIPE` instead of killing the process. The `print!` family then
@@ -10,7 +10,9 @@
 //! The first log line to a closed stderr is a fatal panic, and the stack that
 //! reaches Sentry is the printer, not the bug.
 
+use std::fmt;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
 /// Stderr that treats a broken pipe as a successful write of the whole buffer.
@@ -38,6 +40,57 @@ impl Write for LossyStderr {
             other => other,
         }
     }
+}
+
+/// Set once a write to stdout hit a closed pipe, so later prints skip the
+/// syscall instead of failing the same way for every remaining line.
+static STDOUT_CLOSED: AtomicBool = AtomicBool::new(false);
+
+/// What `print!` / `println!` do, except that a closed stdout is not a panic.
+///
+/// The standard macros turn any write error into
+/// `panic: failed printing to stdout: ...`. For `outl <cmd> | head -1` that is
+/// `EPIPE` (Rust sets `SIGPIPE` to `SIG_IGN`), and on Windows it is
+/// `ERROR_NO_DATA` (232) or `ERROR_BROKEN_PIPE` (109). Either way the reader
+/// left on purpose, so the panic is a fatal crash report about nothing wrong.
+///
+/// A broken pipe drops the output and the command **keeps running**. Exiting
+/// at that point would abandon a mutating command half way (`outl doctor
+/// --repair | head`), and the reader choosing not to read says nothing about
+/// whether the work should stop. The exit status is the command's own.
+///
+/// Any other error is still the panic the standard macros raise, with the
+/// same message, so a real stdout failure keeps reaching the crash reporter.
+///
+/// `newline` is `println!` versus `print!`. The CLI's `print!` / `println!`
+/// shadows call this; see `outl-cli/src/stdout.rs`.
+pub fn print_stdout(args: fmt::Arguments<'_>, newline: bool) {
+    if STDOUT_CLOSED.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut out = io::stdout().lock();
+    if let Err(err) = write_print(&mut out, args, newline) {
+        settle_stdout_error(&err, &STDOUT_CLOSED);
+    }
+}
+
+/// Writes one `print!` / `println!` worth of output.
+fn write_print(mut out: impl Write, args: fmt::Arguments<'_>, newline: bool) -> io::Result<()> {
+    out.write_fmt(args)?;
+    if newline {
+        out.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+/// Decides what a failed stdout write means: a closed pipe is recorded in
+/// `closed` and forgiven, anything else is the standard macros' panic.
+fn settle_stdout_error(err: &io::Error, closed: &AtomicBool) {
+    if is_broken_pipe(err) {
+        closed.store(true, Ordering::Relaxed);
+        return;
+    }
+    panic!("failed printing to stdout: {err}");
 }
 
 /// Installs a panic hook that records the panic and ignores a closed stderr.
@@ -135,6 +188,85 @@ mod tests {
                 assert!(is_broken_pipe(&err));
             }
         }
+    }
+
+    /// A writer whose every write fails with the given error.
+    struct Failing(io::ErrorKind);
+
+    impl Write for Failing {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(self.0, "closed"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_print_renders_the_arguments_and_the_newline() {
+        let mut buf = Vec::new();
+        write_print(&mut buf, format_args!("a {}", 1), true).expect("write");
+        write_print(&mut buf, format_args!("b"), false).expect("write");
+        assert_eq!(buf, b"a 1\nb");
+    }
+
+    #[test]
+    fn a_closed_stdout_is_remembered_and_not_a_panic() {
+        let closed = AtomicBool::new(false);
+        let err = write_print(Failing(io::ErrorKind::BrokenPipe), format_args!("x"), true)
+            .expect_err("the writer fails");
+        settle_stdout_error(&err, &closed);
+        assert!(closed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn the_os_errors_a_closed_stdout_arrives_as_are_forgiven() {
+        // Unix EPIPE is 32. Windows reports the same condition as 109 or 232.
+        // std maps each to BrokenPipe, and the kind is what is checked.
+        #[cfg(unix)]
+        let codes = [32];
+        #[cfg(windows)]
+        let codes = [109, 232];
+        for code in codes {
+            let closed = AtomicBool::new(false);
+            settle_stdout_error(&io::Error::from_raw_os_error(code), &closed);
+            assert!(closed.load(Ordering::Relaxed), "{code}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "failed printing to stdout: no")]
+    fn any_other_stdout_error_is_still_the_standard_panic() {
+        let closed = AtomicBool::new(false);
+        settle_stdout_error(
+            &io::Error::new(io::ErrorKind::PermissionDenied, "no"),
+            &closed,
+        );
+    }
+
+    #[test]
+    fn another_error_does_not_mark_stdout_closed() {
+        let closed = AtomicBool::new(false);
+        let err = io::Error::new(io::ErrorKind::PermissionDenied, "no");
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            settle_stdout_error(&err, &closed)
+        }));
+        assert!(caught.is_err());
+        assert!(!closed.load(Ordering::Relaxed));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_sharing_violation_is_not_a_closed_stdout() {
+        // Error 32 is ERROR_SHARING_VIOLATION on Windows, the number EPIPE has
+        // on Unix. It must stay a panic, same rule as `is_broken_pipe`.
+        let closed = AtomicBool::new(false);
+        let err = io::Error::from_raw_os_error(32);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            settle_stdout_error(&err, &closed)
+        }));
+        assert!(caught.is_err());
+        assert!(!closed.load(Ordering::Relaxed));
     }
 
     #[test]

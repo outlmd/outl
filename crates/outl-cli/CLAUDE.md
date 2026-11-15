@@ -367,6 +367,7 @@ Exit codes follow:
 ```
 src/
 ├── main.rs                # dispatch only — one arm per Command
+├── stdout.rs              # print!/println! that survive a closed stdout (shadow the prelude's)
 ├── cli.rs                 # every clap declaration + the parse tests
 ├── startup.rs             # path resolution, workspace bootstrap, tracing
 ├── output.rs              # JSON envelope, ApiError, exit codes
@@ -447,6 +448,11 @@ If it deliberately skips a step — a bulk import that announces once at the end
   Two `outl` processes can't race against `outl serve` or each other.
 - Read-only commands open through `ws::open_read`.
   They take no per-actor write lock and mint no actor.
+- `print!` / `println!` in this crate are **not** the standard macros: `stdout.rs` shadows them (declared first in `main.rs` with `#[macro_use]`) so `outl <cmd> | head -1` drops output instead of panicking with `failed printing to stdout` and filing a fatal crash report (OUTL-4).
+  A broken pipe never stops the command, because a mutating command abandoned half way is worse than output nobody reads; the exit status is the command's own.
+  Any other stdout error is still the standard panic.
+  `outl_telemetry::print_stdout` owns the decision, and `tests/closed_stdout.rs` runs the real binary against a closed pipe.
+  Printing from another crate (`outl-import`'s `ImportReport::print_human`) is not covered by the shadow.
 - `anyhow::Result` on lifecycle commands (`init`, `serve`, `doctor`) is kept — those produce human errors and never JSON.
 
 ## What this crate does NOT do
