@@ -31,7 +31,9 @@ use outl_core::workspace::WorkspaceError;
 use crate::output::{codes, emit, ApiError, EXIT_OK, EXIT_USER};
 use crate::ws::{self, WsCtx};
 
-use super::{block as block_cmd, daily as daily_cmd, page as page_cmd, prop as prop_cmd};
+use super::{
+    block as block_cmd, daily as daily_cmd, page as page_cmd, page_merge, prop as prop_cmd,
+};
 
 /// RAII batch scope over a [`WsCtx`], coalescing every op the wrapped
 /// commands apply into a single storage flush.
@@ -222,13 +224,20 @@ fn apply_op(ctx: &mut WsCtx, op: &str, args: &Value) -> Result<Value, ApiError> 
         }
         "page_delete" => {
             let slug = require_str(args, "slug")?;
-            require_confirm(args, &format!("page `{slug}`"))?;
+            require_confirm(args, &format!("delete page `{slug}`"))?;
             page_cmd::delete(ctx, slug)
         }
         "page_rename" => {
             let old = require_str(args, "old_slug")?;
             let new = require_str(args, "new_slug")?;
-            page_cmd::rename(ctx, old, new)
+            let merge = args.get("merge").and_then(Value::as_bool).unwrap_or(false);
+            page_cmd::rename(ctx, old, new, merge)
+        }
+        "page_merge" => {
+            let source = require_str(args, "source")?;
+            let target = require_str(args, "target")?;
+            require_confirm(args, &format!("merge page `{source}` into `{target}`"))?;
+            page_merge::merge(ctx, source, target)
         }
         "block_append" => {
             let page = opt_str(args, "page");
@@ -265,7 +274,7 @@ fn apply_op(ctx: &mut WsCtx, op: &str, args: &Value) -> Result<Value, ApiError> 
         }
         "block_delete" => {
             let id = require_str(args, "id")?;
-            require_confirm(args, &format!("block `{id}`"))?;
+            require_confirm(args, &format!("delete block `{id}`"))?;
             block_cmd::delete(ctx, id)
         }
         "block_toggle_todo" => {
@@ -313,7 +322,7 @@ fn opt_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
 }
 
-fn require_confirm(args: &Value, label: &str) -> Result<(), ApiError> {
+fn require_confirm(args: &Value, action: &str) -> Result<(), ApiError> {
     if args
         .get("confirm")
         .and_then(Value::as_bool)
@@ -323,7 +332,7 @@ fn require_confirm(args: &Value, label: &str) -> Result<(), ApiError> {
     } else {
         Err(ApiError::new(
             codes::CONFIRM_REQUIRED,
-            format!("refusing to delete {label} without confirm:true"),
+            format!("refusing to {action} without confirm:true"),
         ))
     }
 }

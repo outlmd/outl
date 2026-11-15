@@ -328,6 +328,16 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
+        // The TUI's `/merge <page>` (`commands::builtins::MergeCommand`,
+        // confirmed with y/n) runs `outl_actions::merge_pages` and
+        // projects what it touched. The two GUI clients have no surface
+        // over that function yet: the CLI and MCP reach it as
+        // `outl page merge`, which is why both nudges name a way there.
+        Capability::PageMerge => ClientSupport {
+            tui: Full,
+            desktop: Missing(why::NO_DESKTOP_PAGE_MERGE),
+            mobile: Missing(why::NO_MOBILE_PAGE_MERGE),
+        },
     }
 }
 
@@ -381,7 +391,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 20, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 21, "Capability::ALL changed size");
     }
 
     #[test]

@@ -27,12 +27,16 @@ use crate::state::{App, ToastKind};
 /// The TUI's half of `commit_page` for a landing capture: guarded
 /// projection (root invariant 8), the peer announce, and a flag for the
 /// backlink rebuild, which needs `&mut App` and so runs after the drain.
-struct CaptureCommit<'a> {
-    root: &'a Path,
-    hlc: &'a HlcGenerator,
-    transport: Option<&'a Arc<dyn SyncTransport>>,
-    backlinks_stale: bool,
-    projection_failure: Option<ActionError>,
+///
+/// Shared with the page merge (`actions/merge`), which commits the same
+/// way: it is a projection-only commit, so a second copy would be one
+/// more place to forget the guard.
+pub(crate) struct CaptureCommit<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) hlc: &'a HlcGenerator,
+    pub(crate) transport: Option<&'a Arc<dyn SyncTransport>>,
+    pub(crate) backlinks_stale: bool,
+    pub(crate) projection_failure: Option<ActionError>,
 }
 
 impl CommitHooks for CaptureCommit<'_> {

@@ -11,6 +11,7 @@ Every command shells out to the `outl` CLI — no outliner logic is reimplemente
 | **Search**        | view    | Search-as-you-type over blocks + pages (`outl search --in all`). Enter opens the hit in the app; `Cmd+.` copies its deep link. |
 | **Open Today**    | no-view | Opens `outl://daily/today` in the desktop app.                                                                                 |
 | **New Page**      | view    | Create a page (`outl page create`), then open it in the app.                                                                   |
+| **Merge Pages**   | view    | Pick a source and a target page, confirm, then fold the source into the target (`outl page merge --confirm`).                  |
 
 ## Preferences
 

@@ -234,7 +234,11 @@ impl App {
             .filter(|t| !t.trim().is_empty())
             .unwrap_or_else(|| slug.clone());
         self.status = format!("delete page '{title}'? y/n");
-        self.pending_sidebar_delete = Some(PendingSidebarDelete { slug, title });
+        self.pending_sidebar_delete = Some(PendingSidebarDelete {
+            slug,
+            title,
+            merge_into: None,
+        });
     }
 
     /// Resolve an armed `pending_sidebar_delete`: run the CRDT delete
@@ -247,6 +251,11 @@ impl App {
         let Some(pending) = pending else {
             return Ok(());
         };
+        // `/merge` shares this prompt and its y/n keys; the action is the
+        // only difference (`actions/merge`).
+        if let Some(target) = pending.merge_into.as_deref() {
+            return self.confirm_page_merge(&pending.slug, target);
+        }
         let is_current = self.current_slug() == pending.slug;
 
         let meta = match outl_actions::delete_page(&mut self.workspace, &self.hlc, &pending.slug) {

@@ -16,6 +16,7 @@ use outl_actions::{
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 
+use super::page_merge;
 pub use super::page_rename::rename;
 use crate::human::print_outline_tree;
 use crate::output::{codes, emit, ApiError};
@@ -98,12 +99,33 @@ pub enum PageCommand {
     },
     /// Rename a page slug and rewrite `[[old_slug]]` / `#old_slug`
     /// mentions in every block (`rewritten_refs` lists the blocks).
-    /// Fails with `SLUG_CONFLICT` when the new slug is another page.
+    /// Fails with `SLUG_CONFLICT` when the new slug is another page,
+    /// unless `--merge` folds the page into that one.
     Rename {
         /// Current slug.
         old_slug: String,
         /// New slug.
         new_slug: String,
+        /// When `new_slug` is already a page, merge into it instead of
+        /// failing. The existing page keeps its name.
+        #[arg(long)]
+        merge: bool,
+        /// Force JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Merge `source` into `target`: move its blocks, merge its
+    /// properties, rewrite every `[[source]]` / `#source` mention to the
+    /// target, keep the source's names as aliases of the target and move
+    /// the source to the trash. Safe to run again.
+    Merge {
+        /// Page to fold away (slug).
+        source: String,
+        /// Page that keeps the content (slug).
+        target: String,
+        /// Required to actually merge.
+        #[arg(long, visible_alias = "yes")]
+        confirm: bool,
         /// Force JSON output.
         #[arg(long)]
         json: bool,
@@ -211,10 +233,15 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
         PageCommand::Rename {
             old_slug,
             new_slug,
+            merge,
             json,
         } => {
-            let result = ws::open(path).and_then(|mut ctx| rename(&mut ctx, old_slug, new_slug));
+            let result =
+                ws::open(path).and_then(|mut ctx| rename(&mut ctx, old_slug, new_slug, *merge));
             emit(*json, result, |v| {
+                if v.get("outcome").and_then(Value::as_str) == Some("merged") {
+                    return page_merge::print_human(v);
+                }
                 print_page_meta("renamed", v);
                 let rewritten = v
                     .get("rewritten_refs")
@@ -225,6 +252,12 @@ pub fn run(cmd: &PageCommand, path: &Path) -> i32 {
                 }
             })
         }
+        PageCommand::Merge {
+            source,
+            target,
+            confirm,
+            json,
+        } => page_merge::run(path, source, target, *confirm, *json),
         PageCommand::Render { slug, json } => {
             let result = ws::open_read(path).and_then(|ctx| render(&ctx, slug));
             emit(*json, result, |v| {

@@ -207,6 +207,18 @@ pub enum Capability {
     /// rather than `Full`. `docs/privacy.md` is disclosure too, and it
     /// is not in the product.
     CrashReportingDisclosure,
+    /// Folding one page into another: its blocks land under the
+    /// target, its properties and names carry over as aliases, and
+    /// every link that named it follows (RFC 0557).
+    ///
+    /// Distinct from deleting a page, which every client can do and
+    /// which leaves the links pointing at nothing. This keeps the
+    /// content and the links, and the source goes to the trash.
+    ///
+    /// The merge itself is `outl_actions::merge_pages`, one owner for
+    /// every client; this row is only whether the client has a way to
+    /// ask for it.
+    PageMerge,
 }
 
 impl Capability {
@@ -239,6 +251,7 @@ impl Capability {
         Capability::SlashCommandMenu,
         Capability::CrashReportingOptOut,
         Capability::CrashReportingDisclosure,
+        Capability::PageMerge,
     ];
 }
 
@@ -250,7 +263,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_20: usize = 20;
+    const EXPECTED_21: usize = 21;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -274,6 +287,7 @@ mod tests {
             Capability::SlashCommandMenu => "SlashCommandMenu",
             Capability::CrashReportingOptOut => "CrashReportingOptOut",
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
+            Capability::PageMerge => "PageMerge",
         }
     }
 
@@ -290,9 +304,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_20,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_20} variants \
-             — add the new variant to Capability::ALL (and bump EXPECTED_20)",
+            EXPECTED_21,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_21} variants \
+             (add the new variant to Capability::ALL and bump EXPECTED_21)",
             names.len(),
         );
     }

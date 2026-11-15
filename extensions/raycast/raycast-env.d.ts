@@ -26,6 +26,8 @@ declare namespace Preferences {
   export type OpenToday = ExtensionPreferences & {}
   /** Preferences accessible in the `new-page` command */
   export type NewPage = ExtensionPreferences & {}
+  /** Preferences accessible in the `merge-pages` command */
+  export type MergePages = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -40,5 +42,7 @@ declare namespace Arguments {
   export type OpenToday = {}
   /** Arguments passed to the `new-page` command */
   export type NewPage = {}
+  /** Arguments passed to the `merge-pages` command */
+  export type MergePages = {}
 }
 

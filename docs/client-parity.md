@@ -183,6 +183,7 @@ the drift this RFC exists to prevent.
 | `SlashCommandMenu` | ✅ | ✅ | ❌ Typing `/` doesn't open a command list on the phone yet — plugin commands are behind the plugins button in the top bar, and templates are under "Insert template" when you long-press a block. |
 | `CrashReportingOptOut` | ❌ Crash reporting is switched from the terminal here — run `outl telemetry off` to stop sending reports, or `outl telemetry status` to see where it stands. | ✅ | ✅ |
 | `CrashReportingDisclosure` | ❌ Crash reporting is on, and the terminal does not announce it the way the apps do — run `outl telemetry status` to see where it stands, or read the full list of what a report carries at outl.app/privacy. | ✅ | ✅ |
+| `PageMerge` | ✅ | ❌ Merging one page into another isn't in the desktop app yet: run `outl page merge <page> <into>` from a terminal, or use `/merge <page>` in the TUI. | ❌ Merging one page into another isn't on the phone yet: open this workspace on your computer and merge the pages there. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

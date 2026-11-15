@@ -118,18 +118,18 @@ pub(crate) enum SidebarSection {
     Recent,
 }
 
-/// A page deletion awaiting `y` confirmation from the sidebar.
+/// A page action awaiting `y` confirmation: delete (sidebar `d`, the
+/// `g d` chord) or, when `merge_into` is set, merge `slug` into that
+/// page (`/merge`).
 ///
-/// Pressing `d` on a focused Pinned / Recent sidebar row arms this;
-/// the user then has one keystroke to confirm (`y` / `Y`) or cancel
-/// (anything else). Carrying the resolved slug + title means the
-/// status-line prompt doesn't need to re-walk the section on the
-/// confirm key, and a peer-driven page list change between arm and
-/// confirm can't delete the wrong page.
+/// Arming resolves the slug + title once, so a peer-driven page list
+/// change between arm and confirm cannot act on the wrong page. `y` /
+/// `Y` confirms, any other key cancels.
 #[derive(Debug, Clone)]
 pub(crate) struct PendingSidebarDelete {
     pub(crate) slug: String,
     pub(crate) title: String,
+    pub(crate) merge_into: Option<String>,
 }
 
 /// Where the cursor lives — inside the current page's outline (default)

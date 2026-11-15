@@ -115,7 +115,8 @@ The MCP tool column is the name Claude Desktop (or any MCP host) sees.
 | `outl page update <slug> [--title=…] [--icon=…]`               | `outl_page_update`   |
 | `outl page delete <slug> [--confirm]`                          | `outl_page_delete`   |
 | `outl page list [--filter=tag:foo] [--json]`                   | `outl_page_list`     |
-| `outl page rename <old-slug> <new-slug>`                       | `outl_page_rename`   |
+| `outl page rename <old-slug> <new-slug> [--merge]`             | `outl_page_rename`   |
+| `outl page merge <source> <target> --confirm`                  | `outl_page_merge`    |
 | `outl page render <slug>`                                      | `outl_page_render`   |
 | `outl page history <slug> [--limit=N] [--json]`                 | —                    |
 
@@ -135,10 +136,89 @@ The output carries:
 
 Properties are not rewritten: a page ref inside a `key:: value` stays as written.
 
-A new slug that another page already owns fails with `SLUG_CONFLICT`, and the message says the page could be merged into the existing one.
+The reply carries `"outcome": "renamed"`.
+A new slug that another page already owns fails with `SLUG_CONFLICT`, and the message names `--merge` (`merge: true` over MCP and in a batch op) and `outl page merge`.
 Nothing is written.
-No command merges pages yet.
 A journal cannot be renamed, because its slug is its date.
+
+With `--merge`, a new slug that another page owns folds the renamed page into that page instead of failing.
+The existing page keeps its name and its title, and a title given to the rename has nowhere to go.
+The reply is the merge reply described below, with `"outcome": "merged"`.
+`--merge` on a free slug is an ordinary rename.
+
+#### Merging pages
+
+```sh
+outl page merge alpha beta --confirm
+outl page merge alpha beta --yes --json
+outl page rename alpha beta --merge
+```
+
+`page merge <source> <target>` folds the source page into the target, in one op-log batch:
+
+1. Every top-level block of the source moves under the target, after the target's own children, with ids and subtrees intact (nothing is copied).
+2. Page properties merge onto the target.
+   `alias` and `tags` are unions, and a property the target lacks is copied.
+   When both pages hold a property with different values, **the target wins** and the dropped value is reported, so nothing is lost silently.
+   The source's identity keys (its slug and title) never reach the target.
+3. The source's slug and title become aliases of the target, so a `[[source]]` typed later still lands on the merged page.
+4. Every mention of the source (`[[source]]`, `[[@source]]` for a person page, `#source`) is rewritten to name the target, by the same rewriter `page rename` uses.
+   Code spans, fenced code, link text and urls, block refs and names that only contain the slug are left alone.
+5. The source moves to the trash.
+
+`--confirm` is required, the same way it is for `page delete`: without it the command fails with `CONFIRM_REQUIRED` and writes nothing.
+`--yes` is a visible alias of `--confirm`.
+The MCP tool and the batch op take `confirm: true`.
+
+There is no `--dry-run`.
+`merge_pages` applies its ops to the workspace inside one batch and has no preview path, so a preview would be a second implementation of the merge, and the two would drift.
+Read both pages with `page get` before running it.
+
+The reply is the merge report, with `rewritten_blocks` spelled `rewritten_refs` to match `page rename`:
+
+```json
+{
+  "outcome": "merged",
+  "nothing_changed": false,
+  "source": { "slug": "alpha", "title": "Alpha", "...": "..." },
+  "target": { "slug": "beta", "title": "Beta", "...": "..." },
+  "moved_blocks": 3,
+  "moved_block_ids": ["blk-…", "blk-…", "blk-…"],
+  "rewritten_refs": ["blk-…"],
+  "property_conflicts": [{ "key": "status", "kept": "active", "dropped": "draft" }],
+  "properties_written": ["alias"],
+  "aliases_added": ["alpha", "Alpha"],
+  "skipped_namespace_refs": [{ "block_id": "blk-…", "name": "alpha/child" }],
+  "source_deleted": true,
+  "already_merged": false,
+  "touched_pages": ["beta"]
+}
+```
+
+- `property_conflicts`: one entry per property both pages held with different values.
+  `kept` is the target's value, `dropped` the source's.
+  The human output lists each as `key: kept X, dropped Y`.
+- `skipped_namespace_refs`: mentions of a sub-page (`[[alpha/child]]`, `#alpha/child`), reported and not rewritten, because that sub-page is not being merged.
+- `touched_pages`: every page that was re-projected.
+  The source is never in it: its `.md` and sidecar are removed last, and only once the target's own projection succeeded, so a failed write never costs the only `.md` that still holds the blocks.
+
+Running the same merge again is safe.
+The source may already be in the trash, so a re-run moves any block that reached it late (a peer that appended before the merge arrived) and otherwise reports `"nothing_changed": true` and changes nothing.
+
+Errors:
+
+| Code | When |
+|------|------|
+| `CONFIRM_REQUIRED` | `--confirm` (or `confirm: true`) is missing |
+| `PAGE_NOT_FOUND` | the source (a trashed one is accepted) or the target does not exist, or the target is in the trash |
+| `INVALID_ARG` | the source is a journal (a day is identified by its date), or source and target are the same page |
+| `SLUG_CONFLICT` | `page rename` without `--merge` onto a slug another page owns |
+
+A journal as the *target* is allowed.
+
+What a merge does not undo: the source stays in the trash under its own slug (a trashed page root cannot be restored), the moved blocks stay under the target, and the rewritten links and added aliases stay.
+Property values and fenced code that name the source are not rewritten either.
+The full list is in [RFC 0557](rfcs/0557-page-merge-and-rename.md#the-opposite-direction) and its known limits.
 
 `page create --content` accepts a forest of `[{text, children?}, ...]` (or a single `{text, children?}` for ergonomics) so a brand-new page lands with its full outline in one op-log session instead of a chain of `block append` calls.
 Pass `--content -` to read the JSON from stdin.
@@ -382,8 +462,9 @@ Input shape:
 }
 ```
 
-Supported `op` names: `page_create`, `page_update`, `page_delete`, `page_rename`, `block_append`, `block_append_tree`, `block_insert`, `block_update`, `block_move`, `block_delete`, `block_toggle_todo`, `daily_append`, `page_prop_set`, `page_prop_delete`.
+Supported `op` names: `page_create`, `page_update`, `page_delete`, `page_rename`, `page_merge`, `block_append`, `block_append_tree`, `block_insert`, `block_update`, `block_move`, `block_delete`, `block_toggle_todo`, `daily_append`, `page_prop_set`, `page_prop_delete`.
 Each op's `args` mirror the matching standalone tool.
+`page_rename` takes an optional `merge` boolean, and `page_merge` takes `source`, `target` and `confirm: true` (without it the op fails with `CONFIRM_REQUIRED`, like `page_delete`).
 
 **Semantics: stop-on-first-error.** When an op fails, earlier ops stay in the op log (they're already CRDT ops; we don't roll them back) and the response carries `failed_at`, `failed_op`, and `error` so the caller can decide what to do with the suffix that never ran.
 CLI exit code is `1` in that case; MCP returns the payload via the normal envelope.
@@ -768,7 +849,7 @@ This document stays focused on the surface; how to attach it to a host lives ove
   A wizard inside a tool call is the wrong shape.
 - **Long-running watchers** (`serve`) stay CLI-only.
   MCP tools are request/response; the file watcher is a process, not a tool.
-- **Destructive commands** (`page delete`, `block delete`) accept `--confirm` on the CLI and require `confirm: true` in the MCP input.
+- **Destructive commands** (`page delete`, `page merge`, `block delete`) accept `--confirm` on the CLI and require `confirm: true` in the MCP input.
   Without it, the tool returns `{ "code": "CONFIRM_REQUIRED" }` and the operation is a no-op.
 - **Importers** (`outl import …`) stay CLI-only — they're one-time migrations, not workspace ops.
 - `page history` / `block history` — read-only, and their handlers print rather than returning a `Value`, so they need the ordinary `fn(ctx, …) -> Result<Value, ApiError>` extraction before they can be registered. Tracked with [#241](https://github.com/outlmd/outl/issues/241).

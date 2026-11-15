@@ -80,14 +80,28 @@ pub fn list() -> Vec<Value> {
         ),
         tool_def(
             "outl_page_rename",
-            "Rename a page slug and rewrite `[[old_slug]]` / `#old_slug` mentions in every block (`rewritten_refs` lists the edited blocks; namespace children are listed in `skipped_namespace_refs`, not rewritten). Fails with SLUG_CONFLICT when `new_slug` is another page.",
+            "Rename a page slug and rewrite `[[old_slug]]` / `#old_slug` mentions in every block (`rewritten_refs` lists the edited blocks; namespace children are listed in `skipped_namespace_refs`, not rewritten). Fails with SLUG_CONFLICT when `new_slug` is another page, unless `merge: true`: then the page is folded into that existing page, which keeps its name, and the reply is the `outl_page_merge` report with `outcome: \"merged\"`.",
             json!({
                 "type": "object",
                 "properties": {
                     "old_slug": { "type": "string" },
-                    "new_slug": { "type": "string" }
+                    "new_slug": { "type": "string" },
+                    "merge": { "type": "boolean" }
                 },
                 "required": ["old_slug", "new_slug"]
+            }),
+        ),
+        tool_def(
+            "outl_page_merge",
+            "Merge page `source` into page `target`. Requires confirm:true. Moves the source's blocks under the target, merges properties (when both pages hold a key with different values the target's value is kept and the pair is listed in `property_conflicts`), rewrites every `[[source]]` / `#source` mention to the target, keeps the source's names as aliases of the target (`aliases_added`) and moves the source to the trash. Safe to re-run: a second call reports `nothing_changed: true`.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string" },
+                    "target": { "type": "string" },
+                    "confirm": { "type": "boolean" }
+                },
+                "required": ["source", "target"]
             }),
         ),
         tool_def(
@@ -480,7 +494,7 @@ pub fn list() -> Vec<Value> {
         // Batch
         tool_def(
             "outl_batch",
-            "Apply write ops in one session (stops on first error, reports `failed_at` + `applied`). Use for multi-step authoring so each op skips a round-trip. `op` is one of: page_create, page_update, page_delete, page_rename, block_append, block_append_tree, block_insert, block_update, block_move, block_delete, block_toggle_todo, daily_append, page_prop_set, page_prop_delete; each op's `args` mirror the matching `outl_<op>` tool.",
+            "Apply write ops in one session (stops on first error, reports `failed_at` + `applied`). Use for multi-step authoring so each op skips a round-trip. `op` is one of: page_create, page_update, page_delete, page_rename (accepts `merge`), page_merge (needs `confirm: true`), block_append, block_append_tree, block_insert, block_update, block_move, block_delete, block_toggle_todo, daily_append, page_prop_set, page_prop_delete; each op's `args` mirror the matching `outl_<op>` tool.",
             json!({
                 "type": "object",
                 "properties": {
