@@ -84,9 +84,9 @@
 636 crates/outl-config/src/lib.rs
 716 crates/outl-core/src/storage/jsonl/read.rs
 805 crates/outl-core/src/storage/jsonl/tests.rs
-729 crates/outl-core/src/workspace.rs
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
+611 crates/outl-desktop/src-tauri/src/lib.rs
 620 crates/outl-desktop/src-tauri/src/settings.rs
 867 crates/outl-desktop/src/components/OutlineView.tsx
 831 crates/outl-frontend-shared/src/api/commands.ts
@@ -95,7 +95,7 @@
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1788 crates/outl-mobile/src/components/Journal.tsx
+1792 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 636 crates/outl-plugins/src/host_tests.rs
 791 crates/outl-shortcuts/src/defaults.rs

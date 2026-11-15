@@ -48,6 +48,7 @@ mod quick_capture;
 mod settings;
 mod state;
 mod webview_boot;
+mod window_paint;
 mod workspace_open;
 
 use std::path::PathBuf;
@@ -61,27 +62,28 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::commands::{
-    attach_asset, clear_reminder_snooze, copy_block_markdown, copy_block_ref, copy_markdown,
-    create_block, current_workspace, cut_block, date_title, delete_block, delete_page,
-    deliver_due_reminders, device_activity, drain_capture_inbox, edit_block, export_markdown,
-    get_settings, get_telemetry_enabled, get_theme, get_theme_config, import_asset_file,
-    indent_block, instantiate_template_at, journal_days_with_content, known_property_keys,
-    list_action_support, list_all_pages, list_open_tasks, list_reminders, list_shortcut_bindings,
-    list_templates_cmd, list_themes, list_trash, mark_block_done, merged_edits, move_block_after,
-    move_block_down, move_block_up, next_day, open_asset, open_external_file, open_journal_for,
-    open_page_by_slug, open_ref, open_today_journal, outdent_block, outl_emoji_search,
-    outl_peer_list, outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove, outl_peer_status,
-    outl_sync_now, page_backlinks, page_timeline, paste_block_after, paste_markdown_at,
-    paste_plain_at, plugin_config_set, plugin_install_official, plugin_keybindings, plugin_list,
-    plugin_registry_list, plugin_run, plugin_secret_remove, plugin_secret_set, plugin_set_enabled,
-    plugin_settings_describe, plugin_sync_hooks, plugin_toolbar, plugin_transform,
-    plugin_transformers, plugin_uninstall, previous_day, read_asset_data_url, redo_page,
-    reload_workspace, reminder_settings, resolve_embeds, resolve_page_labels, resolve_ref,
-    restore_trash_entry, run_auto_run_blocks, run_code_block, search_blocks, search_pages,
-    search_persons, set_backlinks_order, set_block_collapsed, set_block_property, set_block_remind,
-    set_page_property, set_reminder_settings, set_telemetry_enabled, set_workspace, snooze_presets,
-    snooze_reminder, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
-    undo_merged_edit, undo_page, update_settings, workspace_stats,
+    attach_asset, boot_mark, clear_reminder_snooze, copy_block_markdown, copy_block_ref,
+    copy_markdown, create_block, current_workspace, cut_block, date_title, delete_block,
+    delete_page, deliver_due_reminders, device_activity, drain_capture_inbox, edit_block,
+    export_markdown, get_settings, get_telemetry_enabled, get_theme, get_theme_config,
+    import_asset_file, indent_block, instantiate_template_at, journal_days_with_content,
+    known_property_keys, list_action_support, list_all_pages, list_open_tasks, list_reminders,
+    list_shortcut_bindings, list_templates_cmd, list_themes, list_trash, mark_block_done,
+    merged_edits, move_block_after, move_block_down, move_block_up, next_day, open_asset,
+    open_external_file, open_journal_for, open_page_by_slug, open_ref, open_today_journal,
+    outdent_block, outl_emoji_search, outl_peer_list, outl_peer_pair_host, outl_peer_pair_join,
+    outl_peer_remove, outl_peer_status, outl_sync_now, page_backlinks, page_timeline,
+    paste_block_after, paste_markdown_at, paste_plain_at, plugin_config_set,
+    plugin_install_official, plugin_keybindings, plugin_list, plugin_registry_list, plugin_run,
+    plugin_secret_remove, plugin_secret_set, plugin_set_enabled, plugin_settings_describe,
+    plugin_sync_hooks, plugin_toolbar, plugin_transform, plugin_transformers, plugin_uninstall,
+    previous_day, read_asset_data_url, redo_page, reload_workspace, reminder_settings,
+    resolve_embeds, resolve_page_labels, resolve_ref, restore_trash_entry, run_auto_run_blocks,
+    run_code_block, search_blocks, search_pages, search_persons, set_backlinks_order,
+    set_block_collapsed, set_block_property, set_block_remind, set_page_property,
+    set_reminder_settings, set_telemetry_enabled, set_workspace, snooze_presets, snooze_reminder,
+    split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo, undo_merged_edit,
+    undo_page, update_settings, wait_workspace_ready, workspace_stats,
 };
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
@@ -334,6 +336,10 @@ pub fn run() {
             // matching the timezone line above and the TUI.
             let calendar_week_start = global_cfg.calendar.week_start;
 
+            // Repaint the native window from the theme on disk, before
+            // the webview draws. See `window_paint`.
+            window_paint::repaint_windows(app.handle(), &global_cfg.theme);
+
             let workspace: Arc<Mutex<Option<Workspace>>> = Arc::new(Mutex::new(None));
             let storage_root: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
             // Cross-process workspace locks, held for as long as a
@@ -347,6 +353,7 @@ pub fn run() {
                 Arc::new(Mutex::new(None));
             let iroh_pairing: Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>> =
                 Arc::new(Mutex::new(None));
+            let (first_paint, workspace_ready) = workspace_open::start_boot_phase();
 
             if let Some(path) = last_workspace {
                 spawn_workspace_opener(
@@ -360,6 +367,8 @@ pub fn run() {
                     path,
                     hlc.clone(),
                     app.handle().clone(),
+                    first_paint.clone(),
+                    workspace_ready.clone(),
                 );
             }
 
@@ -390,6 +399,8 @@ pub fn run() {
                 history: Mutex::new(std::collections::HashMap::new()),
                 backlink_index: Arc::new(Mutex::new(None)),
                 projection_writer,
+                first_paint,
+                workspace_ready,
                 calendar_week_start,
             });
             app.manage(plugins);
@@ -441,6 +452,8 @@ pub fn run() {
             set_workspace,
             current_workspace,
             workspace_stats,
+            boot_mark,
+            wait_workspace_ready,
             reload_workspace,
             // Settings
             get_settings,

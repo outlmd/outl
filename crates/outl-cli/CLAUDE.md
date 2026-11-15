@@ -325,6 +325,21 @@ What that means for the surfaces in this crate:
   **Only the watcher half takes the per-actor write lock.** The transport buckets writes by `op.actor` and goes through `OpsDirAppendLock`, never the `JsonlStorage::append` path that `ActorWriteLock` guards, so `--no-watch` takes no write lock at all — which is what makes it safe to run permanently beside a GUI, instead of minting that GUI a fresh ephemeral actor and `ops-<ulid>.jsonl` on every launch.
 - **`outl peer pair`/`status`** use a transient endpoint they close before returning (CLI-only, no long-lived client should be mid-pair at the same time).
 
+## A writing open persists the boot cache; a read does not
+
+Short-lived openers were excluded from snapshot writes wholesale, on the grounds that a write would race the long-lived GUI.
+That race was real and was **fixed in the writer**: `snapshot::write_to_disk` composes in a per-write scratch and publishes by `rename`, so two writers for one actor no longer share an inode.
+The cost no longer argues against the design (root `CLAUDE.md` invariant 11).
+
+The exclusion left a real hole: on a machine driven only from the terminal nothing else wrote one either, so **every** `outl` invocation full-replayed the log forever — 330-357 ms for `outl page get` against 132-166 ms with a snapshot present, on 10k pages.
+
+`ws::open` turns it on and `ws::open_read` does not, because that is where the cost is attributable: a writing command is already encoding and fsyncing ops, and `Workspace::apply` only spawns the write when the threshold is crossed, which after a full replay means "there was no usable snapshot".
+A read paying for the next process stays refused.
+`WsCtx::drop` waits the worker out, so a 200 ms command cannot exit mid-fsync.
+
+Pinned by `outl-ws/tests/snapshot_writes.rs`, in both directions.
+Full launch sequence: [`docs/boot-performance.md`](../../docs/boot-performance.md).
+
 ## JSON envelope (CLI)
 
 ```json

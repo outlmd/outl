@@ -68,22 +68,22 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tracing::info;
 
 use crate::commands::{
-    add_block, attach_asset, copy_block_markdown, copy_block_ref, copy_markdown, create_block,
-    cut_block, date_title, delete_block, delete_page, edit_block, get_editor_diagrams,
-    get_telemetry_enabled, get_theme, get_theme_config, import_asset_file, indent_block,
-    instantiate_template_at, list_all_pages, list_outline, list_templates_cmd, list_themes,
-    move_block_after, move_block_down, move_block_up, next_day, open_asset, open_external_file,
-    open_journal_for, open_page_by_slug, open_ref, open_today_journal, outdent_block,
-    outl_emoji_search, outl_peer_list, outl_peer_pair_host, outl_peer_pair_join, outl_peer_remove,
-    outl_peer_status, outl_sync_now, page_backlinks, paste_block_after, paste_markdown_at,
-    paste_plain_at, plugin_config_set, plugin_install_official, plugin_list, plugin_registry_list,
-    plugin_run, plugin_secret_remove, plugin_secret_set, plugin_set_enabled,
+    add_block, attach_asset, boot_mark, copy_block_markdown, copy_block_ref, copy_markdown,
+    create_block, cut_block, date_title, delete_block, delete_page, edit_block,
+    get_editor_diagrams, get_telemetry_enabled, get_theme, get_theme_config, import_asset_file,
+    indent_block, instantiate_template_at, list_all_pages, list_outline, list_templates_cmd,
+    list_themes, move_block_after, move_block_down, move_block_up, next_day, open_asset,
+    open_external_file, open_journal_for, open_page_by_slug, open_ref, open_today_journal,
+    outdent_block, outl_emoji_search, outl_peer_list, outl_peer_pair_host, outl_peer_pair_join,
+    outl_peer_remove, outl_peer_status, outl_sync_now, page_backlinks, paste_block_after,
+    paste_markdown_at, paste_plain_at, plugin_config_set, plugin_install_official, plugin_list,
+    plugin_registry_list, plugin_run, plugin_secret_remove, plugin_secret_set, plugin_set_enabled,
     plugin_settings_describe, plugin_sync_hooks, plugin_toolbar, plugin_transform,
     plugin_transformers, plugin_uninstall, previous_day, read_asset_data_url, redo_page,
     reload_workspace, resolve_page_labels, resolve_ref, search_blocks, search_pages,
     search_persons, set_backlinks_order, set_block_collapsed, set_editor_diagrams,
     set_telemetry_enabled, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
-    undo_page, workspace_stats,
+    undo_page, wait_workspace_ready, workspace_stats,
 };
 // Registered on mobile for the first time by the shared command catalog
 // (`outl_tauri_shared::wrappers`): the bodies always existed, only the
@@ -318,6 +318,17 @@ pub fn run() {
                 global_cfg.backup.interval_minutes,
             );
 
+            // The interactive phase: the orphan sweep, the snapshot
+            // refresh and the signal that lets iroh bind all wait for the
+            // frontend's `first_content` mark. The deadline is not
+            // optional — a webview that never reports would otherwise be
+            // a phone that syncs with nobody, silently. 6s is past a cold
+            // open on a large graph on a phone (measured in seconds, not
+            // hundreds of ms) and short of a user noticing.
+            let first_paint = outl_tauri_shared::FirstPaintGate::new();
+            first_paint.arm_deadline(std::time::Duration::from_secs(6));
+            let workspace_ready = Arc::new(outl_tauri_shared::WorkspaceReady::new());
+
             // Gate on the opener finishing: see `iroh_sync::wire_iroh_transport`.
             let (open_done_tx, open_done_rx) = std::sync::mpsc::channel();
             spawn_workspace_opener(
@@ -328,6 +339,8 @@ pub fn run() {
                 hlc.clone(),
                 app.handle().clone(),
                 open_done_tx,
+                first_paint.clone(),
+                workspace_ready.clone(),
             );
 
             let registry = Arc::new(RuntimeRegistry::with_builtins());
@@ -384,6 +397,8 @@ pub fn run() {
                 history: Mutex::new(std::collections::HashMap::new()),
                 backlink_index: Arc::new(Mutex::new(None)),
                 projection_writer,
+                first_paint,
+                workspace_ready,
                 calendar_week_start,
             });
             app.manage(plugins);
@@ -449,6 +464,8 @@ pub fn run() {
             today_slug_cmd,
             date_title,
             workspace_stats,
+            boot_mark,
+            wait_workspace_ready,
             resolve_ref,
             // Shortcuts + the per-client support matrix (invariant 12).
             // New on mobile: the help surface can only say *where* an

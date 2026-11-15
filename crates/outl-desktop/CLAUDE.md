@@ -185,6 +185,33 @@ Three rules a contributor will trip on:
 
 Net: `PageTitle.test.tsx` → "stops calling it Today once the day rolls over under an untouched window", plus `day-clock.test.ts` in `@outl/shared`.
 
+## What a launch waits for
+
+**The loading screen paints today's journal, not a spinner.**
+`App.tsx` subscribes to `onPagePreview` before any `await` (the backend emits it before it opens the op log, so a listener armed after the theme round-trip would miss it on a fast workspace) and renders `<PreviewOutline />` in place of "Opening your workspace…".
+The spinner stays as the fallback for a launch with nothing to preview, and a small line above the content is what stops the read-only state reading as a frozen app.
+Rules the preview carries: [`docs/boot-performance.md`](../../docs/boot-performance.md).
+
+The boot opener publishes the workspace, emits `workspace-ready`, latches `WorkspaceReady`, and stops.
+The filesystem watcher, the iroh transport, the orphan reconcile and the snapshot refresh are registered on `outl_tauri_shared::FirstPaintGate` and start when the frontend reports `first_content`.
+
+`workspace_open::spawn_interactive_phase` is where that registration lives, and [`docs/boot-performance.md`](../../docs/boot-performance.md) owns why each one waits.
+
+Four things in this crate that are easy to undo:
+
+- **`setup` arms the gate's deadline (4 s), and must keep doing so.**
+  The painted signal comes over IPC; a webview that fails to load leaves it unsent, and without the deadline this window would sync with nobody and say nothing.
+- **Deferring the watcher opens a window, and the fix is to ask the log, not to start earlier.**
+  A watcher only reports what happens after it starts, so the `fs_watcher` job asks `ops_watermark::read_needed` once it is up and emits a single `peer-ops-changed` when a peer appended in between.
+- **`App.tsx` waits instead of polling.**
+  The 500 ms `setInterval` is gone; `waitWorkspaceReady` resolves when the opener publishes. The loop around it keeps the old ~20 s budget and still calls `refresh()`, because a rejected wait (an older backend) has to fall back to asking.
+- **`window_paint::window_background` repaints the native window from the theme on disk.**
+  `tauri.conf.json`'s static `backgroundColor` covers the brand default; this is what stops a light-theme user opening outl with a dark rectangle. It **cannot** resolve `mode = "auto"` (the OS appearance setting is the webview's question), so `auto` takes the dark side and `index.html`'s cached-palette script corrects it one frame later.
+  **`tauri.windows.conf.json` mirrors the window entry**, and `webview_boot`'s parity test fails when it does not.
+
+The four marks the frontend reports (`html_parsed` in `index.tsx`, `theme_applied` after `installTheme`, `first_content` off whichever cold-start target won, `interactive` at the end of `AppShell`'s mount) are `@outl/shared/boot`'s.
+`first_content` rides the deep-link and open-file paths too, and fires even when the target **failed**: the shell is mounted and the error is on screen, so holding the mark back would hold sync behind a state nothing resolves on its own.
+
 ## Theme tokens
 
 `applyPaletteToRoot` (`@outl/shared/theme`) writes only the canonical `--color-outl-*` namespace, and `src/styles.css`'s `@theme` block declares only that one.

@@ -90,6 +90,20 @@ pub(crate) struct AppState {
     /// so a commit never blocks the next tap on disk I/O (the outl
     /// async-writes default). See [`outl_tauri_shared::projection`].
     pub(crate) projection_writer: ProjectionWriter,
+    /// Holds back the work a launch does not need on screen — here the
+    /// orphan sweep, the snapshot refresh, and the signal that lets the
+    /// iroh transport bind — until the frontend reports a painted frame
+    /// (or the gate's deadline elapses).
+    ///
+    /// On a phone this is the gate that matters most: the open and a
+    /// first sync both peak in the hundreds of MB, and the sweep holds
+    /// the workspace lock for 2,557ms unbroken on this client. `run()`
+    /// arms the deadline, which is what keeps "deferred" from becoming
+    /// "never" on a webview that fails to report.
+    pub(crate) first_paint: Arc<outl_tauri_shared::FirstPaintGate>,
+    /// Latched "the workspace is published", so `wait_workspace_ready`
+    /// is a wait rather than `Journal.boot.ts`'s 50 × 200ms retry.
+    pub(crate) workspace_ready: Arc<outl_tauri_shared::WorkspaceReady>,
     /// `[calendar] week_start` from the global config, read once at boot
     /// beside the timezone. `None` keeps the phone's historical Sunday.
     /// Restart-to-apply, like every other `[calendar]` value.
@@ -151,5 +165,13 @@ impl AppHost for AppState {
 
     fn projection_writer(&self) -> Option<&ProjectionWriter> {
         Some(&self.projection_writer)
+    }
+
+    fn first_paint_gate(&self) -> Option<&Arc<outl_tauri_shared::FirstPaintGate>> {
+        Some(&self.first_paint)
+    }
+
+    fn workspace_ready(&self) -> Option<&Arc<outl_tauri_shared::WorkspaceReady>> {
+        Some(&self.workspace_ready)
     }
 }

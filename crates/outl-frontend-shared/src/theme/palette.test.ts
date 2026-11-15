@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { applyPaletteToRoot } from "./palette";
+import { applyPaletteToRoot, paletteDeclarations } from "./palette";
+import { BOOT_STYLE_KEY } from "../boot";
 import type { Palette } from "../api/types";
 
 const p = (over: Partial<Palette> = {}): Palette =>
@@ -77,5 +78,66 @@ describe("applyPaletteToRoot", () => {
     expect(document.documentElement.style.colorScheme).toBe("light");
     applyPaletteToRoot(p({ bg: "#0c0814ff" }));
     expect(document.documentElement.style.colorScheme).toBe("dark");
+  });
+});
+
+describe("the first-frame style cache", () => {
+  beforeEach(() => {
+    document.documentElement.removeAttribute("style");
+  });
+
+  /**
+   * The cached string is what the inline `<head>` script assigns before
+   * the first pixel, so it has to carry a background on `<html>` — the
+   * script runs before `<body>` is parsed and has nowhere else to put
+   * one.
+   */
+  it("carries the background and the tokens on <html>", () => {
+    const decls = paletteDeclarations(p({ bg: "#ffffff", fg: "#101010" }));
+    expect(decls).toContain("--color-outl-bg:#ffffff");
+    expect(decls).toContain("background-color:#ffffff");
+    expect(decls).toContain("color:#101010");
+    expect(decls).toContain("color-scheme:light");
+  });
+
+  it("is what applying a palette stores", () => {
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      value: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    const palette = p({ bg: "#ffffff" });
+    applyPaletteToRoot(palette);
+    expect(store.get(BOOT_STYLE_KEY)).toBe(paletteDeclarations(palette));
+  });
+
+  /**
+   * An OS appearance flip repaints, and a client keeps its own
+   * `<html>`-level values there (`--outl-notice-offset`). Replacing
+   * `cssText` wholesale used to be safe only because nothing else wrote
+   * to it; this keeps it safe by construction.
+   */
+  it("keeps a non-theme declaration across a repaint", () => {
+    document.documentElement.style.setProperty("--outl-notice-offset", "12px");
+    applyPaletteToRoot(p());
+    expect(
+      document.documentElement.style.getPropertyValue("--outl-notice-offset"),
+    ).toBe("12px");
+    expect(
+      document.documentElement.style.getPropertyValue("--color-outl-bg"),
+    ).toBe("#0c0814");
+  });
+
+  it("replaces a token a later palette changes rather than keeping both", () => {
+    applyPaletteToRoot(p({ bg: "#0c0814" }));
+    applyPaletteToRoot(p({ bg: "#ffffff" }));
+    expect(
+      document.documentElement.style.getPropertyValue("--color-outl-bg"),
+    ).toBe("#ffffff");
   });
 });

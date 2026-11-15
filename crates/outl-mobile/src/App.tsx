@@ -1,11 +1,13 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 
 import { getThemeConfig } from "@outl/shared/api/commands";
+import { bootMark } from "@outl/shared/boot";
 import { setDiagramsMode } from "@outl/shared/diagram";
 import { CrashReportsNotice } from "@outl/shared/polish";
 import { installTheme } from "@outl/shared/theme";
 
 import { getEditorDiagrams } from "./lib/api";
+import { dismissBootSplash } from "./lib/splash";
 
 import { Journal } from "./components/Journal";
 import { Onboarding } from "./components/Onboarding";
@@ -51,6 +53,12 @@ function App() {
   }
 
   onMount(async () => {
+    // First run has no journal to wait for, so nothing on the Journal
+    // path will dismiss the splash. Onboarding *is* the first screen
+    // here, so it dismisses on mount — otherwise a brand-new install
+    // sat behind the logo until the 4s failsafe, which is the exact
+    // floor the timer-dismissed splash was removed to delete.
+    if (!onboarded()) dismissBootSplash();
     // Hydrate the theme BEFORE the rest of the boot routine so the
     // first painted frame already uses the real palette instead of
     // the static `styles.css` boot values (mirrors the desktop's
@@ -79,6 +87,12 @@ function App() {
     try {
       const unsubscribe = await installTheme(cfg);
       onCleanup(unsubscribe);
+      // The palette is on `<html>`. Reported even though the inline
+      // `<head>` script usually painted the same colours already — the
+      // mark measures when the *authoritative* palette landed, and the
+      // gap between the two is exactly what the cache is hiding from the
+      // user.
+      bootMark("theme_applied");
     } catch {
       // No backend at all (shouldn't happen). Keep the static boot frame.
     }

@@ -1,9 +1,16 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { attachConsole } from "@tauri-apps/plugin-log";
+import { bootMark } from "@outl/shared/boot";
 
 import App from "./App";
 import "./styles.css";
+
+// The earliest point a module can report. Everything before this is the
+// document and the inline palette script; everything after is the app.
+// Reported here rather than in a component's `onMount` so the number
+// brackets Solid's own mount cost instead of hiding it.
+bootMark("html_parsed");
 
 // Forward Rust logs (the `Webview` target of tauri-plugin-log) into the browser
 // console, so backend `log::` lines show up in the webview devtools alongside

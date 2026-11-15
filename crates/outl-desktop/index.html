@@ -31,6 +31,36 @@
           system-ui, sans-serif;
       }
     </style>
+    <script>
+      /*
+       * The user's palette, on the FIRST frame.
+       *
+       * The real palette arrives over IPC — `get_settings` then
+       * `get_theme` ×2 — which is two round-trips after this document
+       * parses. Until then the rule above falls back to the brand's dark
+       * `#0c0814`, so every light-theme user saw a dark flash on every
+       * launch, and a dark-theme user on a light OS saw the reverse once
+       * `color-scheme` landed.
+       *
+       * So the last installed palette is replayed here, before anything
+       * paints. `applyPaletteToRoot` (@outl/shared/theme) is the only
+       * writer of that cache and the only owner of what a palette means;
+       * this script knows nothing about colours — it assigns one string
+       * to one element.
+       *
+       * Deliberately inline and deliberately not a module: a module is
+       * deferred until after the document parses, which is exactly the
+       * frame this exists to fix. Wrapped in try/catch because
+       * `localStorage` throws with site data blocked, and a theme cache
+       * must never be able to stop the app from booting.
+       */
+      try {
+        var cached = localStorage.getItem("outl.boot.style");
+        if (cached) document.documentElement.style.cssText = cached;
+      } catch (e) {
+        /* No cache: the static rule above paints the brand default. */
+      }
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

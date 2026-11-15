@@ -37,7 +37,10 @@ import {
 } from "@outl/shared/api/commands";
 import type { PageView } from "@outl/shared/api/types";
 
+import { bootMark, waitWorkspaceReady } from "@outl/shared/boot";
+
 import { withTimeout } from "../lib/async";
+import { dismissBootSplash } from "../lib/splash";
 
 /** Cap on a `syncNow` force-sync pass. With an unreachable peer the connect
  *  waits out a 10–30s timeout; awaiting that in the reload path froze the UI.
@@ -51,15 +54,23 @@ export const SYNC_TIMEOUT_MS = 6000;
  *  seconds and a tighter bound would report a healthy boot as a failure.
  *  It buys the *gate*, not the thread: see the module doc. */
 export const OPEN_TIMEOUT_MS = 15000;
-/** How long the boot load keeps retrying a still-booting workspace. 50
- *  attempts × 200ms of backoff, so ~10s of `workspace_loading` rejections
- *  (each of which returns immediately — the opener is not holding the
- *  lock yet). An attempt that actually stalls does not spend the budget:
- *  it times out at `OPEN_TIMEOUT_MS` and fails the load outright, because
- *  "workspace is still opening" and "the open hung" need different answers
- *  and only the first is worth waiting through. */
-const BOOT_ATTEMPTS = 50;
-const BOOT_BACKOFF_MS = 200;
+/** How long one `waitWorkspaceReady` call blocks before reporting "not
+ *  yet". The backend clamps it; this value only decides how often the
+ *  loop gets a chance to give up.
+ *
+ *  **It replaced a 200ms backoff loop.** 50 attempts × 200ms could not
+ *  resolve faster than its own interval, so a workspace that became
+ *  ready 10ms into a tick waited out the remaining 190ms, every launch,
+ *  and every attempt was an IPC round-trip that had to be served on the
+ *  main thread. The wait is latched in Rust now
+ *  (`outl_tauri_shared::WorkspaceReady`), so the reply arrives when it
+ *  becomes true. */
+const READY_WAIT_MS = 2_000;
+
+/** How many times the load asks again after a "not yet".
+ *  `READY_WAIT_MS × BOOT_ATTEMPTS` is the same ~10s budget the old
+ *  backoff had, spent waiting instead of polling. */
+const BOOT_ATTEMPTS = 5;
 
 /** What the two loads need from `Journal`. Accessors, never values. */
 export interface JournalBootDeps {
@@ -101,12 +112,37 @@ export function createJournalBoot(deps: JournalBootDeps): JournalBoot {
   // the freeze).
   let reloadPendingWhileEditing = false;
 
+  /** Release the skeleton and dismiss the splash, in that order. */
+  function finishLoad(failed: boolean, message: string | null): void {
+    deps.setError(message);
+    deps.setLoadFailed(failed);
+    deps.setLoaded(true);
+    // Even on failure: the failure state carries a Retry button, and a
+    // splash over it is a dead end.
+    dismissBootSplash();
+  }
+
   async function loadTodayWithRetry(): Promise<void> {
-    // The skeleton placeholder is the user-facing "still loading"; we keep
-    // retrying the workspace open silently and only flip `loadFailed` when
-    // the budget is gone or an attempt stalls past its cap.
+    // The skeleton placeholder is the user-facing "still loading"; we wait
+    // for the workspace rather than polling for it, and only flip
+    // `loadFailed` when the budget is gone or an attempt stalls past its
+    // cap.
     deps.setLoadFailed(false);
     for (let i = 0; i < BOOT_ATTEMPTS; i += 1) {
+      // Wait for the open instead of racing it. A rejection here is a
+      // backend that could not take the wait at all, not a slow open, so
+      // it falls through to the attempt below and is reported by it.
+      try {
+        await withTimeout(
+          waitWorkspaceReady(READY_WAIT_MS),
+          OPEN_TIMEOUT_MS,
+          "Waiting for the workspace",
+        );
+      } catch {
+        // An older backend has no such command. Asking for the journal
+        // is still the right next move — it answers `workspace_loading`
+        // if the open is in flight, which is what the loop handles.
+      }
       try {
         const v = await withTimeout(
           openTodayJournal(),
@@ -114,28 +150,28 @@ export function createJournalBoot(deps: JournalBootDeps): JournalBoot {
           "Opening the workspace",
         );
         deps.applyView(v);
-        deps.setError(null);
-        deps.setLoaded(true);
+        // The first real content is on screen, which is both the
+        // measurement and the signal that releases the backend's
+        // deferred boot work (sync, the orphan sweep, the snapshot).
+        bootMark("first_content");
+        finishLoad(false, null);
         return;
       } catch (e) {
         const msg = String(e);
         if (msg.includes("workspace_loading")) {
-          // Workspace opener still in flight; back off briefly and try again.
-          await new Promise((r) => setTimeout(r, BOOT_BACKOFF_MS));
+          // Opener still in flight. No sleep: the wait above is what
+          // spends the time now, and it returns the moment the
+          // workspace is published.
           continue;
         }
         // Anything else — including the timeout above — is the end of the
         // load, not a retry: `loaded` is released so the skeleton gives way
         // to the failure state and its Retry button.
-        deps.setError(msg);
-        deps.setLoadFailed(true);
-        deps.setLoaded(true);
+        finishLoad(true, msg);
         return;
       }
     }
-    deps.setError("Workspace took too long to open.");
-    deps.setLoadFailed(true);
-    deps.setLoaded(true);
+    finishLoad(true, "Workspace took too long to open.");
   }
 
   /**
@@ -312,5 +348,11 @@ export async function runBootSequence(seq: BootSequence): Promise<void> {
   } finally {
     seq.firstSync();
     seq.catchUp();
+    // Last, inside the `finally`, for the same reason the two steps
+    // above are: a deep-link drain that throws must not leave a running
+    // app whose launch never finished as far as any measurement knows.
+    // It emits the summary line, so a launch missing it in the log is a
+    // launch that did not get here.
+    bootMark("interactive");
   }
 }

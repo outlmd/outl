@@ -26,6 +26,8 @@ use tracing::{info, warn};
 
 use crate::fs_watcher::{self, WatcherHandle};
 
+use outl_tauri_shared::{FirstPaintGate, WorkspaceReady};
+
 pub(crate) use outl_tauri_shared::workspace_open::{
     load_or_create_actor, open_workspace_at, WorkspaceGuards,
 };
@@ -59,6 +61,29 @@ pub(crate) fn spawn_background_reconcile(
             }
         },
     );
+}
+
+/// How long the interactive phase waits for a painted frame before
+/// starting anyway.
+///
+/// Well past a cold open on a large workspace, and far short of a user
+/// noticing that sync is late. It exists because the painted signal
+/// arrives over IPC: a webview that failed to load, or a frontend built
+/// before `boot_mark` existed, leaves it unsent, and without a deadline
+/// that is a window which syncs with nobody and says nothing.
+const FIRST_PAINT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Build the two boot signals `AppState` carries, with the gate's
+/// deadline already armed.
+///
+/// One function so a caller cannot construct the gate without arming
+/// it — which is the obligation `FirstPaintGate`'s own docs put on a
+/// host, and the kind of obligation that is kept by not offering the
+/// other path.
+pub(crate) fn start_boot_phase() -> (Arc<FirstPaintGate>, Arc<WorkspaceReady>) {
+    let gate = FirstPaintGate::new();
+    gate.arm_deadline(FIRST_PAINT_DEADLINE);
+    (gate, Arc::new(WorkspaceReady::new()))
 }
 
 /// Start the process's one automatic-backup thread and return the cell
@@ -99,8 +124,27 @@ pub(crate) fn spawn_projection_writer(
 
 /// Background opener used at boot when `settings.last_workspace` is
 /// already set. Runs on a worker thread so the WebView starts
-/// painting immediately; the frontend polls `workspace_stats` /
-/// listens for the `workspace-ready` event.
+/// painting immediately.
+///
+/// # What publishes, and what waits
+///
+/// Three things happen the moment the open returns, and nothing else:
+/// the slots are filled, `workspace-ready` is emitted, and
+/// [`outl_tauri_shared::WorkspaceReady`] is latched so a frontend
+/// blocked in `wait_workspace_ready` wakes. That is the whole set the
+/// first frame depends on.
+///
+/// Everything else is registered on the [`FirstPaintGate`] and starts
+/// once the frontend reports `first_content` (or the gate's deadline
+/// elapses): the filesystem watcher, the iroh transport, the orphan
+/// reconcile, and the snapshot refresh. All four read the same disk and
+/// take the same workspace lock the first journal paint needs, and
+/// running them on a worker thread does not make them invisible — the
+/// premise is the *device*, which is the rule
+/// [`outl_tauri_shared::reconcile`] already carries for the sweep.
+///
+/// **Deferred is not cancelled**, and the gate's deadline is what makes
+/// that true rather than aspirational.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
@@ -113,6 +157,8 @@ pub(crate) fn spawn_workspace_opener(
     last_workspace: PathBuf,
     hlc: HlcGenerator,
     app: tauri::AppHandle,
+    first_paint: Arc<FirstPaintGate>,
+    workspace_ready: Arc<WorkspaceReady>,
 ) {
     let actor = hlc.actor();
     let lru_cap = outl_config::load().storage.lru_cap;
@@ -124,6 +170,17 @@ pub(crate) fn spawn_workspace_opener(
             );
             return;
         }
+        // Today's journal, off disk, **before** the open.
+        //
+        // This is the whole point of the page-first boot: the `.md` is
+        // the projection of exactly the page the user is waiting for,
+        // and reading it with its sidecar costs 8-11ms whatever the
+        // workspace holds — against 163ms of snapshot boot plus the
+        // index load on a real 730k-op graph, and seconds on a cold
+        // one. The client paints real text here and swaps it for the
+        // live view when the open lands. See `page_preview`.
+        outl_tauri_shared::page_preview::emit_today_journal_preview(&app, &last_workspace);
+
         // Fast open: ops/, journals/, pages/ exist; today's journal is
         // resolved; legacy blocks moved under it. **No orphan
         // reconcile here** — that runs after we publish the workspace
@@ -145,42 +202,139 @@ pub(crate) fn spawn_workspace_opener(
                 return;
             }
         };
-        // Start the FS watcher BEFORE we swap the slot so the first
-        // peer change after boot is captured. Failure is logged but
-        // non-fatal — the user can still work, just without
-        // automatic reload.
-        match fs_watcher::start_watcher(&last_workspace, actor, app.clone()) {
-            Ok(handle) => fs_watcher::swap_watcher(&fs_watcher_slot, Some(handle)),
-            Err(e) => warn!("fs watcher failed to start: {e}"),
-        }
         *workspace_slot.lock() = Some(workspace);
         *storage_root_slot.lock() = Some(last_workspace.clone());
         if let Err(e) = app.emit("workspace-ready", ()) {
             warn!("emit workspace-ready: {e}");
         }
+        // After the slot, never before: a waiter that wakes to
+        // `ERR_LOADING` is the poll this replaces, one line earlier.
+        workspace_ready.publish();
         info!("background workspace opener complete");
 
-        // Wire the iroh P2P transport (best-effort, gated on
-        // `[sync] transport = "iroh"`). It runs ALONGSIDE the `notify`
-        // watcher started above: both deliver peer ops to `<root>/ops/`
-        // and both surface as `peer-ops-changed`, so the frontend
-        // reload path is identical whichever wins the race. A `File`
-        // config or any build failure is a silent no-op here.
-        crate::iroh_sync::wire_iroh_transport(
-            &iroh_transport_slot,
-            &iroh_pairing_slot,
-            last_workspace.clone(),
-            actor,
-            app.clone(),
+        spawn_interactive_phase(
+            &first_paint,
+            InteractivePhase {
+                workspace_slot,
+                fs_watcher_slot,
+                iroh_transport_slot,
+                iroh_pairing_slot,
+                root: last_workspace,
+                actor,
+                hlc,
+                app,
+            },
         );
+    });
+}
 
-        // Background reconcile: scan and reconcile orphan `.md` files in yet
-        // another thread, releasing the workspace lock between each
-        // page. The frontend can already query the workspace; pages
-        // that get materialised by the reconcile become visible on
-        // the next read (no full reload required). The reconcile
-        // emits `workspace-reconciled` on completion if a client
-        // wants to explicitly refresh the current view.
-        spawn_background_reconcile(workspace_slot, last_workspace, hlc, app);
+/// What the opener hands the gate. A struct because the five slots plus
+/// the root, the actor, the clock and the app handle is past the point
+/// where positional arguments read.
+pub(crate) struct InteractivePhase {
+    pub workspace_slot: Arc<Mutex<Option<Workspace>>>,
+    pub fs_watcher_slot: Arc<Mutex<Option<WatcherHandle>>>,
+    pub iroh_transport_slot: Arc<Mutex<Option<Arc<dyn SyncTransport>>>>,
+    pub iroh_pairing_slot: Arc<Mutex<Option<outl_sync_iroh::IrohSyncTransport>>>,
+    pub root: PathBuf,
+    pub actor: outl_core::id::ActorId,
+    pub hlc: HlcGenerator,
+    pub app: tauri::AppHandle,
+}
+
+/// Register the four deferred boot jobs on `gate`, in the order they
+/// should start.
+///
+/// Watcher first: it is the cheapest and the only one whose *delay* can
+/// lose a notification, so it closes its own window (below) and then
+/// the expensive three follow.
+pub(crate) fn spawn_interactive_phase(gate: &Arc<FirstPaintGate>, phase: InteractivePhase) {
+    let InteractivePhase {
+        workspace_slot,
+        fs_watcher_slot,
+        iroh_transport_slot,
+        iroh_pairing_slot,
+        root,
+        actor,
+        hlc,
+        app,
+    } = phase;
+
+    // The watcher used to start *before* the slot was filled, so that
+    // "the first peer change after boot is captured". Deferring it opens
+    // a window where a peer writes and no `notify` event is delivered.
+    //
+    // That window is closed here rather than by starting earlier: a
+    // watcher only reports what happens *after* it starts, so the
+    // question "did the log move while nobody was watching" has to be
+    // asked of the log. `ops_watermark` is that question, and the boot
+    // already answered it once (`open_workspace_at` calls
+    // `note_current`), so a `Some` here means a peer appended between
+    // the open and this moment — exactly what the watcher would have
+    // told us.
+    //
+    // A missed notification was never data loss (the ops are on disk and
+    // the next reload reads them); it was a page that does not refresh
+    // until the user does something. This keeps it from being either.
+    {
+        let root = root.clone();
+        let app = app.clone();
+        gate.on_open("fs_watcher", move || {
+            match fs_watcher::start_watcher(&root, actor, app.clone()) {
+                Ok(handle) => fs_watcher::swap_watcher(&fs_watcher_slot, Some(handle)),
+                // Non-fatal: the user can still work, just without
+                // automatic reload.
+                Err(e) => warn!("fs watcher failed to start: {e}"),
+            }
+            let ops = root.join("ops");
+            if outl_tauri_shared::ops_watermark::read_needed(&ops, actor).is_some() {
+                info!("boot: op log moved before the watcher started; signalling a reload");
+                if let Err(e) = app.emit("peer-ops-changed", ()) {
+                    warn!("emit peer-ops-changed: {e}");
+                }
+            }
+        });
+    }
+
+    // Re-persist the boot cache. Queued before iroh and the reconcile
+    // because it is the shortest of the three and the next launch is
+    // what pays for skipping it; `boot` deliberately no longer does this
+    // inline (see `outl_tauri_shared::workspace_open`).
+    {
+        let slot = workspace_slot.clone();
+        gate.on_open("snapshot_refresh", move || {
+            outl_tauri_shared::workspace_open::snapshot_after_first_paint(&slot);
+        });
+    }
+
+    // Wire the iroh P2P transport (best-effort, gated on
+    // `[sync] transport = "iroh"`). It runs ALONGSIDE the `notify`
+    // watcher started above: both deliver peer ops to `<root>/ops/`
+    // and both surface as `peer-ops-changed`, so the frontend
+    // reload path is identical whichever wins the race. A `File`
+    // config or any build failure is a silent no-op here.
+    {
+        let root = root.clone();
+        let app = app.clone();
+        gate.on_open("iroh_transport", move || {
+            crate::iroh_sync::wire_iroh_transport(
+                &iroh_transport_slot,
+                &iroh_pairing_slot,
+                root,
+                actor,
+                app,
+            );
+        });
+    }
+
+    // Background reconcile: scan and reconcile orphan `.md` files in yet
+    // another thread, releasing the workspace lock between each
+    // page. The frontend can already query the workspace; pages
+    // that get materialised by the reconcile become visible on
+    // the next read (no full reload required). The reconcile
+    // emits `workspace-reconciled` on completion if a client
+    // wants to explicitly refresh the current view.
+    gate.on_open("orphan_reconcile", move || {
+        spawn_background_reconcile(workspace_slot, root, hlc, app);
     });
 }

@@ -442,6 +442,22 @@ A retryable failure (I/O, permissions, an unreadable sidecar) is a
 picks it up, and nagging about it trains the user past the banner that
 matters.
 
+## The terminal comes up before the workspace
+
+`runtime/boot.rs` owns the two frames before there is a workspace, and the reordering that put them first.
+
+The open used to happen **before** the alternate screen, so everything it cost was spent against the user's shell prompt: 190-270 ms warm, and the whole of a cold replay on a large graph, with nothing on screen to distinguish "replaying a 700k-op log" from "hung".
+Now: raw mode, the alternate screen, a skeleton frame naming the workspace, then `open_workspace`.
+
+Three consequences:
+
+- **A failed open happens inside the alternate screen**, so `restore_terminal` runs on that path too. Returning `?` straight out hands the user a shell in raw mode with no prompt.
+- **The skeleton's theme comes from the global config alone**, because the per-workspace `[theme] preset` lives in the file `open_workspace` reads. A workspace that overrides the preset shows the global palette for that one frame.
+- **`supports_keyboard_enhancement()` moved after the first frame.** It costs **2.4 s** on a terminal that does not answer, and it cannot move to a thread, because it reads stdin: a thread doing that races the event loop for the user's keystrokes, and losing that race swallows input. Those 2.4 s are still input-dead wherever they happen; closing that needs a way to skip the query outright, which is a config key and a decision about its default.
+
+The boot reports its phases through `outl_core::boot_timing`, same line the GUI clients produce.
+Budgets and the rest of the launch sequence: [`docs/boot-performance.md`](../../docs/boot-performance.md).
+
 ## Persistence model
 
 Editing is **AST-first**: edits mutate an in-memory `ParsedPage`.

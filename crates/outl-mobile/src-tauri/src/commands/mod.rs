@@ -19,6 +19,7 @@
 
 pub(crate) mod asset;
 pub(crate) mod block;
+pub(crate) mod boot;
 pub(crate) mod capture;
 pub(crate) mod editor;
 pub(crate) mod exec;
@@ -40,6 +41,7 @@ pub(crate) mod workspace;
 
 pub(crate) use asset::*;
 pub(crate) use block::*;
+pub(crate) use boot::*;
 pub(crate) use capture::*;
 pub(crate) use editor::*;
 pub(crate) use exec::*;

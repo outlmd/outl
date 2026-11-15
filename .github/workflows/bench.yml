@@ -17,13 +17,26 @@ name: bench
 on:
   push:
     branches: [main]
+    # `outl-md` was the only entry in these two lists, so
+    # `benches/boot.rs` — the one benchmark measuring the latency a user
+    # actually waits on — never ran on a PR. A change to the op log, the
+    # snapshot or the workspace open could not trip this workflow at all.
+    #
+    # The list is written twice because GitHub Actions does not expand
+    # YAML anchors in a workflow file; keep the two in step.
     paths:
+      - 'crates/outl-core/**'
       - 'crates/outl-md/**'
+      - 'crates/outl-actions/**'
+      - 'crates/outl-tauri-shared/**'
       - '.github/workflows/bench.yml'
   pull_request:
     branches: [main]
     paths:
+      - 'crates/outl-core/**'
       - 'crates/outl-md/**'
+      - 'crates/outl-actions/**'
+      - 'crates/outl-tauri-shared/**'
       - '.github/workflows/bench.yml'
   schedule:
     # Mondays 09:00 UTC. Catches drift weekly even on quiet repos.
@@ -63,6 +76,27 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: Build benches
         run: cargo bench -p outl-md --no-run
+      - name: Build boot bench
+        run: cargo bench -p outl-core --bench boot --no-run
+      # Boot, at the smallest tier only.
+      #
+      # This is the number the product is built on ("content visible
+      # must stop depending on vault size"), and until now nothing ran
+      # it outside a developer's own machine. `10k` on a shared runner
+      # is a trend line, not a gate: criterion's wall-clock on a noisy
+      # 4-vCPU box moves by double digits between identical runs, which
+      # is why the budget checker lives on the xlarge tier's JSON and
+      # not here.
+      #
+      # The tiers above 10k stay out of the PR path deliberately —
+      # `218k` is minutes per boot mode.
+      - name: boot (10k, every mode)
+        run: |
+          cargo bench -p outl-core --bench boot -- \
+            --warm-up-time 1 \
+            --measurement-time 5 \
+            --sample-size 10 \
+            "10k"
       # The filter `'small|medium|large'` would also catch `xlarge`
       # because criterion does substring matching — so we run the
       # cheap tiers one at a time. Each is fast (sub-second) so the
@@ -107,6 +141,18 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: Build benches
         run: cargo bench -p outl-md --bench index --no-run
+      - name: Build boot bench
+        run: cargo bench -p outl-core --bench boot --no-run
+      # The reference workspace is 217,811 ops across 20 actors, so
+      # `218k` is production rather than a stress test — and the gap
+      # between `replay_cold` and `snapshot` at that size is the
+      # headline number for every client's cold start.
+      - name: boot (50k + 218k)
+        run: |
+          cargo bench -p outl-core --bench boot -- \
+            --warm-up-time 2 \
+            --measurement-time 10 \
+            --sample-size 10
       - name: index (xlarge)
         # Shorter measurement window — 10k-file iters cost real time;
         # default 5s × 100 samples would blow past 30 minutes.

@@ -64,6 +64,7 @@
 ## Project
 
 * [Development guide](development.md)
+* [Boot performance](boot-performance.md)
 * [CI and release](ci-and-release.md)
 * [Desktop UX behaviour](desktop-ux.md)
 * [Mobile UX behaviour](mobile-ux.md)

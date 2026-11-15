@@ -48,9 +48,25 @@
 
       /*
        * Static splash. Lives outside #root so Solid's mount never
-       * touches it. Auto fade-out via CSS — no JS needed, no
-       * hydration race. After the animation finishes it is
-       * display:none so it never intercepts touches.
+       * touches it.
+       *
+       * **It used to dismiss itself on a timer** — a 380ms delay plus a
+       * 240ms fade, both in CSS, "no JS needed, no hydration race". That
+       * bought a 620ms floor on every launch, including the ones where
+       * the journal was ready in 180ms, and it could not be shortened
+       * without risking the opposite failure: a splash that leaves
+       * before there is anything behind it.
+       *
+       * It is dismissed by the app instead, when the first view is
+       * applied (`dismissBootSplash`, src/lib/splash.ts). The fade stays
+       * in CSS and stays at 240ms, so what was removed is the wait, not
+       * the transition. `.is-leaving` is the class that starts it.
+       *
+       * The 4s `boot-splash-failsafe` is what keeps a launch that never
+       * reaches that call from stranding the user behind a logo — the
+       * same reason the backend's first-paint gate has a deadline. It is
+       * a backstop, not the mechanism: shortening it does not make a
+       * launch faster, it makes a slow launch show an empty page.
        */
       #boot-splash {
         position: fixed;
@@ -60,7 +76,7 @@
         align-items: center;
         justify-content: center;
         background: #ffffff;
-        animation: boot-splash-out 240ms cubic-bezier(0.4, 0, 0.2, 1) 380ms
+        animation: boot-splash-failsafe 240ms cubic-bezier(0.4, 0, 0.2, 1) 4s
           forwards;
       }
       @media (prefers-color-scheme: dark) {
@@ -68,14 +84,24 @@
           background: #0c0814;
         }
       }
+      #boot-splash.is-leaving {
+        animation: boot-splash-out 240ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      }
       #boot-splash img {
         width: 128px;
         height: 128px;
         filter: drop-shadow(0 8px 32px rgba(167, 139, 250, 0.35));
-        animation: boot-splash-img 240ms cubic-bezier(0.4, 0, 0.2, 1) 380ms
-          forwards;
+      }
+      #boot-splash.is-leaving img {
+        animation: boot-splash-img 240ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
       }
       @keyframes boot-splash-out {
+        to {
+          opacity: 0;
+          visibility: hidden;
+        }
+      }
+      @keyframes boot-splash-failsafe {
         to {
           opacity: 0;
           visibility: hidden;
@@ -86,7 +112,34 @@
           transform: scale(0.96);
         }
       }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash.is-leaving {
+          animation-duration: 1ms;
+        }
+        #boot-splash.is-leaving img {
+          animation: none;
+        }
+      }
     </style>
+    <script>
+      /*
+       * The user's palette, on the FIRST frame. Same cache and the same
+       * reasoning as the desktop's copy — see `outl-desktop/index.html`.
+       * `applyPaletteToRoot` (@outl/shared/theme) is the only writer of
+       * the cache; this assigns one string to one element and knows
+       * nothing about colours.
+       *
+       * It matters more here: on iOS the handoff is LaunchScreen →
+       * WebView, so a wrong first frame is a visible flash between two
+       * full-screen images.
+       */
+      try {
+        var cached = localStorage.getItem("outl.boot.style");
+        if (cached) document.documentElement.style.cssText = cached;
+      } catch (e) {
+        /* No cache: the static rules above paint the brand default. */
+      }
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

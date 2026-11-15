@@ -100,6 +100,7 @@ import type { MobileAction } from "../lib/palette-actions";
 import { PullToRefresh } from "./PullToRefresh";
 import { JournalChrome } from "./JournalChrome";
 import { BlockRow } from "./BlockRow";
+import { JournalPreview } from "./Journal.preview";
 import { SkeletonOutline } from "./Skeleton";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { createLongPress } from "../lib/long-press";
@@ -1461,7 +1462,10 @@ export function Journal() {
           <Show
             when={loaded() && view() && view()!.outline.length > 0}
             fallback={
-              <Show when={loaded()} fallback={<SkeletonOutline />}>
+              <Show
+                when={loaded()}
+                fallback={<JournalPreview fallback={<SkeletonOutline />} />}
+              >
                 <Show
                   when={loadFailed()}
                   fallback={

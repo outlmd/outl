@@ -10,6 +10,7 @@ import {
   todaySlug,
 } from "@outl/shared/api/commands";
 import type { PageView } from "@outl/shared/api/types";
+import { bootMark } from "@outl/shared/boot";
 import { installForegroundRefresh } from "@outl/shared/capture";
 import { createDayClock } from "@outl/shared/journal";
 import { flattenAll } from "@outl/shared/outline";
@@ -318,11 +319,25 @@ export function AppShell() {
     // The drain below waits on this before refreshing, so a capture
     // landing first cannot reach `refreshActivePage`'s no-page branch
     // and load today over the requested target.
-    const initialNav: Promise<unknown> = pending
-      ? handleDeepLink(pending)
-      : pendingFile
-        ? handleOpenFile(pendingFile)
-        : loadToday();
+    // `first_content` is reported off whichever of the three cold-start
+    // targets wins, not off `loadToday` alone — a launch that opened a
+    // deep link or an imported file painted real content just the same,
+    // and the backend's deferred boot work is waiting on this mark.
+    const markFirstContent = () => bootMark("first_content");
+    const initialNav: Promise<unknown> = (
+      pending
+        ? handleDeepLink(pending)
+        : pendingFile
+          ? handleOpenFile(pendingFile)
+          : loadToday()
+    ).then(markFirstContent, (e: unknown) => {
+      // A failed open still ends the "nothing on screen" phase: the
+      // shell is mounted and the error is rendered. Holding the mark
+      // back would hold back sync and the orphan sweep behind a state
+      // nothing is going to resolve on its own.
+      markFirstContent();
+      throw e;
+    });
 
     // Land anything `outl capture` left in the inbox (RFC 0363): on
     // mount, and on every return to the foreground. That is what makes a
@@ -408,6 +423,11 @@ export function AppShell() {
       });
     }, REMINDER_POLL_MS);
     onCleanup(() => clearInterval(remindersTimer));
+
+    // Last line of the shell's mount: every listener is armed and every
+    // ticker is running. It emits the summary line, so a launch missing
+    // it in the log is a launch that did not get here.
+    bootMark("interactive");
   });
 
   function gridTemplate(): string {

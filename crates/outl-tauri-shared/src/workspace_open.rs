@@ -353,39 +353,66 @@ fn boot(
     let snap_cfg = outl_config::load().snapshot;
     workspace.set_snapshot_policy(snap_cfg.enabled, snap_cfg.op_threshold);
 
-    // Write-through snapshot after a cold full replay.
+    // **No snapshot write here.** It used to happen on this line, and the
+    // reasoning for writing one is unchanged and still correct:
     //
     // A receive-only device (mobile paired to a desktop) gets its ops from
     // sync ingest, which writes `ops-*.jsonl` straight to disk — never
     // through `Workspace::apply` — so the background snapshot writer (which
     // only fires from `apply` crossing the threshold) never runs. Every boot
     // then full-replays the entire log (200k+ ops → tens of seconds on a
-    // phone), and the post-`workspace-ready` reload replays it AGAIN.
-    // Persist one snapshot here, after the first replay that found none on
-    // disk, so the next boot and that reload are O(delta). Best-effort; a
-    // stale/corrupt snapshot is always safe — boot silently falls back to a
-    // full replay — so this can never corrupt state, only save work.
-    // Re-persist whenever `Workspace::snapshot_refresh_due` says so: after a
-    // full replay (there was no usable snapshot), and — the arm this used to
-    // be missing — after a boot that ADOPTED one whose delta has grown past
-    // the threshold. `save_snapshot` is O(log) now (the block-text index
-    // makes `force_materialize_pending` cheap), not the old O(blocks × log),
-    // so this is safe on either path.
-    let refresh_due = workspace.snapshot_refresh_due();
-    if refresh_due {
-        if let Err(e) = workspace.save_snapshot() {
-            warn!("boot: could not persist snapshot: {e}");
-        }
-    }
-    timer.phase("snapshot_write");
-
+    // phone), and the post-`workspace-ready` reload replays it AGAIN. One
+    // snapshot after that replay makes the next boot and that reload
+    // O(delta). `Workspace::snapshot_refresh_due` owns *whether* one is
+    // owed, on both arms (after a full replay, and after adopting one whose
+    // delta outgrew the threshold).
+    //
+    // What changed is **when**. `save_snapshot` is synchronous: a multi-MB
+    // postcard encode plus an `F_FULLFSYNC`, measured at 306 ms of a cold
+    // open on a 10k-page workspace — and it sat *in front of* the publish,
+    // so the user waited out a write that only the next launch reads.
+    // Nothing on screen depends on it, so nothing on screen waits for it:
+    // [`snapshot_after_first_paint`] runs it once the workspace is published
+    // and the client has reported a painted frame. The decision is still
+    // asked at that point, not cached here, because the delta can grow
+    // between the two (sync ingest lands ops without `apply`).
     timer.finish(&format!(
-        "adopted={} delta_ops={} blocks_resident={} snapshot_written={refresh_due}",
+        "adopted={} delta_ops={} blocks_resident={} snapshot_deferred={}",
         workspace.booted_from_snapshot(),
         workspace.log().len(),
         workspace.resident_text_count(),
+        workspace.snapshot_refresh_due(),
     ));
     Ok(workspace)
+}
+
+/// Re-persist the snapshot once the first frame is on screen, if one is
+/// owed. Called by both GUI openers **after** publishing the workspace and
+/// emitting `workspace-ready`.
+///
+/// Three properties, each of which was the alternative:
+///
+/// - **It asks under the lock, and writes off-thread.**
+///   `Workspace::refresh_snapshot_in_background` builds the body on this
+///   thread (it reads the tree) and hands the encode + fsync + rename to a
+///   worker. Taking the whole write under the workspace mutex is the stall
+///   this moved out of `boot`, one layer down.
+/// - **It asks late, rather than carrying a verdict from `boot`.**
+///   Sync ingest appends to `ops-*.jsonl` without going through
+///   `Workspace::apply`, so the delta `snapshot_refresh_due` measures can
+///   grow between the open and the first paint. A boolean captured at boot
+///   would answer about a log that has since moved.
+/// - **A missing workspace is not an error.**
+///   The slot is empty when the open failed, and the opener has already
+///   reported that. A snapshot is a cache; there is nothing to say here.
+pub fn snapshot_after_first_paint(workspace: &Mutex<Option<Workspace>>) {
+    let mut slot = workspace.lock();
+    let Some(ws) = slot.as_mut() else {
+        return;
+    };
+    if ws.refresh_snapshot_in_background() {
+        info!("boot: snapshot refresh queued after first paint");
+    }
 }
 
 /// Load (or generate-and-persist) the device's actor id.

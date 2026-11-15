@@ -214,6 +214,30 @@ They never met: snapshot boot was inert in production, while every test (which u
 The fix removed snapshot I/O from the `Storage` trait entirely: storage owns the op log, the workspace owns the snapshot cache, and there is now a single path derivation.
 Never re-add `save_snapshot` / `load_snapshot` to `Storage` — that reintroduces the two-owners divergence.
 
+#### A boot does not wait for the snapshot it is writing
+
+`Workspace::refresh_snapshot_in_background` is the form a boot wants: same decision and same body as `save_snapshot`, but the encode, the fsync and the rename move to a worker.
+
+`save_snapshot` is synchronous, and the GUI open called it *before* publishing the workspace, so the user waited out a multi-MB postcard encode plus an `F_FULLFSYNC` before the first frame.
+Measured at **306 ms** of a cold open on a 10k-page workspace, spent writing a cache that only the *next* launch reads.
+
+The body is still built on the caller's thread, because building it reads the tree and the content store.
+That part is short and unavoidable; the part that is neither moved.
+
+`save_snapshot` stays the right call on **shutdown**, where the caller is about to drop the workspace and a spawned worker would race the process exit.
+`WsCtx::drop` (`outl-ws`) is the other half of that rule for short-lived processes.
+
+#### `outl_core::boot_timing` also carries the client's half of a launch
+
+`BootTimer` covers the workspace open.
+The frontend half is invisible to it, so a GUI client reports four milestones through `boot_timing::mark_client_phase`: `html_parsed`, `theme_applied`, `first_content`, `interactive`.
+Each is logged on arrival, so a launch that never reaches the last one still says how far it got, and `interactive` emits the whole sequence on one line.
+
+`note_process_start` is the zero both halves count from, called first thing in `main`.
+A binary that forgets it gets the first mark as its zero instead, which under-reports rather than panicking: a missing zero must not be able to make a slow launch look fast *and* take the process down.
+
+Which client reports what, and the budgets: [`docs/boot-performance.md`](../../docs/boot-performance.md).
+
 #### `Workspace::snapshot_refresh_due` is the single owner of "write one now?"
 
 Three call sites ask it — the GUI open (`outl-tauri-shared`'s `boot`), `SyncEngine::reload_workspace`, and the TUI's shutdown flush — and each used to decide for itself with `!booted_from_snapshot()`.

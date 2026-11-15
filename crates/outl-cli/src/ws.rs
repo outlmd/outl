@@ -28,7 +28,32 @@ fn map_open(result: Result<WsCtx, WsError>) -> Result<WsCtx, ApiError> {
 /// See [`outl_ws::open`] for the lock/actor policy. A command that only
 /// reads uses [`open_read`] so a held write lock does not mint an actor.
 pub fn open(path: &Path) -> Result<WsCtx, ApiError> {
-    map_open(outl_ws::open(path))
+    // Writing opens persist the boot cache; reads do not.
+    //
+    // A CLI command is short-lived, so it was excluded from snapshot
+    // writes wholesale. But the exclusion left a real hole: on a
+    // machine driven only from the terminal nothing else writes one
+    // either, so **every** `outl` invocation full-replayed the log
+    // forever — 330-357ms for `outl page get` on a 10k-page workspace
+    // against 132-166ms with a snapshot present.
+    //
+    // The write is enabled here and not in `open_read` because that is
+    // where the cost is attributable (root `CLAUDE.md` invariant 11):
+    // this command is already encoding and fsyncing ops, and
+    // `Workspace::apply` only spawns the write when the threshold is
+    // crossed — which after a full replay means "there was no usable
+    // snapshot", i.e. exactly the case that needs one. A read paying
+    // for the next process is the trade that stays refused.
+    //
+    // Two things make it safe now rather than when #109 refused it:
+    // `write_to_disk` uses a per-write scratch, so a concurrent GUI
+    // writer is no longer a shared inode; and `WsCtx::drop` waits out
+    // the worker, so a 200ms command cannot exit mid-fsync.
+    let opts = outl_ws::OpenOptions {
+        write_snapshots: true,
+        ..Default::default()
+    };
+    map_open(outl_ws::open_with(path, opts))
 }
 
 /// Open the workspace at `path` for reading.

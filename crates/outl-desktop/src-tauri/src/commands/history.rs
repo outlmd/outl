@@ -76,6 +76,18 @@ mod tests {
             history: Mutex::new(HashMap::new()),
             backlink_index: Arc::new(Mutex::new(None)),
             projection_writer,
+            // Open from the start: this fixture has no frontend to
+            // report a painted frame, and nothing it tests is deferred.
+            first_paint: {
+                let gate = outl_tauri_shared::FirstPaintGate::new();
+                gate.painted();
+                gate
+            },
+            workspace_ready: {
+                let ready = Arc::new(outl_tauri_shared::WorkspaceReady::new());
+                ready.publish();
+                ready
+            },
             calendar_week_start: None,
         };
         (tmp, state, page, block.to_string())

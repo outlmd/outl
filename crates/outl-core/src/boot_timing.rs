@@ -20,6 +20,7 @@
 //! idevicesyslog -u <udid> | grep "boot phases"
 //! ```
 
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use tracing::info;
@@ -67,4 +68,90 @@ impl BootTimer {
             .join(" ");
         info!("boot phases: total={total}ms {phases} {detail}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Client-side marks
+// ---------------------------------------------------------------------------
+
+/// When this process started, as close to `main` as the binary sets it.
+///
+/// A client mark is only comparable to a `boot phases` line if both count
+/// from the same zero. [`BootTimer`] starts when the workspace open
+/// starts; a webview's `html_parsed` lands *before* that on a cold launch
+/// and after it on a workspace switch, so it has to count from the
+/// process instead.
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+
+/// Marks reported so far, in arrival order.
+static CLIENT_MARKS: OnceLock<Mutex<Vec<(String, u128)>>> = OnceLock::new();
+
+/// The mark a client reports last. Reaching it emits the summary line.
+const LAST_MARK: &str = "interactive";
+
+/// Record the moment this process started. Call it from `main`, first
+/// statement, before any work.
+///
+/// Idempotent, and the first call wins: a binary that forgets gets the
+/// first [`mark_client_phase`] as its zero instead, which under-reports
+/// rather than panicking. Under-reporting is the right failure here — a
+/// missing zero should not be able to make a slow launch look fast *and*
+/// take the process down.
+pub fn note_process_start() {
+    let _ = PROCESS_START.set(Instant::now());
+}
+
+fn process_start() -> Instant {
+    *PROCESS_START.get_or_init(Instant::now)
+}
+
+/// Milliseconds since [`note_process_start`].
+pub fn since_process_start_ms() -> u128 {
+    process_start().elapsed().as_millis()
+}
+
+/// Record a client-reported boot milestone.
+///
+/// The four a GUI client reports are `html_parsed`, `theme_applied`,
+/// `first_content` and `interactive` — the frontend half of a launch,
+/// which no Rust-side timer can see. Each is logged on arrival so a
+/// launch that never reaches the last one still says how far it got, and
+/// `interactive` additionally emits the whole sequence on one line, in
+/// the same shape [`BootTimer::finish`] uses.
+///
+/// Cheap by construction: one `Instant::elapsed`, one short lock, one
+/// `info!`. It is on in release for the reason the rest of this module
+/// is — a measurement you have to rebuild to collect is one nobody takes
+/// on the device where it matters.
+///
+/// A poisoned lock drops the mark rather than propagating: losing a
+/// measurement must never be able to fail a boot.
+pub fn mark_client_phase(name: &str) {
+    let at = since_process_start_ms();
+    info!("boot mark: {name}={at}ms");
+    let marks = CLIENT_MARKS.get_or_init(|| Mutex::new(Vec::new()));
+    let Ok(mut marks) = marks.lock() else {
+        return;
+    };
+    marks.push((name.to_string(), at));
+    if name != LAST_MARK {
+        return;
+    }
+    let line = marks
+        .iter()
+        .map(|(name, at)| format!("{name}={at}ms"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    info!("boot marks: {line}");
+}
+
+/// Every mark reported so far, as `(name, ms since process start)`.
+///
+/// For a test or a diagnostic command; the production reader is the log.
+pub fn client_marks() -> Vec<(String, u128)> {
+    CLIENT_MARKS
+        .get()
+        .and_then(|m| m.lock().ok())
+        .map(|m| m.clone())
+        .unwrap_or_default()
 }

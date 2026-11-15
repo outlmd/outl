@@ -179,6 +179,30 @@ The text and the caret come off `PasteReply` (`pasteEditorUpdate`, `@outl/shared
 Writing it uses the `spliceText` + double `parkCaret` pattern `lib/textarea.ts` owns, and bails when `editingId()` moved during the round-trip.
 Regression net: `Journal.block-ops.test.ts` → "pasteMarkdownAt — #488".
 
+## What a launch waits for
+
+**The skeleton is replaced by today's journal, read off disk.**
+`Journal.tsx` subscribes to `onPagePreview` synchronously at mount (the event is emitted before the op log is opened) and renders `<PreviewOutline />` in the skeleton's place.
+The subscription is deliberately **unguarded**: the render is the only reader of that signal and already sits inside the load gate, so a preview arriving late is simply never shown — and reading the gate out there would put a read outside the outline section, which `Journal.load-gate.test.ts` pins against.
+The skeleton stays for a launch with nothing to preview (a fresh install, a day with no journal yet).
+
+The splash is dismissed by the app, not by a timer.
+The CSS version cost a **620 ms floor on every launch** (a 380 ms delay plus a 240 ms fade), paid whether the journal was ready in 180 ms or in four seconds, and it could not be shortened without risking the opposite failure.
+`lib/splash.ts`'s `dismissBootSplash` starts the fade when the first view is applied, **including on failure** (that state carries a Retry button, and a splash over it is a dead end) and from `App.tsx` on the first-run path, which has no journal to wait for.
+`index.html` keeps a 4 s failsafe animation as a backstop, never as the mechanism.
+
+`Journal.boot.ts` waits for the workspace instead of retrying it: `waitWorkspaceReady` replaced 50 attempts at 200 ms of backoff, so the load resolves when the opener publishes rather than on the next tick of its own interval.
+A rejection there means an older backend, and the open below it still answers `workspace_loading` while the opener runs.
+
+The orphan sweep, the snapshot refresh and **the signal that lets iroh bind** are registered on `outl_tauri_shared::FirstPaintGate` and released by the frontend's `first_content` mark.
+`run()` arms the gate's 6 s deadline, which is what keeps "deferred" from becoming "never" on a webview that fails to report.
+
+**The `open_done` channel is not replaced by the gate.**
+It is a memory gate rather than a readiness one (see "The workspace open and the first sync must not run at the same time" below) and it stays a channel because a channel cannot be missed.
+What changed is that the send now happens from inside the gate, so the first dial does not compete with the first paint either.
+
+Why each job waits, and the budgets: [`docs/boot-performance.md`](../../docs/boot-performance.md).
+
 ## The keyboard has to come up inside the tap
 
 **A handler that creates a block from a tap taken with the keyboard down calls `armKeyboard()` before its first `await`** — WKWebView raises the keyboard only for a `.focus()` inside the tap's gesture window, and a create is two awaits deep.

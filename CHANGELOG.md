@@ -5,6 +5,62 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Changed
+
+- **Today's journal is on screen before the workspace opens.**
+  The screen a user waited on said "Opening your workspace…", and what it was waiting for was the op log: the index sidecars, the snapshot decode, the delta replay, the boot repairs.
+  None of that is needed to *show* today's journal, because the `.md` on disk is the projection of exactly that page and the sidecar beside it carries the block ids.
+  The opener now reads that pair **first** and emits it, and the client paints real text while the open runs behind it.
+  Measured on a real 730k-op workspace against its largest journal (1,006 lines): **0.6-1.3 ms**, against 163 ms of snapshot boot plus the index load, and the cost does not move with the size of the graph.
+  The preview is never editable (every mutation needs the workspace, which is not open yet), never authoritative about what the op log knows and the file does not, and silent when there is nothing to show.
+
+- **A launch stops waiting for the things a launch does not need.**
+  Sync, the filesystem watcher, the plugin host, the backup pass, the orphan `.md` sweep and the boot-cache write all used to start the moment the workspace was published, which on a phone is the moment the webview is laying out the first screen.
+  They read the same disk and take the same workspace lock the first paint needs, so running them on a worker thread never made them invisible: the premise is the device.
+  They now wait for the frontend to report a painted frame (`outl_tauri_shared::FirstPaintGate`), and **deferred never means cancelled** — the gate carries a deadline, because the painted signal arrives over IPC and a webview that fails to report would otherwise be an app that syncs with nobody, silently.
+  Mobile's existing `open_done` channel is kept rather than replaced: it is a memory gate, not a readiness one, and a channel cannot be missed.
+
+- **The snapshot write left the critical path.**
+  The GUI open called the synchronous `save_snapshot` *before* publishing the workspace, so a cold open spent 306 ms on a 10k-page workspace encoding and fsyncing a cache that only the next launch reads.
+  `Workspace::refresh_snapshot_in_background` builds the body under the lock and hands the encode, the fsync and the rename to a worker; the decision is asked after the first frame rather than carried from `boot`, because sync ingest appends to `ops-*.jsonl` without going through `Workspace::apply` and the delta can grow in between.
+
+- **"Is the workspace open yet" is waited on, not polled.**
+  The desktop asked `workspace_stats` every 500 ms behind its loading screen; the phone retried `open_today_journal` 50 times with a 200 ms backoff.
+  Neither could resolve faster than its own interval, so a workspace that became ready 10 ms into a tick waited out the rest of it, every launch.
+  `wait_workspace_ready` is a latch with a blocking wait, and `false` means "not yet, ask again" rather than a failure, because a cold 700k-op replay legitimately takes seconds.
+  The `workspace-ready` event and its fallback stay: an event can be emitted before the frontend subscribed or lost to a webview reload, which is why the poll existed at all.
+
+- **The first painted frame is the user's own theme.**
+  The palette arrives two IPC round-trips after the document parses, so a light-theme user saw the brand's dark background first and an auto-mode user on a light OS saw the reverse.
+  The last installed palette is now replayed by an inline `<head>` script before anything paints; `applyPaletteToRoot` is the only writer of that cache, sitting beside the only writer of the tokens.
+  The desktop window itself is repainted from the theme on disk before the webview exists, so the native frame matches too.
+
+- **Mobile's splash lost its 620 ms floor.**
+  It dismissed itself on a CSS timer (a 380 ms delay plus a 240 ms fade), paid whether the journal was ready in 180 ms or in four seconds.
+  The app dismisses it when the first view is applied, including on the failure state (which carries a Retry button, so a splash over it is a dead end) and on the first-run path, which has no journal to wait for.
+  A 4 s failsafe animation remains as a backstop, not as the mechanism.
+
+- **The TUI shows itself before it opens the workspace.**
+  Raw mode, the alternate screen and a skeleton frame naming the workspace now come first, so a slow open is no longer indistinguishable from a hang against the user's shell prompt.
+  `supports_keyboard_enhancement()` moved after that first frame: it costs 2.4 s on a terminal that does not answer and cannot move to a background thread, because it reads stdin and would race the event loop for the user's keystrokes.
+  A failed open now restores the terminal instead of leaving a shell in raw mode with no prompt.
+
+- **A writing `outl` command persists the boot cache; a read still does not.**
+  Short-lived openers were excluded wholesale because a write would race the long-lived GUI; that race was fixed in the writer (a per-write scratch, published by `rename`), so the cost stopped arguing against the design.
+  On a machine driven only from the terminal nothing else wrote one either, so every invocation full-replayed the log forever: 330-357 ms for `outl page get` against 132-166 ms with a snapshot present.
+
+### Added
+
+- **A launch reports its own frontend half.**
+  `outl_core::boot_timing` covered the workspace open; nothing in Rust could see when the webview painted, so the measured launch stopped at about half of what the user waited for.
+  Clients now report `html_parsed`, `theme_applied`, `first_content` and `interactive` through `boot_mark`, logged on arrival and summarised on one line, with the same numbers in CI, in a simulator and in production.
+  `first_content` is also what releases the deferred boot work, so the measurement and the behaviour cannot disagree about when a launch finished.
+
+- **CI watches the boot benchmark.**
+  `bench.yml` triggered on `crates/outl-md/**` alone, so `crates/outl-core/benches/boot.rs` never ran on a pull request: a change to the op log, the snapshot or the workspace open could not trip the workflow at all.
+  It now triggers on `outl-core`, `outl-actions` and `outl-tauri-shared` too, runs the 10k tier on every PR and the 50k + 218k tiers weekly.
+  This is a trend line rather than a gate; a real gate needs instruction counts and absolute budgets, which [`docs/boot-performance.md`](docs/boot-performance.md) records as open work along with page-first boot, the persistent backlink index and the remaining full-replay cliffs.
+
 ### Fixed
 
 - **TestFlight uploads stopped being refused over export compliance.**

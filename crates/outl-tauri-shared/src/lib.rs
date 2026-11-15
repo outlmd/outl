@@ -32,8 +32,10 @@
 //!   delegates to `outl-actions` — this crate is glue, same hard rule as
 //!   the client crates.
 
+pub mod boot_ready;
 pub mod capture_inbox;
 pub mod commands;
+pub mod first_paint;
 pub mod helpers;
 pub mod history_external;
 pub mod host;
@@ -41,6 +43,7 @@ pub mod iroh_sync;
 pub mod merges;
 pub mod offload;
 pub mod ops_watermark;
+pub mod page_preview;
 pub mod plugin_dto;
 pub mod plugin_service;
 mod plugin_thread;
@@ -52,7 +55,10 @@ pub mod workspace_open;
 pub mod workspace_reload;
 pub mod wrappers;
 
+pub use boot_ready::WorkspaceReady;
+pub use first_paint::FirstPaintGate;
 pub use host::{AppHost, StorageRootProvider};
+pub use page_preview::PAGE_PREVIEW_EVENT;
 pub use plugin_service::PluginService;
 pub use projection::ProjectionWriter;
 pub use state::{

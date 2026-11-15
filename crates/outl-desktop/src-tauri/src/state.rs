@@ -105,6 +105,19 @@ pub(crate) struct AppState {
     /// (the outl async-writes default). See
     /// [`outl_tauri_shared::projection`].
     pub projection_writer: ProjectionWriter,
+    /// Holds back everything a launch does not need on screen — the iroh
+    /// endpoint, the filesystem watcher, the plugin host, the backup
+    /// pass, the orphan sweep, the snapshot refresh — until the frontend
+    /// reports a painted frame (or the gate's deadline elapses).
+    ///
+    /// `setup` arms that deadline. A gate with none is an app that syncs
+    /// with nobody the moment a webview fails to report, which is why
+    /// `FirstPaintGate`'s own docs make arming it the host's obligation.
+    pub first_paint: Arc<outl_tauri_shared::FirstPaintGate>,
+    /// Latched "the workspace is published", so `wait_workspace_ready`
+    /// is a wait rather than the 500 ms poll `App.tsx` used to run.
+    /// The boot opener and `set_workspace` are its only publishers.
+    pub workspace_ready: Arc<outl_tauri_shared::WorkspaceReady>,
 
     /// `[calendar] week_start` from the global config, read once at boot
     /// beside the timezone. `None` keeps this surface's historical
@@ -155,5 +168,13 @@ impl AppHost for AppState {
 
     fn projection_writer(&self) -> Option<&ProjectionWriter> {
         Some(&self.projection_writer)
+    }
+
+    fn first_paint_gate(&self) -> Option<&Arc<outl_tauri_shared::FirstPaintGate>> {
+        Some(&self.first_paint)
+    }
+
+    fn workspace_ready(&self) -> Option<&Arc<outl_tauri_shared::WorkspaceReady>> {
+        Some(&self.workspace_ready)
     }
 }

@@ -54,6 +54,7 @@
 
 pub mod asset;
 pub mod block;
+pub mod boot;
 pub mod exec;
 pub mod history;
 pub mod journal_days;

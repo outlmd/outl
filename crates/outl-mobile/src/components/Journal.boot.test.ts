@@ -11,6 +11,20 @@ const commands = vi.hoisted(() => ({
 }));
 vi.mock("@outl/shared/api/commands", () => commands);
 
+const bootApi = vi.hoisted(() => ({
+  bootMark: vi.fn(),
+  waitWorkspaceReady: vi.fn(async () => true),
+  // The cache helpers are not used here, but the module is mocked
+  // wholesale so a real `invoke` never reaches a non-existent backend.
+  BOOT_MARKS: ["html_parsed", "theme_applied", "first_content", "interactive"],
+  BOOT_STYLE_KEY: "outl.boot.style",
+  cacheBootStyle: vi.fn(),
+}));
+vi.mock("@outl/shared/boot", () => bootApi);
+
+const splash = vi.hoisted(() => ({ dismissBootSplash: vi.fn() }));
+vi.mock("../lib/splash", () => splash);
+
 import {
   OPEN_TIMEOUT_MS,
   SYNC_TIMEOUT_MS,
@@ -75,6 +89,10 @@ beforeEach(() => {
   for (const fn of Object.values(commands)) fn.mockReset();
   commands.reloadWorkspace.mockResolvedValue(undefined);
   commands.syncNow.mockResolvedValue(undefined);
+  bootApi.bootMark.mockReset();
+  bootApi.waitWorkspaceReady.mockReset();
+  bootApi.waitWorkspaceReady.mockResolvedValue(true);
+  splash.dismissBootSplash.mockReset();
 });
 
 afterEach(() => {
@@ -134,6 +152,63 @@ describe("boot load", () => {
     expect(commands.openTodayJournal).toHaveBeenCalledTimes(3);
     expect(state.loadFailed).toBe(false);
     expect(state.loaded).toBe(true);
+  });
+
+  /**
+   * The point of replacing the backoff: the load asks the backend to
+   * *wait*, so it resolves when the workspace is published instead of on
+   * the next tick of an interval it owns.
+   */
+  it("waits for the workspace before asking for the journal", async () => {
+    commands.openTodayJournal.mockResolvedValue(view());
+    const { boot } = harness();
+
+    await boot.loadTodayWithRetry();
+
+    expect(bootApi.waitWorkspaceReady).toHaveBeenCalled();
+    expect(commands.openTodayJournal).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A backend built before `wait_workspace_ready` existed must still
+   * boot: the open itself answers `workspace_loading` while the opener
+   * runs, which is what the loop handles.
+   */
+  it("still loads when the backend has no readiness command", async () => {
+    bootApi.waitWorkspaceReady.mockRejectedValueOnce(
+      new Error("command not found"),
+    );
+    commands.openTodayJournal.mockResolvedValue(view());
+    const { boot, state } = harness();
+
+    await boot.loadTodayWithRetry();
+
+    expect(state.loaded).toBe(true);
+    expect(state.loadFailed).toBe(false);
+  });
+
+  it("reports first_content once real content is applied", async () => {
+    commands.openTodayJournal.mockResolvedValue(view());
+    const { boot } = harness();
+
+    await boot.loadTodayWithRetry();
+
+    expect(bootApi.bootMark).toHaveBeenCalledWith("first_content");
+  });
+
+  /**
+   * The failure state carries a Retry button, so leaving the splash up
+   * over it is a dead end — the one case a timer-dismissed splash got
+   * right by accident and an app-dismissed one has to do on purpose.
+   */
+  it("dismisses the splash on failure too", async () => {
+    commands.openTodayJournal.mockRejectedValue("boom");
+    const { boot, state } = harness();
+
+    await boot.loadTodayWithRetry();
+
+    expect(state.loadFailed).toBe(true);
+    expect(splash.dismissBootSplash).toHaveBeenCalled();
   });
 
   it("gives up with a message when the workspace never finishes opening", async () => {

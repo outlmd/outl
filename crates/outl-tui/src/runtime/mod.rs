@@ -18,28 +18,28 @@
 //! | `logging`       | Send every dependency's `tracing` output to a file, not here  |
 
 use anyhow::{Context, Result};
+use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
-use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use outl_core::boot_timing::BootTimer;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::path::Path;
 use std::time::Duration;
 
+mod boot;
 mod event_loop;
 mod logging;
 mod preset;
 mod terminal;
 mod workspace;
 
+use boot::{draw_skeleton, query_enhanced_keys};
 use event_loop::event_loop;
 use logging::install_silent_log_subscriber;
 use preset::resolve_theme;
@@ -94,19 +94,6 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     install_silent_log_subscriber(path);
 
     let workspace_root = path.to_path_buf();
-    // `_lock` and `_actor_lock` live through the entire TUI run:
-    // - `_lock` is the shared workspace flock on `<root>/.outl/.lock`.
-    // - `_actor_lock` is the exclusive per-actor write flock on
-    //   `<root>/ops/.lock-<actor>` and keeps another `outl` from
-    //   stealing this process's actor mid-session.
-    //
-    // The underscore prefix only silences the unused-binding lint —
-    // both are RAII guards, dropped at the end of this function. If
-    // a future refactor moves `event_loop` (or anything else that
-    // mutates the workspace) into a different function, the locks
-    // have to move with it. `open_workspace`'s doc spells out the
-    // ownership contract.
-    let (workspace, actor, cfg, _lock, _actor_lock) = open_workspace(&workspace_root)?;
 
     // No boot-time `apply_all_pages_md` here. The op log remains the
     // source of truth; `.md` is its projection. We deliberately skip
@@ -149,7 +136,6 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         global_cfg.backup.enabled,
         global_cfg.backup.interval_minutes,
     );
-    let theme = resolve_theme(theme_override, &cfg, global_cfg);
     // Backlinks list direction (issue #142). Read once at boot; the
     // `Ctrl+O` toggle persists changes back to `config.toml`.
     let backlinks_newest_first = global_cfg.display.backlinks_order.newest_first();
@@ -170,18 +156,13 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     // with NO peer sync on exactly those workspaces (the "TUI ↔ mobile
     // doesn't sync" bug: `~/outl-p2p/.outl/config.toml` has no `storage`
     // line, so the TUI never started a transport or a poller).
-    let shared_workspace = cfg
-        .get("workspace")
-        .and_then(|w| w.get("storage"))
-        .and_then(|s| s.as_str())
-        .is_none_or(|s| s == "jsonl");
-
     // Install the panic hook BEFORE switching to raw mode. If
     // anything panics from here on — bug in the render path, OOM —
     // the hook runs first, restores the terminal, then chains to the
     // default handler so the user still sees the panic message.
     install_panic_restore_hook();
 
+    let mut timer = BootTimer::start();
     enable_raw_mode().context("enabling raw mode")?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen).context("entering alt screen")?;
@@ -202,25 +183,81 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         let _ = execute!(stdout, EnableMouseCapture);
     }
 
-    // Ask the terminal to report enhanced key events (kitty keyboard
-    // protocol). When supported, this lets us distinguish `Shift+Enter`
-    // from `Enter`, `Ctrl+Enter` from `Enter`, and so on — essential
-    // for multi-line editing inside a single block. Terminals that
-    // don't support it (Terminal.app, plain xterm) silently ignore the
-    // CSI sequence; we still have Alt+Enter as a portable fallback.
-    let enhanced_keys = supports_keyboard_enhancement().unwrap_or(false);
-    if enhanced_keys {
-        let _ = execute!(
-            stdout,
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS,
-            )
-        );
-    }
-
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("creating terminal")?;
+    timer.phase("terminal");
+
+    // The skeleton, before the workspace. Everything below this line
+    // used to happen against the user's shell prompt — see
+    // `boot.rs`'s module doc. The theme here resolves from the global
+    // config alone, because the per-workspace `[theme] preset` lives in
+    // the file `open_workspace` reads; a workspace that overrides the
+    // preset therefore shows the global palette for this one frame, and
+    // the first real frame corrects it.
+    let boot_theme = resolve_theme(
+        theme_override,
+        &toml::Value::Table(Default::default()),
+        global_cfg,
+    );
+    draw_skeleton(&mut terminal, &boot_theme, &workspace_root);
+    timer.phase("skeleton");
+
+    // `_lock` and `_actor_lock` live through the entire TUI run:
+    // - `_lock` is the shared workspace flock on `<root>/.outl/.lock`.
+    // - `_actor_lock` is the exclusive per-actor write flock on
+    //   `<root>/ops/.lock-<actor>` and keeps another `outl` from
+    //   stealing this process's actor mid-session.
+    //
+    // The underscore prefix only silences the unused-binding lint —
+    // both are RAII guards, dropped at the end of this function. If
+    // a future refactor moves `event_loop` (or anything else that
+    // mutates the workspace) into a different function, the locks
+    // have to move with it. `open_workspace`'s doc spells out the
+    // ownership contract.
+    //
+    // **A failure here has to put the terminal back.** We are inside
+    // the alternate screen now, so returning `?` straight out would
+    // leave the user's shell in raw mode with no prompt — which is
+    // exactly the kind of thing the panic hook exists for and the
+    // error path had no equivalent of.
+    let opened = open_workspace(&workspace_root);
+    timer.phase("open_workspace");
+    let (workspace, actor, cfg, _lock, _actor_lock) = match opened {
+        Ok(parts) => parts,
+        Err(e) => {
+            restore_terminal(&mut terminal, false, mouse_capture);
+            return Err(e);
+        }
+    };
+
+    let theme = resolve_theme(theme_override, &cfg, global_cfg);
+    // `shared_workspace` gates the peer-sync threads (iroh transport + the
+    // filesystem poller). JsonlStorage is the ONLY persistent backend
+    // (sqlite was removed in 0.5.0), so a workspace is shareable unless its
+    // config *explicitly* pins a non-jsonl storage. A GUI/sync-created
+    // workspace — and the CLI/TUI lazy-seeded config — omit the `storage`
+    // key entirely; treat that absence as the jsonl default, NOT as "not
+    // shared". The old `== Some("jsonl")` check made the TUI silently run
+    // with NO peer sync on exactly those workspaces (the "TUI ↔ mobile
+    // doesn't sync" bug: `~/outl-p2p/.outl/config.toml` has no `storage`
+    // line, so the TUI never started a transport or a poller).
+    let shared_workspace = cfg
+        .get("workspace")
+        .and_then(|w| w.get("storage"))
+        .and_then(|s| s.as_str())
+        .is_none_or(|s| s == "jsonl");
+
+    // The keyboard-enhancement query goes LAST, after there is
+    // something on screen. It costs 2.4s on a terminal that does not
+    // answer it, and it cannot be moved to a thread (it reads stdin).
+    // `boot.rs`'s module doc carries the reasoning and what is still
+    // owed.
+    let enhanced_keys = query_enhanced_keys(terminal.backend_mut());
+    timer.phase("keyboard_query");
+    timer.finish(&format!(
+        "enhanced_keys={enhanced_keys} theme={}",
+        theme.name
+    ));
 
     let result = event_loop(
         &mut terminal,
@@ -236,7 +273,23 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     );
 
     crate::actions::yank::release_os_clipboard();
+    restore_terminal(&mut terminal, enhanced_keys, mouse_capture);
 
+    result
+}
+
+/// Put the terminal back the way it was found.
+///
+/// One function because there are two exits now: the normal one at the
+/// end of [`run_with_theme_override`], and a failed `open_workspace`,
+/// which happens **inside** the alternate screen since the skeleton is
+/// drawn before the open. A return that skipped this would hand the
+/// user back a shell in raw mode with no prompt and no cursor.
+fn restore_terminal(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    enhanced_keys: bool,
+    mouse_capture: bool,
+) {
     if enhanced_keys {
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     }
@@ -247,6 +300,4 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let _ = terminal.show_cursor();
-
-    result
 }

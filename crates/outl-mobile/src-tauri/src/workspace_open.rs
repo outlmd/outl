@@ -144,6 +144,7 @@ pub(crate) fn persist_workspace_path(path: &Path) {
 /// is the cold-boot bottleneck. Backlinks are fetched lazily off the
 /// page-open path anyway (`page_backlinks`), so they no longer depend on
 /// the reconcile finishing before first paint.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_workspace_opener(
     workspace_slot: Arc<Mutex<Option<Workspace>>>,
     workspace_guards: Arc<Mutex<Option<WorkspaceGuards>>>,
@@ -152,6 +153,8 @@ pub(crate) fn spawn_workspace_opener(
     hlc: HlcGenerator,
     app: tauri::AppHandle,
     open_done: std::sync::mpsc::Sender<()>,
+    first_paint: Arc<outl_tauri_shared::FirstPaintGate>,
+    workspace_ready: Arc<outl_tauri_shared::WorkspaceReady>,
 ) {
     let actor = hlc.actor();
     // Mobile pins the LRU cap to 5k ops (≈ 1 MB of cache) regardless of
@@ -160,6 +163,13 @@ pub(crate) fn spawn_workspace_opener(
     // index. Keeps the long-lived client well under iOS jetsam.
     let lru_cap = outl_config::load().storage.lru_cap.min(5_000);
     thread::spawn(move || {
+        // Today's journal, off disk, **before** the open — the
+        // page-first boot. Reading the `.md` with its sidecar costs
+        // 8-11ms whatever the workspace holds, against a snapshot boot
+        // plus index load that is measured in hundreds of ms on a
+        // desktop and seconds on a phone. See `page_preview`.
+        outl_tauri_shared::page_preview::emit_today_journal_preview(&app, &storage_root);
+
         let workspace = match open_workspace_at(
             actor,
             &hlc,
@@ -182,22 +192,47 @@ pub(crate) fn spawn_workspace_opener(
         if let Err(e) = app.emit("workspace-ready", ()) {
             warn!("emit workspace-ready: {e}");
         }
+        // After the slot, never before: a waiter that wakes to
+        // `ERR_LOADING` is the retry loop this replaces, one line earlier.
+        workspace_ready.publish();
         info!("background workspace opener complete");
-        // Let the sync transport start. It is a MEMORY gate, not a readiness
-        // one: the open and a first sync both peak in the hundreds of MB, and
-        // on a 723k-op workspace the two running together is what killed the
-        // Android app — a launch with no `boot phases:` line in its log,
-        // because the open never finished. A `Sender` rather than the
-        // `workspace-ready` event because a channel cannot be missed: the
-        // signal is buffered if the transport is not waiting yet, and a
-        // panicking opener drops it, which wakes the waiter just the same.
-        let _ = open_done.send(());
+
+        // Everything below waits for the frontend's painted frame.
+        //
+        // The sync transport's gate was already here and is **not**
+        // replaced: it is a MEMORY gate, not a readiness one — the open
+        // and a first sync both peak in the hundreds of MB, and on a
+        // 723k-op workspace the two running together is what killed the
+        // Android app, with no `boot phases:` line in the log because the
+        // open never finished. What changes is that the signal now goes
+        // out one step later, after the journal is on screen, so the dial
+        // does not compete with the first paint either. It stays a
+        // `Sender` and not an event because a channel cannot be missed:
+        // buffered if the transport is not waiting yet, and dropped by a
+        // panicking opener, which wakes the waiter just the same.
+        first_paint.on_open("iroh_start_signal", move || {
+            let _ = open_done.send(());
+        });
+
+        // Re-persist the boot cache. `boot` no longer does this inline —
+        // on this client it was a multi-MB encode and an fsync in front
+        // of the first frame (see `outl_tauri_shared::workspace_open`).
+        {
+            let slot = workspace_slot.clone();
+            first_paint.on_open("snapshot_refresh", move || {
+                outl_tauri_shared::workspace_open::snapshot_after_first_paint(&slot);
+            });
+        }
 
         // Reconcile orphan `.md` + repair doubled journal titles off the
         // boot path, on its own thread (mirrors desktop). The workspace is
         // already live; pages materialised by the reconcile surface on the
-        // next read.
-        spawn_background_reconcile(workspace_slot, storage_root, hlc);
+        // next read. Deferred because its two unchunkable phases hold the
+        // workspace lock for 2,557ms unbroken on this client, and a lock
+        // held is a keystroke refused however many threads are involved.
+        first_paint.on_open("orphan_reconcile", move || {
+            spawn_background_reconcile(workspace_slot, storage_root, hlc);
+        });
     });
 }
 

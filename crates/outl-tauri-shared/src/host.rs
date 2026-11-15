@@ -80,6 +80,34 @@ pub trait AppHost: Send + Sync {
     fn projection_writer(&self) -> Option<&crate::projection::ProjectionWriter> {
         None
     }
+
+    /// The gate that holds back everything a launch does not need on
+    /// screen — the iroh endpoint, the filesystem watcher, the plugin
+    /// host, the backup pass, the orphan sweep, the snapshot refresh.
+    ///
+    /// `Some` lets [`crate::commands::boot::boot_mark`] release that work
+    /// the moment the frontend reports a painted frame. The default
+    /// `None` means a host wires none of it through the gate and every
+    /// job starts as soon as the opener publishes — the pre-gate
+    /// behaviour, which is correct and slower, never silently broken.
+    ///
+    /// A host that returns `Some` **must** have armed the gate's deadline
+    /// ([`crate::first_paint::FirstPaintGate::arm_deadline`]): a client
+    /// whose webview never reports is otherwise an app that syncs with
+    /// nobody and says nothing.
+    fn first_paint_gate(&self) -> Option<&Arc<crate::first_paint::FirstPaintGate>> {
+        None
+    }
+
+    /// The latch a client waits on instead of polling for the workspace.
+    ///
+    /// `Some` makes [`crate::commands::boot::wait_workspace_ready`] a
+    /// real wait; the default `None` makes it a single slot read, which
+    /// is what a client that still polls gets. The opener is the only
+    /// writer — see [`crate::boot_ready::WorkspaceReady`].
+    fn workspace_ready(&self) -> Option<&Arc<crate::boot_ready::WorkspaceReady>> {
+        None
+    }
 }
 
 /// Owned handle to "the current storage root" the plugin thread can move

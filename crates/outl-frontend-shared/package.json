@@ -43,6 +43,7 @@
     "./api/trash": "./src/api/trash.ts",
     "./api/trust": "./src/api/trust.ts",
     "./autocomplete": "./src/autocomplete/index.ts",
+    "./boot": "./src/boot/index.ts",
     "./capture": "./src/capture/index.ts",
     "./trust": "./src/trust/index.ts",
     "./trust/styles": "./src/trust/styles.css",

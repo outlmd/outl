@@ -180,6 +180,24 @@ impl WsCtx {
     }
 }
 
+/// Wait out any snapshot write still in flight before the process can
+/// exit.
+///
+/// `Workspace::apply` writes a snapshot on a background worker when the
+/// threshold is crossed, which is fine for a surface that runs for
+/// hours and wrong for one that is about to call `exit`: the process
+/// would take the worker down mid-fsync and leave a scratch file for
+/// `snapshot::gc::stale_tmp` to collect later.
+///
+/// A no-op when nothing is in flight, which is every read open and most
+/// writes — so this is not a cost the common command pays, it is a
+/// correctness condition for the uncommon one that does.
+impl Drop for WsCtx {
+    fn drop(&mut self) {
+        self.workspace.wait_for_snapshots();
+    }
+}
+
 /// [`WsCtx`]'s half of the commit pipeline.
 ///
 /// `project` is the only hook implemented. It cannot return the failure
@@ -210,12 +228,26 @@ impl CommitHooks for CtxCommit<'_> {
 pub struct OpenOptions {
     /// Whether this process may **write** boot snapshots.
     ///
-    /// Defaults to `false`: short-lived openers (CLI commands,
-    /// embedders) read snapshots but must not write them — a write
-    /// here would race with the long-lived TUI/desktop/mobile that
-    /// own the workspace (#109). A long-lived surface adopting this
-    /// crate opts in, otherwise its boot/reload cost on a large
-    /// workspace silently regresses to full log replay.
+    /// Defaults to `false`. A long-lived surface adopting this crate
+    /// opts in, otherwise its boot/reload cost on a large workspace
+    /// silently regresses to full log replay.
+    ///
+    /// # The original reason for the default no longer holds
+    ///
+    /// It was "a write here would race with the long-lived
+    /// TUI/desktop/mobile that own the workspace" (#109). That race was
+    /// real and it was **fixed in the writer**: `snapshot::write_to_disk`
+    /// composes in a per-write scratch (`snap-<actor>.bin.tmp.<ulid>`)
+    /// and publishes by `rename`, so two writers for one actor no longer
+    /// share an inode. The cost this flag was avoiding is not caused by
+    /// this flag any more (root `CLAUDE.md` invariant 11).
+    ///
+    /// What is still true, and is why the default did not simply flip:
+    /// writing a snapshot is a multi-MB encode plus an fsync, and a
+    /// 200ms CLI command paying it is paying for the *next* process. So
+    /// the opt-in belongs where the cost is attributable — a surface
+    /// that already writes ops, or one that outlives the command.
+    /// A **read** open never writes one: see `open_read`.
     pub write_snapshots: bool,
     /// Whether this process may append ops.
     ///
