@@ -58,7 +58,7 @@ export function BottomBar(props: {
       <nav
         aria-label="Main"
         class="outl-fade-in outl-focus-hide fixed inset-x-3 z-30 flex items-center rounded-[22px] border border-(--color-outl-border)/60 bg-(--color-outl-bg-elev)/90 px-1 shadow-[var(--shadow-capsule)] backdrop-blur-xl"
-        style="bottom: max(env(safe-area-inset-bottom), 12px);"
+        style="bottom: max(var(--safe-area-inset-bottom), 12px);"
       >
         <For each={left}>{item}</For>
         <div class="flex flex-1 justify-center">

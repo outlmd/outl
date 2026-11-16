@@ -348,7 +348,7 @@ export function DevicesSheet(props: DevicesSheetProps) {
       <div
         class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg)/85 shadow-2xl backdrop-blur-2xl backdrop-saturate-150"
         style={{
-          "padding-bottom": "env(safe-area-inset-bottom)",
+          "padding-bottom": "var(--safe-area-inset-bottom)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
             ? "none"

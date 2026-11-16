@@ -40,8 +40,8 @@ export function TasksSheet(props: {
       <div
         class="outl-sheet-up fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg)/90 shadow-2xl backdrop-blur-2xl backdrop-saturate-150"
         style={{
-          top: "calc(env(safe-area-inset-top) + 48px)",
-          "padding-bottom": "env(safe-area-inset-bottom)",
+          top: "calc(var(--safe-area-inset-top) + 48px)",
+          "padding-bottom": "var(--safe-area-inset-bottom)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging() ? "none" : "transform 220ms var(--ease-spring-in)",
         }}

@@ -153,7 +153,7 @@ export function PluginSheet(props: {
           <div
             class="flex max-h-[80vh] flex-col overflow-hidden rounded-t-2xl bg-(--color-outl-bg-elev)"
             style={{
-              "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
+              "padding-bottom": "max(var(--safe-area-inset-bottom), 16px)",
               transform: `translateY(${drag.translateY()}px)`,
               transition: drag.dragging() ? "none" : "transform 220ms var(--ease-spring-in)",
             }}

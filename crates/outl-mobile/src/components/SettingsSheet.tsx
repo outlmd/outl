@@ -189,8 +189,8 @@ export function SettingsSheet(props: {
           // the top of it — Sync, Devices, and the drag handle with them
           // — grows off the screen, leaving no way to scroll back to it.
           // Same shape as the long-press menu had.
-          "padding-top": "max(env(safe-area-inset-top), 12px)",
-          "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
+          "padding-top": "max(var(--safe-area-inset-top), 12px)",
+          "padding-bottom": "max(var(--safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
             ? "none"
