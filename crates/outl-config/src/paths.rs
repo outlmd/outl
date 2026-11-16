@@ -48,6 +48,21 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// `~/.config/outl/themes/` — where a user's own `.toml` themes live.
+///
+/// This crate is the **single owner of the path**, and `outl-theme` is the
+/// single owner of the format: `outl_theme::Registry::with_user_dir` takes
+/// the directory as an argument rather than resolving it, so its tests get
+/// their own copy instead of reading the developer's real config (invariant
+/// 9). Three clients join the two — don't add a fourth spelling of the
+/// path.
+///
+/// Nothing creates this directory. A missing one is the normal case and
+/// means "no custom themes", not an error.
+pub fn theme_dir() -> PathBuf {
+    config_dir().join("themes")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

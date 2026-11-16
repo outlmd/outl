@@ -538,6 +538,20 @@ Three contracts:
 A terminal has no API to read the OS appearance setting, and probing (OSC 11, `COLORFGBG`) is unreliable under tmux/screen and several emulators — so `Auto` is hardcoded to the dark side rather than guessed.
 This is a declared, permanent gap (RFC 0022), not a TODO; see [`docs/theming.md` → Light / dark pair and `mode`](../../docs/theming.md#light--dark-pair-and-mode).
 
+## The theme catalog is built once and passed down
+
+`runtime::preset::load_catalog()` builds an `outl_theme::Registry` from the built-ins plus every `.toml` in `outl_config::theme_dir()`, and `resolve_theme` takes it as an argument.
+
+Three things about that shape:
+
+- **It is a parameter, not a call inside the resolver.** The directory comes from `XDG_CONFIG_HOME`, which is process-wide, so a resolver that read it itself would make every test in `runtime/preset.rs` depend on the developer's own theme files (root `CLAUDE.md` invariant 9, third question).
+- **One catalog per launch**, shared by the skeleton frame and the first real frame. A theme file written while the TUI is up takes effect on the next launch.
+- **A broken theme file is a `tracing::warn!` and nothing else here, and that is a recorded gap.** The palette is resolved before `App` exists, so there is no toast and no status line to write into — the skeleton is drawn with whatever `resolve_theme` returns. `outl theme list` names the file on stderr and `outl doctor` warns about it; those are the surfaces that reach the user. If this crate ever grows a boot-notice channel (the one `Loaded::notice()` uses on the first frame), this belongs in it.
+
+Every level of the precedence order resolves against that catalog, so `--theme mine`, a per-workspace `preset = "mine"` and a global one all accept a theme from `~/.config/outl/themes/` exactly as they accept a built-in.
+
+`crates/outl-tui/src/theme.rs::from_palette` is what renders one: it hands `ansi` and `ansi-light` to their hand-built ANSI themes and derives everything else. It is `pub` so `outl theme show` can render a user's theme through the same path.
+
 Only the global-config lookup in `resolve_theme` (`runtime/preset.rs`) goes through this resolver.
 The `--theme <preset>` CLI override and the per-workspace `.outl/config.toml` `[theme] preset` both stay a bare preset name with no pair — an explicit preset always overrides the pair, per `docs/theming.md`'s precedence order.
 Don't route those two through `resolve_preset_name`.

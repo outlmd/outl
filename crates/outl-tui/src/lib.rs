@@ -41,4 +41,6 @@ pub use edit_buffer::EditBuffer;
 // `PRESETS` is deliberately NOT re-exported here. It belongs to
 // `outl-theme`; callers that need the list (the CLI's `outl theme
 // list`) take it from there, so there is no second name for it.
-pub use theme::{by_name as theme_by_name, default_theme, Theme};
+pub use theme::{
+    by_name as theme_by_name, default_theme, from_palette as theme_from_palette, Theme,
+};

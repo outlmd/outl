@@ -1,9 +1,9 @@
 # Theming
 
-outl ships eleven built-in palettes (`outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`).
+outl ships eleven built-in palettes (`outl`, `outl-light`, `ansi`, `ansi-light`, `logseq-light`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`), and takes your own from `~/.config/outl/themes/`.
 The hex values live in the shared **`outl-theme`** crate — every styled surface (`ref_link_fg`, `cursor_block_bg`, `bold_fg`, `status_normal_bg`, …) is a named field on a `Palette` struct, and the TUI / desktop / mobile clients each turn those hex strings into whatever their renderer expects.
 
-This means a color change in `outl-theme/src/presets.rs` propagates to every client without a coordinated edit.
+This means a color change in `outl-theme/themes/*.toml` propagates to every client without a coordinated edit.
 
 ## Picking a theme
 
@@ -28,9 +28,9 @@ Four ways to pick, in precedence order:
    mode = "auto"
    ```
    The desktop's Settings modal writes here, so changing the theme there propagates to the next `outl-tui` launch automatically.
-4. **Default** — the `outl-light` / `outl` brand pair when nothing is configured, **unless the terminal does not accept 24-bit colour**, in which case the TUI falls back to the ANSI-based `default-dark` instead ([#453](https://github.com/outlmd/outl/issues/453)).
+4. **Default** — the `outl-light` / `outl` brand pair when nothing is configured, **unless the terminal does not accept 24-bit colour**, in which case the TUI falls back to the ANSI-based `ansi` instead ([#453](https://github.com/outlmd/outl/issues/453)).
 
-   Every preset but `default-dark` and `light` maps each palette field through `Color::Rgb`, so an unconfigured launch used to emit 24-bit SGR whatever the terminal could render: approximated on a 256-colour tmux without `Tc`, and potentially unreadable on a plain `xterm` or `TERM=linux`.
+   Every preset but `ansi` and `ansi-light` maps each palette field through `Color::Rgb`, so an unconfigured launch used to emit 24-bit SGR whatever the terminal could render: approximated on a 256-colour tmux without `Tc`, and potentially unreadable on a plain `xterm` or `TERM=linux`.
 
    The signals are `COLORTERM` in (`truecolor`, `24bit`) and a terminfo direct-colour `TERM` entry (`*-direct`, `*-direct16`, `*-direct256`). Both are widely set, which is what separates this from the OS appearance setting — that one has no reliable terminal answer, which is why `mode = "auto"` is pinned to dark rather than probed.
 
@@ -90,11 +90,11 @@ Now that the modal owns all three fields, restoring any of them would silently d
 |------|------|
 | `outl` | The brand palette, matched to the marketing site (avelino.run). Deep-purple background, lavender accent, lemon highlight. Default theme. |
 | `outl-light` | The brand light palette. Paper-white canvas (`#ffffff`) with a barely raised `bg_elev` (`#f7f7fa`), cool grays and one violet accent (`#6d28d9`, 7.1:1). Started as what `outl-mobile` hardcoded in `styles.css` before RFC 0022; refreshed toward a calmer single-accent canvas. |
-| `default-dark` | The original outl-tui palette. Cyan refs, magenta tags, green code. |
-| `light` | High-brightness terminals. Blue refs, red tags. |
+| `ansi` | The original outl-tui palette, built from the 16 ANSI colours. Cyan refs, magenta tags, green code. On a terminal it renders through ratatui's *named* colours, so your own palette shows through. Was `default-dark`, which still resolves. |
+| `ansi-light` | The ANSI pair's light side, for high-brightness terminals. Blue refs, red tags. Was `light`, which still resolves. |
 | `logseq-light` | Logseq's default light theme. White canvas, warm dark-gray text, Blueprint blue links. Alias: `logseq`. |
 | `dracula` | Iconic dark palette — pink, purple, cyan, yellow. |
-| `solarized-dark` | Ethan Schoonover's classic. Muted base03 background. |
+| `solarized` | Ethan Schoonover's classic. Muted base03 background. Alias: `solarized-dark`. |
 | `nord` | Arctic blue-greys. Cool, low-contrast. |
 | `monokai` | Wimer Hazenberg's high-contrast. Hot pink for highlights. |
 | `gruvbox` | morhetz's retro-groove dark. Warm charcoal, cream text, muted yellow/green/aqua. Alias: `gruvbox-dark`. |
@@ -105,8 +105,10 @@ Now that the modal owns all three fields, restoring any of them would silently d
 
 ## Semantic surfaces
 
-Every preset fills every field.
-If you add a new field to `Theme`, **every preset must set it** — the compiler enforces this.
+Every preset fills every field, directly or by inheriting it.
+A field with nothing to inherit from is a load error naming the field, never a default: a theme is not a surface that can be half-painted, and a missing `fg` is invisible text.
+
+For a **built-in**, that error is a `cargo test` failure, so an incomplete preset never ships. For **your own**, it is what `outl theme list` and `outl doctor` report.
 
 ### Outline
 
@@ -154,41 +156,110 @@ Until then the token's name is wider than its meaning (root [`CLAUDE.md`](../CLA
 
 ## Defining a new preset
 
-Presets are constructors in `crates/outl-theme/src/presets.rs`:
+A theme is one `.toml` file per family, with `[dark]` and `[light]` inside it.
+Built-in themes live in `crates/outl-theme/themes/` and are compiled into the binary; your own live in `~/.config/outl/themes/` and are read at startup.
+**Same format either way.**
 
-```rust
-pub fn my_theme() -> Palette {
-    Palette {
-        name: "my-theme".into(),
-        bg: "#141420".into(),
-        // ... fill every field with a #rrggbb hex string
-    }
-}
+```toml
+# crates/outl-theme/themes/my-theme.toml
+[dark]
+bg = "#141420"
+fg = "#e8e8f0"
+# … every Palette field
+
+[light]
+bg = "#ffffff"      # inherits [dark], so only the delta is written
+fg = "#1a1a2e"
+accent = "#6d28d9"
 ```
 
-Then:
+Names are derived, never written:
 
-1. Add the name to the `PRESETS` slice in `crates/outl-theme/src/lib.rs`.
-2. Add the `"my-theme" => Some(presets::my_theme())` arm to `by_name`.
-3. The compiler tells you if you missed a field on `Palette`.
-4. Add a TUI delegate in `crates/outl-tui/src/theme.rs`:
-   ```rust
-   pub fn my_theme() -> Theme {
-       theme_from_palette("my-theme", &outl_theme::presets::my_theme())
-   }
-   ```
-   `default-dark` and `light` are the two TUI presets that *don't* go through `theme_from_palette` — they build on top of ANSI named colors (`Color::Reset`, `Color::DarkGray`, …) so the user's terminal palette shows through, which is intentional for ANSI-only environments.
-5. Desktop and mobile clients pick the preset up automatically through `list_themes` / `get_theme` Tauri commands.
+| File + section | Resolves as |
+|---|---|
+| `my-theme.toml` `[dark]` | `my-theme` (canonical), `my-theme-dark` |
+| `my-theme.toml` `[light]` | `my-theme-light` |
+| a file with only `[light]` | `my-theme-light`, plus `my-theme` |
 
-The `every_listed_preset_resolves` test ensures every name in `PRESETS` has a working constructor.
-The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a missed `#` prefix before it hits the renderers.
+Writing `name = "…"` in a section is an error, not an override — the filename is the name.
+
+For a built-in, add one line to `BUILTIN` in `crates/outl-theme/src/registry.rs` (its position is its position in the picker), then update the preset table above and `docs/config.md`'s list, and regenerate the browser mock's fixture:
+
+```sh
+OUTL_UPDATE_FIXTURES=1 cargo test -p outl-theme --test presets_fixture
+```
+
+Nothing else needs wiring. The TUI, the desktop, and mobile all read the same registry.
+
+### Your own theme
+
+Drop a `.toml` in `~/.config/outl/themes/` (`$XDG_CONFIG_HOME/outl/themes/` when that is set; `%APPDATA%\outl\themes\` on Windows). No restart of anything but the app you are using.
+
+The shortest useful theme is three lines — `extends` takes any theme name, built-in or your own:
+
+```toml
+# ~/.config/outl/themes/mine.toml
+[dark]
+extends = "outl"
+accent = "#ff6ac1"
+```
+
+That resolves as `mine`, appears in every picker, and is usable anywhere a preset name goes:
+
+```toml
+[theme]
+preset = "mine-light"
+preset_dark = "mine"
+mode = "auto"
+```
+
+A file that names a built-in it shadows (`dracula.toml`) replaces that built-in rather than adding a second entry.
+
+**Inheritance is field by field, and `accent` is not a role.**
+This is the one thing that surprises people writing their first theme.
+In `outl`, five fields hold the same violet — `accent`, `ref_link_fg`, `selected_bullet_bg`, `status_normal_bg`, `list_selected_bg` — because that is what the palette was authored with, not because four of them follow the fifth.
+So the file above repaints the accent *surfaces* and leaves `[[refs]]` the original violet.
+
+Nothing derives a colour from another colour here, on purpose: a runtime-lightened shade looks different on an OLED than on a CRT, and a hand-tuned one does not.
+If you want one hue everywhere it appears, name every field:
+
+```toml
+[dark]
+extends = "outl"
+accent = "#ff6ac1"
+ref_link_fg = "#ff6ac1"
+selected_bullet_bg = "#ff6ac1"
+status_normal_bg = "#ff6ac1"
+list_selected_bg = "#ff6ac1"
+```
+
+`outl theme show mine` prints every resolved surface, which is the fastest way to find the ones you missed.
+The full field list, with what each one paints, is under [Semantic surfaces](#semantic-surfaces).
+
+**What is refused, and where you hear about it.**
+A missing field with nothing to inherit, a value that is not `#rrggbb`, a misspelled field, a written `name`, an `extends` pointing at nothing, and a file that could not be read at all are each an error naming the thing that is wrong. The theme does not load, and the rest of your themes are unaffected.
+
+```
+$ outl theme list
+warning: theme `mine` field `accent` is not a hex colour: `rebeccapurple`
+```
+
+`outl doctor` warns about the same files. The TUI and the GUI clients write it to their log only — the palette is resolved before there is a status line or a toast to put it in, so when a theme is missing from the picker, those two commands are where the reason is.
+
+### Validating a theme
+
+```sh
+outl theme list          # names any file that failed to load, on stderr
+outl theme show mine     # dumps every resolved surface
+outl doctor              # warns about each broken file
+```
 
 ## Tips
 
 - **Don't overlap modifiers on the same field across themes.** Solarized's `bold` is `fg(orange) + BOLD`; Dracula's is similar but on orange too.
   Keep modifiers semantic (BOLD for bold, etc.) and let the color carry the personality.
-- **Backgrounds**: the RGB presets (`outl`, `outl-light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`) paint `bg` across the whole TUI canvas and use `fg` as the base text color, so a light theme stays readable on a dark terminal (and vice versa).
-  Only the two ANSI presets (`default-dark`, `light`) keep `Color::Reset` and inherit the terminal's own background/foreground — that's their point.
+- **Backgrounds**: the RGB presets (every one but the `ansi` pair) paint `bg` across the whole TUI canvas and use `fg` as the base text color, so a light theme stays readable on a dark terminal (and vice versa).
+  Only `ansi` and `ansi-light` keep `Color::Reset` and inherit the terminal's own background/foreground — that's their point.
 - **Underline on `ref_link` and `tag_link` is intentional.** They're the only "clickable" things in pretty-render mode, and the underline is the visual affordance.
   The Insert-mode caret underlines too (it marks the character it precedes rather than printing a glyph — [#320](https://github.com/outlmd/outl/issues/320)), and on a link character it also swaps the hue to `cursor_caret_fg` and adds `BOLD`, so the two never read as the same thing.
   The underline is what keeps the caret visible on a space, where a foreground colour alone paints nothing; past the end of the line there is no character to mark, so a thin `▏` is drawn there instead.
@@ -201,7 +272,7 @@ The `every_palette_field_is_hex` test catches a typo like `"#xyz123"` or a misse
 
 | Client | What it does with the hex |
 |---|---|
-| **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). The nine RGB presets (`outl`, `outl-light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`) are one-line delegates; `default-dark` and `light` stay manual on ANSI named colors. |
+| **`outl-tui`** | `crates/outl-tui/src/theme.rs::theme_from_palette` converts each `#rrggbb` to `ratatui::Color::Rgb(r, g, b)` and re-applies the consistent modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on `italic`, `CROSSED_OUT` on `strike`). Every preset resolves through `outl_theme::Registry` and renders via `theme::from_palette`; `ansi` and `ansi-light` are the two it hands to hand-built themes on ANSI named colors instead. A theme from `~/.config/outl/themes/` goes through the same path. |
 | **`outl-desktop`** | The Tauri commands `list_themes()` and `get_theme(name)` return the `Palette` as JSON. The frontend writes each field as a CSS custom property on `<html>` (`--color-outl-accent`, `--color-outl-ref-link-fg`, …) so Tailwind class utilities like `text-(--color-outl-accent)` resolve at runtime, and flips `color-scheme` (light/dark) from the palette's `bg` luminance so native controls and scrollbars follow. Settings modal exposes the dropdown. Chrome surfaces never hardcode a hue — translucent layers derive from `--color-outl-fg` (`bg-(--color-outl-fg)/10`) so they adapt to light and dark presets alike. |
 | **`outl-mobile`** | Shared `@outl/shared/theme::installTheme` fetches both sides of the configured pair and holds both `Palette` objects in memory, then calls `applyPaletteToRoot` (RFC 0022, issue #22). A `prefers-color-scheme` media-query listener swaps tokens on an OS appearance flip without a second backend round-trip; a fresh default config uses `outl-light` / `outl`. |
 
@@ -227,8 +298,6 @@ Both GUI clients import the stylesheet.
 A theme switch repaints an already mounted diagram. Nothing re-renders it.
 
 ## Future
-
-- **User TOML overrides** — `[theme.colors]` table letting you tweak fields without rebuilding the binary.
 - **Theme hot-reload on config change** — listen on `~/.config/outl/config.toml` and per-workspace `.outl/config.toml` via `notify`.
 - **`outl theme preview`** — render every preset side-by-side on the same fixture so you can pick by feel.
 

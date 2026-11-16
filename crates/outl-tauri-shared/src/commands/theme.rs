@@ -7,18 +7,41 @@
 //! and a body only the desktop can call is how mobile ended up with
 //! hardcoded hex in `styles.css` for three releases.
 
-use outl_theme::Palette;
+use outl_theme::{Palette, Registry};
 
-/// Every built-in palette name, in user-facing order.
+/// The catalog these commands resolve against: the built-ins plus every
+/// theme in `~/.config/outl/themes/`.
+///
+/// Read per call rather than cached, so a user who writes a theme file and
+/// reopens Settings sees it without restarting the app. The built-ins are
+/// parsed once per process (`Registry::builtin`), so the per-call cost is
+/// reading one directory.
+///
+/// A broken theme file is a `warn!` and nothing else here. It is absent
+/// from the list rather than resolving to something half-painted, and
+/// `outl doctor` is the surface that names it — a GUI has no channel for
+/// "your file on disk has a typo on line 4" at the moment a palette is
+/// being fetched for the first paint.
+fn catalog() -> Registry {
+    let (reg, errors) = Registry::with_user_dir(&outl_config::theme_dir());
+    for e in errors {
+        tracing::warn!("theme file ignored: {e}");
+    }
+    reg
+}
+
+/// Every palette name, in user-facing order: built-ins first, then the
+/// user's own.
 pub fn list_themes() -> Vec<String> {
-    outl_theme::PRESETS.iter().map(|s| s.to_string()).collect()
+    catalog().names().into_iter().map(str::to_string).collect()
 }
 
 /// Resolve a palette by name, falling back to the default on an
 /// unknown or empty name so malformed config cannot break boot.
 pub fn get_theme(name: Option<String>) -> Palette {
+    let catalog = catalog();
     name.as_deref()
-        .and_then(outl_theme::by_name)
+        .and_then(|n| catalog.by_name(n).cloned())
         .unwrap_or_else(outl_theme::default)
 }
 
@@ -81,8 +104,14 @@ mod tests {
     }
 
     #[test]
-    fn list_themes_matches_the_preset_table() {
-        assert_eq!(list_themes().len(), outl_theme::PRESETS.len());
+    fn list_themes_covers_every_builtin() {
+        let listed = list_themes();
+        for name in outl_theme::preset_names() {
+            assert!(
+                listed.iter().any(|n| n == name),
+                "{name} is a built-in but list_themes omitted it"
+            );
+        }
     }
 
     #[test]

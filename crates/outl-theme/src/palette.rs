@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 /// strings and the desktop frontend can drop each into a CSS custom
 /// property without parsing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Palette {
     /// User-visible name (`"outl"`, `"dracula"`, …). Owned because
     /// the palette rides JSON across the Tauri wire — Serde can't
@@ -320,8 +321,7 @@ mod tests {
 
     #[test]
     fn palette_round_trips_via_serde() {
-        use crate::presets;
-        let p = presets::outl();
+        let p = crate::default();
         let json = serde_json::to_string(&p).unwrap();
         let back: Palette = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, p.name);
@@ -334,11 +334,11 @@ mod tests {
         // owner of "is this a light theme" — palette.ts used to have
         // its own copy (`isLightHex`), and two answers to one
         // question is what RFC 0022 exists to remove.
-        assert!(crate::presets::light().is_light());
-        assert!(crate::presets::logseq_light().is_light());
-        assert!(!crate::presets::outl().is_light());
-        assert!(!crate::presets::dracula().is_light());
-        assert!(!crate::presets::nord().is_light());
+        assert!(crate::by_name("ansi-light").unwrap().is_light());
+        assert!(crate::by_name("logseq-light").unwrap().is_light());
+        assert!(!crate::by_name("outl").unwrap().is_light());
+        assert!(!crate::by_name("dracula").unwrap().is_light());
+        assert!(!crate::by_name("nord").unwrap().is_light());
     }
 
     #[test]
@@ -346,8 +346,8 @@ mod tests {
         // The compiler forces the field to exist. This forces it to
         // mean something: a preset satisfying the struct with ""
         // would paint an invisible delete button.
-        for name in crate::PRESETS {
-            let p = crate::by_name(name).expect("preset in PRESETS must resolve");
+        for name in crate::preset_names() {
+            let p = crate::by_name(name).expect("a listed preset must resolve");
             assert!(
                 p.destructive.starts_with('#') && p.destructive.len() == 7,
                 "preset {name} has no usable destructive colour: {:?}",

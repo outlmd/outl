@@ -16,7 +16,7 @@ fn fixture_path() -> PathBuf {
 }
 
 fn rendered() -> String {
-    let presets: Vec<_> = outl_theme::PRESETS
+    let presets: Vec<_> = outl_theme::preset_names()
         .iter()
         .map(|name| outl_theme::by_name(name).expect("every listed preset resolves"))
         .collect();

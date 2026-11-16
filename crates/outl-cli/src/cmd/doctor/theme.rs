@@ -8,6 +8,8 @@
 //! whether that name is actually dark (see that struct's doc comment).
 //! `outl doctor` is where that gets caught.
 
+use std::path::Path;
+
 use outl_config::ThemeCfg;
 
 use super::Builder;
@@ -53,6 +55,35 @@ pub(super) fn check_theme_pair(b: &mut Builder, cfg: &ThemeCfg) {
                  Swap it with preset, or set mode = \"light\" to always use the light side."
             ));
         }
+    }
+}
+
+/// Report every `.toml` in the user's theme directory that failed to load.
+///
+/// A broken theme file is **silent on every other surface a user is likely
+/// to be looking at**: the GUI clients log it, the TUI logs it (the palette
+/// is resolved before there is a toast or a status line to write into), and
+/// the theme simply does not appear in the picker. `outl theme list` names
+/// it on stderr, and this is the other half — the command a user runs when
+/// something is off and they do not know what.
+///
+/// `dir` is a parameter for the same reason `theme` and `store` are
+/// (root `CLAUDE.md` invariant 9, third question): it comes from
+/// `XDG_CONFIG_HOME`, which is process-wide, so a check that resolved it
+/// itself would make the whole battery depend on the developer's own theme
+/// files.
+///
+/// Reports; never errors. A theme that will not parse is a cosmetic
+/// problem, and `doctor` exiting non-zero over one would put it in the same
+/// bucket as a torn op log.
+pub(super) fn check_theme_files(b: &mut Builder, dir: &Path) {
+    let (_, errors) = outl_theme::Registry::with_user_dir(dir);
+    for e in errors {
+        b.warn(format!(
+            "theme file ignored: {e}. It is in {}, and until it parses the \
+             theme will not appear in any picker.",
+            dir.display()
+        ));
     }
 }
 
@@ -112,5 +143,51 @@ mod tests {
         let mut b = builder();
         check_theme_pair(&mut b, &cfg);
         assert!(b.findings.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod theme_file_tests {
+    use super::*;
+
+    fn builder() -> Builder {
+        Builder::new("test".into(), "test".into())
+    }
+
+    #[test]
+    fn a_theme_file_that_does_not_parse_is_named() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("mine.toml"), "[dark]\naccent = \"nope\"\n").expect("write");
+
+        let mut b = builder();
+        check_theme_files(&mut b, dir.path());
+
+        assert_eq!(b.findings.len(), 1, "{:?}", b.findings);
+        assert!(
+            b.findings[0].message.contains("mine"),
+            "the finding has to name the file: {:?}",
+            b.findings[0]
+        );
+    }
+
+    #[test]
+    fn a_theme_file_that_loads_is_not_a_finding() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join("mine.toml"),
+            "[dark]\nextends = \"outl\"\naccent = \"#ff6ac1\"\n",
+        )
+        .expect("write");
+
+        let mut b = builder();
+        check_theme_files(&mut b, dir.path());
+        assert!(b.findings.is_empty(), "{:?}", b.findings);
+    }
+
+    #[test]
+    fn no_theme_directory_is_not_a_finding() {
+        let mut b = builder();
+        check_theme_files(&mut b, Path::new("/nonexistent/outl-doctor-test/themes"));
+        assert!(b.findings.is_empty(), "{:?}", b.findings);
     }
 }

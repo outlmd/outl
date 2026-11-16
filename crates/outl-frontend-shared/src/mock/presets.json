@@ -96,7 +96,7 @@
     "help_title_fg": "#7c3aed"
   },
   {
-    "name": "default-dark",
+    "name": "ansi",
     "bg": "#000000",
     "bg_elev": "#101010",
     "fg": "#cccccc",
@@ -144,7 +144,7 @@
     "help_title_fg": "#ffff55"
   },
   {
-    "name": "light",
+    "name": "ansi-light",
     "bg": "#ffffff",
     "bg_elev": "#f4f4f4",
     "fg": "#1a1a1a",
@@ -288,7 +288,7 @@
     "help_title_fg": "#f1fa8c"
   },
   {
-    "name": "solarized-dark",
+    "name": "solarized",
     "bg": "#002b36",
     "bg_elev": "#073642",
     "fg": "#839496",

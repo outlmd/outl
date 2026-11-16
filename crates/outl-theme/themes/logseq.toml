@@ -1,0 +1,56 @@
+# logseq — the default light theme of Logseq.
+#
+# White canvas, warm dark-gray text (`#433f38`), and the Blueprint.js blue
+# rail (`#106ba3` links, `#0069b6` active accent) Logseq ships out of the
+# box. Hex values sourced from Logseq's `vars-classic.css` (`--ls-*` custom
+# properties); the dim grays are alpha blends of the primary text colour on
+# white, matching how Logseq fades bullets and metadata.
+#
+# Light-only, so `logseq` and `logseq-light` both resolve to this side.
+
+[light]
+bg = "#ffffff"
+bg_elev = "#f7f7f7"
+fg = "#433f38"
+fg_dim = "#726f6c"
+fg_dimmer = "#bdbbb9"
+border = "#cccccc"
+hint = "#8e8b87"
+accent = "#106ba3"
+accent_fg = "#ffffff"
+accent_soft = "#0069b6"
+accent_alt = "#0d8050"
+warn = "#bf7326"
+destructive = "#c5372c"
+destructive_fg = "#ffffff"
+ref_link_fg = "#106ba3"
+tag_link_fg = "#1a537c"
+md_link_fg = "#106ba3"
+bold_fg = "#161e2e"
+italic_fg = "#433f38"
+strike_fg = "#8e8b87"
+highlight_bg = "#fff3a0"
+highlight_fg = "#433f38"
+code_fg = "#0d8050"
+todo_open_fg = "#bf7326"
+todo_done_fg = "#0d8050"
+todo_done_body_fg = "#8e8b87"
+property_key_fg = "#8e8b87"
+property_value_fg = "#0069b6"
+heading_fg = "#0f1419"
+dim_fg = "#8e8b87"
+selected_bullet_bg = "#106ba3"
+selected_bullet_fg = "#ffffff"
+cursor_block_bg = "#433f38"
+cursor_block_fg = "#ffffff"
+cursor_caret_fg = "#0069b6"
+status_normal_bg = "#106ba3"
+status_normal_fg = "#ffffff"
+status_insert_bg = "#0d8050"
+status_insert_fg = "#ffffff"
+status_visual_bg = "#752f75"
+status_visual_fg = "#ffffff"
+status_message_fg = "#bf7326"
+list_selected_bg = "#e4f2ff"
+list_selected_fg = "#0f1419"
+help_title_fg = "#106ba3"

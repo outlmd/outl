@@ -30,7 +30,7 @@ Today's journal opens.
 The screen looks like this:
 
 ```
-┌Pages────────┬─outl · default-dark · ws:notes pages:0 blocks:1 ──────────┐
+┌Pages────────┬─outl · ansi · ws:notes pages:0 blocks:1 ──────────┐
 │             │ Journal · Monday, 2026-05-25                              │
 │             ├───────────────────────────────────────────────────────────┤
 │             │ │ - ▏                                                    │
