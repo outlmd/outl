@@ -26,7 +26,7 @@ import WebKit
 /// insets change or the webview appears, and the page can pull by posting
 /// to the `outlSafeArea` message handler, which answers with a push.
 @objc(OutlSafeArea)
-public final class OutlSafeArea: NSObject, WKScriptMessageHandler {
+public final class OutlSafeArea: NSObject {
 
     private static let handlerName = "outlSafeArea"
     private static let shared = OutlSafeArea()
@@ -34,6 +34,7 @@ public final class OutlSafeArea: NSObject, WKScriptMessageHandler {
     private var probe: OutlSafeAreaProbe?
     private weak var registeredOn: WKWebView?
     private var retries = 0
+    private lazy var bridge = OutlSafeAreaBridge { [weak self] in self?.push() }
 
     /// Single entry point called by `OutlBootstrap.+load` in `main.mm`.
     @objc public static func install() {
@@ -71,7 +72,7 @@ public final class OutlSafeArea: NSObject, WKScriptMessageHandler {
         if registeredOn !== web {
             registeredOn?.configuration.userContentController
                 .removeScriptMessageHandler(forName: Self.handlerName)
-            web.configuration.userContentController.add(self, name: Self.handlerName)
+            web.configuration.userContentController.add(bridge, name: Self.handlerName)
             registeredOn = web
         }
 
@@ -92,15 +93,34 @@ public final class OutlSafeArea: NSObject, WKScriptMessageHandler {
             completionHandler: nil
         )
     }
+}
 
-    // MARK: - WKScriptMessageHandler
+/// Receives the page asking for the insets (it booted after our last push).
+///
+/// **Why this is a separate, non-`public` object:** a `public` class that
+/// conforms to `WKScriptMessageHandler` lands in the generated
+/// `outl-Swift.h` as `@interface OutlSafeArea : NSObject
+/// <WKScriptMessageHandler>`, and the header generator forward-declares
+/// WebKit *classes* only (`@class WKScriptMessage;`), never the protocol.
+/// `main.mm` imports UIKit, not WebKit, so that header stopped compiling
+/// ("unknown class name 'WKScriptMessageHandler'"). The other ten Swift
+/// shells only expose `WKWebView?` properties, where a class forward
+/// declaration is enough — a protocol in the conformance list is not.
+/// Keeping the conformance internal keeps `OutlSafeArea`'s Obj-C surface
+/// at `install`, which is all `main.mm` ever wanted from it.
+private final class OutlSafeAreaBridge: NSObject, WKScriptMessageHandler {
+    private let onPull: () -> Void
 
-    /// The page asking for the insets (it booted after our last push).
-    public func userContentController(
+    init(onPull: @escaping () -> Void) {
+        self.onPull = onPull
+        super.init()
+    }
+
+    func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        push()
+        onPull()
     }
 }
 
