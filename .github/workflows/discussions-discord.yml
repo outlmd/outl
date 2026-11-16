@@ -76,6 +76,7 @@ jobs:
     # Forks have no webhook secret and no business posting to our forum.
     if: github.repository == 'outlmd/outl'
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: discord
     # A cold compile of the crate and its HTTP stack; a warm cache is ~1 min.
     timeout-minutes: 15
     steps:
