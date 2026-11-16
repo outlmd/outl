@@ -2286,6 +2286,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "discussions-discord"
+version = "0.13.0"
+dependencies = [
+ "flate2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ureq",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6809,6 +6820,9 @@ version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]

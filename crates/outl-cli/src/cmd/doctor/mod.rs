@@ -87,6 +87,7 @@ pub fn collect_scoped(
         &DeviceStore::open_default(),
         &global.config.theme,
         global.notice(),
+        &outl_config::theme_dir(),
     )
 }
 
@@ -111,6 +112,7 @@ pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
         &DeviceStore::open_default(),
         &global.config.theme,
         global.notice(),
+        &outl_config::theme_dir(),
     )
 }
 
@@ -133,6 +135,9 @@ pub fn collect_in_session(path: &Path) -> Result<DoctorReport, ApiError> {
 /// would make every test in the battery judge whatever theme pair
 /// happens to be on the machine running the suite, the exact bug the
 /// `store` parameter above exists to avoid for the device store.
+///
+/// `theme_dir` is the third of the same kind: `~/.config/outl/themes/`,
+/// resolved from the process-wide `XDG_CONFIG_HOME`.
 #[allow(clippy::too_many_arguments)]
 fn collect_internal(
     path: &Path,
@@ -142,6 +147,7 @@ fn collect_internal(
     store: &DeviceStore,
     theme: &outl_config::ThemeCfg,
     config_notice: Option<String>,
+    theme_dir: &Path,
 ) -> Result<DoctorReport, ApiError> {
     let paths = Paths::at(path.to_path_buf());
     let cfg = read_config(&paths).map_err(|e| {
@@ -184,6 +190,7 @@ fn collect_internal(
         b.warn(notice);
     }
     theme::check_theme_pair(&mut b, theme);
+    theme::check_theme_files(&mut b, theme_dir);
 
     // 1. Raw op-log sweep, before any storage open. `JsonlStorage::open`
     //    skips malformed records and reports them only through

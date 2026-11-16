@@ -42,7 +42,7 @@ mod workspace;
 use boot::{draw_skeleton, query_enhanced_keys};
 use event_loop::event_loop;
 use logging::install_silent_log_subscriber;
-use preset::resolve_theme;
+use preset::{load_catalog, resolve_theme};
 use terminal::{install_panic_restore_hook, is_tty};
 use workspace::open_workspace;
 
@@ -215,10 +215,12 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
     // the file `open_workspace` reads; a workspace that overrides the
     // preset therefore shows the global palette for this one frame, and
     // the first real frame corrects it.
+    let theme_catalog = load_catalog();
     let boot_theme = resolve_theme(
         theme_override,
         &toml::Value::Table(Default::default()),
         global_cfg,
+        &theme_catalog,
     );
     draw_skeleton(&mut terminal, &boot_theme, &workspace_root);
     timer.phase("skeleton");
@@ -251,7 +253,7 @@ pub fn run_with_theme_override(path: &Path, theme_override: Option<&str>) -> Res
         }
     };
 
-    let theme = resolve_theme(theme_override, &cfg, global_cfg);
+    let theme = resolve_theme(theme_override, &cfg, global_cfg, &theme_catalog);
     // `shared_workspace` gates the peer-sync threads (iroh transport + the
     // filesystem poller). JsonlStorage is the ONLY persistent backend
     // (sqlite was removed in 0.5.0), so a workspace is shareable unless its

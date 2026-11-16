@@ -72,13 +72,9 @@ fn every_fill_pair_passes_contrast() {
         // The visual-mode status background is a mid purple in three
         // presets, and the canvas is what gets painted on it. All three
         // are inherited from the upstream colour scheme.
+        ("ansi", "status_visual", "ANSI magenta #aa00aa is 3.29:1"),
         (
-            "default-dark",
-            "status_visual",
-            "ANSI magenta #aa00aa is 3.29:1",
-        ),
-        (
-            "solarized-dark",
+            "solarized",
             "status_visual",
             "Solarized magenta #d33682 is 3.30:1",
         ),
@@ -87,15 +83,32 @@ fn every_fill_pair_passes_contrast() {
             "status_visual",
             "nord15 #b48ead is 4.41:1, just under",
         ),
+        // Found by the `body text on bg_elev` row the moment it was
+        // added, and it is a real defect: popups and modals paint body
+        // text on `bg_elev`, so Solarized's are harder to read than its
+        // canvas.
+        //
+        // Exempted rather than fixed because both halves are the upstream
+        // scheme's own values — `base0` text on `base02` — and Solarized
+        // never intended base02 to carry body text (it is the "background
+        // highlight" tone). Fixing it honestly means either a new
+        // `fg_on_elev` field for every preset or breaking fidelity with
+        // the scheme the preset exists to reproduce. 4.11:1 clears the 3.0
+        // large-text floor.
+        (
+            "solarized",
+            "body text on bg_elev",
+            "base0 #839496 on base02 #073642 is 4.11:1",
+        ),
     ];
 
     let mut offenders = Vec::new();
-    for name in outl_theme::PRESETS {
+    for name in outl_theme::preset_names() {
         let p = outl_theme::by_name(name).unwrap_or_else(|| panic!("{name} resolves"));
         for (role, bg, fg) in fill_pairs(&p) {
             if KNOWN_BELOW_AA
                 .iter()
-                .any(|(x, r, _)| *x == *name && *r == role)
+                .any(|(x, r, _)| *x == name && *r == role)
             {
                 continue;
             }
@@ -163,6 +176,18 @@ fn fill_pairs(p: &outl_theme::Palette) -> Vec<(&'static str, &str, &str)> {
         // so a preset can pass with an `accent_fg` the clients use and
         // still be unreadable where the TUI paints the canvas instead.
         ("accent on bg", &p.accent, &p.bg),
+        // Body text on the canvas. Not a "fill" in the `_bg` / `_fg`
+        // sense, and that is exactly why it was missing: nothing paired
+        // these two fields, so nothing checked the most-painted pixel
+        // pair in the product.
+        //
+        // It became reachable as a bug when `[light]` started inheriting
+        // `[dark]` field by field: a light side that sets `bg` and forgets
+        // `fg` is cream-on-cream, renders as a blank page, and would pass
+        // every other test in this crate.
+        ("body text", &p.bg, &p.fg),
+        ("dim text", &p.bg, &p.fg_dim),
+        ("body text on bg_elev", &p.bg_elev, &p.fg),
     ]
 }
 

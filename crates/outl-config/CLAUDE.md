@@ -45,6 +45,7 @@ Three rules to keep it working:
 ```
 ~/.config/outl/                         ← `config_dir()` (XDG-style on every OS)
 ├── config.toml                         ← `config_path()`
+├── themes/<name>.toml                  ← `theme_dir()`; your own palettes, read by every client
 ├── machine-id                          ← device fingerprint (outl-core's device store)
 ├── actor                               ← device-wide ULID, desktop + mobile (outl-core's device store)
 └── actors/<workspace-id>               ← per-workspace ULID, CLI + TUI + MCP (outl-core's device store)
@@ -75,7 +76,7 @@ managed = false                   # top-level: owned by Nix/home-manager → sav
 last = "/Users/me/iCloud/outl"   # absolute path; optional
 
 [theme]
-preset = "outl-light"             # name from outl_theme::PRESETS; the light side of the pair
+preset = "outl-light"             # any name `outl theme list` prints; the light side of the pair
 preset_dark = "outl"              # optional; dark side. Omit = falls back to `preset` (pre-RFC-0022 behaviour)
 mode = "auto"                     # "light" | "dark" | "auto" (default); TUI treats "auto" as "dark"
 

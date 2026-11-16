@@ -2,11 +2,8 @@
 //!
 //! Shared palette definitions for every outl client that paints
 //! something — `outl-tui` (terminal, via `ratatui::Color`) and
-//! `outl-desktop` (Tauri + Solid, via CSS custom properties).
-//!
-//! The crate is intentionally **dependency-light**: no `ratatui`,
-//! no CSS engine, just `serde` so the palette can ride the Tauri
-//! wire as JSON.
+//! `outl-desktop` / `outl-mobile` (Tauri + Solid, via CSS custom
+//! properties).
 //!
 //! A [`Palette`] holds named hex colors for every semantic surface
 //! the outliner paints (background, accent, ref-link, todo-open,
@@ -16,84 +13,70 @@
 //! - **TUI** maps `#a78bfa` → `ratatui::style::Color::Rgb(167, 139, 250)`
 //!   and re-applies the modifiers it always wanted (`BOLD` on
 //!   `bold`, `UNDERLINED` on `ref_link`, `ITALIC` on `italic`, …) —
-//!   see `outl-tui/src/theme.rs::Theme::from_palette`.
-//! - **Desktop** writes each field as a CSS custom property on
+//!   see `outl-tui/src/theme.rs::theme_from_palette`.
+//! - **Desktop / mobile** write each field as a CSS custom property on
 //!   `<html>` (`--color-outl-accent: #a78bfa`) which Tailwind class
 //!   utilities reference (`bg-(--color-outl-accent)`).
 //!
-//! ## Presets
+//! ## Where a theme comes from
 //!
-//! Eleven built-in palettes, named identically to the TUI presets
-//! that shipped before this crate existed. The TUI's render path is
-//! unchanged; it now derives its `Theme` from these. Adding a
-//! preset means: extend `presets`, add a name to
-//! [`PRESETS`], and add a match arm in [`by_name`].
+//! One `.toml` per family in `themes/`, with `[dark]` and `[light]`
+//! inside it. Built-ins are `include_str!`'d into the binary, because
+//! outl ships as a binary and a built-in theme cannot be a file the user
+//! has to have. A user's own theme is the **same format**, read from a
+//! directory the client passes in ([`registry::Registry::with_user_dir`]),
+//! so `extends = "dracula"` in `~/.config/outl/themes/mine.toml` resolves
+//! against the built-in it names.
+//!
+//! [`spec`] owns the format, [`registry`] owns the catalog. The functions
+//! here are thin wrappers over [`registry::Registry::builtin`], kept
+//! because most callers only ever want a built-in by name.
 
 pub mod palette;
-pub mod presets;
+pub mod registry;
+pub mod spec;
 
 pub use palette::Palette;
+pub use registry::Registry;
 
-/// List of built-in preset names, in the order surfaced to users
-/// in pickers (CLI, settings modal, command palette).
-pub const PRESETS: &[&str] = &[
-    "outl",
-    "outl-light",
-    "default-dark",
-    "light",
-    "logseq-light",
-    "dracula",
-    "solarized-dark",
-    "nord",
-    "monokai",
-    "gruvbox",
-    "gruvbox-light",
-];
+/// Canonical preset names, in the order surfaced to users in pickers
+/// (CLI, settings modal, command palette).
+///
+/// Derived from the theme files rather than declared: the name of each
+/// side comes from its filename and its section, so this list cannot
+/// disagree with what [`by_name`] resolves. It was a hand-written `const`
+/// array until the files became the source, and keeping both was two
+/// owners of one fact.
+pub fn preset_names() -> Vec<&'static str> {
+    Registry::builtin().names()
+}
 
-/// Resolve a preset by name. Accepts the canonical name or any of
-/// the documented aliases; case- and separator-insensitive
-/// (`"Solarized Dark"` and `"solarized_dark"` both resolve to
-/// `solarized-dark`).
+/// Resolve a built-in preset by name.
+///
+/// Accepts the canonical name, the derived `-dark` / `-light` suffix, the
+/// bare family name, and the legacy spellings kept for older configs.
+/// Case- and separator-insensitive (`"Solarized Dark"` and
+/// `"solarized_dark"` both resolve).
 ///
 /// Returns `None` when nothing matches so callers can fall back to
 /// [`default`] without panicking on malformed user input.
+///
+/// This sees **built-ins only**. A client that also honours the user's
+/// `themes/` directory builds a [`Registry::with_user_dir`] and asks that.
 pub fn by_name(name: &str) -> Option<Palette> {
-    let norm: String = name
-        .chars()
-        .map(|c| match c {
-            'A'..='Z' => c.to_ascii_lowercase(),
-            '_' | ' ' => '-',
-            _ => c,
-        })
-        .collect();
-    match norm.as_str() {
-        "outl" | "default" => Some(presets::outl()),
-        "outl-light" => Some(presets::outl_light()),
-        "default-dark" | "dark" => Some(presets::default_dark()),
-        "light" => Some(presets::light()),
-        "logseq-light" | "logseq" => Some(presets::logseq_light()),
-        "dracula" => Some(presets::dracula()),
-        "solarized-dark" | "solarized" => Some(presets::solarized_dark()),
-        "nord" => Some(presets::nord()),
-        "monokai" => Some(presets::monokai()),
-        "gruvbox" | "gruvbox-dark" => Some(presets::gruvbox()),
-        "gruvbox-light" => Some(presets::gruvbox_light()),
-        _ => None,
-    }
+    Registry::builtin().by_name(name).cloned()
 }
 
-/// Default palette returned when nothing is configured. Mirrors the
-/// TUI's `theme::default_theme()` choice — `outl` is the brand
-/// palette every other client picks up too.
+/// Default palette returned when nothing is configured — `outl`, the
+/// brand palette every client picks up.
 pub fn default() -> Palette {
-    presets::outl()
+    by_name("outl").expect("the brand preset is built in")
 }
 
-/// Iterator over every built-in palette, in [`PRESETS`] order.
-/// Useful for pickers that need to list everything without naming
-/// each helper.
+/// Every built-in palette, in [`preset_names`] order. Useful for pickers
+/// that need to list everything without naming each theme.
 pub fn all() -> Vec<Palette> {
-    PRESETS.iter().filter_map(|name| by_name(name)).collect()
+    Registry::builtin().all().into_iter().cloned().collect()
 }
 
 #[cfg(test)]
@@ -107,31 +90,31 @@ mod tests {
         // `outl doctor`'s `check_theme_pair` warns when a pair's
         // light slot resolves to a dark palette — this pins the
         // preset never regresses into tripping that check.
-        assert!(presets::outl_light().is_light());
+        assert!(by_name("outl-light").unwrap().is_light());
         assert!(
-            !presets::outl().is_light(),
+            !by_name("outl").unwrap().is_light(),
             "outl must stay the dark side of the pair"
         );
     }
 
     #[test]
     fn every_listed_preset_resolves() {
-        for name in PRESETS {
+        for name in preset_names() {
             assert!(
                 by_name(name).is_some(),
-                "PRESETS lists {name} but by_name returns None"
+                "preset_names lists {name} but by_name returns None"
             );
         }
     }
 
     #[test]
     fn name_matches_listed_preset() {
-        for name in PRESETS {
+        for name in preset_names() {
             let p = by_name(name).unwrap();
             assert_eq!(
                 p.name.as_str(),
-                *name,
-                "palette name drifted from PRESETS entry"
+                name,
+                "palette name drifted from its preset_names entry"
             );
         }
     }
@@ -141,11 +124,11 @@ mod tests {
         assert_eq!(by_name("DRACULA").unwrap().name.as_str(), "dracula");
         assert_eq!(
             by_name("Solarized Dark").unwrap().name.as_str(),
-            "solarized-dark"
+            "solarized"
         );
         assert_eq!(
             by_name("solarized_dark").unwrap().name.as_str(),
-            "solarized-dark"
+            "solarized"
         );
     }
 
@@ -160,6 +143,10 @@ mod tests {
         // hex string per field. A missed field would surface as an
         // empty or non-`#` value when the palette ships across the
         // Tauri wire. Catch it once, not at render-time.
+        //
+        // `spec` already refuses a non-hex value at parse time, so this
+        // is the second line rather than the first — it also covers a
+        // palette built any other way.
         for p in all() {
             for (field, value) in p.fields() {
                 assert!(

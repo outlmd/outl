@@ -199,6 +199,7 @@ What it does **not** give you is direct access to the iOS platform APIs that out
 | `UIInputAccessoryView` (`OutlToolbar.swift`) | The formatting toolbar must be UIKit — a WebView toolbar has input-focus latency and the keyboard re-anchors when the toolbar mounts. |
 | Native suggest overlay (`OutlSuggestOverlay.swift`, `OutlSuggestView.swift`) | Autocomplete chips anchored to the caret without the keyboard jumping or the WebView reflowing. |
 | Method swizzle + brand chrome (`OutlSwizzle.swift`, `OutlBrandChrome.swift`) | Splash, status-bar, and a few UIKit hooks the WebView doesn't expose. |
+| `safeAreaInsets` probe (`OutlSafeArea.swift`, registered from `main.mm`) | The `WKWebView` is full-screen and does not publish truthful `env(safe-area-inset-*)` values, so the header drew under the status bar. A touch-transparent probe view reports UIKit's `safeAreaInsets` on every `safeAreaInsetsDidChange` and pushes them to the page as `--safe-area-inset-*`; the page can also pull through the `outlSafeArea` message handler. Android's twin is `OutlSafeArea.kt`. See [`outl-mobile/CLAUDE.md` → Safe areas](../crates/outl-mobile/CLAUDE.md#safe-areas-the-native-shell-measures-the-page-applies). |
 
 The native code is split into **two tiers** with different test contracts:
 
@@ -207,7 +208,7 @@ The native code is split into **two tiers** with different test contracts:
   **Has unit tests** under `swift/OutlKit/Tests/OutlKitTests/`.
   Run with `swift test` from `swift/OutlKit/` or via `mobile.yml` in CI.
 - **`crates/outl-mobile/src-tauri/gen/apple/Sources/outl-mobile/`** — Tauri-generated iOS shell + outl-specific UIKit / Foundation bridges.
-  Files: `main.mm`, `OutlOpsWatcher.swift`, `OutlBackgroundRefresh.swift`, `OutlToolbar.swift`, `OutlSuggestOverlay.swift`, `OutlSuggestView.swift`, `OutlSwizzle.swift`, `OutlBrandChrome.swift`.
+  Files: `main.mm`, `OutlOpsWatcher.swift`, `OutlBackgroundRefresh.swift`, `OutlToolbar.swift`, `OutlSuggestOverlay.swift`, `OutlSuggestView.swift`, `OutlSwizzle.swift`, `OutlBrandChrome.swift`, `OutlSafeArea.swift`.
   **No unit tests** — observed via `NSLog` probes printed on app boot.
   Run on a real device or simulator to exercise.
 
@@ -465,6 +466,7 @@ Fix: drop the brackets, keep the backticks.
 | Frontend | `crates/outl-mobile/src/**/*.test.ts`, `crates/outl-desktop/src/**/*.test.ts`, `crates/outl-frontend-shared/**/*.test.ts` (`bun run test`) | Pure helpers and DTO conversions. |
 | Swift (`OutlKit`) | `crates/outl-mobile/swift/OutlKit/Tests/OutlKitTests/` (`swift test`) | Pure native helpers — brand color, suggester chip parser, toolbar MFU, peer-file predicates, JS escape. **Required** for new pure Swift logic. |
 | Native iOS bridges (`gen/apple/.../*.swift`, `main.mm`) | None (yet) — observed via `NSLog` probes on boot | UIKit / Foundation glue that needs the iOS runtime. If you add a piece that *can* be tested without UIKit, extract it into `OutlKit` first. |
+| Safe-area bridge (`OutlSafeArea.swift`, `OutlSafeArea.kt`) | Page side only: `src/lib/safe-area.test.ts` + `safe-area.css.test.ts` (Vitest). The native measurement is **device-only** | The numbers exist only on hardware: check a notched iPhone in portrait and both landscape orientations, and an Android phone with gesture and three-button navigation, before calling a change done. |
 
 ### Per-client test suites
 
@@ -478,7 +480,7 @@ Two layers cover each GUI client.
 
 Every bug fixed in a pure helper (the tokenize duplicate, refs/tags extraction, fuzzy matching) must land with a unit test before merge so it never regresses.
 
-Native bits (`main.mm` swizzle, BGTaskScheduler, NSMetadataQuery) are not covered by unit tests yet — they're observed via the NSLog probes shown on app boot.
+Native bits (`main.mm` swizzle, BGTaskScheduler, NSMetadataQuery, the `OutlSafeArea` probe) are not covered by unit tests yet — they're observed via the NSLog probes shown on app boot.
 If we add Swift Tests later they belong next to `main.mm` in `gen/apple/Tests/`.
 
 `outl-desktop`:
@@ -638,6 +640,10 @@ If you find yourself writing UIKit-shaped code inside `OutlKit`, **stop** — ex
 The iCloud peer-file watcher is the canonical pattern: predicate logic lives in `OutlKit/Watcher/OpsFilePredicate.swift` (tested), the `NSMetadataQuery` driver lives in `gen/apple/.../OutlOpsWatcher.swift` (boot-time logged).
 
 Always re-read `crates/outl-mobile/CLAUDE.md` § "Peer-file materialisation" before touching `main.mm` or the watcher — that section spells out the iCloud race that two lines of code prevent.
+
+Touching `OutlSafeArea.swift` (or a component's top / side padding) means re-reading `crates/outl-mobile/CLAUDE.md` § "Safe areas" first.
+Components read `var(--safe-area-inset-*)`, never `env()`, and `safe-area.css.test.ts` fails on a stray `env(safe-area-inset`.
+The probe has no unit test and the simulator does not prove it: validate on a notched iPhone in portrait and both landscape orientations (the cutout moves to a side inset, top drops to 0), and mirror any contract change in Android's `OutlSafeArea.kt`.
 
 ### Add a code-block runtime (`outl-exec`)
 

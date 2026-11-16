@@ -152,3 +152,26 @@ describe("JournalChrome sync dot", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("JournalChrome top inset", () => {
+  it("pads the header from --safe-area-inset-top, floored at 12px", () => {
+    mount();
+    const header = document.querySelector("header") as HTMLElement;
+    expect(header.getAttribute("style")).toContain(
+      "max(var(--safe-area-inset-top), 12px)",
+    );
+    // The Tailwind `pt-2` must not sit under the inline value.
+    expect(header.className).not.toMatch(/(^|\s)pt-2(\s|$)/);
+  });
+
+  it("pads the header from the side insets, floored at 12px", () => {
+    // Landscape on a notched iPhone: top is 0, the cutout is on a side.
+    mount();
+    const header = document.querySelector("header") as HTMLElement;
+    const style = header.getAttribute("style") ?? "";
+    expect(style).toContain("max(var(--safe-area-inset-left), 12px)");
+    expect(style).toContain("max(var(--safe-area-inset-right), 12px)");
+    // A Tailwind `px-3` would be overridden anyway; keep one owner.
+    expect(header.className).not.toMatch(/(^|\s)px-3(\s|$)/);
+  });
+});

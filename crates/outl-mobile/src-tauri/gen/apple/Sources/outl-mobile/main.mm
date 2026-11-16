@@ -20,6 +20,10 @@
 #include "bindings/bindings.h"
 
 #import <UIKit/UIKit.h>
+// `outl-Swift.h` declares `OutlSafeArea` as conforming to
+// `WKScriptMessageHandler`, and the generated header does not import
+// WebKit itself, so it has to be visible before the include.
+#import <WebKit/WebKit.h>
 #import "outl-Swift.h"
 
 @interface OutlBootstrap : NSObject
@@ -38,6 +42,7 @@
         [OutlSwizzle install];
         [OutlBackgroundRefresh install];
         [OutlBrandChrome install];
+        [OutlSafeArea install];
         [OutlOpsWatcher install];
         [OutlCaptureInbox install];
     });

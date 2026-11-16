@@ -20,9 +20,12 @@ If anything here is wrong or out of date, that's a bug — open an issue or fix 
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
 | [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every PR; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
 | [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when `main` moved in the last 24h **and** the newest conclusive `ci.yml` run on `main` is green (beta), `v*` tag (GA), manual. Runs no tests of its own: `ci.yml` owns them, and the gate is what keeps ~20 build legs off a red tree | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
-| [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully | Downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
+| [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully, or manual dispatch | Skips the upload (green run, `gate` notice) when the Mobile run has no non-expired `outl-ios-release` artifact; manual dispatch bypasses that check. Otherwise downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
 | [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. | No |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Called by `release.yml` from `needs: tag` (once per tag created), or manual | Keeps the 2 most recently generated `vX.Y.Z-beta.N` tags repo-wide and deletes every older one, release and tag together. GA tags are never candidates, and neither is a beta a shipped package manifest still points at. Each deletion is confirmed by re-reading the ref from origin, because a 46-tag drain once printed `- [deleted]` 46 times, left 21 refs in place and still exited 0. Not `on: push: tags:`: the tag is pushed with `GITHUB_TOKEN`, which triggers no workflow. | n/a |
+
+[`discussions-discord.yml`](../.github/workflows/discussions-discord.yml) is not a CI check: it mirrors new Discussions and comments into a Discord forum, see [Discussions mirror to Discord](discussions-discord.md).
+It builds and runs the `tools/discussions-discord` crate, whose tests run in `ci.yml` with the rest of the workspace.
 
 ### Action pinning
 
@@ -227,8 +230,18 @@ A release asset URL does not redirect, so renaming either family breaks links th
 
 ### TestFlight (iOS)
 
-`mobile.yml` builds + signs the IPA on every push.
+`mobile.yml` builds + signs the IPA (`ios-release`) on every push, and on a `workflow_dispatch` only with `release_build=true`.
 `testflight.yml` runs after `mobile.yml` completes, downloads the IPA artifact, uploads to App Store Connect.
+
+A successful Mobile run does not imply an IPA, so `testflight.yml` starts with a Linux `gate` job.
+It lists the triggering Mobile run's artifacts and lets `upload` run only when a non-expired `outl-ios-release` exists.
+Otherwise `upload` is skipped: the TestFlight run ends green, never enters the `release` environment, and starts no macOS runner.
+That is an expected skip, not a shipping failure.
+To tell them apart, open the run's `Check for IPA artifact` job: a skip leaves a `::notice::` saying the Mobile run has no current `outl-ios-release` artifact, and the `Upload IPA to TestFlight` job shows as skipped.
+A shipping failure is a red `Upload IPA to TestFlight` job.
+
+A manual dispatch of `testflight.yml` bypasses the artifact check.
+It always runs `upload` against `mobile_run_id` (or the latest successful Mobile run on `main`), so a run without an IPA fails loudly at the download step instead of skipping.
 
 **Release notes** ("What to Test") come from `conventional-changelog-cli` (preset `conventionalcommits`) reading the commit log since the last tag.
 **Use Conventional Commits.**

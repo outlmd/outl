@@ -1,0 +1,58 @@
+# monokai — Wimer Hazenberg's high-contrast palette.
+#
+# Hot pink accent on warm charcoal. Hex values from the canonical Monokai
+# specification.
+#
+# Known contrast gap, exempted by name in `tests/contrast.rs`: the accent
+# `#f92672` is 3.93:1 on its own canvas, over the 3.0 large-text floor and
+# under AA, and three more roles reuse `accent` as a fill. Fixing it means
+# picking a new Monokai accent, which is a preset decision. Its `accent_fg`
+# is not exempt and does not need to be: a real field let it pick
+# `#000000` and reach 5.55:1.
+
+[dark]
+bg = "#272822"
+bg_elev = "#1e1f1c"
+fg = "#f8f8f2"
+fg_dim = "#939081"
+fg_dimmer = "#75715e"
+border = "#75715e"
+hint = "#75715e"
+accent = "#f92672"
+accent_fg = "#000000"
+accent_soft = "#ae81ff"
+accent_alt = "#a6e22e"
+warn = "#e6db74"
+destructive = "#f92672"
+destructive_fg = "#141511"
+ref_link_fg = "#66d9ef"
+tag_link_fg = "#f92672"
+md_link_fg = "#66d9ef"
+bold_fg = "#fd971f"
+italic_fg = "#e6db74"
+strike_fg = "#75715e"
+highlight_bg = "#e6db74"
+highlight_fg = "#272822"
+code_fg = "#a6e22e"
+todo_open_fg = "#f92672"
+todo_done_fg = "#a6e22e"
+todo_done_body_fg = "#75715e"
+property_key_fg = "#75715e"
+property_value_fg = "#ae81ff"
+heading_fg = "#f92672"
+dim_fg = "#75715e"
+selected_bullet_bg = "#f92672"
+selected_bullet_fg = "#272822"
+cursor_block_bg = "#f8f8f2"
+cursor_block_fg = "#272822"
+cursor_caret_fg = "#f8f8f2"
+status_normal_bg = "#f92672"
+status_normal_fg = "#272822"
+status_insert_bg = "#a6e22e"
+status_insert_fg = "#272822"
+status_visual_bg = "#ae81ff"
+status_visual_fg = "#272822"
+status_message_fg = "#e6db74"
+list_selected_bg = "#f92672"
+list_selected_fg = "#272822"
+help_title_fg = "#e6db74"

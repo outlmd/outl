@@ -125,7 +125,7 @@ A few of the keys:
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `managed` | bool | `true` | Emits the top-level `managed = true` directive so no client rewrites `config.toml`. See [Declarative config](#declarative-config). |
-| `theme.preset` | enum | `"outl-light"` | Light side of the pair. One of `outl`, `outl-light`, `default-dark`, `light`, `logseq-light`, `dracula`, `solarized-dark`, `nord`, `monokai`, `gruvbox`. |
+| `theme.preset` | enum | `"outl-light"` | Light side of the pair. One of `outl`, `outl-light`, `ansi`, `ansi-light`, `logseq-light`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox`, `gruvbox-light`, or one of your own from `~/.config/outl/themes/`. |
 | `theme.presetDark` | enum \| null | `null` | Dark side — the preset the TUI renders under `mode = "auto"`/`"dark"`. `null` follows `preset`; the terminal is themed by a lone `theme.preset`. |
 | `theme.mode` | enum | `"auto"` | `"light"`, `"dark"`, or `"auto"`. A terminal reads `auto` as **dark**, so `"auto"` themes it by the dark side. |
 | `editor.vimMode` | bool | `true` | Vim-style modal bindings (desktop). |

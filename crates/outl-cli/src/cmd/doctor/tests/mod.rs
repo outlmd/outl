@@ -196,6 +196,23 @@ fn collect_with_store(
     scope: RepairScope,
     store: &outl_core::device::DeviceStore,
 ) -> Result<DoctorReport, ApiError> {
+    let themes = tempfile::TempDir::new().expect("temp theme dir");
+    collect_with_theme_dir(path, do_repair, scope, store, themes.path())
+}
+
+/// A doctor run whose theme directory the caller owns.
+///
+/// Same argument as `store` and `theme`: `~/.config/outl/themes/` resolves
+/// from the process-wide `XDG_CONFIG_HOME`, so a pass that read it itself
+/// would report on the developer's own theme files and make the finding
+/// count in this battery depend on them.
+fn collect_with_theme_dir(
+    path: &Path,
+    do_repair: bool,
+    scope: RepairScope,
+    store: &outl_core::device::DeviceStore,
+    theme_dir: &Path,
+) -> Result<DoctorReport, ApiError> {
     super::collect_internal(
         path,
         true,
@@ -212,6 +229,7 @@ fn collect_with_store(
         // `a_config_that_does_not_parse_is_reported` passes `Some` directly.
         &outl_config::ThemeCfg::default(),
         None,
+        theme_dir,
     )
 }
 

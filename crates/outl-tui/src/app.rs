@@ -98,9 +98,9 @@ mod tests {
         // Sanity: all preset themes share the same set of named styles
         // (compiler-enforced by the struct shape, but a quick smoke
         // here catches accidental Color::Reset placeholders).
-        for name in theme::PRESETS {
+        for name in theme::preset_names() {
             let t = theme::by_name(name).unwrap();
-            assert_eq!(t.name, *name);
+            assert_eq!(t.name, name);
         }
     }
 

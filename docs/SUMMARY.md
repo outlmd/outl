@@ -66,6 +66,7 @@
 * [Development guide](development.md)
 * [Boot performance](boot-performance.md)
 * [CI and release](ci-and-release.md)
+* [Discussions mirror to Discord](discussions-discord.md)
 * [Desktop UX behaviour](desktop-ux.md)
 * [Mobile UX behaviour](mobile-ux.md)
 * [iOS platform integration](ios-platform.md)

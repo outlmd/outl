@@ -113,8 +113,8 @@ pub struct Settings {
     /// Defaults to `true` — outl is keyboard-first and the same
     /// behaviour ships in the TUI.
     pub vim_mode: bool,
-    /// Palette preset name from `outl_theme::PRESETS`. Default
-    /// `"outl-light"`. The light side of the RFC 0022 pair, and the
+    /// Palette preset name — a built-in or one from `~/.config/outl/themes/`.
+    /// Default `"outl-light"`. The light side of the RFC 0022 pair, and the
     /// only side used when `theme_mode == "light"`.
     pub theme: String,
     /// The dark side of the RFC 0022 pair, used when `theme_mode ==

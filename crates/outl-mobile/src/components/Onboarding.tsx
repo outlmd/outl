@@ -50,11 +50,11 @@ export function Onboarding(props: { onFinish: () => void }) {
   return (
     <div
       class="flex h-full w-full flex-col bg-(--color-outl-bg)"
-      style={{ "padding-top": "max(env(safe-area-inset-top), 16px)" }}
+      style={{ "padding-top": "max(var(--safe-area-inset-top), 16px)" }}
     >
       <div
         class="flex flex-1 flex-col px-6 py-8"
-        style={{ "padding-bottom": "max(env(safe-area-inset-bottom), 16px)" }}
+        style={{ "padding-bottom": "max(var(--safe-area-inset-bottom), 16px)" }}
       >
         {/* ---- Step 1: storage ---- */}
         <Show when={step() === "storage"}>

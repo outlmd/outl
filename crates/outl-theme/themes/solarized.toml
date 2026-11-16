@@ -1,0 +1,58 @@
+# solarized — Ethan Schoonover's classic muted palette, dark variant.
+#
+# base03 canvas (`#002b36`), base0 text (`#839496`), with the scheme's own
+# accent set. Hex values from the canonical Solarized specification.
+#
+# Known contrast gap, exempted by name in `tests/contrast.rs`: body text on
+# `bg_elev` (base0 on base02) is 4.11:1, under WCAG AA. Both halves are the
+# upstream scheme's own values and Solarized never intended base02 to carry
+# body text, so fixing it honestly means a new field for every preset.
+#
+# `solarized-dark` still resolves — it is the derived `-dark` suffix.
+
+[dark]
+bg = "#002b36"
+bg_elev = "#073642"
+fg = "#839496"
+fg_dim = "#7f9399"
+fg_dimmer = "#586e75"
+border = "#073642"
+hint = "#93a1a1"
+accent = "#2aa198"
+accent_fg = "#002b36"
+accent_soft = "#6c71c4"
+accent_alt = "#859900"
+warn = "#b58900"
+destructive = "#dc322f"
+destructive_fg = "#ffffff"
+ref_link_fg = "#268bd2"
+tag_link_fg = "#d33682"
+md_link_fg = "#6c71c4"
+bold_fg = "#cb4b16"
+italic_fg = "#6c71c4"
+strike_fg = "#586e75"
+highlight_bg = "#b58900"
+highlight_fg = "#002b36"
+code_fg = "#859900"
+todo_open_fg = "#dc322f"
+todo_done_fg = "#859900"
+todo_done_body_fg = "#586e75"
+property_key_fg = "#586e75"
+property_value_fg = "#2aa198"
+heading_fg = "#93a1a1"
+dim_fg = "#586e75"
+selected_bullet_bg = "#2aa198"
+selected_bullet_fg = "#002b36"
+cursor_block_bg = "#93a1a1"
+cursor_block_fg = "#002b36"
+cursor_caret_fg = "#93a1a1"
+status_normal_bg = "#2aa198"
+status_normal_fg = "#002b36"
+status_insert_bg = "#859900"
+status_insert_fg = "#002b36"
+status_visual_bg = "#d33682"
+status_visual_fg = "#002b36"
+status_message_fg = "#b58900"
+list_selected_bg = "#2aa198"
+list_selected_fg = "#002b36"
+help_title_fg = "#b58900"

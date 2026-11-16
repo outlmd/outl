@@ -78,7 +78,7 @@ export function Toast(props: ToastProps): JSX.Element {
         role="status"
         aria-live="polite"
         class="pointer-events-none outl-toast-in fixed inset-x-0 top-0 z-50 flex justify-center"
-        style="padding-top: max(env(safe-area-inset-top), 12px);"
+        style="padding-top: max(var(--safe-area-inset-top), 12px);"
       >
         {/* Pill-shaped in-app notification, Apple/Bear style: capsule
             rounded-full, blurred translucent bg, shadow elevation,

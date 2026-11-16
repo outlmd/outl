@@ -67,6 +67,8 @@ outl-mobile (this crate)
    ├── gen/apple/.../OutlBackgroundRefresh.swift  (BGTaskScheduler windows + the beginBackgroundTask flush)
    ├── gen/apple/.../OutlBonjour.swift            (NetService advertise + NetServiceBrowser resolve, the iOS mDNS path)
    ├── gen/android/.../MainActivity.kt            (load check, then NativeSetup.install + OutlBackgroundSync.install, before Tauri boots)
+   ├── gen/apple/.../OutlSafeArea.swift           (measures UIKit safeAreaInsets, pushes them to the page; see "Safe areas")
+   ├── gen/android/.../OutlSafeArea.kt            (system bars + cutout from WindowInsets, pushed to the page)
    ├── gen/android/.../OutlNativeLibrary.kt       (the one "did the .so load?" answer; logs ABI + page size)
    ├── gen/android/.../NativeLoadErrorActivity.kt (plain error screen instead of a crash when the .so will not load)
    ├── gen/android/.../NativeSync.kt              (external fun bindings for the bg_sync JNI symbols)
@@ -356,6 +358,15 @@ A long-press on a **page** row (never a journal) opens the same menu component t
   A summary with several lines (a merge with property conflicts) makes `Toast.tsx` show every line and stay 12 s, because the conflict line is the one the user has to read.
 - Not done on mobile: a keyboard shortcut (there is no chord surface) and the optional alias-conflict warning.
 - Pinned by `PageSwitcher.page-actions.test.tsx` (the shared flow runs for real over stubbed `api/page-merge` commands) and `sheets.bounded.test.ts` (the name sheet declares its bound).
+
+## Safe areas: the native shell measures, the page applies
+
+`env(safe-area-inset-*)` is not trustworthy in either webview here: both shells are edge-to-edge (full-screen `WKWebView`; `enableEdgeToEdge()` in `MainActivity`), and with the inset reading 0 the header's `max(env(...), 12px)` fell to its floor and drew under the status bar.
+So there is one source: `OutlSafeArea.swift` (iOS, a probe view's `safeAreaInsetsDidChange`) and `OutlSafeArea.kt` (Android, the `WindowInsets` listener, system bars plus display cutout, IME excluded) push CSS-pixel values into the page, and `src/lib/safe-area.ts` writes them to `--safe-area-inset-*` on `:root`, installed once from `index.tsx`.
+`styles.css` declares those properties from `env(..., 0px)` as the fallback.
+**A component reads `var(--safe-area-inset-*)`, never `env()`**; `safe-area.css.test.ts` fails on a stray `env(safe-area-inset` and on a fallback without a length.
+Load order is covered both ways: native pushes on change and when the webview appears, the page pulls (iOS `outlSafeArea` message handler, Android `window.OutlSafeArea.get()`).
+Only a device can show the numbers, so check a notched iPhone in both orientations and an Android phone with gesture and three-button navigation before calling it done.
 
 ## Per-feature behaviour lives in `docs/mobile-ux.md`
 

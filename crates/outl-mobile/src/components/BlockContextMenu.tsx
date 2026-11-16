@@ -68,8 +68,8 @@ export function BlockContextMenu(props: BlockContextMenuProps): JSX.Element {
           // the screen and the first row sat under the status bar, out of
           // reach. The list scrolls instead, and the top inset keeps the
           // first row clear of the notch rather than merely on screen.
-          "padding-top": "max(env(safe-area-inset-top), 12px)",
-          "padding-bottom": "max(env(safe-area-inset-bottom), 16px)",
+          "padding-top": "max(var(--safe-area-inset-top), 12px)",
+          "padding-bottom": "max(var(--safe-area-inset-bottom), 16px)",
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
             ? "none"

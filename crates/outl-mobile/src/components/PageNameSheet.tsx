@@ -55,7 +55,7 @@ export function PageNameSheet(props: {
       <div
         class="outl-sheet-up fixed inset-x-0 bottom-0 z-[56] max-h-[80vh] overflow-y-auto rounded-t-2xl bg-(--color-outl-bg-elev) px-4 pt-3 shadow-2xl"
         style={{
-          "padding-bottom": `max(env(safe-area-inset-bottom), ${keyboardInset()}px, 12px)`,
+          "padding-bottom": `max(var(--safe-area-inset-bottom), ${keyboardInset()}px, 12px)`,
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging() ? "none" : "transform 220ms var(--ease-spring-in)",
         }}

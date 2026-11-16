@@ -24,7 +24,7 @@
 //! last = "/Users/me/iCloud/outl"
 //!
 //! [theme]
-//! preset = "outl-light"  # name from outl_theme::PRESETS; the light side of the pair
+//! preset = "outl-light"  # any name `outl theme list` prints; the light side of the pair
 //! preset_dark = "outl"   # optional; dark side. Omit = falls back to `preset`
 //! mode = "auto"          # "light" | "dark" | "auto" (default)
 //!
@@ -78,7 +78,7 @@ mod paths;
 mod schema;
 mod tui;
 
-pub use paths::{config_dir, config_path};
+pub use paths::{config_dir, config_path, theme_dir};
 pub use schema::{
     AssetsCfg, BacklinksOrder, BackupCfg, CalendarCfg, Config, DiagramsMode, DisplayCfg, EditorCfg,
     RemindersCfg, SnapshotCfg, StorageCfg, SyncConfig, SyncTransportKind, TelemetryCfg, ThemeCfg,

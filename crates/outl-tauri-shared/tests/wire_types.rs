@@ -197,7 +197,7 @@ fn workspace_summary_matches_its_interface() {
 /// side of the same triangle.
 #[test]
 fn palette_matches_its_interface() {
-    assert_wire_shape(&outl_theme::presets::outl(), "Palette", &[]);
+    assert_wire_shape(&outl_theme::default(), "Palette", &[]);
 }
 
 // --- the rest of the wire ------------------------------------------------
