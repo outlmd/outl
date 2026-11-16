@@ -34,6 +34,7 @@ import type { PageView, Reminder } from "@outl/shared/api/types";
 
 import { appState, setAppState } from "../lib/store";
 import { focusFirstRowOnOpen, rovingKeydown } from "../lib/keyboard-reach";
+import { resetForNavigation } from "../lib/page-change";
 
 export interface RemindersPanelDeps {
   applyView: (view: PageView) => void;
@@ -86,6 +87,11 @@ export function RemindersPanel(props: RemindersPanelDeps) {
   async function jumpTo(r: Reminder) {
     try {
       const view = await openPageBySlug(r.page_slug);
+      // A navigation, so the zoom and any backlink cursor go. Called
+      // here rather than taken as an `openView` prop because this
+      // panel's other writer (`markDone`) is a mutation on the page
+      // already open, which must keep them.
+      resetForNavigation();
       props.applyView(view);
       setAppState("selectedBlockId", r.block_id);
       setAppState("remindersOpen", false);

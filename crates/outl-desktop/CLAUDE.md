@@ -381,8 +381,22 @@ Why diverge from the TUI: it has a char cursor, so "open the ref under cursor" i
 
 The chrome (page-like header, zoom path, which blocks render) is in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#zoom--focus-on-a-block), the cross-client contract in [`docs/clients.md`](../../docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
 
-Three decisions beyond that contract:
+Five decisions beyond that contract:
 
+- **`zoomView()` (`lib/store.ts`) is the one owner of "is this window zoomed, and into what".**
+  Three surfaces have to agree — what the body renders, where `j` / `k` may go, and whether the page's own sections are drawn — and each used to resolve `focusBlockId` against the outline itself.
+  A stale id read as zoomed by one and unzoomed by another is a cursor walking into a section nothing painted, which is exactly what `backlinkBlockIds()` did.
+  `<OutlineView />` wraps it in the `focus()` memo so the walk runs once per render, and passes the answer down as `<PageSections zoomed>` rather than letting that component ask a second time.
+- **Nothing belonging to the page renders while zoomed.**
+  `<PageSections />` draws nothing (backlinks, nested pages, namespace mentions), the page-property row is already hidden, and `backlinkBlockIds()` returns `[]` so `j` clamps at the zoom's last row.
+  The reason is the one the property row carries: the header is a *block* there, so the page's references under a block title are a wrong answer, not merely a distraction.
+  Net: `PageSections.test.tsx`, plus "j stays inside the zoom instead of entering the page's backlinks" (`action-handlers.zoom.test.ts`).
+- **`resetForNavigation()` (`lib/page-change.ts`) is what a navigation drops, and it has two callers on purpose.**
+  `installPageChangeEffect` only notices a page *id* change, so it cannot see the user asking for the page they are already on — `Cmd+J` while zoomed into a block of today's journal navigated to today and left the zoom standing, so the chord looked dead.
+  The handlers go through `ctx.navigateTo` (`handler-context.ts`) and the shell's chrome through `AppShell`'s `openView`; both are `applyView` plus that reset, and **a failed open resets nothing**.
+  `applyView` stays the one for everything that is not a navigation: a commit, a batch op, `refreshActivePage` (a peer reload keeps the page *and* the user's zoom), a quick capture into today, and a timeline restore.
+  `RemindersPanel` calls the reset inside its own `jumpTo`, because one `applyView` prop cannot answer for both that and `markDone`.
+  Net: "OpenToday leaves a zoom held on today's journal" and "a failed OpenToday keeps the zoom".
 - **No zoom stack:** `ZoomOut` reads the current focus's breadcrumb — last crumb is the parent, empty breadcrumb means top-level so it exits to the full page.
 - **Bullet gesture split**, so zoom cannot collide with task state: a `•` bullet zooms via `onFocusBlock`, a `▢` / `▨` / `▣` checkbox keeps its one-stop-per-click toggle, and the fold **chevron** stays collapse.
   DOING shares TODO's colour and is told apart by the half-filled glyph; only DONE strikes the body.

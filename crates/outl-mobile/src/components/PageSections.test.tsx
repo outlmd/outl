@@ -64,6 +64,7 @@ function reply(count: number): PageBacklinks {
 function mount(
   backlinks: PageBacklinks | undefined,
   pageKind: "page" | "journal",
+  zoomed = false,
 ): HTMLElement {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -72,6 +73,7 @@ function mount(
       <PageSections
         backlinks={backlinks}
         pageKind={pageKind}
+        zoomed={zoomed}
         onToggleOrder={vi.fn()}
         onOpenPage={vi.fn()}
       />
@@ -137,5 +139,55 @@ describe("Journal hands PageSections an answer for the page on screen", () => {
     expect(source).toContain(
       "backlinks={backlinks.loading ? undefined : backlinks()}",
     );
+  });
+});
+
+/**
+ * Zooming into a block is a request for that subtree and nothing else.
+ *
+ * Every section here answers a question about the **page**, so under a
+ * zoom — where the header is a block — the page's backlinks read as
+ * that block's. That is a wrong answer, not a noisy one. The desktop
+ * hides the same three (plus the page's `key:: value` row, which this
+ * client draws from `Journal.tsx`).
+ */
+describe("none of the page's sections survive a zoom", () => {
+  it("hides the backlinks card the scan already answered for", () => {
+    const host = mount(reply(2), "journal", true);
+
+    expect(host.textContent).not.toContain("Linked from 2");
+    expect(host.querySelector("section")).toBeNull();
+  });
+
+  it("hides the empty-state card a regular page would otherwise keep", () => {
+    // `keepWhenEmpty` is what earns that box its space on a page, and
+    // the zoom outranks it: discoverability is a page-level job.
+    const host = mount(reply(0), "page", true);
+
+    expect(host.textContent).not.toContain("No backlinks yet");
+  });
+
+  it("still draws them on the full page", () => {
+    const host = mount(reply(2), "journal", false);
+    expect(host.textContent).toContain("Linked from 2");
+  });
+});
+
+/**
+ * Two more facts that live in `Journal.tsx` and therefore get the
+ * source-pin treatment above: what it hands `zoomed`, and the page's
+ * own `key:: value` row, which is page metadata sitting above a block
+ * title while zoomed.
+ */
+describe("Journal scopes the page's own surfaces to the full page", () => {
+  const source = () =>
+    readFileSync(join(import.meta.dirname, "Journal.tsx"), "utf8");
+
+  it("tells PageSections when the outline is zoomed", () => {
+    expect(source()).toContain("zoomed={focusView() !== null}");
+  });
+
+  it("keeps the page property row out of a zoom", () => {
+    expect(source()).toContain('<Show when={!focusView()}>\n          <BlockProperties');
   });
 });

@@ -36,7 +36,6 @@ import { HistoryIcon, PageGlyph, PaperclipIcon } from "@outl/shared/icons";
 import {
   collectBlockRefHandles,
   findBlock,
-  focusSubtree,
   rawTextWithTodo,
   visualRangeSet,
 } from "@outl/shared/outline";
@@ -58,9 +57,11 @@ import {
   setAppState,
   setOutline,
   trackBacklinks,
+  visibleRoots,
+  zoomView,
 } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
-import { installPageChangeEffect } from "../lib/page-change";
+import { installPageChangeEffect, resetForNavigation } from "../lib/page-change";
 import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
 import { PageSections } from "./PageSections";
@@ -260,40 +261,30 @@ export function OutlineView() {
   });
 
   /**
-   * Zoom view (Roam/Workflowy focus). `null` when not zoomed; otherwise
-   * the focused block's subtree + ancestor breadcrumb, sliced from the
-   * outline the client already holds — pure view state, no round-trip.
-   * `focusSubtree` returns `null` when the focused id is no longer in
-   * the outline (a peer deleted it, or it moved off-page); we clear the
-   * zoom so the full page renders again instead of a blank pane.
+   * Zoom view (Roam/Workflowy focus): the focused block's subtree +
+   * ancestor breadcrumb, or `null` when not zoomed — *or* when the
+   * focused id left the outline, which the effect below then clears.
+   *
+   * `zoomView` (`lib/store.ts`) is the one owner of that resolution,
+   * shared with `j` / `k` and with `<PageSections zoomed>`; the memo
+   * keeps the walk to once per render, not once per reader.
    */
-  const focus = createMemo<import("@outl/shared/outline").FocusView | null>(
-    () => {
-      const id = appState.focusBlockId;
-      if (!id) return null;
-      return focusSubtree(appState.outline, id);
-    },
-  );
+  const focus = createMemo(() => zoomView());
 
-  // Self-heal a stale zoom target *outside* the memo: when the focused
-  // id left the outline (peer delete / off-page move) `focus()` is
-  // `null` while `focusBlockId` still holds the dead id, so clear it and
-  // the full page renders. Kept in an effect, not the memo, so the memo
-  // stays a pure derivation (a `setAppState` inside a memo is a
-  // reactivity hazard as the component grows).
+  // Self-heal a stale zoom target: `focusBlockId` still holds an id the
+  // outline lost (peer delete / off-page move), so clear it and the full
+  // page renders. An effect and not the memo, so the memo stays a pure
+  // derivation (a `setAppState` inside one is a reactivity hazard).
   createEffect(() => {
     if (appState.focusBlockId && !focus()) {
       setAppState("focusBlockId", null);
     }
   });
 
-  /** Blocks to render in the outline body. When zoomed (Roam-style) the
-   *  focused block becomes the header title, so the body shows its
-   *  **children**; otherwise the whole page. */
-  const rootBlocks = () => {
-    const fv = focus();
-    return fv ? fv.root.children : appState.outline;
-  };
+  /** Blocks to render in the outline body — the same ones `j` / `k`
+   *  walk (`visibleRoots`, `lib/store.ts`). Memoised because three
+   *  readers call it per render and the zoom slice is an O(page) walk. */
+  const rootBlocks = createMemo(visibleRoots);
 
   async function handleError<T>(promise: Promise<T>): Promise<T | undefined> {
     try {
@@ -324,7 +315,11 @@ export function OutlineView() {
 
   async function handleRefClick(target: string) {
     const view = await handleError(openRef(target));
-    if (view) applyView(view);
+    if (!view) return;
+    // A navigation, even when the ref points back at the open page —
+    // so the zoom goes, the same way `Cmd+J` drops it.
+    resetForNavigation();
+    applyView(view);
   }
 
   function handleTagClick(tag: string) {
@@ -854,9 +849,12 @@ export function OutlineView() {
             </For>
           </Show>
 
-          {/* Backlinks, nested pages, namespace mentions — in that
-              order, below the outline (TUI parity). */}
-          <PageSections blank={isBlankOutline(rootBlocks())} onOpenPage={(slug) => void handleRefClick(slug)} />
+          {/* Backlinks, nested pages, namespace mentions — in that order
+              below the outline (TUI parity), and none of them while
+              zoomed: the header is a block there, so the page's
+              references would read as that block's. */}
+          <PageSections blank={isBlankOutline(rootBlocks())} zoomed={focus() !== null}
+            onOpenPage={(slug) => void handleRefClick(slug)} />
         </div>
       </div>
       {/* The error surface is the top-right `<ErrorToast />` (mounted in

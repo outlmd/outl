@@ -34,6 +34,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Zooming into a block is distraction-free on every client, and asking for a page you are already on gets you back out.**
+  Two faults with one shape: the zoom was a slice of the outline body, and everything around the body carried on as if the whole page were open.
+
+  **The page's own surfaces stayed on screen under the block's title** — its backlinks, its nested pages, its namespace mentions, and on mobile its `key:: value` row.
+  Those answer questions about the **page**, so under a block header they read as the block's: a wrong answer, not just a noisy one.
+  All of them are hidden now on the desktop, on mobile and in the TUI.
+  The cursor follows the same rule where there is one: `j` off the zoom's last row stops instead of crossing into the backlinks, and in the TUI `z i` pressed while the cursor sits in the backlinks panel brings it back to the outline rather than leaving it on a row that is no longer drawn.
+
+  **`Cmd+J` zoomed into a block of today's journal did nothing at all**, and so did mobile's Today.
+  Both clients dropped the zoom on exactly one signal — the page id (desktop) or slug (mobile) changing — so navigating to the page *already open* had nothing to notice and left the zoom standing.
+  "The user asked for a page" is now a separate question from "the page changed", and only the first is a navigation.
+  That also fixes the sidebar's Today, a `Cmd+P` pick of the current page, a click on a `[[ref]]` that points back at it, mobile's week strip, calendar, page switcher, deep links and wake-to-today.
+  A commit, a peer refresh, a background poll, a capture into today and a timeline restore are **not** navigations and keep the zoom; a failed open changes nothing.
+  The TUI never had this one: it clears the zoom on every view **load** rather than on a comparison.
+
+  The per-client owners are in [`docs/clients.md` → Zoom / focus on a block](docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
+
 - **The iOS widget was a white card, and the Lock Screen control was a button that did nothing.**
   Two separate faults in the same extension, both silent.
 

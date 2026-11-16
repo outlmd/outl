@@ -58,7 +58,7 @@ pub(crate) fn render_backlinks_inline(
     app: &App,
     inner_width: u16,
 ) -> (Vec<Line<'static>>, Option<usize>) {
-    if !app.show_backlinks {
+    if !app.show_backlinks || !app.page_sections_visible() {
         return (Vec::new(), None);
     }
     let backlinks = app.backlinks_for_current();
@@ -345,6 +345,33 @@ mod tests {
             ancestors: Vec::new(),
             source_path: None,
         }
+    }
+
+    /// Zooming into a block is a request for that subtree and nothing
+    /// else. The backlinks belong to the **page**, so under a zoom —
+    /// where the header is a block — they are an answer to a question
+    /// nobody asked, about something other than what is on screen.
+    ///
+    /// Driven through the pending-index notice because that is the one
+    /// section state reachable without building an index: it proves the
+    /// renderer asks `page_sections_visible`, which a test of the
+    /// predicate alone cannot.
+    #[test]
+    fn a_zoom_takes_the_pages_backlinks_off_screen() {
+        let (mut app, _dir) = test_app();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.backlink_index_rx = Some(rx);
+        assert!(
+            !render_backlinks_inline(&app, 40).0.is_empty(),
+            "the section is on screen on the full page"
+        );
+
+        app.zoom_stack.push(vec![0]);
+
+        assert!(
+            render_backlinks_inline(&app, 40).0.is_empty(),
+            "a zoom hides the page's backlinks"
+        );
     }
 
     /// #319, third caller. `render_block` has the same rule and its own

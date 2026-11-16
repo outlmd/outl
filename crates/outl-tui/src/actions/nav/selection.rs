@@ -57,10 +57,11 @@ impl App {
                     return true;
                 }
                 // Bottom of outline → try entering the backlinks zone.
-                // Only when the whole page is shown: a zoomed subtree
-                // ends before `flat_len`, and its backlinks aren't part
-                // of the focused view, so `j` stops at the subtree edge.
-                if self.zoom_stack.is_empty() && self.backlinks_navigable() {
+                // Only when the section is actually drawn: a zoom takes
+                // it off screen (`page_sections_visible`, the one owner
+                // the renderers ask too), so `j` stops at the subtree
+                // edge instead of parking the cursor on an invisible row.
+                if self.page_sections_visible() && self.backlinks_navigable() {
                     self.focus = Focus::Backlink {
                         idx: 0,
                         sub_path: Vec::new(),

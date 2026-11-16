@@ -30,6 +30,12 @@ use ratatui::text::{Line, Span};
 /// current page has nothing nested under it — an empty section does
 /// not earn its rows.
 pub(crate) fn render_nested_pages(app: &App, inner_width: u16) -> Vec<Line<'static>> {
+    // Nested pages live under *this page's* namespace, which says
+    // nothing about the block a zoom put in the header — same rule the
+    // backlinks section follows, one owner.
+    if !app.page_sections_visible() {
+        return Vec::new();
+    }
     let children = app.namespace_children_for_current();
     if children.is_empty() {
         return Vec::new();
@@ -62,4 +68,67 @@ pub(crate) fn render_nested_pages(app: &App, inner_width: u16) -> Vec<Line<'stat
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use outl_core::id::ActorId;
+    use outl_core::workspace::Workspace;
+    use tempfile::TempDir;
+
+    fn test_app() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// The twin of the backlinks rule: nested pages live *under this
+    /// page's namespace*, which says nothing about the block a zoom put
+    /// in the header.
+    ///
+    /// The memo is filled directly rather than deriving rows, so the
+    /// test is about the guard and not about `namespace_descendants`.
+    #[test]
+    fn a_zoom_takes_the_nested_pages_off_screen() {
+        let (mut app, _dir) = test_app();
+        let slug = app.current_slug();
+        *app.namespace_children.borrow_mut() = Some((
+            slug,
+            vec![outl_actions::NamespaceChild {
+                page: outl_actions::PageMeta {
+                    id: "blk-nested1".into(),
+                    slug: "os-linux".into(),
+                    title: "os/linux".into(),
+                    kind: outl_actions::PageKind::Page,
+                    icon: None,
+                    aliases: Vec::new(),
+                    page_type: None,
+                    pinned: false,
+                },
+                depth: 1,
+                label: "linux".into(),
+            }],
+        ));
+        assert!(
+            !render_nested_pages(&app, 40).is_empty(),
+            "the section is on screen on the full page"
+        );
+
+        app.zoom_stack.push(vec![0]);
+
+        assert!(
+            render_nested_pages(&app, 40).is_empty(),
+            "a zoom hides the page's nested pages"
+        );
+    }
 }

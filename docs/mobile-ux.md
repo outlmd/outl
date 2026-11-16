@@ -152,6 +152,11 @@ Convention (three-surface parity): [`docs/clients.md` → Blockquote convention]
 Tap a block's plain bullet dot to zoom in — it becomes the outline root (Roam/Workflowy focus); `← Back` + breadcrumb zoom out.
 Local view state (`focusBlockId` in `Journal.tsx`), never a Tauri round-trip; the shared `focusSubtree` (`@outl/shared/outline`) does the subtree + breadcrumb.
 Mobile owns only the touch chrome: the bullet tap moves mark-as-TODO to the long-press menu; checkbox + `<CollapseTriangle>` untouched.
+
+**Nothing that belongs to the page is on screen while zoomed**: the backlinks card, the nested-pages list, the namespace mentions and the page's own `key:: value` row all go, because the header is a *block* there.
+**Opening a page leaves the zoom, including the page already open** — Today, the week strip, the calendar, a tap on a `[[ref]]`, the page switcher, a deep link and wake-to-today.
+A commit, a background poll, a peer reload and a capture into today keep it: none of those is the user asking to go somewhere.
+
 Convention: [`docs/clients.md` → Zoom / focus on a block](clients.md#zoom--focus-on-a-block-roamworkflowy).
 
 ## Paste from external apps

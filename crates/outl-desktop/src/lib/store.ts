@@ -8,9 +8,11 @@
  * because the chrome diverges; only pure helpers and DTOs go through
  * `@outl/shared`.
  */
+import { focusSubtree } from "@outl/shared/outline";
 import { createSavedMarks } from "@outl/shared/trust";
 import { createStore, reconcile } from "solid-js/store";
 
+import type { FocusView } from "@outl/shared/outline";
 import type {
   Backlink,
   BacklinksOrder,
@@ -456,6 +458,44 @@ export function trackBacklinks(reply: Promise<PageBacklinks>): Promise<void> {
     .then((r) => setState(backlinksState(r)))
     .catch(() => {})
     .finally(() => setState("backlinksLoading", false));
+}
+
+/**
+ * The zoom, resolved against the live outline: the focused block's
+ * subtree plus its ancestor breadcrumb, or `null` when there is no zoom
+ * **or** the focused block has left the page (a peer deleted it, a move
+ * took it elsewhere).
+ *
+ * The single owner of "is this window zoomed, and into what", because
+ * three surfaces have to agree on it and they used to each resolve it
+ * themselves: what the outline body renders, where `j` / `k` may go,
+ * and whether the page's own sections are on screen. A stale id read as
+ * "zoomed" by one of them and as "not zoomed" by another is a cursor
+ * walking into a section that is not drawn.
+ *
+ * Reads the store, so calling it inside a memo / JSX keeps the
+ * reactivity — `<OutlineView />` wraps it in a `createMemo` so the walk
+ * runs once per render rather than once per reader.
+ */
+export function zoomView(): FocusView | null {
+  const id = state.focusBlockId;
+  if (!id) return null;
+  return focusSubtree(state.outline, id);
+}
+
+/**
+ * The blocks on screen: the zoom's children when zoomed, the whole page
+ * otherwise.
+ *
+ * One function because the body renders them and the cursor walks them,
+ * and those two must not disagree — `navBlocks()` used to carry a
+ * comment saying it matched `<OutlineView />`, which is a parity claim
+ * nothing could fail. A stale zoom target falls back to the full page
+ * here, so neither caller has to ask twice.
+ */
+export function visibleRoots(): BlockNode[] {
+  const fv = zoomView();
+  return fv ? fv.root.children : state.outline;
 }
 
 /**

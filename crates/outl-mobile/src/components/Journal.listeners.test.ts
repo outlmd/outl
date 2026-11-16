@@ -71,6 +71,9 @@ function view(id = "page-1", slug = "2026-09-18"): PageView {
 function harness(over: Partial<JournalListenerDeps> = {}) {
   const calls = {
     applyView: vi.fn(),
+    // A deep link is a navigation and takes the zoom with it; every
+    // other listener here is a refresh and must not.
+    openView: vi.fn(),
     setError: vi.fn(),
     setAheadOfLog: vi.fn(),
     loadTodayWithRetry: vi.fn(async () => {}),
@@ -210,7 +213,10 @@ describe("deep link", () => {
     await emit("deep-link://navigate", payload);
 
     expect(commands[cmd]).toHaveBeenCalled();
-    expect(calls.applyView).toHaveBeenCalled();
+    // `openView`, not `applyView`: a deep link into the page already on
+    // screen still has to leave the zoom the user was in.
+    expect(calls.openView).toHaveBeenCalled();
+    expect(calls.applyView).not.toHaveBeenCalled();
   });
 
   it("opens the capture sheet for outl://capture without navigating", async () => {
@@ -223,7 +229,7 @@ describe("deep link", () => {
 
     expect(calls.openCapture).toHaveBeenCalledOnce();
     expect(commands.openTodayJournal).not.toHaveBeenCalled();
-    expect(calls.applyView).not.toHaveBeenCalled();
+    expect(calls.openView).not.toHaveBeenCalled();
   });
 
   it("surfaces a failed navigation instead of swallowing it", async () => {
@@ -236,7 +242,7 @@ describe("deep link", () => {
     await emit("deep-link://navigate", { kind: "today" });
 
     expect(calls.setError).toHaveBeenCalledWith("Error: boom");
-    expect(calls.applyView).not.toHaveBeenCalled();
+    expect(calls.openView).not.toHaveBeenCalled();
   });
 });
 

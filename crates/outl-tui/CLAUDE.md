@@ -45,6 +45,10 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   `selected` / `id_by_flat` stay **whole-page** flat indices; `render_outline` draws only the root subtree but keeps `cursor` counting from the root's whole-page index (`zoom_root_node`), so nothing re-indexes.
   Navigation is confined to `zoom_root_window()` — `step_forward`/`step_backward` in `actions/nav/selection.rs` clamp to `[start, end)` and don't cross into backlinks while zoomed.
   Zooming a leaf is allowed (Workflowy shows just that block); `z o` at the page root is a silent no-op.
+  **`App::page_sections_visible()` is the one owner of "are the page's own sections on screen"** — the inline backlinks and the nested-pages list, which answer questions about the *page* and read as the focused block's when drawn under its title.
+  Three callers ask it and must not disagree: both renderers in `view::`, and the selection walk in `actions::nav::selection` that used to read `zoom_stack` directly.
+  `zoom_in_on_selected` also resets `focus` to `Focus::Outline`: it reads `selected` (an outline index) and so fires with the cursor parked on a backlink row, which the zoom then takes off screen.
+  Net: `a_zoom_takes_the_pages_backlinks_off_screen`, `a_zoom_takes_the_nested_pages_off_screen`, `zooming_in_brings_the_cursor_back_from_the_backlinks`.
   **Pure local view state** — never an `Op`, per-device, cleared on every view switch (`load_current_no_autorun` empties `zoom_stack` alongside `focus`).
   A stale root path (block moved/deleted) degrades to the whole page instead of panicking.
 - **`z M` / `z R` skip-leaves contract.**

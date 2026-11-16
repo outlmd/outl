@@ -21,7 +21,17 @@ import { haptic } from "../lib/haptics";
 export interface DayNavDeps {
   view: () => PageView | null;
   editingId: () => string | null;
-  applyView: (v: PageView) => void;
+  /**
+   * `Journal`'s **navigation** opener, never its plain `applyView`.
+   *
+   * Every path in this module is the user asking for a day, so each one
+   * drops the view state that belonged to where they were — above all
+   * the zoom. `jumpToday` is the case that makes the distinction
+   * load-bearing: today's journal is often *already* the open page, so
+   * an opener keyed on "did the slug change" leaves a zoom standing and
+   * the Today button does nothing at all.
+   */
+  openView: (v: PageView) => void;
   withError: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
 }
 
@@ -46,7 +56,7 @@ export function createDayNav(deps: DayNavDeps) {
   async function open(slug: string) {
     haptic("light");
     const next = await deps.withError(() => openJournalFor(slug));
-    if (next) deps.applyView(next);
+    if (next) deps.openView(next);
   }
 
   async function step(by: -1 | 1) {
@@ -73,7 +83,7 @@ export function createDayNav(deps: DayNavDeps) {
   async function jumpToday() {
     haptic("light");
     const next = await deps.withError(openTodayJournal);
-    if (next) deps.applyView(next);
+    if (next) deps.openView(next);
   }
 
   void refreshToday();

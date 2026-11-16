@@ -23,6 +23,32 @@ function outlineIds(blocks: BlockNode[], out: string[] = []): string[] {
 }
 
 /**
+ * What opening a page throws away: the zoom, and a cursor parked on a
+ * backlink row.
+ *
+ * Both are statements about the page the user was looking at, so both
+ * are wrong the moment another page (or the same page, asked for again)
+ * is on screen.
+ *
+ * **The single owner of that list**, because it has two callers that
+ * cannot be merged: the effect below, which notices a page id change
+ * however it happened (sidebar, picker, deep link, peer reload landing
+ * elsewhere), and the navigation handlers, which know the user *asked*
+ * for a page even when it is the one already open. The second case has
+ * no id change to notice, which is how `Cmd+J` came to do nothing while
+ * zoomed into a block of today's journal.
+ *
+ * It deliberately does **not** touch `selectedBlockId`: a block the
+ * user had selected inside a zoom is still a block on the page they
+ * just asked for. The effect re-snaps it when the page genuinely
+ * changed.
+ */
+export function resetForNavigation(): void {
+  setAppState("selectedBacklinkBlockId", null);
+  setAppState("focusBlockId", null);
+}
+
+/**
  * Reset per-page view state when the *page id* changes, and only then.
  *
  * Keyed with `on(() => appState.page?.id)`: `applyView` replaces the page
@@ -66,8 +92,7 @@ export function installPageChangeEffect(): void {
       }
       // A new page lands the cursor on the outline (never a stale
       // backlink) and drops any zoom held on the previous page.
-      setAppState("selectedBacklinkBlockId", null);
-      setAppState("focusBlockId", null);
+      resetForNavigation();
       snap();
     }),
   );

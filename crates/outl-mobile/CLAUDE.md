@@ -125,8 +125,11 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   The markup is one `<ConfirmDialog />` each and would not have earned a file on its own.
 
 - **`PageSections.tsx`** — everything below the outline, in order: the backlinks card (`<BacklinksSection />`) and the nested-pages list (`<NestedPages />` from `@outl/shared/namespace`, issue #275).
+  **It draws nothing while the outline is zoomed into a block** (`zoomed`, handed down from `Journal`'s `focusView()`), and `Journal` hides the page's own `key:: value` row on the same condition: the header is a *block* there, so the page's backlinks under it are a wrong answer rather than a noisy one.
+  Both facts live in `Journal.tsx`'s JSX, so `PageSections.test.tsx` pins them by reading the source, the way the `backlinks` prop's own contract already is.
   The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
   `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
+That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see that module's entry above.
   **Nothing here draws until the scan answers for the page on screen** (`lateSectionVisible`, `@outl/shared/outline`).
   `Journal` is what makes that true: `createResource` keeps its last value through a source change, so the raw accessor left the page the user just left answering for the one they opened, while the card said "No backlinks yet" over a scan still running.
 
@@ -134,6 +137,10 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   Every await in here is capped. The open is the one the journal's skeleton waits on, so an uncapped call there is not a slow page, it is a page that never comes back.
 - **`Journal.polls.ts`** — `installJournalPolls`: the connectivity listeners and every ticker (peers 3s, reminders 30s).
   Armed in the body so `onCleanup` owns the right scope, started only after the boot load settles.
+- **`Journal.navigation.ts`** — `createNavigation(deps)`: `openView` (a page the user asked for) and the `resetForNavigation` behind it.
+  Its own module because `applyView` cannot answer the question it asks. `applyView` compares slugs, which is the right net for "the page changed however it happened" and blind to the case that bit: **asking for the page you are already on.**
+  Today's journal is usually the open page, so the Today button, the week strip's current day, a `[[ref]]` pointing back here and a deep link to this page all resolved to the same slug, and the zoom they were supposed to leave stayed up with nothing on screen moving.
+  `Journal.day-nav.ts` and the deep-link listener take `openView` rather than `applyView` for that reason; a commit, a background poll, a peer reload and a capture into today keep `applyView` and keep the zoom.
 - **`Journal.embeds.ts`** — `createEmbedResolver(slug)`: the `((blk-…))` resolve for the visible page, called from `applyView`.
   It owns the signal too, so the component holds no state for it.
   The skip rule is the part with a failure mode: a resolve is skipped only when the page **and** the handle set both match the last one.

@@ -12,6 +12,11 @@ export interface PageSectionsProps {
   onOpenPage: (slug: string) => void;
   /** The page holds only empty blocks: show the first-run tips. */
   blank?: boolean;
+  /** The outline is zoomed into a block, so none of this is on screen
+   *  (see below). Passed in rather than read off the store, so this and
+   *  the outline body cannot disagree about whether the page is
+   *  zoomed — `zoomView` is the one owner of that. */
+  zoomed?: boolean;
 }
 
 /**
@@ -31,10 +36,20 @@ export interface PageSectionsProps {
  *
  * Each section renders nothing when it has nothing to show, so this
  * component is free when a page has neither.
+ *
+ * **None of it renders while the outline is zoomed into a block.**
+ * Every section here answers a question about the *page*, and under a
+ * zoom the header is a block — so the page's backlinks sitting beneath
+ * a block title read as that block's, which is a wrong answer and not
+ * merely a distracting one. Zooming is a request for one subtree and
+ * nothing else (Roam / Workflowy "focus"), which is the same reason
+ * `<OutlineView />` hides the page's `key:: value` row there.
+ * The matching half is `backlinkBlockIds()` in `lib/cursor-handlers.ts`:
+ * `j` must not walk into a section that is not drawn.
  */
 export function PageSections(props: PageSectionsProps) {
   return (
-    <>
+    <Show when={!props.zoomed}>
       <Show when={props.blank}>
         <div class="mt-8">
           <FirstRunTips client="desktop" />
@@ -52,6 +67,6 @@ export function PageSections(props: PageSectionsProps) {
         total={appState.namespaceMentionsTotal}
         onOpen={props.onOpenPage}
       />
-    </>
+    </Show>
   );
 }

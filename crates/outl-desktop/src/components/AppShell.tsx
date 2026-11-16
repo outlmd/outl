@@ -42,6 +42,7 @@ import { installShortcuts, type ActionHandlers } from "../lib/shortcuts";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { buildHandlers } from "../lib/action-handlers";
 import { followSelection, installRegionKeys } from "../lib/keyboard-reach";
+import { resetForNavigation } from "../lib/page-change";
 import { BatchToolbar } from "./BatchToolbar";
 import { Sidebar } from "./Sidebar";
 import { OutlineView } from "./OutlineView";
@@ -110,6 +111,25 @@ export function AppShell() {
     }
   }
 
+  /**
+   * Show a page the user **asked** for — the chrome's half of
+   * `ctx.navigateTo` (`lib/handler-context.ts`), which owns why that is
+   * not the same as applying a reply.
+   *
+   * Which surfaces take which is the part that is not obvious, and the
+   * list is **not** "everything that shows a page": `refreshActivePage`
+   * (a peer reload keeps the page *and* the user's zoom), a quick
+   * capture — which only refreshes today when today is already on
+   * screen — and a timeline restore all keep `applyView`.
+   * `<RemindersPanel />` does too, and calls `resetForNavigation` inside
+   * its own `jumpTo`, because one prop cannot answer for both that and
+   * its `markDone`.
+   */
+  function openView(view: PageView) {
+    resetForNavigation();
+    applyView(view);
+  }
+
   function setError(msg: string) {
     setAppState("lastError", msg);
   }
@@ -131,7 +151,7 @@ export function AppShell() {
   async function loadToday() {
     try {
       const view = await openTodayJournal();
-      applyView(view);
+      openView(view);
       await refreshStats();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -244,7 +264,7 @@ export function AppShell() {
           : payload.kind === "daily"
             ? await openJournalFor(payload.date)
             : await openPageBySlug(payload.slug);
-      applyView(view);
+      openView(view);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -261,7 +281,7 @@ export function AppShell() {
    */
   async function handleOpenFile(path: string) {
     try {
-      applyView(await openExternalFile(path));
+      openView(await openExternalFile(path));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -459,7 +479,7 @@ export function AppShell() {
         style={{ "grid-template-columns": gridTemplate() }}
       >
         <Show when={appState.sidebarOpen} fallback={<div />}>
-          <Sidebar onToday={loadToday} onPickPage={applyView} />
+          <Sidebar onToday={loadToday} onPickPage={openView} />
         </Show>
 
         <OutlineView />
@@ -469,14 +489,14 @@ export function AppShell() {
         {(h) => <BatchToolbar handlers={h()} />}
       </Show>
       <ChromeToggleBar handlers={handlers()} />
-      <Picker onPicked={applyView} handlers={handlers()} />
+      <Picker onPicked={openView} handlers={handlers()} />
       <QuickCapture applyView={applyView} />
       <PluginMarketplace />
       <SettingsModal onSwitchWorkspace={switchWorkspaceHere} />
       <HelpOverlay />
       <RemindersPanel applyView={applyView} setError={setError} />
-      <TasksPanel applyView={applyView} setError={setError} />
-      <TrashPanel applyView={applyView} setError={setError} />
+      <TasksPanel applyView={openView} setError={setError} />
+      <TrashPanel applyView={openView} setError={setError} />
       <TimelinePanel setError={setError} applyView={applyView} />
       <PluginEffectLayer />
       {/* Shell level, not above the outline: it is a statement about the

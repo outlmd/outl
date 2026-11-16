@@ -15,6 +15,7 @@
 
 import type { BlockNode, PageView } from "@outl/shared/api/types";
 
+import { resetForNavigation } from "./page-change";
 import { appState, setAppState } from "./store";
 
 export interface DesktopHandlerDeps {
@@ -29,6 +30,7 @@ export interface HandlerCtx {
   deps: DesktopHandlerDeps;
   safeCall: <T>(p: Promise<T>) => Promise<T | undefined>;
   runOn: (cmd: Promise<PageView>, nextSelectedId?: string | null) => Promise<void>;
+  navigateTo: (cmd: Promise<PageView>) => Promise<PageView | undefined>;
   runEach: (
     ids: readonly string[],
     op: (id: string) => Promise<PageView>,
@@ -83,6 +85,36 @@ export function createHandlerCtx(deps: DesktopHandlerDeps): HandlerCtx {
     }
   }
 
+  /**
+   * Open a page the user **asked** for.
+   *
+   * `runOn`'s sibling, and the difference is the intent rather than the
+   * reply: both apply a `PageView`, but this one is a navigation, so it
+   * drops the view state that belonged to wherever the user was
+   * (`resetForNavigation` — the zoom, a cursor on a backlink row).
+   *
+   * It exists because "navigation" and "the page id changed" are not
+   * the same question, and only the second one had an owner.
+   * `installPageChangeEffect` cannot see a user asking for the page
+   * they are already on, so `Cmd+J` while zoomed into a block of
+   * today's journal navigated to today and left the zoom standing —
+   * the chord that means "back to today" appeared to do nothing.
+   *
+   * Nothing is reset when the command fails: no navigation happened,
+   * so the subtree the user was reading stays on screen with the error
+   * on the status line. It hands the view back for that reason — a
+   * caller that places the cursor afterwards needs to know it landed.
+   */
+  async function navigateTo(cmd: Promise<PageView>) {
+    const view = await safeCall(cmd);
+    if (!view) return undefined;
+    // Before the paint, so no frame renders the new page through the
+    // old page's zoom.
+    resetForNavigation();
+    deps.applyView(view);
+    return view;
+  }
+
   /** Fire `op` once per id, in the order given, and paint only the
    *  last view that came back. Every batch action is this shape — fold
    *  all, indent a Visual range, delete one — and they agree on two
@@ -106,5 +138,5 @@ export function createHandlerCtx(deps: DesktopHandlerDeps): HandlerCtx {
     if (lastView) deps.applyView(lastView);
   }
 
-  return { deps, safeCall, runOn, runEach };
+  return { deps, safeCall, runOn, navigateTo, runEach };
 }

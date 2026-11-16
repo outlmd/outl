@@ -48,6 +48,8 @@ vi.mock("./api", () => ({
   undoPage: vi.fn(),
 }));
 
+import { openTodayJournal } from "@outl/shared/api/commands";
+
 import { buildHandlers } from "./action-handlers";
 import { appState, setAppState } from "./store";
 
@@ -189,5 +191,78 @@ describe("zoom / focus (ZoomIn / ZoomOut)", () => {
     handlers.ZoomOut?.();
 
     expect(appState.focusBlockId).toBeNull();
+  });
+
+  /**
+   * Asking for a page means the whole page, including when it is the
+   * page already open.
+   *
+   * The zoom used to be dropped by one thing only: `installPageChangeEffect`
+   * noticing a different page id. So `Cmd+J` zoomed into a block of
+   * today's journal navigated to today, landed on the same id, and the
+   * reset never ran — the user pressed the one chord that means "take me
+   * back to today" and the screen did not move.
+   */
+  it("OpenToday leaves a zoom held on today's journal", async () => {
+    setAppState({ focusBlockId: "blk-mid", selectedBlockId: "blk-leaf" });
+    vi.mocked(openTodayJournal).mockResolvedValue({
+      page: { id: "pg-1", slug: "today", title: "Today", kind: "journal" },
+      outline: [],
+      backlinks: [],
+      backlinks_order: "newest",
+    });
+
+    const handlers = buildHandlers({ applyView, setError });
+    await handlers.OpenToday?.();
+
+    expect(appState.focusBlockId).toBeNull();
+    expect(applyView).toHaveBeenCalledOnce();
+  });
+
+  it("a failed OpenToday keeps the zoom", async () => {
+    // Nothing navigated, so there is nothing to come back out to: the
+    // error is on the status line and the subtree the user was reading
+    // stays on screen.
+    setAppState("focusBlockId", "blk-mid");
+    vi.mocked(openTodayJournal).mockRejectedValue(new Error("no workspace"));
+
+    const handlers = buildHandlers({ applyView, setError });
+    await handlers.OpenToday?.();
+
+    expect(appState.focusBlockId).toBe("blk-mid");
+    expect(applyView).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `j` off the last row of a zoom used to cross into the page's
+   * backlinks — a section that is not on screen while zoomed, so the
+   * cursor left the outline for nowhere.
+   */
+  it("j stays inside the zoom instead of entering the page's backlinks", () => {
+    setAppState({
+      focusBlockId: "blk-mid",
+      selectedBlockId: "blk-leaf",
+      backlinks: [
+        {
+          block_id: "blk-citing",
+          todo: null,
+          ancestors: [],
+          source_page: {
+            id: "pg-2",
+            slug: "other",
+            title: "Other",
+            kind: "page",
+          },
+          source_block: block("blk-citing", "cites today"),
+          source_block_path: [],
+        },
+      ],
+    });
+
+    const handlers = buildHandlers({ applyView, setError });
+    handlers.SelectionDown?.();
+
+    expect(appState.selectedBacklinkBlockId).toBeNull();
+    expect(appState.selectedBlockId).toBe("blk-leaf");
   });
 });

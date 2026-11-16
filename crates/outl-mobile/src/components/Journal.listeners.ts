@@ -48,6 +48,12 @@ export interface JournalListenerDeps {
   view: () => PageView | null;
   editingId: () => string | null;
   applyView: (v: PageView) => void;
+  /**
+   * `Journal`'s navigation opener. A deep link is the user asking for a
+   * page, so it drops the zoom; the other listeners here are refreshes
+   * (`workspace-ready`, a projection failure) and must not.
+   */
+  openView: (v: PageView) => void;
   setError: (message: string | null) => void;
   setAheadOfLog: (notice: { slug: string; info: NonNullable<ProjectionWriteFailed["md_ahead_of_log"]> }) => void;
   /** Open today's journal, retrying while the workspace is still booting. */
@@ -93,7 +99,7 @@ function armCleanup(): (unlisten: () => void) => void {
  * with a buffered payload, without a listener in between.
  */
 export async function navigateDeepLink(
-  deps: Pick<JournalListenerDeps, "applyView" | "setError" | "openCapture">,
+  deps: Pick<JournalListenerDeps, "openView" | "setError" | "openCapture">,
   p: DeepLinkNavigate,
 ): Promise<void> {
   if (p.kind === "capture") {
@@ -107,7 +113,7 @@ export async function navigateDeepLink(
         : p.kind === "daily"
           ? await openJournalFor(p.date)
           : await openPageBySlug(p.slug);
-    deps.applyView(next);
+    deps.openView(next);
     deps.setError(null);
   } catch (err) {
     deps.setError(String(err));

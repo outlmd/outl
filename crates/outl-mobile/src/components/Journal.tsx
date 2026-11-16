@@ -127,6 +127,7 @@ import {
   runBootSequence,
 } from "./Journal.boot";
 import { installJournalPolls } from "./Journal.polls";
+import { createNavigation } from "./Journal.navigation";
 import { PageSections } from "./PageSections";
 import { BlockContextMenu } from "./BlockContextMenu";
 import { SelectionToolbar } from "./SelectionToolbar";
@@ -327,24 +328,17 @@ export function Journal() {
     info: MdAheadOfLog;
   } | null>(null);
 
+  // `Journal.navigation.ts` owns why opening a page and folding in a
+  // reply about the open one are different acts. (`applyView` below is
+  // a hoisted declaration, so naming it here is fine.)
+  const { resetForNavigation, openView } = createNavigation({ applyView, setFocusBlockId, setSelection });
+
   function applyView(v: PageView) {
     if (v.projection_error) setError(v.projection_error);
-    // Dropping the zoom on a page switch keeps focus scoped to the page
-    // it was set on. A same-page refresh (background poll, edit commit)
-    // keeps it — `focusSubtree` re-resolves the id against the fresh
-    // outline every render, and falls back to the full page if the block
-    // vanished.
-    if (v.page.slug !== view()?.page.slug) {
-      setFocusBlockId(null);
-      // A range selection is scoped to the page it was started on —
-      // block ids from another page would resolve to nothing (or,
-      // worse, to an unrelated same-id-shaped block after a future
-      // cross-page id collision that can't happen today but shouldn't
-      // be assumed). Drop it rather than carry stale anchor/cursor
-      // ids across a navigation the user didn't ask the selection to
-      // survive.
-      setSelection(null);
-    }
+    // The net for a page switch that did not come through `openView`.
+    // A same-page refresh keeps the zoom: `focusSubtree` re-resolves it
+    // against the fresh outline every render.
+    if (v.page.slug !== view()?.page.slug) resetForNavigation();
     // "This page isn't syncing" is sticky per page across the replies
     // that cannot answer: only the open commands attempt the
     // re-projection that discovers it, so a mutation reply never carries
@@ -372,7 +366,7 @@ export function Journal() {
    *  narrows a page the user did not ask to narrow. */
   async function navigateToBlock(slug: string, blockId: string) {
     const v = await openPageBySlug(slug);
-    applyView(v);
+    openView(v);
     // One frame, so the outline has rendered. A block under a collapsed
     // ancestor has no node, and `?.` made that a silent no-op: the page
     // opened with the reminder's block nowhere on it. Zoom always renders.
@@ -465,7 +459,7 @@ export function Journal() {
   });
 
   // Day navigation, today's slug and wake-to-today (`Journal.day-nav.ts`).
-  const dayNav = createDayNav({ view, editingId, applyView, withError });
+  const dayNav = createDayNav({ view, editingId, openView, withError });
   /**
    * Which day the week strip highlights, and `null` to hide it.
    *
@@ -703,6 +697,7 @@ export function Journal() {
     view,
     editingId,
     applyView,
+    openView,
     setError,
     setAheadOfLog,
     loadTodayWithRetry,
@@ -1249,7 +1244,7 @@ export function Journal() {
     // like `[[2026-13-01]]` (regex shape OK, semantic parse fails).
     haptic("light");
     const next = await withError(() => openRef(target));
-    if (next) applyView(next);
+    if (next) openView(next);
   }
 
   async function handleTagClick(tag: string) {
@@ -1259,7 +1254,7 @@ export function Journal() {
     if (!target) return;
     haptic("light");
     const next = await withError(() => openRef(target));
-    if (next) applyView(next);
+    if (next) openView(next);
   }
 
   function handleLinkClick(href: string) {
@@ -1283,7 +1278,7 @@ export function Journal() {
       kind === "journal"
         ? await withError(() => openJournalFor(slug))
         : await withError(() => openPageBySlug(slug));
-    if (next) applyView(next);
+    if (next) openView(next);
   }
 
   /**
@@ -1450,16 +1445,20 @@ export function Journal() {
         {/* The page's own `key:: value` metadata (`icon::`, `type::`),
             which lived only in the `.md` and the TUI before. Same
             attribute line the blocks draw, so page and block metadata
-            cannot read as two different kinds of thing. */}
-        <BlockProperties
-          properties={view()?.page_properties}
-          label="Page properties"
-          rowClass="px-4 pt-2"
-          onOpen={() => {
-            haptic("light");
-            setPropertiesTarget({ blockId: null, scope: "page" });
-          }}
-        />
+            cannot read as two different kinds of thing.
+
+            Hidden while zoomed: the header is a *block* there. */}
+        <Show when={!focusView()}>
+          <BlockProperties
+            properties={view()?.page_properties}
+            label="Page properties"
+            rowClass="px-4 pt-2"
+            onOpen={() => {
+              haptic("light");
+              setPropertiesTarget({ blockId: null, scope: "page" });
+            }}
+          />
+        </Show>
         <section class="mt-1 pb-1">
           <Show
             when={loaded() && view() && view()!.outline.length > 0}
@@ -1566,6 +1565,7 @@ export function Journal() {
           backlinks={backlinks.loading ? undefined : backlinks()}
           pageKind={view()?.page.kind}
           blank={isBlankOutline(outlineRoots())}
+          zoomed={focusView() !== null}
           onToggleOrder={async () => {
             const v = view();
             if (!v) return;
@@ -1585,7 +1585,7 @@ export function Journal() {
               kind === "journal"
                 ? await withError(() => openJournalFor(slug))
                 : await withError(() => openPageBySlug(slug));
-            if (next) applyView(next);
+            if (next) openView(next);
           }}
         />
 

@@ -586,6 +586,24 @@ This is pure view state with no Rust mirror — the id never leaves the frontend
 Every client resolves the focused id against the **live** outline on each render, so an edit / collapse inside the zoom stays reflected, and a stale target (block deleted or moved to another page → `null`) transparently falls back to the full page.
 Switching pages drops the zoom, so focus is scoped to the page it was set on.
 
+**Zooming is a request for one subtree, so the page's own surfaces go with it.**
+Backlinks, nested pages, namespace mentions and the page's `key:: value` row answer questions about the *page*; drawn under a block title they read as the block's, which is a wrong answer rather than a noisy one.
+All three clients hide them, and each keeps its cursor out of them too — the desktop through `backlinkBlockIds()`, the TUI through `page_sections_visible()` (which `z i` also uses to bring a cursor back out of the backlinks panel), mobile through having no cursor to move.
+The owner per client: `<PageSections zoomed>` (desktop and mobile) and `App::page_sections_visible` (TUI).
+
+**Asking for a page means the whole page, including when it is the page already open.**
+A client that drops the zoom only when the page *id* or slug changes leaves `Cmd+J` (or a tap on Today) doing nothing visible while zoomed into a block of today's journal — the one gesture that means "take me back" appears broken.
+So "the user asked for a page" is a separate question from "the page changed", and only the first is a navigation:
+
+| Client | What a navigation runs | What catches the rest |
+|---|---|---|
+| desktop | `resetForNavigation()` via `navigateTo` / `openView` | `installPageChangeEffect` on a page-id change |
+| mobile | `resetForNavigation()` via `openView` | `applyView` on a slug change |
+| TUI | `load_current()`, which clears `zoom_stack` outright | — (every view load goes through it) |
+
+The TUI never had the bug: `go_today` loads unconditionally, so the reset is keyed on the load rather than on a comparison.
+A mutation reply, a peer refresh and a background capture are **not** navigations and keep the zoom on every client.
+
 On mobile the gesture is touch, not a chord: a tap on a block's **plain bullet dot** zooms in (`Journal.tsx` holds one `focusBlockId` signal; `BlockRow` → `BulletOrCheckbox` fires `onFocusBlock` when wired).
 That repurposes the plain dot's old mark-as-TODO tap — TODO stays reachable in the long-press context menu — while the TODO/DONE checkbox and the collapse triangle keep their taps, so no gesture collides.
 Zoom-out is stackless: a `← Back` header button plus a tappable ancestor breadcrumb, derived by re-resolving `focusSubtree` and stepping to `breadcrumb.at(-1)` (the parent) or exiting when already top-level.

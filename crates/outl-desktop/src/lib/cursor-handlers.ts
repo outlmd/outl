@@ -17,49 +17,40 @@ import {
   previousDay,
   todaySlug,
 } from "@outl/shared/api/commands";
-import type { BlockNode } from "@outl/shared/api/types";
 import {
   flattenVisible,
-  focusSubtree,
   nextVisibleId,
   previousVisibleId,
 } from "@outl/shared/outline";
 
 import { type HandlerCtx } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
-import { appState, setAppState } from "./store";
+import { appState, setAppState, visibleRoots, zoomView } from "./store";
 
 /** Block ids of each visible backlink, in render order. The
  *  selection cursor traverses this list with `j/k` when the
- *  backlinks section is reachable. */
+ *  backlinks section is reachable.
+ *
+ *  Empty while zoomed, because the page's sections are not drawn then
+ *  (`<PageSections zoomed>`): the backlinks belong to the page, and the
+ *  header is a block. Without this, `j` off the zoom's last row parked
+ *  the cursor on a row nobody could see. */
 function backlinkBlockIds(): string[] {
-  if (!appState.backlinksOpen) return [];
+  if (!appState.backlinksOpen || zoomView()) return [];
   return appState.backlinks.map((b) => b.block_id);
-}
-
-/** Blocks the selection cursor is allowed to traverse. When zoomed
- *  (`focusBlockId` set and still present), the focused block is the
- *  header title, so the cursor traverses its **children** (the visible
- *  body) — matching what `<OutlineView />` renders. Otherwise the
- *  whole page. A stale focus falls back to the full outline. */
-function navBlocks(): BlockNode[] {
-  const id = appState.focusBlockId;
-  if (!id) return appState.outline;
-  const fv = focusSubtree(appState.outline, id);
-  return fv ? fv.root.children : appState.outline;
 }
 
 /** Pop one level of zoom, to the parent crumb or all the way out. */
 function zoomOut() {
   const id = appState.focusBlockId;
   if (!id) return;
-  const crumbs = focusSubtree(appState.outline, id)?.breadcrumb ?? [];
+  const crumbs = zoomView()?.breadcrumb ?? [];
   setAppState("focusBlockId", crumbs[crumbs.length - 1]?.id ?? null);
 }
 
 export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
   // Plain record, not Solid props — see `HandlerCtx`.
-  const { deps, runOn, safeCall } = ctx;
+  const { navigateTo, safeCall } = ctx;
 
   /** Walk one journal day from wherever the user is: the open journal
    *  when they are on one, today when they are not (`[[` / `]]` from an
@@ -74,7 +65,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     if (!anchor) return;
     const slug = await safeCall(step(anchor));
     if (!slug) return;
-    await runOn(openJournalFor(slug));
+    await navigateTo(openJournalFor(slug));
   };
 
   /** One day either side of **today**, ignoring the open page. The
@@ -85,13 +76,13 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     if (!today) return;
     const slug = await safeCall(step(today));
     if (!slug) return;
-    await runOn(openJournalFor(slug));
+    await navigateTo(openJournalFor(slug));
   };
 
   return {
     // ── page-level navigation ────────────────────────────────────
     OpenToday: async () => {
-      await runOn(openTodayJournal());
+      await navigateTo(openTodayJournal());
     },
     PrevDay: () => stepDay(previousDay),
     NextDay: () => stepDay(nextDay),
@@ -124,7 +115,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
         return;
       }
       const cur = appState.selectedBlockId;
-      const nav = navBlocks();
+      const nav = visibleRoots();
       const next = nextVisibleId(cur, nav);
       const atLast = cur !== null && next === cur;
       if (atLast && backlinkIds.length > 0) {
@@ -146,7 +137,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
         }
         // First backlink → step back into the outline's last
         // visible block.
-        const list = flattenVisible(navBlocks());
+        const list = flattenVisible(visibleRoots());
         if (list.length > 0) {
           setAppState("selectedBacklinkBlockId", null);
           setAppState("selectedBlockId", list[list.length - 1]);
@@ -154,7 +145,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
         return;
       }
       const cur = appState.selectedBlockId;
-      const nav = navBlocks();
+      const nav = visibleRoots();
       const prev = previousVisibleId(cur, nav);
       if (prev) {
         setAppState("selectedBlockId", prev);
@@ -188,12 +179,9 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
         const link = appState.backlinks.find((b) => b.block_id === curBacklink);
         const target = link?.source_page?.slug;
         if (!target) return;
-        const view = await safeCall(openRef(target));
-        if (!view) return;
-        deps.applyView(view);
+        if (!(await navigateTo(openRef(target)))) return;
         // Reset cursor to the source block on the freshly-opened
         // page so the user lands exactly where the ref lives.
-        setAppState("selectedBacklinkBlockId", null);
         setAppState("selectedBlockId", curBacklink);
         return;
       }

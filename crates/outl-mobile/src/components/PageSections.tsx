@@ -26,6 +26,11 @@ export interface PageSectionsProps {
   onOpenPage: (slug: string, kind: PageMeta["kind"]) => void;
   /** The page holds only empty blocks: show the first-run tips. */
   blank?: boolean;
+  /** The outline is zoomed into a block, so none of this is on screen
+   *  (see below). Passed in rather than re-resolved here, so this and
+   *  the outline body cannot disagree about whether the page is
+   *  zoomed. */
+  zoomed?: boolean;
 }
 
 /**
@@ -51,10 +56,19 @@ export interface PageSectionsProps {
  * every section here draws nothing — the box that said "No backlinks
  * yet" over a scan still running was telling the user something it
  * then took back.
+ *
+ * **None of it renders while the outline is zoomed into a block.**
+ * Every section here answers a question about the *page*, and under a
+ * zoom the header is a block — so the page's backlinks sitting beneath
+ * a block title read as that block's, which is a wrong answer and not
+ * merely a distracting one. Zooming is a request for one subtree and
+ * nothing else (Roam / Workflowy "focus"). The desktop's twin hides the
+ * same three, and `Journal.tsx` hides the page's `key:: value` row for
+ * the same reason.
  */
 export function PageSections(props: PageSectionsProps): JSX.Element {
   return (
-    <>
+    <Show when={!props.zoomed}>
       <Show when={props.blank}>
         <div class="px-5 pt-8">
           <FirstRunTips client="mobile" />
@@ -94,6 +108,6 @@ export function PageSections(props: PageSectionsProps): JSX.Element {
         total={props.backlinks?.namespace_backlinks_total ?? 0}
         onOpen={(slug) => props.onOpenPage(slug, "page")}
       />
-    </>
+    </Show>
   );
 }

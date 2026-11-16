@@ -30,6 +30,23 @@ impl App {
         self.focus_mode = !self.focus_mode;
     }
 
+    /// Whether the page's own sections are on screen: the inline
+    /// backlinks and the nested-pages list.
+    ///
+    /// The single owner of that question, because three places ask it
+    /// and they must not disagree: the two renderers in `view::` and
+    /// the selection walk in `actions::nav::selection`, which refuses
+    /// to step the cursor into a section nothing drew.
+    ///
+    /// Both sections answer something about the **page**. A zoom puts a
+    /// *block* in the header, so "who links to this page" rendered
+    /// under a block title reads as the block's backlinks — a wrong
+    /// answer, not merely a distraction. Zooming is a request for one
+    /// subtree and nothing else.
+    pub(crate) fn page_sections_visible(&self) -> bool {
+        self.zoom_stack.is_empty()
+    }
+
     /// Zoom into the currently selected block (`z i`).
     ///
     /// Pushes the block's DFS path onto [`App::zoom_stack`] and moves
@@ -50,6 +67,12 @@ impl App {
         self.zoom_stack.push(path);
         self.selected = self.zoom_root_index().unwrap_or(self.selected);
         self.cursor_col = 0;
+        // The backlinks section goes off screen with the zoom, so a
+        // cursor parked on one of its rows would be pointing at nothing
+        // drawable. `z i` reads `selected` (an outline index) and never
+        // the focus, so this is reachable: press it while the focus is
+        // in the panel and the keys below go quiet.
+        self.focus = crate::state::Focus::Outline;
         self.status = "zoomed in".into();
     }
 
@@ -182,6 +205,42 @@ mod tests {
         assert_eq!(app.zoom_stack, vec![vec![1]], "b is the second top-level");
         assert_eq!(app.selected, 3, "selection lands on the zoom root");
         assert_eq!(app.zoom_root_window(), (3, 5), "b + its one child b1");
+    }
+
+    /// `z i` reads `selected`, which is an outline index, so it fires
+    /// the same whether the cursor is in the outline or parked on a
+    /// backlink row. The zoom takes that section off screen, so a focus
+    /// left behind points at nothing: `j` / `k` and `Enter` all go
+    /// quiet, with a row still looking selected.
+    #[test]
+    fn zooming_in_brings_the_cursor_back_from_the_backlinks() {
+        let (mut app, _dir) = fresh_app();
+        seed_nested(&mut app);
+        app.selected = 3;
+        app.focus = crate::state::Focus::Backlink {
+            idx: 0,
+            sub_path: Vec::new(),
+        };
+
+        app.zoom_in_on_selected();
+
+        assert!(
+            matches!(app.focus, crate::state::Focus::Outline),
+            "a zoom hides the backlinks, so the cursor cannot stay in them"
+        );
+    }
+
+    #[test]
+    fn the_page_sections_are_visible_only_on_the_whole_page() {
+        let (mut app, _dir) = fresh_app();
+        seed_nested(&mut app);
+        assert!(app.page_sections_visible());
+
+        app.zoom_in_on_selected();
+        assert!(!app.page_sections_visible());
+
+        app.zoom_out();
+        assert!(app.page_sections_visible(), "zooming out brings them back");
     }
 
     #[test]

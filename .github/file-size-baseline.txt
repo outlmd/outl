@@ -88,7 +88,7 @@
 712 crates/outl-core/tests/tree_unit.rs
 616 crates/outl-desktop/src-tauri/src/lib.rs
 620 crates/outl-desktop/src-tauri/src/settings.rs
-867 crates/outl-desktop/src/components/OutlineView.tsx
+865 crates/outl-desktop/src/components/OutlineView.tsx
 859 crates/outl-frontend-shared/src/api/commands.ts
 707 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs

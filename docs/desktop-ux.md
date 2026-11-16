@@ -189,6 +189,14 @@ The outline body renders the focused block's **children** (`rootBlocks()` → `f
 `navBlocks()` traverses the same children, so `j` / `k` stay in the body.
 `addFirstBlock()` creates into the focused block (`parentId: focusBlockId`) when it is a zoomed-into leaf.
 
+**Nothing that belongs to the page is on screen while zoomed.**
+The page's `key:: value` row, the backlinks section, the nested-pages list and the namespace mentions all disappear, because the header is a *block* then and the page's references sitting under a block title read as that block's.
+`j` off the last row of the zoom therefore stops instead of crossing into the backlinks, the way it clamps on an unzoomed page with the section toggled off.
+
+**Opening a page leaves the zoom, including the page already open.**
+`Cmd+J` zoomed into a block of today's journal returns to today's full journal; so do the sidebar's Today, a `Cmd+P` pick, a click on a `[[ref]]` or `#tag` that points back at this page, `[` / `]`, and an `outl://` deep link.
+A commit, a batch op, a quick capture into today, a timeline restore and a peer-driven refresh all **keep** it — none of them is the user asking to go somewhere.
+
 Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoom--focus-on-a-block-roamworkflowy).
 
 ## Inline autocomplete popups
