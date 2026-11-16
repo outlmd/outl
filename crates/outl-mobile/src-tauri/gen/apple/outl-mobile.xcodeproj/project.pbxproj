@@ -127,6 +127,7 @@
 		F0A1B2C00000000001000010 /* OutlSafeArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlSafeArea.swift; sourceTree = "<group>"; };
 		F0A1B2C0000000000100000E /* OutlBonjour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlBonjour.swift; sourceTree = "<group>"; };
 		F164B16BCE3D8D774DEB42C9 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		0364CF0000000000000000F1 /* Outl.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Outl.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -258,6 +259,7 @@
 		8B5F93D0F33FF3A6234E686C = {
 			isa = PBXGroup;
 			children = (
+				0364CF0000000000000000F1 /* Outl.xcconfig */,
 				44DED8F4CED1FB65709229F9 /* assets */,
 				C883D4BA8E2E34769FE43776 /* Assets.xcassets */,
 				626BD1839E141625CCF789B9 /* LaunchScreen.storyboard */,
@@ -542,7 +544,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "app.outl.mobile-app.widget";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(OUTL_BUNDLE_ID).widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -568,7 +570,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "app.outl.mobile-app.widget";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(OUTL_BUNDLE_ID).widget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -594,7 +596,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "app.outl.mobile-app.share";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(OUTL_BUNDLE_ID).share";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -620,7 +622,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "app.outl.mobile-app.share";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(OUTL_BUNDLE_ID).share";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -681,6 +683,7 @@
 		};
 		36D05CEFC85032D43AED2F18 /* release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0364CF0000000000000000F1 /* Outl.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -790,6 +793,7 @@
 		};
 		BE076A937BD2628AF7CC5679 /* debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 0364CF0000000000000000F1 /* Outl.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;

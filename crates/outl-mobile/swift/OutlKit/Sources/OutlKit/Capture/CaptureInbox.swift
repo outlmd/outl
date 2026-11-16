@@ -45,10 +45,15 @@ public struct CaptureRecord: Codable, Equatable {
 /// nothing here touches the workspace.
 public struct CaptureInbox {
     /// The App Group the app and its extensions share.
-    public static let appGroup = "group.app.outl.mobile-app"
+    ///
+    /// Resolved per flavor: a preview build installed beside the real app
+    /// has its own container, so a capture written by one is never drained
+    /// by the other. See `OutlFlavor`.
+    public static let appGroup = OutlFlavor.current.appGroup
     /// Darwin notification an extension posts after a write, so an app
     /// already on screen drains without waiting for the next foreground.
-    public static let arrivedNotification = "app.outl.capture.arrived"
+    /// Machine-global, so it carries the flavor too — see `OutlFlavor`.
+    public static let arrivedNotification = OutlFlavor.current.captureNotification
     /// Env var the app sets so the Rust side finds the inbox.
     public static let envVar = "OUTL_CAPTURE_INBOX"
     /// Folder name inside the App Group container.

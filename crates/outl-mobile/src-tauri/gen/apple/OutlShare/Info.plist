@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>outl</string>
+	<string>$(OUTL_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -37,5 +37,11 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>ShareViewController</string>
 	</dict>
+	<key>OutlAppGroup</key>
+	<string>$(OUTL_APP_GROUP)</string>
+	<key>OutlCaptureNotification</key>
+	<string>$(OUTL_CAPTURE_NOTIFICATION)</string>
+	<key>OutlURLScheme</key>
+	<string>$(OUTL_URL_SCHEME)</string>
 </dict>
 </plist>

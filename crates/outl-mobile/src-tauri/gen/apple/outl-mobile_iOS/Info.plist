@@ -4,11 +4,13 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>app.outl.mobile-app.refresh</string>
-		<string>app.outl.mobile-app.sync</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).sync</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>$(OUTL_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,10 +29,10 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>app.outl.mobile-app</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>outl</string>
+				<string>$(OUTL_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
@@ -65,5 +67,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>OutlAppGroup</key>
+	<string>$(OUTL_APP_GROUP)</string>
+	<key>OutlCaptureNotification</key>
+	<string>$(OUTL_CAPTURE_NOTIFICATION)</string>
+	<key>OutlURLScheme</key>
+	<string>$(OUTL_URL_SCHEME)</string>
 </dict>
 </plist>

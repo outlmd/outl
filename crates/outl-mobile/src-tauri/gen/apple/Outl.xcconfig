@@ -1,0 +1,39 @@
+// Who this app is, as build settings — the one owner of the iOS flavor.
+//
+// Every identity string the three targets need (app, OutlWidget, OutlShare)
+// derives from `OUTL_BUNDLE_ID` here instead of being spelled again in each
+// target's build settings, in two entitlements files and in two Info.plists.
+// They were, and the copies are exactly what makes a second flavor unsafe:
+// a preview build that keeps one of them reaches into the real app's data.
+//
+// Production values are the defaults, so a build that includes nothing is
+// byte-for-byte what it was before this file existed. CI never writes
+// `Preview.xcconfig`, which is the whole reason the override is a separate
+// file rather than a flag with a default.
+
+OUTL_BUNDLE_ID = app.outl.mobile-app
+OUTL_DISPLAY_NAME = outl
+
+// The URL scheme is NOT shared with a second flavor on purpose.
+//
+// Two installed apps registering `outl://` is resolved by iOS in whatever
+// order it likes, so a `outl://capture` from the Home Screen widget would
+// open either app — and the one it opens writes to its own graph. A preview
+// build that steals the real app's deep links is worse than one that has
+// none, because the failure is silent and lands in real notes.
+OUTL_URL_SCHEME = outl
+
+// Machine-global, and that is the point: an extension posts this through
+// CFNotificationCenterGetDarwinNotifyCenter, which is scoped by neither
+// app nor App Group. One name shared with a preview build means the real
+// app drains an inbox it cannot read.
+OUTL_CAPTURE_NOTIFICATION = app.outl.capture.arrived
+
+// Derived. Expansion is lazy, so these follow whatever the include below
+// leaves in `OUTL_BUNDLE_ID`.
+OUTL_APP_GROUP = group.$(OUTL_BUNDLE_ID)
+
+// Optional, gitignored, written by `scripts/ios-preview.sh`. `#include?`
+// (with the `?`) does not fail when the file is absent, which is the state
+// of every checkout and every CI runner.
+#include? "Preview.xcconfig"

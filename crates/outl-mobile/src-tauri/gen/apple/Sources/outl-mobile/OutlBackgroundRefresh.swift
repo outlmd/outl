@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import OutlKit
 import UIKit
 
 /// Rust FFI, defined in `src/bg_sync.rs` and linked into the app's static
@@ -71,8 +72,20 @@ private func outlIosPeerCount() -> UInt32
 @objc(OutlBackgroundRefresh)
 public final class OutlBackgroundRefresh: NSObject {
 
-    private static let refreshIdentifier = "app.outl.mobile-app.refresh"
-    private static let syncIdentifier = "app.outl.mobile-app.sync"
+    /// Both must be listed in `BGTaskSchedulerPermittedIdentifiers` or
+    /// `register` throws, and that list is spelled
+    /// `$(PRODUCT_BUNDLE_IDENTIFIER).<suffix>` in `Info.plist` — so these
+    /// derive from the same bundle id instead of repeating it. A preview
+    /// build installed beside the real app therefore registers its own
+    /// pair, which is also what keeps the two from being one scheduler
+    /// entry the OS hands to whichever asked last.
+    private static let refreshIdentifier = taskIdentifier("refresh")
+    private static let syncIdentifier = taskIdentifier("sync")
+
+    private static func taskIdentifier(_ suffix: String) -> String {
+        let base = Bundle.main.bundleIdentifier ?? OutlFlavor.productionBundleId
+        return "\(base).\(suffix)"
+    }
 
     /// Floor, not a guarantee — iOS schedules when it can. Kept modest (15 min,
     /// not 1 h) so the scheduler has more latitude to grant a window; a larger

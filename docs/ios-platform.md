@@ -16,21 +16,90 @@ The text App Review needs for a submission (App Review Information > Notes, plus
 - Bundle id: `app.outl.mobile-app`
 - Team: `CPEEKT3E77` (paid Apple Developer Program)
 - iCloud container: `iCloud.app.outl.mobile-app`
-- Display name (Files.app / iCloud Drive): `outl`
+- Display name (Home Screen, Files.app): `outl`
 - Category: `public.app-category.productivity`
-- Entitlements: `com.apple.developer.icloud-services` + `icloud-container-identifiers` + `ubiquity-container-identifiers`
+- Entitlements: `com.apple.security.application-groups` only, holding `group.app.outl.mobile-app`.
+  **There are no iCloud entitlements and no `NSUbiquitousContainers` key.**
+  Both went with the Rust-side iCloud teardown, and this page listed them for months after they were gone.
+  A workspace folder inside an iCloud container still syncs, because that is the OS syncing a path the user picked, not the app holding a container.
 - Export compliance: **not declared**, deliberately. See below.
 
-Bundle ID + iCloud container are **global** in the Apple Developer ecosystem.
-If you change either, also update:
+### `gen/apple/Outl.xcconfig` is the one owner
 
-1. `tauri.conf.json` → `identifier`
-2. `gen/apple/outl-mobile.xcodeproj/project.pbxproj` → `PRODUCT_BUNDLE_IDENTIFIER`
-3. `gen/apple/outl-mobile_iOS/outl-mobile_iOS.entitlements`
-4. `gen/apple/outl-mobile_iOS/Info.plist` → `NSUbiquitousContainers` key
-5. `gen/apple/project.yml` → `bundleIdPrefix` and `PRODUCT_BUNDLE_IDENTIFIER`
+Bundle ID is **global** in the Apple Developer ecosystem, and it used to be written out everywhere it was needed.
+`PRODUCT_BUNDLE_IDENTIFIER` twice per target across three targets, two entitlements files, three `Info.plist` files, `project.yml`, and two Swift literals.
+Ten spellings of one fact, each of which failed quietly when missed, and a checklist is what you get instead of a mechanism.
 
-There is no sixth entry in Rust: `lib.rs` holds no `ICLOUD_CONTAINER_ID`, because the Rust-side iCloud path was removed.
+`Outl.xcconfig` declares it once, on both project-level build configurations, so the three targets inherit it:
+
+| setting | production value | where it lands |
+|---|---|---|
+| `OUTL_BUNDLE_ID` | `app.outl.mobile-app` | `PRODUCT_BUNDLE_IDENTIFIER` on **the two extension targets**, suffixed `.widget` / `.share` |
+| `OUTL_APP_GROUP` | `group.$(OUTL_BUNDLE_ID)` | both entitlements files, and `OutlAppGroup` in each `Info.plist` |
+| `OUTL_URL_SCHEME` | `outl` | `CFBundleURLSchemes`, and `OutlURLScheme` in each `Info.plist` |
+| `OUTL_CAPTURE_NOTIFICATION` | `app.outl.capture.arrived` | `OutlCaptureNotification` in each `Info.plist` |
+| `OUTL_DISPLAY_NAME` | `outl` | `CFBundleDisplayName` on the app and both extensions |
+
+`PRODUCT_NAME` is deliberately **not** in that table and stays `outl`: the Tauri CLI locates the built bundle by that name, so the Home Screen label is `CFBundleDisplayName` instead.
+
+**Swift reads these out of `Info.plist`, through `OutlKit`'s `OutlFlavor`**, rather than repeating the literals.
+That covers the three names an App Group does not scope, and which therefore reach across two installs on one phone.
+The group itself.
+The URL scheme, since iOS picks one app for `outl://` in whatever order it likes.
+And the Darwin notification an extension posts after a capture, because `CFNotificationCenterGetDarwinNotifyCenter` is machine-global.
+
+`OutlFlavor` falls back to the production values for a bundle with no such keys, because `swift test` runs outside an app bundle.
+**That fallback is not the safety mechanism and must not be read as one.**
+The entitlement is.
+It is generated from the same `OUTL_APP_GROUP`, so a build whose plist somehow named another flavor's group is refused by the sandbox at the container lookup.
+The failure is a build that cannot write its own captures, never one that writes into the wrong graph.
+
+**Two owners remain and they have to agree**, because the Tauri CLI does not read an xcconfig:
+
+1. `src-tauri/tauri.conf.json` → `identifier` owns the **app** target's bundle id, and what the CLI installs and launches.
+2. `Outl.xcconfig` owns everything the CLI does not know about: the two extension targets, the App Group, the scheme, the notification, the display name.
+
+The split is not a preference. **`cargo tauri ios dev` and `ios build` write `identifier` into the app target's build settings on every run**, so a variable there is overwritten on the next build and shows up as a diff in a committed file.
+The app target therefore keeps the literal, and the extensions, which the CLI does not touch, derive from the xcconfig.
+
+Changing the shipping bundle id means changing both.
+
+### A preview build, installed beside the real app
+
+`cargo tauri ios dev <device>` installs over the app from TestFlight: same bundle id, so it takes that container, that paired iroh identity and that graph.
+Driving a dev build then writes synthetic edits into real notes, and the signed app is gone until the next TestFlight install.
+
+```bash
+cd crates/outl-mobile
+scripts/ios-preview.sh "samba-phone"           # release, the default
+scripts/ios-preview.sh "samba-phone" --debug
+```
+
+The script writes `gen/apple/Preview.xcconfig`, which `Outl.xcconfig` picks up through `#include?`, and passes `src-tauri/tauri.preview.conf.json` to `--config` so the CLI installs and launches the same id it just built.
+`app.outl.mobile-app.preview` lands on the Home Screen as **outl Preview**, with its own container, App Group, `outl-preview://` scheme and BGTask ids.
+Its icon carries a `PREVIEW` band, so the two are told apart at a glance.
+
+Five things worth knowing before you change it:
+
+- **The script restores `project.pbxproj` and `AppIcon.appiconset` on the way out.**
+  Both are committed files the preview has to write, and the CLI is why.
+  It rewrites the app target's bundle id in the pbxproj on every run, so a preview otherwise leaves `app.outl.mobile-app.preview` checked in.
+  That ships a TestFlight build under the preview id, behind a diff that looks like an unrelated two-line change.
+- **The icon is swapped in place, not selected by name.**
+  `ASSETCATALOG_COMPILER_APPICON_NAME` pointed at a second `AppIcon-Preview.appiconset` is the clean way to do this, and it does not survive.
+  The CLI rewrites that setting back to the literal `AppIcon` too, and the build then succeeds with the production icon and says nothing.
+  So `gen-icons.py --preview-appicon` draws the banded slots into a staging directory, the script copies them over `AppIcon.appiconset`, and the originals come back on exit.
+  Neither directory is committed, because an appiconset inside `Assets.xcassets` is compiled into **every** build, including the App Store one that can never show it.
+- **`Preview.xcconfig` is removed when the script exits**, Ctrl-C included, and is gitignored.
+  Preview is a property of that command, not a state the checkout sits in.
+  A leftover file would make the next `cargo tauri ios build` produce an IPA that App Store Connect rejects for the wrong bundle id, long after anyone remembers running this.
+- **CI never writes it**, which is why the override is a separate file rather than a flag with a default.
+  Without it, every setting above resolves to the production value and the build is what it was before this file existed.
+- **`--release` on `ios dev` does not change the Xcode configuration.**
+  The CLI builds the `debug` configuration either way (it is the Rust profile that changes), which is why the xcconfig is wired to **both** project configurations rather than to `release` alone.
+
+Automatic signing creates the new App ID and App Group on first run, so there is nothing to register by hand.
+The extensions are signed the same way.
 
 ### Export compliance: the flag is about the paperwork, not about the code
 

@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>outl</string>
+	<string>$(OUTL_DISPLAY_NAME)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -25,5 +25,11 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
+	<key>OutlAppGroup</key>
+	<string>$(OUTL_APP_GROUP)</string>
+	<key>OutlCaptureNotification</key>
+	<string>$(OUTL_CAPTURE_NOTIFICATION)</string>
+	<key>OutlURLScheme</key>
+	<string>$(OUTL_URL_SCHEME)</string>
 </dict>
 </plist>

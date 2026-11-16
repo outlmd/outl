@@ -178,14 +178,18 @@ cd crates/outl-mobile
 # iOS simulator
 cargo tauri ios dev "iPhone 17 Pro outl"
 
-# Physical device (Mac + iPhone on the same WiFi)
+# Physical device, as a SECOND app beside the real one (preferred)
+scripts/ios-preview.sh "<device-name>"
+
+# Physical device, over the real app (Mac + iPhone on the same WiFi)
 cargo tauri ios dev "<device-name>" --host
 
 # Release archive for TestFlight (local smoke test only — CI ships)
 cargo tauri ios build
 ```
 
-After the first run, the iCloud capability must be confirmed in Xcode (Signing & Capabilities → iCloud → Containers → `iCloud.app.outl.mobile-app`).
+The bare `ios dev` installs over the app from TestFlight, taking its bundle id, container and graph with it.
+`scripts/ios-preview.sh` installs **outl Preview** beside it instead: [`ios-platform.md` → Bundle / signing](ios-platform.md#bundle--signing).
 
 #### Why the mobile crate has native Swift / ObjC code
 

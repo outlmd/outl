@@ -54,6 +54,16 @@ jobs:
       - name: icons
         run: python3 scripts/check-icons.py
 
+      # The iOS app's identity comes from `Outl.xcconfig` through
+      # `$(OUTL_*)`, and an undefined one of those expands to the empty
+      # string rather than failing: an unstaged xcconfig gives the widget
+      # the bundle id `.widget`, and nothing says so until signing. The
+      # mirror case is a preview override left in a committed file, which
+      # builds, signs, and is refused by App Store Connect after the
+      # upload. Both are release-breaking and neither is loud.
+      - name: ios flavor
+        run: python3 scripts/check-ios-flavor.py
+
       - name: release strip check
         run: python3 scripts/tests/test_check_artifact_stripped.py
 

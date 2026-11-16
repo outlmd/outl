@@ -634,8 +634,12 @@ The two mandatory calls: [`docs/ios-platform.md`](../../docs/ios-platform.md#pee
 
 ## Bundle / signing
 
-Bundle id + iCloud container are **global** in the Apple Developer ecosystem, so changing either means updating five files in lockstep.
-Identifiers, team, entitlements and that checklist: [`docs/ios-platform.md`](../../docs/ios-platform.md#bundle--signing).
+`gen/apple/Outl.xcconfig` owns the app's identity (bundle id, App Group, URL scheme, capture notification, display name); Swift reads it back through `OutlKit`'s `OutlFlavor`.
+**Never write an identity literal into a plist, an entitlements file or a Swift file.**
+That is the ten-place lockstep this replaced.
+`tauri.conf.json` → `identifier` is the second owner (the CLI does not read an xcconfig) and has to agree.
+On a phone holding real notes run `scripts/ios-preview.sh <device>`, which installs beside the real app instead of over it.
+Identifiers, team, entitlements, the derivation table and the preview flow: [`docs/ios-platform.md`](../../docs/ios-platform.md#bundle--signing).
 
 ## Running
 

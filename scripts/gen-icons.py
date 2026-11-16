@@ -38,6 +38,7 @@ It needs a grayscale variant inside an asset catalog or an Icon Composer
 `.icon`, compiled with `actool`, which is Xcode's and not Tauri's.
 `icon-mono-1024.png` is written for whoever wires that up.
 """
+
 import io
 import json
 import pathlib
@@ -47,7 +48,7 @@ import subprocess
 import sys
 
 import resvg_py
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
@@ -63,12 +64,30 @@ DMG = ROOT / "crates" / "outl-desktop" / "src-tauri" / "dmg"
 MOBILE = ROOT / "crates" / "outl-mobile" / "src-tauri" / "icons"
 WEB = ROOT / "crates" / "outl-mobile" / "public"
 APPICON = (
-    ROOT / "crates" / "outl-mobile" / "src-tauri" / "gen" / "apple"
-    / "Assets.xcassets" / "AppIcon.appiconset"
+    ROOT
+    / "crates"
+    / "outl-mobile"
+    / "src-tauri"
+    / "gen"
+    / "apple"
+    / "Assets.xcassets"
+    / "AppIcon.appiconset"
 )
+# The preview flavor's icon set. Written on demand by
+# `crates/outl-mobile/scripts/ios-preview.sh`, never committed: see
+# `ios_preview_appicon`.
+PREVIEW_APPICON = APPICON.parent / "AppIcon-Preview.appiconset"
 ANDROID_RES = (
-    ROOT / "crates" / "outl-mobile" / "src-tauri" / "gen" / "android"
-    / "app" / "src" / "main" / "res"
+    ROOT
+    / "crates"
+    / "outl-mobile"
+    / "src-tauri"
+    / "gen"
+    / "android"
+    / "app"
+    / "src"
+    / "main"
+    / "res"
 )
 RAYCAST = ROOT / "extensions" / "raycast" / "assets" / "command-icon.png"
 WIDGET_ASSETS = (
@@ -132,7 +151,9 @@ ADAPTIVE_MARK_DP = 40
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
 
 
-def mark_group(cx: float, cy: float, height: float, body: str, tip: str | None = None) -> str:
+def mark_group(
+    cx: float, cy: float, height: float, body: str, tip: str | None = None
+) -> str:
     """The mark as an SVG `<g>`, its bounding box centred on (cx, cy)."""
     s = height / MARK_H
     x = cx - MARK_W * s / 2
@@ -153,7 +174,9 @@ def gradient_def(gid: str = "g") -> str:
     )
 
 
-def tile_svg(shape: str, size: int = CANVAS, scale: float = MARK_SCALE, inset: float = 0) -> str:
+def tile_svg(
+    shape: str, size: int = CANVAS, scale: float = MARK_SCALE, inset: float = 0
+) -> str:
     """The app tile as SVG.
 
     `shape` is "square" (opaque, full bleed), "rounded" (the macOS corner
@@ -196,7 +219,11 @@ def render(svg: str, size: int, **kw) -> Image.Image:
 
 
 def write(im: Image.Image, path: pathlib.Path, size: int | None = None) -> None:
-    out = im.resize((size, size), Image.LANCZOS) if size and im.size != (size, size) else im
+    out = (
+        im.resize((size, size), Image.LANCZOS)
+        if size and im.size != (size, size)
+        else im
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     out.save(path)
     print(f"  {path.relative_to(ROOT)}  {out.size[0]}x{out.size[1]}")
@@ -226,6 +253,7 @@ def monochrome(src: Image.Image) -> Image.Image:
 
 def brand_svgs() -> None:
     """Plain SVGs of the mark and the tile, for use outside this repo."""
+
     def mark(body: str, tip: str | None = None) -> str:
         t = f'<path d="{MARK_TIP}" fill="{tip}"/>' if tip else ""
         return (
@@ -254,7 +282,15 @@ def tauri_set(src: Image.Image, out: pathlib.Path) -> None:
     write(src, out / "128x128@2x.png", 256)
     src.resize((256, 256), Image.LANCZOS).save(
         out / "icon.ico",
-        sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        sizes=[
+            (16, 16),
+            (24, 24),
+            (32, 32),
+            (48, 48),
+            (64, 64),
+            (128, 128),
+            (256, 256),
+        ],
     )
     print(f"  {(out / 'icon.ico').relative_to(ROOT)}  16..256")
     for size in (30, 44, 71, 89, 107, 142, 150, 284, 310):
@@ -285,7 +321,95 @@ def ios_appicon(square: Image.Image) -> None:
         px = round(float(m.group(1)) * int(m.group(2)))
         # No alpha: the App Store rejects an icon with one.
         flat.resize((px, px), Image.LANCZOS).save(f)
-    print(f"  {APPICON.relative_to(ROOT)}  {len(list(APPICON.glob('AppIcon-*.png')))} slots")
+    print(
+        f"  {APPICON.relative_to(ROOT)}  {len(list(APPICON.glob('AppIcon-*.png')))} slots"
+    )
+
+
+def banner_font(px: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """A bold face for the preview band, from whatever this Mac has.
+
+    Only the preview icon needs a font, and only on the machine running
+    a preview build, which is a Mac by definition (it is an iOS build).
+    The bitmap default is a legible last resort rather than a failure:
+    the band's job is to tell two home-screen icons apart, and a blurry
+    label still does that.
+    """
+    for p in (
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/System/Library/Fonts/Helvetica.ttc",
+    ):
+        try:
+            return ImageFont.truetype(p, px)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def preview_band(square: Image.Image, label: str = "PREVIEW") -> Image.Image:
+    """The app icon with a label band across its foot.
+
+    Drawn once on the 1024 master and then resized per slot, so the
+    band antialiases with the artwork instead of being redrawn at 40px
+    where a 1px rule would alias into nothing.
+
+    The band is `PAPER` on `VIOLET` rather than the grey this imitates:
+    the point is to tell two of *our* icons apart, so it stays inside
+    the brand.
+    """
+    im = square.convert("RGB").copy()
+    w, h = im.size
+    band = round(h * 0.2)
+    top = h - band
+    draw = ImageDraw.Draw(im)
+    draw.rectangle((0, top, w, h), fill=PAPER)
+
+    font = banner_font(round(band * 0.5))
+    # Tracked out by hand: PIL has no letter-spacing, and the label
+    # reads as a word rather than a smear at small sizes with it.
+    track = round(band * 0.1)
+    widths = [draw.textlength(c, font=font) for c in label]
+    span = sum(widths) + track * (len(label) - 1)
+    bbox = font.getbbox(label)
+    x = (w - span) / 2
+    y = top + (band - (bbox[3] - bbox[1])) / 2 - bbox[1]
+    for c, cw in zip(label, widths):
+        draw.text((x, y), c, font=font, fill=VIOLET)
+        x += cw + track
+    return im
+
+
+def ios_preview_appicon(square: Image.Image, label: str = "PREVIEW") -> pathlib.Path:
+    """Write `AppIcon-Preview.appiconset` beside the real one.
+
+    Same slots and the same `Contents.json`, because the filenames
+    inside an appiconset are local to it.
+
+    **This directory is a staging area, not what the build reads.**
+    `scripts/ios-preview.sh` copies these slots over `AppIcon.appiconset`
+    and restores the originals on exit, because selecting a second set by
+    name does not survive: the Tauri CLI rewrites
+    `ASSETCATALOG_COMPILER_APPICON_NAME` back to the literal `AppIcon` on
+    every run, the same way it rewrites the bundle id, and the build then
+    succeeds with the production icon without saying so.
+
+    **Nothing here is committed**, in either place: an appiconset inside
+    `Assets.xcassets` is compiled into *every* build, so a committed one
+    would ride along in the App Store copy, which can never show it.
+    """
+    master = preview_band(square, label)
+    if PREVIEW_APPICON.exists():
+        shutil.rmtree(PREVIEW_APPICON)
+    PREVIEW_APPICON.mkdir(parents=True)
+    shutil.copyfile(APPICON / "Contents.json", PREVIEW_APPICON / "Contents.json")
+    for f in sorted(APPICON.glob("AppIcon-*.png")):
+        m = re.match(r"AppIcon-([\d.]+)(?:x[\d.]+)?@(\d)x", f.name)
+        if not m:
+            continue
+        px = round(float(m.group(1)) * int(m.group(2)))
+        master.resize((px, px), Image.LANCZOS).save(PREVIEW_APPICON / f.name)
+    return PREVIEW_APPICON
 
 
 def place_path(d: str, scale: float, dx: float, dy: float) -> str:
@@ -377,8 +501,13 @@ def quick_add_symbolset() -> None:
     )
     info = {"author": "xcode", "version": 1}
     symbols = [{"filename": "QuickAddMark.svg", "idiom": "universal"}]
-    write_text(out / "Contents.json", json.dumps({"info": info, "symbols": symbols}, indent=2) + "\n")
-    write_text(WIDGET_ASSETS / "Contents.json", json.dumps({"info": info}, indent=2) + "\n")
+    write_text(
+        out / "Contents.json",
+        json.dumps({"info": info, "symbols": symbols}, indent=2) + "\n",
+    )
+    write_text(
+        WIDGET_ASSETS / "Contents.json", json.dumps({"info": info}, indent=2) + "\n"
+    )
 
 
 def vector_mark(fill: str) -> str:
@@ -411,7 +540,9 @@ def android() -> None:
     if not ANDROID_RES.is_dir():
         print("  (no android project, run `cargo tauri android init` first)")
         return
-    write_text(ANDROID_RES / "drawable" / "ic_launcher_background.xml", f"""<?xml version="1.0" encoding="utf-8"?>
+    write_text(
+        ANDROID_RES / "drawable" / "ic_launcher_background.xml",
+        f"""<?xml version="1.0" encoding="utf-8"?>
 <!-- Generated by scripts/gen-icons.py: the app tile gradient. Do not edit. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
@@ -432,9 +563,15 @@ def android() -> None:
         </aapt:attr>
     </path>
 </vector>
-""")
-    write_text(ANDROID_RES / "drawable-v24" / "ic_launcher_foreground.xml", vector_mark("#FFFFFF"))
-    write_text(ANDROID_RES / "drawable" / "ic_launcher_monochrome.xml", vector_mark("#FFFFFF"))
+""",
+    )
+    write_text(
+        ANDROID_RES / "drawable-v24" / "ic_launcher_foreground.xml",
+        vector_mark("#FFFFFF"),
+    )
+    write_text(
+        ANDROID_RES / "drawable" / "ic_launcher_monochrome.xml", vector_mark("#FFFFFF")
+    )
     adaptive = """<?xml version="1.0" encoding="utf-8"?>
 <!-- Generated by scripts/gen-icons.py. Do not edit. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -464,7 +601,11 @@ def web(src: Image.Image) -> None:
     write(src, WEB / "logo.png", 512)
     write(src, WEB / "logo-192.png", 192)
     # apple-touch-icon is masked by iOS like an app icon: opaque square.
-    write(render(tile_svg("square"), CANVAS).convert("RGB"), WEB / "apple-touch-icon.png", 180)
+    write(
+        render(tile_svg("square"), CANVAS).convert("RGB"),
+        WEB / "apple-touch-icon.png",
+        180,
+    )
     for out in (WEB / "favicon.ico", DESKTOP_WEB / "favicon.ico"):
         src.resize((64, 64), Image.LANCZOS).save(
             out, sizes=[(16, 16), (32, 32), (48, 48), (64, 64)]
@@ -547,5 +688,26 @@ def main() -> int:
     return 0
 
 
+def preview_appicon_only(label: str) -> int:
+    """`--preview-appicon [LABEL]`: write just the preview icon set.
+
+    A separate entry point because `main()` rewrites every committed
+    icon on every platform, and a preview build wants one throwaway
+    directory, not a dirty working tree.
+    """
+    if not APPICON.is_dir():
+        print(
+            "no AppIcon.appiconset; run `cargo tauri ios init` first", file=sys.stderr
+        )
+        return 1
+    out = ios_preview_appicon(render(tile_svg("square"), CANVAS).convert("RGB"), label)
+    print(f"{out.relative_to(ROOT)}  {len(list(out.glob('AppIcon-*.png')))} slots")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--preview-appicon" in sys.argv:
+        i = sys.argv.index("--preview-appicon")
+        rest = sys.argv[i + 1 :]
+        sys.exit(preview_appicon_only(rest[0] if rest else "PREVIEW"))
     sys.exit(main())

@@ -92,3 +92,8 @@ docs/app-store-*
 # layout battery passed against. Local, never shared.
 .claude/.ux-battery-stamp
 issue497.zip
+
+# Written by crates/outl-mobile/scripts/ios-preview.sh while a preview
+# build runs on a device; never committed (see that script).
+crates/outl-mobile/src-tauri/gen/apple/Preview.xcconfig
+crates/outl-mobile/src-tauri/gen/apple/Assets.xcassets/AppIcon-Preview.appiconset/
