@@ -7,12 +7,27 @@
 
 use crate::ThemeSubcommand;
 use anyhow::Result;
-// The preset *list* comes from `outl-theme`, its owner. `show` still
-// goes through the TUI's `by_name` because it prints ratatui `Style`
-// values, which only exist once a `Palette` has been lowered to a
-// terminal theme.
-use outl_theme::PRESETS;
-use outl_tui::theme_by_name;
+use outl_theme::Registry;
+// Name resolution comes from `outl-theme`, its owner. Rendering still
+// goes through the TUI, because the printed ratatui `Style` values only
+// exist once a `Palette` has been lowered to a terminal theme.
+use outl_tui::theme_from_palette;
+
+/// The catalog this command resolves against: the built-ins inside the
+/// binary plus every `.toml` in `~/.config/outl/themes/`.
+///
+/// **A file that failed to load is named on stderr**, which is the whole
+/// reason the CLI builds the registry itself instead of calling
+/// `outl_theme::by_name`. A user whose theme has a typo on line 4 would
+/// otherwise see it simply missing from the list, with nothing to fix.
+/// Stderr, not stdout: `outl theme list | grep` stays usable.
+fn catalog() -> Registry {
+    let (reg, errors) = Registry::with_user_dir(&outl_config::theme_dir());
+    for e in errors {
+        eprintln!("warning: {e}");
+    }
+    reg
+}
 
 /// Run the `theme` subcommand. `None` defaults to `list`.
 pub fn run(sub: Option<&ThemeSubcommand>) -> Result<()> {
@@ -23,18 +38,23 @@ pub fn run(sub: Option<&ThemeSubcommand>) -> Result<()> {
 }
 
 fn list() -> Result<()> {
+    let catalog = catalog();
     println!("Available theme presets:");
-    for name in PRESETS {
+    for name in catalog.names() {
         println!("  {name}");
     }
     println!();
     println!("Use --theme <name> to override for one run, or set");
     println!("`[theme] preset = \"<name>\"` in .outl/config.toml for the workspace.");
+    println!(
+        "Write your own in {}/<name>.toml.",
+        outl_config::theme_dir().display()
+    );
     Ok(())
 }
 
 fn show(name: &str) -> Result<()> {
-    match theme_by_name(name) {
+    match catalog().by_name(name).map(theme_from_palette) {
         Some(t) => {
             println!("Theme: {}", t.name);
             println!();

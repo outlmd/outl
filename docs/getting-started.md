@@ -187,9 +187,9 @@ outl --workspace ~/notes --theme logseq-light
 outl --workspace ~/notes --theme dracula
 outl --workspace ~/notes --theme nord
 outl --workspace ~/notes --theme monokai
-outl --workspace ~/notes --theme solarized-dark
+outl --workspace ~/notes --theme solarized
 outl --workspace ~/notes --theme light
-outl --workspace ~/notes --theme default-dark
+outl --workspace ~/notes --theme ansi
 ```
 
 To pin a theme **for every workspace** (shared between the TUI and the desktop app), edit the global config:

@@ -22,6 +22,7 @@ use super::*;
 fn a_config_that_does_not_parse_is_reported_as_a_warning() {
     let (_dir, root, _paths) = fresh();
     let store_dir = TempDir::new().expect("temp device store");
+    let themes = TempDir::new().expect("temp theme dir");
 
     let report = super::collect_internal(
         &root,
@@ -31,6 +32,7 @@ fn a_config_that_does_not_parse_is_reported_as_a_warning() {
         &outl_core::device::DeviceStore::at(store_dir.path()),
         &outl_config::ThemeCfg::default(),
         Some("~/.config/outl/config.toml could not be read (line 7: boom)".into()),
+        themes.path(),
     )
     .expect("doctor runs with an unreadable global config");
 
@@ -57,4 +59,35 @@ fn a_readable_config_produces_no_finding_about_it() {
         "{:#?}",
         messages(&report)
     );
+}
+
+/// The pure `check_theme_files` tests pass whether or not the pass calls
+/// it, so this is the one that pins the wiring.
+#[test]
+fn a_theme_file_that_does_not_parse_reaches_the_report() {
+    let (_dir, root, _paths) = fresh();
+    let store_dir = TempDir::new().expect("temp device store");
+    let themes = TempDir::new().expect("temp theme dir");
+    std::fs::write(
+        themes.path().join("mine.toml"),
+        "[dark]\naccent = \"rebeccapurple\"\n",
+    )
+    .expect("write theme");
+
+    let report = super::collect_with_theme_dir(
+        &root,
+        false,
+        RepairScope::Guarded,
+        &outl_core::device::DeviceStore::at(store_dir.path()),
+        themes.path(),
+    )
+    .expect("doctor runs with a broken theme file");
+
+    assert!(
+        has(&report, "mine"),
+        "the report has to name the theme file: {:#?}",
+        messages(&report)
+    );
+    // Cosmetic, so it never ranks beside a torn op log.
+    assert_eq!(report.error_count, 0, "{:#?}", messages(&report));
 }

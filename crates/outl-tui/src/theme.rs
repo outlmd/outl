@@ -12,8 +12,8 @@
 //!
 //! Or temporarily via the CLI: `outl --theme nord --path ~/notes`.
 //!
-//! Adding a preset means adding one constructor function and a string in
-//! [`PRESETS`]. The render path doesn't need to change.
+//! Adding a preset means adding a `themes/<family>.toml` to the
+//! `outl-theme` crate. The render path doesn't need to change.
 
 use outl_theme::Palette;
 use ratatui::style::{Color, Modifier, Style};
@@ -31,7 +31,7 @@ fn hex_to_color(s: &str) -> Color {
     }
 }
 
-/// Build a `Theme` from a shared `Palette` plus the static name.
+/// Build a `Theme` from a shared `Palette`.
 ///
 /// Modifiers (`BOLD` on `bold`, `UNDERLINED` on links, `ITALIC` on
 /// `italic`, `CROSSED_OUT` on `strike`) are consistent across every
@@ -41,9 +41,9 @@ fn hex_to_color(s: &str) -> Color {
 /// [`Theme::cursor_caret_on_char`], and it lives in this file for the
 /// same reason: a modifier decided in a view module is a second owner
 /// of the formula.
-fn theme_from_palette(name: &'static str, p: &Palette) -> Theme {
+fn theme_from_palette(p: &Palette) -> Theme {
     Theme {
-        name,
+        name: p.name.clone(),
         background: hex_to_color(&p.bg),
         foreground: hex_to_color(&p.fg),
         bullet: Style::default().fg(hex_to_color(&p.fg_dimmer)),
@@ -130,7 +130,7 @@ fn theme_from_palette(name: &'static str, p: &Palette) -> Theme {
 #[derive(Debug, Clone)]
 pub struct Theme {
     /// User-visible preset name.
-    pub name: &'static str,
+    pub name: String,
     /// Background of the alternate screen.
     pub background: Color,
     /// Base body-text color painted across the canvas together with
@@ -261,65 +261,53 @@ impl Theme {
 
 /// List of preset names exposed to users (CLI / config / `outl theme list`).
 ///
-/// Re-exported from [`outl_theme::PRESETS`], which is the owner. The TUI
-/// renders these through ratatui `Style`s rather than hex, but *which
-/// presets exist* is one fact, and it used to be declared here as a
-/// second identical array — with `outl theme list` reading this copy
-/// while the GUI read the other one. Adding a preset to one and not the
-/// other is a divergence nothing would have caught.
-pub use outl_theme::PRESETS;
+/// Re-exported from [`outl_theme::preset_names`], which is the owner: the
+/// names are derived from the theme files themselves. The TUI renders
+/// these through ratatui `Style`s rather than hex, but *which presets
+/// exist* is one fact, and it used to be declared here as a second
+/// identical array — with `outl theme list` reading this copy while the
+/// GUI read the other one.
+pub use outl_theme::preset_names;
 
-/// Look up a preset by name. Case-insensitive; dashes and underscores
-/// are interchangeable so `"Solarized Dark"` and `"solarized_dark"`
-/// both work.
+/// Look up a built-in preset by name.
+///
+/// Name resolution belongs to [`outl_theme::Registry`] — case folding,
+/// the derived `-dark` / `-light` suffixes, the bare family name and the
+/// legacy spellings are all answered there. This used to be a second
+/// `match` with its own alias list, and `crates/outl-tui/tests/theme_parity.rs`
+/// existed because the two could disagree.
 pub fn by_name(name: &str) -> Option<Theme> {
-    let norm: String = name
-        .chars()
-        .map(|c| match c {
-            'A'..='Z' => c.to_ascii_lowercase(),
-            '_' | ' ' => '-',
-            _ => c,
-        })
-        .collect();
-    match norm.as_str() {
-        "outl" | "default" => Some(outl()),
-        "default-dark" | "dark" => Some(default_dark()),
-        "light" => Some(light()),
-        "logseq-light" | "logseq" => Some(logseq_light()),
-        "dracula" => Some(dracula()),
-        "solarized-dark" | "solarized" => Some(solarized_dark()),
-        "nord" => Some(nord()),
-        "monokai" => Some(monokai()),
-        "outl-light" => Some(outl_light()),
-        "gruvbox" | "gruvbox-dark" => Some(gruvbox()),
-        "gruvbox-light" => Some(gruvbox_light()),
-        _ => None,
+    outl_theme::Registry::builtin()
+        .by_name(name)
+        .map(from_palette)
+}
+
+/// Render any palette as a `Theme`, including one that came from the
+/// user's own `themes/` directory.
+///
+/// The two ANSI presets are the exception and stay hand-built: they use
+/// ratatui's *named* colours (`Color::Reset`, `Color::Cyan`) so the
+/// terminal's own palette shows through, which is the whole point of
+/// having them. Every other preset derives from its hex.
+pub fn from_palette(p: &Palette) -> Theme {
+    match p.name.as_str() {
+        "ansi" => default_dark(),
+        "ansi-light" => light(),
+        _ => theme_from_palette(p),
     }
 }
 
-/// Default fallback when nothing is configured.
+/// Default fallback when nothing is configured — the brand preset.
 pub fn default_theme() -> Theme {
-    outl()
+    from_palette(&outl_theme::default())
 }
 
 // --- presets -------------------------------------------------------------
 
-/// outl — the project's brand palette, matched 1:1 with the marketing
-/// site (avelino.run). Deep-purple background with a lavender accent
-/// and lemon highlight; this is the default theme.
-pub fn outl() -> Theme {
-    theme_from_palette("outl", &outl_theme::presets::outl())
-}
-
-/// outl-light — the brand's light counterpart to [`outl`].
-pub fn outl_light() -> Theme {
-    theme_from_palette("outl-light", &outl_theme::presets::outl_light())
-}
-
 /// Default dark — the original outl-tui palette.
 pub fn default_dark() -> Theme {
     Theme {
-        name: "default-dark",
+        name: "ansi".into(),
         background: Color::Reset,
         foreground: Color::Reset,
         bullet: Style::default().fg(Color::DarkGray),
@@ -391,7 +379,7 @@ pub fn default_dark() -> Theme {
 /// Light theme — for high-brightness terminals.
 pub fn light() -> Theme {
     Theme {
-        name: "light",
+        name: "ansi-light".into(),
         background: Color::Reset,
         foreground: Color::Reset,
         bullet: Style::default().fg(Color::Gray),
@@ -464,49 +452,13 @@ pub fn light() -> Theme {
     }
 }
 
-/// Logseq light — Logseq's default light theme (Blueprint blues on
-/// a white canvas).
-pub fn logseq_light() -> Theme {
-    theme_from_palette("logseq-light", &outl_theme::presets::logseq_light())
-}
-
-/// Dracula — popular dark palette.
-pub fn dracula() -> Theme {
-    theme_from_palette("dracula", &outl_theme::presets::dracula())
-}
-
-/// Solarized Dark — Ethan Schoonover's classic.
-pub fn solarized_dark() -> Theme {
-    theme_from_palette("solarized-dark", &outl_theme::presets::solarized_dark())
-}
-
-/// Nord — Arctic palette.
-pub fn nord() -> Theme {
-    theme_from_palette("nord", &outl_theme::presets::nord())
-}
-
-/// Monokai — Wimer Hazenberg's high-contrast palette.
-pub fn monokai() -> Theme {
-    theme_from_palette("monokai", &outl_theme::presets::monokai())
-}
-
-/// Gruvbox Dark — morhetz's retro-groove palette.
-pub fn gruvbox() -> Theme {
-    theme_from_palette("gruvbox", &outl_theme::presets::gruvbox())
-}
-
-/// Gruvbox Light — the light side of morhetz's retro-groove palette.
-pub fn gruvbox_light() -> Theme {
-    theme_from_palette("gruvbox-light", &outl_theme::presets::gruvbox_light())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn every_listed_preset_resolves() {
-        for name in PRESETS {
+        for name in preset_names() {
             assert!(by_name(name).is_some(), "preset {name} should resolve");
         }
     }
@@ -529,10 +481,10 @@ mod tests {
     #[test]
     fn theme_name_matches_preset_id() {
         // Catches the "shipped Monokai but typo'd its name" class of bug.
-        for name in PRESETS {
+        for name in preset_names() {
             let t = by_name(name).unwrap();
             assert_eq!(
-                t.name, *name,
+                t.name, name,
                 "preset {name} resolved to a theme with name {}",
                 t.name
             );

@@ -6,7 +6,33 @@
 //! OS appearance setting, so it is pinned to the dark side rather than
 //! guessed.
 
+use outl_theme::Registry;
+
 use crate::theme::{self, Theme};
+
+/// The catalog a launch resolves against: the built-ins inside the binary
+/// plus every `.toml` in `~/.config/outl/themes/`.
+///
+/// Built once per launch and passed down, rather than resolved inside
+/// [`resolve_theme`]: the directory comes from `XDG_CONFIG_HOME`, which is
+/// process-wide, so a resolver that read it itself would make every test in
+/// this module depend on the developer's own theme files (root `CLAUDE.md`
+/// invariant 9, third question).
+///
+/// **A broken theme file is a `tracing::warn!` here and nothing more.**
+/// This client has no surface for it at boot — the palette is resolved
+/// before `App` exists, so there is no toast and no status line to write
+/// into, and the skeleton frame is drawn with whatever this returns.
+/// `outl theme list` and `outl doctor` are the surfaces that name the file,
+/// and the TUI's log carries it. Recorded rather than implied: a user who
+/// typo'd a hex sees their theme missing and has two commands that say why.
+pub(super) fn load_catalog() -> Registry {
+    let (reg, errors) = Registry::with_user_dir(&outl_config::theme_dir());
+    for e in errors {
+        tracing::warn!("theme file ignored: {e}");
+    }
+    reg
+}
 
 /// Resolve the active theme.
 ///
@@ -17,7 +43,10 @@ use crate::theme::{self, Theme};
 /// 3. `[theme] preset = "..."` in the **global**
 ///    `~/.config/outl/config.toml` (shared with the desktop client
 ///    via the `outl-config` crate).
-/// 4. [`theme::default_theme`].
+/// 4. [`fallback_theme`].
+///
+/// Each name is resolved against `catalog`, so every level accepts a
+/// theme from `~/.config/outl/themes/` exactly as it accepts a built-in.
 ///
 /// An unknown name falls through silently to the next level. The
 /// caller can surface the choice via the status line if it cares.
@@ -25,9 +54,11 @@ pub(super) fn resolve_theme(
     cli_override: Option<&str>,
     cfg: &toml::Value,
     global: &outl_config::Config,
+    catalog: &Registry,
 ) -> Theme {
+    let resolve = |name: &str| catalog.by_name(name).map(theme::from_palette);
     if let Some(name) = cli_override {
-        if let Some(t) = theme::by_name(name) {
+        if let Some(t) = resolve(name) {
             return t;
         }
     }
@@ -36,7 +67,7 @@ pub(super) fn resolve_theme(
         .and_then(|t| t.get("preset"))
         .and_then(|v| v.as_str())
     {
-        if let Some(t) = theme::by_name(preset) {
+        if let Some(t) = resolve(preset) {
             return t;
         }
     }
@@ -45,7 +76,7 @@ pub(super) fn resolve_theme(
     // propagates to the next `outl-tui` launch automatically (and
     // vice versa). Passed in pre-loaded so the launch reads the file
     // once for both theme and `[sync]`.
-    if let Some(t) = theme::by_name(resolve_preset_name(&global.theme)) {
+    if let Some(t) = resolve(resolve_preset_name(&global.theme)) {
         return t;
     }
     fallback_theme()

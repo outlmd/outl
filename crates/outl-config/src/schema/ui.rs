@@ -61,7 +61,7 @@ pub enum ThemeMode {
     Auto,
 }
 
-/// Theme section. Preset names match `outl_theme::PRESETS`
+/// Theme section. Preset names are resolved by `outl_theme`
 /// (`"outl"`, `"dracula"`, …); unknown names fall back to
 /// `outl_theme::default()` at render time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

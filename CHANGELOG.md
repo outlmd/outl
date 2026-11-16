@@ -5,7 +5,51 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **Write your own theme: a `.toml` in `~/.config/outl/themes/`.**
+  Three lines is a working theme, because `extends` takes any theme name and inherits the other 44 fields:
+
+  ```toml
+  # ~/.config/outl/themes/mine.toml
+  [dark]
+  extends = "outl"
+  accent = "#ff6ac1"
+  ```
+
+  It resolves as `mine`, appears in every picker on every client, and goes anywhere a preset name goes.
+  A `[light]` section beside it gives `mine-light`, and a file named after a built-in replaces that built-in rather than adding a second entry.
+  Names are derived from the filename and the section, so nothing is spelled twice.
+
+  **This is the same format the built-in themes are written in**, which is the point: the eleven built-ins moved out of Rust and into `crates/outl-theme/themes/*.toml`, `include_str!`'d into the binary so there is still nothing to install.
+  One parser, one validator, one `extends` resolver — a built-in in Rust and a user's in TOML would have been two of each, and the user's `extends = "dracula"` would have had no Rust `fn` to reach.
+
+  A file that fails to load is **named**, never silently dropped: a value that is not a hex colour, a field with nothing to inherit, a misspelled field, a written `name`, an `extends` pointing at nothing, a file that could not be read at all.
+  `outl theme list` prints the reason on stderr and `outl doctor` warns about it; the TUI and the GUI clients log it, because the palette is resolved before any of them has a status line or a toast to put it in.
+  One bad file never takes the others down.
+  [`docs/theming.md` → Your own theme](docs/theming.md#your-own-theme).
+
+- **`outl doctor` reports theme files that failed to load.**
+  A warning naming the file and the reason. A missing themes directory is the normal case and is never flagged.
+
 ### Changed
+
+- **Three preset names changed; every old spelling still resolves.**
+  `default-dark` and `light` were one family all along (the two ANSI fallbacks, the only presets the TUI renders through ratatui's *named* colours so your terminal's own palette shows through), and are now `ansi` and `ansi-light`.
+  `solarized-dark` is `solarized`, since `<name>-dark` is derived for every family that has a dark side.
+  `default-dark`, `dark`, `light` and `default` are kept as legacy names in `outl_theme`'s registry, so **no existing `config.toml` needs an edit**; the list may only ever get shorter.
+  Not one colour changed: the migration is pinned by `presets_fixture`, whose regenerated JSON differs in exactly those three `name` strings across eleven presets and 45 fields.
+
+- **Adding a built-in theme is two steps instead of eight.**
+  A `themes/<family>.toml` and one line in `BUILTIN`.
+  `preset_names`, `by_name`, the `-dark` / `-light` aliases, the TUI's resolver and the GUI clients' `list_themes` / `get_theme` all derive from the files.
+  The TUI's nine hand-written preset delegates and its second `by_name` match are gone with them — `crates/outl-tui/tests/theme_parity.rs` was written to catch the two resolvers drifting, and now pins that the TUI never grows its own again.
+
+- **The contrast test checks text on the canvas, not only `_bg` / `_fg` pairs.**
+  `body text`, `dim text` and `body text on bg_elev` join the checked pairs.
+  The first two pass everywhere; the third found a real defect on its first run: `solarized` paints body text on elevated surfaces (popups, modals) at 4.11:1, under WCAG AA.
+  Both halves are the upstream scheme's own values, so it is exempted by name with the reason rather than papered over.
+  The row exists because `[light]` inheriting `[dark]` makes "a light side that forgot `fg`" reachable, and nothing in this crate could see it.
 
 - **`outl page rename` and `outl_page_rename` now rewrite every mention of the page, and refuse journals.**
   The command moved the file and left `[[old]]` and `#old` in every other page pointing at a page that no longer existed, handing the list back in `affected_refs`.

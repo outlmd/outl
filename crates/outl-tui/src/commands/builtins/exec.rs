@@ -74,7 +74,7 @@ impl SlashCommand for ThemeCommand {
             return Ok(false);
         }
         if let Some(t) = theme::by_name(args) {
-            let name = t.name;
+            let name = t.name.clone();
             app.theme = t;
             app.status = format!("theme: {name}");
         } else {

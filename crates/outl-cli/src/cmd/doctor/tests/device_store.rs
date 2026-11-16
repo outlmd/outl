@@ -41,6 +41,9 @@ fn with_stale_binding(age: std::time::Duration) -> (TempDir, PathBuf, TempDir, P
 }
 
 fn collect_against(path: &Path, do_repair: bool, store: &Path) -> Result<DoctorReport, ApiError> {
+    // An own, empty theme directory for the same reason the store is a
+    // parameter: `~/.config/outl/themes/` is process-wide state.
+    let themes = tempfile::TempDir::new().expect("temp theme dir");
     super::collect_internal(
         path,
         true,
@@ -49,6 +52,7 @@ fn collect_against(path: &Path, do_repair: bool, store: &Path) -> Result<DoctorR
         &outl_core::device::DeviceStore::at(store),
         &outl_config::ThemeCfg::default(),
         None,
+        themes.path(),
     )
 }
 

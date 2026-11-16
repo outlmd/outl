@@ -126,6 +126,12 @@ The only thing a default run writes is its own stdout.
   A config with no `preset_dark` (every config written before the light/dark pair existed) is never flagged.
   Always a warning, never an error: a bad theme should never stop you from reaching your notes.
 
+- **A theme file in `~/.config/outl/themes/` that failed to load.**
+  Names the file and the reason — a value that is not a hex colour, a field with nothing to inherit, a misspelled field, an `extends` pointing at nothing.
+  Until it parses, that theme does not appear in any picker, and **this is one of only two places the reason surfaces** (`outl theme list` prints it on stderr; the TUI and the GUI clients only write it to their log, because the palette is resolved before there is a status line or a toast to show it in).
+  A warning, never an error, and a missing directory is never flagged.
+  See [theming.md → Your own theme](theming.md#your-own-theme).
+
 ## `--repair`
 
 Applies **only** the fixes that cannot lose data, and prints what it will do before doing it: the same list a read-only run shows under `N repairable item(s)`, capped the same way (see [`--json`](#--json) below).

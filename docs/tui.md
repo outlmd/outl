@@ -448,7 +448,7 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
 ## Panels
 
 ```
-┌─outl · default-dark ───────────────────────────────────────────────────┐
+┌─outl · ansi ───────────────────────────────────────────────────┐
 │ Page · Avelino                                                         │
 ├────────────────────────────────────────────────────────────────────────┤
 │ - I am the author                                                      │
