@@ -1,0 +1,21 @@
+[package]
+name = "discussions-discord"
+description = "CI tool: mirrors GitHub Discussions into a Discord forum (run by discussions-discord.yml)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Already in Cargo.lock (rustls on ring, webpki roots). No default features:
+# the gzip one is not needed and would add a crate to this job's build.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# Deflate for the single-entry artifact zip, see `artifact_zip.rs`.
+flate2 = "1"
+
+[dev-dependencies]
+tempfile = { workspace = true }

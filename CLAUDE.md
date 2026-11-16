@@ -315,6 +315,8 @@ outl/
 ├── .claude/                   # agents, commands, hooks, settings
 ├── .github/workflows/
 ├── docs/                      # user + contributor reference (see docs/SUMMARY.md)
+├── tools/
+│   └── discussions-discord/   # CI-only: mirrors GitHub Discussions into Discord (see docs/discussions-discord.md)
 └── crates/
     ├── outl-core/             # tree CRDT, op log, storage trait
     ├── outl-md/               # parser, sidecar, matching
