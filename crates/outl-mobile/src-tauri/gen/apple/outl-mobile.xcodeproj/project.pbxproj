@@ -12,6 +12,8 @@
 		0363A100000000000000000E /* OutlWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0363A1000000000000000001 /* OutlWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0363A1000000000000000012 /* OutlCaptureWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363A1000000000000000011 /* OutlCaptureWidget.swift */; };
 		0363A1000000000000000014 /* OutlQuickAddControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363A1000000000000000013 /* OutlQuickAddControl.swift */; };
+		0363A1000000000000000016 /* OpenQuickAddIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363A1000000000000000015 /* OpenQuickAddIntent.swift */; };
+		0363A1000000000000000017 /* OpenQuickAddIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363A1000000000000000015 /* OpenQuickAddIntent.swift */; };
 		0363B2000000000000000001 /* OutlCaptureInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363B2000000000000000002 /* OutlCaptureInbox.swift */; };
 		0363C3000000000000000001 /* OutlAddToTodayIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0363C3000000000000000002 /* OutlAddToTodayIntent.swift */; };
 		0363D400000000000000000D /* OutlKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0363D400000000000000000C /* OutlKit */; };
@@ -83,6 +85,7 @@
 		0363A1000000000000000003 /* OutlWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OutlWidget.entitlements; sourceTree = "<group>"; };
 		0363A1000000000000000011 /* OutlCaptureWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlCaptureWidget.swift; sourceTree = "<group>"; };
 		0363A1000000000000000013 /* OutlQuickAddControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlQuickAddControl.swift; sourceTree = "<group>"; };
+		0363A1000000000000000015 /* OpenQuickAddIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenQuickAddIntent.swift; sourceTree = "<group>"; };
 		0363B2000000000000000002 /* OutlCaptureInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlCaptureInbox.swift; sourceTree = "<group>"; };
 		0363C3000000000000000002 /* OutlAddToTodayIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlAddToTodayIntent.swift; sourceTree = "<group>"; };
 		0363D4000000000000000001 /* OutlShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OutlShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -178,6 +181,7 @@
 			children = (
 				0363A1000000000000000011 /* OutlCaptureWidget.swift */,
 				0363A1000000000000000013 /* OutlQuickAddControl.swift */,
+				0363A1000000000000000015 /* OpenQuickAddIntent.swift */,
 				0363A1000000000000000002 /* Info.plist */,
 				0363A1000000000000000003 /* OutlWidget.entitlements */,
 			);
@@ -470,6 +474,7 @@
 			files = (
 				0363A1000000000000000012 /* OutlCaptureWidget.swift in Sources */,
 				0363A1000000000000000014 /* OutlQuickAddControl.swift in Sources */,
+				0363A1000000000000000016 /* OpenQuickAddIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -497,6 +502,7 @@
 				F0A1B2C0000000000100000D /* OutlBonjour.swift in Sources */,
 				0363B2000000000000000001 /* OutlCaptureInbox.swift in Sources */,
 				0363C3000000000000000001 /* OutlAddToTodayIntent.swift in Sources */,
+				0363A1000000000000000017 /* OpenQuickAddIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -14,7 +14,7 @@ from outside the app.
 | Piece | Path | Target |
 |---|---|---|
 | Widget (opens `outl://capture`) | `src-tauri/gen/apple/OutlWidget/` | `OutlWidget` app extension, iOS 16+ |
-| Control Center "Quick Add" control (opens `outl://capture`) | `src-tauri/gen/apple/OutlWidget/OutlQuickAddControl.swift` | same `OutlWidget` extension, iOS 18+ |
+| Control Center "Quick Add" control (opens `outl://capture`) | `src-tauri/gen/apple/OutlWidget/OutlQuickAddControl.swift`, intent in `OpenQuickAddIntent.swift` | same `OutlWidget` extension, iOS 18+; the intent is also compiled into the app |
 | Shared pure logic (links, inbox writer, ULID) | `swift/OutlKit/Sources/OutlKit/Capture/` | OutlKit package, unit tested by `swift test` |
 | App Intent "Add to today" + App Shortcut | `src-tauri/gen/apple/Sources/outl-mobile/OutlAddToTodayIntent.swift` | app, iOS 16+ (`AppIntents` weak-linked) |
 | Share extension (text, one web link) | `src-tauri/gen/apple/OutlShare/` | `OutlShare` app extension, iOS 15+ |
@@ -31,8 +31,10 @@ picks the lowest and an `#available` branch nobody tests comes back).
 ## Control Center "Quick Add" (iOS 18+)
 
 A `ControlWidget` in the existing `OutlWidget` extension, so it has no target, App ID, profile or App Group of its own.
-One tap runs `OpenQuickAddIntent`, which returns `OpenURLIntent(CaptureLink.capture)`: it opens `outl://capture`, the same link the Home Screen widget and Android's quick settings tile open, so the capture sheet appears over today's journal with the keyboard up.
-The intent opens the URL on purpose rather than setting `openAppWhenRun`, which would only resume the last screen.
+One tap runs `OpenQuickAddIntent`, which opens the app and routes it to `outl://capture`, the same link the Home Screen widget and Android's quick settings tile open, so the capture sheet appears over today's journal with the keyboard up.
+It does not return `OpenURLIntent(CaptureLink.capture)`: from a control, `OpenURLIntent` only opens universal links, and a custom scheme like `outl://` opens nothing on a device (it can appear to work in the simulator).
+Instead the intent sets `openAppWhenRun`, and `OpenQuickAddIntent.swift` is compiled into both the `OutlWidget` extension and the app, so `perform()` runs in the app process.
+`openAppWhenRun` alone would only resume the last screen, so `perform()` calls `QuickAddRoute`, which the app points at `UIApplication.open(CaptureLink.capture)` in `OutlCaptureInbox.install()`; the URL then takes the same deep-link path as the widget's.
 It writes nothing and is a different intent from "Add to today" (which saves a line to the inbox without opening the app), with no Shortcuts phrases.
 
 Control Center controls need iOS 18, but the app and the Home Screen / Lock Screen widget keep the iOS 17 floor.

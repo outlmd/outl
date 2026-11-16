@@ -69,6 +69,8 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # Shared with OutlWidget: the Quick Add control's intent runs in the app.
+      - path: OutlWidget/OpenQuickAddIntent.swift
       - path: Assets.xcassets
       - path: Externals
       - path: outl-mobile_iOS

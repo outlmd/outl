@@ -25,6 +25,14 @@ public final class OutlCaptureInbox: NSObject {
     }
 
     @objc public static func install() {
+        // The Control Center "Quick Add" intent runs here, in the app,
+        // and opens the capture sheet through the same `outl://capture`
+        // deep link the widget uses (see `OpenQuickAddIntent.swift`).
+        // `main.mm` calls `install()` on the main queue.
+        MainActor.assumeIsolated {
+            QuickAddRoute.open = { UIApplication.shared.open(CaptureLink.capture) }
+        }
+
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterAddObserver(
             center,
