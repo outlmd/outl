@@ -32,6 +32,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 - **`outl doctor` reports theme files that failed to load.**
   A warning naming the file and the reason. A missing themes directory is the normal case and is never flagged.
 
+### Fixed
+
+- **The iOS widget was a white card, and the Lock Screen control was a button that did nothing.**
+  Two separate faults in the same extension, both silent.
+
+  The widget never declared `containerBackground(for: .widget)`, which has not been optional since the iOS 17 SDK.
+  WidgetKit does not fall back to its material without it; it paints an opaque white, so the tile sat on the Home Screen as a blank card next to every other widget and the gallery preview showed nothing.
+  The Home Screen now gets the brand gradient and the Lock Screen gets `AccessoryWidgetBackground()`, since an accessory tints its own content.
+
+  The control ran a custom `AppIntent` that returned `.result(opensIntent: OpenURLIntent(…))`.
+  An `AppIntent` inherits `openAppWhenRun == false`, so it ran inside the widget extension, where an intent it hands back has nobody to open it.
+  `OpenQuickAddIntent` now sets `openAppWhenRun` and is compiled into **both** the extension and the app, so `perform()` runs in the app process and routes to the capture sheet through `QuickAddRoute`.
+  Handing the control `OpenURLIntent` directly looks like the smaller fix and is not one: from a control it opens only universal links, so a custom scheme like `outl://` opens nothing on a device, while appearing to work in the simulator.
+  The deep link itself was never the problem.
+
+- **The capture widget shows the outl mark, not `plus.circle`.**
+  On the Home Screen and the Lock Screen it draws the mark with a `+` knocked out of its body, on the app icon's gradient.
+  `scripts/gen-icons.py` writes it from the same geometry every app icon is rasterised from, so the widget and the icon beside it cannot drift; the gradient comes from `OutlKit`'s `BrandColor`, pinned by `BrandColorTests`.
+  It ships as a custom SF Symbol because a control renders no arbitrary SwiftUI view and loads no imageset — both show a `?` placeholder.
+  The Control Center control still shows a system `plus`: it resolves the symbol (the `?` goes away) and draws an empty circle anyway, while the same symbol from the same `Assets.car` draws correctly in the widget. A blank button is worse than a generic one, so that one waits.
+
 ### Changed
 
 - **Three preset names changed; every old spelling still resolves.**

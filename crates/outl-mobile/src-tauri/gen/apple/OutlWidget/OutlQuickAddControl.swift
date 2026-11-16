@@ -8,6 +8,12 @@ import WidgetKit
 /// keyboard raised. It writes nothing, so like the widget it needs no App
 /// Group.
 ///
+/// **The icon is a system symbol here, and the outl mark everywhere
+/// else.** The `QuickAddMark` symbol draws correctly in the widget and
+/// draws an empty circle in a control, and a blank button is worse than
+/// a generic one. What was measured and what to try next:
+/// `IOS-EXTENSIONS.md` → "The icon is the outl mark".
+///
 /// The app and the Home Screen widget still deploy to iOS 17; the control
 /// is only registered on systems that have `ControlWidget`
 /// (see `OutlWidgetBundle`).

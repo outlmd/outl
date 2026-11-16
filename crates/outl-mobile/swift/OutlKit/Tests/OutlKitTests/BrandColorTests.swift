@@ -18,6 +18,18 @@ final class BrandColorTests: XCTestCase {
         XCTAssertEqual(c.hex, "0c0814")
     }
 
+    func testIconGradientMatchesTheGeneratedTiles() {
+        // The widget paints the same two-stop gradient every app icon
+        // is rasterised from, so a tile on the Home Screen and the icon
+        // beside it are the same purple. The source of those tiles is
+        // scripts/gen-icons.py (VIOLET, LAVENDER, PAPER) and
+        // assets/brand/*.svg. There is no build step tying the Swift
+        // side to the Python one, so this test is the tie.
+        XCTAssertEqual(BrandColor.violet.hex, "7c3aed")
+        XCTAssertEqual(BrandColor.lavender.hex, "a78bfa")
+        XCTAssertEqual(BrandColor.paper.hex, "f4f1fa")
+    }
+
     func testComponentsAreUnitScale() {
         let comps = BrandColor.dark.components
         XCTAssertEqual(comps.red, 12.0 / 255.0, accuracy: 1e-9)

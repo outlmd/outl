@@ -44,6 +44,11 @@ APPICON = (
     ROOT / "crates" / "outl-mobile" / "src-tauri" / "gen" / "apple"
     / "Assets.xcassets" / "AppIcon.appiconset"
 )
+SYMBOLSET = (
+    ROOT / "crates" / "outl-mobile" / "src-tauri" / "gen" / "apple"
+    / "OutlWidget" / "Assets.xcassets" / "QuickAddMark.symbolset"
+    / "QuickAddMark.svg"
+)
 MASTERS = [
     ROOT / "assets" / "source-icon.png",
     ROOT / "assets" / "app-store-icon-1024.png",
@@ -86,6 +91,47 @@ def expected_size(name: str) -> int | None:
     if m := re.fullmatch(r"AppIcon-([\d.]+)(?:x\1)?@(\d)x(?:-\d)?\.png", name):
         return round(float(m[1]) * int(m[2]))
     return {"StoreLogo.png": 50, "icon.png": 512}.get(name)
+
+
+def check_symbolset(bad: list[str]) -> None:
+    """The capture symbol the widget and the Control Center control draw.
+
+    Every rule here has the same failure: the build stays green and the
+    glyph is simply **not there**. So they are checked rather than
+    remembered. What each one costs, and the `xcrun actool --compile`
+    loop that reproduces it, is in `crates/outl-mobile/IOS-EXTENSIONS.md`.
+    """
+    rel = SYMBOLSET.relative_to(ROOT)
+    if not SYMBOLSET.exists():
+        bad.append(f"{rel}: missing; run gen-icons.py")
+        return
+    svg = SYMBOLSET.read_text()
+
+    # actool wants the M glyph, whatever the "three required sources"
+    # advice says about Regular-S, plus a guide pair for every size —
+    # including the two sizes with no glyph of their own.
+    wanted = ['id="Regular-M"']
+    wanted += [f'id="{guide}-{size}"' for size in "SML" for guide in ("Baseline", "Capline")]
+    bad += [f"{rel}: missing {want}" for want in wanted if want not in svg]
+
+    _, _, symbols = svg.partition('<g id="Symbols">')
+    for token, why in (
+        ("transform", "actool ignores it, leaving the path at the artboard origin"),
+        ("fill-rule", "CoreSVG drops it; wind the cut-out the other way instead"),
+    ):
+        if token in symbols:
+            bad.append(f"{rel}: {token} inside the glyph; {why}")
+
+    # An arc's flags must stay bare 0/1: `0.000` parses in a browser and
+    # CoreSVG rejects the whole path.
+    for arc in re.findall(r"A([^A-Za-z]*)", symbols):
+        flags = arc.split()[2:5]
+        if len(flags) == 3 and any("." in f for f in flags):
+            bad.append(
+                f"{rel}: arc flags written with decimals ({' '.join(flags)}); "
+                "CoreSVG rejects the path"
+            )
+            break
 
 
 def main() -> int:
@@ -134,6 +180,8 @@ def main() -> int:
                     f"{png.relative_to(ROOT)}: has an alpha channel; "
                     "App Store Connect rejects the upload"
                 )
+
+    check_symbolset(bad)
 
     if bad:
         print("icon check failed:", file=sys.stderr)

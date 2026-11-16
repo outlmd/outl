@@ -18,6 +18,14 @@ dist/
 # `gen/apple/` (mobile) is manual config and intentionally committed.
 **/src-tauri/gen/schemas/
 
+# Xcode build output inside the committed `gen/apple/` tree, and the index
+# store xcodebuild drops beside the project when it builds a target directly.
+# Both land in a directory we otherwise track, so without these every iOS
+# build leaves a thousand untracked files in `git status`.
+crates/outl-mobile/src-tauri/gen/apple/build/
+crates/outl-mobile/src-tauri/gen/apple/outl-mobile.xcodeproj/-Xcc/
+crates/outl-mobile/swift/OutlKit/build/
+
 # Backups from rustfmt
 **/*.rs.bk
 

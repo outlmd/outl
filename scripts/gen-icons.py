@@ -39,6 +39,7 @@ It needs a grayscale variant inside an asset catalog or an Icon Composer
 `icon-mono-1024.png` is written for whoever wires that up.
 """
 import io
+import json
 import pathlib
 import re
 import shutil
@@ -70,6 +71,16 @@ ANDROID_RES = (
     / "app" / "src" / "main" / "res"
 )
 RAYCAST = ROOT / "extensions" / "raycast" / "assets" / "command-icon.png"
+WIDGET_ASSETS = (
+    ROOT
+    / "crates"
+    / "outl-mobile"
+    / "src-tauri"
+    / "gen"
+    / "apple"
+    / "OutlWidget"
+    / "Assets.xcassets"
+)
 
 # The outl mark on its 91x128 grid: the body (head plus tentacles) and
 # the tip of the lowest tentacle, which only the dark mark paints lime.
@@ -80,6 +91,19 @@ MARK_BODY = (
     "L34 66 L25 66 L25 91 Q25 94 22 94 L3 94 Q0 94 0 91 Z"
 )
 MARK_TIP = "M34 115 L52 104.2 L52 117.2 L34 128 Z"
+# The `+` every capture entry point shows, knocked out of the body on
+# the same grid. It sits inside the body's solid span (y 0…66, before
+# the tentacles start) and is centred on that body, not on the whole
+# 91x128 box, which is what keeps it optically centred.
+# Wound **anti-clockwise**, the opposite of MARK_BODY, so a plain
+# non-zero fill knocks it out. `fill-rule="evenodd"` would say the same
+# thing and CoreSVG drops the attribute: `actool` then computes the
+# right bounding box from the `d` and renders nothing, which is a blank
+# control with a correctly-sized blank in it.
+MARK_PLUS = (
+    "M39 11 L39 26.5 L23.5 26.5 L23.5 39.5 L39 39.5 L39 55 "
+    "L52 55 L52 39.5 L67.5 39.5 L67.5 26.5 L52 26.5 L52 11 Z"
+)
 
 # Palette.
 INK = "#0c0814"
@@ -264,6 +288,99 @@ def ios_appicon(square: Image.Image) -> None:
     print(f"  {APPICON.relative_to(ROOT)}  {len(list(APPICON.glob('AppIcon-*.png')))} slots")
 
 
+def place_path(d: str, scale: float, dx: float, dy: float) -> str:
+    """Scale and translate an SVG path's coordinates in place.
+
+    The SF Symbols template puts each glyph where a `transform` on its
+    `<g>` would, but `actool` reads the geometry, not the group's matrix:
+    with the transform doing the work the symbol compiles, loses the `?`
+    placeholder, and still draws nothing, because the path itself sits at
+    the artboard's origin. So the numbers move, not the group.
+
+    Only the commands this mark uses are handled (`M`/`L`/`Q` points and
+    `A` radii), which is why it lives next to the one caller rather than
+    pretending to be a general SVG transformer.
+    """
+    out: list[str] = []
+    for cmd, args in re.findall(r"([MLQAZz])([^MLQAZz]*)", d):
+        nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", args)]
+        if cmd in ("Z", "z"):
+            out.append(cmd)
+            continue
+        if cmd == "A":
+            # rx ry rot large-arc-flag sweep-flag x y. The two flags must
+            # stay bare `0`/`1`: written as `0.000` the path parses in a
+            # browser and CoreSVG rejects it, so `actool` logs an error,
+            # writes the .car anyway, and the symbol draws nothing.
+            rx, ry, rot, large, sweep, x, y = nums
+            parts = [
+                f"{rx * scale:.3f}",
+                f"{ry * scale:.3f}",
+                f"{rot:g}",
+                f"{int(large)}",
+                f"{int(sweep)}",
+                f"{x * scale + dx:.3f}",
+                f"{y * scale + dy:.3f}",
+            ]
+        else:
+            parts = [
+                f"{n * scale + (dx if i % 2 == 0 else dy):.3f}"
+                for i, n in enumerate(nums)
+            ]
+        out.append(cmd + " ".join(parts))
+    return " ".join(out)
+
+
+def quick_add_symbolset() -> None:
+    """The capture icon the iOS widget draws: the mark with a `+` cut out.
+
+    A **custom SF Symbol** rather than an imageset, because a Control
+    Center control resolves only a symbol. (It still draws the symbol as
+    an empty circle, so the control falls back to a system `plus` — see
+    `crates/outl-mobile/IOS-EXTENSIONS.md`, which also carries the four
+    template rules below and what each one costs.)
+
+    The template is the SF Symbols one cut to what `actool` demands: a
+    glyph named `Regular-M`, and guide pairs for all three sizes even
+    though only M has a glyph. One glyph is enough on purpose — a logo
+    does not get heavier at `Black`, so the other 26 slots would be this
+    same path repeated, and the system interpolates from this one.
+    """
+    out = WIDGET_ASSETS / "QuickAddMark.symbolset"
+    out.mkdir(parents=True, exist_ok=True)
+
+    baseline, capline = 1220.0, 1088.0
+    scale = (baseline - capline) / MARK_H
+    # Centre the mark on the M column, sitting on the baseline.
+    left = 1156.0 - MARK_W * scale / 2
+    glyph_path = place_path(f"{MARK_BODY} {MARK_PLUS}", scale, left, capline)
+
+    guides = "".join(
+        f'<line id="{name}-{size}" stroke="#27AAE1" x1="263" x2="3000" '
+        f'y1="{y}" y2="{y}"/>'
+        for size in "SML"
+        for name, y in (("Baseline", baseline), ("Capline", capline))
+    )
+    write_text(
+        out / "QuickAddMark.svg",
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" '
+        'width="3300" height="2200" viewBox="0 0 3300 2200">'
+        '<g id="Notes">'
+        '<rect id="artboard" fill="white" height="2200" width="3300" x="0" y="0"/>'
+        "</g>"
+        f'<g id="Guides">{guides}</g>'
+        '<g id="Symbols"><g id="Regular-M">'
+        f'<path d="{glyph_path}"/>'
+        "</g></g>"
+        "</svg>\n",
+    )
+    info = {"author": "xcode", "version": 1}
+    symbols = [{"filename": "QuickAddMark.svg", "idiom": "universal"}]
+    write_text(out / "Contents.json", json.dumps({"info": info, "symbols": symbols}, indent=2) + "\n")
+    write_text(WIDGET_ASSETS / "Contents.json", json.dumps({"info": info}, indent=2) + "\n")
+
+
 def vector_mark(fill: str) -> str:
     """The mark as an Android vector drawable on the 108dp adaptive canvas."""
     s = ADAPTIVE_MARK_DP / MARK_H
@@ -415,6 +532,9 @@ def main() -> int:
 
     print("\nWeb icons in the webviews")
     web(src)
+
+    print("\niOS widget + Control Center capture icon (the mark with a `+`)")
+    quick_add_symbolset()
 
     print("\nRaycast command icon")
     write(src, RAYCAST, 512)
