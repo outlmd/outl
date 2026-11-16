@@ -56,6 +56,11 @@ class MainActivity : TauriActivity() {
     // installs the observer, and it is idempotent across activity recreation.
     OutlBackgroundSync.install(applicationContext)
     super.onCreate(savedInstanceState)
+    // Edge-to-edge puts the WebView under the status bar and the navigation
+    // bar, and the WebView does not publish them as CSS `env()` values. Hand
+    // the page the real insets instead. After `super.onCreate`, which is what
+    // creates the window's decor view. See OutlSafeArea.
+    OutlSafeArea.install(this)
   }
 
   // The Wi-Fi driver filters multicast frames not addressed to this device, so

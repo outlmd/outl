@@ -89,8 +89,8 @@ export function JournalChrome(props: {
 
   return (
     <header
-      class="outl-focus-hide z-30 shrink-0 bg-(--color-outl-bg)/80 px-3 pt-2 pb-3 backdrop-blur-xl"
-      style="padding-top: max(env(safe-area-inset-top), 12px);"
+      class="outl-focus-hide z-30 shrink-0 bg-(--color-outl-bg)/80 px-3 pb-3 backdrop-blur-xl"
+      style="padding-top: max(var(--safe-area-inset-top), 12px);"
     >
       <div class="grid grid-cols-[auto_auto_1fr] items-center gap-2">
         {/* Left capsule — visible only when the user has navigated

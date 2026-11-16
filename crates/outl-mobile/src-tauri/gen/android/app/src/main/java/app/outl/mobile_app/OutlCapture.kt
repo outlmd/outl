@@ -137,7 +137,7 @@ internal object OutlCapture {
     )
   }
 
-  private fun findWebView(view: View?): WebView? = when (view) {
+  internal fun findWebView(view: View?): WebView? = when (view) {
     null -> null
     is WebView -> view
     is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findWebView(view.getChildAt(it)) }

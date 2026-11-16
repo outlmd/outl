@@ -22,6 +22,21 @@
   --ease-spring-in: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* System safe-area insets — the one definition every surface reads.
+   `src/lib/safe-area.ts` overwrites these inline on <html> with the values
+   the native shell measures (iOS `safeAreaInsets`, Android system bars +
+   display cutout), because neither edge-to-edge webview publishes them
+   through `env()` reliably. The `env()` here is only the fallback for a
+   browser or a platform that never reports; the `0px` is mandatory — a
+   unitless fallback makes `max(var(...), 12px)` invalid and drops the
+   whole declaration. Never read `env(safe-area-inset-*)` anywhere else. */
+:root {
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+}
+
 @keyframes outl-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -168,7 +183,7 @@
      bottom, where this client already floats `BottomBar`. Lift it clear
      of that capsule plus the home indicator; the shared stylesheet
      defaults to a desktop window, whose bottom edge is empty. */
-  --outl-notice-offset: calc(max(env(safe-area-inset-bottom), 12px) + 60px);
+  --outl-notice-offset: calc(max(var(--safe-area-inset-bottom), 12px) + 60px);
 
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
@@ -204,8 +219,8 @@ html.barcode-scanning #root {
   align-items: center;
   justify-content: center;
   gap: 24px;
-  padding: calc(env(safe-area-inset-top) + 24px) 24px
-    calc(env(safe-area-inset-bottom) + 24px);
+  padding: calc(var(--safe-area-inset-top) + 24px) 24px
+    calc(var(--safe-area-inset-bottom) + 24px);
   pointer-events: none;
 }
 .scan-frame {

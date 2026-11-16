@@ -38,6 +38,7 @@
         [OutlSwizzle install];
         [OutlBackgroundRefresh install];
         [OutlBrandChrome install];
+        [OutlSafeArea install];
         [OutlOpsWatcher install];
         [OutlCaptureInbox install];
     });

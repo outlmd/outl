@@ -558,12 +558,24 @@ scrolls instead of the column. **Exactly one element opts into scrolling, explic
 
 ### Safe areas (mobile only)
 
-Every bottom-anchored surface reserves the home indicator, with a floor so it is never flush on a device
-that has no inset:
+Both mobile shells are edge-to-edge, so the status bar, notch and home indicator sit on top of the page, and
+neither webview publishes them reliably through `env(safe-area-inset-*)`.
+The native side therefore measures the insets (iOS `safeAreaInsets`, Android system bars plus display cutout)
+and `crates/outl-mobile/src/lib/safe-area.ts` applies them as `--safe-area-inset-top|right|bottom|left` on
+`:root`, once, at boot.
+`styles.css` declares the same four properties from `env(safe-area-inset-*, 0px)` as the fallback for a browser
+or a platform that never reports.
+**Components read the variable, never `env()`**, and the fallback always carries a length: a unitless one makes
+`max(var(...), 12px)` invalid and drops the whole declaration.
+Never hard-code a device's status-bar height; the value is whatever the system reports for that device and
+orientation.
+
+Every edge-anchored surface reserves its inset, with a floor so it is never flush on a device that has none.
+The canvas and the header background still run edge-to-edge: the inset is padding on the chrome, not a margin.
 
 ```tsx
-style={{ bottom: "max(env(safe-area-inset-bottom), 16px)" }}   // SelectionToolbar.tsx
-style="padding-top: max(env(safe-area-inset-top), 12px);"      // JournalChrome.tsx
+style={{ bottom: "max(var(--safe-area-inset-bottom), 16px)" }}   // SelectionToolbar.tsx
+style="padding-top: max(var(--safe-area-inset-top), 12px);"      // JournalChrome.tsx
 ```
 
 ## Elevation & Depth
@@ -637,7 +649,7 @@ takes the grab handle with it, so the sheet cannot even be dragged shut.
 *How* it is bounded follows from where the shape puts the card.
 An inset card sits inside a transparent positioned wrapper, so the wrapper takes `max-h-dvh` plus a top
 safe-area padding, which costs nothing while the sheet is short.
-An edge-to-edge sheet *is* the card, so it takes `max-height: calc(100dvh - max(env(safe-area-inset-top),
+An edge-to-edge sheet *is* the card, so it takes `max-height: calc(100dvh - max(var(--safe-area-inset-top),
 12px))` instead: a padding there would open a gap above the handle on every portrait phone, where nothing
 was wrong.
 A sheet pinned by both `top` and `bottom-0` is already bounded by the gap between them.

@@ -380,11 +380,11 @@ export function PageSwitcher(props: PageSwitcherProps) {
           // Fullscreen sheet, iOS page-sheet style: anchored to the
           // bottom and stretching up to just below the status bar so
           // the rounded corners + grab handle stay visible.
-          top: "calc(env(safe-area-inset-top) + 8px)",
+          top: "calc(var(--safe-area-inset-top) + 8px)",
           // When the keyboard is up, its inset already covers the
           // home-indicator safe area — take the max instead of
           // stacking both.
-          "padding-bottom": `max(env(safe-area-inset-bottom), ${keyboardInset()}px)`,
+          "padding-bottom": `max(var(--safe-area-inset-bottom), ${keyboardInset()}px)`,
           transform: `translateY(${drag.translateY()}px)`,
           transition: drag.dragging()
             ? "none"

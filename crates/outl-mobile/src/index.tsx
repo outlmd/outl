@@ -3,6 +3,7 @@ import { render } from "solid-js/web";
 import { attachConsole } from "@tauri-apps/plugin-log";
 import { bootMark } from "@outl/shared/boot";
 import App from "./App";
+import { installSafeArea } from "./lib/safe-area";
 import "./styles.css";
 
 // The earliest point a module can report. Everything before this is the
@@ -10,6 +11,10 @@ import "./styles.css";
 // Reported here rather than in `App`'s `onMount` so the number brackets
 // Solid's own mount cost instead of hiding it.
 bootMark("html_parsed");
+
+// Before the first render, so the first painted frame already sits below the
+// status bar. The native shell supplies the real insets; see `lib/safe-area.ts`.
+installSafeArea();
 
 // Forward Rust logs (the `Webview` target of tauri-plugin-log) into the browser
 // console, so backend `log::` lines show up in Safari Web Inspector alongside
