@@ -1,6 +1,6 @@
 # iOS app extensions (RFC 0363)
 
-Capture from outside the app: a widget, an App Intent ("Add to today",
+Capture from outside the app: a widget, a Control Center control, an App Intent ("Add to today",
 which Shortcuts, Siri and the Action button use) and a share extension.
 Design and invariants: [`docs/rfcs/0363-ios-quick-capture.md`](../../docs/rfcs/0363-ios-quick-capture.md).
 
@@ -14,6 +14,7 @@ from outside the app.
 | Piece | Path | Target |
 |---|---|---|
 | Widget (opens `outl://capture`) | `src-tauri/gen/apple/OutlWidget/` | `OutlWidget` app extension, iOS 16+ |
+| Control Center "Quick Add" control (opens `outl://capture`) | `src-tauri/gen/apple/OutlWidget/OutlQuickAddControl.swift` | same `OutlWidget` extension, iOS 18+ |
 | Shared pure logic (links, inbox writer, ULID) | `swift/OutlKit/Sources/OutlKit/Capture/` | OutlKit package, unit tested by `swift test` |
 | App Intent "Add to today" + App Shortcut | `src-tauri/gen/apple/Sources/outl-mobile/OutlAddToTodayIntent.swift` | app, iOS 16+ (`AppIntents` weak-linked) |
 | Share extension (text, one web link) | `src-tauri/gen/apple/OutlShare/` | `OutlShare` app extension, iOS 15+ |
@@ -26,6 +27,22 @@ ships with: the deployment target is **iOS 17**, declared in
 `src-tauri/gen/apple/project.yml`, the committed `project.pbxproj`,
 `tauri.conf.json` and `swift/OutlKit/Package.swift` (all four, or a build
 picks the lowest and an `#available` branch nobody tests comes back).
+
+## Control Center "Quick Add" (iOS 18+)
+
+A `ControlWidget` in the existing `OutlWidget` extension, so it has no target, App ID, profile or App Group of its own.
+One tap runs `OpenQuickAddIntent`, which returns `OpenURLIntent(CaptureLink.capture)`: it opens `outl://capture`, the same link the Home Screen widget and Android's quick settings tile open, so the capture sheet appears over today's journal with the keyboard up.
+The intent opens the URL on purpose rather than setting `openAppWhenRun`, which would only resume the last screen.
+It writes nothing and is a different intent from "Add to today" (which saves a line to the inbox without opening the app), with no Shortcuts phrases.
+
+Control Center controls need iOS 18, but the app and the Home Screen / Lock Screen widget keep the iOS 17 floor.
+The control and its intent are `@available(iOS 18.0, *)`, and `OutlWidgetBundle` only lists the control behind `if #available(iOS 18.0, *)`.
+Building it needs the iOS 18 SDK (Xcode 16 or later).
+
+There is no audio-capture control: the app has no audio-capture entry point for one to open.
+
+To try it: install the build on an iOS 18 device, open Control Center, tap the `+` in the top left ("Add a Control") and pick "Quick Add" under outl.
+Tapping it should open the app on the capture sheet.
 
 The App Group is `group.app.outl.mobile-app`; the inbox is `captures/` in
 its container. The app and every extension that writes must carry it.
@@ -64,6 +81,7 @@ regenerates with `xcodegen`.
    the `outl-mobile_iOS` scheme on a phone, then add the "Add to today"
    widget from the Home Screen and the Lock Screen and tap it: the app
    should open on the capture sheet.
+   On iOS 18, add the "Quick Add" control from Control Center too.
 5. **Inbox on a device.** With the app in the background, use the
    "Add to today" Shortcut (step 3) or share some text to outl: the line
    should be in today's journal when you open the app, and with the app

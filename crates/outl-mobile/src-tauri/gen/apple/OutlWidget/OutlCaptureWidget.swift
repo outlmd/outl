@@ -73,5 +73,8 @@ struct OutlCaptureWidget: Widget {
 struct OutlWidgetBundle: WidgetBundle {
     var body: some Widget {
         OutlCaptureWidget()
+        if #available(iOS 18.0, *) {
+            OutlQuickAddControl()
+        }
     }
 }
