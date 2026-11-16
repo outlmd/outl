@@ -2,6 +2,7 @@ package app.outl.mobile_app
 
 import android.content.Context
 import android.os.Bundle
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
@@ -61,6 +62,14 @@ class MainActivity : TauriActivity() {
     // the page the real insets instead. After `super.onCreate`, which is what
     // creates the window's decor view. See OutlSafeArea.
     OutlSafeArea.install(this)
+  }
+
+  // wry calls this from `setWebView`, before the first `loadUrl`, which is
+  // the only point where a JavaScript interface reaches the first document.
+  // See OutlSafeArea's load-order note.
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    OutlSafeArea.attach(webView)
   }
 
   // The Wi-Fi driver filters multicast frames not addressed to this device, so

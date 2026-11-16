@@ -27,6 +27,16 @@ import java.lang.ref.WeakReference
  * now, and the [Bridge] (exposed as `window.OutlSafeArea`) lets a document
  * that loads later read the current value synchronously at boot.
  *
+ * The bridge is registered from [attach], which `MainActivity` calls from
+ * wry's `onWebViewCreate`, before the first `loadUrl`. That ordering is what
+ * closes the gap between the two directions: an `addJavascriptInterface`
+ * only reaches documents created after it, and a push evaluated before the
+ * first navigation commits lands in the outgoing blank document and is lost.
+ * With the bridge already in place, the first real document always finds
+ * it, and [latest] is written before every push, so whichever of "push" and
+ * "page reads `get()`" comes second sees the current value. The push
+ * deduplication below therefore never strands a document.
+ *
  * The keyboard (IME) is deliberately not part of this: the web layer
  * already tracks it through `visualViewport` (`lib/viewport.ts`).
  */
@@ -41,6 +51,17 @@ object OutlSafeArea {
   /** Read by the page on its own thread, hence [latest] is volatile. */
   class Bridge {
     @JavascriptInterface fun get(): String = latest
+  }
+
+  /**
+   * Exposes `window.OutlSafeArea` on [web] before it navigates anywhere.
+   * Must run before the first `loadUrl`; see the load-order note above.
+   */
+  fun attach(web: WebView) {
+    if (pushedTo?.get() === web) return
+    web.addJavascriptInterface(bridge, "OutlSafeArea")
+    pushedTo = WeakReference(web)
+    pushedJson = null
   }
 
   fun install(activity: Activity) {
@@ -76,12 +97,9 @@ object OutlSafeArea {
     if (known != null && known.isAttachedToWindow && pushedJson == latest) return
 
     val web = known?.takeIf { it.isAttachedToWindow } ?: OutlCapture.findWebView(root) ?: return
-    if (web !== known) {
-      // Visible to documents loaded after this call; the evaluate below
-      // covers the one already loaded.
-      web.addJavascriptInterface(bridge, "OutlSafeArea")
-      pushedTo = WeakReference(web)
-    }
+    // Fallback for a WebView [attach] never saw: visible to documents loaded
+    // after this call, and the evaluate below covers the one already loaded.
+    if (web !== known) attach(web)
     pushedJson = latest
     web.evaluateJavascript(
       "window.__outlSafeArea=$latest;" +
