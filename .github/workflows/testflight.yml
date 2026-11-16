@@ -58,9 +58,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  upload:
-    name: Upload IPA to TestFlight
-    runs-on: blacksmith-6vcpu-macos-15
+  # Decides whether there is an IPA to ship, on a cheap Linux runner,
+  # before the macOS job and the `release` environment are involved.
+  # Mobile runs `ios-release` only on push or on a dispatch with
+  # `release_build=true`, yet it reports `success` either way, so a
+  # successful `workflow_run` does not imply the artifact exists.
+  # Without this check the upload job failed at download-artifact.
+  gate:
+    name: Check for IPA artifact
+    runs-on: ubuntu-latest
     # workflow_run fires on every conclusion; only proceed when:
     #   1. a human triggered us manually (workflow_dispatch), or
     #   2. the Mobile workflow finished `success` AND was triggered
@@ -77,7 +83,41 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        (github.event.workflow_run.event == 'push' ||
         github.event.workflow_run.event == 'workflow_dispatch'))
+    outputs:
+      ship: ${{ steps.check.outputs.ship }}
+    steps:
+      - name: Look for a current outl-ios-release artifact
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          MOBILE_RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A manual dispatch always proceeds: a human who asks to ship
+          # should get a clear failure if the chosen run has no IPA.
+          if [[ "$EVENT_NAME" != "workflow_run" ]]; then
+            echo "ship=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FOUND=$(gh api --paginate \
+            "repos/$REPO/actions/runs/$MOBILE_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name == "outl-ios-release" and .expired == false) | .id')
+          if [[ -n "$FOUND" ]]; then
+            echo "ship=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Mobile run $MOBILE_RUN_ID has outl-ios-release"
+          else
+            echo "ship=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Mobile run $MOBILE_RUN_ID has no current outl-ios-release artifact (no release build); skipping upload"
+          fi
 
+  upload:
+    name: Upload IPA to TestFlight
+    needs: gate
+    runs-on: blacksmith-6vcpu-macos-15
+    if: needs.gate.outputs.ship == 'true'
+    # The event / conclusion gate and the artifact check live in `gate`.
     environment:
       name: release
       url: https://appstoreconnect.apple.com/apps
