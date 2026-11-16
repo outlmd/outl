@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use anyhow::{Context, Result};
 use iroh::protocol::Router;
@@ -27,15 +26,14 @@ use crate::engine_catchup::{catch_up_loop, drain_sync_now};
 use crate::engine_pairing::{
     drain_pair_completions, pair_host_on_hub, pair_join_on_hub, PairingHub, PairingProtocolHandler,
 };
-// The delta-sync wire protocol lives in `engine_sync`; re-exported here so
-// `crate::engine::{delta_sync, SyncProtocolHandler}` keeps resolving for the
-// catch-up loop, pairing drain, the router below, and `test_support`.
+// Wire protocol: `engine_sync` (initiator) + `engine_serve` (responder), re-exported
+// so `crate::engine::{delta_sync, SyncProtocolHandler}` keeps resolving everywhere.
 use crate::engine_assets::AssetProtocolHandler;
 use crate::engine_snapshot::SnapshotProtocolHandler;
-pub(crate) use crate::engine_sync::{delta_sync, SyncProtocolHandler};
 use crate::identity::IrohIdentity;
 use crate::peers::{PeerEntry, PeersStore};
 use crate::protocol::{ASSET_ALPN, PAIRING_ALPN, SNAPSHOT_ALPN, SYNC_ALPN};
+pub(crate) use crate::{engine_serve::SyncProtocolHandler, engine_sync::delta_sync};
 
 /// iroh-based P2P transport.
 ///
@@ -621,7 +619,7 @@ async fn run_iroh(
     // the same one the catch-up loop, gossip-triggered sync and forced passes
     // reuse — which is the whole point: the connect is paid once per peer, not
     // once per sync.
-    let conns = crate::peer_conn::PeerConnections::new(endpoint.clone());
+    let conns = crate::peer_conn::PeerConnections::with_health(endpoint.clone(), health.clone());
 
     let gossip = Gossip::builder().spawn(endpoint.clone());
 
@@ -660,6 +658,7 @@ async fn run_iroh(
                 peer_ready_tx: peer_ready_tx.clone(),
                 append_lock: append_lock.clone(),
                 inbound_serves,
+                health: health.clone(),
             },
         )
         .accept(
@@ -693,7 +692,6 @@ async fn run_iroh(
         workspace_id.clone(),
         actor,
         peer_ready_tx.clone(),
-        health.clone(),
         append_lock.clone(),
         in_flight.clone(),
         progress.clone(),
@@ -710,7 +708,6 @@ async fn run_iroh(
         let wr = workspace_root.clone();
         let wid = workspace_id.clone();
         let tx = peer_ready_tx.clone();
-        let health = health.clone();
         let lock = append_lock.clone();
         let in_flight = in_flight.clone();
         let prog = progress.clone();
@@ -727,17 +724,11 @@ async fn run_iroh(
                 has_direct_addrs = has_direct,
                 "boot: connecting to peer for initial sync"
             );
-            let started = Instant::now();
             let wid_snapshot = wid.read().expect("workspace id rwlock poisoned").clone();
             match delta_sync(&conns, addr, &wr, &wid_snapshot, actor, tx, &lock, &prog).await {
-                Ok(()) => {
-                    info!("boot: initial sync to {label} ok");
-                    health.record_success(nid, started);
-                }
-                Err(e) => {
-                    warn!("boot: initial sync to {label} failed: {e}");
-                    health.record_failure(nid);
-                }
+                Ok(()) => info!("boot: initial sync to {label} ok"),
+                // Reachability belongs to the connection pool now.
+                Err(e) => warn!("boot: initial sync to {label} failed: {e}"),
             }
         });
     }
@@ -763,7 +754,6 @@ async fn run_iroh(
         workspace_id: workspace_id.clone(),
         actor,
         peer_ready_tx: peer_ready_tx.clone(),
-        health: health.clone(),
         append_lock: append_lock.clone(),
         in_flight: in_flight.clone(),
         peers_path: peers_path.clone(),
@@ -784,7 +774,6 @@ async fn run_iroh(
     let catchup_wr = workspace_root.clone();
     let catchup_wid = workspace_id.clone();
     let catchup_tx = peer_ready_tx.clone();
-    let catchup_health = health.clone();
     let catchup_lock = append_lock.clone();
     let catchup_in_flight = in_flight.clone();
     let catchup_peers_path = peers_path.clone();
@@ -803,7 +792,6 @@ async fn run_iroh(
             catchup_wid,
             actor,
             catchup_tx,
-            catchup_health,
             catchup_lock,
             catchup_in_flight,
             catchup_wid_changed,
@@ -827,7 +815,6 @@ async fn run_iroh(
         workspace_id.clone(),
         actor,
         peer_ready_tx.clone(),
-        health.clone(),
         append_lock.clone(),
         in_flight.clone(),
         sync_passes,

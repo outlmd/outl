@@ -1,8 +1,8 @@
 import { For, Show, onCleanup } from "solid-js";
-import type { PageView, PluginToolbarButton } from "@outl/shared";
+import type { PageView, PeerStatusDto, PluginToolbarButton } from "@outl/shared";
 
 import { JournalHeader, PageHeader } from "./JournalHeader";
-import { SyncDot } from "./SyncDot";
+import { SyncDot, syncState } from "@outl/shared/peers";
 import { focusMode } from "@outl/shared/polish";
 import { journalHeading } from "@outl/shared/journal";
 import { haptic } from "../lib/haptics";
@@ -33,10 +33,10 @@ const focus = focusMode();
 export function JournalChrome(props: {
   /** The page currently on screen, or `null` while loading. */
   view: PageView | null;
-  /** `false` puts the sync dot in its offline state. */
+  /** The device's own radio, as a floor under the sync dot's state. */
   online: boolean;
-  /** At least one peer is reachable. */
-  peersUp: boolean;
+  /** The last `peerStatus()` answer, `null` before the first one lands. */
+  peers: readonly PeerStatusDto[] | null;
   /** A sync pass is in flight. */
   syncing: boolean;
   /** A manual refresh is in flight (spins the sync dot). */
@@ -62,6 +62,18 @@ export function JournalChrome(props: {
   // Either flag means a pass is running: `syncing` covers the automatic
   // open/foreground pulls, `refreshing` the manual ones.
   const syncBusy = () => props.syncing || props.refreshing;
+  /**
+   * What the dot shows. Derived by `@outl/shared/peers`, not here: the
+   * desktop asks the same question and the two answers used to be written
+   * separately, which is how a launch read "offline" on the phone and
+   * "checking" on the desktop over the same unmeasured state (#575).
+   */
+  const dotState = () =>
+    syncState({
+      syncing: syncBusy(),
+      peers: props.peers,
+      deviceOnline: props.online,
+    });
   /**
    * What the title says while the first page is still opening.
    *
@@ -267,11 +279,9 @@ export function JournalChrome(props: {
               Mirrors the desktop's clickable dot. */}
           <button
             type="button"
-            aria-label={
-              syncBusy()
-                ? "Syncing"
-                : "Sync now. Press and hold for devices"
-            }
+            // The button says what pressing it does; the dot announces what
+            // the sync state is (`<SyncDot>` owns that live region).
+            aria-label="Sync now. Press and hold for devices"
             aria-busy={syncBusy()}
             title="Sync now"
             onPointerDown={devicesLongPress.onPointerDown}
@@ -289,20 +299,7 @@ export function JournalChrome(props: {
             }}
             class="flex h-9 w-9 items-center justify-center rounded-full active:bg-(--color-outl-border)/40"
           >
-            <SyncDot
-              status={
-                // PRIMARY signal is iroh peer health, not navigator.onLine.
-                // A sync in flight wins (spinner); else a reachable
-                // peer → synced (green); else offline/orange — either the
-                // device has no radio, or peers exist but none answered
-                // (or none are paired, so there's nothing to sync with).
-                syncBusy()
-                  ? "syncing"
-                  : props.online && props.peersUp
-                    ? "synced"
-                    : "offline"
-              }
-            />
+            <SyncDot state={dotState()} />
           </button>
           {/* Focus mode: fades the chrome and dims every row but the
               one being written. Same glyph and slot as desktop. */}

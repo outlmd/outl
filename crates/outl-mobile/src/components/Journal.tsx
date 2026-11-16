@@ -47,7 +47,7 @@ import {
 } from "@outl/shared/api/commands";
 import { utf16OffsetToCharOffset } from "@outl/shared/paste";
 import { isAssetLink } from "@outl/shared/links";
-import { peersOnline } from "@outl/shared/peers";
+import type { PeerStatusDto } from "@outl/shared/api/types";
 import {
   findBlock,
   flattenAll,
@@ -284,13 +284,13 @@ export function Journal() {
   });
 
   const [syncing, setSyncing] = createSignal(false);
-  // PRIMARY sync signal: is at least one iroh peer reachable right now?
-  // Polled from the transport's own dial outcomes (`peerStatus()` →
-  // `peer_health()`), NOT from `navigator.onLine`. The phone having WiFi
-  // says nothing about whether a P2P peer answered — iroh is outl's
-  // default transport, so the dot must reflect the mesh, not the radio.
-  // `false` means nothing to sync with (no peers paired, or all down).
-  const [peersUp, setPeersUp] = createSignal(false);
+  // PRIMARY sync signal: the transport's per-peer reachability, from the
+  // dials it made AND the ones it answered (`peerStatus()` → `peer_health()`),
+  // NOT `navigator.onLine` — WiFi says nothing about whether a device
+  // answered. `null` until the first probe lands: `[]` is a measurement,
+  // `null` the absence of one, and collapsing them made this client claim
+  // offline on launch (#575). `@outl/shared/peers` derives the state.
+  const [peers, setPeers] = createSignal<PeerStatusDto[] | null>(null);
   // SECONDARY signal — drives the `<SyncDot>` "offline" pill when the
   // device itself is offline (truly no radio → no peer can be up
   // anyway). `navigator.onLine` is not perfectly accurate (it lies when
@@ -304,7 +304,7 @@ export function Journal() {
   // flapping the dot to offline on a transient error.
   async function refreshPeerStatus() {
     try {
-      setPeersUp(peersOnline(await peerStatus()));
+      setPeers(await peerStatus());
     } catch {
       // keep the previous value; the next tick retries
     }
@@ -1406,7 +1406,7 @@ export function Journal() {
       <JournalChrome
         view={view()}
         online={online()}
-        peersUp={peersUp()}
+        peers={peers()}
         syncing={syncing()}
         refreshing={refreshing()}
         todaySlug={dayNav.today()}

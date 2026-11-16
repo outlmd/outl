@@ -51,7 +51,8 @@ Every split below was forced by the file-size guard, but each one landed on a se
 
 | File | Owns | Why it is not in `engine.rs` |
 |---|---|---|
-| `engine_sync.rs` | The delta-sync wire protocol: `delta_sync` (initiator), `SyncProtocolHandler` (responder), and the framing helpers (`read_frame` + typed `read_*`). | "On the wire" and "stand it up" are different jobs, and only one of them changes when the protocol version moves. |
+| `engine_sync.rs` | The delta-sync wire protocol, **initiator** side: `delta_sync` plus the framing helpers (`read_frame` + typed `read_*`) both sides share. | "On the wire" and "stand it up" are different jobs, and only one of them changes when the protocol version moves. |
+| `engine_serve.rs` | The **responder**: `SyncProtocolHandler`, mounted on `SYNC_ALPN`. | Split out when the file crossed the size ratchet, along the line its own header already drew. The two sides share the wire format and nothing else: only this one reads `peers.json`, asks `authz`, holds the inbound-serve count a background flush waits on, records inbound reachability, and self-heals a peer's stale address. |
 | `engine.rs` | Boot orchestration: the `IrohSyncTransport` struct + channel wiring, `run_iroh`, the boot/catch-up/gossip task spawns, the router setup. | — |
 | `coordination.rs` | The handles concurrent tasks meet on: `AppendLock`, `InFlightPeers` (+ `InFlightGuard`, `try_acquire_in_flight`), `InboundServes`, `SharedWorkspaceId`. | Four dial paths and the inbound `serve` all reach for these, and none of them care how `run_iroh` works. |
 | `oplog.rs` | What the wire **writes** to disk: `ingest_received_ops` and the append-serialization invariant. | Those durability rules hold regardless of which wire version calls them, so they are not protocol code. |

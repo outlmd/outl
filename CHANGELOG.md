@@ -34,6 +34,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The desktop sync dot turns green again, and the four states it can show are now decided in one place for every client.**
+  On a machine that was syncing perfectly the dot stayed orange, with a tooltip that contradicted itself: "Sync: no peer reachable" one line above "Last synced just now".
+
+  Reachability was recorded for the dials a device **made** and not for the ones it **answered**.
+  That is backwards for the arrangement outl is built on: a phone behind carrier NAT is the side that dials, which is why the phone forces a pass every few seconds instead of waiting to be reached.
+  So the desktop logged a failed dial to the phone every catch-up tick, ingested that same phone's ops seconds later over an inbound connection, recorded nothing for it, and reported every device offline.
+  The responder now records the peer on each confirmed inbound exchange, after the authorization check, so a device that was removed can never mark itself reachable on someone else's dot.
+
+  **A dial that connected and then broke counts as contact too**, and that half is what made the dot flicker rather than simply lie: a first sync, or a gap resend of a 500k-op actor, takes minutes, so an exchange still running — or one cut off half way through its push — was read as "that device is gone".
+  Only a dial that never connected means offline now, and the connection pool decides it, because connecting is the only step that answers the question.
+  That also deleted the reachability parameter from five functions that knew whether the *pass* worked and nothing about whether the device answered.
+
+  The remaining half is the one that would have made this drift back.
+  Both GUI clients read the same `peersOnline`, and then each built its own state, label and colour on top of it — which had already diverged where nobody looks: the desktop treated "no answer yet" as a dim *checking* dot and the phone treated it as orange *offline*, so a launch claimed a verdict on a measurement nobody had taken, and a probe that threw meant "read offline" on one client and "keep the last value" on the other.
+  `syncState`, `syncStateLabel`, `syncStateColor` and the `<SyncDot>` glyph live in `@outl/shared/peers` now, and the clients keep only their own chrome.
+  The dot is also what announces the state to a screen reader, so each client's button says what pressing it does rather than repeating it.
+  [#575](https://github.com/outlmd/outl/issues/575)
+
 - **Zooming into a block is distraction-free on every client, and asking for a page you are already on gets you back out.**
   Two faults with one shape: the zoom was a slice of the outline body, and everything around the body carried on as if the whole page were open.
 

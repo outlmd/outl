@@ -112,7 +112,29 @@ The lease lives on the **endpoint thread**, not on the transport. Too late stran
 ## Status from the transport (`peer_health`)
 
 `IrohSyncTransport` tracks per-peer reachability in an `Arc<Mutex<HashMap<EndpointId, PeerHealth>>>` (the `health` module).
-The transport's own dials populate it: the **boot connect**, the **catch-up loop**, and **gossip-triggered sync** each record `record_success(nid, started)` / `record_failure(nid)` on their `delta_sync` outcome — no extra endpoint, no extra dials.
+**Contact is what it records, and exactly two places decide it.**
+`PeerConnections` (the connection pool) owns the outbound verdict, because connecting is the only step that answers "can this device be reached"; `SyncProtocolHandler::serve_exchange` owns the inbound one. Nothing else writes the map.
+
+| what happened | recorded |
+|---|---|
+| the dial never connected | `record_failure(nid)` — the only thing that means offline |
+| the connection opened, or a pooled one was reused | `record_reached(nid)` |
+| an approved device dialed **us** | `record_reached(remote)`, right after `authorize_or_close` |
+| the exchange completed | `record_success(nid, started)`, adding the measured rtt (`delta_sync`) |
+| the exchange broke after connecting | **nothing** — the peer was reached, a half-sent push does not unmake that |
+
+No extra endpoint and no extra dials in any of them.
+The inbound position is pinned from both sides: earlier would let a refused dialer mark itself reachable on this device's dot, and later ties the record to the rest of the exchange surviving — the first version recorded after the durable-ingest ack, where a `send.finish()` that errors on an initiator which already hung up skips it entirely.
+
+**Both halves were bugs, and they are the same bug.**
+Reachability is asymmetric and outl is built on that asymmetry: a phone behind carrier NAT is the side that dials, which is why mobile forces a pass every 3s rather than waiting to be reached.
+Recording only outbound dials meant a desktop logged nothing but failures against that phone while ingesting its ops, so the dot read "no peer reachable" one line above "Last synced just now".
+Recording only *completed* exchanges meant the same dot flickered: a real log carries an inbound serve from a peer at 19:38:30 and that same peer's outbound dial failing on `send our ops blob` at 19:38:34, and a first sync or a 500k-op gap resend takes minutes to finish.
+[#575](https://github.com/outlmd/outl/issues/575).
+
+**The map is not threaded through the call graph.**
+It used to be a parameter on `run_catch_up`, `force_sync_all`, `GossipCtx`, the pairing drain and the boot connect — five places that knew whether the *pass* worked and nothing about whether the device answered. Putting it on the pool deleted all five.
+Regression net: `tests/health.rs` — an inbound serve marks the dialer, a dialer `authz` refuses is never marked, an exchange that breaks after connecting stays reachable, and a dial that never connects reads offline.
 
 `SyncTransport::peer_health()` (a trait method in `outl-actions`, default `Vec::new()`) returns the snapshot as `Vec<outl_actions::PeerHealthSnapshot>` (`node_id`, `reachable`, `last_rtt_ms`).
 `FileSyncTransport` uses the default (no peers).

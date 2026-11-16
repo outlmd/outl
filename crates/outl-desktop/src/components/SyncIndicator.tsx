@@ -1,12 +1,17 @@
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 
+import type { PeerStatusDto } from "@outl/shared/api/types";
 import {
   peerStatus,
   reloadWorkspace,
   syncNow,
 } from "@outl/shared/api/commands";
-import { peersOnline } from "@outl/shared/peers";
-import { createSettle } from "@outl/shared/polish";
+import {
+  SyncDot,
+  peersAfterFailedProbe,
+  syncState,
+  syncStateLabel,
+} from "@outl/shared/peers";
 
 import { setAppState } from "../lib/store";
 import { onPeerOpsChanged } from "../lib/events";
@@ -14,9 +19,9 @@ import { onPeerOpsChanged } from "../lib/events";
 /**
  * Always-visible sync status dot for the desktop chrome cluster.
  *
- * Mirrors the mobile `<SyncDot>`: green when at least one iroh peer is
- * reachable, orange when none are, a dim dot while the first probe is
- * still in flight, a spinner while a sync pass runs.
+ * It **is** the mobile dot: the state comes from `syncState` and the glyph
+ * from `<SyncDot>`, both in `@outl/shared/peers`, so green / orange / dim /
+ * spinner mean the same thing in both clients and are decided once.
  *
  * Clicking it syncs now: dial every peer, reload the op log so the page
  * re-renders with whatever arrived. That is the refresh the chrome used
@@ -25,19 +30,17 @@ import { onPeerOpsChanged } from "../lib/events";
  * Settings → Sync, where the full peer list + pairing live
  * (`<SyncPanel>` is the Sync section of `<SettingsModal>`).
  *
- * The reachability read is the running transport's own dial outcomes
- * (`peerStatus()` → `peersOnline`) — the SAME source the Settings Sync
- * panel uses, so the dot and the panel can never disagree. We re-probe on
- * a slow interval and immediately whenever a peer delivers ops
+ * The reachability read is the running transport's own evidence — the dials
+ * it made and, since #575, the dials it answered — which is the SAME source
+ * the Settings Sync panel uses, so the dot and the panel can never disagree.
+ * We re-probe on a slow interval and immediately whenever a peer delivers ops
  * (`peer-ops-changed`): a delivery is proof the mesh is up, so the dot
  * should flip green without waiting for the next tick.
  */
 export function SyncIndicator() {
-  // null = first probe still running (dim); true / false = reachability.
-  const [online, setOnline] = createSignal<boolean | null>(null);
+  // `null` = the first probe has not answered yet (dim), never "offline".
+  const [peers, setPeers] = createSignal<readonly PeerStatusDto[] | null>(null);
   const [syncing, setSyncing] = createSignal(false);
-  // One soft pulse on the dot when a pass finishes, same as mobile.
-  const settling = createSettle(syncing);
   // When this window last saw a sync land: a pass it ran finished, or a
   // peer delivered ops. `null` until the first one, the tooltip says so.
   const [lastSynced, setLastSynced] = createSignal<number | null>(null);
@@ -46,11 +49,11 @@ export function SyncIndicator() {
 
   async function refresh() {
     try {
-      setOnline(peersOnline(await peerStatus()));
+      setPeers(await peerStatus());
     } catch {
-      // Probe failed (no transport wired / no network) — read as offline
-      // rather than blanking, so the dot stays meaningful.
-      setOnline(false);
+      // A probe that threw measured nothing. `peersAfterFailedProbe` owns
+      // what to hold, for both clients.
+      setPeers((prev) => peersAfterFailedProbe(prev));
     }
   }
 
@@ -84,22 +87,10 @@ export function SyncIndicator() {
     await refresh();
   }
 
-  function color(): string {
-    const o = online();
-    if (o === null) return "var(--color-outl-fg-dim)";
-    // `accent_alt` is the palette's success hue and `warn` its warning
-    // one — a hex here would be a second definition of a colour with no
-    // `Palette` field behind it (root CLAUDE.md invariant 13).
-    return o
-      ? "var(--color-outl-accent-alt)"
-      : "var(--color-outl-warn)";
-  }
+  const state = () => syncState({ syncing: syncing(), peers: peers() });
 
   function label(): string {
-    if (syncing()) return "Syncing…";
-    const o = online();
-    if (o === null) return "Sync: checking…";
-    return o ? "Sync: a peer is reachable" : "Sync: no peer reachable";
+    return syncStateLabel(state());
   }
 
   function tooltip(): string {
@@ -113,7 +104,9 @@ export function SyncIndicator() {
   return (
     <button
       type="button"
-      aria-label={syncing() ? label() : `Sync now. ${label()}`}
+      // The button says what pressing it does; `<SyncDot>` announces what
+      // the state is, so a screen reader is not told both on every change.
+      aria-label="Sync now"
       aria-busy={syncing()}
       title={tooltip()}
       onMouseEnter={() => setNow(Date.now())}
@@ -124,24 +117,7 @@ export function SyncIndicator() {
       }}
       class="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-(--color-outl-border)/40"
     >
-      <Show
-        when={syncing()}
-        fallback={
-          <span
-            role="status"
-            aria-live="polite"
-            aria-hidden="true"
-            class={`h-2.5 w-2.5 rounded-full${settling() ? " outl-sync-settle" : ""}`}
-            style={{ background: color() }}
-          />
-        }
-      >
-        <span
-          aria-hidden="true"
-          data-testid="sync-spinner"
-          class="h-2.5 w-2.5 animate-spin rounded-full border-2 border-(--color-outl-accent) border-t-transparent"
-        />
-      </Show>
+      <SyncDot state={state()} />
     </button>
   );
 }

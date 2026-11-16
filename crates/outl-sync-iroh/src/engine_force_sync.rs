@@ -6,7 +6,6 @@
 //! window drive.
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use outl_core::id::ActorId;
 use tracing::{debug, info, warn};
@@ -14,7 +13,6 @@ use tracing::{debug, info, warn};
 use crate::engine::{
     delta_sync, try_acquire_in_flight, AppendLock, InFlightPeers, SharedWorkspaceId,
 };
-use crate::health::PeerHealthMap;
 use crate::peers::PeersStore;
 
 /// Run a single forced delta-sync pass over the current peer set.
@@ -38,7 +36,6 @@ pub(crate) async fn force_sync_all(
     workspace_id: SharedWorkspaceId,
     actor: ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: PeerHealthMap,
     append_lock: AppendLock,
     in_flight: InFlightPeers,
     progress: crate::progress::ProgressSink,
@@ -65,7 +62,6 @@ pub(crate) async fn force_sync_all(
         &workspace_id,
         actor,
         &peer_ready_tx,
-        Some(&health),
         &append_lock,
         &in_flight,
         &progress,
@@ -99,7 +95,6 @@ pub(crate) async fn force_sync_addrs<L, D>(
     workspace_id: &SharedWorkspaceId,
     actor: ActorId,
     peer_ready_tx: &std::sync::mpsc::Sender<()>,
-    health: Option<&PeerHealthMap>,
     append_lock: &AppendLock,
     in_flight: &InFlightPeers,
     progress: &crate::progress::ProgressSink,
@@ -119,7 +114,6 @@ pub(crate) async fn force_sync_addrs<L, D>(
             );
             return;
         };
-        let started = Instant::now();
         let wid_snapshot = workspace_id
             .read()
             .expect("workspace id rwlock poisoned")
@@ -136,18 +130,10 @@ pub(crate) async fn force_sync_addrs<L, D>(
         )
         .await
         {
-            Ok(()) => {
-                info!("sync-now: sync to {} ok", label(nid));
-                if let Some(h) = health {
-                    h.record_success(nid, started);
-                }
-            }
-            Err(e) => {
-                warn!("sync-now: sync to {} failed: {e}", label(nid));
-                if let Some(h) = health {
-                    h.record_failure(nid);
-                }
-            }
+            Ok(()) => info!("sync-now: sync to {} ok", label(nid)),
+            // Reachability is `delta_sync`'s to record (it knows whether the
+            // dial got through); this only reports the pass.
+            Err(e) => warn!("sync-now: sync to {} failed: {e}", label(nid)),
         }
     });
     n0_future::join_all(dials).await;

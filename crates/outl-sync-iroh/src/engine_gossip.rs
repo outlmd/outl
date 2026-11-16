@@ -23,7 +23,6 @@
 //! the same `Gossip`/`Endpoint`).
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use iroh_gossip::api::{Event, GossipReceiver, GossipSender};
 use iroh_gossip::Gossip;
@@ -36,7 +35,6 @@ use crate::engine::{
     delta_sync, try_acquire_in_flight, workspace_topic_id, Announce, AppendLock, InFlightPeers,
     SharedWorkspaceId,
 };
-use crate::health::PeerHealthMap;
 use crate::peers::PeersStore;
 
 /// Everything the gossip supervisor needs, grouped so `run_iroh`'s spawn site
@@ -51,7 +49,6 @@ pub(crate) struct GossipCtx {
     pub(crate) workspace_id: SharedWorkspaceId,
     pub(crate) actor: ActorId,
     pub(crate) peer_ready_tx: std::sync::mpsc::Sender<()>,
-    pub(crate) health: PeerHealthMap,
     pub(crate) append_lock: AppendLock,
     pub(crate) in_flight: InFlightPeers,
     pub(crate) peers_path: PathBuf,
@@ -167,7 +164,6 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
     let wid = ctx.workspace_id.clone();
     let actor = ctx.actor;
     let tx = ctx.peer_ready_tx.clone();
-    let health = ctx.health.clone();
     let lock = ctx.append_lock.clone();
     let in_flight = ctx.in_flight.clone();
     let prog = ctx.progress.clone();
@@ -178,7 +174,6 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
             debug!("gossip: sync from {label} already in flight, skipping");
             return;
         };
-        let started = Instant::now();
         let wid_snapshot = wid.read().expect("workspace id rwlock poisoned").clone();
         match delta_sync(
             &conns,
@@ -192,11 +187,9 @@ fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
         )
         .await
         {
-            Ok(()) => health.record_success(peer_node_id, started),
-            Err(e) => {
-                warn!("gossip-triggered sync from {label} failed: {e}");
-                health.record_failure(peer_node_id);
-            }
+            Ok(()) => {}
+            // Reachability is `delta_sync`'s to record.
+            Err(e) => warn!("gossip-triggered sync from {label} failed: {e}"),
         }
     });
 }

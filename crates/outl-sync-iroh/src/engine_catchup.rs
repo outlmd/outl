@@ -19,7 +19,6 @@ use crate::engine::{
     delta_sync, try_acquire_in_flight, AppendLock, InFlightPeers, SharedWorkspaceId,
 };
 use crate::engine_force_sync::force_sync_all;
-use crate::health::PeerHealthMap;
 use crate::peers::PeersStore;
 
 /// How often the catch-up loop reloads `peers.json` and re-syncs new/failed
@@ -83,7 +82,6 @@ pub(crate) async fn catch_up_loop(
     workspace_id: SharedWorkspaceId,
     actor: ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: PeerHealthMap,
     append_lock: AppendLock,
     in_flight: InFlightPeers,
     wid_changed: tokio::sync::broadcast::Receiver<outl_core::WorkspaceId>,
@@ -116,7 +114,6 @@ pub(crate) async fn catch_up_loop(
         workspace_id,
         actor,
         peer_ready_tx,
-        Some(health),
         append_lock,
         Some(in_flight),
         Some(wid_changed),
@@ -153,7 +150,6 @@ pub(crate) async fn drain_sync_now(
     workspace_id: SharedWorkspaceId,
     actor: ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: PeerHealthMap,
     append_lock: AppendLock,
     in_flight: InFlightPeers,
     passes_completed: Arc<AtomicU64>,
@@ -190,7 +186,6 @@ pub(crate) async fn drain_sync_now(
             workspace_id.clone(),
             actor,
             peer_ready_tx.clone(),
-            health.clone(),
             append_lock.clone(),
             in_flight.clone(),
             progress.clone(),
@@ -228,7 +223,6 @@ pub(crate) async fn run_catch_up<F>(
     workspace_id: SharedWorkspaceId,
     actor: ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: Option<PeerHealthMap>,
     append_lock: AppendLock,
     in_flight: Option<InFlightPeers>,
     mut wid_changed: Option<tokio::sync::broadcast::Receiver<outl_core::WorkspaceId>>,
@@ -317,7 +311,6 @@ pub(crate) async fn run_catch_up<F>(
                 Some(Some(guard)) => Some(guard),
                 None => None,
             };
-            let started = Instant::now();
             let wid_snapshot = workspace_id
                 .read()
                 .expect("workspace id rwlock poisoned")
@@ -339,9 +332,6 @@ pub(crate) async fn run_catch_up<F>(
                     // Stamp the success so this peer is skipped until it goes
                     // stale (`resync_after`), then re-dialed as maintenance.
                     last_synced.insert(nid, Instant::now());
-                    if let Some(h) = &health {
-                        h.record_success(nid, started);
-                    }
                     // Converge binary assets too (best-effort): pull any
                     // content-addressed uploads the peer holds that this device
                     // lacks. A separate `ASSET_ALPN` connection after the op
@@ -369,10 +359,9 @@ pub(crate) async fn run_catch_up<F>(
                 Err(e) => {
                     // Drop any stale timestamp so the next tick retries it now.
                     last_synced.remove(&nid);
+                    // Reachability is `delta_sync`'s to record: it is the
+                    // only caller that knows whether the dial got through.
                     warn!("catch-up: sync to {} failed: {e}", label(nid));
-                    if let Some(h) = &health {
-                        h.record_failure(nid);
-                    }
                 }
             }
         }
@@ -415,7 +404,6 @@ mod tests {
             wid,
             ActorId::new(),
             ready_tx,
-            PeerHealthMap::default(),
             Arc::new(tokio::sync::Mutex::new(())),
             Arc::new(std::sync::Mutex::new(HashSet::new())),
             passes.clone(),
@@ -475,7 +463,6 @@ mod tests {
             wid,
             ActorId::new(),
             ready_tx,
-            PeerHealthMap::default(),
             Arc::new(tokio::sync::Mutex::new(())),
             Arc::new(std::sync::Mutex::new(HashSet::new())),
             passes.clone(),

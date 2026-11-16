@@ -569,11 +569,12 @@ These are the **only** commands that touch `peers.json` directly instead of the 
 The header `<SyncDot>` and `PullToRefresh` reflect and drive the **iroh P2P transport** (outl's default sync), not the iCloud-era `navigator.onLine` signal they started on.
 
 - **Dot state.**
-  The PRIMARY input is iroh peer health, polled via `peerStatus()` → the shared `peersOnline()` helper (`@outl/shared/peers`) into a `peersUp` signal.
+  The PRIMARY input is iroh peer health, polled via `peerStatus()` into a `peers` signal (`PeerStatusDto[] | null`, `null` until the first probe answers — the absence of a measurement, which `[]` is not).
   The poll runs every 3s, and after each `peer-ops-changed` (the native ops bridge) plus after a force-sync.
   It is **armed** in the component body but **started** at the end of `onMount`, after the boot load settles (`Journal.polls.ts`): probing during render put a full workspace load in front of the first paint.
   `peer_status` is `async` now, so that load is off the iOS main thread, but it still reopens the op log per call — deferring the first probe stays right.
-  Derivation: a force-sync in flight → **syncing** (spinner); else `online() && peersUp()` → **synced** (green); else **offline** (orange).
+  **The derivation is not written here**: `JournalChrome` hands the list, `navigator.onLine` and the two in-flight flags to `syncState` (`@outl/shared/peers`), which answers `syncing` / `checking` / `online` / `offline` for this client and the desktop alike, and `<SyncDot>` paints it.
+  A pass in flight wins; no radio floors to offline; `null` is **checking** (dim), which is the bug the shared owner closed — this client used to start at `false` and claim offline on launch over a probe nobody had taken ([#575](https://github.com/outlmd/outl/issues/575)).
   `navigator.onLine` stays only as a secondary floor (truly no radio → orange regardless).
   Zero paired peers reads as offline — there's nothing to sync with.
 - **Refresh.**
@@ -589,7 +590,8 @@ The header `<SyncDot>` and `PullToRefresh` reflect and drive the **iroh P2P tran
   **Reload-ordering guard:** each `pullAndReload` captures a monotonic `reloadGen` at entry and applies only when still the latest, so a slow reload can't flip the page back to an older state.
   (The split-content flicker's real cause was a backend duplicate-slug-root bug, fixed in `outl-actions::merge_duplicate_slug_roots`; this is the frontend belt-and-suspenders.)
 
-`syncNow()` and `peersOnline()` both live in `@outl/shared` so mobile and desktop derive the dot + drive the refresh identically.
+`syncNow()`, `peersOnline()`, `syncState()` and `<SyncDot>` all live in `@outl/shared` so mobile and desktop derive the dot + drive the refresh identically.
+There is no `SyncDot.tsx` in this crate any more; the sync button's `aria-label` names the action only, because the shared dot is the live region that announces the state.
 See [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLAUDE.md) → "Force-sync trigger (`sync_now`)".
 
 ## Cross-runtime contracts (now in `@outl/shared`)

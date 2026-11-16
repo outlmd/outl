@@ -12,6 +12,15 @@
 export { PairingQR } from "./PairingQR";
 export { PeerList } from "./PeerList";
 export { ticketToSvg, type TicketQrOptions } from "./qr";
-export { peersOnline } from "./status";
+export { peersAfterFailedProbe, peersOnline } from "./status";
+export {
+  SYNC_STATES,
+  syncState,
+  syncStateColor,
+  syncStateLabel,
+  type SyncState,
+  type SyncStateInput,
+} from "./status";
+export { SyncDot } from "./SyncDot";
 export { SyncProgressView } from "./SyncProgressView";
 export { createSyncProgress, type SyncFeedEntry, type SyncProgressState } from "./sync-progress";

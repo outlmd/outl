@@ -644,11 +644,20 @@ Run `outl sync` on the device that's missing notes, or open a GUI/TUI client (it
 For a machine that should keep pulling peers' ops with no GUI open, run `outl serve --no-watch` under `launchd` / `systemd`.
 That converges the **op log**; the `.md` files on that machine are re-projected when a client next opens the workspace, not by the daemon.
 
-**`outl peer status` says a peer is offline.**
+**The sync dot in a GUI client is orange, or `outl peer status` says a peer is offline.**
 The other device has to be running a long-lived client (GUI, TUI, `outl mcp serve`, or `outl serve`) to answer.
 A device that only ever runs one-shot CLI commands has no endpoint to reach — the ephemeral CLI never binds one, documented in `crates/outl-cli/CLAUDE.md`.
 A device runs **one** sync endpoint at a time, taken by whichever long-lived process started first; the others sync through the shared `ops/` dir behind it.
 So a machine running only `outl mcp serve` does answer, and a machine where a GUI is already open answers through the GUI.
+
+The CLI and the GUI answer this question from different evidence, and the difference matters when they disagree.
+`outl peer status` **probes**: it opens a transient endpoint and dials each peer now.
+A GUI client never probes — a second endpoint on the device identity would hijack the relay route from the running one — so its dot reads the transport's own record of who it is in contact with: a dial that connected, **or** an approved device that dialed in.
+
+That second half is why "offline" and "we are not syncing" are not the same sentence.
+A phone behind carrier NAT is the side that dials, so a desktop can fail every dial to it while ingesting its ops on an inbound connection; the dot is green because contact is contact, whichever side opened it.
+An exchange that connects and then breaks (a half-sent push, a peer whose OS suspended it) also stays green: the device was reached, the pass simply has to run again.
+Only a dial that never connects reads as offline.
 
 **Pairing or syncing fails only when you run outl from source.**
 The repo's `.cargo/config.toml` exports `$OUTL_DEVICE_DIR`, so **every** binary cargo launches — `cargo run -p outl-desktop` included — is a *separate device* from the installed app: its own actor, its own iroh identity, its own node id.
@@ -656,7 +665,7 @@ It logs one `WARN` naming the directory at startup.
 Two consequences bite when testing sync:
 
 - Peers paired with the installed app list that app's node id and simply show this machine as offline.
-- The key lives under `target/`, so `cargo clean` deletes it and the next run mints a **new** node id, voiding every pairing made with the previous one.
+- The identity lives in `.dev-device-store/`, **not** under `target/`, so a `cargo clean` no longer voids it: pair the phone against a source build once and it stays paired across rebuilds. Deleting that directory is what mints a new node id and breaks every pairing made with the old one.
 
 Run the machine's real identity instead by clearing the variable for that one command:
 

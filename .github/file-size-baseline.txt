@@ -100,9 +100,8 @@
 636 crates/outl-plugins/src/host_tests.rs
 805 crates/outl-shortcuts/src/defaults.rs
 717 crates/outl-shortcuts/src/support.rs
-763 crates/outl-sync-iroh/src/engine_pairing.rs
-614 crates/outl-sync-iroh/src/engine_sync.rs
-868 crates/outl-sync-iroh/src/engine.rs
+759 crates/outl-sync-iroh/src/engine_pairing.rs
+855 crates/outl-sync-iroh/src/engine.rs
 1245 crates/outl-sync-iroh/src/pairing.rs
 1022 crates/outl-sync-iroh/src/peers.rs
 821 crates/outl-sync-iroh/tests/chaos.rs

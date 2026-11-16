@@ -31,6 +31,9 @@ use crate::protocol::SYNC_ALPN;
 mod assets;
 pub use assets::{run_asset_pull, run_staged_asset_pull, spawn_asset_responder, write_test_asset};
 
+mod health;
+pub use health::{run_delta_sync_tracking_health, spawn_responder_with_health, HealthWindow};
+
 /// Authorize `peer` as an approved device for the responder rooted at
 /// `workspace_root`, by writing a minimal [`PeerEntry`] into its
 /// `<root>/.outl/peers.json` — the same file real pairing writes.
@@ -156,24 +159,15 @@ pub fn spawn_responder(
     peer_ready_tx: std::sync::mpsc::Sender<()>,
     authorized_peers: &[iroh::EndpointId],
 ) -> Router {
-    for peer in authorized_peers {
-        authorize_peer(&workspace_root, *peer);
-    }
-    Router::builder(endpoint)
-        .accept(
-            SYNC_ALPN,
-            SyncProtocolHandler {
-                workspace_root,
-                workspace_id: Arc::new(RwLock::new(workspace_id)),
-                actor,
-                peer_ready_tx,
-                // A fresh per-responder append guard: the test responder is the
-                // only writer to its workspace, so a standalone lock is enough.
-                append_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
-                inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            },
-        )
-        .spawn()
+    spawn_responder_with_health(
+        endpoint,
+        workspace_root,
+        workspace_id,
+        actor,
+        peer_ready_tx,
+        authorized_peers,
+    )
+    .0
 }
 
 /// Mount the production `SnapshotProtocolHandler` on a `Router` and return it.
@@ -234,6 +228,7 @@ pub fn spawn_sync_and_snapshot_responder(
                 peer_ready_tx,
                 append_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
                 inbound_serves: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                health: crate::health::PeerHealthMap::default(),
             },
         )
         .accept(
@@ -275,7 +270,7 @@ pub async fn run_snapshot_pull(
 ///
 /// The three public forms differ only in where the connection pool comes from
 /// and whether progress is captured, so they are one-liners over this.
-async fn drive_delta_sync(
+pub(super) async fn drive_delta_sync(
     conns: &crate::peer_conn::PeerConnections,
     peer: impl Into<iroh::EndpointAddr>,
     workspace_root: &Path,
@@ -425,9 +420,6 @@ pub async fn run_catch_up_loop<F>(
         Arc::new(RwLock::new(workspace_id)),
         actor,
         peer_ready_tx,
-        // Tests assert sync convergence, not the GUI reachability projection,
-        // so they don't record health.
-        None,
         // Fresh append guard; no shared in-flight set (the per-session `synced`
         // dedup inside the loop is what the test exercises).
         std::sync::Arc::new(tokio::sync::Mutex::new(())),
@@ -465,7 +457,6 @@ pub async fn run_force_sync(
         &Arc::new(RwLock::new(workspace_id)),
         actor,
         &peer_ready_tx,
-        None,
         &std::sync::Arc::new(tokio::sync::Mutex::new(())),
         &Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         &crate::progress::ProgressSink::default(),

@@ -56,6 +56,7 @@ mod engine_force_sync;
 mod engine_gossip;
 mod engine_membership;
 mod engine_pairing;
+mod engine_serve;
 mod engine_snapshot;
 mod engine_sync;
 mod health;

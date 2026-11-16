@@ -436,7 +436,6 @@ pub(crate) async fn drain_pair_completions(
     workspace_id: SharedWorkspaceId,
     actor: outl_core::id::ActorId,
     peer_ready_tx: std::sync::mpsc::Sender<()>,
-    health: crate::health::PeerHealthMap,
     append_lock: crate::engine::AppendLock,
     in_flight: crate::engine::InFlightPeers,
     progress: crate::progress::ProgressSink,
@@ -447,7 +446,6 @@ pub(crate) async fn drain_pair_completions(
         let Some(_guard) = crate::engine::try_acquire_in_flight(&in_flight, nid) else {
             continue;
         };
-        let started = std::time::Instant::now();
         let label = crate::peer_label::peer_log_label(&peers_path, nid);
         info!(peer = %label, "pairing: immediate sync to freshly paired peer");
         // Read the LIVE id: if this device just adopted the host's id during the
@@ -469,11 +467,9 @@ pub(crate) async fn drain_pair_completions(
         )
         .await
         {
-            Ok(()) => health.record_success(nid, started),
-            Err(e) => {
-                warn!("pairing: immediate sync to {label} failed: {e}");
-                health.record_failure(nid);
-            }
+            Ok(()) => {}
+            // Reachability is `delta_sync`'s to record.
+            Err(e) => warn!("pairing: immediate sync to {label} failed: {e}"),
         }
 
         // Phase 2 snapshot sync: also pull the peer's materialized snapshot so a

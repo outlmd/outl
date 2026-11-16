@@ -51,14 +51,40 @@ use tracing::debug;
 pub struct PeerConnections {
     endpoint: iroh::Endpoint,
     live: Arc<Mutex<HashMap<iroh::EndpointId, Connection>>>,
+    /// Who this device is in contact with, as the GUI status dot reads it.
+    ///
+    /// It lives here because **connecting is the only step that answers the
+    /// question**: everything after it is about the exchange. Threading it
+    /// through `delta_sync` and its five callers instead put the verdict in
+    /// the hands of code that only knew whether the *pass* worked, which is
+    /// how an exchange that broke after connecting came to be recorded as
+    /// "offline" (see `crate::health`).
+    health: crate::health::PeerHealthMap,
 }
 
 impl PeerConnections {
     pub(crate) fn new(endpoint: iroh::Endpoint) -> Self {
+        Self::with_health(endpoint, crate::health::PeerHealthMap::default())
+    }
+
+    /// A pool that records contact into `health` — the transport's own map.
+    ///
+    /// `new` gives a pool whose records go nowhere, which is what the tests
+    /// that only care about the exchange want.
+    pub(crate) fn with_health(
+        endpoint: iroh::Endpoint,
+        health: crate::health::PeerHealthMap,
+    ) -> Self {
         Self {
             endpoint,
             live: Arc::new(Mutex::new(HashMap::new())),
+            health,
         }
+    }
+
+    /// The reachability map this pool writes into.
+    pub(crate) fn health(&self) -> &crate::health::PeerHealthMap {
+        &self.health
     }
 
     /// The endpoint these connections are made from.
@@ -82,10 +108,26 @@ impl PeerConnections {
 
         if let Some(conn) = self.live_connection(node_id) {
             debug!("reusing live connection to {}", node_id.fmt_short());
+            // A connection QUIC still calls usable is contact, so say so: a
+            // pooled peer would otherwise keep whatever the last completed
+            // exchange left behind, including a stale failure.
+            self.health.record_reached(node_id);
             return Ok(conn);
         }
 
-        let conn = crate::engine_sync::connect_with_fallback(&self.endpoint, peer_addr).await?;
+        let conn = match crate::engine_sync::connect_with_fallback(&self.endpoint, peer_addr).await
+        {
+            Ok(conn) => {
+                self.health.record_reached(node_id);
+                conn
+            }
+            // The one outcome that means offline. Everything that can go wrong
+            // after this point went wrong *with* a reachable device.
+            Err(e) => {
+                self.health.record_failure(node_id);
+                return Err(e);
+            }
+        };
         // A concurrent caller may have connected first. Keep whichever is
         // already in the map so both callers converge on one connection rather
         // than leaving an orphan nobody closes.

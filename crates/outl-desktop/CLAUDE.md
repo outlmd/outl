@@ -470,6 +470,9 @@ What that pass actually does: [`outl-sync-iroh/CLAUDE.md`](../outl-sync-iroh/CLA
 
 The always-visible capsule dot ([states](../../docs/desktop-ux.md#sync-status-dot)) and the panel's derive reachability from the same `peersOnline` (`@outl/shared/peers`) mobile uses.
 **Do not add a second reachability path**; `peersOnline` is the one owner.
+The same module owns the state built on top of it — `syncState` (checking / online / offline / syncing), `syncStateLabel`, `syncStateColor` and the `<SyncDot>` glyph — because it did not, and the two clients had already drifted: this one started dim on `null` and mobile started orange on `false`, so a phone claimed "offline" over a probe that had not answered yet ([#575](https://github.com/outlmd/outl/issues/575)).
+`<SyncIndicator />` keeps only the chrome: the button, the click-to-sync pass, the right-click into Settings, and the "last synced" half of the tooltip.
+**The button's `aria-label` says what pressing it does, never what the dot shows** — `<SyncDot>` is the live region that announces the state, and putting it in both reads it out twice on every change.
 When adding a control to the top-right capsule, keep it in the same order as mobile's top bar.
 
 ### When this window does not hold the device endpoint
@@ -496,6 +499,7 @@ Only `P2pDisabled` refuses to pair; collapsing the others into it told a user wh
 **Still missing:** the status dot cannot tell "every device is offline" from "another local process holds the endpoint".
 Teaching it that state means changing `PeerStatusDto` in [`outl-tauri-shared`](../outl-tauri-shared/CLAUDE.md), not a desktop-local patch, because `peersOnline` is the one owner of reachability on both clients.
 Until then the Refresh error is the only surface that explains it.
+Note this is **not** what kept the dot orange on a window that did hold the endpoint: that was the responder recording nothing, fixed in `outl-sync-iroh` ([#575](https://github.com/outlmd/outl/issues/575)).
 
 ### `reload_workspace` offloads the replay off the IPC thread
 

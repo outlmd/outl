@@ -73,7 +73,9 @@ Reminders is the one exception: mobile moved it to its bottom bar's Reminders ta
 The sidebar toggle has no mobile twin either and sits alone top-left.
 The sidebar pads its own top so the capsule never covers search, and the page header (`OutlineView`) pads its top the same way so the eyebrow's attach and history icons clear the right capsule.
 
-Dot states: green when at least one iroh peer is reachable, orange when none are, dim while the first probe runs, and a spinner while a sync pass runs.
+Dot states: green when at least one device is reachable, orange when none are, dim while the first probe runs, and a spinner while a sync pass runs.
+**The state, its sentence and its colour are `@outl/shared/peers`' `syncState` / `syncStateLabel` / `syncStateColor`, and the glyph is that module's `<SyncDot>`** — the same four states, decided once, for this client and mobile ([#575](https://github.com/outlmd/outl/issues/575)).
+Reachability counts both directions: a device that can only dial *us* (a phone behind carrier NAT) is reachable, and the responder records it on every confirmed inbound exchange.
 The tooltip shows the reachability state and when this window last saw a sync land (a finished pass, or a `peer-ops-changed`).
 Clicking syncs now — `syncNow()` then `reloadWorkspace()`, the same pass as the Sync panel's Refresh — and clicks during a pass are ignored.
 Right-click opens Settings → Sync.

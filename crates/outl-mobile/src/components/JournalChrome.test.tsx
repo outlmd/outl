@@ -38,7 +38,15 @@ function mount(
       <JournalChrome
         view={null}
         online
-        peersUp
+        peers={[
+          {
+            node_id: "n1",
+            alias: "mac",
+            online: true,
+            rtt_ms: null,
+            pending_ops: null,
+          },
+        ]}
         syncing={syncing()}
         refreshing={refreshing()}
         todaySlug={opts.todaySlug ?? null}

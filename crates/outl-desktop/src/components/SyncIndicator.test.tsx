@@ -105,6 +105,33 @@ describe("SyncIndicator", () => {
     expect(btn.title).toContain("Last synced just now");
   });
 
+  it("is dim before the first probe and green once a device answers", async () => {
+    // Held by `@outl/shared/peers`, asserted here because this is the client
+    // that reads it: a launch must not claim offline over a measurement
+    // nobody has taken (#575).
+    let answer!: (v: unknown) => void;
+    peerStatus.mockReturnValue(new Promise((r) => (answer = r)));
+    const btn = mount();
+    await flush();
+    const dot = () =>
+      btn.querySelector("[data-testid=sync-dot]") as HTMLElement | null;
+    expect(dot()!.style.background).toContain("--color-outl-fg-dim");
+    expect(btn.title).toContain("checking");
+
+    answer([
+      {
+        node_id: "n1",
+        alias: "iPhone",
+        online: true,
+        rtt_ms: 12,
+        pending_ops: 0,
+      },
+    ]);
+    await flush();
+    expect(dot()!.style.background).toContain("--color-outl-accent-alt");
+    expect(btn.title).toContain("a device is reachable");
+  });
+
   it("opens Sync settings on right-click without syncing", () => {
     const btn = mount();
     btn.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
