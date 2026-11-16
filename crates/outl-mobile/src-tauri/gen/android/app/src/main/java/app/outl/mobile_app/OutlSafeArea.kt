@@ -53,8 +53,10 @@ object OutlSafeArea {
       val d = view.resources.displayMetrics.density
       latest = json(bars.top / d, bars.right / d, bars.bottom / d, bars.left / d)
       push(view)
-      // Keep the default dispatch: this listener only observes.
-      ViewCompat.onApplyWindowInsets(view, insets)
+      // This listener only observes: returning `insets` unchanged consumes
+      // nothing. Calling ViewCompat.onApplyWindowInsets(view, ...) here would
+      // re-enter this same listener, since it replaces the view's own handler.
+      insets
     }
     // The WebView is created after this runs; the first layout that contains
     // it is the first chance to hand it the value.
