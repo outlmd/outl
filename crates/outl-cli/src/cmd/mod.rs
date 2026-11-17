@@ -20,6 +20,7 @@ pub mod migrate_to_per_page_ops;
 pub mod page;
 pub mod page_merge;
 pub mod page_rename;
+pub mod page_update;
 pub mod peer_qr;
 pub mod plugin;
 pub mod plugin_init;

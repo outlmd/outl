@@ -18,6 +18,7 @@ use outl_core::property::PropValue;
 
 use super::page_merge;
 pub use super::page_rename::rename;
+pub use super::page_update::update;
 use crate::human::print_outline_tree;
 use crate::output::{codes, emit, ApiError};
 use crate::ws::{self, WsCtx};
@@ -377,39 +378,6 @@ pub fn create(
     Ok(payload)
 }
 
-/// Update a page's title and/or icon. At least one of `--title` /
-/// `--icon` must be provided.
-pub fn update(
-    ctx: &mut WsCtx,
-    slug: &str,
-    title: Option<&str>,
-    icon: Option<&str>,
-) -> Result<Value, ApiError> {
-    if title.is_none() && icon.is_none() {
-        return Err(ApiError::new(
-            codes::INVALID_ARG,
-            "update requires at least one of --title or --icon".to_string(),
-        ));
-    }
-    let id = resolve(ctx, slug)?;
-
-    if let Some(t) = title {
-        outl_actions::block::edit_text(&mut ctx.workspace, &ctx.hlc, id, t)
-            .map_err(ApiError::internal)?;
-    }
-    if let Some(icon_value) = icon {
-        if icon_value.is_empty() {
-            // Setting the property to None clears it.
-            write_page_property(ctx, id, "icon", None)?;
-        } else {
-            write_page_property(ctx, id, "icon", Some(icon_value))?;
-        }
-    }
-
-    write_projection(ctx, id)?;
-    page_meta_value(ctx, id)
-}
-
 /// Delete a page by moving its root to the trash. The op stays in the
 /// log so peers converge; the on-disk `.md` + sidecar projection is
 /// dropped so the page disappears from this device's listings right
@@ -487,7 +455,7 @@ pub fn render(ctx: &WsCtx, slug: &str) -> Result<Value, ApiError> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn page_meta_value(ctx: &WsCtx, id: NodeId) -> Result<Value, ApiError> {
+pub(super) fn page_meta_value(ctx: &WsCtx, id: NodeId) -> Result<Value, ApiError> {
     Ok(json!({ "meta": page_meta_inner(ctx, id)? }))
 }
 
@@ -508,7 +476,7 @@ fn page_property(workspace: &outl_core::workspace::Workspace, id: NodeId, key: &
 
 /// Wrap `outl_actions::set_property` with `ApiError` mapping. `None`
 /// clears the property.
-fn write_page_property(
+pub(super) fn write_page_property(
     ctx: &mut WsCtx,
     id: NodeId,
     key: &str,
