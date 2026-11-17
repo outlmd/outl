@@ -38,7 +38,7 @@ walkdir = "2"
 open = "5"
 # Decode the iOS document picker's `file://` percent-encoded paths (already
 # in the tree via tauri). Beats a hand-rolled `%XX` decoder on untrusted input.
-percent-encoding = "2"
+percent-encoding = { workspace = true }
 # Encode asset bytes into a `data:` URL the webview loads inline (image /
 # pdf render). Already in the dep tree via outl-sync-iroh; pinned to the
 # same 0.22 line it uses.

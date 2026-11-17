@@ -18,26 +18,12 @@ use outl_md::slug::slugify;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// UID marker prefix of the interim block-ref form.
-pub(crate) const PLACEHOLDER_PREFIX: &str = "outl-import:";
-
-/// UID marker prefix of the interim embed form. Distinct from
-/// [`PLACEHOLDER_PREFIX`] so the resolve pass knows ref-vs-embed from
-/// the marker itself — sniffing the preceding `!` would misclassify a
-/// user's text that happens to end in `!` glued to a ref
-/// (`Done!((uid))`).
-pub(crate) const PLACEHOLDER_EMBED_PREFIX: &str = "outl-import-embed:";
-
-/// Interim block-ref form.
-pub(crate) fn placeholder_ref(uid: &str) -> String {
-    format!("(({PLACEHOLDER_PREFIX}{uid}))")
-}
-
-/// Interim embed form. The leading `!` is already the final outl
-/// syntax — resolve only rewrites the `((…))` part.
-pub(crate) fn placeholder_embed(uid: &str) -> String {
-    format!("!(({PLACEHOLDER_EMBED_PREFIX}{uid}))")
-}
+// The placeholder spelling is owned by `ir` (an adapter emits it for a
+// ref inside a property value, which never reaches this renderer); the
+// render and resolve stages read it from there.
+pub(crate) use crate::ir::{
+    placeholder_embed, placeholder_ref, PLACEHOLDER_EMBED_PREFIX, PLACEHOLDER_PREFIX,
+};
 
 /// One page ready to hit the disk.
 pub struct RenderedPage {
@@ -289,32 +275,42 @@ fn render_page(
 
     // Page properties. `title::` is the emitter's own on named pages;
     // journals carry no title (the filename is the date).
-    let mut header = String::new();
+    //
+    // **The order is the projection's, not the writer's.** A page's
+    // `.md` is a projection of the op log, and the op log has no
+    // property order — `outl_actions::tree::sort_in_presentation_order`
+    // is what decides how one comes back out. Writing the header in
+    // source order instead made every imported page with two or more
+    // properties *immediately* stale: the bytes on disk were not the
+    // ones the tree projects, so `outl doctor` reported the whole
+    // import as "pages hold a stale .md projection", and that is the
+    // first thing a migrating user runs.
+    let mut props: Vec<(String, String)> = Vec::new();
     if !is_journal {
-        header.push_str(&format!("title:: {title}\n"));
+        props.push(("title".to_string(), title.to_string()));
     }
     let mut aliases_written = aliases.is_empty();
     for page in sources {
         for (k, v) in &page.props {
             if k == "alias" && !aliases_written {
                 // One `alias::` line: the index reads only the first.
-                header.push_str(&format!("{k}:: {v}, {}\n", aliases.join(", ")));
+                props.push((k.clone(), format!("{v}, {}", aliases.join(", "))));
                 aliases_written = true;
             } else {
-                header.push_str(&format!("{k}:: {v}\n"));
+                props.push((k.clone(), v.clone()));
             }
             ctx.report.props_pages += 1;
         }
     }
     if !aliases_written {
-        header.push_str(&format!("alias:: {}\n", aliases.join(", ")));
+        props.push(("alias".to_string(), aliases.join(", ")));
     }
     let page_uids: Vec<&str> = sources
         .iter()
         .filter_map(|p| p.source_uid.as_deref())
         .collect();
     if let Some(key) = uid_key.filter(|_| !page_uids.is_empty()) {
-        header.push_str(&format!("{key}:: {}\n", page_uids.join(", ")));
+        props.push((key.to_string(), page_uids.join(", ")));
     }
     // Page timestamps, same policy as block ones. A merged journal
     // (two source pages, one date) keeps the earliest creation and the
@@ -331,13 +327,18 @@ fn render_page(
             };
             for (key, ts) in [("created", created), ("edited", edited)] {
                 if let Some(ts) = ts.filter(|_| !has_key(key)) {
-                    header.push_str(&format!("{key}:: {}\n", ts.to_rfc3339()));
+                    props.push((key.to_string(), ts.to_rfc3339()));
                     ctx.report.props_pages += 1;
                 }
             }
         } else {
             ctx.report.timestamps_dropped += 1;
         }
+    }
+    outl_actions::tree::sort_in_presentation_order(&mut props);
+    let mut header = String::new();
+    for (k, v) in &props {
+        header.push_str(&format!("{k}:: {v}\n"));
     }
     if !header.is_empty() {
         header.push('\n');

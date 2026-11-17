@@ -80,6 +80,15 @@ pub(super) fn rewrite_placeholders(
     out
 }
 
+/// Whether this page has anything for pass B to do: a placeholder in
+/// block text, a folded block, or a marker somewhere else in the file
+/// (a property value). Asked three times — for which sidecars to load,
+/// for the progress total, and for the loop itself — and the three have
+/// to agree, or a page gets counted and then skipped.
+fn needs_wiring(p: &RenderedPage) -> bool {
+    !p.placeholder_blocks.is_empty() || !p.collapsed.is_empty() || p.has_markers
+}
+
 /// Apply pass B against the destination workspace.
 pub(super) fn apply(
     dest: &mut ImportDest<'_>,
@@ -90,10 +99,7 @@ pub(super) fn apply(
 ) -> Result<(), ImportError> {
     // Which pages need their sidecar in memory: every ref target plus
     // every page that has placeholders or collapsed blocks.
-    let mut needed: Vec<bool> = pages
-        .iter()
-        .map(|p| !p.placeholder_blocks.is_empty() || !p.collapsed.is_empty())
-        .collect();
+    let mut needed: Vec<bool> = pages.iter().map(needs_wiring).collect();
     for loc in uid_map.values() {
         needed[loc.page_idx] = true;
     }
@@ -127,13 +133,10 @@ pub(super) fn apply(
         })
         .collect();
 
-    let work_total = pages
-        .iter()
-        .filter(|p| !p.placeholder_blocks.is_empty() || !p.collapsed.is_empty())
-        .count();
+    let work_total = pages.iter().filter(|p| needs_wiring(p)).count();
     let mut work_done = 0usize;
     for (idx, page) in pages.iter().enumerate() {
-        if page.placeholder_blocks.is_empty() && page.collapsed.is_empty() {
+        if !needs_wiring(page) {
             continue;
         }
         work_done += 1;
@@ -167,6 +170,46 @@ pub(super) fn apply(
             if new_text != pb.text {
                 outl_actions::edit_text(dest.workspace, dest.hlc, entry.id, &new_text)
                     .map_err(|e| ImportError::Workspace(e.to_string()))?;
+                touched = true;
+            }
+        }
+
+        // A marker inside a **property value** never appears in a
+        // block's text, so the loop above cannot see it. Resolving it
+        // through `Op::SetProp` keeps pass B's rule intact — mutate
+        // through the op log, never by rewriting the `.md` — and keeps
+        // the file-fallback sweep below a fallback. It used to be the
+        // main road for these: one read, one `write_atomic` and one
+        // `reconcile_md` per page, on top of the re-projection this
+        // path does anyway.
+        for entry in &sc.blocks {
+            let marked: Vec<(String, String)> = dest
+                .workspace
+                .tree()
+                .properties_of(entry.id)
+                .filter_map(|(k, v)| match v {
+                    outl_core::property::PropValue::Text(text) => {
+                        Some((k.to_string(), text.clone()))
+                    }
+                    _ => None,
+                })
+                .filter(|(_, text)| {
+                    text.contains(PLACEHOLDER_PREFIX)
+                        || text.contains(super::render::PLACEHOLDER_EMBED_PREFIX)
+                })
+                .collect();
+            for (key, value) in marked {
+                let resolved = rewrite_placeholders(&value, &mut |uid, is_embed| {
+                    resolve_one(uid, is_embed, uid_map, &sidecars, report)
+                });
+                outl_actions::page::set_property(
+                    dest.workspace,
+                    dest.hlc,
+                    entry.id,
+                    &key,
+                    Some(outl_core::property::PropValue::Text(resolved)),
+                )
+                .map_err(|e| ImportError::Workspace(e.to_string()))?;
                 touched = true;
             }
         }
@@ -221,6 +264,7 @@ pub(super) fn apply(
         // degrades to a `[[Title]]` link. Degrading every one of them
         // turned a `note:: ((uid))` property into a page link even when
         // the block it named was right there.
+        let degraded_before = report.refs_page_fallback;
         let new_text = rewrite_placeholders(&text, &mut |uid, is_embed| {
             resolve_one(uid, is_embed, uid_map, &sidecars, report)
         });
@@ -233,11 +277,22 @@ pub(super) fn apply(
         {
             report.warn(&page.title, format!("fallback sweep reconcile failed: {e}"));
         }
-        report.warn(
-            &page.title,
-            "placeholders outside block text resolved via file fallback (unmappable targets \
-             degrade to [[links]])",
-        );
+        // Only a *degraded* ref is news. The sweep also runs for the
+        // ordinary case of a ref inside a property value, which it
+        // resolves to a real handle — warning there put a line the user
+        // has to go read next to every page with a `related::`
+        // property, and a warning that is usually nothing is a warning
+        // nobody reads.
+        let degraded = report.refs_page_fallback - degraded_before;
+        if degraded > 0 {
+            report.warn(
+                &page.title,
+                format!(
+                    "{degraded} ref(s) outside block text point at a page that could not be \
+                     handle-mapped — they degraded to [[links]]"
+                ),
+            );
+        }
     }
 
     Ok(())

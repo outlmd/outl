@@ -60,6 +60,34 @@ pub fn asset_placeholder(idx: usize) -> String {
 /// Marker prefix inside an [`asset_placeholder`].
 pub const ASSET_PLACEHOLDER_PREFIX: &str = "outl-import-asset:";
 
+/// UID marker prefix of the interim block-ref form.
+pub const PLACEHOLDER_PREFIX: &str = "outl-import:";
+
+/// UID marker prefix of the interim embed form. Distinct from
+/// [`PLACEHOLDER_PREFIX`] so the resolve pass knows ref-vs-embed from
+/// the marker itself — sniffing the preceding `!` would misclassify a
+/// user's text that happens to end in `!` glued to a ref
+/// (`Done!((uid))`).
+pub const PLACEHOLDER_EMBED_PREFIX: &str = "outl-import-embed:";
+
+/// Interim block-ref form.
+///
+/// Lives here, beside [`asset_placeholder`], because two stages emit
+/// it: `emit::render` for a [`Inline::BlockRef`] in block text, and an
+/// adapter for a ref inside a **property value**, which never reaches
+/// the inline tokenizer (a Logseq `related:: ((uuid))` is a property,
+/// not prose). Both forms are rewritten by the same resolve pass, so
+/// the spelling needs one owner.
+pub fn placeholder_ref(uid: &str) -> String {
+    format!("(({PLACEHOLDER_PREFIX}{uid}))")
+}
+
+/// Interim embed form. The leading `!` is already the final outl
+/// syntax — resolve only rewrites the `((…))` part.
+pub fn placeholder_embed(uid: &str) -> String {
+    format!("!(({PLACEHOLDER_EMBED_PREFIX}{uid}))")
+}
+
 /// Where a page lands in the workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PageName {
@@ -107,7 +135,11 @@ pub enum PageBody {
 }
 
 /// One outline block.
-#[derive(Debug, Default)]
+///
+/// `Clone` because a Logseq block template is lifted into its own page
+/// by copying the carrier's subtree (`adapters::logseq::templates`) —
+/// the source block stays where the user put it.
+#[derive(Debug, Default, Clone)]
 pub struct ImportBlock {
     /// Source UID (Roam `uid`, Logseq `id::`). The key the resolve
     /// pass uses to mint `((blk-XXXXXX))` handles.
@@ -134,7 +166,7 @@ pub struct ImportBlock {
 }
 
 /// Block body shapes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BlockContent {
     /// Regular text, tokenized. `Text` runs may contain newlines —
     /// the emitter renders them as continuation lines.

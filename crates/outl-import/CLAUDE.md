@@ -18,10 +18,18 @@ source on disk (JSON backup / graph dir / vault)
    │    ((outl-import:<uid>)) / !((outl-import-embed:<uid>))
    ▼
 [3] emit::resolve                  ← 2-pass handle resolution
-        reconcile_md stamps sidecars → uid → NodeId → ref_handle
-        rewrite goes through the op log (edit_text + re-render)
-        collapsed flags land as Op::SetCollapsed
+   │    reconcile_md stamps sidecars → uid → NodeId → ref_handle
+   │    rewrite goes through the op log (edit_text / SetProp + re-render)
+   │    collapsed flags land as Op::SetCollapsed
+   ▼
+[4] emit::canonicalize_projections ← every `.md` ends up byte-identical
+        to what the op log projects, through
+        apply_page_md_with_sidecar_if_stale (root invariant 8's guard)
 ```
+
+Stage 4 exists because the file is a *projection*: one that is correct
+but spelled differently is a **stale** projection, and `outl doctor`
+says so about the entire fresh import.
 
 ## Why the placeholder + 2-pass dance
 
@@ -115,6 +123,12 @@ Three rules that keep the contract honest:
   Every legitimate reducer is subtracted **by name**: `pages_merged` (two source pages onto one journal date), `skipped` (with `blocks_dropped` per entry), `blocks_lifted_to_props` (a leading pure-attribute block promoted to page props).
   What's left over is real, unexplained loss, and prints as an unmissable `UNACCOUNTED CONTENT` block.
   A new adapter that doesn't set the source counts simply gets no `reconciliation` (a fabricated "0/0, balanced" would be worse than silence); wire them up when you add the adapter.
+  Go through `report.count_source(pages, blocks)` — **calling it is what marks the block denominator as measured**, which is how "an empty graph has 0 blocks" is told apart from "this source has no blocks to count".
+  A free-markdown source (Obsidian: the page is its unit, its blocks are the ones outl's parser makes *after* the text is written) calls `count_source_pages` instead and reconciles pages only.
+  Reporting `0` as its block denominator read as "every block vanished", and printing `blocks: 0` after importing someone's whole vault read worse.
+- **A page the import *adds* comes off the emitted side, by name.**
+  `pages_merged` is the reducer everyone remembers; `pages_added_as_templates` / `blocks_copied_into_templates` are its mirror image — a Logseq block template is copied into an outl template *page*, so the emitted count legitimately exceeds the source's.
+  `finalize` subtracts them, and the human output names them, because `8/8 emitted` with two lifted templates otherwise reads as a coincidence rather than as six source pages arriving.
 - **Never `continue` past a construct you're dropping.**
   Use `report.skip(path, reason, blocks)` — the block count matters, because dropping a page drops its whole subtree.
 - **Aggregate high-frequency warnings, don't emit one per hit.**
@@ -128,7 +142,8 @@ src/
 ├── lib.rs             # run_import / dry_run, ImportDest, ImportOptions
 ├── adapter.rs         # SourceAdapter trait + ImportError
 ├── ir.rs              # ImportGraph / ImportPage / PageBody / ImportBlock / Inline
-├── report.rs          # ImportReport (per-feature counts, warnings)
+├── report/            # mod.rs (counts + finalize's balance) + print.rs (the human
+│                      #   summary) + tests.rs
 ├── emit/
 │   ├── mod.rs         # pipeline orchestration + dry-run simulation + landing measurement
 │   ├── render.rs      # IR → markdown, placeholder emission, DFS bookkeeping
@@ -138,7 +153,9 @@ src/
     ├── scan.rs        # shared low-level scanners (balanced, is_uid, alias_link, parse_prop_line)
     ├── asset_scan.rs  # shared asset-link scanner: CommonMark link → AssetRef + placeholder
     ├── roam/          # mod.rs (JSON → IR) + inline.rs (dialect scanner) + tests.rs
-    ├── logseq/        # mod.rs (outline parser) + inline.rs + tests.rs
+    ├── logseq/        # mod.rs (adapter) + files.rs (what is read / refused) + names.rs
+    │                  #   (filename → title) + outline/ (parser + org.rs) + inline.rs
+    │                  #   + templates.rs (block `template::` → template page)
     ├── logseq_db/     # DB-version EDN export: edn/ (reader) + graph.rs (datoms → entities) + convert.rs / block.rs / props.rs / text.rs
     └── obsidian/      # mod.rs (frontmatter/wikilink policy) + stems.rs (collisions)
 
@@ -149,9 +166,27 @@ tests/
 ├── roam_page_merge_e2e.rs  # pages sharing a slug / journal date merge
 ├── roam_reconciliation_e2e.rs  # report reconciliation + landing measurement
 ├── logseq_e2e.rs
+├── logseq_refs_e2e.rs # every ref/embed spelling Logseq writes, end to end
 ├── logseq_db_e2e.rs
 └── obsidian_e2e.rs    # ports every scenario the legacy pipeline covered
 ```
+
+## The Logseq adapter (`logseq/`)
+
+Five modules, one concern each — `mod.rs` is the adapter and page naming, and everything a reviewer is likely to get wrong lives in its own file:
+
+- **`files.rs`** owns *which files are read and what is said about the rest*, and therefore the reconciliation's page denominator.
+  The split that matters: a **document** (`.org`, a whiteboard, any other extension under `pages/`) counts in `source_pages` and goes in `skipped`; a file that was never a page (`logseq/config.edn`, `assets/`, `draws/`) is in neither and goes into **one** aggregate `(graph)` warning.
+  Get that backwards and `finalize`'s `pages_accounted` stops matching `source_pages`, so `UNACCOUNTED CONTENT` cries wolf over a config file.
+  `pages/` and `journals/` are walked **recursively**, because Logseq reads them that way.
+- **`names.rs`** owns *filename → page title*, ported from Logseq's own `tri-lb-title-parsing` / `legacy-title-parsing` (`deps/graph-parser/src/logseq/graph_parser/extract.cljc`).
+  **`___` is the namespace separator (`/`), not a space** — reading it as a space flattened every `[[parent/child]]` page in a modern graph into one unrelated title.
+  A missing `:file/name-format` reads as `:triple-lowbar` here, where Logseq's own importer defaults to legacy; the module doc carries the reasoning (the two guesses are not symmetric — legacy turns every `.` into a separator, so `node.js` becomes `node/js`).
+  A `;;`-commented key in `config.edn` is documentation, not a setting: the shipped config has most keys commented out, and reading one would flip the encoding for every page in the graph.
+- **`outline/`** is the parser; `outline/org.rs` holds the two org-syntax constructs (`SCHEDULED:`/`DEADLINE:` stamps, `#+BEGIN_` blocks).
+  A `((uuid))` in a **property value** becomes a ref placeholder here, because a property never reaches the inline tokenizer.
+- **`templates.rs`** copies a block carrying `template::` into a `templates/<name>` page.
+  It **copies**: the source block stays where the user wrote it, and every copied `uid` is stripped, or two blocks would claim one uid and the resolve pass could point an existing `((ref))` at the template.
 
 ## The Logseq DB adapter (`logseq_db/`)
 
@@ -184,6 +219,10 @@ Dialect boundaries worth remembering:
 
 - ❌ Emitting `((blk-…))` directly from render — handles don't exist yet; that's resolve's job.
 - ❌ Rewriting `.md` files in pass B instead of going through `edit_text`.
+  A marker in a **property value** is covered by this too: resolve it with `Op::SetProp`, not through the file-fallback sweep.
+  The sweep is a fallback — routing every page with a `related:: ((uuid))` through it cost one read, one `write_atomic` and one `reconcile_md` per page (measured: 25.4 s → 7.6 s of system time on a 2,028-page graph).
+- ❌ Writing a page header in source order. The order is `outl_actions::tree::sort_in_presentation_order`'s, because the `.md` is a projection of the op log and the op log has no property order — a header in any other order is a **stale projection the moment it is written**, and `outl doctor` reports the whole import as needing `--repair`.
+- ❌ Reading `___` in a Logseq filename as anything but `/`.
 - ❌ Minting `NodeId`s for imported blocks — `reconcile_md` derives them; fresh ids break convergence.
 - ❌ Dropping content silently when a construct doesn't parse — `BlockContent::Verbatim` + a report count is the floor.
 - ❌ Writing dialect knowledge into `emit/` — if the emitter needs to know what `__` means, the adapter failed to translate.

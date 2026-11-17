@@ -142,6 +142,9 @@ notify = "8"
 notify-debouncer-full = "0.7"
 walkdir = "2"
 fs2 = "0.4"
+# Decode percent-escapes: iOS document-picker `file://` paths, and the
+# `%2F`/`%3A` escapes Logseq writes into page filenames.
+percent-encoding = "2"
 
 # Concurrency
 # TEMPORARY, paired with the libc pin below — NOT a considered downgrade.
