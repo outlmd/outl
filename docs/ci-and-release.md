@@ -194,6 +194,7 @@ Refusing on unknown would turn any such gap into a silent release freeze, which 
 - Tag: `v<workspace.version>-beta.<run_number>` (e.g. `v0.6.0-beta.48`).
 - Binary: reports the full beta version (the workflow `sed`s `Cargo.toml` in-place before `cargo build`; the change is local to the runner).
 - GitHub: published as a prerelease with auto-generated release notes.
+  `publish_release` appends one sponsor link at the end of the body ("Ask for sponsors in the release notes"), after any missing-assets note.
 - Homebrew tap (`Formula/outl-beta.rb`, `Casks/outl-desktop-beta.rb`) bumped automatically with `[skip ci]` commit.
 
 ### GA
@@ -222,6 +223,10 @@ So `required` lives in that table and the pipeline reads it in three places:
 
 Promoting a platform out of bring-up is flipping `required` in the table, and that flip is the record that it has been green.
 Nothing about this is a reason to leave a platform optional: the gap is loud in three places, and a leg that keeps failing is a bug with a name.
+
+**The release body ends with one sponsor link.**
+After the gap note, `publish_release` runs "Ask for sponsors in the release notes", which appends a one-line footer pointing at GitHub Sponsors.
+It removes any existing copy before appending, so a retried job that adds another gap note below an earlier footer still leaves exactly one footer, at the end.
 
 **Asset names use two architecture spellings, and both are deliberate.**
 The CLI / TUI tarballs are `outl-linux-x64` / `outl-linux-arm64` (and `outl-macos-x64` / `outl-macos-arm64`), the desktop bundles are `outl-desktop-linux-x86_64` / `outl-desktop-linux-aarch64`.
