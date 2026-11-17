@@ -263,10 +263,15 @@ mod tests {
         }
     }
 
+    /// The lifted page for `name`, told apart from a source page that
+    /// happens to share its title by the `template::` it carries.
     fn template_page<'a>(g: &'a ImportGraph, name: &str) -> &'a ImportPage {
         g.pages
             .iter()
-            .find(|p| p.name == PageName::Named(format!("templates/{name}")))
+            .find(|p| {
+                p.name == PageName::Named(format!("templates/{name}"))
+                    && p.props.iter().any(|(k, _)| k == TEMPLATE_KEY)
+            })
             .unwrap_or_else(|| panic!("no template page for {name} in {:?}", g.pages.len()))
     }
 
