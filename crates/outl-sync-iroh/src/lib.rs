@@ -66,6 +66,7 @@ pub mod lan;
 mod lease;
 mod oplog;
 mod oplog_census;
+mod oplog_select;
 pub(crate) mod pairing;
 pub mod peer_conn;
 mod peer_label;

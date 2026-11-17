@@ -73,4 +73,6 @@ pub(crate) use delta::{
     decode_ops_blob, decode_request, decode_response, encode_op, encode_ops_blob, encode_request,
     encode_response, ActorClock, SyncRequest, SyncResponse, ACK_DURABLE,
 };
-pub(crate) use frame::{encode_blob_frame, read_frame, read_frame_reporting, FRAME_PREFIX_LEN};
+pub(crate) use frame::{
+    encode_blob_frame, read_frame, read_frame_reporting, FRAME_PREFIX_LEN, MAX_FRAME_BODY,
+};

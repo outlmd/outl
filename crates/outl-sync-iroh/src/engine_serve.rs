@@ -18,7 +18,8 @@ use tracing::{debug, info, warn};
 use crate::engine::{AppendLock, SharedWorkspaceId};
 use crate::engine_sync::{read_ops_blob, read_request};
 use crate::oplog::ingest_received_ops;
-use crate::oplog_census::{local_vector_clock, ops_missing_for};
+use crate::oplog_census::local_vector_clock;
+use crate::oplog_select::ops_missing_for;
 use crate::peer_label::peer_log_label;
 use crate::peers::{refresh_peer_direct_addr, workspace_peers_path};
 use crate::protocol::{

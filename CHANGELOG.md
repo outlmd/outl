@@ -5,7 +5,54 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sync: one actor with a gap could stop a whole workspace converging, in one direction, silently.**
+  A peer missing ops *below* its own watermark triggers a resend, and that resend used to cross whole.
+  The reasoning: a budget cuts the oldest ops while the missing ones could be anywhere, so a blind cut might send a slice the peer already has and make no progress.
+  The reasoning is right; its conclusion was not.
+  "Send everything" is not an alternative to a stalled repair when everything does not fit in a frame: an oversized resend is refused by the 64 MB frame cap on the reading side, which is the same non-convergence with the repair removed.
+
+  Measured on a real workspace: an actor holding 508,421 ops (164 MB).
+  Every exchange ingested the peer's ops, built that frame, had it refused, and never reached the durable-ingest ack — so nothing went **out**, for eleven hours, while ops kept coming **in** and the sync dot stayed green.
+  One actor took every other actor's ops down with it.
+
+  The resend is now a window that obeys the budget and **rotates**.
+  It opens where a peer holding a prefix plus the watermark is first missing something, and when a window comes back having taught the peer nothing — its `(max, count)` unchanged, which is exactly that signal — the next one starts where that one ended and wraps.
+  A full rotation covers everything we hold, so the repair progresses for any shape of gap, not just a prefix.
+  A second guard trims the encoded selection to what one frame can carry, because the op budget bounds how many ops cross and nothing bounds how big one is.
+
+  **Updating the sender is what fixes a stuck pair**: the receiver needs no change.
+
 ### Added
+
+- **Mobile: "Remind me…" is a sheet now, not a text prompt for the rule language.**
+  A time, a repeat, an optional "until", and a **Remove** button.
+  It replaced a `window.prompt` asking for `3pm every 1h until DONE`, which on a phone is easy to miss, easy to cancel, and reads as a tap that did nothing.
+
+  The prompt had a real argument behind it: the rule language is richer than a clock, and a picker that can only express the anchor hides the repeat.
+  So the sheet carries an **Edit as text** field with the rule verbatim, and that field is what keeps the argument true — a rule the controls cannot express opens there rather than being simplified into one they can, and an interval they do not offer (`every 45min`, written in the TUI) keeps its own label instead of reading as "Once".
+
+  **Neither half re-spells the grammar.**
+  `outl_md::remind` gained `format_remind`, the inverse of the parser it already had, so the sheet reads and writes rule text through the same code the `.md` does — twice per session, on open and on save.
+  A field set the grammar cannot express is refused rather than corrected: a rule silently rewritten is a reminder that fires at a time nobody chose.
+  The Reminders tab's empty state names the gesture, so opening it with nothing scheduled is no longer a dead end.
+  [`docs/reminders.md` → Mobile](docs/reminders.md#mobile-outl-mobile), [#572](https://github.com/outlmd/outl/issues/572).
+
+- **Mobile: a New page control, in Search.**
+  The `+` beside the search box asks for a title and opens the page, prefilled with whatever is already in the box.
+
+  Named pages always worked; the only way to *start* one was to type `[[` into a block and tap the link, which a phone-only user has no reason to know — so writing in the journal every day led to the reasonable conclusion that every note has to live on a day.
+  The name goes through `open_ref`, the same resolution a typed `[[ref]]` takes, so **a name that already exists opens that page** instead of making a second one.
+  [`docs/mobile-ux.md`](docs/mobile-ux.md#search-sheet--starting-a-page-that-is-not-a-daily-note), [#573](https://github.com/outlmd/outl/issues/573).
+
+- **Mobile: a first launch now says what the buttons do.**
+  One skippable sheet naming Journal / Search / Tasks / Reminders, the `+`, the week strip, the month label and the block long-press, re-openable any time from **Settings → What's what**.
+
+  The existing 30-second tour teaches the *outline* and only ever appears on an empty page, so it never named a single piece of chrome and a returning user never saw it at all.
+  This one has its own dismissal key for that reason, and any way out counts as read — someone who swiped it away has read as much of it as they intend to.
+  Nothing in it blocks the first bullet.
+  [#574](https://github.com/outlmd/outl/issues/574).
 
 - **Write your own theme: a `.toml` in `~/.config/outl/themes/`.**
   Three lines is a working theme, because `extends` takes any theme name and inherits the other 44 fields:
