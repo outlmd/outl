@@ -78,4 +78,19 @@ ignore = [
     { id = "RUSTSEC-2026-0404", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
     { id = "RUSTSEC-2026-0405", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
     { id = "RUSTSEC-2026-0406", reason = "zstd-safe unsound, via wasmtime-internal-cache; needs 8.2.0, wasmtime is on ^7" },
+    # chrono and chrono-tz, marked unmaintained on 2026-11-17. Unlike every
+    # other line here, these are **direct** dependencies: chrono is in eight
+    # crates' manifests and chrono-tz backs `[calendar] timezone` resolution in
+    # outl-actions. So the honest reason is not "transitive", it is "the fix is
+    # a migration we have not made".
+    #
+    # The advisory recommends jiff or time. Either is a real port: chrono types
+    # cross the wire in DTOs, land in serialized sidecar and peer records, and
+    # back `remind::` scheduling, journal dates and the `since:` filter. Note
+    # what does NOT depend on it: HLC time is hand-rolled (architecture.md §8),
+    # so op ordering and convergence are untouched by this choice either way.
+    #
+    # Neither advisory is a vulnerability. Drop these when the port lands.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, direct dependency in eight crates; porting to jiff or time is its own change" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained, direct dependency behind [calendar] timezone; moves with chrono" },
 ]

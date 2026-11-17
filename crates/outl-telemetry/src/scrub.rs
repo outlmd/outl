@@ -34,7 +34,7 @@ use crate::redact::redact;
 /// `contexts` is in the second group, not the first: it survives because this
 /// scrubber rebuilds it from compile-time constants, not because an incoming
 /// value was allowed through. `fingerprint` carries nothing the exception
-/// does not already send — see [`set_panic_fingerprint`] — so allowing it
+/// does not already send — see `set_panic_fingerprint` — so allowing it
 /// through costs nothing the scrubber has not already redacted.
 ///
 /// `an_event_carries_only_allowlisted_fields` asserts the serialized key set

@@ -23,6 +23,12 @@
 //! The window is created on demand and dropped when closed; a second
 //! click focuses the one already open rather than stacking a copy.
 
+// Only the macOS Help menu opens this window, so off macOS nothing
+// calls `show`. The items stay compiled rather than `cfg`-gated, which
+// is what keeps the two tests below running on Linux CI — the same
+// arrangement `crate::menu` uses, for the same reason.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};

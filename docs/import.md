@@ -12,7 +12,25 @@ A Roam block that is only `key:: value` lines becomes block properties; in a blo
 Each dialect is translated on the way in.
 Roam: `__italic__` → `*italic*`, an org stamp (`DEADLINE: <2024-03-20 Wed>`, Logseq residue that Roam shows as plain text) kept exactly as written, flat `{{[[query]]}}` → ` ```query ` fences, `{{[[pdf]]: url}}` → a `[name](url)` file link (counted as `pdf embeds`; a local path is copied into `assets/` like any attachment).
 Logseq: `DOING` and `NOW` → outl's `DOING` prefix (`NOW` also keeps a `state:: now` property, the nuance outl has no separate state for).
-`LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `SCHEDULED:`/`DEADLINE:` → `[[date]]` links, `:LOGBOOK:` drawers dropped and counted.
+`LATER`/`WAITING` → `TODO` + `state::` property, `CANCELED` → `DONE` + `state::`, `[#A]` → `priority::`, `:LOGBOOK:` drawers dropped and counted.
+Every marker Logseq accepts is a task, `WAIT`, `IN-PROGRESS` and `STARTED` included (the last two are its spellings of `DOING`).
+`SCHEDULED:` / `DEADLINE:` become a `[[date]]` link in the text **and** a `scheduled::` / `deadline::` property, so which kind of date it was survives and is queryable; a time of day or repeater rides along in the property (`scheduled:: [[2026-11-20]] 09:00 .+1w`).
+`#+BEGIN_SRC` / `#+BEGIN_QUOTE` org blocks become a fenced code block and `> ` lines — the shapes the `logseq-db` adapter already produced for the same constructs.
+Free text before a page's first bullet (Logseq's "pre-block", common in a file written or edited outside Logseq) becomes a block instead of being dropped.
+A `((uuid))` inside a **property value** (`related:: ((uuid))`) resolves to a real handle like one in prose, through the op log.
+`{{embed ((uuid))}}` resolves, and so do the two spellings that used to arrive as plain text: the older triple-brace `{{{embed ((uuid))}}}` and a missing space (`{{embed((uuid))}}`).
+
+**Page names come from the filename, in whichever of Logseq's two encodings the graph uses.**
+`:file/name-format :triple-lowbar` (every graph Logseq has created since 0.6.7) writes `/` as `___` and percent-encodes the rest, so `pages/projeto___outl.md` is the page `projeto/outl` and `pages/com%3Ados.md` is `com:dos`.
+A graph whose `logseq/config.edn` says `:legacy` is read the old way instead (`.` is the separator).
+With no config, or no key in it, outl reads the modern format: Logseq's own file→DB importer defaults to legacy there, but it wrote that config and knows an old graph when it sees one, and guessing legacy on a modern graph renames `node.js` to `node/js`.
+The title keeps the slash (`title:: projeto/outl`), the slug stays flat (`pages/projeto-outl.md`), and `[[projeto/outl]]` resolves through the title index.
+
+**A Logseq block template becomes an outl template page.**
+A Logseq template is a block carrying `template:: Name`; an outl template is a *page* with that property ([templates.md](templates.md)), so the property alone used to import as inert block metadata and `/template` showed nothing.
+Each block template is now **copied** into `templates/<name>` — the original block stays where you wrote it — and `template-including-parent:: true` keeps the carrying block as part of the body.
+A page that already has page-level `template::` is left alone, two templates with one name keep the first and warn, and a template with no body is reported rather than created as a name that stamps nothing.
+The copies are counted (`templates lifted`) and subtracted by name in the reconciliation, since they are pages the import added rather than pages the source had.
 A `DOING` block imported before outl had the state was flattened to `TODO ` + `state:: doing` and is indistinguishable from a real `TODO` in every query and count; re-importing that graph is what fixes it.
 Two Roam pages whose titles land on one outl slug (`Cloudflare` and `cloudflare`, `@Ana` and `Ana`) are one page in outl: they merge, the page with the most blocks keeps the title, and every other spelling becomes an `alias::` name, a title with a comma written as `[[Plan, v2]]` so it stays one name.
 A Roam `{{[[table]]}}` block becomes one [pipe-table](markdown-format.md#tables) block: its first row is the header, and a table with merged cells, multi-line or attribute cells, or a cell another block refers to keeps its subtree as it was.
@@ -45,6 +63,8 @@ Logseq 2.x keeps a graph in SQLite (`<graph>/db.sqlite`), not in `pages/` + `jou
 
 Only the whole-graph datoms export is accepted.
 A page or block EDN snippet, the human-readable `:graph-human` shape and the "standard Markdown" zip fail with a message naming what was found.
+Pointing `outl import logseq` at a zip is the obvious thing to try after Logseq's "Export as standard Markdown", so that case says what to do with it: unzip it and point outl at the directory, or take the EDN export instead, which keeps more (refs, task state, properties).
+An unzipped markdown export is a graph directory like any other — `detect()` accepts one that holds only `pages/` or only `journals/`, which is what such an export (or a graph whose owner never used journals) looks like.
 The format is read as Logseq 2.0.2 writes it (schema `65.x`); an export from another schema major imports with a warning.
 
 What lands:
@@ -69,6 +89,12 @@ What is skipped, and where it is counted: built-in pages with no blocks (each on
 A reference to a uuid that is not part of the import keeps its `[[<uuid>]]` text, counts under `unresolved` and is named in a warning.
 
 Not imported yet: reading `db.sqlite` directly, assets (the export carries no file bytes — the files sit in `assets/` next to `db.sqlite`), whiteboards, property history, what views and queries *do* (their text is kept), page-level and block-level EDN snippets, the `:graph-human` shape.
+
+**Every `.md` the import writes is already the projection of the op log.**
+A page's file is a projection, so one that is correct but spelled differently from what the tree projects is a *stale* projection — and `outl doctor` says exactly that about it.
+Reporting a fresh import as "N page(s) hold a stale `.md` projection … run `outl doctor --repair`" is a terrible first sentence to read about a graph you have just moved and still only half-trust, so the pipeline closes with a pass that leaves every file byte-identical to its projection.
+It goes through the same `apply_page_md_with_sidecar_if_stale` every other writer uses, so [root invariant 8](../CLAUDE.md#critical-invariants-never-violate) still applies: a file holding a line the op log never saw is refused, not overwritten, and that refusal is warned about by name.
+`outl doctor` on a freshly imported workspace reports `integrity OK`.
 
 **Importing twice is destructive, so it's opt-in.**
 An import overwrites every `.md` it emits and reconciles the result through the op log, so a second run against a workspace you've been using erases whatever you wrote there since the first import — there is no undo.
@@ -106,7 +132,7 @@ A marker that is missing or unparseable is treated as "no unfinished import", so
 
 **Reconciliation: what the source held vs. what landed.**
 The per-feature counts only describe what the pipeline knows it produced — a block lost in the parse would show up in neither the numerator nor the denominator.
-So the report also carries a `reconciliation` block (Roam today; other adapters as they start reporting source counts) whose denominators are counted straight off the parsed source:
+So the report also carries a `reconciliation` block — for **every** importer — whose denominators are counted straight off the parsed source:
 
 ```text
   reconciliation:
@@ -124,6 +150,25 @@ A page that fails to write, fails to reconcile, or loses blocks in the matcher i
 So a real import also sums the block entries in each page's sidecar (written by `reconcile_md` straight off the materialized tree) and reports that as `landed_blocks`.
 A gap prints as `CONTENT NEVER REACHED THE OP LOG` and makes `balanced` false.
 `--dry-run` writes nothing, so it reports the landing as *not measured* rather than as zero-loss: there, `balanced: true` means only that parse and render agree.
+
+**What each importer refuses, and where it says so.**
+A file the importer will not read is either a *document* or an *attachment*, and the difference decides where it is reported.
+A document counts in the page denominator and is named in `skipped:` with a reason; an attachment is not a page, so it stays out of the denominator and is reported once, in aggregate, in a `(graph)` warning.
+Neither is ever silent: a file dropped with no trace is the one import bug you only discover months later, when the original graph is already stale.
+
+| Source | Named in `skipped:` (a document) | One aggregate warning (not a page) |
+| --- | --- | --- |
+| **Logseq** | `.org` files, `whiteboards/*.edn`, any other extension under `pages/` or `journals/` | `assets/`, `logseq/` (config, custom CSS, backups), `draws/`, `version-files/`, loose files in the graph root |
+| **Logseq DB** | built-in pages with no blocks, whiteboards | built-in tags, property definitions, closed values, value nodes, hidden and recycled blocks |
+| **Obsidian** | `.canvas`, `.base` | every other extension (attachments); `.obsidian/` and dotfiles are vault config |
+| **Roam** | a page the backup holds with no usable title | — |
+
+`pages/` and `journals/` are read **recursively**, because Logseq reads them that way: a page filed into a subdirectory is a page, and the earlier depth-1 scan dropped it silently.
+
+**A free-markdown source has no block denominator.**
+An Obsidian vault is prose, not an outline: its blocks are the ones outl's own parser makes after the text is written, so there is no source count to compare them against.
+That reconciliation reports pages only and says so, rather than printing `0` and implying every block vanished.
+The block count it *can* report is the one measured in the op log after reconcile.
 
 Warnings are listed in full under `--json`.
 The human output prints the first 20 and states how many it hid.

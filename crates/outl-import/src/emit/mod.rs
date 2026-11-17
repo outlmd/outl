@@ -72,6 +72,9 @@ pub fn run(
     // Pass B: placeholders → real handles, collapsed flags → ops.
     resolve::apply(&mut dest, &pages, &uid_map, report, sink)?;
 
+    // Pass C: leave every `.md` as the bytes the op log projects.
+    canonicalize_projections(&dest, &pages, report);
+
     measure_landing(&pages, report);
     Ok(())
 }
@@ -156,6 +159,58 @@ fn descendant_count(ws: &outl_core::workspace::Workspace, node: outl_core::id::N
         .into_iter()
         .map(|(id, _)| 1 + descendant_count(ws, id))
         .sum()
+}
+
+/// Leave every page's `.md` as the exact bytes the op log projects.
+///
+/// The op log is the source of truth and a `.md` is a projection of it,
+/// so a file that is *correct* but spelled differently from the
+/// projection is a **stale** projection. The import writes its own
+/// markdown, which is close but not identical: free-markdown sources
+/// (an Obsidian vault) carry prose the projection writes back as a
+/// bullet, and any page whose property order the writer did not match
+/// diverges the same way.
+///
+/// The cost of not doing this lands on the user, immediately: `outl
+/// doctor` reports the whole fresh import as "N page(s) hold a stale
+/// `.md` projection … run `outl doctor --repair`", which is a terrible
+/// first sentence to read about a graph you just moved and still only
+/// half-trust.
+///
+/// This goes through `apply_page_md_with_sidecar_if_stale`, the one
+/// owner of "may I overwrite this `.md`" — so the root invariant 8
+/// guard applies: a file holding a line the op log never saw is
+/// refused rather than overwritten. During an import that can only mean
+/// the pipeline wrote something it did not log, which is exactly the
+/// defect that guard exists to surface, so it is warned about by name.
+fn canonicalize_projections(
+    dest: &ImportDest<'_>,
+    pages: &[render::RenderedPage],
+    report: &mut ImportReport,
+) {
+    for p in pages {
+        // A page whose sidecar is missing or unreadable is already
+        // `measure_landing`'s warning to raise; re-projecting it blind
+        // is not this pass's call to make.
+        let Ok(sc) = outl_md::sidecar::read(&outl_md::sidecar::sidecar_path_for(&p.path)) else {
+            continue;
+        };
+        match outl_actions::journal::apply_page_md_with_sidecar_if_stale(
+            dest.workspace,
+            &dest.root,
+            sc.page_id,
+        ) {
+            Ok(Some(_)) => report.pages_normalized += 1,
+            Ok(None) => {}
+            Err(e) => report.warn(
+                &p.title,
+                format!(
+                    "the .md this import wrote could not be normalised to the op log's \
+                     projection: {e}"
+                ),
+            ),
+        }
+    }
 }
 
 /// Count what actually reached the destination's op log.

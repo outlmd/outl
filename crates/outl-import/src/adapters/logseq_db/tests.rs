@@ -523,6 +523,17 @@ fn deadline_and_scheduled_become_date_links_in_the_text() {
     assert_eq!(report.org_dates_converted, 2);
 }
 
+/// The date link says *when*; the property says *which kind of date*,
+/// which is what a query needs and what Logseq draws differently
+/// (issue #578).
+#[test]
+fn a_deadline_and_a_scheduled_date_keep_their_kind() {
+    let (g, _) = parse_fixture();
+    let blocks = outline(named(&g, "My Project"));
+    assert_eq!(prop(&blocks[3], "deadline"), Some("[[2026-11-12]]"));
+    assert_eq!(prop(&blocks[7], "scheduled"), Some("[[2026-11-10]]"));
+}
+
 // --- special nodes -------------------------------------------------------------
 
 #[test]

@@ -7,6 +7,61 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Logseq import: every namespaced page came in under the wrong name.**
+  `pages/projeto___outl.md` imported as the page `projeto outl`, not `projeto/outl`.
+  `___` is Logseq's **namespace separator** — it is what `/` is written as on disk in `:file/name-format :triple-lowbar`, the format every graph Logseq has created since 0.6.7 — and the importer read it as a space.
+  Percent-escapes beyond `%2F` were not decoded either, so `com%3Ados.md` stayed `com%3Ados` instead of `com:dos`.
+
+  Filename decoding is now ported from Logseq's own `tri-lb-title-parsing` / `legacy-title-parsing` (`deps/graph-parser/.../extract.cljc`), and the format is read from `logseq/config.edn` — including the detail that the shipped config has most keys commented out, so a `;;`-prefixed `:file/name-format` is documentation, not a setting.
+  A graph that says `:legacy` is decoded the old way (`.` is the separator).
+  The title keeps the slash, the slug stays flat (`pages/projeto-outl.md`), and `[[projeto/outl]]` resolves through the title index.
+
+- **Logseq import: two embed spellings arrived as plain text.**
+  `{{{embed ((uuid))}}}` — the triple-brace form Logseq's own block-embed command used to insert, so it is in every graph that has been around a while — and `{{embed((uuid))}}` with no space, which Logseq renders.
+  Both resolve to a real `!((blk-XXXXXX))` handle now.
+  A `((uuid))` inside a **property value** (`related:: ((uuid))`) also used to stay inert text forever, because a property never reaches the inline tokenizer; it resolves too, through `Op::SetProp` rather than by rewriting the file.
+
+- **Logseq import: three task markers lost their task state, silently.**
+  `WAIT`, `IN-PROGRESS` and `STARTED` are markers Logseq accepts, and a block starting with one imported as plain prose with the word still in the text — not a task in any query or count, and not even reported.
+
+- **Logseq import: text before a page's first bullet was dropped.**
+  A file written or edited outside Logseq often starts with prose (Logseq shows it as the page's "pre-block"); the parser `continue`d past every one of those lines with nothing in the report to show for it.
+  It becomes a block.
+
+- **Logseq import: a page filed into a subdirectory of `pages/` was not imported.**
+  Logseq reads `pages/` recursively; the importer's scan was depth-1, so the file was skipped with no trace.
+
+- **Import: unsupported files vanished without a word, and two of three importers reported no denominator** ([#299](https://github.com/outlmd/outl/issues/299)).
+  A `board.canvas`, a `sub/deep.base`, a `whiteboards/w.edn` appeared in neither `skipped` nor `warnings`, and with `source_pages: 0` the one report block that answers *did everything arrive* never ran for Logseq or Obsidian.
+  Every importer reports a reconciliation now, and every file is accounted for: a **document** the importer will not read is named in `skipped:` with a reason and counted in the page denominator, while an attachment (never a page) is reported once in an aggregate `(graph)` warning.
+  An Obsidian vault is free markdown, where the page is the unit of content, so its reconciliation compares pages and *says* it has no block denominator rather than printing `0` and implying every block vanished.
+
+- **Import: a freshly imported workspace reported itself as needing repair.**
+  Any page with two or more properties was written with its header in source order, while a page's `.md` is a projection of the op log and the op log has no property order — so the bytes on disk were never the ones the tree projects.
+  `outl doctor` therefore greeted a fresh migration with "N page(s) hold a stale `.md` projection … run `outl doctor --repair`", which is a terrible first sentence to read about a graph you have just moved and still only half-trust.
+  The header is now written in the projection's order, and the pipeline closes with a pass that leaves every file byte-identical to its projection (through the same guard as every other writer, so [invariant 8](CLAUDE.md#critical-invariants-never-violate) still refuses a file holding a line the op log never saw).
+  `outl doctor` on a freshly imported workspace reports `integrity OK`.
+
+### Added
+
+- **Logseq import: a block template becomes an outl template page** ([#563](https://github.com/outlmd/outl/issues/563)).
+  A Logseq template is a *block* carrying `template:: Name`; an outl template is a *page* with that property.
+  So a graph that lives in block templates imported cleanly and then showed an empty `/template` picker.
+  Each one is copied into `templates/<name>` — the original block stays where you wrote it — and `template-including-parent:: true` keeps the carrying block as part of the body.
+  A page that already has page-level `template::` is left alone; two templates with one name keep the first and warn; a template with no body is reported rather than created as a name that stamps nothing.
+
+- **Logseq import: `SCHEDULED:` and `DEADLINE:` keep which kind of date they were** ([#578](https://github.com/outlmd/outl/issues/578)).
+  Both used to collapse into a bare `[[date]]` link, which lost the distinction Logseq draws and queries on, along with any time of day or repeater.
+  The link stays (a date in text surfaces in that day's journal through backlinks) and a `scheduled::` / `deadline::` property carries the kind, with the rest of the stamp: `scheduled:: [[2026-11-20]] 09:00 .+1w`.
+  The `logseq-db` adapter writes the same two properties, so one app does not import two different ways.
+
+- **Logseq import: `#+BEGIN_SRC` and `#+BEGIN_QUOTE` become a fenced code block and `> ` lines.**
+  A markdown graph that came through org-mode is full of them, and they used to import as literal text — which also meant the file and DB importers disagreed about the same construct.
+
+- **Logseq import: pointing at a `.zip` says what to do with it.**
+  Logseq's "Export as standard Markdown" hands you one, and `outl import logseq <that zip>` is the obvious next thing to type.
+  A graph directory holding only `pages/` or only `journals/` is also recognised now, which is what such an export (or a graph whose owner never used journals) looks like.
+
 - **Windows: `scoop install` could not install outl at all, on any release.**
   The Scoop manifest's `architecture.*.url` carried a literal `$version`.
   Scoop expands that token only inside `autoupdate` — the block a bucket maintainer runs against a new release — so a client downloaded the url exactly as written and GitHub answered `404` for `/download/v$version/outl-windows-x64.zip`.

@@ -11,10 +11,29 @@
 //! `title::` is unaffected — only the on-disk filename changes.
 
 use crate::adapter::ImportError;
+use crate::report::ImportReport;
 use outl_md::frontmatter::{extract_leading_h1, split_frontmatter};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Vault files that are documents in their own right, so a user counts
+/// them as content the import either took or refused. Each lands in
+/// `skipped` by name, and in the reconciliation's page denominator.
+///
+/// `.canvas` is Obsidian's JSON graph; `.base` is the Bases format.
+/// Neither has an outl equivalent, which is fine — being skipped
+/// silently is not.
+const DOCUMENT_EXTENSIONS: &[(&str, &str)] = &[
+    (
+        "canvas",
+        "an Obsidian canvas (a JSON graph) has no outl equivalent yet",
+    ),
+    (
+        "base",
+        "an Obsidian base (the Bases format) has no outl equivalent yet",
+    ),
+];
 
 /// One source file we discovered during the walk, plus the slug we'd
 /// assign it in the absence of collisions.
@@ -23,9 +42,19 @@ pub(super) struct DiscoveredFile {
     pub base_slug: String,
 }
 
-/// Walk the vault and compute the base slug for every `.md` file.
-pub(super) fn discover(src: &Path) -> Result<Vec<DiscoveredFile>, ImportError> {
+/// Walk the vault and compute the base slug for every `.md` file,
+/// accounting for every other file on the way past it.
+///
+/// The `continue` that used to skip a non-markdown file is the reason
+/// `board.canvas` and `sub/deep.base` left no trace in a dry run: not
+/// in `skipped`, not in `warnings`, and with no page denominator the
+/// reconciliation never ran either (issue #299).
+pub(super) fn discover(
+    src: &Path,
+    report: &mut ImportReport,
+) -> Result<Vec<DiscoveredFile>, ImportError> {
     let mut discovered: Vec<DiscoveredFile> = Vec::new();
+    let mut attachments: BTreeMap<String, usize> = BTreeMap::new();
     for entry in walkdir::WalkDir::new(src)
         .min_depth(1)
         .sort_by_file_name()
@@ -39,16 +68,53 @@ pub(super) fn discover(src: &Path) -> Result<Vec<DiscoveredFile>, ImportError> {
             continue;
         }
         let path = entry.path();
-        if path.extension().and_then(|x| x.to_str()) != Some("md") {
+        let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("");
+        if ext != "md" {
+            let rel = path.strip_prefix(src).unwrap_or(path).display().to_string();
+            match DOCUMENT_EXTENSIONS.iter().find(|(e, _)| *e == ext) {
+                Some((_, why)) => {
+                    // A document the vault holds and outl will not: in
+                    // the denominator, and named in `skipped`.
+                    report.count_source_pages(1);
+                    report.skip(rel, *why, 0);
+                }
+                // An attachment is not a page, so it stays out of the
+                // page denominator — but it is still said out loud, in
+                // one aggregate line rather than one per file.
+                None => {
+                    *attachments
+                        .entry(if ext.is_empty() {
+                            "(no extension)".to_string()
+                        } else {
+                            format!(".{ext}")
+                        })
+                        .or_insert(0) += 1;
+                }
+            }
             continue;
         }
         let text = fs::read_to_string(path).map_err(|e| ImportError::io(path, e))?;
         let title = derive_title(path, &text);
         let slug = outl_md::slug::slugify(&title);
+        report.count_source_pages(1);
         discovered.push(DiscoveredFile {
             path: path.to_path_buf(),
             base_slug: slug,
         });
+    }
+    if !attachments.is_empty() {
+        let kinds: Vec<String> = attachments
+            .iter()
+            .map(|(ext, n)| format!("{n} {ext}"))
+            .collect();
+        report.warn(
+            "(graph)",
+            format!(
+                "not read, and not notes: {}. A file a note links to is still pulled into \
+                 assets/; `.obsidian/` and other dotfiles are vault config",
+                kinds.join(", ")
+            ),
+        );
     }
     Ok(discovered)
 }

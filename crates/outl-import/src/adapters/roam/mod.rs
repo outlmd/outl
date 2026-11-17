@@ -116,11 +116,13 @@ impl SourceAdapter for RoamAdapter {
         // Denominators for the report's reconciliation, counted off the
         // deserialized JSON — before any pipeline decision can hide a
         // loss from both the numerator and the denominator.
-        report.source_pages += pages.len();
-        report.source_blocks += pages
-            .iter()
-            .map(|p| count_blocks(&p.children))
-            .sum::<usize>();
+        report.count_source(
+            pages.len(),
+            pages
+                .iter()
+                .map(|p| count_blocks(&p.children))
+                .sum::<usize>(),
+        );
 
         // After the source counts: a folded table's cells are reported
         // as folded, not lost. Keeping source ids keeps the cell blocks.
