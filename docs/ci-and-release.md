@@ -194,6 +194,7 @@ Refusing on unknown would turn any such gap into a silent release freeze, which 
 - Tag: `v<workspace.version>-beta.<run_number>` (e.g. `v0.6.0-beta.48`).
 - Binary: reports the full beta version (the workflow `sed`s `Cargo.toml` in-place before `cargo build`; the change is local to the runner).
 - GitHub: published as a prerelease with auto-generated release notes.
+  `publish_release` appends one sponsor link at the end of the body ("Ask for sponsors in the release notes"), after any missing-assets note.
 - Homebrew tap (`Formula/outl-beta.rb`, `Casks/outl-desktop-beta.rb`) bumped automatically with `[skip ci]` commit.
 
 ### GA
