@@ -441,7 +441,8 @@ Don't unilaterally pivot.
 
 Don't add code for these unless explicitly asked:
 
-- Plugin system (`rhai`)
+- ~~Plugin system (`rhai`)~~ — **this shipped**, as JavaScript on the Boa interpreter, not `rhai`.
+  `crates/outl-plugins` is a workspace member with `default = ["js"]`; [RFC 0025](docs/rfcs/0025-plugin-system.md) records why Boa and why Rhai was rejected, and [`docs/plugins.md`](docs/plugins.md) is the user-facing page.
 - `ChronDbStorage` backend (issue #1, tracked publicly)
 - ~~Android mobile build~~ — **this shipped**, and this line said otherwise long enough to be worth a warning.
   `release.yml`'s `build_android` job signs an arm64 APK on every release; `gen/android/` holds a hand-written `MainActivity.kt`; `android_jni.rs` primes rustls-platform-verifier + `ndk_context` so iroh's first QUIC connection doesn't `SIGABRT`.

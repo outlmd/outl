@@ -25,7 +25,7 @@ outl picks the parts that worked — the outliner UX, the bi-directional graph, 
 | **Conflict on concurrent moves?** | Silent loss | Silent loss | Deterministic resolution, no loss |
 | **Time travel / history** | Paid tier | Per-file git, optional | Issue [#1][i1] tracks ChronDB |
 | **Open source** | No | Yes (frontend) | Yes (MIT) |
-| **Plugin system** | Yes (JS) | Yes (JS, complex) | Issue [#4][i4] tracks `rhai` |
+| **Plugin system** | Yes (JS) | Yes (JS, complex) | Yes (JS, [RFC 0025](rfcs/0025-plugin-system.md)) |
 | **Mobile** | Native, fine | Native, known-bad | iOS (Tauri 2), TestFlight beta; Android APK per release |
 | **Desktop** | Electron | Electron | Issue [#2][i2] tracks Tauri |
 | **TUI** | No | No | Yes — first-class |
@@ -37,7 +37,6 @@ outl picks the parts that worked — the outliner UX, the bi-directional graph, 
 [i1]: https://github.com/outlmd/outl/issues/1
 [i2]: https://github.com/outlmd/outl/issues/2
 [i3]: https://github.com/outlmd/outl/issues/3
-[i4]: https://github.com/outlmd/outl/issues/4
 
 ## What outl is **not**
 
