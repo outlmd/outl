@@ -5,7 +5,7 @@
 use crate::outline_ops::path_for_index;
 use crate::state::{App, Focus, Mode};
 use crate::theme::Theme;
-use crate::view::embed::{embed_only_handle, emit_embedded_children};
+use crate::view::embed::emit_block_embed;
 use crate::view::inline::{highlight_inline, render_markdown_inline, render_pretty_block_text};
 use crate::view::wrap::push_wrapped;
 use outl_md::inline::byte_index_for_char;
@@ -222,25 +222,19 @@ pub(crate) fn render_block(
         push_property_row(indent, k, v, has_auto_run, app, out, text_width);
     }
 
-    // Expand `!((blk-XXXXXX))` embeds as a read-only subtree under
-    // the carrying block. Triggered when:
-    //   - the block's text resolves to a single Embed token
-    //     (mixed prose keeps the inline `↳ <text>` render);
-    //   - the handle resolves through the workspace index.
+    // Expand a bare `!((blk-XXXXXX))` or `![[page]]` as a read-only
+    // subtree under the carrying block. Which texts qualify and what
+    // each spelling expands to is `view::embed`'s; `indent` is all this
+    // module contributes, and it matches the carrying block's own so
+    // the `│ ` guides line up with the outline's indent pattern.
+    //
     // The expanded rows are visual-only — they don't move `cursor`
     // (the flat index used for navigation), so `j` / `k` cross them
     // in one step instead of paging through borrowed content. The
     // carrying block's own row keeps whatever render `mode` chose
     // (raw with cursor, raw with caret, or pretty) so column-to-byte
     // alignment is never broken by the expansion.
-    if let Some(handle) = embed_only_handle(&b.text) {
-        if let Some(entry) = app.index.resolve_block_ref(handle) {
-            // `outer_indent` matches the carrying block's own indent so
-            // the `│ ` guides line up with the outline's normal indent
-            // pattern. Embed-internal nesting comes from `depth`.
-            emit_embedded_children(&entry.children, indent, 1, app, out, text_width);
-        }
-    }
+    emit_block_embed(&b.text, indent, app, out, text_width);
 
     *cursor += 1;
     if is_collapsed {

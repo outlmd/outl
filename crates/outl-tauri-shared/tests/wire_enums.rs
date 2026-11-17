@@ -209,6 +209,7 @@ fn inline_token_matches_its_union() {
         T::Tag { .. } => T::Tag { value: "#infra".into() },
         T::BlockRef { .. } => T::BlockRef { value: "blk-abc123".into() },
         T::Embed { .. } => T::Embed { value: "blk-abc123".into() },
+        T::PageEmbed { .. } => T::PageEmbed { value: "infra".into() },
         T::Emoji { .. } => T::Emoji { shortcode: "tada".into(), glyph: "🎉".into() },
     );
     assert_tagged_enum(&variants, "InlineToken", "kind");

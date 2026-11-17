@@ -19,7 +19,6 @@ import {
   pastePlain,
   pluginRun,
   pluginSyncHooks,
-  resolveEmbeds,
   runAutoRunBlocks,
   runCodeBlock,
   setBlockCollapsed,
@@ -34,7 +33,6 @@ import { PageAheadOfLogBanner, ParseWarningsBanner } from "@outl/shared/warnings
 import { isAssetLink } from "@outl/shared/links";
 import { HistoryIcon, PageGlyph, PaperclipIcon } from "@outl/shared/icons";
 import {
-  collectBlockRefHandles,
   findBlock,
   rawTextWithTodo,
   visualRangeSet,
@@ -154,53 +152,15 @@ export function OutlineView() {
   /**
    * Fold a reply into the page's state — `applyPageState`
    * (`lib/page-view.ts`) owns which fields that is and why the
-   * ahead-of-log notice is sticky — then do the two things only this
-   * component needs: auto-run the page's query blocks and resolve its
-   * `((blk-…))` handles.
+   * ahead-of-log notice is sticky — then auto-run the page's query
+   * blocks. The transclusion resolve rides the outline effect above,
+   * so it is not repeated here.
    */
   function applyView(view: PageView) {
     applyPageState(view);
-    // Auto-run query blocks after page load / commit, then re-resolve
-    // embeds with the updated outline.
     void runAutoRunBlocks(view.page.id)
       .then((reply) => {
-        if (reply.ran > 0) {
-          applyPageState(reply.view);
-          void resolvePageEmbeds(reply.view.outline);
-        }
-      })
-      .catch(() => {});
-    // Resolve embeds on the initial page view.
-    void resolvePageEmbeds(view.outline);
-  }
-
-  // Last resolve's page + handle set, so a commit that changed neither
-  // can skip the round-trip (see `resolvePageEmbeds`).
-  let lastResolvedSlug = "";
-  let lastResolvedKey = "";
-
-  /** Collect unique block-ref handles (`((…))` refs + `!((…))` embeds)
-   *  from the outline and batch-resolve them to source blocks.
-   *
-   *  `resolveEmbeds` rebuilds the workspace index off disk, so it's
-   *  O(workspace) — and `applyView` calls this on every mutation, not
-   *  just navigation. Refs don't change per keystroke, so we skip when
-   *  the page (slug) and the handle set both match the last resolve.
-   *  That keeps the scan off the commit path (same rule the backlinks
-   *  fetch follows), while a newly-typed ref (handle set grows) or a
-   *  navigation (slug changes) still resolves — the slug check also
-   *  refreshes source text edited on another page. */
-  function resolvePageEmbeds(outline: import("@outl/shared/api/types").BlockNode[]) {
-    const slug = appState.page?.slug ?? "";
-    const handles = collectBlockRefHandles(outline);
-    const key = handles.join("\n");
-    if (slug === lastResolvedSlug && key === lastResolvedKey) return;
-    lastResolvedSlug = slug;
-    lastResolvedKey = key;
-    if (handles.length === 0) return;
-    void resolveEmbeds(handles)
-      .then((map) => {
-        setAppState("embeds", map);
+        if (reply.ran > 0) applyPageState(reply.view);
       })
       .catch(() => {});
   }

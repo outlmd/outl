@@ -145,10 +145,13 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   It owns the signal, like `Journal.embeds.ts`, so the component holds no state for the feature.
   The order is the part with a failure mode.
   The current rule is read **before** the sheet opens and carried as *text*, because a rule that does not parse still has to reach the user: opening a picker on a default would show them a time their block never said.
-- **`Journal.embeds.ts`** — `createEmbedResolver(slug)`: the `((blk-…))` resolve for the visible page, called from `applyView`.
-  It owns the signal too, so the component holds no state for it.
-  The skip rule is the part with a failure mode: a resolve is skipped only when the page **and** the handle set both match the last one.
+- **`Journal.embeds.ts`** — `createEmbedResolver(slug)`: the `((blk-…))` / `!((blk-…))` and `![[page]]` resolves for the visible page, called from `applyView`.
+  It owns both signals too, so the component holds no state for either.
+  The skip rule is the part with a failure mode: a resolve is skipped only when the page **and** that kind's key both match the last one.
   Keyed on the slug alone, a newly typed ref keeps printing its raw handle until the user navigates away ([#16](https://github.com/outlmd/outl/issues/16)).
+  **The two kinds keep separate keys and separate generation counters**, which is the same bug one door along.
+  Share them and a newly typed `((blk-…))` cancels the page-embed reply already in flight; the key was recorded before the fetch, so nothing re-asks and the embed renders its literal `![[name]]` until the user navigates away.
+  `createMapResolver` is the one implementation of that rule, generic over the kind, so there is no second copy to get wrong.
 
 What is left is ~1,800 lines, almost all of it one `Journal()` function.
 That is real debt, not a finished job: what is left is a state/effects question (edit lifecycle, sync signals, the native bridges, the sheet stack), not a "move these functions" question — phases 1-3 were the movable half — and it wants its own plan.

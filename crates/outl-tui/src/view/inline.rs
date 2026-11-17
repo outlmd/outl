@@ -305,6 +305,22 @@ fn render_markdown_inline_impl(
                     }
                 }
             }
+            InlineTok::PageEmbed { name } => {
+                // The page-level twin of `Embed`. Rendered by
+                // `view::embed`, which owns every shape borrowed
+                // content takes.
+                //
+                // `expand_embed` is deliberately *not* consulted, and
+                // that is the whole of it: the chip is the target
+                // page's `title::`, a plain string that opens no
+                // second tokenizer pass, so this arm cannot recurse
+                // and there is nothing for the cycle guard to stop.
+                // Gating it would hide the title inside an expansion
+                // for no gain. The subtree below the carrying block
+                // never recurses either — see `view::embed`'s module
+                // doc for why the depth cap is the only bound needed.
+                out.extend(crate::view::embed::page_embed_chip(name, theme, index));
+            }
         }
     }
     out
@@ -409,6 +425,12 @@ pub(crate) fn highlight_inline(text: &str, theme: &Theme) -> Vec<Span<'static>> 
                 out.push(Span::styled("!((".to_string(), dim));
                 out.push(Span::styled(handle.to_string(), theme.ref_link));
                 out.push(Span::styled("))".to_string(), dim));
+            }
+            InlineTok::PageEmbed { name } => {
+                // Same contract as the `Embed` arm above — raw source,
+                // delimiters dimmed — delegated to `view::embed` so the
+                // page embed's two renders sit next to its expansion.
+                out.extend(crate::view::embed::page_embed_raw(name, theme));
             }
             InlineTok::Emoji { shortcode } => {
                 // Highlight (cursor-bearing) render keeps the source

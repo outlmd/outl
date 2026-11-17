@@ -20,6 +20,7 @@ import type {
   MdAheadOfLog,
   NamespaceChild,
   PageBacklinks,
+  PageEmbedContent,
   ParseWarning,
   PageMeta,
   ResolvedBlock,
@@ -85,6 +86,12 @@ export interface AppStateShape {
    *  refs and `!((blk-…))` embeds on the current page. Inline refs render
    *  `text`; embeds also expand `children` as a subtree. */
   embeds: Record<string, ResolvedBlock>;
+  /** Resolved pages keyed by the name inside `![[page]]`, for the page
+   *  embeds on the current page. The inline token renders `title`; a
+   *  block that is nothing but the embed also expands `blocks` as a
+   *  read-only subtree. Twin of {@link AppStateShape.embeds}, filled by
+   *  the same resolve pass in `<OutlineView />`. */
+  pageEmbeds: Record<string, PageEmbedContent>;
   /** DFS path of the selected block, or `null` for no selection. */
   selectedPath: number[] | null;
   /**
@@ -332,6 +339,7 @@ const [state, setState] = createStore<AppStateShape>({
   pageProperties: [],
   addPropertyBlockId: null,
   embeds: {},
+  pageEmbeds: {},
   selectedPath: null,
   selectedBlockId: null,
   selectedBacklinkBlockId: null,

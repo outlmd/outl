@@ -27,6 +27,13 @@
 //!   ([`rewrite_text_with`]'s `resolves_to_other`, answered by
 //!   [`rewrite_mentions`] from the workspace). Respelled as
 //!   `[[<to.title>]]`.
+//! - **`![[Name]]`**, the page embed (issue #190), mentions `from` by the
+//!   same ladder as `[[Name]]` and is respelled `![[<to.title>]]`. It is a
+//!   page reference that happens to render expanded, so a rename that left
+//!   it behind would point every transclusion at a page that no longer
+//!   answers to that name. The only differences from the plain ref are
+//!   mechanical and both live in `RefForm`: the opener is three bytes,
+//!   and the replacement carries the `!` back.
 //! - **`[[@Name]]`**, the person mention, is a `PageRef` whose name
 //!   starts with `@` (there is no separate token). It mentions `from` only
 //!   when `from.person`, which is the rule the backlinks side applies
@@ -57,8 +64,9 @@
 //! - A `[[X]]` inside a link's text or url (`[label]([[X]])` is a `Link`
 //!   token, opaque by construction). There is no `#[[Name]]` form and no
 //!   aliased ref in this dialect, so nothing else to handle.
-//! - Block refs `((blk-...))` and embeds `!((blk-...))`: they name blocks,
-//!   not pages.
+//! - Block refs `((blk-...))` and block embeds `!((blk-...))`: they name
+//!   blocks, not pages. (A *page* embed, `![[Name]]`, is a page mention and
+//!   is rewritten — see above.)
 //! - Names that merely contain the slug (`[[alphabet]]`, `#alpha-two`
 //!   against `alpha`) and names that only match a page **alias**
 //!   (an alias is another page's property, not `from`'s names; `PageNames`
@@ -343,7 +351,8 @@ fn splice(text: &str, splices: &[Splice]) -> Option<String> {
 fn collect(toks: &[InlineTok<'_>], ctx: &mut Ctx<'_>) {
     for tok in toks {
         match tok {
-            InlineTok::PageRef { name } => visit_ref(name, ctx),
+            InlineTok::PageRef { name } => visit_ref(name, RefForm::Link, ctx),
+            InlineTok::PageEmbed { name } => visit_ref(name, RefForm::Embed, ctx),
             InlineTok::Tag { name } => visit_tag(name, ctx),
             InlineTok::Bold { inner }
             | InlineTok::Italic { inner, .. }
@@ -366,7 +375,42 @@ fn offset_in(text: &str, slice: &str) -> usize {
     slice.as_ptr() as usize - text.as_ptr() as usize
 }
 
-fn visit_ref(name: &str, ctx: &mut Ctx<'_>) {
+/// How a page mention is spelled on disk: `[[Name]]` or `![[Name]]`.
+///
+/// Both are mentions of the same page and both get respelled; the two
+/// things that differ are mechanical, and keeping them here is what stops
+/// a splice from being computed with the wrong opener width. A token's
+/// `name` borrows from the middle of the source, so the splice's start is
+/// derived by *subtracting* the opener — three bytes for an embed, not two
+/// — and an off-by-one there eats the character in front of the mention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefForm {
+    /// `[[Name]]` — a page reference.
+    Link,
+    /// `![[Name]]` — a page embed (issue #190). Still a page reference, so
+    /// a rename respells it; the `!` is the only extra byte.
+    Embed,
+}
+
+impl RefForm {
+    /// Bytes between the start of the token and the start of `name`.
+    fn opener_len(self) -> usize {
+        match self {
+            RefForm::Link => "[[".len(),
+            RefForm::Embed => "![[".len(),
+        }
+    }
+
+    /// What the replacement has to put back in front of the `[[`.
+    fn prefix(self) -> &'static str {
+        match self {
+            RefForm::Link => "",
+            RefForm::Embed => "!",
+        }
+    }
+}
+
+fn visit_ref(name: &str, form: RefForm, ctx: &mut Ctx<'_>) {
     let (bare, at) = match name.strip_prefix('@') {
         Some(rest) if !rest.is_empty() => (rest, true),
         _ => (name, false),
@@ -379,13 +423,13 @@ fn visit_ref(name: &str, ctx: &mut Ctx<'_>) {
         if (ctx.resolves_to_other)(bare) {
             return;
         }
-        let Some(replacement) = spell_ref(ctx.to, at) else {
+        let Some(replacement) = spell_ref(ctx.to, at, form) else {
             return;
         };
-        let start = offset_in(ctx.text, name) - 2;
+        let start = offset_in(ctx.text, name) - form.opener_len();
         ctx.splices.push(Splice {
             start,
-            end: start + 2 + name.len() + 2,
+            end: start + form.opener_len() + name.len() + "]]".len(),
             replacement,
         });
     } else {
@@ -434,9 +478,18 @@ fn note_namespace_child(bare: &str, written: &str, ctx: &mut Ctx<'_>) {
     }
 }
 
-/// `[[<to.title>]]` (or `[[@<to.title>]]`), falling back to the slug when
-/// the title cannot be written inside brackets. `None` when neither can.
-fn spell_ref(to: &PageNames, at: bool) -> Option<String> {
+/// `[[<to.title>]]` (or `[[@<to.title>]]`, or `![[<to.title>]]` for an
+/// embed), falling back to the slug when the title cannot be written
+/// inside brackets. `None` when neither can.
+///
+/// The round trip is checked against the spelling this will actually
+/// write, `form` included, so a replacement the tokenizer would read back
+/// as something else is never emitted. The forms are not interchangeable
+/// here: `![[photo.png]]` is refused by `try_page_embed` (the image-embed
+/// spelling has another owner), so a title the plain ref could carry
+/// verbatim falls through to the slug — where `.` folds to `-` and
+/// `![[photo-png]]` reads back as the embed it is.
+fn spell_ref(to: &PageNames, at: bool, form: RefForm) -> Option<String> {
     let person = at && to.person;
     [&to.title, &to.slug].into_iter().find_map(|name| {
         let inner = if person {
@@ -444,11 +497,17 @@ fn spell_ref(to: &PageNames, at: bool) -> Option<String> {
         } else {
             name.clone()
         };
-        let spelled = format!("[[{inner}]]");
-        let round_trips = matches!(
-            tokenize(&spelled).as_slice(),
-            [InlineTok::PageRef { name: back }] if *back == inner
-        );
+        let spelled = format!("{}[[{inner}]]", form.prefix());
+        let round_trips = match form {
+            RefForm::Link => matches!(
+                tokenize(&spelled).as_slice(),
+                [InlineTok::PageRef { name: back }] if *back == inner
+            ),
+            RefForm::Embed => matches!(
+                tokenize(&spelled).as_slice(),
+                [InlineTok::PageEmbed { name: back }] if *back == inner
+            ),
+        };
         round_trips.then_some(spelled)
     })
 }
@@ -464,6 +523,6 @@ fn spell_tag(to: &PageNames) -> Option<String> {
     if round_trips {
         Some(spelled)
     } else {
-        spell_ref(to, false)
+        spell_ref(to, false, RefForm::Link)
     }
 }

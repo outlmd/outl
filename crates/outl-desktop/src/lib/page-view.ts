@@ -23,8 +23,11 @@
  * the shell, auto-run blocks and embed resolution in the outline.
  */
 
+import { resolveEmbeds, resolvePageEmbeds } from "@outl/shared/api/commands";
+
 import type { PageView } from "@outl/shared/api/types";
 
+import { createTransclusionOps, type TransclusionOps } from "./outline-transclusions";
 import { appState, setAppState, setOutline } from "./store";
 
 /**
@@ -59,6 +62,34 @@ function stickyAheadOfLog(view: PageView): PageView["md_ahead_of_log"] {
  * page that was on screen), so the order of the writes below is
  * load-bearing.
  */
+/**
+ * The resolver, bound to the store once, **built on first use**.
+ *
+ * Lazily, not at module scope: this module is imported by `App.tsx`,
+ * `AppShell.tsx` and `<OutlineView />`, and running a factory during
+ * module evaluation puts it inside whatever import cycle those form.
+ * It did — `ReferenceError: Can't find variable: createTransclusionOps`,
+ * a white window, and nothing in the Rust log, because the failure is
+ * in the webview.
+ *
+ * The factory itself lives in `./outline-transclusions` (pure,
+ * dependency-injected, with its own test). This is the single instance
+ * the app writes through, which is what keeps the skip keys meaningful
+ * across navigations.
+ */
+let transclusions: TransclusionOps | null = null;
+
+function transclusionOps(): TransclusionOps {
+  transclusions ??= createTransclusionOps({
+    slug: () => appState.page?.slug,
+    resolveEmbeds,
+    resolvePageEmbeds,
+    setEmbeds: (map) => setAppState("embeds", map),
+    setPageEmbeds: (map) => setAppState("pageEmbeds", map),
+  });
+  return transclusions;
+}
+
 export function applyPageState(view: PageView): void {
   if (view.projection_error) setAppState("lastError", view.projection_error);
   setAppState({
@@ -70,4 +101,23 @@ export function applyPageState(view: PageView): void {
   // Reconcile the outline (see `setOutline`): only the block that
   // actually changed re-renders, not all N rows.
   setOutline(view.outline);
+  // Resolve what the page transcludes, here and nowhere else.
+  //
+  // This sits beside `setOutline` because that is the one write it has
+  // to follow, and being the single writer is the only reason this is
+  // correct. Two things were tried first and are both wrong:
+  //
+  // - Hanging it off `<OutlineView />`'s `applyView`. `<AppShell />`
+  //   has its own, and that one is every navigation the chrome owns —
+  //   boot included — so an *opened* page never asked, and every
+  //   transclusion showed its unresolved fallback until some later
+  //   mutation happened to run the other one.
+  // - A `createEffect(on(() => appState.outline, …))`. `setOutline`
+  //   writes through `reconcile(…, { key: "id" })`, which patches in
+  //   place, so the top-level reference the effect tracks does not
+  //   change and it never fires again.
+  //
+  // The resolve is cheap to over-call: `createTransclusionOps` skips a
+  // kind whose page and key both match the last answer.
+  transclusionOps().resolve(view.outline);
 }

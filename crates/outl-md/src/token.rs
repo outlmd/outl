@@ -117,6 +117,24 @@ pub enum InlineTok<'a> {
         /// Full handle, e.g. `"blk-r6s4a1"`.
         handle: &'a str,
     },
+    /// `![[page]]` — page embed: render the target page's outline
+    /// expanded inline instead of as a link.
+    ///
+    /// The page-level twin of [`InlineTok::Embed`], and shaped from the
+    /// same two halves: `!` means "expand", `[[name]]` names a page.
+    /// It is also a page *reference* — it produces a backlink and it
+    /// gets respelled by a rename, exactly like
+    /// [`InlineTok::PageRef`] — so a consumer that treats it as inert
+    /// drops a real edge (see `outl_actions::mentions::collect`).
+    ///
+    /// UI consumers resolve `name` to a page and draw its title plus
+    /// its top-level blocks, read-only, capped at the same depth the
+    /// block embed is capped at.
+    PageEmbed {
+        /// Page name, display form, kept verbatim (the file is
+        /// `pages/<slugify(name)>.md`).
+        name: &'a str,
+    },
     /// `:shortcode:` — GitHub gemoji shortcode.
     ///
     /// The borrowed form carries only the shortcode (without the `:`s);
@@ -237,6 +255,16 @@ pub enum InlineToken {
         /// Full handle including the `blk-` prefix.
         value: String,
     },
+    /// `![[page]]` page embed — the page-level twin of `Embed`.
+    ///
+    /// Clients resolve `value` to a page and render its title plus its
+    /// top-level blocks, read-only. It is also a page reference, so it
+    /// carries a backlink.
+    #[serde(rename = "pageembed")]
+    PageEmbed {
+        /// Page name, display form, verbatim.
+        value: String,
+    },
     /// `:shortcode:` GitHub gemoji shortcode.
     ///
     /// `shortcode` is the literal text between the `:`s
@@ -285,6 +313,9 @@ impl InlineToken {
                 href: (*url).to_owned(),
             },
             InlineTok::PageRef { name } => InlineToken::Ref {
+                value: (*name).to_owned(),
+            },
+            InlineTok::PageEmbed { name } => InlineToken::PageEmbed {
                 value: (*name).to_owned(),
             },
             InlineTok::Tag { name } => InlineToken::Tag {

@@ -786,6 +786,30 @@ rhythm (`--outl-read-leading: 1.6`, `--outl-read-measure: 68ch`), the block lead
 treatment, and the first-run tips card. Treat a `--outl-*` name there the way you treat a `--color-outl-*`
 name: one owner, one meaning, both clients.
 
+#### Transclusion — one rail, not a glyph per row
+
+`EmbeddedSubtree.tsx` draws what `!((blk-XXXXXX))` and `![[page]]` pull in. The region carries a single
+continuous `border-l-[3px] border-(--color-outl-accent)/25` with `pl-[10px]`, drawn **only by the
+outermost call**; rows inside step at the standard 22px and open with a `·` in `fg_dimmer`.
+
+It replaced a `↳` on every row. That glyph is the TUI's answer and the right one there — a terminal has
+no hairline to draw — but in a webview it repeated "this row is nested", which the indentation already
+says, while nothing carried the fact a reader cannot infer: that the rows came from another page. One
+rail says that once, for the region it is true of.
+
+**The 25 % is the whole reason it reads as a region and not as a cursor.** The selected block's rail is
+solid `accent` at 3px (see "The two odd numbers"), and the hue is shared on purpose — both mean "outl is
+marking this". What tells them apart is weight and length: a cursor is one row and solid, a transclusion
+is many rows and faint. A solid rail here makes a page with an embed look permanently selected.
+
+No fill, no card, no shadow. `bg_elev` is the only elevation colour in the product and it belongs to
+things that float; an embed sits *in* the page, so it gets a margin and a line.
+
+The title above the rail is weight plus `ref_link_fg`, with **no marker glyph**. An icon was tried: an
+`<svg>` is an atomic inline box whose height enters the line box, and that line swaps content a round
+trip after first paint, inside a block the user may be typing in. `PageEmbed.test.tsx` refuses any such
+box there.
+
 ### Desktop (`crates/outl-desktop/src/components/`)
 
 Three-pane chrome, mouse + keyboard. `AppShell` (the grid), `Sidebar` (page list + month calendar),

@@ -221,7 +221,10 @@ pub enum Inline {
 pub enum EmbedTarget {
     /// Block embed → `!((blk-XXXXXX))`.
     Block(String),
-    /// Page embed → `[[Page]]` fallback until issue #190 lands.
+    /// Page embed → `![[Page]]` (issue #190). The name is spelled
+    /// verbatim, so this target needs no resolve pass — unlike
+    /// [`EmbedTarget::Block`], whose handle does not exist until the
+    /// sidecar is stamped.
     Page(String),
 }
 

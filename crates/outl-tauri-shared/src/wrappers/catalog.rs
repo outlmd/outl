@@ -213,6 +213,18 @@ macro_rules! exec_commands {
                     String,
                 >
                 => $crate::commands::exec::resolve_embeds;
+
+            /// Resolve `![[page]]` names to the target page's title and
+            /// top-level blocks.
+            async fn resolve_page_embeds(names: Vec<String>)
+                -> ::std::result::Result<
+                    ::std::collections::HashMap<
+                        String,
+                        $crate::commands::exec::PageEmbedContent,
+                    >,
+                    String,
+                >
+                => $crate::commands::exec::resolve_page_embeds;
         }
     };
 }

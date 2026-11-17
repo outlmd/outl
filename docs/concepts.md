@@ -126,8 +126,10 @@ Stores the stable block IDs and content hashes:
 }
 ```
 
-Filename is a dotfile: `pages/avelino.md` ↔ `pages/.avelino.outl`.
-Hidden from `ls` by default; gitignorable if you want (but you'd lose ID stability across devices).
+Filename is the `.md`'s stem with an `.outl` extension, and deliberately **not** a dotfile: `pages/avelino.md` ↔ `pages/avelino.outl`.
+The dotted form was abandoned because iCloud Documents skips dotted paths during cross-device sync, which silently breaks a multi-device workspace.
+An older workspace's dotted `pages/.avelino.outl` is still read (`readable_sidecar_path` falls back to it).
+Gitignorable if you want (but you'd lose ID stability across devices).
 
 `ref_handle` is the short, stable handle used by inline block references (`((blk-XXXXXX))`) and embeds (`!((blk-XXXXXX))`).
 See [`docs/markdown-format.md`](markdown-format.md#block-refs-and-embeds).

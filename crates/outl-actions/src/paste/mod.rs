@@ -22,6 +22,8 @@
 //! | `- [ ] foo` | `- TODO foo` | GitHub / CommonMark task list |
 //! | `- [x] foo` / `- [X] foo` | `- DONE foo` | GitHub / CommonMark |
 //! | `{{embed: ((blk-XXXXXX))}}` | `!((blk-XXXXXX))` | Roam |
+//! | `{{[[embed]]: [[Page]]}}` / `{{embed: [[Page]]}}` | `![[Page]]` | Roam |
+//! | `{{embed [[Page]]}}` | `![[Page]]` | Logseq |
 //! | `{{[[query]]: foo}}` | `{{query: foo}}` | Roam |
 //! | `^^highlight^^` | `==highlight==` (unbalanced `^^` stays verbatim) | Roam |
 //! | `{{video: url}}` and other unknown `{{…}}` | (stripped) | various |
@@ -63,7 +65,7 @@
 //! 4. **No new dependencies for parsing.** The pipeline is plain
 //!    `str` manipulation on purpose: `regex` would pull a 40+kb dep
 //!    into a crate that runs on the mobile binary. Manual scans
-//!    (see `rewrite_roam_embed`) are the pattern.
+//!    (see `rewrite_embed`) are the pattern.
 //! 5. **Test the conversion AND the order-of-operations.** Every new
 //!    entry in the table above gets a unit test in
 //!    `normalize.rs::tests`, plus one assertion that the conversion

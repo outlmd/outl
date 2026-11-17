@@ -81,15 +81,20 @@ fn an_embed_without_a_space_resolves_too() {
     assert_eq!(report.embeds_resolved, 1);
 }
 
-/// A page embed has no outl form yet (issue #190), so it degrades to a
-/// link — but it must be *counted*, never silent.
+/// `{{embed [[Page]]}}` has a real outl form now (issue #190): the page
+/// embed. It must land as `![[Page]]` and not as the bare `[[Page]]` link
+/// it used to degrade to — a link renders one line where the user wrote a
+/// transclusion.
 #[test]
-fn a_page_embed_degrades_to_a_link_and_says_so() {
+fn a_page_embed_imports_as_a_page_embed() {
     let (page, report) = imported("- {{embed [[Other Page]]}}\n");
-    assert!(page.contains("[[Other Page]]"), "{page}");
-    assert_eq!(report.embeds_page_fallback, 1);
+    assert!(page.contains("![[Other Page]]"), "{page}");
+    assert_eq!(report.embeds_page, 1);
+    // Nothing is lost any more, so nothing is warned about. A warning per
+    // occurrence used to be the record of a degradation; keeping it would
+    // put a line in every import report that names no problem.
     assert!(
-        report
+        !report
             .warnings
             .iter()
             .any(|w| w.detail.contains("page embed")),

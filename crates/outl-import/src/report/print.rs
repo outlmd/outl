@@ -39,8 +39,8 @@ impl ImportReport {
             self.refs_resolved, self.refs_page_fallback, self.refs_unresolved
         );
         println!(
-            "  embeds:              {} resolved, {} page-fallback",
-            self.embeds_resolved, self.embeds_page_fallback
+            "  embeds:              {} block, {} page",
+            self.embeds_resolved, self.embeds_page
         );
         if !self.tasks.is_empty() {
             let states: Vec<String> = self

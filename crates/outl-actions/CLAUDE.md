@@ -333,6 +333,20 @@ The caller runs `commit_page` over each of `touched_pages`, then removes the sta
 The merge source is trashed, never left as a stub page: its slug and title become aliases of the target.
 A second page-name matcher, in any crate or client, is the thing to refuse in review.
 
+### `![[page]]` is a page reference ([#190](https://github.com/outlmd/outl/issues/190))
+
+Rendering expanded is the only way the page embed differs from `[[page]]`.
+It resolves a page by the same ladder, so it is a mention in both owners: `mentions::collect` pushes it to `refs` (a backlink), and `rewrite_mentions` respells it `![[old]]` → `![[new]]`.
+Both `match`es over `InlineTok` are exhaustive, which is what forced that verdict to be made; **do not add a `_ =>` arm to either**.
+
+Two details that corrupt text rather than failing loudly, both reasoned out where they live:
+the opener is **three** bytes, so `link_rewrite::RefForm` owns that width and the `!` the replacement carries back;
+and the replacement is round-tripped *in the form it will be written*, because `![[photo.png]]` is the image-embed spelling and `try_page_embed` refuses it.
+
+The same translation closed two separate gaps on the way in from a foreign graph.
+`outl-import` emitted a `[[Page]]` link plus a warning (now `ImportReport::embeds_page`, not a `*_fallback`);
+`paste::normalize::rewrite_embed` **deleted** the token, page name included, because nothing claimed it before the generic `{{…}}` strip.
+
 ## Opening an external file (`open_with`)
 
 `open_with.rs` owns the "Open With → outl" import: an OS gesture hands a client a `.md` / `.txt` that lives outside the workspace, and what lands is an ordinary page.

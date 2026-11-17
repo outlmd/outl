@@ -26,6 +26,32 @@ pub(crate) fn try_page_ref(s: &str) -> Option<(InlineTok<'_>, usize)> {
     Some((InlineTok::PageRef { name }, 2 + close + 2))
 }
 
+/// `![[page]]` — page embed.
+///
+/// The page-level twin of [`try_embed`], assembled from the same two
+/// halves: `!` means "expand", `[[name]]` names a page. Name validation
+/// mirrors [`try_page_ref`] exactly, so a name that is a legal ref is a
+/// legal embed target and vice versa.
+///
+/// **An image target is refused**, and that is not an oversight.
+/// `![[photo.png]]` is Obsidian's image embed, and
+/// [`crate::wikilink::convert_image_links`] already turns it into
+/// `![photo.png](photo.png)` on the way in from a vault. Claiming it
+/// here would give one spelling two owners — and the one that loses is
+/// whichever runs second, silently. Refusing leaves the shape exactly
+/// as it tokenizes today (`Plain("!")` + [`InlineTok::PageRef`]), so
+/// this matcher only ever claims input that previously meant nothing.
+pub(crate) fn try_page_embed(s: &str) -> Option<(InlineTok<'_>, usize)> {
+    let rest = s.strip_prefix("![[")?;
+    let close = rest.find("]]")?;
+    let name = &rest[..close];
+    if name.is_empty() || name.contains('\n') || crate::wikilink::is_image_target(name) {
+        return None;
+    }
+    // Consumed: `!` (1) + `[[` (2) + name + `]]` (2).
+    Some((InlineTok::PageEmbed { name }, 1 + 2 + close + 2))
+}
+
 /// `!((blk-XXXXXX))` — block embed.
 ///
 /// Markdown-image-shaped (`!((handle))` mirrors `![alt](url)`).

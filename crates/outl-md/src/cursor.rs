@@ -21,7 +21,12 @@ use crate::inline::{is_valid_block_handle, try_md_link, InlineTok, RefTarget};
 pub fn ref_at_cursor(text: &str, char_index: usize) -> Option<RefTarget> {
     let cursor_byte = byte_index_for_char(text, char_index);
 
-    // Scan `[[...]]` ranges.
+    // Scan `[[...]]` ranges. A preceding `!` (the page-embed form
+    // `![[name]]`) widens the match by one byte so a cursor sitting on
+    // the `!` still resolves to the same page — the same courtesy the
+    // block-embed scan below extends to `!((blk-…))`. Both forms are
+    // page / block *references*, so "go to target" is the right verb
+    // whichever half of the token the caret is on.
     let mut search = 0usize;
     while let Some(rel_open) = text[search..].find("[[") {
         let abs_open = search + rel_open;
@@ -31,7 +36,12 @@ pub fn ref_at_cursor(text: &str, char_index: usize) -> Option<RefTarget> {
         };
         let inner_end = inner_start + rel_close;
         let abs_close_end = inner_end + 2;
-        if cursor_byte >= abs_open && cursor_byte <= abs_close_end {
+        let match_start = if abs_open > 0 && text.as_bytes()[abs_open - 1] == b'!' {
+            abs_open - 1
+        } else {
+            abs_open
+        };
+        if cursor_byte >= match_start && cursor_byte <= abs_close_end {
             let inner = &text[inner_start..inner_end];
             if let Ok(date) = NaiveDate::parse_from_str(inner, "%Y-%m-%d") {
                 return Some(RefTarget::Journal(date));

@@ -3,6 +3,7 @@ import { createResource, For, JSX, Match, Show, Switch } from "solid-js";
 import { readAssetDataUrl } from "../api/commands";
 import { ImageIcon, PageIcon } from "../icons";
 import type { InlineToken, ResolvedBlock } from "../api/types";
+import { PageEmbedTitle, type PageEmbedMap } from "./PageEmbed";
 import {
   assetFileName,
   isAssetLink,
@@ -104,6 +105,8 @@ function FileChip(props: {
  * - `[[page name]]` wiki refs and `#tag` (visual style controlled
  *   by `variant`)
  * - `((blk-XXXXXX))` block refs and `!((blk-XXXXXX))` embeds
+ * - `![[page]]` page embeds — the resolved page's title (through
+ *   `pageEmbeds`), or the literal `![[name]]` when it did not resolve
  * - `![alt](href)` images / assets — an `<img>` for image extensions
  *   (local `assets/…` resolved to a `data:` URL via `readAssetDataUrl`,
  *   remote `http(s)` loaded directly), a clickable file chip for pdf /
@@ -153,6 +156,13 @@ interface MarkdownInlineProps {
   /** Resolved embed content keyed by handle. When present, `embed`
    *  tokens render the source block's text instead of a chip. */
   embeds?: EmbedMap;
+  /** Resolved page content keyed by the name inside `![[…]]`. The twin
+   *  of {@link embeds} for page embeds: when present, a `pageembed`
+   *  token renders the target page's title, and when absent it renders
+   *  the literal `![[name]]`. The *expansion* of the page's blocks is
+   *  the client's call (`pageEmbedOnlyName` + `<EmbeddedSubtree />`);
+   *  this renderer only ever draws the one line. */
+  pageEmbeds?: PageEmbedMap;
 }
 
 export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
@@ -181,6 +191,8 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
+                  embeds={props.embeds}
+                  pageEmbeds={props.pageEmbeds}
                 />
               </span>
             );
@@ -194,6 +206,8 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
+                  embeds={props.embeds}
+                  pageEmbeds={props.pageEmbeds}
                 />
               </span>
             );
@@ -207,6 +221,8 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
+                  embeds={props.embeds}
+                  pageEmbeds={props.pageEmbeds}
                 />
               </span>
             );
@@ -220,6 +236,8 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
                   onRefClick={props.onRefClick}
                   onTagClick={props.onTagClick}
                   onLinkClick={props.onLinkClick}
+                  embeds={props.embeds}
+                  pageEmbeds={props.pageEmbeds}
                 />
               </mark>
             );
@@ -468,6 +486,23 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
               </span>
             );
           }
+          case "pageembed":
+            // `![[page]]` — the page-level embed. One line here (the
+            // target's title, or the literal when it did not resolve);
+            // the page's blocks are expanded by the client, under a
+            // block whose whole text is this token.
+            //
+            // `onRefClick` and not a handler of its own: a page embed
+            // *is* a page reference, so following it means the same
+            // thing as following `[[page]]`, and a second prop would be
+            // a second answer to one question.
+            return (
+              <PageEmbedTitle
+                name={tok.value}
+                content={props.pageEmbeds?.[tok.value]}
+                onOpenPage={props.onRefClick}
+              />
+            );
           case "emoji":
             // The backend's catalog gate guarantees `glyph` is set on
             // every Emoji token. Defensive fall-back: if a peer ever

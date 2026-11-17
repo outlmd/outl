@@ -9,7 +9,7 @@ import {
   splitQuote,
   stripQuoteFromTokens,
 } from "@outl/shared/markdown";
-import { embedOnlyHandle } from "@outl/shared/outline";
+import { embedOnlyHandle, pageEmbedOnlyName } from "@outl/shared/outline";
 
 import { appState, setAppState } from "../lib/store";
 import type { BlockCallbacks } from "./block-callbacks";
@@ -25,7 +25,8 @@ import { PropertyEditor } from "./PropertyEditor";
  * 1. a fenced code block → `<CodeFenceView />` (`detectFence`);
  * 2. a markdown table → `<MarkdownTable />` (`block.table`, issue #329);
  * 3. nothing but an embed → the prose line plus the resolved subtree
- *    beneath it (`embedOnlyHandle`);
+ *    beneath it (`embedOnlyHandle` for `!((blk-…))`,
+ *    `pageEmbedOnlyName` for `![[page]]`);
  * 4. ordinary prose → `<MarkdownInline />` over the backend's tokens.
  *
  * The branches are flat, not nested, because they are mutually
@@ -73,6 +74,7 @@ export function BlockBody(props: {
         onTagClick={props.cb.onTagClick}
         onLinkClick={props.cb.onLinkClick}
         embeds={appState.embeds}
+        pageEmbeds={appState.pageEmbeds}
         onEdit={props.onStartEdit}
       />
     );
@@ -89,8 +91,24 @@ export function BlockBody(props: {
   // When the block is *only* an embed (`!((blk-…))` with no surrounding
   // prose), expand the resolved source subtree below the `↳ text` line —
   // read-only, mirroring the TUI's child expansion.
-  const embedHandle = embedOnlyHandle(props.block.tokens);
-  const embedded = embedHandle ? appState.embeds[embedHandle] : undefined;
+  // Accessors, not consts. A Solid component body runs once and is not
+  // a tracking scope, so `const x = appState.embeds[h]` captures
+  // whatever the map held at mount and never updates — and the resolve
+  // these read lands a round-trip *after* the page is on screen, while
+  // `setOutline` reconciles on id and keeps the row. Read as a const,
+  // the expansion appeared only if the map happened to be warm already
+  // (a navigation back to a page resolved earlier).
+  const embedded = () => {
+    const handle = embedOnlyHandle(props.block.tokens);
+    return handle ? appState.embeds[handle] : undefined;
+  };
+  // Same rule one level up: a block that is *only* `![[page]]` expands
+  // that page's top-level blocks. Through the same `<EmbeddedSubtree />`
+  // the block embed uses, so the two transclusions can't drift apart.
+  const pageEmbedded = () => {
+    const name = pageEmbedOnlyName(props.block.tokens);
+    return name ? appState.pageEmbeds[name] : undefined;
+  };
   return (
     <>
       <div
@@ -117,6 +135,7 @@ export function BlockBody(props: {
             onTagClick={props.cb.onTagClick}
             onLinkClick={props.cb.onLinkClick}
             embeds={appState.embeds}
+            pageEmbeds={appState.pageEmbeds}
           />
         </Show>
       </div>
@@ -138,10 +157,24 @@ export function BlockBody(props: {
         chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
         inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
       />
-      <Show when={embedded?.children?.length}>
+      <Show when={embedded()?.children?.length}>
         <EmbeddedSubtree
-          nodes={embedded!.children}
+          nodes={embedded()!.children}
           embeds={appState.embeds}
+          pageEmbeds={appState.pageEmbeds}
+        />
+      </Show>
+      {/* Nothing is drawn until the resolve answers with rows, and the
+          title line above never leaves the page: a page embed landing
+          after the first paint is its own section with its own
+          placeholder (the literal `![[name]]`), which is the
+          `lateSectionVisible` rule reduced to `count > 0` — a page
+          embed has no empty state worth keeping. */}
+      <Show when={pageEmbedded()?.blocks?.length}>
+        <EmbeddedSubtree
+          nodes={pageEmbedded()!.blocks}
+          embeds={appState.embeds}
+          pageEmbeds={appState.pageEmbeds}
         />
       </Show>
     </>

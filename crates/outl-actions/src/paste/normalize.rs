@@ -111,8 +111,12 @@ fn convert_line(line: &str) -> String {
     let rest = rest.replace("{{[[DONE]]}} ", "DONE ");
     let rest = rest.replace("{{[[DONE]]}}", "DONE");
 
-    // Roam embed: {{embed: ((blk-XXXXXX))}} → !((blk-XXXXXX))
-    let rest = rewrite_roam_embed(&rest);
+    // Roam / Logseq embed: `{{embed: ((blk-XXXXXX))}}` → `!((blk-XXXXXX))`,
+    // `{{embed [[Page]]}}` → `![[Page]]`. Runs before `rewrite_date_refs`
+    // on purpose, so a page embed of a Roam-dated journal
+    // (`{{embed [[June 2nd, 2026]]}}`) gets its ISO rewrite from that pass
+    // like any other `[[…]]` — the `!` is outside the brackets it scans.
+    let rest = rewrite_embed(&rest);
 
     // Roam query: {{[[query]]: foo}} → {{query: foo}}
     let rest = rest.replace("{{[[query]]:", "{{query:");
@@ -202,26 +206,43 @@ fn rewrite_date_refs(s: &str) -> String {
     out
 }
 
-/// Replace every occurrence of `{{embed: ((blk-XXXXXX))}}` with
-/// `!((blk-XXXXXX))`. Tolerates whitespace around the inner ref.
-fn rewrite_roam_embed(s: &str) -> String {
-    const NEEDLE: &str = "{{embed:";
-    if !s.contains(NEEDLE) {
+/// Every spelling Roam and Logseq write a `{{embed}}` with.
+///
+/// Roam's is colon-shaped and comes in a bare and a bracketed form;
+/// Logseq's is space-shaped. None of the three shares a prefix with
+/// another, so the scan simply takes whichever appears first.
+const EMBED_OPENERS: [&str; 3] = ["{{[[embed]]:", "{{embed:", "{{embed "];
+
+/// Translate every `{{embed …}}` whose target outl can name:
+/// `((blk-XXXXXX))` becomes `!((blk-XXXXXX))` and `[[Page]]` becomes
+/// `![[Page]]` (issue #190). Whitespace around the target is tolerated.
+///
+/// **An untranslatable target is left as the literal `{{…}}`, which
+/// [`strip_unknown_tokens`] then deletes.** That is this pass's standing
+/// rule for a token outl has no syntax for, and the page target is no
+/// longer one of them — until `![[page]]` existed, the page name a user
+/// pasted was deleted outright, which is the gap this closes.
+///
+/// A source uuid that is not an outl handle (`{{embed ((CLGp3LXxM))}}`,
+/// what a real Roam or Logseq block embed actually carries) is still
+/// untranslatable here: the handle is derived from a `NodeId` that only
+/// exists for a block already in *this* workspace, and the paste path has
+/// no graph to resolve it against. That is `outl-import`'s two-pass job,
+/// not a text transform's.
+fn rewrite_embed(s: &str) -> String {
+    if !s.contains("embed") {
         return s.to_string();
     }
     let mut out = String::with_capacity(s.len());
     let mut cursor = 0usize;
-    while let Some(start) = s[cursor..].find(NEEDLE) {
-        let abs_start = cursor + start;
+    while let Some((abs_start, opener)) = next_embed_opener(s, cursor) {
         out.push_str(&s[cursor..abs_start]);
-        let after_open = abs_start + NEEDLE.len();
+        let after_open = abs_start + opener.len();
         // Locate the matching `}}` for this opener.
         if let Some(close_rel) = s[after_open..].find("}}") {
             let close = after_open + close_rel;
-            let inner = s[after_open..close].trim();
-            if let Some(inner_ref) = extract_block_ref(inner) {
-                out.push('!');
-                out.push_str(inner_ref);
+            if let Some(expanded) = expand_embed_target(s[after_open..close].trim()) {
+                out.push_str(&expanded);
                 cursor = close + 2;
                 continue;
             }
@@ -234,6 +255,24 @@ fn rewrite_roam_embed(s: &str) -> String {
     out
 }
 
+/// The earliest [`EMBED_OPENERS`] match at or after `from`, with the
+/// spelling that matched so the caller knows how many bytes to skip.
+fn next_embed_opener(s: &str, from: usize) -> Option<(usize, &'static str)> {
+    EMBED_OPENERS
+        .iter()
+        .filter_map(|opener| s[from..].find(opener).map(|rel| (from + rel, *opener)))
+        .min_by_key(|(pos, _)| *pos)
+}
+
+/// The outl spelling of one embed target, or `None` when outl cannot
+/// name it (see [`rewrite_embed`]).
+fn expand_embed_target(inner: &str) -> Option<String> {
+    if let Some(handle) = extract_block_ref(inner) {
+        return Some(format!("!{handle}"));
+    }
+    extract_page_ref(inner).map(spell_page_embed)
+}
+
 /// Extract `((blk-XXXXXX))` from a string that contains exactly that
 /// token (possibly with surrounding whitespace). Returns the matched
 /// slice so the caller can paste it back verbatim.
@@ -243,6 +282,42 @@ fn extract_block_ref(s: &str) -> Option<&str> {
         return None;
     }
     Some(s)
+}
+
+/// Extract `Name` from a string that is exactly `[[Name]]`.
+///
+/// The name rules match the tokenizer's (`reference::try_page_ref`): a
+/// non-empty name on one line. A nested `]]` is refused rather than
+/// guessed at, so `[[a]] and [[b]]` is not read as one target.
+fn extract_page_ref(s: &str) -> Option<&str> {
+    let inner = s.trim().strip_prefix("[[")?.strip_suffix("]]")?;
+    if inner.is_empty() || inner.contains('\n') || inner.contains("]]") {
+        return None;
+    }
+    Some(inner)
+}
+
+/// `![[Name]]` when the tokenizer reads that back as the page embed it is
+/// meant to be, `[[Name]]` when it does not.
+///
+/// One name comes apart: an image target. `![[photo.png]]` is the
+/// image-embed spelling, owned by `outl_md::wikilink::convert_image_links`,
+/// so `try_page_embed` refuses it and the `!` would sit in the block as
+/// literal text in front of a link. Falling back to the plain ref loses
+/// the expansion and keeps the name, which is the right way round — and
+/// still strictly better than what this pass did before, which was to
+/// delete the whole token.
+fn spell_page_embed(name: &str) -> String {
+    let embed = format!("![[{name}]]");
+    let reads_back = matches!(
+        outl_md::inline::tokenize(&embed).as_slice(),
+        [outl_md::inline::InlineTok::PageEmbed { name: back }] if *back == name
+    );
+    if reads_back {
+        embed
+    } else {
+        format!("[[{name}]]")
+    }
 }
 
 /// True for lines that look like `id:: 01HXY8KJZQ9T8M7VN3P2R6S4A1`
@@ -355,191 +430,4 @@ fn collapse_inner_spaces(line: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn roam_todo_becomes_prefix() {
-        let out = normalize_external_syntax("- {{[[TODO]]}} foo");
-        assert_eq!(out, "- TODO foo");
-    }
-
-    #[test]
-    fn roam_done_becomes_prefix() {
-        let out = normalize_external_syntax("- {{[[DONE]]}} bar");
-        assert_eq!(out, "- DONE bar");
-        let out = normalize_external_syntax("- {{[[DOING]]}} baz");
-        assert_eq!(out, "- DOING baz");
-    }
-
-    #[test]
-    fn github_checkbox_becomes_todo() {
-        assert_eq!(normalize_external_syntax("- [ ] foo"), "- TODO foo");
-        assert_eq!(normalize_external_syntax("- [/] foo"), "- DOING foo");
-        assert_eq!(normalize_external_syntax("- [x] foo"), "- DONE foo");
-        assert_eq!(normalize_external_syntax("- [X] foo"), "- DONE foo");
-    }
-
-    #[test]
-    fn roam_embed_becomes_outl_embed() {
-        let out = normalize_external_syntax("see {{embed: ((blk-r6s4a1))}} here");
-        assert_eq!(out, "see !((blk-r6s4a1)) here");
-    }
-
-    #[test]
-    fn roam_query_becomes_outl_query() {
-        let out = normalize_external_syntax("- {{[[query]]: TODO}}");
-        assert_eq!(out, "- {{query: TODO}}");
-    }
-
-    #[test]
-    fn logseq_id_line_is_dropped() {
-        let input = "- header\n  id:: 01HXY8KJZQ9T8M7VN3P2R6S4A1\n  - child";
-        let out = normalize_external_syntax(input);
-        assert_eq!(out, "- header\n  - child");
-    }
-
-    #[test]
-    fn id_line_with_non_crockford_chars_survives() {
-        // Looks 26-char and alphanumeric but uses banned letters
-        // (`I`, `L`) — not a real ULID, must NOT be dropped.
-        let input = "- header\n  id:: IIIILLLLOOOO0000000000000A\n  - child";
-        let out = normalize_external_syntax(input);
-        assert!(out.contains("IIIILLLLOOOO"), "non-ULID id:: stays: {out}");
-    }
-
-    #[test]
-    fn id_line_with_wrong_length_survives() {
-        // 27 chars — wrong length, not a ULID.
-        let input = "- header\n  id:: 01HXY8KJZQ9T8M7VN3P2R6S4A1X\n  - child";
-        let out = normalize_external_syntax(input);
-        assert!(
-            out.contains("01HXY8KJZQ9T8M7VN3P2R6S4A1X"),
-            "long id:: stays: {out}"
-        );
-    }
-
-    #[test]
-    fn unknown_tokens_are_stripped() {
-        // {{video: ...}} not in the known set → stripped.
-        let out = normalize_external_syntax("- check {{video: https://x.test}} this");
-        assert_eq!(out, "- check this");
-        // A balanced `^^highlight^^` now converts to native `==…==`
-        // instead of being stripped (see roam_highlight_becomes_double_equals).
-        let out = normalize_external_syntax("- ^^hot take^^ here");
-        assert_eq!(out, "- ==hot take== here");
-    }
-
-    #[test]
-    fn indent_4_normalizes_to_2() {
-        let input = "- parent\n    - child\n        - grand";
-        let out = normalize_external_syntax(input);
-        assert_eq!(out, "- parent\n  - child\n    - grand");
-    }
-
-    #[test]
-    fn indent_2_stays_unchanged() {
-        let input = "- parent\n  - child";
-        let out = normalize_external_syntax(input);
-        assert_eq!(out, "- parent\n  - child");
-    }
-
-    #[test]
-    fn known_token_wins_over_generic_strip() {
-        // The {{[[TODO]]}} conversion must run before the generic
-        // {{...}} strip, otherwise TODO becomes empty.
-        let out = normalize_external_syntax("- {{[[TODO]]}} review");
-        assert_eq!(out, "- TODO review");
-    }
-
-    #[test]
-    fn roam_highlight_becomes_double_equals() {
-        // Balanced `^^…^^` converts to the native `==…==`.
-        assert_eq!(
-            normalize_external_syntax("- mark ^^this^^ well"),
-            "- mark ==this== well"
-        );
-        // A single unpaired `^^` has no closing marker, so it stays
-        // verbatim (the strip pass only removes balanced pairs).
-        assert_eq!(
-            normalize_external_syntax("- a ^^ dangling"),
-            "- a ^^ dangling"
-        );
-        // Spaces adjacent to the markers are trimmed so the result is a
-        // real highlight the tokenizer accepts, not inert `== foo ==`.
-        assert_eq!(
-            normalize_external_syntax("- mark ^^ this ^^ well"),
-            "- mark ==this== well"
-        );
-    }
-
-    #[test]
-    fn roam_long_date_becomes_iso() {
-        assert_eq!(
-            normalize_external_syntax("- check [[June 2nd, 2026]]"),
-            "- check [[2026-06-02]]",
-        );
-        assert_eq!(
-            normalize_external_syntax("- [[January 1st, 2025]]"),
-            "- [[2025-01-01]]",
-        );
-        assert_eq!(
-            normalize_external_syntax("- [[December 31st, 2025]]"),
-            "- [[2025-12-31]]",
-        );
-        assert_eq!(
-            normalize_external_syntax("- meet [[April 22nd, 2026]] again"),
-            "- meet [[2026-04-22]] again",
-        );
-    }
-
-    #[test]
-    fn short_month_long_date_becomes_iso() {
-        assert_eq!(
-            normalize_external_syntax("- [[Apr 22nd, 2026]]"),
-            "- [[2026-04-22]]",
-        );
-        assert_eq!(
-            normalize_external_syntax("- [[Sep 3rd, 2025]]"),
-            "- [[2025-09-03]]",
-        );
-    }
-
-    #[test]
-    fn slashed_date_becomes_iso() {
-        assert_eq!(
-            normalize_external_syntax("- [[2026/04/22]]"),
-            "- [[2026-04-22]]",
-        );
-    }
-
-    #[test]
-    fn iso_date_is_left_alone() {
-        assert_eq!(
-            normalize_external_syntax("- [[2026-06-02]]"),
-            "- [[2026-06-02]]",
-        );
-    }
-
-    #[test]
-    fn plain_page_ref_is_left_alone() {
-        assert_eq!(
-            normalize_external_syntax("- ping [[Avelino]] today"),
-            "- ping [[Avelino]] today",
-        );
-        // Looks date-ish but isn't: missing year, leave verbatim.
-        assert_eq!(
-            normalize_external_syntax("- [[June 2nd]]"),
-            "- [[June 2nd]]",
-        );
-    }
-
-    #[test]
-    fn unbalanced_brackets_dont_panic() {
-        // No closer — passthrough.
-        assert_eq!(
-            normalize_external_syntax("- before [[unclosed"),
-            "- before [[unclosed",
-        );
-    }
-}
+mod tests;

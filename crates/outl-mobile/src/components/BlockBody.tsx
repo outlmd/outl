@@ -1,8 +1,9 @@
 import { Show, onCleanup } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
-import type { EmbedMap } from "@outl/shared/markdown";
+import type { EmbedMap, PageEmbedMap } from "@outl/shared/markdown";
 import {
   BlockProperties,
+  EmbeddedSubtree,
   MarkdownInline,
   MarkdownTable,
   QuoteWrap,
@@ -13,6 +14,7 @@ import {
 import { DiagramFence, chooseFence, diagramsMode } from "@outl/shared/diagram";
 import { HighlightedCode, detectFence } from "@outl/shared/highlight";
 import { transformerFor } from "@outl/shared/plugins/transformer-registry";
+import { pageEmbedOnlyName } from "@outl/shared/outline";
 import { createLongPress } from "../lib/long-press";
 import { BulletOrCheckbox, CollapseTriangle } from "./BlockMarkers";
 import { EditableTextarea } from "./BlockTextarea";
@@ -86,6 +88,8 @@ export function BlockBody(props: {
   onOpenProperties?: (blockId: string) => void;
   /** Resolved `((blk-…))` / `!((blk-…))` sources, keyed by handle. */
   embeds?: EmbedMap;
+  /** Resolved `![[page]]` targets, keyed by the name as written. */
+  pageEmbeds?: PageEmbedMap;
   onTextareaMount?: (el: HTMLTextAreaElement) => void;
   /** See `BlockRowProps.onPasteMarkdown`. The parent has already
    *  injected `blockId`; this variant gets the caret + text. */
@@ -174,6 +178,16 @@ export function BlockBody(props: {
   onCleanup(() => longPress.cancel());
 
   const padLeft = () => rowPadLeft(props.depth);
+
+  /** Top-level blocks of the page this block transcludes, when the
+   *  block is nothing but a `![[page]]` embed. An accessor, not a
+   *  const: both `props.block` and `props.pageEmbeds` change under us,
+   *  and a prop read once at first render freezes (root `CLAUDE.md`
+   *  anti-patterns). */
+  const pageEmbedBlocks = (): BlockNode[] | undefined => {
+    const name = pageEmbedOnlyName(props.block.tokens);
+    return name ? props.pageEmbeds?.[name]?.blocks : undefined;
+  };
 
   return (
     <div
@@ -336,6 +350,7 @@ export function BlockBody(props: {
                         variant="inline"
                         blockAssets
                         embeds={props.embeds}
+                        pageEmbeds={props.pageEmbeds}
                         onRefClick={tap(props.onRefClick)}
                         onTagClick={tap(props.onTagClick)}
                         onLinkClick={tap(props.onLinkClick)}
@@ -361,6 +376,21 @@ export function BlockBody(props: {
                         : undefined
                     }
                   />
+                  {/* A block that is *only* `![[page]]` expands that
+                      page's top-level blocks beneath its title, through
+                      the same read-only `<EmbeddedSubtree />` the
+                      desktop uses. Nothing is drawn until the resolve
+                      answers with rows: the title line is already on
+                      screen as the embed's own placeholder, so the
+                      page never enters a load state for it
+                      (`UX.md` → Never block a keystroke). */}
+                  <Show when={pageEmbedBlocks()?.length}>
+                    <EmbeddedSubtree
+                      nodes={pageEmbedBlocks()!}
+                      embeds={props.embeds}
+                      pageEmbeds={props.pageEmbeds}
+                    />
+                  </Show>
                   </>
                 );
               })()}

@@ -248,6 +248,15 @@ Five places put a node beside an existing one — `create_before`, `create_after
 | A slot strictly between a node and its next / previous sibling, `None` when the gap has no interior | `outl_actions::tree::position_after` / `position_before` | `crates/outl-actions/src/tree/position.rs` |
 | Open a slot that does not exist — free a neighbour's key by shifting it up, and refuse to move one that cannot be cleared (the new block may land a slot off; an existing sibling may never move) | `outl_actions::block::slot::{slot_between, slot_after, vacate}` (crate-private) | `crates/outl-actions/src/block/slot.rs` |
 
+Recently added — the `![[page]]` page embed (catalog: `docs/primitives-markdown.md` → "View helpers"), issue #190.
+**Block a second `![[page]]` matcher, and block any PR that teaches one to claim an image target.**
+`![[photo.png]]` already belongs to `wikilink::convert_image_links` on the way in from a vault, and one spelling with two owners silently resolves to whichever ran second.
+It is a page **reference**, not an inert token, so `mentions::collect` and `link_rewrite::collect` must both name it — their `match`es are exhaustive on purpose and a `_ =>` arm in either is the drift to refuse.
+
+| Intent | Use this | File |
+|---|---|---|
+| The `![[page]]` page embed — the page-level twin of `!((blk-…))`. `try_page_embed` precedes both other `!` openers in `match_one` (most specific wins) and `try_md_link`, or the `!` strands and the `[[name]]` behind it demotes to a plain ref. `inline_to_source` re-emits the literal, `plain_text` keeps the name, `ref_at_cursor` resolves it to `RefTarget::Page` / `Journal` with the caret anywhere in it | `outl_md::InlineTok::PageEmbed { name }` / owned `InlineToken::PageEmbed { value }` (serde `"pageembed"`); matcher `outl_md::reference::try_page_embed` | `crates/outl-md/src/reference.rs`, `crates/outl-md/src/token.rs` |
+
 Frontend shared primitives (`@outl/shared`) — canonical home is [`crates/outl-frontend-shared/CLAUDE.md`](../../crates/outl-frontend-shared/CLAUDE.md) → "Today's surface"; the embed / block-ref pieces the desktop wires for issue #147:
 
 | Intent | Use this | File |

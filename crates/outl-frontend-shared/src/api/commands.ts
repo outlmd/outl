@@ -27,7 +27,6 @@ import type {
   Palette,
   PageTimeline,
   PropertyKey,
-  ResolvedBlock,
   RunCodeBlockReply,
   TemplateDto,
   ThemeConfig,
@@ -559,17 +558,7 @@ export function runAutoRunBlocks(
   });
 }
 
-/**
- * Batch-resolve embed handles (`blk-XXXXXX`) to their source content.
- * Returns a map from handle to {@link ResolvedBlock} — the source
- * block's `text`, `page_slug`, `status`, and its `children` subtree
- * (populated for `!((…))` embeds, empty for a leaf).
- */
-export function resolveEmbeds(
-  handles: string[],
-): Promise<Record<string, ResolvedBlock>> {
-  return invoke<Record<string, ResolvedBlock>>("resolve_embeds", { handles });
-}
+export { resolveEmbeds, resolvePageEmbeds } from "./embeds";
 
 /**
  * Open an external `[label](url)` link in the user's default browser

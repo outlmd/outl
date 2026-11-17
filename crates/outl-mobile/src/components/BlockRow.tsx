@@ -1,6 +1,6 @@
 import { For, JSX, Show } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
-import type { EmbedMap } from "@outl/shared/markdown";
+import type { EmbedMap, PageEmbedMap } from "@outl/shared/markdown";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { createSettle } from "@outl/shared/polish";
 import { haptic } from "../lib/haptics";
@@ -57,9 +57,14 @@ interface BlockRowProps {
    * when it has nothing to resolve against — the whole symptom in
    * [#16](https://github.com/outlmd/outl/issues/16). `Journal` fills it
    * with `resolveEmbeds` for the visible page, the way the desktop's
-   * `resolvePageEmbeds` does.
+   * `resolveTransclusions` does.
    */
   embeds?: EmbedMap;
+  /** Resolved `![[page]]` targets, keyed by the name as written. Same
+   *  contract as {@link embeds} one level up: the title renders from
+   *  it, and a block that is nothing but the embed expands the page's
+   *  top-level blocks under itself. */
+  pageEmbeds?: PageEmbedMap;
   onTextareaMount?: (el: HTMLTextAreaElement) => void;
   /**
    * Called when the user pastes outline-shaped markdown into this
@@ -163,6 +168,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           onCommitEdit={props.onCommitEdit}
           onOpenProperties={props.onOpenProperties}
           embeds={props.embeds}
+          pageEmbeds={props.pageEmbeds}
           onDeleteEmpty={() => {
             // Backspace on an already-empty block (RFC 0254 phase 4b,
             // `DeleteEmptyBlock`) — same destructive haptic and the
@@ -241,6 +247,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
                 onPasteMarkdown={props.onPasteMarkdown}
                 onOpenProperties={props.onOpenProperties}
                 embeds={props.embeds}
+                pageEmbeds={props.pageEmbeds}
                 selectionMode={props.selectionMode}
                 selectionSet={props.selectionSet}
                 onSelectTap={props.onSelectTap}

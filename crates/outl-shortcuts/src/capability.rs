@@ -238,6 +238,28 @@ pub enum Capability {
     /// and a row every client lacks equally would say nothing. This
     /// is only whether the app tells you where you stand.
     AboutAndSupport,
+    /// Expanding `![[page]]` where it is written: the target page's
+    /// outline is rendered read-only under the block carrying the
+    /// token, four levels deep.
+    ///
+    /// Distinct from the block embed `!((blk-…))`, which expands one
+    /// block and the subtree below it. A page embed starts at the page
+    /// root, so what it pulls in is that page's top-level blocks — and
+    /// it names its target the way the user wrote it, so renaming the
+    /// page respells the token exactly as it respells a `[[page]]`
+    /// ref.
+    ///
+    /// Distinct from that plain `[[page]]` ref too, which links
+    /// without expanding. Both are page references and both produce
+    /// the same backlink, which is why this row has to exist: a client
+    /// that renders the link and not the expansion looks identical
+    /// from the target page's side, and the difference only shows on
+    /// the page doing the embedding.
+    ///
+    /// Not about editing through it — the expansion is read-only
+    /// everywhere, by design — and not about embedding part of a page,
+    /// which is what a block embed is for.
+    PageEmbed,
 }
 
 impl Capability {
@@ -273,6 +295,7 @@ impl Capability {
         Capability::CrashReportingOptOut,
         Capability::CrashReportingDisclosure,
         Capability::AboutAndSupport,
+        Capability::PageEmbed,
     ];
 }
 
@@ -284,7 +307,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_23: usize = 23;
+    const EXPECTED_24: usize = 24;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -311,6 +334,7 @@ mod tests {
             Capability::CrashReportingOptOut => "CrashReportingOptOut",
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
             Capability::AboutAndSupport => "AboutAndSupport",
+            Capability::PageEmbed => "PageEmbed",
         }
     }
 
@@ -327,9 +351,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_23,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_23} variants \
-             : add the new variant to Capability::ALL (and bump EXPECTED_23)",
+            EXPECTED_24,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_24} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_24)",
             names.len(),
         );
     }

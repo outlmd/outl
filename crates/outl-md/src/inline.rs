@@ -38,7 +38,7 @@ use crate::emphasis::{
     try_strike,
 };
 use crate::link::try_image;
-use crate::reference::{try_block_ref, try_embed, try_page_ref, try_tag};
+use crate::reference::{try_block_ref, try_embed, try_page_embed, try_page_ref, try_tag};
 use crate::shortcode::try_emoji;
 
 pub use crate::plain::plain_text;
@@ -110,6 +110,15 @@ pub fn tokenize(text: &str) -> Vec<InlineTok<'_>> {
 
 fn match_one(s: &str, prev: Option<char>) -> Option<(InlineTok<'_>, usize)> {
     if let Some(out) = try_page_ref(s) {
+        return Some(out);
+    }
+    // `try_page_embed` claims `![[name]]`. It sits here, ahead of the
+    // other two `!` openers, because it is the most specific of the
+    // three: `![[` cannot be a block embed (`!((`) and `try_image`
+    // already refuses it (`![` with no `](`). Ahead of `try_md_link`
+    // for the same reason `try_image` is — otherwise the `!` is
+    // stranded and the bare `[[name]]` behind it reads as a plain ref.
+    if let Some(out) = try_page_embed(s) {
         return Some(out);
     }
     // `try_embed` MUST be checked before `try_block_ref`: the embed
@@ -236,6 +245,11 @@ pub fn inline_to_source(toks: &[InlineTok<'_>]) -> String {
                 out.push_str("!((");
                 out.push_str(handle);
                 out.push_str("))");
+            }
+            InlineTok::PageEmbed { name } => {
+                out.push_str("![[");
+                out.push_str(name);
+                out.push_str("]]");
             }
             InlineTok::Emoji { shortcode } => {
                 out.push(':');

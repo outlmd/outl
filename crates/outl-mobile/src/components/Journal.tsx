@@ -10,10 +10,7 @@ import {
   onMount,
 } from "solid-js";
 import type {
-  BlockNode,
-  MdAheadOfLog,
-  PageView,
-  PluginToolbarButton,
+  BlockNode, MdAheadOfLog, PageView, PeerStatusDto, PluginToolbarButton,
 } from "@outl/shared/api/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -45,7 +42,6 @@ import {
 } from "@outl/shared/api/commands";
 import { utf16OffsetToCharOffset } from "@outl/shared/paste";
 import { isAssetLink } from "@outl/shared/links";
-import type { PeerStatusDto } from "@outl/shared/api/types";
 import {
   findBlock,
   flattenAll,
@@ -1516,6 +1512,7 @@ export function Journal() {
                   block={block}
                   depth={0}
                   embeds={refs.embeds()}
+                  pageEmbeds={refs.pageEmbeds()}
                   editingId={editingId()}
                   draftText={draft}
                   onStartEdit={startEdit}

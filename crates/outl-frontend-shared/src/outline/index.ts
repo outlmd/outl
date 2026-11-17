@@ -20,6 +20,20 @@ import type { BlockNode, InlineToken } from "../api/types";
 // prose, not a walk.
 export { lateSectionVisible, type LateSection } from "./late-section";
 
+// The `![[page]]` twins of `embedOnlyHandle` and
+// `collectBlockRefHandles` below — same rules, one level up (a page
+// instead of a block). Their own file to keep this one under the
+// size ratchet.
+import { collectTokenValues, soleTokenValue } from "./token-walk";
+
+/** Both spellings a block-ref handle appears under. */
+const BLOCK_REF_KINDS: ReadonlySet<InlineToken["kind"]> = new Set([
+  "blockref",
+  "embed",
+]);
+
+export { collectPageEmbedNames, pageEmbedOnlyName } from "./page-embed";
+
 /**
  * Reconstruct the wire-format text of a block (TODO/DONE prefix
  * reattached). The API splits the TODO state out of `text` so the
@@ -48,17 +62,9 @@ export function rawTextWithTodo(block: BlockNode): string {
  * a second embed, or any other token disqualifies the block.
  */
 export function embedOnlyHandle(tokens: InlineToken[]): string | null {
-  let handle: string | null = null;
-  for (const tok of tokens) {
-    if (tok.kind === "plain" && tok.value.trim() === "") continue;
-    if (tok.kind === "embed" && handle === null) {
-      handle = tok.value;
-      continue;
-    }
-    return null;
-  }
-  return handle;
+  return soleTokenValue(tokens, "embed");
 }
+
 
 /**
  * Collect every distinct block-ref handle (`blk-XXXXXX`) reachable in
@@ -72,32 +78,9 @@ export function embedOnlyHandle(tokens: InlineToken[]): string | null {
  * insertion order), so the caller can slice / display them stably.
  */
 export function collectBlockRefHandles(outline: BlockNode[]): string[] {
-  const handles = new Set<string>();
-  const walkTokens = (tokens: InlineToken[]) => {
-    for (const tok of tokens) {
-      switch (tok.kind) {
-        case "blockref":
-        case "embed":
-          if (tok.value) handles.add(tok.value);
-          break;
-        case "bold":
-        case "italic":
-        case "strike":
-        case "highlight":
-          walkTokens(tok.inner);
-          break;
-      }
-    }
-  };
-  const walkNodes = (nodes: BlockNode[]) => {
-    for (const node of nodes) {
-      walkTokens(node.tokens);
-      walkNodes(node.children);
-    }
-  };
-  walkNodes(outline);
-  return [...handles];
+  return collectTokenValues(outline, BLOCK_REF_KINDS);
 }
+
 
 /** Locate a block by id anywhere in a (possibly nested) outline. */
 export function findBlock(blocks: BlockNode[], id: string): BlockNode | null {

@@ -79,7 +79,7 @@ The **Documentation triggers** table in root `CLAUDE.md` and § 5.3 of `.github/
 | New TUI shortcut | `tui.md`, `shortcuts.md` |
 | New slash command / changed `/check` / `/check-invariants` / `/roundtrip` / `/coverage` / `/new-op` / `/init-playground` semantics | `development.md` § 4 |
 | New PostToolUse hook or agent | `development.md` § 4 ("Hooks", "Agents"), `.claude/agents/<name>.md` |
-| New public crate API | per-crate `CLAUDE.md`, root `CLAUDE.md` "Shared primitives catalog" if it's reusable across crates, `.github/copilot-instructions.md` § 5.1 (mirror) |
+| New public crate API | per-crate `CLAUDE.md`, root `CLAUDE.md` "Shared primitives catalog" if it's reusable across crates, `.github/instructions/shared-primitives.instructions.md` (mirror) |
 | Sidecar format change | `markdown-format.md`, `outl-md/CLAUDE.md`, `development.md` § 6 cookbook if migration story changed |
 | Op log format change | `crdt.md`, `outl-core/CLAUDE.md`, `development.md` § 6 cookbook |
 | Storage trait change | `storage.md`, `outl-core/CLAUDE.md`, `development.md` § 5 |

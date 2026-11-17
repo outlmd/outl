@@ -54,7 +54,7 @@ mod wire_pin;
 mod wire_fixtures;
 
 use outl_tauri_shared::capture_inbox::CaptureDrainDto;
-use outl_tauri_shared::commands::exec::{EmbedContent, RunCodeBlockReply};
+use outl_tauri_shared::commands::exec::{EmbedContent, PageEmbedContent, RunCodeBlockReply};
 use outl_tauri_shared::commands::peers::{PeerDto, PeerStatusDto};
 use outl_tauri_shared::commands::property::PropertyKey;
 use outl_tauri_shared::commands::reminders::{
@@ -358,6 +358,19 @@ fn embed_content_matches_resolved_block() {
         children: vec![outline_node()],
     };
     assert_wire_shape(&dto, "ResolvedBlock", &[]);
+}
+
+/// The `![[page]]` reply (issue #190). Keyed by the name as written, so
+/// the DTO itself carries the slug it resolved to — and a key missing
+/// here is an embed that renders nothing on a device, in both clients.
+#[test]
+fn page_embed_content_matches_its_interface() {
+    let dto = PageEmbedContent {
+        slug: "infra".into(),
+        title: "Infra".into(),
+        blocks: vec![outline_node()],
+    };
+    assert_wire_shape(&dto, "PageEmbedContent", &[]);
 }
 
 #[test]
