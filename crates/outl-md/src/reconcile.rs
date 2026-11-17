@@ -31,7 +31,7 @@ pub use outcome::{ReconcileError, ReconcileReport};
 pub use page_root::ensure_page_root_in_tree;
 
 use crate::parse::parse;
-use crate::sidecar::{self, file_hash, sidecar_path_for, Sidecar, SIDECAR_VERSION};
+use crate::sidecar::{self, file_hash, Sidecar, SIDECAR_VERSION};
 use outcome::io_err;
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::NodeId;
@@ -85,7 +85,12 @@ pub fn reconcile_md_with_guard(
     let new_ast = parse(&md_text);
     let md_hash = file_hash(&md_text);
 
-    let sidecar_path = sidecar_path_for(md_path);
+    // `resolve_sidecar_path`, not `sidecar_path_for`: a workspace from
+    // before the sidecar was un-hidden still has `.<stem>.outl`, and
+    // reading only the modern name would take the "no sidecar" arm
+    // below — a fresh id per block, the old ids left under the page.
+    // This pass writes the sidecar anyway, so it may do the rename.
+    let sidecar_path = sidecar::resolve_sidecar_path(md_path);
     // Read the sidecar **once** — both the diff (which needs `page_id`
     // and `old_blocks`) and the short-circuit below (which needs
     // `last_synced_hash` + `pipeline_version`) consume the same JSON.
