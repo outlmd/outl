@@ -120,13 +120,11 @@ pub(super) fn convert(g: &Graph, report: &mut ImportReport) -> ImportGraph {
         let blocks = by_page.get(id).map_or(&[][..], Vec::as_slice);
         match decision {
             Decision::Import => {
-                report.source_pages += 1;
-                report.source_blocks += blocks.len();
+                report.count_source(1, blocks.len());
                 out.pages.push(ctx.convert_page(*id, ent, blocks, report));
             }
             Decision::Skip(reason) => {
-                report.source_pages += 1;
-                report.source_blocks += blocks.len();
+                report.count_source(1, blocks.len());
                 report.skip(page_label(ent, *id), *reason, blocks.len());
             }
             Decision::Structural => {}
@@ -307,8 +305,7 @@ impl Ctx<'_> {
             .collect();
         orphans.sort();
         for (page, blocks) in orphans {
-            report.source_pages += 1;
-            report.source_blocks += blocks.len();
+            report.count_source(1, blocks.len());
             report.skip(
                 format!("page entity #{page}"),
                 "blocks point at a page that is not in the export",

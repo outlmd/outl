@@ -60,7 +60,7 @@ impl SourceAdapter for ObsidianAdapter {
 
         // Pass 1+2: discover every file and resolve slug collisions
         // before anything is converted.
-        let discovered = stems::discover(src)?;
+        let discovered = stems::discover(src, report)?;
         let stem_map = stems::assign_unique_stems(&discovered, src);
         let collisions = discovered
             .iter()

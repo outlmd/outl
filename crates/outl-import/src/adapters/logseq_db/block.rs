@@ -35,6 +35,14 @@ impl Ctx<'_> {
             self.text_content(ent, title, &tags, &c, label, report)
         };
         let (task, mut props) = self.task_props(&c, report);
+        // Which kind of date it was, not just the date (issue #578).
+        // The file-graph adapter writes the same two properties, so one
+        // app does not import two different ways.
+        for (key, date) in [("deadline", c.deadline), ("scheduled", c.scheduled)] {
+            if let Some(d) = date {
+                props.push((key.to_string(), format!("[[{d}]]")));
+            }
+        }
         if let Some(q) = c.query.take() {
             props.push(("query".to_string(), q));
         }

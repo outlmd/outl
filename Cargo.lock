@@ -6631,6 +6631,7 @@ dependencies = [
  "outl-actions",
  "outl-core",
  "outl-md",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

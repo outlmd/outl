@@ -215,3 +215,76 @@ fn auto_detect_shapes() {
 
     let _ = open_test_ws(); // keep harness helpers exercised
 }
+
+/// Issue #299: a vault document the importer cannot read has to be
+/// named, and the page denominator has to exist so the reconciliation
+/// runs at all. Both used to be lost to a bare `continue`.
+#[test]
+fn unsupported_vault_documents_are_named_and_the_books_balance() {
+    let v = fixture_tree(&[
+        (".obsidian/app.json", "{}"),
+        ("Note.md", "# Note\n\nbody\n"),
+        ("board.canvas", "{\"nodes\":[]}"),
+        ("sub/deep.base", "filters: []\n"),
+        ("attachments/pic.png", "PNG"),
+    ]);
+    let (_ws, report) = import_with(&ObsidianAdapter, v.path());
+
+    assert_eq!(report.source_pages, 3, "one note + two documents");
+    let skipped: Vec<&str> = report.skipped.iter().map(|s| s.path.as_str()).collect();
+    assert!(
+        skipped.iter().any(|p| p.ends_with("board.canvas")),
+        "{skipped:?}"
+    );
+    assert!(
+        skipped.iter().any(|p| p.ends_with("deep.base")),
+        "{skipped:?}"
+    );
+
+    // An attachment is not a page, so it stays out of the denominator
+    // and is reported once, in aggregate.
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.detail.contains("not read, and not notes") && w.detail.contains("1 .png")),
+        "{:?}",
+        report.warnings
+    );
+
+    let rec = report.reconciliation.expect("reconciliation runs now");
+    assert_eq!(rec.pages_skipped, 2);
+    assert_eq!(rec.pages_unaccounted, 0);
+    assert!(
+        !rec.source_blocks_measured,
+        "a vault is free markdown — the page is its unit"
+    );
+    assert!(rec.balanced, "{rec:?}");
+}
+
+/// The same contract as the Logseq suite's `no_imported_page_is_born_stale`:
+/// what the import writes has to be what the op log projects.
+#[test]
+fn no_imported_page_is_born_stale() {
+    let v = fixture_tree(&[
+        (
+            "Note.md",
+            "---\ntitle: My Note\ntags: [dev, x]\nstatus: active\n---\n\n- a bullet\n- another\n",
+        ),
+        ("Plain.md", "# Plain\n\nsome prose\n"),
+    ]);
+    let (ws, _) = import_with(&ObsidianAdapter, v.path());
+    for meta in outl_actions::page::list_all(&ws.workspace) {
+        let path = outl_actions::journal::page_md_path(&ws.root, &meta);
+        if !path.exists() {
+            continue;
+        }
+        let id = outl_actions::page::find_by_slug(&ws.workspace, &meta.slug).expect("page node");
+        assert_eq!(
+            read(&path),
+            outl_actions::journal::render_page_md(&ws.workspace, id),
+            "{} is stale on arrival",
+            path.display()
+        );
+    }
+}

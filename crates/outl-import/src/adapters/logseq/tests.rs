@@ -1,220 +1,35 @@
-//! Golden tests for the Logseq dialect — one case per fidelity-matrix
-//! row that the outline parser owns.
+//! Adapter-level tests: what `parse` accepts, refuses, and names.
+//!
+//! The outline parser's own golden tests live in `outline/tests.rs`,
+//! filename decoding in `names.rs`, and the file survey in `files.rs`.
 
 use super::*;
-use crate::ir::Inline;
+use crate::ir::PageBody;
 
-fn parse_page(text: &str) -> (Vec<(String, String)>, Vec<ImportBlock>, ImportReport) {
+fn graph(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (path, body) in files {
+        let p = dir.path().join(path);
+        std::fs::create_dir_all(p.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&p, body).expect("write");
+    }
+    dir
+}
+
+fn parse(dir: &Path) -> (ImportGraph, ImportReport) {
     let mut report = ImportReport::new("logseq");
-    let (props, blocks) = parse_outline(text, Path::new(""), &mut Vec::new(), &mut report);
-    (props, blocks, report)
+    let graph = LogseqAdapter.parse(dir, &mut report).expect("parse");
+    (graph, report)
 }
 
-fn inline_text(b: &ImportBlock) -> String {
-    match &b.content {
-        BlockContent::Inline(toks) => toks
-            .iter()
-            .map(|t| match t {
-                Inline::Text(s) => s.clone(),
-                Inline::CodeSpan(s) => format!("`{s}`"),
-                Inline::BlockRef { uid, .. } => format!("(({uid}))"),
-                Inline::Embed(_) => "<embed>".to_string(),
-                Inline::Component { raw, .. } => raw.clone(),
-            })
-            .collect(),
-        other => panic!("expected inline, got {other:?}"),
-    }
-}
-
-#[test]
-fn id_lines_become_uids_not_text() {
-    let (_, blocks, report) =
-        parse_page("- first\n  id:: 6601a2c1-4f31-4a45-1c2c-3a5e6b7d8f90\n- second\n");
-    assert_eq!(blocks.len(), 2);
-    assert_eq!(
-        blocks[0].uid.as_deref(),
-        Some("6601a2c1-4f31-4a45-1c2c-3a5e6b7d8f90")
-    );
-    assert_eq!(inline_text(&blocks[0]), "first");
-    assert!(report.artifacts_stripped >= 1);
-}
-
-#[test]
-fn nested_bullets_build_a_tree() {
-    let (_, blocks, _) = parse_page("- parent\n  - child\n    - grandchild\n- sibling\n");
-    assert_eq!(blocks.len(), 2);
-    assert_eq!(blocks[0].children.len(), 1);
-    assert_eq!(blocks[0].children[0].children.len(), 1);
-    assert_eq!(
-        inline_text(&blocks[0].children[0].children[0]),
-        "grandchild"
-    );
-}
-
-#[test]
-fn tab_indentation_builds_the_same_tree() {
-    let (_, blocks, _) = parse_page("- parent\n\t- child\n\t\t- grandchild\n");
-    assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].children.len(), 1);
-    assert_eq!(blocks[0].children[0].children.len(), 1);
-}
-
-#[test]
-fn task_states_map_with_nuance_preserved() {
-    let (_, blocks, report) = parse_page(
-        "- TODO buy milk\n- DOING write spec\n- LATER read paper\n- CANCELED old idea\n",
-    );
-    assert_eq!(blocks[0].task, Some(TaskState::Todo));
-    assert_eq!(blocks[1].task, Some(TaskState::Doing));
-    assert_eq!(blocks[2].task, Some(TaskState::Later));
-    assert_eq!(blocks[3].task, Some(TaskState::Canceled));
-    assert_eq!(inline_text(&blocks[1]), "write spec");
-    assert_eq!(report.tasks.get("DOING"), Some(&1));
-}
-
-#[test]
-fn priority_marker_becomes_property() {
-    let (_, blocks, _) = parse_page("- TODO [#A] urgent thing\n");
-    assert_eq!(inline_text(&blocks[0]), "urgent thing");
-    assert!(blocks[0]
-        .props
-        .contains(&("priority".to_string(), "A".to_string())));
-}
-
-#[test]
-fn collapsed_property_sets_the_flag() {
-    let (_, blocks, _) = parse_page("- folded\n  collapsed:: true\n  - hidden child\n");
-    assert!(blocks[0].collapsed);
-    assert!(
-        blocks[0].props.is_empty(),
-        "collapsed:: must not leak as a prop"
-    );
-}
-
-#[test]
-fn block_properties_carry_over() {
-    let (_, blocks, _) = parse_page("- objective\n  priority:: high\n  owner:: [[avelino]]\n");
-    assert_eq!(
-        blocks[0].props,
-        vec![
-            ("priority".to_string(), "high".to_string()),
-            ("owner".to_string(), "[[avelino]]".to_string())
-        ]
-    );
-}
-
-#[test]
-fn logseq_internal_props_are_dropped() {
-    let (_, blocks, report) = parse_page("- list\n  logseq.order-list-type:: number\n");
-    assert!(blocks[0].props.is_empty());
-    assert!(report.artifacts_stripped >= 1);
-}
-
-#[test]
-fn scheduled_and_deadline_become_date_links() {
-    let (_, blocks, report) = parse_page(
-        "- DONE ship it\n  SCHEDULED: <2026-11-10 Tue>\n  DEADLINE: <2026-11-12 Thu .+1w>\n",
-    );
-    assert_eq!(
-        inline_text(&blocks[0]),
-        "ship it [[2026-11-10]] [[2026-11-12]]"
-    );
-    assert_eq!(report.org_dates_converted, 2);
-}
-
-#[test]
-fn logbook_drawers_are_dropped() {
-    let (_, blocks, report) = parse_page(
-        "- DONE task\n  :LOGBOOK:\n  CLOCK: [2026-05-01 Fri 10:00]--[2026-05-01 Fri 11:00] =>  01:00\n  :END:\n- next\n",
-    );
-    assert_eq!(blocks.len(), 2);
-    assert_eq!(inline_text(&blocks[0]), "task");
-    assert!(report.artifacts_stripped >= 1);
-}
-
-#[test]
-fn page_props_and_directives_lift_off_the_body() {
-    let (props, blocks, _) = parse_page("#+title: Real Title\ntype:: project\n\n- first block\n");
-    assert!(props.contains(&("title".to_string(), "Real Title".to_string())));
-    assert!(props.contains(&("type".to_string(), "project".to_string())));
-    assert_eq!(blocks.len(), 1);
-}
-
-#[test]
-fn fence_block_is_typed_code() {
-    let (_, blocks, _) = parse_page("- ```clojure\n  (+ 1 2)\n  ```\n- after\n");
-    match &blocks[0].content {
-        BlockContent::Code { lang, body } => {
-            assert_eq!(lang.as_deref(), Some("clojure"));
-            assert_eq!(body, "(+ 1 2)");
-        }
-        other => panic!("expected code, got {other:?}"),
-    }
-    assert_eq!(blocks.len(), 2);
-}
-
-#[test]
-fn fence_body_never_parses_as_props_or_bullets() {
-    let (_, blocks, _) = parse_page("- ```text\n  key:: value\n  - not a bullet\n  ```\n");
-    assert_eq!(blocks.len(), 1);
-    assert!(blocks[0].props.is_empty());
-    match &blocks[0].content {
-        BlockContent::Code { body, .. } => {
-            assert!(body.contains("key:: value"));
-            assert!(body.contains("- not a bullet"));
-        }
-        other => panic!("expected code, got {other:?}"),
-    }
-}
-
-#[test]
-fn embeds_and_refs_tokenize() {
-    let (_, blocks, _) =
-        parse_page("- see ((6601-abc)) and {{embed ((6601-def))}} and {{embed [[Other Page]]}}\n");
-    let toks = match &blocks[0].content {
-        BlockContent::Inline(t) => t,
-        other => panic!("expected inline, got {other:?}"),
-    };
-    assert!(toks.contains(&Inline::BlockRef {
-        uid: "6601-abc".to_string(),
-        alias: None
-    }));
-    assert!(toks.contains(&Inline::Embed(crate::ir::EmbedTarget::Block(
-        "6601-def".into()
-    ))));
-    assert!(toks.contains(&Inline::Embed(crate::ir::EmbedTarget::Page(
-        "Other Page".into()
-    ))));
-}
-
-#[test]
-fn multiword_tag_becomes_page_ref() {
-    let (_, blocks, report) = parse_page("- see #[[My Project]] now\n");
-    assert_eq!(inline_text(&blocks[0]), "see [[My Project]] now");
-    assert_eq!(report.tags_multiword_to_page_ref, 1);
-}
-
-#[test]
-fn underscores_are_not_translated() {
-    // Logseq is CommonMark: `__x__` already means bold — unlike Roam.
-    let (_, blocks, _) = parse_page("- keep __bold__ as is\n");
-    assert_eq!(inline_text(&blocks[0]), "keep __bold__ as is");
-}
-
-#[test]
-fn page_name_decoding() {
-    assert_eq!(decode_page_name("foo%2Fbar"), "foo/bar");
-    assert_eq!(decode_page_name("meu___projeto"), "meu projeto");
-}
-
-#[test]
-fn multiline_continuation_text_stays_with_the_block() {
-    let (_, blocks, _) = parse_page("- first line\n  second line of same block\n- next\n");
-    assert_eq!(blocks.len(), 2);
-    assert_eq!(
-        inline_text(&blocks[0]),
-        "first line\nsecond line of same block"
-    );
+fn page_named<'a>(g: &'a ImportGraph, name: &str) -> &'a ImportPage {
+    g.pages
+        .iter()
+        .find(|p| p.name == PageName::Named(name.to_string()))
+        .unwrap_or_else(|| {
+            let have: Vec<String> = g.pages.iter().map(|p| format!("{:?}", p.name)).collect();
+            panic!("no page named {name}; have {have:?}")
+        })
 }
 
 /// A DB-version graph directory holds `db.sqlite` and none of the file
@@ -230,4 +45,126 @@ fn a_logseq_db_graph_directory_is_refused_instead_of_importing_zero_pages() {
         .to_string();
     assert!(err.contains("Export EDN file"), "{err}");
     assert!(err.contains("outl import logseq-db"), "{err}");
+}
+
+/// Logseq's markdown export hands you a zip, and pointing outl at it
+/// is the obvious next thing to try. Say what to do with it.
+#[test]
+fn a_zip_says_what_to_do_with_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let zip = dir.path().join("graph.zip");
+    std::fs::write(&zip, b"PK\x03\x04").expect("write");
+    let mut report = ImportReport::new("logseq");
+    let err = LogseqAdapter
+        .parse(&zip, &mut report)
+        .expect_err("a zip is refused")
+        .to_string();
+    assert!(err.contains("unzip"), "{err}");
+    assert!(err.contains("logseq-db"), "{err}");
+}
+
+/// A graph whose owner never used journals is still a graph — and so
+/// is an unzipped markdown export holding only one of the two dirs.
+#[test]
+fn one_content_directory_is_enough_to_detect_a_graph() {
+    let g = graph(&[("pages/a.md", "- x\n")]);
+    assert!(LogseqAdapter::detect(g.path()));
+    let j = graph(&[("journals/2026_01_01.md", "- x\n")]);
+    assert!(LogseqAdapter::detect(j.path()));
+    let empty = tempfile::tempdir().expect("tempdir");
+    assert!(!LogseqAdapter::detect(empty.path()));
+}
+
+/// The namespace bug, end to end: the page's title has to be what
+/// Logseq shows, or every `[[parent/child]]` in the graph points at a
+/// page that does not exist under that name.
+#[test]
+fn a_namespaced_filename_becomes_a_namespaced_title() {
+    let g = graph(&[("pages/parent___child.md", "- x\n")]);
+    let (graph, _) = parse(g.path());
+    page_named(&graph, "parent/child");
+}
+
+#[test]
+fn a_legacy_graph_decodes_dots_as_namespaces() {
+    let g = graph(&[
+        ("logseq/config.edn", "{:file/name-format :legacy}"),
+        ("pages/parent.child.md", "- x\n"),
+    ]);
+    let (graph, _) = parse(g.path());
+    page_named(&graph, "parent/child");
+}
+
+/// Both halves of the reconciliation denominator, which the Logseq
+/// adapter never reported (issue #299).
+#[test]
+fn the_source_counts_are_reported() {
+    let g = graph(&[
+        ("pages/a.md", "- one\n  - two\n"),
+        ("journals/2026_01_01.md", "- three\n"),
+    ]);
+    let (_, report) = parse(g.path());
+    assert_eq!(report.source_pages, 2);
+    assert_eq!(report.source_blocks, 3);
+}
+
+/// `journals/` filenames follow a configurable format.
+#[test]
+fn journal_filenames_parse_in_the_formats_logseq_writes() {
+    let g = graph(&[
+        ("journals/2026_01_02.md", "- a\n"),
+        ("journals/2026-01-03.md", "- b\n"),
+        ("journals/2026.01.04.md", "- c\n"),
+    ]);
+    let (graph, report) = parse(g.path());
+    let mut dates: Vec<String> = graph
+        .pages
+        .iter()
+        .filter_map(|p| match &p.name {
+            PageName::Journal(d) => Some(d.to_string()),
+            PageName::Named(_) => None,
+        })
+        .collect();
+    dates.sort();
+    assert_eq!(dates, vec!["2026-01-02", "2026-01-03", "2026-01-04"]);
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+}
+
+/// A block template becomes a template page, which is what makes it
+/// show up in `/template` after the migration (issue #563).
+#[test]
+fn a_block_template_reaches_the_graph_as_a_page() {
+    let g = graph(&[(
+        "pages/Templates.md",
+        "- Interview\n  template:: interview\n  - **Candidate:**\n  - **Role:**\n",
+    )]);
+    let (graph, report) = parse(g.path());
+    let tpl = page_named(&graph, "templates/interview");
+    assert_eq!(
+        tpl.props,
+        vec![("template".to_string(), "interview".to_string())]
+    );
+    let PageBody::Outline(body) = &tpl.body else {
+        panic!("outline expected");
+    };
+    assert_eq!(body.len(), 2);
+    assert_eq!(report.pages_added_as_templates, 1);
+}
+
+/// An empty source directory is a user mistake worth naming, not a
+/// successful import of nothing.
+#[test]
+fn a_directory_with_no_pages_says_so() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("logseq")).expect("mkdir");
+    let (graph, report) = parse(dir.path());
+    assert!(graph.pages.is_empty());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.detail.contains("no markdown pages found")),
+        "{:?}",
+        report.warnings
+    );
 }

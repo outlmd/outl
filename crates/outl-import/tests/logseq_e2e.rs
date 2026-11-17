@@ -127,9 +127,12 @@ fn journals_route_to_iso_and_filenames_decode() {
     assert!(!journal.starts_with("title::"));
     assert_eq!(report.journals, 1);
 
+    // `___` is Logseq's namespace separator, so the title keeps the
+    // slash the user typed (`[[meu/projeto]]`) while the slug stays
+    // flat — reading it as a space renamed every namespaced page.
     let decoded = read(&ws.root.join("pages/meu-projeto.md"));
     assert!(
-        decoded.contains("title:: meu projeto"),
+        decoded.contains("title:: meu/projeto"),
         "decoded:\n{decoded}"
     );
 }
@@ -193,4 +196,106 @@ fn org_files_are_counted_as_skipped() {
     let (_ws, report) = import_with(&LogseqAdapter, g.path());
     assert_eq!(report.pages, 1);
     assert!(report.skipped.iter().any(|s| s.path.ends_with("old.org")));
+}
+
+/// Issue #299: the Logseq adapter reported no denominator at all, so
+/// the one report block that answers "did everything arrive" never ran.
+#[test]
+fn the_reconciliation_runs_and_balances() {
+    let g = fixture_tree(&[
+        ("logseq/config.edn", "{:file/name-format :triple-lowbar}"),
+        ("pages/a.md", "- one\n  - two\n"),
+        ("journals/2026_01_01.md", "- three\n"),
+        ("whiteboards/w.edn", "{}"),
+        ("pages/board.canvas", "{}"),
+        ("assets/pic.png", "PNG"),
+    ]);
+    let (_ws, report) = import_with(&LogseqAdapter, g.path());
+
+    assert_eq!(report.source_pages, 4, "2 md + 1 whiteboard + 1 canvas");
+    assert_eq!(report.source_blocks, 3);
+    let rec = report.reconciliation.expect("reconciliation runs now");
+    assert_eq!(rec.pages_skipped, 2);
+    assert_eq!(rec.pages_unaccounted, 0);
+    assert_eq!(rec.blocks_unaccounted, 0);
+    assert!(rec.balanced, "{rec:?}");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.detail.contains("not read, and holds no pages")),
+        "{:?}",
+        report.warnings
+    );
+}
+
+/// A block template becomes a template page, and the page it added does
+/// not break the balance (issue #563).
+#[test]
+fn a_block_template_lands_as_a_template_page() {
+    let g = fixture_tree(&[(
+        "pages/Templates.md",
+        "- Interview\n  template:: interview\n  template-including-parent:: false\n  \
+         - **Candidate:**\n  - **Role:**\n",
+    )]);
+    let (ws, report) = import_with(&LogseqAdapter, g.path());
+
+    let tpl = read(&ws.root.join("pages/templates-interview.md"));
+    assert!(tpl.contains("template:: interview"), "{tpl}");
+    assert!(tpl.contains("- **Candidate:**"), "{tpl}");
+    assert!(
+        !tpl.contains("template-including-parent"),
+        "bookkeeping property must not travel into the template:\n{tpl}"
+    );
+    // The source page keeps what the user wrote.
+    let src = read(&ws.root.join("pages/templates.md"));
+    assert!(src.contains("template:: interview"), "{src}");
+
+    assert_eq!(report.pages_added_as_templates, 1);
+    let rec = report.reconciliation.expect("reconciliation");
+    assert!(rec.balanced, "{rec:?}");
+}
+
+/// Every `.md` the import writes must already be the bytes the op log
+/// projects.
+///
+/// It is the op log that is the source of truth, so the file is a
+/// projection of it — and a projection written in a different order is
+/// a *stale* projection. With the header in source order, a page with
+/// two properties was stale the moment it was written: `outl doctor`
+/// reported the whole import as "pages hold a stale `.md` projection
+/// … run `outl doctor --repair`", which is the first thing someone
+/// runs after migrating a graph they still half-trust.
+#[test]
+fn no_imported_page_is_born_stale() {
+    let g = fixture_tree(&[
+        (
+            "pages/props.md",
+            "type:: project\ntags:: dev\nstatus:: active\n\n- a block with no refs\n",
+        ),
+        (
+            "pages/Templates.md",
+            "- Interview\n  template:: interview\n  - **Candidate:**\n",
+        ),
+        ("journals/2026_01_01.md", "- a journal block\n"),
+    ]);
+    let (ws, _) = import_with(&LogseqAdapter, g.path());
+
+    let pages = outl_actions::page::list_all(&ws.workspace);
+    assert!(pages.len() >= 3, "pages: {}", pages.len());
+    for meta in &pages {
+        let path = outl_actions::journal::page_md_path(&ws.root, meta);
+        if !path.exists() {
+            continue;
+        }
+        let on_disk = read(&path);
+        let id = outl_actions::page::find_by_slug(&ws.workspace, &meta.slug).expect("page node");
+        let projected = outl_actions::journal::render_page_md(&ws.workspace, id);
+        assert_eq!(
+            on_disk,
+            projected,
+            "{} differs from what the op log projects — it is stale on arrival",
+            path.display()
+        );
+    }
 }

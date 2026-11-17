@@ -134,10 +134,27 @@ fn flush(buf: &mut String, out: &mut Vec<Inline>) {
 
 /// Classify one `{{…}}` component. Logseq's head is space-separated
 /// (`{{embed ((uuid))}}`), not colon-separated like Roam's.
+///
+/// Two spellings beyond the canonical one, both of which used to reach
+/// outl as literal text because the head never matched:
+///
+/// - **`{{{embed ((uuid))}}}`** — the triple-brace form Logseq's own
+///   block-embed command used to insert, so it is in every graph that
+///   has been around a while.
+/// - **`{{embed((uuid))}}`** — no space. Logseq renders it, so a user
+///   has no reason to think it is a typo.
 fn component(raw: &str, buf: &mut String, out: &mut Vec<Inline>, report: &mut ImportReport) {
-    let inner = raw[2..raw.len() - 2].trim();
-    let (head_raw, tail) = match inner.find(char::is_whitespace) {
-        Some(p) => (&inner[..p], inner[p + 1..].trim()),
+    // Trimming braces rather than slicing a fixed two covers both brace
+    // counts with one rule. `raw` itself is untouched, so a component
+    // kept verbatim still carries the braces the source wrote.
+    let inner = raw.trim_matches(|c| c == '{' || c == '}').trim();
+    // The head ends at whitespace *or* at the opening delimiter of its
+    // argument, which is what makes the space optional.
+    let (head_raw, tail) = match inner.find(|c: char| c.is_whitespace() || c == '(' || c == '[') {
+        Some(p) if inner[p..].starts_with(char::is_whitespace) => {
+            (&inner[..p], inner[p + 1..].trim())
+        }
+        Some(p) => (&inner[..p], inner[p..].trim()),
         None => (inner, ""),
     };
     let head = head_raw.to_ascii_lowercase();
