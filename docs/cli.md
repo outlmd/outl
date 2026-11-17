@@ -122,6 +122,8 @@ The MCP tool column is the name Claude Desktop (or any MCP host) sees.
 
 `page get` returns page meta plus the outline tree.
 `page render` returns the projected `.md` string (clean, no sidecar fields).
+`page update --title` writes the `title::` page property, the same one `page rename` writes, so the new title shows in the page meta and in the `.md`.
+A blank or whitespace-only title fails with `INVALID_ARG`, and nothing in the call is applied.
 `page rename` updates the `page-slug` property, renames the on-disk `.md`/`.outl`, and rewrites every mention of the page so it names the new one.
 That covers `[[old]]`, `[[@old]]` for a person page, and `#old`, written as one edit per block in the same op-log batch.
 Code spans, fenced code, link text and urls, block refs, and names that only contain the old slug are left alone.
