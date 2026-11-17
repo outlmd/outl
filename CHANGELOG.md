@@ -26,6 +26,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Desktop (macOS): an About window that answers more than "which version", and a Help menu.**
+  **outl → About outl** opens the project's own window: the mark, the name, the running version, one line about what outl is, and three links.
+  **Help** carries the same three — the source, the issue tracker, the sponsor page.
+
+  What it replaces is AppKit's standard panel, which outl was getting by default.
+  That panel shows an icon, a name and a version number, and nothing in it is clickable, so someone who had just hit a bug walked away knowing their build and no way to act on it.
+
+  The links are declared once (`src-tauri/src/links.rs`) and read by both surfaces, so the menu and the window cannot point at different places.
+  The About window is a real window rather than a modal in the main one, which is what lets it open while the workspace is still replaying and on the first-run picker — the two moments someone most wants a version number and somewhere to send a report.
+  Windows and Linux have neither, for the same reason they have no menu bar; the gap is recorded as `Capability::AboutAndSupport`.
+  [`docs/desktop-ux.md`](docs/desktop-ux.md#about-window-and-the-help-menu-macos).
+
 - **Mobile: "Remind me…" is a sheet now, not a text prompt for the rule language.**
   A time, a repeat, an optional "until", and a **Remove** button.
   It replaced a `window.prompt` asking for `3pm every 1h until DONE`, which on a phone is easy to miss, easy to cancel, and reads as a tap that did nothing.

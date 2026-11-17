@@ -10,17 +10,24 @@
 //! either: a menu bar there would be new chrome nobody asked for. Those
 //! platforms switch workspace from the "Switch…" button in Settings,
 //! which runs the same frontend flow. [`install`] is a no-op there, and
-//! the menu itself is compiled out; `event_for` and the constants stay so
-//! Linux CI still runs their tests.
+//! the menu itself is compiled out; `action_for` and the constants stay
+//! so Linux CI still runs their tests.
 //!
-//! This module owns the *menu*, not the behaviour. Clicking the item only
-//! emits [`SWITCH_WORKSPACE_EVENT`]; the frontend opens the folder dialog
-//! and calls `set_workspace`, exactly as the first-run picker does, so no
-//! workspace logic lives on this side.
+//! This module owns the *menu*, not the behaviour. A click resolves to
+//! a [`MenuAction`] and nothing else happens here: Switch Workspace
+//! emits [`SWITCH_WORKSPACE_EVENT`] for `lib/switch-workspace.ts`,
+//! About hands off to [`crate::about`], and a Help item opens a URL
+//! declared in [`crate::links`].
 //!
-//! Shape follows the default menu it replaces: app menu (About / Services
-//! / Hide / Quit), File, Edit, View, Window. The Edit menu is what makes
-//! `Cmd+C` / `Cmd+V` / `Cmd+Z` reach the webview, so it cannot be left out.
+//! Shape follows the default menu it replaces: app menu (About /
+//! Services / Hide / Quit), File, Edit, View, Window, plus Help. The
+//! Edit menu is what makes `Cmd+C` / `Cmd+V` / `Cmd+Z` reach the
+//! webview, so it cannot be left out.
+//!
+//! **About is ours, not `PredefinedMenuItem::about`.** That one opens
+//! AppKit's standard panel, which shows an icon, a name, a version and
+//! credits text with no clickable link in it — see [`crate::about`] for
+//! what that cost the user and why this is a window.
 
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
@@ -28,6 +35,10 @@
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID};
 #[cfg(target_os = "macos")]
 use tauri::{AppHandle, Emitter, Runtime};
+#[cfg(target_os = "macos")]
+use tauri_plugin_opener::OpenerExt;
+
+use crate::links;
 
 /// Id of the File → Switch Workspace… item.
 pub const SWITCH_WORKSPACE_ID: &str = "switch-workspace";
@@ -39,13 +50,31 @@ pub const SWITCH_WORKSPACE_LABEL: &str = "Switch Workspace…";
 /// Event the frontend listens to (`onMenuSwitchWorkspace`).
 pub const SWITCH_WORKSPACE_EVENT: &str = "menu://switch-workspace";
 
-/// The event a click on the menu item `id` should raise, if it is one of
-/// ours. Predefined items (Quit, Copy, …) are handled natively and never
-/// reach this.
-fn event_for(id: &str) -> Option<&'static str> {
+/// Id of the app menu's About item.
+pub const ABOUT_ID: &str = "about";
+
+/// The Help submenu's title. Named here rather than inline so the
+/// doc and the test can point at one constant.
+pub const HELP_MENU_TITLE: &str = "Help";
+
+/// What a click on one of our items does. Predefined items (Quit,
+/// Copy, …) are handled natively by AppKit and never reach this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    /// Raise an event for the frontend to act on.
+    Emit(&'static str),
+    /// Open the About window.
+    ShowAbout,
+    /// Open a URL in the user's browser.
+    OpenUrl(&'static str),
+}
+
+/// What the menu item `id` should do, if it is one of ours.
+fn action_for(id: &str) -> Option<MenuAction> {
     match id {
-        SWITCH_WORKSPACE_ID => Some(SWITCH_WORKSPACE_EVENT),
-        _ => None,
+        SWITCH_WORKSPACE_ID => Some(MenuAction::Emit(SWITCH_WORKSPACE_EVENT)),
+        ABOUT_ID => Some(MenuAction::ShowAbout),
+        other => links::by_id(other).map(|link| MenuAction::OpenUrl(link.url)),
     }
 }
 
@@ -65,6 +94,10 @@ pub fn install(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry
 /// Build the application menu. Passed to `Builder::menu`.
 #[cfg(target_os = "macos")]
 fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let name = app.package_info().name.clone();
+
+    let about = MenuItem::with_id(app, ABOUT_ID, format!("About {name}"), true, None::<&str>)?;
+
     let switch_workspace = MenuItem::with_id(
         app,
         SWITCH_WORKSPACE_ID,
@@ -75,10 +108,10 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let app_menu = Submenu::with_items(
         app,
-        &app.package_info().name,
+        &name,
         true,
         &[
-            &PredefinedMenuItem::about(app, None, None)?,
+            &about,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, None)?,
             &PredefinedMenuItem::separator(app)?,
@@ -136,17 +169,40 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         ],
     )?;
 
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
+    // Built from `links::HELP_LINKS` rather than written out, so the
+    // order, the labels and the URLs are the ones the About window
+    // shows. A row added there appears here with no edit.
+    let help_items = links::HELP_LINKS
+        .iter()
+        .map(|link| MenuItem::with_id(app, link.id, link.label, true, None::<&str>))
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let help_refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = help_items
+        .iter()
+        .map(|item| item as &dyn tauri::menu::IsMenuItem<R>)
+        .collect();
+    let help = Submenu::with_items(app, HELP_MENU_TITLE, true, &help_refs)?;
+
+    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
 }
 
 /// Route a menu click. Passed to `Builder::on_menu_event`.
 #[cfg(target_os = "macos")]
 fn on_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    let Some(name) = event_for(&event.id().0) else {
-        return;
-    };
-    if let Err(err) = app.emit(name, ()) {
-        tracing::warn!("menu: failed to emit {name}: {err}");
+    match action_for(&event.id().0) {
+        Some(MenuAction::Emit(name)) => {
+            if let Err(err) = app.emit(name, ()) {
+                tracing::warn!("menu: failed to emit {name}: {err}");
+            }
+        }
+        Some(MenuAction::ShowAbout) => crate::about::show(app),
+        Some(MenuAction::OpenUrl(url)) => {
+            // Best-effort, like every other menu click: a browser that
+            // refuses to launch is logged, never a dialog over the app.
+            if let Err(err) = app.opener().open_url(url, None::<&str>) {
+                tracing::warn!("menu: failed to open {url}: {err}");
+            }
+        }
+        None => {}
     }
 }
 
@@ -156,13 +212,32 @@ mod tests {
 
     #[test]
     fn the_switch_workspace_item_raises_its_event() {
-        assert_eq!(event_for(SWITCH_WORKSPACE_ID), Some(SWITCH_WORKSPACE_EVENT));
+        assert_eq!(
+            action_for(SWITCH_WORKSPACE_ID),
+            Some(MenuAction::Emit(SWITCH_WORKSPACE_EVENT)),
+        );
     }
 
     #[test]
-    fn an_id_that_is_not_ours_raises_nothing() {
-        assert_eq!(event_for("quit"), None);
-        assert_eq!(event_for(""), None);
+    fn the_about_item_opens_the_about_window() {
+        assert_eq!(action_for(ABOUT_ID), Some(MenuAction::ShowAbout));
+    }
+
+    /// Every Help row routes, and routes to its own URL. An id that
+    /// resolves to nothing is a menu item that looks enabled and does
+    /// nothing when clicked — the dead-key shape invariant 12 exists
+    /// to stop.
+    #[test]
+    fn every_help_item_opens_its_own_link() {
+        for link in links::HELP_LINKS {
+            assert_eq!(action_for(link.id), Some(MenuAction::OpenUrl(link.url)));
+        }
+    }
+
+    #[test]
+    fn an_id_that_is_not_ours_does_nothing() {
+        assert_eq!(action_for("quit"), None);
+        assert_eq!(action_for(""), None);
     }
 
     /// The Settings modal and the frontend listener spell these out by

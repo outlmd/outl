@@ -225,6 +225,19 @@ pub enum Capability {
     /// rather than `Full`. `docs/privacy.md` is disclosure too, and it
     /// is not in the product.
     CrashReportingDisclosure,
+    /// Knowing which build is running, and reaching the project
+    /// from inside the app: the source, the issue tracker, the
+    /// sponsor page.
+    ///
+    /// Two halves of one question, because a user who hits a bug
+    /// needs both at once — a report without a version number is a
+    /// report nobody can act on, and a version number with no
+    /// tracker is a fact with nowhere to go.
+    ///
+    /// Not the same as *shipping* an update: no client self-updates,
+    /// and a row every client lacks equally would say nothing. This
+    /// is only whether the app tells you where you stand.
+    AboutAndSupport,
 }
 
 impl Capability {
@@ -259,6 +272,7 @@ impl Capability {
         Capability::SlashCommandMenu,
         Capability::CrashReportingOptOut,
         Capability::CrashReportingDisclosure,
+        Capability::AboutAndSupport,
     ];
 }
 
@@ -270,7 +284,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_22: usize = 22;
+    const EXPECTED_23: usize = 23;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -296,6 +310,7 @@ mod tests {
             Capability::SlashCommandMenu => "SlashCommandMenu",
             Capability::CrashReportingOptOut => "CrashReportingOptOut",
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
+            Capability::AboutAndSupport => "AboutAndSupport",
         }
     }
 
@@ -312,9 +327,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_22,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_22} variants \
-             : add the new variant to Capability::ALL (and bump EXPECTED_22)",
+            EXPECTED_23,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_23} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_23)",
             names.len(),
         );
     }

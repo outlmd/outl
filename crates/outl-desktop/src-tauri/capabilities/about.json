@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "about",
+  "description": "Capability for the About window: it reads the app version, closes itself, and opens the project's links in the browser. Deliberately narrower than the main window's — nothing here touches the workspace.",
+  "windows": ["about"],
+  "permissions": [
+    "core:default",
+    "log:default",
+    "core:window:allow-close",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
+  ]
+}

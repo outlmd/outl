@@ -36,10 +36,13 @@
 //! - `commands` — Tauri command surface split by responsibility
 //!   (`workspace`, `page`, `block`).
 
+mod about;
 mod commands;
+mod deep_link;
 mod fs_watcher;
 mod helpers;
 mod iroh_sync;
+mod links;
 mod log_target;
 mod menu;
 mod open_with;
@@ -58,7 +61,7 @@ use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
 use parking_lot::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::commands::{
@@ -86,70 +89,14 @@ use crate::commands::{
     snooze_reminder, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
     undo_merged_edit, undo_page, update_settings, wait_workspace_ready, workspace_stats,
 };
+use crate::deep_link::{
+    deep_link_payload, dispatch_deep_link, take_pending_deep_link, PendingDeepLink,
+};
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
 use outl_tauri_shared::workspace_open::WorkspaceGuards;
 
 use crate::workspace_open::{load_or_create_actor, spawn_workspace_opener};
-
-/// A deep link that arrived during cold start, before the frontend
-/// mounted its `deep-link://navigate` listener. The frontend drains it
-/// once on boot via [`take_pending_deep_link`] (issue #98).
-///
-/// Only the **cold-start** path (the launch URL) populates this. The
-/// warm path (`on_open_url` while the app runs) emits the event directly
-/// — the listener is already up — and never touches the buffer, so a
-/// stale target can't replay on the next plain launch.
-struct PendingDeepLink(parking_lot::Mutex<Option<serde_json::Value>>);
-
-/// Frontend command: take (and clear) the deep link buffered during cold
-/// start. Returns `null` when the app launched normally.
-#[tauri::command]
-fn take_pending_deep_link(pending: tauri::State<'_, PendingDeepLink>) -> Option<serde_json::Value> {
-    pending.0.lock().take()
-}
-
-/// Parse an `outl://` URL via the shared `outl_actions` parser into the
-/// `{kind, …}` payload the frontend maps onto its `open*` commands.
-///
-/// A malformed URL (wrong scheme, unknown kind, bad date, traversal
-/// slug) is logged at `warn` and returns `None` — never a crash, never a
-/// stray page (issue #98). The parser is shared with `outl-mobile` so
-/// the two clients can't drift on the scheme contract.
-fn deep_link_payload(raw: &str) -> Option<serde_json::Value> {
-    use outl_actions::DeepLinkTarget;
-
-    match outl_actions::parse_deep_link(raw) {
-        Ok(DeepLinkTarget::Today) => Some(serde_json::json!({ "kind": "today" })),
-        Ok(DeepLinkTarget::Capture) => Some(serde_json::json!({ "kind": "capture" })),
-        Ok(DeepLinkTarget::Daily(date)) => Some(serde_json::json!({
-            "kind": "daily",
-            "date": date.format("%Y-%m-%d").to_string(),
-        })),
-        Ok(DeepLinkTarget::Page(slug)) => Some(serde_json::json!({
-            "kind": "page",
-            "slug": slug,
-        })),
-        Err(err) => {
-            tracing::warn!("deep link ignored ({raw}): {err}");
-            None
-        }
-    }
-}
-
-/// Warm path: an `outl://` URL opened while the app is running. Emit the
-/// navigate event (the frontend listener is up) and focus the window.
-fn dispatch_deep_link(app: &tauri::AppHandle, raw: &str) {
-    let Some(payload) = deep_link_payload(raw) else {
-        return;
-    };
-    if let Err(err) = app.emit("deep-link://navigate", payload) {
-        tracing::warn!("deep link: failed to emit navigate event: {err}");
-    }
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_focus();
-    }
-}
 
 /// Repeat Rust's `SIG_IGN` for `SIGPIPE` so a library cannot restore the
 /// default and kill a GUI on the next write to a closed pipe.

@@ -185,6 +185,7 @@ the drift this RFC exists to prevent.
 | `SlashCommandMenu` | ✅ | ✅ | ❌ Typing `/` doesn't open a command list on the phone yet — plugin commands are behind the plugins button in the top bar, and templates are under "Insert template" when you long-press a block. |
 | `CrashReportingOptOut` | ❌ Crash reporting is switched from the terminal here — run `outl telemetry off` to stop sending reports, or `outl telemetry status` to see where it stands. | ✅ | ✅ |
 | `CrashReportingDisclosure` | ❌ Crash reporting is on, and the terminal does not announce it the way the apps do — run `outl telemetry status` to see where it stands, or read the full list of what a report carries at outl.app/privacy. | ✅ | ✅ |
+| `AboutAndSupport` | ❌ The terminal has no About screen. Run `outl --version` for the build you are running, and the project, its issue tracker and its sponsor page are at github.com/outlmd/outl. | ✅ | ❌ The phone app doesn't show its version or link out yet. Check the build in the App Store or TestFlight, and open github.com/outlmd/outl in a browser to report something or support the project. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

@@ -103,7 +103,9 @@ crates/outl-desktop/
     └── src/                   # main.rs, lib.rs (run() registers all commands),
                               #   settings.rs, state.rs, helpers.rs, workspace_open.rs,
                               #   plugin_service.rs, fs_watcher.rs,
-                              #   menu.rs (native menu, emits menu://switch-workspace),
+                              #   menu.rs (native menu: Switch Workspace, About, Help),
+                              #   links.rs (the project's outbound links, one table),
+                              #   about.rs (the About window), deep_link.rs (outl://),
                               #   commands/ (thin shims over outl_tauri_shared::commands)
 ```
 

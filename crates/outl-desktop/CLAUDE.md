@@ -545,6 +545,25 @@ Behaviour and the frontend half: [`docs/desktop-ux.md`](../../docs/desktop-ux.md
   The hint must not mention a File menu off macOS.
 - **No chord, no palette row.**
   Either needs an `Action`, and an `Action` needs a verdict from every client in `outl_shortcuts::support`.
+- **A click resolves to a `MenuAction` and nothing else happens in `menu.rs`.**
+  `Emit` hands off to the frontend, `ShowAbout` to `about.rs`, `OpenUrl` to the opener plugin.
+  `action_for`'s tests are what stop a new item shipping as an enabled row that does nothing.
+
+### About window and the Help menu
+
+Both macOS-only; what they show is [`docs/desktop-ux.md`](../../docs/desktop-ux.md#about-window-and-the-help-menu-macos), and the gap on the other clients is `Capability::AboutAndSupport`.
+
+- **`src-tauri/src/links.rs` owns the project's outbound links** (id, label, URL).
+  The Help items are built from it, a click resolves back through it, and `src/lib/links.ts` is a mirror pinned by `the_frontend_mirror_matches_this_table`.
+  Never write a URL or a label in a component: About and Help are two surfaces for one fact.
+- **About is a window, not a modal, and not `PredefinedMenuItem::about`.**
+  The predefined item opens AppKit's panel, where no link is clickable.
+  A modal is the smaller change and the wrong one: `<AppShell />` mounts only once a workspace is open, so About would be dead during the boot replay and on the first-run picker.
+- **`src/index.tsx` branches on `?view=about` first, and reports no boot mark.**
+  The four marks measure the app's cold start; a second window reporting `html_parsed` lands in that budget as a launch nobody made.
+- **`capabilities/about.json` is scoped to the window by label**, narrower than the main window's on purpose.
+  A label that stops matching `ABOUT_WINDOW_LABEL` is silent: every command the window calls is denied, which reads as an About screen stuck loading.
+  `the_capability_file_scopes_this_window` is the net.
 
 ## Capture from outside the app (RFC 0363)
 
@@ -557,6 +576,7 @@ The capture is in the op log either way, so the next refresh shows it ([`UX.md` 
 ## Deep links (`outl://`)
 
 The scheme contract, the shared `outl_actions::parse_deep_link` parser, and this client's warm / cold wiring live in [`docs/deep-links.md`](../../docs/deep-links.md#desktop-wiring-outl-desktop).
+The cold-start buffer, the parse and the warm dispatch are `src-tauri/src/deep_link.rs` (lifted out of `lib.rs` unchanged when that file crossed the size ratchet).
 One thing bites every time, and it applies to "Open With" too: **testing on macOS needs a bundled, installed app**.
 LaunchServices only registers `outl://` and reads `CFBundleDocumentTypes` from the built bundle, so `cargo tauri dev` never sees either.
 

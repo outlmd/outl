@@ -33,7 +33,7 @@ Only the chrome is desktop-local; why the copy and the panel are shared rather t
 The native menu is built in `src-tauri/src/menu.rs` and exists on **macOS only**.
 Tauri installs a default menu on macOS alone, so Windows and Linux never had a menu bar, and adding one there would be new chrome nobody asked for.
 On macOS the default's File menu held only "Close Window", so the menu is built here instead.
-It keeps what the default offered (the app menu, Edit with undo / redo / cut / copy / paste / select all, View, Window, and File → Close Window) and adds **File → Switch Workspace…** above Close Window.
+It keeps what the default offered (the app menu, Edit with undo / redo / cut / copy / paste / select all, View, Window, and File → Close Window) and adds **File → Switch Workspace…** above Close Window, plus the **Help** menu described below.
 
 **Settings → Workspace → Switch…** is the cross-platform route, and the only one on Windows and Linux.
 It runs the same `switchWorkspace` flow as the menu item, and closes the modal once the workspace actually changed (not on cancel or failure: the draft still holds the old `last_workspace`, and Save writes it back).
@@ -51,6 +51,41 @@ Clicking the menu item picks nothing in Rust; it emits `menu://switch-workspace`
 
 The menu item does nothing while `<Onboarding />` or the loading screen is up, because the picker is itself the screen then.
 It has no chord and no palette row: both would need a new `Action`, which every client has to declare a verdict for ([`client-parity.md`](client-parity.md)).
+
+## About window and the Help menu (macOS)
+
+**outl → About outl** opens a real window, not AppKit's standard panel.
+The panel shows an icon, a name, a version and a block of credits text, and nothing in it is clickable, so a user who hit a bug learned their version number and no way to act on it.
+
+The window (`src-tauri/src/about.rs`) loads the shipped bundle at `index.html?view=about`; `src/index.tsx` branches on that query before it mounts anything and renders `<AboutWindow />` instead of `<App />`.
+It is 380×460, fixed, centred, with the macOS title bar left empty so the content starts at the top.
+A second click focuses the window already open rather than stacking a copy, and `Esc` or `Cmd+W` closes it.
+
+It carries the brand mark in the theme's accent, the name, the running version, one line describing the project, the three links below, and "MIT licensed · Avelino and contributors".
+The version comes from `getVersion()` and is simply absent when that read fails.
+A placeholder build number would be worse than none: the version is the one fact this window exists to state correctly.
+
+**Help** holds the same three links:
+
+| Item | Opens |
+|---|---|
+| outl on GitHub | <https://github.com/outlmd/outl> |
+| Report a Problem | <https://github.com/outlmd/outl/issues> |
+| Sponsor outl | <https://github.com/sponsors/avelino> |
+
+The table itself is `src-tauri/src/links.rs`, and it is the only copy.
+The menu builds its items from it, and the click router resolves a clicked id back through it.
+`src/lib/links.ts` is a mirror, pinned to it by `the_frontend_mirror_matches_this_table`.
+So the two surfaces cannot name the same destination differently, and adding a row reaches both.
+
+The window opens during the boot replay and on the first-run picker too.
+That is the reason it is a window and not a modal inside `<AppShell />`, which only mounts once a workspace is open.
+Those are the two moments a user most wants a version number and an issue tracker.
+`capabilities/about.json` scopes it to exactly what it does: read the version, close itself, open an `https://` URL.
+Nothing in it touches the workspace.
+
+Windows and Linux have neither surface, for the same reason they have no menu bar.
+The gap is recorded as `Capability::AboutAndSupport` across the three clients in [`client-parity.md`](client-parity.md).
 
 ## Chrome toggle bar and quick capture
 

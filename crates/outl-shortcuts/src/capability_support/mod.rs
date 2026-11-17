@@ -349,6 +349,29 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
+        // Desktop: the About window (`src-tauri/src/about.rs`, opened
+        // from the app menu) carries the running version, and the Help
+        // menu carries the three links, both built from one table so
+        // they cannot name the same destination differently.
+        //
+        // The TUI's reach is real and worth naming: it runs in a
+        // terminal, so the build number is one command away even
+        // though the TUI itself has no screen for it. Mobile has
+        // neither, which is why its sentence points at a browser
+        // instead of a command — there is no `outl` binary on a phone.
+        Capability::AboutAndSupport => ClientSupport {
+            tui: Missing(
+                "The terminal has no About screen. Run `outl --version` for the build you are \
+                 running, and the project, its issue tracker and its sponsor page are at \
+                 github.com/outlmd/outl.",
+            ),
+            desktop: Full,
+            mobile: Missing(
+                "The phone app doesn't show its version or link out yet. Check the build in \
+                 the App Store or TestFlight, and open github.com/outlmd/outl in a browser to \
+                 report something or support the project.",
+            ),
+        },
     }
 }
 
@@ -402,7 +425,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 22, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 23, "Capability::ALL changed size");
     }
 
     #[test]
