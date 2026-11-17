@@ -19,7 +19,6 @@ import { CrashReportsNotice } from "@outl/shared/polish";
 import {
   appState,
   setAppState,
-  setOutline,
   trackBacklinks,
 } from "../lib/store";
 import {
@@ -43,6 +42,7 @@ import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { buildHandlers } from "../lib/action-handlers";
 import { followSelection, installRegionKeys } from "../lib/keyboard-reach";
 import { resetForNavigation } from "../lib/page-change";
+import { applyPageState } from "../lib/page-view";
 import { BatchToolbar } from "./BatchToolbar";
 import { Sidebar } from "./Sidebar";
 import { OutlineView } from "./OutlineView";
@@ -90,8 +90,13 @@ export function AppShell() {
   const [handlers, setHandlers] = createSignal<ActionHandlers | null>(null);
 
   function applyView(view: PageView) {
-    setAppState({ page: view.page });
-    setOutline(view.outline);
+    // The page's own state — properties, parse warnings, the
+    // ahead-of-log notice — is `applyPageState`'s, and this path is
+    // every navigation the chrome owns (sidebar, picker, Today, a task
+    // row, a deep link). Writing `page` and the outline alone here is
+    // what left the previous page's chips and banners standing over the
+    // new one.
+    applyPageState(view);
     // Drop editing / selection cursors that the new outline no longer
     // contains. This path fires on peer-driven reloads (onPeerChange →
     // reloadWorkspace), which replace the outline without going through

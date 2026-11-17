@@ -165,6 +165,15 @@ Three things a contributor should not undo:
 The fetch is gated on `timelineOpen && appState.page`: the read walks every block in the page under the workspace lock, which is not something to do on every navigation on the chance the user might open the panel.
 No chord yet — a global binding means an entry in `outl-shortcuts`, which every client consumes, and the TUI has no timeline surface to bind it to.
 
+## Applying a `PageView` — `lib/page-view.ts`
+
+`applyPageState(view)` is the **single writer** of what a reply says about the page: `page`, `pageProperties`, `parseWarnings`, the sticky `mdAheadOfLog`, the outline and a `projection_error`.
+There used to be two `applyView`s, and the shell's wrote only `page` + outline.
+That one is every page opened from the chrome (sidebar, picker, Today, a task row, a deep link), so each kept the previous page's property chips and its "this page isn't syncing" banner.
+A caller adds only what is its own: cursor repair in the shell, auto-run and embeds in the outline.
+The module doc owns the rest, including why the write order is load-bearing.
+Net: `lib/page-view.test.ts`, which also pins by source-read that neither component writes those fields again.
+
 ## "This page isn't syncing" banner
 
 `<PageAheadOfLogBanner client="desktop" />` (`@outl/shared/warnings`) renders above the outline when `PageView.md_ahead_of_log` comes back set.
