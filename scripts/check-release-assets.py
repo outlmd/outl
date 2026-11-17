@@ -233,6 +233,25 @@ def check_manifest(root: Path) -> list[str]:
                 problems.append(f"{SCOOP} has no `architecture.{arch}` block for {leg.assets[0]}")
             elif leg.assets[0] not in spec.get("url", ""):
                 problems.append(f"{SCOOP}'s `architecture.{arch}.url` does not point at {leg.assets[0]}")
+            # Scoop substitutes `$version` only inside `autoupdate`, which is
+            # the block a bucket maintainer runs. A client reads these urls
+            # verbatim, so a literal token here is a 404 on every install —
+            # it shipped that way and blocked every Windows user (#498). This
+            # check is the reason it cannot come back quietly: the one above
+            # asks whether the url names the right asset, which a templated
+            # url answers yes to.
+            elif "$version" in spec["url"]:
+                problems.append(
+                    f"{SCOOP}'s `architecture.{arch}.url` carries a literal `$version` — Scoop "
+                    f"substitutes that token only inside `autoupdate`, so an install downloads the url "
+                    f"as written and 404s. `update_tap` writes the concrete version here (issue #498)"
+                )
+            elif scoop.get("version", "") not in spec["url"]:
+                problems.append(
+                    f"{SCOOP}'s `architecture.{arch}.url` does not carry the manifest's own `version` "
+                    f"({scoop.get('version')!r}) — `scoop install` would fetch one release and check it "
+                    f"against the digest of another"
+                )
 
     for anchor in sorted(set(re.findall(r"# anchor: (?!bottle-root-url)(?:bottle-)?(\S+)", formula))):
         if anchor not in {leg.anchor for leg in table.LEGS if "brew" in leg.taps}:
@@ -240,6 +259,19 @@ def check_manifest(root: Path) -> list[str]:
     for arch in sorted(scoop.get("architecture", {})):
         if arch not in {SCOOP_ARCH.get(leg.anchor or "") for leg in table.LEGS if "scoop" in leg.taps}:
             problems.append(f"{SCOOP} serves `architecture.{arch}`, which no leg in `release_assets.py` produces")
+
+    # `update_tap` builds each concrete `architecture.*.url` by resolving
+    # `$version` in the matching `autoupdate` template, which keeps the url
+    # shape in one place. That derivation is only total while the two key
+    # sets agree; an arch in one and not the other is a jq failure mid-bump.
+    served = set(scoop.get("architecture", {}))
+    templated = set(scoop.get("autoupdate", {}).get("architecture", {}))
+    if served != templated:
+        problems.append(
+            f"{SCOOP}'s `architecture` serves {sorted(served)} and `autoupdate.architecture` templates "
+            f"{sorted(templated)} — `update_tap` derives each url from its template, so an arch missing "
+            f"from either has no url to build"
+        )
 
     return problems
 

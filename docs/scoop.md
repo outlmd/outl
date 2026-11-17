@@ -50,10 +50,15 @@ Both are central repositories rather than user-added buckets, so each needs a pu
 ## How updates happen
 
 `release.yml`'s `update_tap` job bumps this manifest in the same pass as the Homebrew formula and the desktop cask, after a release publishes.
-It rewrites `version` and both `architecture.*.hash` values with `jq` — the manifest is JSON, so there is a parser for it and no anchor comments are needed.
-The urls are not touched: they carry `$version`, which Scoop substitutes itself.
+It rewrites `version`, both `architecture.*.url` values and both `architecture.*.hash` values with `jq` — the manifest is JSON, so there is a parser for it and no anchor comments are needed.
 
-Two rules that the job enforces rather than hopes for:
+**The urls carry a concrete version, not `$version`.**
+Scoop expands that token only inside `autoupdate`, which is the block a bucket maintainer runs against a new release; a client reads `architecture.*.url` exactly as written.
+This file said the opposite from the day the manifest landed, and so did the manifest's own comment, so every `scoop install` asked GitHub for `/download/v$version/outl-windows-x64.zip` and got a 404.
+The package was uninstallable through 18 version bumps, reported twice before anyone could act on it ([#413](https://github.com/outlmd/outl/issues/413), [#498](https://github.com/outlmd/outl/issues/498)).
+Each concrete url is derived from its `autoupdate` template during the bump rather than written a second time, so the url shape has one owner.
+
+Three rules that the job enforces rather than hopes for:
 
 - **A manifest moves only when every asset it points at is on the release.**
   Both Windows zips, in this case.
@@ -61,6 +66,10 @@ Two rules that the job enforces rather than hopes for:
   The next release picks it up.
 - **The architectures here and the build matrix cannot drift.**
   `scripts/check-release-assets.py --manifest` (run by `hygiene.yml`) fails when an `architecture` block has no build leg behind it, or a Windows build leg has no block here.
+  It also fails when `autoupdate.architecture` and `architecture` serve different sets, because the bump derives one from the other.
+- **A url cannot go back to being a template.**
+  The same check fails on a literal `$version` in `architecture.*.url`, and on a url whose version disagrees with the manifest's own — that one installs one release and checks it against another's digest.
+  The asset-name check that was already here answers "yes" to a templated url, which is how #498 passed it on every run.
 
 ## Troubleshooting
 

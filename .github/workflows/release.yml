@@ -2122,16 +2122,28 @@ jobs:
         run: |
           set -euo pipefail
           # `jq`, not `sed`: the manifest is JSON, so there is a parser for
-          # it and no anchor comments are needed. The urls carry `$version`
-          # and Scoop substitutes it, so only the version and the two
-          # digests move.
+          # it and no anchor comments are needed.
+          #
+          # The urls move too. Scoop substitutes `$version` only inside
+          # `autoupdate` — that block is the one a bucket maintainer runs —
+          # so a client reads `architecture.*.url` verbatim and a literal
+          # token there 404s on every install (issue #498). Each concrete
+          # url is DERIVED from its `autoupdate` template rather than
+          # written again here, so the url shape keeps one owner instead of
+          # two copies that drift. `check-release-assets.py --manifest`
+          # pins that the two `architecture` key sets match, which is what
+          # makes the derivation total.
           B=bucket/outl-beta.json
           X64=$(awk '{print $1}' shas/outl-windows-x64.zip.sha256)
           ARM64=$(awk '{print $1}' shas/outl-windows-arm64.zip.sha256)
           jq --arg v "$VERSION" --arg x64 "$X64" --arg arm64 "$ARM64" \
             '.version = $v
              | .architecture["64bit"].hash = $x64
-             | .architecture["arm64"].hash = $arm64' \
+             | .architecture["arm64"].hash = $arm64
+             | .autoupdate.architecture as $tpl
+             | .architecture |= with_entries(
+                 .value.url = ($tpl[.key].url | sub("\\$version"; $v))
+               )' \
             "$B" > "$B.tmp"
           mv "$B.tmp" "$B"
           python3 -c "import json;json.load(open('$B'))"

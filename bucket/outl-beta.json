@@ -1,13 +1,18 @@
 {
   "##": [
     "Scoop manifest, maintained by .github/workflows/release.yml.",
-    "Every push to main runs the release workflow, which rewrites `version` and",
-    "both `architecture.*.hash` values with jq — structure is edited by hand,",
-    "digests are not. Zeroed hashes are the bootstrap placeholders the first",
-    "release after this file landed replaces.",
-    "`$version` in a url is substituted by Scoop itself, so the urls never",
-    "need bumping; `scripts/check-release-assets.py` holds the architecture",
-    "blocks against the release build matrix."
+    "Every push to main runs the release workflow, which rewrites `version`,",
+    "both `architecture.*.url` values and both `architecture.*.hash` values",
+    "with jq — structure is edited by hand, digests are not. Zeroed hashes",
+    "are the bootstrap placeholders the first release after this file landed",
+    "replaces.",
+    "`architecture.*.url` carries a CONCRETE version, derived by that job from",
+    "the matching `autoupdate` template. Scoop substitutes `$version` only",
+    "inside `autoupdate`, which is the block a bucket maintainer runs; an",
+    "install reads these urls verbatim, so a literal token here is a 404 for",
+    "every Windows user (issue #498). `scripts/check-release-assets.py` holds",
+    "these blocks against the release build matrix and fails on a `$version`",
+    "that got back in."
   ],
   "version": "0.13.0-beta.310",
   "description": "Local-first outliner with CRDT sync: TUI, CLI and MCP server (beta channel, rebuilt on every push to main)",
@@ -15,11 +20,11 @@
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-x64.zip",
+      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.310/outl-windows-x64.zip",
       "hash": "a67d2623a245461beded76827225129a5bb106397f495bf21a1c2530aff4ca3c"
     },
     "arm64": {
-      "url": "https://github.com/outlmd/outl/releases/download/v$version/outl-windows-arm64.zip",
+      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.310/outl-windows-arm64.zip",
       "hash": "cd43071931ecebfecff2074305aae8584cfe700abf8b518d619be934ffb0a0d2"
     }
   },

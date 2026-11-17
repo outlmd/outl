@@ -210,6 +210,36 @@ class ManifestMode(unittest.TestCase):
         )
         self.assertComplains("does not point at outl-windows-arm64.zip")
 
+    def test_a_scoop_url_left_templated(self):
+        """The shape that shipped: `$version` left in a top-level url. Scoop
+        substitutes it only inside `autoupdate`, so every `scoop install`
+        downloaded the token verbatim and 404'd (issue #498). The asset-name
+        check above answers yes to a templated url, which is why this needs
+        its own complaint rather than a tighter version of that one."""
+        self.scoop(
+            lambda p: p["architecture"]["64bit"].update(
+                url=p["autoupdate"]["architecture"]["64bit"]["url"]
+            )
+        )
+        self.assertComplains("carries a literal `$version`")
+
+    def test_a_scoop_url_on_a_different_version_than_the_manifest(self):
+        """A concrete url and a `version` that disagree: the install fetches
+        one release and checks it against the digest of another."""
+        self.scoop(
+            lambda p: p["architecture"]["64bit"].update(
+                url=p["architecture"]["64bit"]["url"].replace(p["version"], "0.0.1-beta.1")
+            )
+        )
+        self.assertComplains("does not carry the manifest's own `version`")
+
+    def test_a_scoop_autoupdate_architecture_dropped(self):
+        """`update_tap` derives each concrete url from its `autoupdate`
+        template, so an arch in one block and not the other is a jq failure
+        mid-bump."""
+        self.scoop(lambda p: p["autoupdate"]["architecture"].pop("arm64"))
+        self.assertComplains("has no url to build")
+
     def test_a_scoop_architecture_nothing_builds(self):
         self.scoop(
             lambda p: p["architecture"].update(

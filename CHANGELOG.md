@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Windows: `scoop install` could not install outl at all, on any release.**
+  The Scoop manifest's `architecture.*.url` carried a literal `$version`.
+  Scoop expands that token only inside `autoupdate` — the block a bucket maintainer runs against a new release — so a client downloaded the url exactly as written and GitHub answered `404` for `/download/v$version/outl-windows-x64.zip`.
+
+  It shipped that way with the manifest and stayed through 18 version bumps.
+  Two people reported it ([#413](https://github.com/outlmd/outl/issues/413), [#498](https://github.com/outlmd/outl/issues/498)) and nothing in CI could have caught it: the one check over these urls asked whether each names the right asset, which a templated url answers correctly.
+
+  The bump now writes the concrete version, **derived from the matching `autoupdate` template** rather than written a second time, so the url shape keeps one owner.
+  `check-release-assets.py --manifest` gained the three complaints that make this fail loudly instead of at install time: a literal `$version` in a top-level url, a url whose version disagrees with the manifest's own (that one fetches one release and checks it against another's digest), and an `autoupdate.architecture` key set that no longer matches `architecture` (which is what makes the derivation total).
+
+  **The manifest on `main` is already fixed**, so `scoop update outl-beta; scoop install outl/outl-beta` works now — it does not wait for the next release.
+
 - **Sync: one actor with a gap could stop a whole workspace converging, in one direction, silently.**
   A peer missing ops *below* its own watermark triggers a resend, and that resend used to cross whole.
   The reasoning: a budget cuts the oldest ops while the missing ones could be anywhere, so a blind cut might send a slice the peer already has and make no progress.
