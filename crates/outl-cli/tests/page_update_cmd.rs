@@ -96,7 +96,10 @@ fn update_title_trims_the_value_like_page_meta_reads_it() {
 fn update_with_a_blank_title_is_rejected_and_changes_nothing() {
     let ws = workspace_with_titled_page();
     for blank in ["", "   "] {
-        let env = run(&ws, &["page", "update", "alpha", "--title", blank, "--json"]);
+        let env = run(
+            &ws,
+            &["page", "update", "alpha", "--title", blank, "--json"],
+        );
         assert_eq!(env["ok"], false, "{env}");
         assert_eq!(env["error"]["code"], "INVALID_ARG", "{env}");
     }
