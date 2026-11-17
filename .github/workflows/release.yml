@@ -1951,6 +1951,24 @@ jobs:
           gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file body.md
           cat gap.md >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
+      # A release is the moment the people who use outl are paying attention,
+      # so the body ends with how to fund it. It runs after the gap note so it
+      # stays last, and the grep keeps a re-run of this job from stacking a
+      # second copy.
+      - name: Ask for sponsors in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > body.md
+          if grep -q 'github.com/sponsors/avelino' body.md; then
+            echo "::notice::sponsor footer already present"
+            exit 0
+          fi
+          printf '\n---\n\noutl is built by one person and funded by the people who use it. If it saves you time, [sponsor it](https://github.com/sponsors/avelino).\n' >> body.md
+          gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file body.md
+
       - name: Flip draft to published
         env:
           GH_TOKEN: ${{ github.token }}
