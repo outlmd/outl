@@ -1953,20 +1953,24 @@ jobs:
 
       # A release is the moment the people who use outl are paying attention,
       # so the body ends with how to fund it. It runs after the gap note so it
-      # stays last, and the grep keeps a re-run of this job from stacking a
-      # second copy.
+      # stays last. A retried job may have appended another gap note below an
+      # earlier footer, so any existing copy is removed and the footer is
+      # re-appended: exactly one, always at the end.
       - name: Ask for sponsors in the release notes
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          FOOTER: "outl is built by one person and funded by the people who use it. If it saves you time, [sponsor it](https://github.com/sponsors/avelino)."
         run: |
           set -euo pipefail
           gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > body.md
-          if grep -q 'github.com/sponsors/avelino' body.md; then
-            echo "::notice::sponsor footer already present"
-            exit 0
-          fi
-          printf '\n---\n\noutl is built by one person and funded by the people who use it. If it saves you time, [sponsor it](https://github.com/sponsors/avelino).\n' >> body.md
+          python3 - <<'PY'
+          import os, pathlib, re
+          footer = os.environ["FOOTER"]
+          path = pathlib.Path("body.md")
+          body = re.sub(r"\n*---\n+" + re.escape(footer) + r"\n*", "\n\n", path.read_text())
+          path.write_text(f"{body.rstrip()}\n\n---\n\n{footer}\n")
+          PY
           gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file body.md
 
       - name: Flip draft to published
