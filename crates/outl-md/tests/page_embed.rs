@@ -150,8 +150,5 @@ fn a_namespaced_page_embed_keeps_its_slashes() {
     assert_eq!(tokenize(&src), vec![InlineTok::PageEmbed { name }]);
     assert_eq!(inline_to_source(&tokenize(&src)), src);
     // And the fold is what the resolver's second rung looks up.
-    assert_eq!(
-        outl_md::slug::slugify(name),
-        "buser-team-people-beneficios"
-    );
+    assert_eq!(outl_md::slug::slugify(name), "buser-team-people-beneficios");
 }
