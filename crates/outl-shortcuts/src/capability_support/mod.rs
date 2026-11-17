@@ -372,6 +372,24 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
                  report something or support the project.",
             ),
         },
+        // All three expand `![[page]]`, with the four-level depth cap
+        // and the read-only projection they already share for
+        // `!((blk-…))`. The GUI clients resolve a name to the target
+        // page's blocks over `resolve_page_embeds`; the TUI resolves it
+        // against the workspace it already holds open.
+        //
+        // `Full` everywhere is why this row is easy to skip and
+        // exactly why it belongs here: the token is parsed in
+        // `outl-md`, so every client inherits *reading* `![[page]]`
+        // for free and nothing at all makes one render it. The
+        // difference would have shown up only on the page doing the
+        // embedding, as a line that reads like a link and was meant to
+        // be a page. Issue #190.
+        Capability::PageEmbed => ClientSupport {
+            tui: Full,
+            desktop: Full,
+            mobile: Full,
+        },
     }
 }
 
@@ -425,7 +443,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 23, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 24, "Capability::ALL changed size");
     }
 
     #[test]

@@ -31,6 +31,7 @@ fn round_trips_every_variant_into_serializable_form() {
             InlineToken::Tag { .. } => "tag",
             InlineToken::BlockRef { .. } => "blockref",
             InlineToken::Embed { .. } => "embed",
+            InlineToken::PageEmbed { .. } => "pageembed",
             InlineToken::Emoji { .. } => "emoji",
         })
         .collect();

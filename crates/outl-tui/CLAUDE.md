@@ -15,6 +15,9 @@ That's the spec; don't change it.
   Recorded as `Capability::NestedPages` → `Partial` in `outl_shortcuts::capability_support`, and the section header says so rather than leaving the user guessing.
 - Block references and embeds: `((blk-XXXXXX))` resolves to the source block's text + page icon.
   `!((blk-XXXXXX))` (when the block contains a single embed token) expands the source block **and its children** read-only below the carrying block.
+  `![[page]]` is the page-level twin ([#190](https://github.com/outlmd/outl/issues/190)).
+  Its chip shows the target page's `icon::` and `title::`; a block whose *whole* text is the token expands that page's **top-level blocks** read-only below it, under the same depth cap.
+  Recorded as `Capability::PageEmbed` → `Full` on the TUI column (`outl_shortcuts::capability_support` owns the row for every client).
   `Enter` on either form opens the source page and lands the cursor on the referenced block.
   The `y r` chord plus `/refer` and `/refer-embed` slash commands copy the current block's handle to the **OS clipboard** (via `arboard`) and stash it in `App::last_yanked_ref` for in-app paste;
   the `((` autocomplete fuzzy-matches block text in Insert.
@@ -256,17 +259,44 @@ TUI-specific contracts worth remembering:
   `[[ref]]` cyan-underlined (no brackets),
   `#tag` magenta-underlined,
   `((blk-XXXXXX))` resolves to the source block's text + page icon (orphan handles render dimmed),
+  `![[page]]` resolves to the target page's icon + `↳ ` + `title::` (an unknown name renders the literal `![[name]]` dimmed, like an orphan handle),
   `:shortcode:` renders as the unicode glyph (`:tada:` → 🎉; unknown shortcodes never tokenize so the literal stays visible).
 - The selected/editing block keeps `:` (dim) + shortcode (raw) + `:` (dim) so cursor columns match source bytes 1:1 — the pretty render is the only place the glyph appears.
-- `!((blk-XXXXXX))` — when a block contains a single embed token (whitespace OK around it) — expands the source block **and its children** read-only below the carrying block.
+- A block whose **whole** text is one embed token (whitespace OK around it) expands that embed read-only below itself.
+  Two spellings, one geometry.
+  `!((blk-XXXXXX))` expands the source block's **children**, `![[page]]` the target page's **top-level blocks** — in both cases the carrying row already holds the parent (the block's text, or the page's title) as its chip.
   Conventions:
   - Every embed row carries a `↳ ` prefix (root + descendants) so the expansion reads as one cohesive block.
   - Descendants get `2 * (depth + 1)` spaces of padding before `↳ ` so children align under the source root's *text*, not under its `↳ `.
   - Outer indent (`│ ` guides) matches the carrying block's outline depth.
   - Task checkboxes (`☐` TODO / `◐` DOING / `☑` DONE), page refs and tags render with their normal styling inside the expansion (via `render_pretty_block_text`).
-  - Recursion is capped at depth 4 to break embed cycles.
-  - Expansion runs in every render mode — but the carrying block's first row keeps the raw `!((…))` literal under the cursor so column-byte alignment holds.
-- The selected/editing block renders **raw** (delimiters visible, dimmed) so cursor columns map 1:1 to source bytes — including the literal `((blk-XXXXXX))` and `!((blk-XXXXXX))` forms.
+  - Recursion is capped at `EMBED_MAX_DEPTH` (4), shared by both spellings — never a second constant.
+  - Expansion runs in every render mode — but the carrying block's first row keeps the raw `!((…))` / `![[…]]` literal under the cursor so column-byte alignment holds.
+  - The expanded rows are **visual only**: they don't move the flat `cursor`, so `j` / `k` cross the whole expansion in one step.
+- The selected/editing block renders **raw** (delimiters visible, dimmed) so cursor columns map 1:1 to source bytes — including the literal `((blk-XXXXXX))`, `!((blk-XXXXXX))` and `![[page]]` forms.
+
+### `view::embed` owns borrowed content
+
+Three contracts, each of which was the alternative:
+
+- **`emit_block_embed` is the single entry point**, so `view::outline` contributes only the indent.
+  "Does this block borrow content, and what" is one question with two spellings, and two `if let`s at the call site makes their order load-bearing.
+  `the_two_bare_embed_predicates_never_both_answer` pins that it is not.
+- **The depth cap is the guard, and it stays sufficient because nothing recurses.**
+  An embed nested *inside* an expansion renders as the inline chip — the source block's text for `!((blk-X))`, the page's title for `![[page]]` — and is never expanded again.
+  So an `A → B → A` cycle, at the block level or the page level, never enters `emit_embedded_children`, which walks concrete `OutlineNode` data and re-resolves nothing.
+  Widening that is what would need a `visited` set, not a bigger cap.
+- **The page embed's two inline renders live here, not in `view::inline` beside their sibling arms.**
+  One module owns every shape borrowed content takes, and `inline.rs` sits at the file-size ratchet while this one does not.
+  The arms in `inline.rs` are thin delegations, pinned as wired by `the_pretty_render_shows_the_title_inside_prose` and `the_cursor_bearing_render_keeps_the_source_verbatim`.
+  The unit tests on `page_embed_chip` / `page_embed_raw` pass either way, which is why those two exist.
+
+`page_embed_roots` walks `WorkspaceIndex::block_at_location(slug, &[i])` from `0` until it misses, because the index exposes no ordered per-page list.
+It drops `properties`: the block index stores them **lowercased** for the query DSL's `prop:` filter, so handing them to a renderer would print a key the user never typed, and the expansion draws text and children only.
+
+**Recorded gap**: `Ctrl+T` on a bare `![[page]]` row prefixes `TODO ` onto the token.
+`toggle_todo` (`actions/block/metadata.rs`) routes a bare `!((blk-X))` row to the *source* block's state for exactly this reason, and a page embed has no single source block to route to.
+The ref survives (the chip still renders inside prose), but the row stops expanding — a surprise, not data loss.
 - A block whose text starts with the CommonMark `"> "` prefix renders with a left `│ ` bar (dimmed, `theme.dim`) and full body colour — the `│` is enough of a cue, dimming refs / tags / bold would erase their affordance.
   Same affordance as `TODO`/`DONE`.
   The chrome lives in **`view::inline::render_pretty_block_text_impl`** and is the **only owner** of the bar + checkbox + token rendering pipeline;

@@ -20,6 +20,12 @@ import type { BlockNode, InlineToken } from "../api/types";
 // prose, not a walk.
 export { lateSectionVisible, type LateSection } from "./late-section";
 
+// The `![[page]]` twins of `embedOnlyHandle` and
+// `collectBlockRefHandles` below — same rules, one level up (a page
+// instead of a block). Their own file to keep this one under the
+// size ratchet.
+export { collectPageEmbedNames, pageEmbedOnlyName } from "./page-embed";
+
 /**
  * Reconstruct the wire-format text of a block (TODO/DONE prefix
  * reattached). The API splits the TODO state out of `text` so the

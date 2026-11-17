@@ -38,65 +38,78 @@ function mount(nodes: BlockNode[], depth?: number) {
 }
 
 describe("EmbeddedSubtree", () => {
-  it("renders each child row with a `↳` prefix", () => {
-    const m = mount([node("a", "first"), node("b", "second")]);
-    expect(m.host.textContent).toContain("↳ first");
-    expect(m.host.textContent).toContain("↳ second");
-    m.dispose();
+  // These pin the *decisions*, not the glyph. The suite they replaced
+  // asserted a `↳` on every row, so swapping that arrow for anything
+  // else failed four tests while changing nothing a reader cares
+  // about — and the one property that actually matters (the region is
+  // marked once, as a region) was pinned by nothing.
+
+  it("renders every row's text", () => {
+    const { host, dispose } = mount([node("a", "first"), node("b", "second")]);
+    expect(host.textContent).toContain("first");
+    expect(host.textContent).toContain("second");
+    dispose();
   });
 
   it("renders nested children recursively", () => {
-    const m = mount([
-      node("a", "parent", { children: [node("a1", "child")] }),
+    const { host, dispose } = mount([
+      node("p", "parent", { children: [node("c", "child")] }),
     ]);
-    expect(m.host.textContent).toContain("↳ parent");
-    expect(m.host.textContent).toContain("↳ child");
-    m.dispose();
+    expect(host.textContent).toContain("parent");
+    expect(host.textContent).toContain("child");
+    dispose();
   });
 
-  it("prefixes the TODO/DONE marker", () => {
-    const m = mount([
-      node("a", "todo item", { todo: "TODO" }),
-      node("b", "done item", { todo: "DONE" }),
+  it("prefixes the task marker", () => {
+    const { host, dispose } = mount([
+      node("t", "todo item", { todo: "TODO" }),
+      node("d", "done item", { todo: "DONE" }),
     ]);
-    expect(m.host.textContent).toContain("↳ ☐ todo item");
-    expect(m.host.textContent).toContain("↳ ✓ done item");
-    m.dispose();
+    expect(host.textContent).toContain("☐ todo item");
+    expect(host.textContent).toContain("✓ done item");
+    dispose();
   });
 
-  it("stops recursing at depth 4 (embed cycle cap)", () => {
-    // depth 4 root; its child would be depth 5 and must be dropped.
-    const m = mount(
-      [node("deep", "deep-root", { children: [node("deeper", "deeper-child")] })],
-      4,
-    );
-    expect(m.host.textContent).toContain("↳ deep-root");
-    expect(m.host.textContent).not.toContain("deeper-child");
-    m.dispose();
+  it("stops recursing at depth 4, which is the whole cycle guard", () => {
+    // A page that embeds itself has no visited-set to stop it; the cap
+    // is the guard. One of three copies (TUI, backend, here).
+    let deep = node("leaf", "deep-leaf");
+    for (let i = 5; i >= 1; i--) deep = node(`d${i}`, `d${i}`, { children: [deep] });
+    const { host, dispose } = mount([deep]);
+    expect(host.textContent).toContain("d1");
+    expect(host.textContent).not.toContain("deep-leaf");
+    dispose();
   });
 
-  it("renders four nesting levels before cutting off", () => {
-    const tree = [
-      node("l1", "level-1", {
-        children: [
-          node("l2", "level-2", {
-            children: [
-              node("l3", "level-3", {
-                children: [
-                  node("l4", "level-4", {
-                    children: [node("l5", "level-5")],
-                  }),
-                ],
-              }),
-            ],
-          }),
-        ],
-      }),
-    ];
-    const m = mount(tree);
-    expect(m.host.textContent).toContain("↳ level-1");
-    expect(m.host.textContent).toContain("↳ level-4");
-    expect(m.host.textContent).not.toContain("level-5");
-    m.dispose();
+  it("draws the source rail once, around the whole region", () => {
+    // The fact a reader cannot infer is "this came from another page",
+    // and it is true of the region, not of any one row. One rail says
+    // it once; the thirteen arrows this replaced said "nested" thirteen
+    // times and never said this at all.
+    const { host, dispose } = mount([
+      node("p", "parent", { children: [node("c", "child")] }),
+    ]);
+    expect(host.querySelectorAll("[class*='border-l-']").length).toBe(1);
+    dispose();
+  });
+
+  it("does not redraw the rail on a nested call", () => {
+    // A nested render is already inside the rail. A second line per
+    // level would redraw the page's own indent guides in a colour that
+    // means something else.
+    const { host, dispose } = mount([node("c", "child")], 2);
+    expect(host.querySelectorAll("[class*='border-l-']").length).toBe(0);
+    dispose();
+  });
+
+  it("steps each level by the outline's own 22px", () => {
+    // `DESIGN.md` → "Outline indentation — 22px per level". This used
+    // to step at 16px (`1rem`), so transcluded rows drifted out of
+    // phase with the page around them the deeper they went.
+    const { host, dispose } = mount([
+      node("p", "parent", { children: [node("c", "child")] }),
+    ]);
+    expect(host.innerHTML).toContain("padding-left: 22px");
+    dispose();
   });
 });

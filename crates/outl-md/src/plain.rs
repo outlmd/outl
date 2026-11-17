@@ -47,7 +47,7 @@ fn push_plain(tokens: &[InlineTok<'_>], out: &mut String) {
     for tok in tokens {
         match tok {
             InlineTok::Plain(s) => out.push_str(s),
-            InlineTok::PageRef { name } => out.push_str(name),
+            InlineTok::PageRef { name } | InlineTok::PageEmbed { name } => out.push_str(name),
             InlineTok::Tag { name } => out.push_str(name),
             InlineTok::Code { inner } => out.push_str(inner),
             InlineTok::Link { text, .. } => out.push_str(text),

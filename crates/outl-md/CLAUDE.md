@@ -5,7 +5,7 @@ The boundary between **what the user sees** (clean markdown) and **what the core
 If this crate misroutes a block during matching, the user perceives "outl deleted my work" — even if the op log still has it.
 Treat matching with the same paranoia as the CRDT.
 
-> The **canonical reuse index** for the whole workspace is the [Shared primitives catalog](../../docs/shared-primitives.md) — index plus three parts ([core](../../docs/primitives-core.md), [markdown](../../docs/primitives-markdown.md), [actions](../../docs/primitives-actions.md)), mirrored in condensed form at [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md) §5.1.
+> The **canonical reuse index** for the whole workspace is the [Shared primitives catalog](../../docs/shared-primitives.md) — index plus three parts ([core](../../docs/primitives-core.md), [markdown](../../docs/primitives-markdown.md), [actions](../../docs/primitives-actions.md)), mirrored in condensed form at [`.github/instructions/shared-primitives.instructions.md`](../../.github/instructions/shared-primitives.instructions.md).
 > This crate's rows live mostly in the [markdown pipeline](../../docs/primitives-markdown.md) part.
 > The detailed list below describes this crate's responsibilities; the catalog is the "intent → use this" cross-crate index you should grep first when adding any helper.
 
@@ -77,16 +77,21 @@ Treat matching with the same paranoia as the CRDT.
   `is_valid_shortcode_char(c)` is the char-level alphabet check — exported so consumers walking buffers char-by-char (`try_emoji`, TUI's `detect_trigger`) avoid allocating a 1-char `String` per keystroke.
   The parser only tokenizes `:foo:` when `shortcode_to_unicode` finds `foo`, so unknown input (`:notarealemoji:`, `meeting at 14:00`) stays plain.
   **Never retro-translate `glyph → shortcode`** — multiple shortcodes can alias the same codepoint (`:+1:` and `:thumbsup:` both → 👍) so the disk form would become lossy.
-- **Inline tokenization** (`inline.rs` + its sibling slices) — `**bold**`, `~~strike~~`, `==highlight==`, `[[refs]]`, `#tags`, `((blk-XXXXXX))`, `!((blk-XXXXXX))`, `![alt](url)`, `:shortcode:`.
+- **Inline tokenization** (`inline.rs` + its sibling slices) — `**bold**`, `~~strike~~`, `==highlight==`, `[[refs]]`, `#tags`, `((blk-XXXXXX))`, `!((blk-XXXXXX))`, `![[page]]`, `![alt](url)`, `:shortcode:`.
   `inline.rs` owns the scan (`tokenize` / `tokenize_owned`), the `match_one` precedence table, and `inline_to_source` (the inverse that re-emits the source).
-  One matcher family per sibling module: `emphasis.rs` (delimiter pairs), `reference.rs` (`[[name]]`, `((blk-…))`, `!((blk-…))`, `#tag`, `is_valid_block_handle`), `link.rs` (`[text](url)`, `![alt](url)`), `shortcode.rs` (`:emoji:`).
+  One matcher family per sibling module: `emphasis.rs` (delimiter pairs), `reference.rs` (`[[name]]`, `((blk-…))`, `!((blk-…))`, `![[page]]`, `#tag`, `is_valid_block_handle`), `link.rs` (`[text](url)`, `![alt](url)`), `shortcode.rs` (`:emoji:`).
   The token vocabulary lives in `token.rs` and prose flattening (`plain_text`) in `plain.rs`.
   All of them are private modules re-exported through `inline`, so every `outl_md::inline::…` path stays stable.
   `==highlight==` (Roam's `^^highlight^^` on import) rejects a space adjacent to either marker so a spaced `==` operator stays plain — unlike `~~strike~~`.
   `![alt](url)` (`InlineTok::Image` / owned `InlineToken::Image { alt, href }`) is the image / embedded-asset token.
   `try_image` runs right after `try_embed` in `match_one` so the leading `!` is never stranded before `try_md_link` claims the bare `[`.
-  Alt may be empty (`![](url)`); the url must be non-empty; `![[…]]` (Obsidian wiki-embed) does not match and is left to `wikilink::convert_image_links`.
+  Alt may be empty (`![](url)`); the url must be non-empty; `![[…]]` does not match it.
   Clients decide `<img>` vs file chip by inspecting the url extension (`wikilink::is_image_target`).
+  `![[page]]` (`InlineTok::PageEmbed` / owned `InlineToken::PageEmbed { value }`, serde `"pageembed"`) is the **page embed** — the page-level twin of `!((blk-…))`, issue #190.
+  `try_page_embed` sits ahead of both other `!` openers in `match_one`, being the most specific of the three, and ahead of `try_md_link` for the same reason `try_image` is: otherwise the `!` is stranded and the `[[name]]` behind it reads as a plain ref, silently demoting every embed to a link.
+  It is a page **reference**, not an inert token — it produces a backlink (`outl_actions::mentions`) and a rename respells it (`outl_actions::link_rewrite`), so the two deliberately-exhaustive `match`es there both name it.
+  **An image target is refused**: `![[photo.png]]` stays `Plain("!")` + `PageRef`, because `wikilink::convert_image_links` already owns that spelling on the way in from a vault, and one spelling with two owners silently resolves to whichever runs second.
+  The refusal also means this matcher only ever claims input that previously meant nothing.
 - **Cursor introspection** (`cursor.rs`) — "what token sits under the caret?", re-exported through `inline` so `outl_md::inline::{…}` paths still resolve.
   `ref_at_cursor` resolves to a navigable `RefTarget::{Page, Journal, Tag, Block}`;
   `link_at_cursor` resolves a markdown link `[text](url)` under the caret (anchor OR url) and returns its URL — the building block for a client that opens links externally (the TUI's `g x`, issue #183);
@@ -295,6 +300,7 @@ tags:: #project
   - child block with [[page reference]]
   - child block with ((blk-r6s4a1))
   - expanded inline: !((blk-r6s4a1))
+  - the whole of another page: ![[projects]]
 - another top level
 ```
 
@@ -306,6 +312,7 @@ tags:: #project
 - `#tag` = tag (page reference with classification semantics).
 - `((blk-XXXXXX))` = inline block reference (renders as the source block's text).
 - `!((blk-XXXXXX))` = block embed (renders source block expanded with subtree).
+- `![[page]]` = page embed (renders the whole target page's outline expanded).
 - `{{query: ...}}` = inline query token (legacy; parsed as opaque text; the ` ```query ` code block is the supported path — see `docs/query.md`).
 
 **No `id::`, no UUID, no HTML comments** — IDs go in the sidecar only.
@@ -441,7 +448,7 @@ Normalise either and the file still passes while pinning nothing.
    The second answers a question about the *sidecar* ("can these blocks say what the log held"); the first answers the one about the *file* ("is anything here at risk").
    They come apart for every page whose blocks are all empty: a pre-0.11 sidecar and a page nobody has written in yet have the same shape, and refusing the second froze it ([issue #332](https://github.com/outlmd/outl/issues/332)).
    Pinned by `tests/multiline_block_roundtrip.rs` (`the_hash_is_still_advanced_for_every_shape_a_real_workspace_holds` and siblings).
-   The bulk-delete half has the same shape: `reconcile_md_with_guard` refuses the whole pass (`ReconcileError::BulkDelete`) instead of trashing an oversized orphan list — see "Second hard rule" under the matching algorithm.
+   The bulk-delete half has the same shape: `reconcile_md_with_guard` refuses the whole pass (`ReconcileError::BulkDelete`) instead of trashing an oversized orphan list — see **Second hard rule** under [`docs/markdown-format.md` → 3-level matching](../../docs/markdown-format.md#3-level-matching).
 
    **A block list cannot answer for the frontmatter fence**: it rides `Op::SetProp`, so `content_lines_missing_from` skips the region and `frontmatter_lines_missing_from` asks the render instead, with `last_synced_hash` as the witness that the log held the disk fence (a fence edited on disk since then is a loss, a peer's edit is not).
    Two channels, neither interchangeable; pinned by `tests/frontmatter_roundtrip.rs`.

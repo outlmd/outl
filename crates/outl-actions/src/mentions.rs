@@ -49,10 +49,18 @@ pub(crate) fn extract_refs_and_tags(text: &str) -> (Vec<String>, Vec<String>) {
 /// flat `filter(PageRef)` drops 403 references on that workspace.
 /// `Code` being opaque is the whole point; `Link` / `Image` carry raw
 /// `&str`, and a `[[ref]]` inside a URL is not clickable.
+///
+/// `PageEmbed` (`![[name]]`) is a ref, not a wrapper: it names a page
+/// the same way `[[name]]` does and only differs in how a client draws
+/// the target. Reading it as inert would mean the one place a user
+/// transcludes a page is the one place that page gets no backlink —
+/// which is the state issue #190 was opened about.
 fn collect(toks: &[InlineTok<'_>], refs: &mut Vec<String>, tags: &mut Vec<String>) {
     for tok in toks {
         match tok {
-            InlineTok::PageRef { name } => refs.push((*name).to_string()),
+            InlineTok::PageRef { name } | InlineTok::PageEmbed { name } => {
+                refs.push((*name).to_string())
+            }
             InlineTok::Tag { name } => tags.push((*name).to_string()),
             InlineTok::Bold { inner }
             | InlineTok::Italic { inner, .. }

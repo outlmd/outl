@@ -45,6 +45,14 @@ export type InlineToken =
   | { kind: "tag"; value: string }
   | { kind: "blockref"; value: string }
   | { kind: "embed"; value: string }
+  // `![[page]]` page embed — the page-level twin of `embed`. `value` is
+  // the page name as written inside the brackets, so it is also what
+  // `resolvePageEmbeds` keys its reply by. The renderer shows the
+  // resolved page's title (and a client expands its top-level blocks
+  // beneath a block that is nothing but this token); an unresolved name
+  // stays visible as the literal `![[name]]`, never blank. Mirrors
+  // `outl_md::InlineToken::PageEmbed`.
+  | { kind: "pageembed"; value: string }
   // `:shortcode:` — GitHub gemoji shortcode. `shortcode` is the disk
   // form (`"tada"`); `glyph` is the resolved unicode codepoint
   // (`"🎉"`). The renderer shows the glyph and surfaces the shortcode

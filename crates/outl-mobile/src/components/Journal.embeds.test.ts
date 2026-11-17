@@ -34,7 +34,10 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
-const commands = vi.hoisted(() => ({ resolveEmbeds: vi.fn() }));
+const commands = vi.hoisted(() => ({
+  resolveEmbeds: vi.fn(),
+  resolvePageEmbeds: vi.fn(),
+}));
 vi.mock("@outl/shared/api/commands", () => commands);
 
 /**
@@ -66,10 +69,17 @@ function withRef(id: string, handle: string): BlockNode {
   ]);
 }
 
+/** A block whose whole text is a `![[page]]` embed. */
+function withPageEmbed(id: string, name: string): BlockNode {
+  return node(id, [{ kind: "pageembed", value: name }]);
+}
+
 describe("createEmbedResolver", () => {
   beforeEach(() => {
     commands.resolveEmbeds.mockReset();
     commands.resolveEmbeds.mockResolvedValue({});
+    commands.resolvePageEmbeds.mockReset();
+    commands.resolvePageEmbeds.mockResolvedValue({});
   });
 
   function resolver(slug = "notes") {
@@ -79,6 +89,7 @@ describe("createEmbedResolver", () => {
       r,
       /** What the resolver is currently publishing to `<BlockRow />`. */
       embeds: () => r.embeds(),
+      pageEmbeds: () => r.pageEmbeds(),
       navigate(next: string) {
         current = next;
       },
@@ -192,5 +203,40 @@ describe("createEmbedResolver", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(embeds()).toEqual({});
+  });
+  it("resolves the `![[page]]` names the outline carries", () => {
+    const { r } = resolver();
+    r.resolve([withPageEmbed("b1", "Projeto X")]);
+    expect(commands.resolvePageEmbeds).toHaveBeenCalledWith(["Projeto X"]);
+  });
+
+  it("asks nothing about page embeds on a page that has none", () => {
+    const { r, pageEmbeds } = resolver();
+    r.resolve([withRef("b1", "blk-aaaaaa")]);
+    expect(commands.resolvePageEmbeds).not.toHaveBeenCalled();
+    expect(pageEmbeds()).toEqual({});
+  });
+
+  it("keeps the two kinds' skip keys apart", () => {
+    // The failure this pins: one shared key (or one shared generation
+    // counter) lets a newly typed `((blk-…))` cancel the page-embed
+    // answer that is already in flight, and because the key is recorded
+    // before the fetch, nothing re-asks — the page embed renders as its
+    // literal `![[name]]` until the user navigates away. #16, one level
+    // up.
+    const { r } = resolver();
+    r.resolve([withPageEmbed("b1", "Projeto X")]);
+    r.resolve([withPageEmbed("b1", "Projeto X"), withRef("b2", "blk-aaaaaa")]);
+    expect(commands.resolvePageEmbeds).toHaveBeenCalledTimes(1);
+    expect(commands.resolveEmbeds).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves page embeds again on a navigation to an identical page", () => {
+    const { r, navigate } = resolver();
+    const outline = [withPageEmbed("b1", "Projeto X")];
+    r.resolve(outline);
+    navigate("other");
+    r.resolve(outline);
+    expect(commands.resolvePageEmbeds).toHaveBeenCalledTimes(2);
   });
 });

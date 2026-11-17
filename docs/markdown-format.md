@@ -394,6 +394,7 @@ Full syntax, defaults, quiet hours, and which clients deliver: [Reminders](remin
 | `#a/b/c`, `[[a/b/c]]` | Nested tag / page — `a/b/c` lives in the `a/b` namespace, which lives in `a`. Any depth. See [Nested tags and page namespaces](#nested-tags-and-page-namespaces) |
 | `((blk-XXXXXX))` | Block reference — renders as the source block's text, links to it |
 | `!((blk-XXXXXX))` | Block embed — renders the source block expanded with its subtree |
+| `![[name]]` | Page embed — renders the whole page "name" expanded read-only, and counts as a reference to it. See [Page embeds](#page-embeds-page) |
 | `![alt](url)` | Image / embedded asset — renders inline (`<img>` on desktop/mobile, a `🖼`/`📄` placeholder in the TUI); `url` is a workspace-relative `assets/<hash>.<ext>` path or a remote URL. See [Asset links](#asset-links-nameassetshashext) |
 | `:shortcode:` | GitHub gemoji shortcode — renders as the unicode glyph (`:tada:` → 🎉) |
 | `{{query: ...}}` | Inline query token (legacy — parsed as opaque; use ` ```query ` code blocks instead, see [Query code blocks](#query-code-blocks) below) |
@@ -461,6 +462,40 @@ When two blocks do land on the same base handle, the second block's handle is la
 Both the winner and the loser stay resolvable through their own (distinct) handles.
 The on-disk sidecar still records the deterministic 6-char handle — the divergence lives in memory until a future reconcile rewrites it.
 Workspaces that ever expanded a handle to 7+ characters keep working forever because lookup goes through the in-memory handle, not the literal sidecar field.
+
+#### Page embeds (`![[page]]`)
+
+`![[name]]` embeds a whole page.
+The name resolves the same way `[[name]]` does, and the target page's outline is expanded read-only under the block carrying the token.
+
+```
+- the plan as it stands: ![[2026-q1-roadmap]]
+- onboarding, verbatim: ![[team/onboarding]]
+```
+
+Four levels deep, the same cap a block embed uses, and for the same reason: the cap is the guard, not a cycle detector.
+A page that embeds a page that embeds the first one stops at level four instead of recursing.
+
+**It is a page reference.**
+`![[name]]` surfaces in the target page's backlinks like any `[[name]]`, and renaming the page respells the token in place.
+Nothing is copied: the `.md` keeps the literal `![[name]]`, and the embedded text lives only in the page it was written on (invariant #2).
+
+**An image target is left alone.**
+`![[photo.png]]` is not a page embed.
+It stays what it is today, a literal `!` followed by the page reference `[[photo.png]]`.
+That spelling already has an owner: `wikilink::convert_image_links` turns an Obsidian vault's `![[image.png]]` into `![image.png](assets/…)` on import.
+One syntax with two owners resolves differently depending on which code path reached it first.
+A file embed is an [asset link](#asset-links-nameassetshashext).
+
+What it is not:
+
+- **Not editable through the embed.**
+  The expansion is a read-out on every client; type on the source page.
+- **Not a way to embed part of a page.**
+  `![[name]]` always starts at the page root.
+  For a section, embed its block instead: `!((blk-XXXXXX))`.
+
+Per-client coverage: `PageEmbed` in [client-parity.md](client-parity.md#capability-parity).
 
 #### Asset links (`[name](assets/<hash>.<ext>)`)
 
@@ -934,6 +969,8 @@ This section is only the **syntax-translation table**; for how paste works as a 
 | `- [/] foo` | `- DOING foo` | Logseq / Obsidian tasks |
 | `- [x] foo` / `- [X] foo` | `- DONE foo` | GitHub / CommonMark |
 | `{{embed: ((blk-XXXXXX))}}` | `!((blk-XXXXXX))` | Roam |
+| `{{[[embed]]: [[Page]]}}` / `{{embed: [[Page]]}}` | `![[Page]]` | Roam |
+| `{{embed [[Page]]}}` | `![[Page]]` | Logseq |
 | `{{[[query]]: foo}}` | `{{query: foo}}` | Roam |
 | `^^highlight^^` | `==highlight==` | Roam |
 | `{{video: url}}` and other unknown `{{…}}` | (stripped) | various |

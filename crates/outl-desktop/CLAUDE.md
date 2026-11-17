@@ -74,6 +74,14 @@ The siblings are in the [layout tree](../../docs/development.md#desktop-crate-la
 `outline-structure.ts` (`createStructureOps`) re-selects and re-edits a block on itself after `indent_block` / `outdent_block`; see "Block-editor chords" below ([#477](https://github.com/outlmd/outl/issues/477)).
 Five of those boundaries rest on a rule, not a preference.
 `BlockBody.tsx`'s read-mode branches are flat and mutually exclusive because a table has no cell editor and a fence has no fence editor, by design ([#329](https://github.com/outlmd/outl/issues/329)).
+It is also where a transclusion expands: a block whose whole text is `!((blk-X))` (`embedOnlyHandle`) or `![[page]]` (`pageEmbedOnlyName`) appends the borrowed rows *below* its own content, through the shared read-only `<EmbeddedSubtree />`.
+**Both expansions draw nothing until their resolve answers with rows, and that is not an optimisation.**
+The resolve lands a round-trip after the first paint, in a block the user may be typing in.
+A placeholder that reserves vertical space and then releases it moves every row below the caret — so this is `lateSectionVisible`'s rule ("a first load draws nothing") reduced to `count > 0`, an embed having no empty state worth keeping.
+The maps come from `appState.embeds` / `appState.pageEmbeds`, both filled by `<OutlineView />`'s `resolveTransclusions` (one skip key per kind, so a newly typed `[[ref]]` does not invalidate the page-embed answer).
+**Each is read through an accessor, never a `const` in the component body.**
+A body runs once and is not a tracking scope, so `const x = appState.embeds[h]` captures what the map held at mount.
+The resolve lands a round-trip after the page is on screen and `setOutline` reconciles on id, so the expansion showed up only when the map happened to be warm already.
 `BlockEditor.tsx` is mounted only while editing, which is why focus and pending caret intent are `onMount` and not an effect on an `editing` flag.
 `block-suggest.ts` is one module because **only one popup is ever open at a time** is the invariant all of it rests on; detection and span replacement stay in `@outl/shared/autocomplete`.
 `CodeFenceView.tsx`'s `RichFenceFrame` iframe is sandboxed `allow-scripts`, never `allow-same-origin`.

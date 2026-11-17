@@ -98,8 +98,8 @@ use crate::commands::{
 use crate::commands::{
     device_activity, drain_capture_inbox, export_markdown, journal_days_with_content,
     list_action_support, list_insert_commands, list_open_tasks, list_shortcut_bindings, list_trash,
-    merged_edits, page_timeline, resolve_embeds, resolve_insert_command, restore_trash_entry,
-    run_auto_run_blocks, run_code_block, undo_merged_edit,
+    merged_edits, page_timeline, resolve_embeds, resolve_insert_command, resolve_page_embeds,
+    restore_trash_entry, run_auto_run_blocks, run_code_block, undo_merged_edit,
 };
 use crate::plugin_service::spawn_plugin_service;
 use crate::state::AppState;
@@ -567,6 +567,7 @@ pub fn run() {
             run_code_block,
             run_auto_run_blocks,
             resolve_embeds,
+            resolve_page_embeds,
             // Legacy
             list_outline,
             add_block,

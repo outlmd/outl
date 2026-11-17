@@ -42,9 +42,14 @@ pub struct ImportReport {
     pub refs_unresolved: usize,
     /// `{{embed}}` of a block resolved to `!((blk-XXXXXX))`.
     pub embeds_resolved: usize,
-    /// `{{embed}}` of a whole page — degraded to `[[Page]]` until
-    /// page embeds land (issue #190).
-    pub embeds_page_fallback: usize,
+    /// `{{embed}}` of a whole page translated to `![[Page]]`, outl's own
+    /// page embed (issue #190).
+    ///
+    /// Not a loss counter. It used to be (`embeds_page_fallback`, a
+    /// `[[Page]]` link plus a per-occurrence warning) because outl had no
+    /// page embed to translate into; it has one now, so the construct
+    /// survives and this only says how many arrived.
+    pub embeds_page: usize,
     /// `#[[Multi Word]]` tags rewritten to `[[Multi Word]]` page refs.
     pub tags_multiword_to_page_ref: usize,
     /// Source task-state counts (`TODO`, `DONE`, Logseq's `DOING`, …).

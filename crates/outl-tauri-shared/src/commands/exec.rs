@@ -27,7 +27,7 @@
 //! that cannot even deliver the keystroke.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use outl_actions::{
@@ -303,6 +303,124 @@ pub async fn resolve_embeds<S: AppHost>(
         Ok(result)
     })
     .await
+}
+
+/// Wire reply for `resolve_page_embeds` — the page-level twin of
+/// [`EmbedContent`], for the `![[page]]` token (issue #190).
+#[derive(Debug, Clone, Serialize)]
+pub struct PageEmbedContent {
+    /// Slug the name resolved to.
+    pub slug: String,
+    /// The page's display title (its `title::`, or the slug when unset).
+    pub title: String,
+    /// The page's top-level blocks, projected with inline tokens and
+    /// capped at `EMBED_SUBTREE_MAX_DEPTH` — the same projection and
+    /// the same cap as [`EmbedContent::children`], so an embed renders
+    /// what the source page renders. Ids are transient (see
+    /// [`outl_actions::project_parsed_subtree`]): the expansion is a
+    /// read-only view re-resolved on navigation, never a mutation
+    /// target.
+    pub blocks: Vec<outl_actions::OutlineNode>,
+}
+
+/// Batch-resolve `![[page]]` names to their target page's title and
+/// top-level blocks.
+///
+/// Async for [`resolve_embeds`]'s reasons, which are the same ones: it
+/// builds a `WorkspaceIndex` from disk, parsing every `.md` + sidecar in
+/// the workspace, and a client fires it on every navigation
+/// ([`crate::offload`]). It takes no workspace lock either — the index
+/// and the page both come straight off the projection.
+///
+/// **Keyed by the name as written in the token**, not by slug: the
+/// renderer holds `token.value`, the same way it holds the handle for
+/// [`resolve_embeds`]. A name that resolves to no page is omitted,
+/// exactly like an unresolvable block handle, and the client falls back
+/// to showing the raw token.
+pub async fn resolve_page_embeds<S: AppHost>(
+    state: &S,
+    names: Vec<String>,
+) -> Result<HashMap<String, PageEmbedContent>, String> {
+    let root = state.storage_root()?;
+    offload::run("resolve_page_embeds", move || {
+        let index = outl_md::index::WorkspaceIndex::build(&root);
+        let mut result = HashMap::new();
+        for name in &names {
+            let Some(entry) = page_for_name(&index, name) else {
+                continue;
+            };
+            let Some(blocks) = page_top_level_blocks(&entry.path) else {
+                continue;
+            };
+            result.insert(
+                name.clone(),
+                PageEmbedContent {
+                    slug: entry.slug.clone(),
+                    title: entry.title.clone(),
+                    blocks,
+                },
+            );
+        }
+        Ok(result)
+    })
+    .await
+}
+
+/// Resolve a `![[name]]` target to an indexed page — read-only, and
+/// never creating one.
+///
+/// The ladder is `outl_actions::resolve::resolve_or_create_by_name`'s,
+/// minus its last rung: a name with no page behind it is left out of the
+/// reply, because rendering a block must never write to the op log.
+///
+/// 1. literal slug, for a name the user already typed as one;
+/// 2. `slugify(name)`, which is what `[[Ideas]]` and `[[os/linux]]`
+///    land on — the slug is lowercased and `/`-folded;
+/// 3. `title::`, then `alias::`. [`outl_md::index::WorkspaceIndex::by_title`]
+///    owns that precedence (a page titled `NYC` keeps `![[NYC]]` from a
+///    page merely aliased `NYC`), which is why this asks it instead of
+///    scanning the page list.
+///
+/// The one case the by-name ladder reaches and this does not is a
+/// case-differing name on a page whose slug no longer derives from its
+/// title; that costs a `list_all` over every page's text there, and the
+/// embed shows its raw token here rather than paying it on every
+/// navigation.
+fn page_for_name<'a>(
+    index: &'a outl_md::index::WorkspaceIndex,
+    name: &str,
+) -> Option<&'a outl_md::index::PageEntry> {
+    if let Some(entry) = index.by_slug(name) {
+        return Some(entry);
+    }
+    let slug = outl_md::slug::slugify(name);
+    if slug != name {
+        if let Some(entry) = index.by_slug(&slug) {
+            return Some(entry);
+        }
+    }
+    index.by_title(name)
+}
+
+/// The page's top-level blocks, read off its `.md` and projected with
+/// inline tokens.
+///
+/// A second read of one file the index already parsed, which is the
+/// cheap half of the trade: the index keeps page *metadata*, so the
+/// alternative is reconstructing an AST out of its block entries, whose
+/// properties are case-folded for the query DSL and whose population
+/// path skips a block whose sidecar hash went stale.
+///
+/// `None` for a file that cannot be read — the page is then omitted from
+/// the reply, same as an unresolvable name. Nothing here writes, so
+/// "cannot show it right now" is the honest answer; an empty outline
+/// would claim the page is empty.
+fn page_top_level_blocks(md_path: &Path) -> Option<Vec<outl_actions::OutlineNode>> {
+    let text = std::fs::read_to_string(md_path).ok()?;
+    let parsed = outl_md::parse::parse(&text);
+    let mut blocks = outl_actions::project_parsed_subtree(&parsed.blocks);
+    truncate_children_depth(&mut blocks, EMBED_SUBTREE_MAX_DEPTH);
+    Some(blocks)
 }
 
 /// Drop subtree levels the client won't render (beyond

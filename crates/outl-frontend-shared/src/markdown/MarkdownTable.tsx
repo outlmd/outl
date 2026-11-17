@@ -3,6 +3,7 @@ import { For, JSX } from "solid-js";
 import type { ColumnAlign, TableView } from "../api/table";
 import type { InlineToken } from "../api/types";
 import { MarkdownInline, type EmbedMap } from "./MarkdownInline";
+import type { PageEmbedMap } from "./PageEmbed";
 
 /**
  * Render a block whose whole text is a markdown table as an HTML
@@ -39,6 +40,9 @@ export interface MarkdownTableProps {
   onTagClick?: (tag: string) => void;
   onLinkClick?: (href: string) => void;
   embeds?: EmbedMap;
+  /** Twin of {@link embeds} for `![[page]]` cells — a cell renders the
+   *  resolved page's title, never an expansion (a grid is a grid). */
+  pageEmbeds?: PageEmbedMap;
   /**
    * Called when the user taps the grid, so the host can drop into its
    * raw-markdown editor — the same gesture that starts editing a prose
@@ -79,6 +83,7 @@ export function MarkdownTable(props: MarkdownTableProps): JSX.Element {
       onTagClick={props.onTagClick}
       onLinkClick={props.onLinkClick}
       embeds={props.embeds}
+      pageEmbeds={props.pageEmbeds}
     />
   );
 

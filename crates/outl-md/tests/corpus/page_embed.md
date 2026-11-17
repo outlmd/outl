@@ -1,0 +1,8 @@
+- ![[projects]]
+- context before ![[weekly review]] and after
+- ![[2026-11-17]]
+  - a child under an embed block
+- ![[photo.png]] stays an image target, not an embed
+- ![[notes]] next to [[notes]] and !((blk-r6s4a1))
+- **![[projects]]** inside emphasis
+- ![[]] and ![[unclosed are prose

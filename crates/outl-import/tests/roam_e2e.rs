@@ -50,6 +50,43 @@ fn remote_image_without_download_keeps_original_link() {
     assert_eq!(report.assets_missing, 0);
 }
 
+/// Roam's `{{[[embed]]: [[Page]]}}` is a whole-page transclusion, and so
+/// is `{{embed: [[Page]]}}`. Both have a real outl form now (issue #190),
+/// so neither may arrive as the bare `[[Page]]` link they used to degrade
+/// to — a link renders one line where the user wrote a page.
+///
+/// `![[…]]` has to be on disk literally: a page embed is expanded at
+/// render time, never projected into the embedding page's `.md` (root
+/// `CLAUDE.md` invariant 2).
+#[test]
+fn page_embeds_import_as_page_embeds() {
+    let json = r#"[
+        {
+            "title": "Hub",
+            "children": [
+                {"string": "roam form: {{[[embed]]: [[Other Page]]}}", "uid": "h1", "children": []},
+                {"string": "short form: {{embed: [[buser/team]]}}", "uid": "h2", "children": []}
+            ]
+        },
+        {"title": "Other Page", "children": [{"string": "body", "uid": "o1", "children": []}]},
+        {"title": "buser/team", "children": [{"string": "roster", "uid": "b1", "children": []}]}
+    ]"#;
+    let src_dir = tempfile::tempdir().expect("src tempdir");
+    let src = src_dir.path().join("backup.json");
+    fs::write(&src, json).expect("write fixture");
+
+    let (ws, report) = import_with_opts(&RoamAdapter, &src, &ImportOptions::default());
+
+    let hub = read(&ws.root.join("pages/hub.md"));
+    assert!(hub.contains("roam form: ![[Other Page]]"), "{hub}");
+    assert!(hub.contains("short form: ![[buser/team]]"), "{hub}");
+    assert_eq!(report.embeds_page, 2, "{hub}");
+    // The target page's text is never inlined — the `.md` carries the
+    // embed and nothing else (invariant 2).
+    assert!(!hub.contains("body"), "{hub}");
+    assert!(!hub.contains("roster"), "{hub}");
+}
+
 #[test]
 fn refs_and_embeds_resolve_to_real_handles() {
     let (ws, report) = import_fixture(FIXTURE);
@@ -468,7 +505,7 @@ fn bullet_lines_and_cross_block_fences_keep_the_page_mappable() {
 
     let refs = read(&ws.root.join("pages/refs.md"));
     assert_eq!(report.refs_page_fallback, 0, "refs:\n{refs}");
-    assert_eq!(report.embeds_page_fallback, 0, "refs:\n{refs}");
+    assert_eq!(report.embeds_page, 0, "refs:\n{refs}");
     assert_eq!(report.refs_resolved, 3, "refs:\n{refs}");
     assert_eq!(report.embeds_resolved, 1, "refs:\n{refs}");
     assert!(

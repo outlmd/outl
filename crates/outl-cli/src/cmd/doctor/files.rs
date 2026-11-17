@@ -67,6 +67,41 @@ pub(super) fn check_md_files(
 /// Walk every indexed block, tokenize its text, and warn for every
 /// `((blk-XXXXXX))` or `!((blk-XXXXXX))` whose handle does not resolve
 /// to an indexed block.
+///
+/// ## Why a dangling `![[page]]` is deliberately **not** reported here
+///
+/// A page embed (`![[name]]`, issue #190) naming a page that does not
+/// exist is not a defect, and the two shapes this check does report are
+/// not the same kind of thing as it.
+///
+/// A `blk-` handle is **derived** from a `NodeId` (`derive_ref_handle`),
+/// so a user cannot author one that points at nothing on purpose: an
+/// unresolvable handle always means something broke downstream of the
+/// user — a block left the tree, a sidecar desynced, a handle rotated —
+/// and there is nothing in the `.md` the user could read to repair it.
+/// Naming the file and the literal is the only way they find out.
+///
+/// A page **name** is the opposite on both counts. The user typed it, it
+/// is legible in the file, and naming a page before creating it is the
+/// core journal-first affordance: `[[next quarter]]` is how the page
+/// gets made. Nothing in this report mentions a dangling `[[name]]`
+/// today, and that is right — on a real workspace it is thousands of
+/// rows, every one of them intentional.
+///
+/// Which leaves one question, and it is the only one that matters here:
+/// is `![[name]]` enough *more* than `[[name]]` to answer differently?
+/// It is not. Both resolve a page by name through the same ladder, both
+/// produce a backlink (`outl_actions::mentions::collect`), and both are
+/// respelled by a rename (`outl_actions::link_rewrite`). The sole
+/// difference is how a client draws the target, which is a render
+/// decision and not a workspace-integrity one. Reporting one spelling
+/// and staying silent about the other would make this check a second
+/// opinion on what a dangling page reference means.
+///
+/// If an unresolved embed ever needs to be *visible*, that belongs in
+/// the client that renders it — the resolve reply omits a name it could
+/// not resolve, so each client already knows — not in a filesystem
+/// check the user runs by hand.
 pub(super) fn check_orphan_block_refs(b: &mut Builder, idx: &WorkspaceIndex) {
     let mut orphans = 0usize;
     for block in idx.iter_blocks() {

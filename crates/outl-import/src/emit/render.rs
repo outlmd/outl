@@ -238,11 +238,16 @@ fn graph_position(graph: &ImportGraph, page: &ImportPage) -> usize {
 }
 
 /// Per-page render accumulator.
+///
+/// It carries no page title: the page embed's degradation warning was
+/// this struct's only reader of one, and the embed has a real outl form
+/// now (issue #190). A future warning raised from inside the render
+/// needs the title back — take it from `render_page`'s own `title`
+/// argument rather than reviving a field nothing reads in between.
 struct Ctx<'a> {
     report: &'a mut ImportReport,
     opts: &'a ImportOptions,
     uid_key: Option<&'static str>,
-    page_title: String,
     out: String,
     dfs: usize,
     collapsed: Vec<usize>,
@@ -266,7 +271,6 @@ fn render_page(
         report,
         opts,
         uid_key,
-        page_title: title.to_string(),
         out: String::new(),
         dfs: 0,
         collapsed: Vec::new(),
@@ -542,12 +546,20 @@ fn content_to_string(content: &BlockContent, ctx: &mut Ctx<'_>) -> String {
                         s.push_str(&placeholder_embed(uid));
                     }
                     Inline::Embed(EmbedTarget::Page(p)) => {
-                        ctx.report.embeds_page_fallback += 1;
-                        ctx.report.warn(
-                            &ctx.page_title.clone(),
-                            format!("page embed of [[{p}]] degraded to a link (issue #190)"),
-                        );
-                        s.push_str(&format!("[[{p}]]"));
+                        // `![[Page]]` is outl's own page embed, so this is
+                        // a translation and not a degradation any more
+                        // (issue #190). It still gets counted — the report
+                        // describes what the pipeline emitted, not only
+                        // what it lost — but the warning is gone: nothing
+                        // about the construct is lossy, and a warning per
+                        // occurrence would be noise in every import.
+                        //
+                        // No resolve pass: the target is a page *name*, and
+                        // the renderer already spells those verbatim.
+                        // Only `((uid))` needs a handle that does not exist
+                        // yet, which is what the placeholders are for.
+                        ctx.report.embeds_page += 1;
+                        s.push_str(&format!("![[{p}]]"));
                     }
                     Inline::Component { raw, .. } => s.push_str(raw),
                 }

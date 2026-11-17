@@ -1,6 +1,7 @@
 /**
- * Resolving `((blk-…))` refs and `!((blk-…))` embeds for the page on
- * screen.
+ * Resolving what the page on screen pulls in from elsewhere —
+ * `((blk-…))` refs, `!((blk-…))` block embeds and `![[page]]` page
+ * embeds.
  *
  * `MarkdownInline` renders a resolved ref as the source block's text and
  * an unresolved one as the raw handle. It decides that purely from its
@@ -18,10 +19,13 @@
 
 import { createSignal, type Accessor } from "solid-js";
 
-import { collectBlockRefHandles } from "@outl/shared/outline";
-import { resolveEmbeds } from "@outl/shared/api/commands";
+import {
+  collectBlockRefHandles,
+  collectPageEmbedNames,
+} from "@outl/shared/outline";
+import { resolveEmbeds, resolvePageEmbeds } from "@outl/shared/api/commands";
 import type { BlockNode } from "@outl/shared/api/types";
-import type { EmbedMap } from "@outl/shared/markdown";
+import type { EmbedMap, PageEmbedMap } from "@outl/shared/markdown";
 
 export interface EmbedResolver {
   /**
@@ -30,9 +34,13 @@ export interface EmbedResolver {
    * so state whose only reader is one prop does not need to live there.
    */
   embeds: Accessor<EmbedMap>;
+  /** The same, for `![[page]]` embeds, keyed by the name as written. */
+  pageEmbeds: Accessor<PageEmbedMap>;
   /**
-   * Resolve every handle in `outline`, unless the last resolve already
-   * answered this exact question.
+   * Resolve every handle and page name in `outline`, unless the last
+   * resolve already answered that exact question. The two kinds are
+   * asked independently: a newly typed `[[ref]]` must not invalidate
+   * the page-embed answer, or vice versa.
    */
   resolve: (outline: BlockNode[]) => void;
 }
@@ -48,7 +56,7 @@ export interface EmbedResolver {
  * resolve; the slug check is also what refreshes source text that was
  * edited on another page.
  *
- * This mirrors the desktop's `resolvePageEmbeds`
+ * This mirrors the desktop's `resolveTransclusions`
  * (`outl-desktop/src/components/OutlineView.tsx`) deliberately — the two
  * clients must not disagree about when a ref is stale. It is duplicated
  * rather than shared because the desktop's copy reads and writes its
@@ -68,7 +76,40 @@ export interface EmbedResolver {
  * [#16](https://github.com/outlmd/outl/issues/16).
  */
 export function createEmbedResolver(slug: () => string): EmbedResolver {
-  const [embeds, setEmbeds] = createSignal<EmbedMap>({});
+  const blocks = createMapResolver(slug, collectBlockRefHandles, resolveEmbeds);
+  const pages = createMapResolver(
+    slug,
+    collectPageEmbedNames,
+    resolvePageEmbeds,
+  );
+  return {
+    embeds: blocks.map,
+    pageEmbeds: pages.map,
+    resolve(outline) {
+      blocks.resolve(outline);
+      pages.resolve(outline);
+    },
+  };
+}
+
+/**
+ * One kind's resolve: collect the keys out of the outline, ask the
+ * backend, hold the reply.
+ *
+ * Generic over the kind rather than written twice, because the skip
+ * rule and the race guard below are the part with a failure mode, and
+ * a second copy of them is a second thing to get wrong. Each kind gets
+ * its **own** key and its own generation counter: sharing them would
+ * let a resolve that skipped one kind cancel that kind's in-flight
+ * reply, and since the key is already recorded, nothing would re-ask —
+ * issue #16 again, by a different door.
+ */
+function createMapResolver<T>(
+  slug: () => string,
+  collect: (outline: BlockNode[]) => string[],
+  fetch: (keys: string[]) => Promise<Record<string, T>>,
+): { map: Accessor<Record<string, T>>; resolve: (o: BlockNode[]) => void } {
+  const [map, setMap] = createSignal<Record<string, T>>({});
   let lastSlug = "";
   let lastKey = "";
   // Which resolve is the current one. `resolve_embeds` rebuilds the
@@ -82,11 +123,11 @@ export function createEmbedResolver(slug: () => string): EmbedResolver {
   let generation = 0;
 
   return {
-    embeds,
+    map,
     resolve(outline) {
       const page = slug();
-      const handles = collectBlockRefHandles(outline);
-      const key = handles.join("\n");
+      const keys = collect(outline);
+      const key = keys.join("\n");
       if (page === lastSlug && key === lastKey) return;
       lastSlug = page;
       lastKey = key;
@@ -95,14 +136,14 @@ export function createEmbedResolver(slug: () => string): EmbedResolver {
       // page whose last ref was just deleted does not re-resolve
       // forever; the token still moves, so an in-flight resolve from
       // the previous page cannot land on top of this empty map.
-      if (handles.length === 0) {
-        setEmbeds({});
+      if (keys.length === 0) {
+        setMap({});
         return;
       }
-      void resolveEmbeds(handles)
-        .then((map) => {
+      void fetch(keys)
+        .then((reply) => {
           if (token !== generation) return;
-          setEmbeds(map);
+          setMap(reply);
         })
         .catch(() => {});
     },

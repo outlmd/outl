@@ -7,6 +7,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Pasting a Roam or Logseq block that embedded something deleted the embed, page name and all.**
+  Not "left it as literal text": the token reached the generic `{{…}}` strip and went with it.
+  Measured on every spelling, only `{{embed: ((blk-…))}}` survived.
+  Roam's own canonical form, `{{[[embed]]: ((blk-…))}}`, was one of the ones that vanished, as was `{{embed ((blk-…))}}` and every page spelling.
+  A paste is the fastest way to move one note out of Roam, so this ran on exactly the content a person was trying to rescue.
+
+  The opener set is now declared once (`EMBED_OPENERS`), which is what fixed the two block spellings alongside the page ones.
+  `{{{embed ((blk-…))}}}` still leaves two stray braces around a correct ref; handling that closer is block-embed work and is tracked separately.
+  A `((uuid))` from a foreign graph stays untranslatable and says so, because the handle derives from a `NodeId` that only exists in this workspace.
+
 - **Logseq import: every namespaced page came in under the wrong name.**
   `pages/projeto___outl.md` imported as the page `projeto outl`, not `projeto/outl`.
   `___` is Logseq's **namespace separator** — it is what `/` is written as on disk in `:file/name-format :triple-lowbar`, the format every graph Logseq has created since 0.6.7 — and the importer read it as a space.
@@ -43,6 +53,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `outl doctor` on a freshly imported workspace reports `integrity OK`.
 
 ### Added
+
+- **`![[page]]` embeds a whole page where you write it** ([#190](https://github.com/outlmd/outl/issues/190)).
+  The target page's outline expands read-only under the block carrying the token, four levels deep, the same cap `!((blk-XXXXXX))` uses.
+  It is a page reference as well as an embed, so the embedding block shows up in the target's backlinks and renaming the page respells the token.
+  Nothing is copied: the `.md` on disk keeps the literal `![[page]]`.
+  All three clients render it.
+
+  `![[photo.png]]` is deliberately not one, and stays the plain `!` plus `[[photo.png]]` it is today.
+  That spelling already belongs to the vault importer, which turns an Obsidian `![[image.png]]` into an `assets/` link, and a syntax with two owners resolves differently depending on which parser reached it first.
 
 - **Logseq import: a block template becomes an outl template page** ([#563](https://github.com/outlmd/outl/issues/563)).
   A Logseq template is a *block* carrying `template:: Name`; an outl template is a *page* with that property.
