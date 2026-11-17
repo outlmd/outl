@@ -20,6 +20,14 @@ export function PageNameSheet(props: {
   /** The value the field opens with. */
   initial: string;
   submitLabel: string;
+  /**
+   * Accept a name equal to `initial`.
+   *
+   * A rename onto the current name writes nothing, so the button stays
+   * disabled there — but a *create* prefilled with the search box's
+   * text is the case where submitting it unchanged is the whole point.
+   */
+  submitUnchanged?: boolean;
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }) {
@@ -39,7 +47,8 @@ export function PageNameSheet(props: {
   });
 
   const value = () => text().trim();
-  const canSubmit = () => value() !== "" && value() !== props.initial.trim();
+  const canSubmit = () =>
+    value() !== "" && (props.submitUnchanged || value() !== props.initial.trim());
 
   function submit() {
     if (!canSubmit()) return;

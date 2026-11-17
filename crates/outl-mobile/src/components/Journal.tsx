@@ -23,7 +23,6 @@ import {
   createBlock,
   editBlock,
   importAssetFile,
-  listReminders,
   openAsset,
   openJournalFor,
   openPageBySlug,
@@ -41,7 +40,6 @@ import {
   searchPersons,
   setBacklinksOrder,
   setBlockCollapsed,
-  setBlockRemind,
   splitBlock,
   undoPage,
 } from "@outl/shared/api/commands";
@@ -91,6 +89,9 @@ import { Calendar } from "./Calendar";
 import { KeyboardAccessory } from "./KeyboardAccessory";
 import { DevicesSheet } from "./DevicesSheet";
 import { RemindersSheet } from "./RemindersSheet";
+import { RemindSheet } from "./RemindSheet";
+import { createRemindAuthoring } from "./Journal.remind";
+import { GuideSheet } from "./GuideSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { JournalDeleteDialogs } from "./JournalDeleteDialogs";
 import { PluginSheet } from "./PluginSheet";
@@ -142,7 +143,7 @@ import { WeekStrip } from "./WeekStrip";
 import { TasksSheet } from "./TasksSheet";
 import { CaptureSheet } from "./CaptureSheet";
 import { JournalEmptyPage, JournalLoadFailed, JournalStartWriting } from "./JournalEmpty";
-import { isBlankOutline } from "@outl/shared/polish";
+import { CHROME_TOUR_KEY, dismissedOnce, isBlankOutline } from "@outl/shared/polish";
 import { JournalZoomBar } from "./JournalZoomBar";
 import { createDayNav } from "./Journal.day-nav";
 import { createCapture } from "./Journal.capture";
@@ -201,6 +202,16 @@ export function Journal() {
   const [remindersOpen, setRemindersOpen] = createSignal(false);
   const [pluginsOpen, setPluginsOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  // Authoring a `remind::` rule — the sheet's target and the write.
+  // The module owns its signal, so nothing about it is state here.
+  const remind = createRemindAuthoring({
+    pageId,
+    applyView: (v) => applyView(v),
+    onError: (m) => setError(m),
+  });
+  // The chrome walkthrough ([#574]): once per device, re-openable from
+  // Settings. Read in the body, so a device that saw it never arms.
+  const [guideOpen, setGuideOpen] = createSignal(!dismissedOnce(CHROME_TOUR_KEY));
   // Plugin-contributed toolbar buttons — one inline glyph each in the
   // header. Loaded after the workspace opens (plugins load lazily on the
   // host's first request), refreshed alongside the plugin-command list.
@@ -1062,29 +1073,6 @@ export function Journal() {
 
 
 
-  /**
-   * "Remind me…": prompt for a `remind::` rule in the block's own syntax
-   * (a time picker could not express `3pm every 1h until DONE`) and write
-   * it as a block property. An empty answer clears the rule.
-   */
-  async function handleRemindMe(id: string) {
-    const pid = pageId();
-    if (!pid) return;
-    const current =
-      (await listReminders().catch(() => []))
-        .find((r) => r.block_id === id)?.rule ?? "";
-    const rule = window.prompt(
-      "Remind me — e.g. 3pm, 10am every 1h, now every 30min until DONE",
-      current || "9am",
-    );
-    if (rule === null) return;
-    try {
-      applyView(await setBlockRemind(pid, id, rule.trim()));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
   async function handleAttachFile(id: string) {
     const pid = pageId();
     if (!pid) return;
@@ -1666,6 +1654,17 @@ export function Journal() {
         open={settingsOpen()}
         onClose={() => setSettingsOpen(false)}
         onOpenDevices={() => setDevicesOpen(true)}
+        onOpenGuide={() => setGuideOpen(true)}
+      />
+
+      <GuideSheet open={guideOpen()} onClose={() => setGuideOpen(false)} />
+
+      <RemindSheet
+        open={remind.target() !== null}
+        rule={remind.target()?.rule ?? ""}
+        onCancel={remind.close}
+        onMessage={(text) => setError(text)}
+        onSubmit={(rule) => void remind.submit(rule)}
       />
 
       <RemindersSheet
@@ -1716,7 +1715,7 @@ export function Journal() {
             insertTemplate: (id) => setTemplateBlockId(id),
             properties: (id) =>
               setPropertiesTarget({ blockId: id, scope: "block" }),
-            remindMe: (id) => void handleRemindMe(id),
+            remindMe: (id) => void remind.open(id),
             attachFile: handleAttachFile,
             copy: async (id) => {
               // Copy the block as clean outl markdown (its subtree

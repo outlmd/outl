@@ -57,7 +57,9 @@ use outl_tauri_shared::capture_inbox::CaptureDrainDto;
 use outl_tauri_shared::commands::exec::{EmbedContent, RunCodeBlockReply};
 use outl_tauri_shared::commands::peers::{PeerDto, PeerStatusDto};
 use outl_tauri_shared::commands::property::PropertyKey;
-use outl_tauri_shared::commands::reminders::{ReminderDto, ReminderSettingsDto, SnoozePresetDto};
+use outl_tauri_shared::commands::reminders::{
+    RemindFieldsDto, ReminderDto, ReminderSettingsDto, SnoozePresetDto,
+};
 use outl_tauri_shared::commands::theme::ThemeConfigDto;
 use outl_tauri_shared::commands::timeline::{PageTimelineDto, TimelineEventDto};
 use outl_tauri_shared::commands::trash::{RestoreTrashReply, TrashEntryDto};
@@ -286,6 +288,25 @@ fn reminder_matches_its_interface() {
     // purpose — one owner, and this is the thing that fails if someone
     // adds the field on either side.
     assert_wire_shape(&dto, "Reminder", &["plain_text"]);
+}
+
+#[test]
+fn remind_fields_match_their_interface() {
+    // The `date` arm, because it is the one carrying a field the other
+    // two leave `None` — a pin built on `done` would pass with
+    // `until_date` missing from either side.
+    let dto = RemindFieldsDto {
+        anchor: "at".into(),
+        hour: 15,
+        minute: 30,
+        every_minutes: Some(60),
+        until: "date".into(),
+        until_hour: None,
+        until_minute: None,
+        until_date: Some("2026-12-20".into()),
+        max_fires: Some(5),
+    };
+    assert_wire_shape(&dto, "RemindFields", &[]);
 }
 
 #[test]

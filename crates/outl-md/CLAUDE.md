@@ -51,7 +51,10 @@ Treat matching with the same paranoia as the CRDT.
   **Do not route this through `revive_if_trashed`.**
   It would trash blocks whose text is in the `.md` being reconciled, and the parse right after would recreate them with fresh ids, breaking every `((blk-…))` handle aimed at them.
   Pinned by `outl-actions/tests/revive_convergence.rs`.
-- **`remind`** — the `remind::` block-property grammar (`3pm every 1h until DONE`) → `RemindRule`.
+- **`remind`** — the `remind::` block-property grammar (`3pm every 1h until DONE`) ↔ `RemindRule`, both directions: `parse_remind` reads one, **`format_remind` writes one back out**.
+  The inverse is what keeps an authoring picker (mobile's "Remind me…" sheet) from becoming a second owner of the grammar in TypeScript — the pairing rule under [Reuse-first](#reuse-first), applied.
+  It emits 24-hour times, leaves `until DONE` implicit, and round-trips everything `parse_remind` produces.
+  A hand-built `RemindRule` outside that domain has no spelling in the grammar (an `every_minutes` neither under 1000 minutes nor a whole number of hours or days), and re-parses as an invalid interval rather than as a different schedule.
   **Syntax only.** *When* a rule actually fires is `outl_actions::reminders` — one owner for the schedule math, wrapped by every client and OS bridge.
   Permissive like the rest of the parser: an unreadable rule yields `rule: None` plus `ParseWarningKind::Remind*` records, and the property stays on disk verbatim so the user can fix the typo in place.
   `parse` validates a `remind::` property line as it reads it, so the warnings carry the exact source line.

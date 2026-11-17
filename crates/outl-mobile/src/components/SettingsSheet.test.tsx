@@ -56,13 +56,19 @@ function mount() {
   document.body.appendChild(host);
   const onClose = vi.fn();
   const onOpenDevices = vi.fn();
+  const onOpenGuide = vi.fn();
   dispose = render(
     () => (
-      <SettingsSheet open onClose={onClose} onOpenDevices={onOpenDevices} />
+      <SettingsSheet
+        open
+        onClose={onClose}
+        onOpenDevices={onOpenDevices}
+        onOpenGuide={onOpenGuide}
+      />
     ),
     host,
   );
-  return { onClose, onOpenDevices };
+  return { onClose, onOpenDevices, onOpenGuide };
 }
 
 /** The row that reaches pairing, found by its label rather than by

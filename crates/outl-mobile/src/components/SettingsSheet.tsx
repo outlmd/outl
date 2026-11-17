@@ -58,6 +58,10 @@ export function SettingsSheet(props: {
    *  `z-[55]` and that one at `z-50`, so both open paints pairing
    *  underneath this card. */
   onOpenDevices: () => void;
+  /** Re-open the chrome walkthrough. It is shown once on a first
+   *  launch, so Settings is where a user who dismissed it — or who
+   *  installed before it existed — gets it back ([#574]). */
+  onOpenGuide: () => void;
 }): JSX.Element {
   const drag = createSheetDrag(() => props.onClose());
   const [locked, setLocked] = createSignal(false);
@@ -242,6 +246,28 @@ export function SettingsSheet(props: {
             <span class="text-[13px] leading-snug text-(--color-outl-fg-dim)">
               Pair this phone with your other devices, see which ones are
               reachable, and sync now.
+            </span>
+          </button>
+
+          {/* Beside Devices because both rows are navigation rather
+              than preferences, and because this is the one surface a
+              user comes looking for after the first-run sheet is
+              gone. */}
+          <button
+            type="button"
+            onClick={() => {
+              haptic("light");
+              props.onOpenGuide();
+              props.onClose();
+            }}
+            class="flex w-full flex-col items-start gap-0.5 border-t border-(--color-outl-border)/30 px-4 py-3.5 text-left active:bg-(--color-outl-border)/30"
+          >
+            <span class="text-[16px] font-medium text-(--color-outl-fg)">
+              What's what
+            </span>
+            <span class="text-[13px] leading-snug text-(--color-outl-fg-dim)">
+              What the buttons along the bottom do, and the gestures worth
+              knowing.
             </span>
           </button>
 

@@ -497,6 +497,35 @@ export function PageSwitcher(props: PageSwitcherProps) {
               Cancel
             </button>
           </Show>
+          {/* The only way to start a page that is not a daily note
+              used to be typing `[[` into a block and tapping the link
+              ([#573](https://github.com/outlmd/outl/issues/573)) — a
+              syntax a phone-only user has no reason to know. It opens
+              prefilled with whatever is in the box, so "searched,
+              found nothing, want it anyway" is one tap. Hidden while
+              picking a merge target: there is nothing to merge a page
+              into that does not exist yet. */}
+          <Show when={!actions.mergeSource()}>
+            <button
+              type="button"
+              aria-label="New page"
+              onClick={() => actions.startCreating(query().trim())}
+              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </Show>
         </div>
         <MergeBanner actions={actions} />
         <div class="ios-scroll flex-1 px-2 pb-4">
@@ -532,6 +561,9 @@ export function PageSwitcher(props: PageSwitcherProps) {
           <Show when={results().items.length === 0}>
             <p class="px-4 py-8 text-center text-[14px] text-(--color-outl-fg-dim)">
               {query().trim() ? `Nothing matches "${query().trim()}".` : "No pages yet."}
+              <Show when={!actions.mergeSource()}>
+                <span class="mt-1 block">Tap + to make one.</span>
+              </Show>
             </p>
           </Show>
         </div>

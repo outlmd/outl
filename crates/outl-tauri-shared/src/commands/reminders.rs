@@ -16,6 +16,7 @@ use outl_actions::reminders::{
 };
 use outl_actions::{clock, mark_done, set_property};
 use outl_core::property::PropValue;
+use outl_md::remind::{RemindAnchor, RemindRule, RemindStop};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::{finish_in_page, parse_node_id, with_ws, with_ws_mut};
@@ -290,6 +291,145 @@ pub fn mark_block_done<S: AppHost>(
     let node = parse_node_id(&block_id)?;
     let hlc = state.hlc().clone();
     finish_in_page(state, page, |ws| mark_done(ws, &hlc, node))
+}
+
+/// A `remind::` rule taken apart into the fields a picker can draw,
+/// and put back together from them.
+///
+/// Flat on purpose. `outl_md::RemindRule` serializes its two enums as
+/// externally-tagged JSON (`{"At":{"hour":15,…}}`), which a webview
+/// would have to pattern-match before it could bind a `<input
+/// type="time">` to anything — and every client would write that
+/// match again. The flat shape is what a form already is.
+///
+/// **It is not a second grammar.** `outl_md::parse_remind` /
+/// `format_remind` remain the only code that reads or writes the rule
+/// text; this struct is the handoff between them and a set of
+/// controls (root `CLAUDE.md` invariant 14's "one owner" rule, applied
+/// to authoring rather than to filters).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemindFieldsDto {
+    /// `"now"` or `"at"` — which anchor the rule carries.
+    pub anchor: String,
+    /// Wall-clock hour / minute of an `"at"` anchor; `0, 0` for `now`,
+    /// which a picker shows as the current time without it meaning one.
+    pub hour: u32,
+    pub minute: u32,
+    /// Repeat interval in minutes, or `null` for a single shot.
+    pub every_minutes: Option<u32>,
+    /// `"done"` (the default), `"time"`, or `"date"`.
+    pub until: String,
+    /// Set when `until` is `"time"`.
+    pub until_hour: Option<u32>,
+    pub until_minute: Option<u32>,
+    /// `YYYY-MM-DD`, set when `until` is `"date"`.
+    pub until_date: Option<String>,
+    /// Cap on the number of fires, or `null` for uncapped.
+    pub max_fires: Option<u32>,
+}
+
+impl From<RemindRule> for RemindFieldsDto {
+    fn from(r: RemindRule) -> Self {
+        let (anchor, hour, minute) = match r.anchor {
+            RemindAnchor::Now => ("now", 0, 0),
+            RemindAnchor::At { hour, minute } => ("at", hour, minute),
+        };
+        // `None` and an explicit `Done` are one schedule — `stop()` is
+        // what resolves that, here as everywhere else.
+        let (until, until_hour, until_minute, until_date) = match r.stop() {
+            RemindStop::Done => ("done", None, None, None),
+            RemindStop::Time { hour, minute } => ("time", Some(hour), Some(minute), None),
+            RemindStop::Date(d) => ("date", None, None, Some(d.format("%Y-%m-%d").to_string())),
+        };
+        Self {
+            anchor: anchor.to_string(),
+            hour,
+            minute,
+            every_minutes: r.every_minutes,
+            until: until.to_string(),
+            until_hour,
+            until_minute,
+            until_date,
+            max_fires: r.max_fires,
+        }
+    }
+}
+
+/// Read a `remind::` value into the fields a picker binds to.
+///
+/// `Ok(None)` for a value that does not parse — including an empty
+/// one, which is how a block with no rule reaches this. The caller
+/// opens its picker on defaults rather than showing an error: an
+/// unreadable rule is a typo to fix, not a failure to report, which is
+/// the same permissive stance `parse_remind` itself takes.
+pub fn parse_remind_rule(value: String) -> Option<RemindFieldsDto> {
+    outl_md::remind::parse_remind(&value)
+        .rule
+        .map(RemindFieldsDto::from)
+}
+
+/// Turn a picker's fields back into a `remind::` value.
+///
+/// The inverse of [`parse_remind_rule`], over the same struct, so a
+/// client that opened the picker on an existing rule and changed
+/// nothing writes back what it read.
+///
+/// Refuses a field set it cannot express rather than guessing: an
+/// out-of-range clock, an `until: "date"` with no date, an interval
+/// outside the grammar. A silently corrected rule is a rule that fires
+/// at a time the user did not choose.
+pub fn format_remind_rule(fields: RemindFieldsDto) -> Result<String, String> {
+    let anchor = match fields.anchor.as_str() {
+        "now" => RemindAnchor::Now,
+        "at" => RemindAnchor::At {
+            hour: valid_hour(fields.hour)?,
+            minute: valid_minute(fields.minute)?,
+        },
+        other => return Err(format!("unknown reminder anchor: {other}")),
+    };
+    let until = match fields.until.as_str() {
+        // `None`, not `Some(Done)`: `format_remind` leaves the default
+        // unwritten either way, and carrying the longer form through
+        // would make the two spellings look like a choice.
+        "done" => None,
+        "time" => Some(RemindStop::Time {
+            hour: valid_hour(fields.until_hour.ok_or("until time is missing its hour")?)?,
+            minute: valid_minute(fields.until_minute.unwrap_or(0))?,
+        }),
+        "date" => {
+            let raw = fields.until_date.ok_or("until date is missing")?;
+            let d = chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+                .map_err(|_| format!("not a date: {raw}"))?;
+            Some(RemindStop::Date(d))
+        }
+        other => return Err(format!("unknown reminder stop: {other}")),
+    };
+    let rule = RemindRule {
+        anchor,
+        every_minutes: fields.every_minutes,
+        until,
+        max_fires: fields.max_fires,
+    };
+    let text = outl_md::remind::format_remind(&rule);
+    // The grammar is the judge of its own output: an interval or a
+    // `max` the picker should never have produced is caught here
+    // rather than written to a block that then silently never fires.
+    if outl_md::remind::parse_remind(&text).rule.is_none() {
+        return Err(format!("reminder rule is not valid: {text}"));
+    }
+    Ok(text)
+}
+
+fn valid_hour(h: u32) -> Result<u32, String> {
+    (h < 24)
+        .then_some(h)
+        .ok_or_else(|| format!("hour out of range: {h}"))
+}
+
+fn valid_minute(m: u32) -> Result<u32, String> {
+    (m < 60)
+        .then_some(m)
+        .ok_or_else(|| format!("minute out of range: {m}"))
 }
 
 /// Set (or clear) a block's `remind::` rule. Thin alias over

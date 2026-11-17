@@ -117,6 +117,34 @@ if [ "${1:-}" = "--update" ]; then
 #     had left the tree. It is the registered reason above, verbatim -
 #     the wire grew, so the mirror grew. The pin is wire_types.rs's
 #     dropped_edit_matches_its_interface.
+#                                     707 -> 711  (issue 572)
+#     The fourth raise is four lines, and three of them are the comment
+#     saying where the type went: RemindFields is declared in
+#     commands-reminders.ts beside parseRemindRule / formatRemindRule,
+#     the arrangement PasteReply already has, so what is left here is
+#     the re-export that keeps the import path one. The pin is
+#     wire_types.rs's remind_fields_match_their_interface, and
+#     commands-reminders.ts joined ts_parser::MIRROR_FILES so the
+#     declaration is read rather than merely moved out of sight.
+#
+#   outl-desktop/src-tauri/src/lib.rs  616 -> 618  (issue 572)
+#     Two lines: the two reminder-authoring commands in the
+#     invoke_handler list (their names join an existing import line).
+#     The file is a registration list, and the rule it registers under
+#     is that a client takes a whole command module or declares the gap
+#     - so a shared module gaining two commands grows both clients by
+#     the same two lines, by design. Splitting the handler list to
+#     avoid that would put half a registration in another file, which
+#     is the state command_parity.rs exists to catch.
+#
+#   frontend-shared/src/api/commands.ts  859 -> 861  (issue 572)
+#     Two names in the existing re-export block: parseRemindRule and
+#     formatRemindRule, the pair that reads and writes a remind:: rule
+#     for the mobile picker that replaced a window.prompt. The bodies
+#     are in commands-reminders.ts, where every other reminder wrapper
+#     already lives; these two lines are what keeps
+#     @outl/shared/api/commands the single import path, which is the
+#     reason the split file exists at all.
 #     (No backticks in this block — the header is written through an
 #     unquoted heredoc, so one becomes a command substitution and the
 #     sentence silently loses the word.)

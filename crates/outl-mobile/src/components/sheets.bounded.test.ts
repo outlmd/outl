@@ -74,6 +74,12 @@ const SHEETS: Sheet[] = [
   { file: "PageSwitcher.tsx", bound: "top-anchored" },
   { file: "DevicesSheet.tsx", bound: "vh-cap" },
   { file: "PageNameSheet.tsx", bound: "vh-cap" },
+  // The card itself, like `PageNameSheet`: a `dvh` wrapper would open
+  // a gap above the grab handle on every portrait phone.
+  { file: "RemindSheet.tsx", bound: "vh-cap" },
+  // `dvh` instead, because its row list is what grows: seven rows in
+  // portrait already, and landscape halves the height.
+  { file: "GuideSheet.tsx", bound: "dvh" },
   {
     file: "PluginSheet.tsx",
     bound: "vh-cap",

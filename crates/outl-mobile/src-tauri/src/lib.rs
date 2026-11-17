@@ -90,9 +90,10 @@ use crate::commands::{
 // wrappers were missing, so the features were absent by omission rather
 // than by decision.
 use crate::commands::{
-    clear_reminder_snooze, deliver_due_reminders, known_property_keys, list_reminders,
-    mark_block_done, reminder_action_catalog, reminder_settings, set_block_property,
-    set_block_remind, set_page_property, set_reminder_settings, snooze_presets, snooze_reminder,
+    clear_reminder_snooze, deliver_due_reminders, format_remind_rule, known_property_keys,
+    list_reminders, mark_block_done, parse_remind_rule, reminder_action_catalog, reminder_settings,
+    set_block_property, set_block_remind, set_page_property, set_reminder_settings, snooze_presets,
+    snooze_reminder,
 };
 use crate::commands::{
     device_activity, drain_capture_inbox, export_markdown, journal_days_with_content,
@@ -436,6 +437,8 @@ pub fn run() {
             snooze_presets,
             clear_reminder_snooze,
             set_block_remind,
+            parse_remind_rule,
+            format_remind_rule,
             mark_block_done,
             set_block_property,
             // Properties (key catalogue + page-level writer)

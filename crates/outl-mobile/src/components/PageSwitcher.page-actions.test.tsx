@@ -11,6 +11,7 @@ import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const deletePage = vi.fn();
+const openRef = vi.fn();
 const listPages = vi.fn();
 const searchPages = vi.fn();
 const renamePage = vi.fn();
@@ -20,6 +21,7 @@ vi.mock("@outl/shared/api/commands", () => ({
   listPages: (...a: unknown[]) => listPages(...a),
   searchPages: (...a: unknown[]) => searchPages(...a),
   deletePage: (...a: unknown[]) => deletePage(...a),
+  openRef: (...a: unknown[]) => openRef(...a),
   searchBlocks: () => Promise.resolve([]),
   togglePin: vi.fn(),
 }));
@@ -326,5 +328,83 @@ describe("PageSwitcher: merge into", () => {
     expect(host.textContent).not.toContain("into which page?");
     expect(mergePages).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Starting a page that is not a daily note (#573).
+ *
+ * Every assertion here is about the **one** decision this client
+ * makes: open the name sheet, hand what was typed to `openRef`, and
+ * navigate to whatever comes back. Resolving a name — existing page,
+ * date, or new — is the backend's, which is why none of these mock a
+ * second outcome for it.
+ */
+describe("PageSwitcher: New page", () => {
+  const newPageButton = () =>
+    [...document.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "New page",
+    ) as HTMLButtonElement | undefined;
+
+  const nameField = () =>
+    document.querySelector('input[aria-label="New page"]') as HTMLInputElement | null;
+
+  it("creates a page from a name and opens it", async () => {
+    openRef.mockResolvedValue({ page: { slug: "reading-list", kind: "page" } });
+    const { onPick } = mount();
+    await settle();
+
+    await tap(newPageButton());
+    const input = nameField();
+    expect(input).not.toBeNull();
+    input!.value = "Reading list";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    await tap(button("Create"));
+
+    expect(openRef).toHaveBeenCalledWith("Reading list");
+    expect(onPick).toHaveBeenCalledWith("reading-list", "page");
+  });
+
+  /** The reason `submitUnchanged` exists: a rename refuses a no-op
+   *  name, a create prefilled from the search box must not. */
+  it("submits the search box's text without the user retyping it", async () => {
+    openRef.mockResolvedValue({ page: { slug: "ideas", kind: "page" } });
+    mount();
+    await settle();
+    const search = document.querySelector('input[type="text"]') as HTMLInputElement;
+    search.value = "Ideas";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+
+    await tap(newPageButton());
+    expect(nameField()?.value).toBe("Ideas");
+    expect(button("Create")?.disabled).toBe(false);
+    await tap(button("Create"));
+
+    expect(openRef).toHaveBeenCalledWith("Ideas");
+  });
+
+  it("cancelling writes nothing and opens nothing", async () => {
+    const { onPick } = mount();
+    await settle();
+    await tap(newPageButton());
+    await tap(button("Cancel", nameField()?.closest("div")?.parentElement ?? document));
+
+    expect(openRef).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  /** Picking a merge target is about pages that exist; offering to
+   *  make one there would be a target with nothing in it. */
+  it("is hidden while the list is picking a merge target", async () => {
+    mount();
+    await settle();
+    await longPress(row("Inbox"));
+    await settle();
+    await tap(button("Merge into..."));
+
+    expect(host.textContent).toContain("into which page?");
+    expect(newPageButton()).toBeUndefined();
   });
 });

@@ -141,6 +141,10 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   Its own module because `applyView` cannot answer the question it asks. `applyView` compares slugs, which is the right net for "the page changed however it happened" and blind to the case that bit: **asking for the page you are already on.**
   Today's journal is usually the open page, so the Today button, the week strip's current day, a `[[ref]]` pointing back here and a deep link to this page all resolved to the same slug, and the zoom they were supposed to leave stayed up with nothing on screen moving.
   `Journal.day-nav.ts` and the deep-link listener take `openView` rather than `applyView` for that reason; a commit, a background poll, a peer reload and a capture into today keep `applyView` and keep the zoom.
+- **`Journal.remind.ts`** — `createRemindAuthoring(deps)`: which block the "Remind me…" sheet is open on, the rule it opened with, and the write back.
+  It owns the signal, like `Journal.embeds.ts`, so the component holds no state for the feature.
+  The order is the part with a failure mode.
+  The current rule is read **before** the sheet opens and carried as *text*, because a rule that does not parse still has to reach the user: opening a picker on a default would show them a time their block never said.
 - **`Journal.embeds.ts`** — `createEmbedResolver(slug)`: the `((blk-…))` resolve for the visible page, called from `applyView`.
   It owns the signal too, so the component holds no state for it.
   The skip rule is the part with a failure mode: a resolve is skipped only when the page **and** the handle set both match the last one.
@@ -261,6 +265,11 @@ Two honest steps, no filler:
    Fully skippable.
 
 The onboarding **copy** lives in `@outl/shared/onboarding` (identical to desktop); the bottom-sheet chrome + haptics stay here.
+
+**A third first-run surface sits after both steps**: `<GuideSheet />`, which names this client's own chrome — the bottom bar, the `+`, the week strip, the long-press ([#574](https://github.com/outlmd/outl/issues/574)).
+It is not the 30-second outline tour (`firstRunTips`), which only ever draws on an empty page and names no buttons, so it carries its own dismissal key (`CHROME_TOUR_KEY`) rather than sharing `TIPS_KEY`.
+Sharing one would hide it from the user whose journal already has content, which is exactly who needs it.
+The rows are `lib/chrome-tour.ts` (mobile-only copy: every one names a control only this client has); the shared half is the "show it once, then remember" pair, which never becomes an Op.
 Pairing is **not** reimplemented — `Onboarding` opens the real `<DevicesSheet />`.
 
 **DEFERRED — native folder picker + security-scoped bookmark.**
@@ -363,6 +372,9 @@ A long-press on a **page** row (never a journal) opens the same menu component t
   A rename onto a taken name asks the same question, and any answer but "Merge" writes nothing.
 - **On success** the switcher navigates to the resulting page through `onPick` (delete does the same) and hands the summary to `onNotice`, which `Journal.tsx` routes into its toast.
   A summary with several lines (a merge with property conflicts) makes `Toast.tsx` show every line and stay 12 s, because the conflict line is the one the user has to read.
+- **The `+` beside the search box starts a page**, name sheet → `openRef`, which is also the only reason `PageNameSheet` grew a `submitUnchanged` prop (a rename refuses a no-op name; a create prefilled from the search box must not).
+  Before it, a non-journal page could only be started by typing `[[` into a block ([#573](https://github.com/outlmd/outl/issues/573)) — the mechanism was fine, the discoverability was the bug.
+  `openRef` decides what a name means, so an existing name **opens** rather than duplicating; see [`docs/mobile-ux.md`](../../docs/mobile-ux.md#search-sheet--starting-a-page-that-is-not-a-daily-note).
 - Not done on mobile: a keyboard shortcut (there is no chord surface) and the optional alias-conflict warning.
 - Pinned by `PageSwitcher.page-actions.test.tsx` (the shared flow runs for real over stubbed `api/page-merge` commands) and `sheets.bounded.test.ts` (the name sheet declares its bound).
 
@@ -465,7 +477,9 @@ scope, the `[[` picker) and `lib/properties.test.ts`.
 
 The header capsule's gear opens `components/SettingsSheet.tsx`.
 It is the client's **only** preferences screen: every other sheet here (`DevicesSheet`, `TemplateSheet`, `RemindersSheet`, `PropertiesSheet`) shows workspace content, which is why the toolbar lock ([#271](https://github.com/outlmd/outl/issues/271)) had nowhere to live before it.
-Its first row is the exception, and it is navigation rather than a preference: **Devices and sync** hands over to `<DevicesSheet />` (closing this sheet first, since this one is `z-[55]` and that one `z-50`).
+Its first two rows are the exception, and both are navigation rather than preferences.
+**Devices and sync** hands over to `<DevicesSheet />`, closing this sheet first since this one is `z-[55]` and that one `z-50`.
+**What's what** re-opens `<GuideSheet />`, the chrome walkthrough that otherwise only appears once per device ([#574](https://github.com/outlmd/outl/issues/574)).
 It is here because pairing otherwise had no name anywhere on the phone — the sync dot's press-and-hold is a gesture nothing announces, and a user looking for P2P looks where the desktop keeps it, in Settings.
 The gesture stays as the shortcut.
 
@@ -490,9 +504,18 @@ Toolbar behaviour it controls (lock, reset, and why the row now only reshuffles 
 
 ## Reminders (`remind::`)
 
-The bottom bar's Reminders tab opens `<RemindersSheet />` (the header has no bell any more), a block long-press authors a rule via `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
-Sheet wiring, why authoring is a prompt instead of a native time picker, and why both device-local settings live in the sheet: [`docs/reminders.md`](../../docs/reminders.md#mobile-outl-mobile).
-The one rule that matters here: **the schedule is never computed in TS** — `groupReminders` / `formatNextFire` only format what `outl_actions::reminders` decided.
+The bottom bar's Reminders tab opens `<RemindersSheet />` (the header has no bell any more), a block long-press authors a rule through `<RemindSheet />` → `set_block_remind`, and `Journal.tsx` polls `deliver_due_reminders` every 30s.
+Sheet wiring and why both device-local settings live in the list sheet: [`docs/reminders.md`](../../docs/reminders.md#mobile-outl-mobile).
+
+**Two rules, and neither is about the sheet's markup.**
+
+- **The schedule is never computed in TS** — `groupReminders` / `formatNextFire` only format what `outl_actions::reminders` decided.
+- **The rule text is never written in TS either.**
+  `<RemindSheet />` reads a rule with `parseRemindRule` and writes one with `formatRemindRule`, two commands over `outl_md::remind`'s `parse_remind` / `format_remind` pair, twice per session rather than per keystroke.
+  Authoring was a `window.prompt` for the grammar until [#572](https://github.com/outlmd/outl/issues/572).
+  The sheet keeps the whole grammar reachable through its **Edit as text** field, which is what stops a picker from quietly narrowing what a user can say.
+  `Journal.remind.ts` owns the target signal and the write, the way `Journal.embeds.ts` owns its own — the component holds no state for it.
+  Per-control decisions (a repeat the list does not offer, a seeded `until`) are `lib/remind-fields.ts`, unit-tested.
 
 ### Actionable banners (mobile only)
 

@@ -376,10 +376,19 @@ export function RemindersSheet(props: RemindersSheetProps): JSX.Element {
               )}
             </For>
 
+            {/* An empty list has to say where reminders come from, or
+                opening this tab is a dead end — the complaint behind
+                [#572](https://github.com/outlmd/outl/issues/572).
+                It says "any block", not "a TODO": a rule schedules on
+                a block with no marker at all, and the old wording sent
+                people looking for a checkbox they did not need. */}
             <Show when={!loading() && reminders().length === 0}>
               <div class="border-t border-(--color-outl-border)/30 px-4 py-6 text-center text-[14px] text-(--color-outl-fg-dim)">
-                No reminders yet. Long-press a TODO and pick{" "}
-                <span class="font-medium">Remind me…</span>
+                No reminders yet.
+                <span class="mt-1 block">
+                  Press and hold any block, then pick{" "}
+                  <span class="font-medium text-(--color-outl-fg)">Remind me…</span>
+                </span>
               </div>
             </Show>
           </div>

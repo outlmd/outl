@@ -129,6 +129,7 @@ Recently added — check these before writing a parallel reminder helper (catalo
 | Every reminder in the workspace with its next fire resolved (tree-driven — the `.md` is projected asynchronously, so disk is stale right after authoring) | `outl_actions::scan_reminders` | `crates/outl-actions/src/reminders/scan.rs` |
 | Every node carrying a property key, without walking the tree | `outl_core::tree::Tree::nodes_with_property` | `crates/outl-core/src/tree/mod.rs` |
 | Parse a `remind::` value (permissive — a bad rule warns, never drops the block) | `outl_md::parse_remind` | `crates/outl-md/src/remind.rs` |
+| Write a rule back out in the grammar the parser reads — what an authoring picker's controls become, so no client re-spells the grammar | `outl_md::format_remind` | `crates/outl-md/src/remind.rs` |
 | Silence a reminder across every device | `outl_actions::snooze` / `snooze_until` (`Op::SnoozeRemind`) | `crates/outl-actions/src/reminders/mod.rs` |
 | Deliver what came due + the device-local fired log. In `outl-actions` because every client delivers, the TUI included | `outl_actions::take_due` | `crates/outl-actions/src/reminders/fired.rs` |
 | Format "in 3h" / bucket a reminder list for a GUI | `@outl/shared` `formatNextFire` / `groupReminders` | `crates/outl-frontend-shared/src/api/commands.ts` |

@@ -241,6 +241,66 @@ pub fn parse_remind(value: &str) -> RemindParse {
     }
 }
 
+/// Write a rule back out in the grammar [`parse_remind`] reads.
+///
+/// The missing half of the pair this crate's CLAUDE.md asks for.
+/// A parser with no inverse makes the next consumer write one, and
+/// that consumer arrived as the mobile "Remind me…" sheet: it turns a
+/// time picker and a repeat row back into `15:00 every 1h`, which
+/// without this would have made a webview the second owner of the
+/// grammar.
+///
+/// Times come out in the 24-hour form, so the output never depends on
+/// an am/pm the user did not write. `until DONE` is left off: it is
+/// the implicit default, and spelling it adds length, not meaning.
+///
+/// **Round-trips the rule's meaning, not its `Option`s.** An explicit
+/// `until: Some(RemindStop::Done)` comes back as `None`, because the
+/// two are one schedule — [`RemindRule::stop`] resolves both to
+/// [`RemindStop::Done`] — and the grammar has one short spelling for
+/// it. Compare a round-trip through `stop()`, never through `until`.
+///
+/// **Round-trips every rule [`parse_remind`] can produce.** It cannot
+/// round-trip a hand-built [`RemindRule`] outside that domain — an
+/// `every_minutes` that is neither under 1000 minutes nor a whole
+/// number of hours or days has no spelling in the grammar at all — and
+/// such a value re-parses as an invalid interval rather than as a
+/// different schedule.
+pub fn format_remind(rule: &RemindRule) -> String {
+    let mut out = match rule.anchor {
+        RemindAnchor::Now => "now".to_string(),
+        RemindAnchor::At { hour, minute } => format!("{hour:02}:{minute:02}"),
+    };
+    if let Some(every) = rule.every_minutes {
+        out.push_str(" every ");
+        out.push_str(&format_interval(every));
+    }
+    match rule.until {
+        None | Some(RemindStop::Done) => {}
+        Some(RemindStop::Time { hour, minute }) => {
+            out.push_str(&format!(" until {hour:02}:{minute:02}"));
+        }
+        Some(RemindStop::Date(d)) => {
+            out.push_str(&format!(" until {}", d.format("%Y-%m-%d")));
+        }
+    }
+    if let Some(max) = rule.max_fires {
+        out.push_str(&format!(" max {max}"));
+    }
+    out
+}
+
+/// Minutes as the largest unit that spells them exactly and keeps the
+/// count inside the grammar's `1..=999`: `2880` is `2d`, not `48h`.
+fn format_interval(minutes: u32) -> String {
+    for (unit, size) in [("d", 60 * 24), ("h", 60)] {
+        if minutes.is_multiple_of(size) && (1..=999).contains(&(minutes / size)) {
+            return format!("{}{unit}", minutes / size);
+        }
+    }
+    format!("{minutes}min")
+}
+
 /// Pull the rule out of a block's property list, if it carries one.
 ///
 /// Returns `None` when the block has no `remind::` at all — an invalid
@@ -324,160 +384,4 @@ fn parse_interval(tok: &str) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rule(s: &str) -> RemindRule {
-        parse_remind(s).rule.expect("rule should parse")
-    }
-
-    #[test]
-    fn bare_time_is_a_single_shot() {
-        let r = rule("10am");
-        assert_eq!(
-            r.anchor,
-            RemindAnchor::At {
-                hour: 10,
-                minute: 0
-            }
-        );
-        assert_eq!(r.every_minutes, None);
-        assert_eq!(r.stop(), RemindStop::Done);
-        assert!(!r.repeats());
-    }
-
-    #[test]
-    fn every_clause_sets_the_interval() {
-        assert_eq!(rule("10am every 1h").every_minutes, Some(60));
-        assert_eq!(rule("3pm every 30min").every_minutes, Some(30));
-        assert_eq!(rule("15:00 every 2d").every_minutes, Some(2880));
-    }
-
-    #[test]
-    fn until_done_is_the_implicit_default() {
-        assert_eq!(rule("10am every 1h").stop(), RemindStop::Done);
-        assert_eq!(rule("10am every 1h until done").stop(), RemindStop::Done);
-    }
-
-    #[test]
-    fn until_accepts_time_and_iso_date() {
-        assert_eq!(
-            rule("10am every 1h until 6pm").until,
-            Some(RemindStop::Time {
-                hour: 18,
-                minute: 0
-            })
-        );
-        assert_eq!(
-            rule("10am every 1d until 2026-12-20").until,
-            Some(RemindStop::Date(
-                NaiveDate::from_ymd_opt(2026, 12, 20).expect("valid date")
-            ))
-        );
-    }
-
-    #[test]
-    fn now_anchor_parses() {
-        assert_eq!(rule("now every 15min until DONE").anchor, RemindAnchor::Now);
-    }
-
-    #[test]
-    fn am_pm_edge_hours_map_to_24h() {
-        assert_eq!(rule("12am").anchor, RemindAnchor::At { hour: 0, minute: 0 });
-        assert_eq!(
-            rule("12pm").anchor,
-            RemindAnchor::At {
-                hour: 12,
-                minute: 0
-            }
-        );
-        assert_eq!(
-            rule("1:30pm").anchor,
-            RemindAnchor::At {
-                hour: 13,
-                minute: 30
-            }
-        );
-    }
-
-    #[test]
-    fn missing_anchor_is_rejected() {
-        let p = parse_remind("every 1h");
-        assert!(p.rule.is_none());
-        assert_eq!(p.warnings, vec![ParseWarningKind::RemindMissingAnchor]);
-        assert_eq!(
-            parse_remind("").warnings,
-            vec![ParseWarningKind::RemindMissingAnchor]
-        );
-    }
-
-    #[test]
-    fn invalid_time_is_rejected() {
-        for bad in ["25:00", "10:70", "13am", "0pm", "banana"] {
-            let p = parse_remind(bad);
-            assert!(p.rule.is_none(), "{bad} should not parse");
-            assert_eq!(p.warnings, vec![ParseWarningKind::RemindInvalidTime]);
-        }
-    }
-
-    #[test]
-    fn sub_minute_interval_is_rejected() {
-        let p = parse_remind("10am every 30s");
-        assert!(p.rule.is_none());
-        assert_eq!(p.warnings, vec![ParseWarningKind::RemindInvalidInterval]);
-    }
-
-    #[test]
-    fn unparseable_stop_is_rejected() {
-        let p = parse_remind("10am until yesterday");
-        assert!(p.rule.is_none());
-        assert_eq!(p.warnings, vec![ParseWarningKind::RemindInvalidStop]);
-    }
-
-    #[test]
-    fn max_above_the_cap_is_clamped_not_rejected() {
-        let p = parse_remind("10am every 1h max 50");
-        assert_eq!(p.rule.expect("still schedules").max_fires, Some(10));
-        assert_eq!(p.warnings, vec![ParseWarningKind::RemindMaxClamped]);
-        assert_eq!(rule("10am every 1h max 5").max_fires, Some(5));
-    }
-
-    #[test]
-    fn until_before_the_anchor_drops_the_clause() {
-        let p = parse_remind("3pm every 1h until 10am");
-        let r = p.rule.expect("rule survives, stop does not");
-        assert_eq!(r.until, None);
-        assert_eq!(p.warnings, vec![ParseWarningKind::RemindInvalidStop]);
-    }
-
-    #[test]
-    fn dangling_keyword_does_not_panic() {
-        assert!(parse_remind("10am every").rule.is_none());
-        assert!(parse_remind("10am until").rule.is_none());
-        assert!(parse_remind("10am max").rule.is_none());
-    }
-
-    #[test]
-    fn parsing_is_case_insensitive() {
-        assert_eq!(
-            rule("3PM EVERY 1H UNTIL DONE").anchor,
-            RemindAnchor::At {
-                hour: 15,
-                minute: 0
-            }
-        );
-    }
-
-    #[test]
-    fn rule_is_read_off_the_property_list() {
-        let props = vec![
-            ("id".to_string(), "x".to_string()),
-            ("remind".to_string(), "10am".to_string()),
-        ];
-        assert!(rule_from_properties(&props)
-            .expect("has remind")
-            .rule
-            .is_some());
-        assert!(rule_from_properties(&[]).is_none());
-    }
-}
+mod tests;

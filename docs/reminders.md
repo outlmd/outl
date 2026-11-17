@@ -124,14 +124,14 @@ The OS asks for notification permission on the first actual fire, not when you f
 |---|---|---|---|
 | **TUI** | `g n` overlay | `g r`, `g R` | OSC 9 notification + a toast, while the TUI is open |
 | **Desktop** | `Cmd/Ctrl+Shift+R` panel | `Cmd+R`, `g r` / `g R` in Normal | OS notification while the app runs |
-| **Mobile** | Reminders tab in the bottom bar | long-press a block → *Remind me…* | iOS notification while the app runs |
+| **Mobile** | Reminders tab in the bottom bar | long-press a block → *Remind me…* (a sheet: time, repeat, until, plus an "edit as text" field) | iOS notification while the app runs |
 
 Editing a rule after you write it: click (desktop) or tap (mobile) the `⏰` chip under the block, or `:prop remind <rule>` in the TUI.
 An empty value clears the rule, which is how you stop a block nagging without deleting it.
 Every `key:: value` a block carries renders as a chip and edits the same way — `remind::` isn't special-cased.
 
 Turning delivery on lives in Settings on the desktop, and in the Reminders sheet itself on mobile.
-Mobile has no settings screen, and `config.toml` sits inside the iOS sandbox, so a switch anywhere else would be unreachable.
+Mobile's `config.toml` sits inside the iOS sandbox, so the sheet is where the two device-local settings stay reachable.
 
 Chords are in the shared catalog, so they can't drift — see [Shortcuts](shortcuts.md).
 
@@ -205,9 +205,20 @@ macOS asks for permission on the first actual fire.
 ### Mobile (`outl-mobile`)
 
 The bottom bar's Reminders tab opens `<RemindersSheet />` — every block with a `remind::`, grouped Today / Tomorrow / This week / Later / Done, with 1h / Tomorrow / Next week snooze chips per row.
-Long-pressing a block offers **Remind me…**, which prompts for the rule in its own syntax and writes it via `set_block_remind`.
-A prompt rather than a native time picker on purpose: the rule language is richer than a clock (`3pm every 1h until DONE`), and a picker that can only express the anchor would quietly hide the repeat.
-The picker is a follow-up, not a substitute.
+Long-pressing a block offers **Remind me…**, which opens `<RemindSheet />`: a time, a repeat, an optional "until", and an **Edit as text** field carrying the rule verbatim.
+It writes through `set_block_remind` like every other authoring surface.
+
+This was a `window.prompt` for the rule language until [issue #572](https://github.com/outlmd/outl/issues/572), with a reason stated here.
+The grammar is richer than a clock (`3pm every 1h until DONE`), and a picker that can only express the anchor hides the repeat.
+That reasoning is right about pickers and wrong about phones — a raw prompt for a DSL is easy to miss, easy to cancel, and reads as a tap that did nothing.
+**The text field is what keeps both halves true**, so the answer was not "a picker instead" but "a picker plus the grammar".
+A rule the controls cannot express opens in that field rather than being simplified into one they can, and an interval they do not offer (`every 45min`, written in the TUI) keeps its own label instead of reading as "Once".
+
+**Neither half re-spells the grammar.**
+The sheet reads a rule through `parse_remind_rule` and writes one through `format_remind_rule`, two commands over `outl_md::remind`'s `parse_remind` / `format_remind`.
+That is the parser and its inverse, the pair that makes a picker possible without a second grammar in TypeScript.
+Two round-trips per session, on open and on save, never per keystroke.
+A field set the grammar cannot express is **refused**, not corrected: a rule silently rewritten is a reminder that fires at a time the user did not pick.
 
 Grouping + the "in 3h" column come from `@outl/shared` (`groupReminders` / `formatNextFire`), shared byte-for-byte with the desktop panel; the instants come from `outl_actions::reminders` in Rust.
 

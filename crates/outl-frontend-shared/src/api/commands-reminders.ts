@@ -12,6 +12,38 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { PageView, Reminder, ReminderSettings, SnoozePreset } from "./types";
 
+/**
+ * A `remind::` rule taken apart into the fields a picker binds to.
+ *
+ * Mirrors `outl_tauri_shared::commands::reminders::RemindFieldsDto`,
+ * pinned by `wire_types.rs`. Flat because a form is flat: the Rust
+ * `RemindRule`'s enums cross the wire externally tagged
+ * (`{"At":{"hour":15,…}}`), and unwrapping that in each client is how
+ * a second reading of the grammar starts.
+ *
+ * **Nothing here parses or writes the rule text.** `parseRemindRule` /
+ * `formatRemindRule` go to `outl_md::remind`, which owns the grammar
+ * in both directions; this is only what a set of controls holds in
+ * between.
+ */
+export interface RemindFields {
+  /** `"now"` or `"at"`. */
+  anchor: string;
+  /** Wall clock of an `"at"` anchor; `0, 0` when the anchor is `now`. */
+  hour: number;
+  minute: number;
+  /** Repeat interval in minutes, or `null` for a single shot. */
+  every_minutes: number | null;
+  /** `"done"` (the default), `"time"`, or `"date"`. */
+  until: string;
+  until_hour: number | null;
+  until_minute: number | null;
+  /** `YYYY-MM-DD`, set when `until` is `"date"`. */
+  until_date: string | null;
+  /** Cap on the number of fires, or `null` for uncapped. */
+  max_fires: number | null;
+}
+
 // ── Reminders (`remind::`) ──────────────────────────────────────────
 //
 // The schedule itself is decided in Rust (`outl_actions::reminders`),
@@ -67,6 +99,33 @@ export function setBlockRemind(
   rule: string,
 ): Promise<PageView> {
   return invoke<PageView>("set_block_remind", { pageId, blockId, rule });
+}
+
+/**
+ * Read a `remind::` value into the fields a picker binds to, or `null`
+ * when the value is empty or does not parse.
+ *
+ * The round trip goes through Rust rather than through a regex here
+ * for the same reason the schedule does: `outl_md::remind` owns the
+ * grammar in both directions, and a client that reads a rule its own
+ * way will eventually write one the backend reads differently.
+ *
+ * Two calls per picker session, not per keystroke — once on open, once
+ * on save.
+ */
+export function parseRemindRule(value: string): Promise<RemindFields | null> {
+  return invoke<RemindFields | null>("parse_remind_rule", { value });
+}
+
+/**
+ * Turn a picker's fields back into a `remind::` value.
+ *
+ * Rejects a field set the grammar cannot express rather than
+ * correcting it: a rule silently rewritten is a reminder that fires at
+ * a time the user did not pick.
+ */
+export function formatRemindRule(fields: RemindFields): Promise<string> {
+  return invoke<string>("format_remind_rule", { fields });
 }
 
 /**

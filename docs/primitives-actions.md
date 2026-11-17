@@ -249,6 +249,7 @@ User-facing spec: [`reminders.md`](reminders.md).
 |---|---|---|
 | Property key that carries a reminder rule (don't hardcode `"remind"`) | `outl_md::REMIND_KEY` | `crates/outl-md/src/remind.rs` |
 | Parse a `remind::` value into a rule + the warnings it triggered (never fails destructively — an unreadable rule just doesn't schedule) | `outl_md::parse_remind` → `RemindParse { rule: Option<RemindRule>, warnings }` | `crates/outl-md/src/remind.rs` |
+| Write a rule back out in the grammar the parser reads (24h times, `until DONE` left implicit) — what an authoring picker turns its controls into, so no client re-spells the grammar | `outl_md::format_remind` | `crates/outl-md/src/remind.rs` |
 | Pull the rule off a block's property list | `outl_md::rule_from_properties` | `crates/outl-md/src/remind.rs` |
 | The parsed rule + its parts (`RemindAnchor::Now` / `At`, `RemindStop::Done` / `Time` / `Date`) | `outl_md::RemindRule` / `RemindAnchor` / `RemindStop` | `crates/outl-md/src/remind.rs` |
 | Hard caps the parser enforces (1-minute interval floor, 10-fire ceiling) | `outl_md::MIN_INTERVAL_MINUTES` / `outl_md::MAX_FIRES_CAP` | `crates/outl-md/src/remind.rs` |

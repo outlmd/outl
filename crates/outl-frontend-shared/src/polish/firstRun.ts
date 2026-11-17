@@ -24,6 +24,24 @@ export const TIPS_KEY = "outl.first-run-tips";
  */
 export const CRASH_NOTICE_KEY = "outl.crash-reports-notice";
 
+/**
+ * Dismissal key for the walkthrough of a client's own chrome
+ * ([#574](https://github.com/outlmd/outl/issues/574)).
+ *
+ * A third key rather than a reuse of {@link TIPS_KEY}, for the reason
+ * the crash notice needed its own: the tour above teaches the
+ * *outline* and only ever appears on an empty page, this one names the
+ * buttons around it and has to reach someone whose journal already has
+ * content. Sharing a key would hide it from exactly the user who has
+ * been tapping unlabelled chrome for a week.
+ *
+ * The lines themselves are **not** here. They name a client's own
+ * controls (a bottom bar, a week strip, a long-press), so they live in
+ * that client, while this file keeps the one "show it once, then
+ * remember" mechanism every first-run surface shares.
+ */
+export const CHROME_TOUR_KEY = "outl.chrome-tour";
+
 export type TipClient = "desktop" | "mobile";
 
 export interface Tip {

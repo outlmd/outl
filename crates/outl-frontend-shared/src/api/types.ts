@@ -700,6 +700,10 @@ export interface ReminderSettings {
   quiet_hours: string;
 }
 
+// `RemindFields` lives in `./commands-reminders`, with the two
+// wrappers that read and write it (the `./paste` arrangement).
+export type { RemindFields } from "./commands-reminders";
+
 /**
  * Property key carrying a reminder rule on a block. Mirrors
  * `outl_md::REMIND_KEY` — don't hardcode `"remind"` at a call site.

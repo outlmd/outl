@@ -25,6 +25,22 @@ Tapping a tab closes the other sheets.
 The sheets cover the bar, so the lit tab is only visible for Journal.
 The bar hides while a block is edited or a range is selected, because the keyboard toolbar owns that space.
 
+## What's what — the first-run walkthrough
+
+One sheet naming the bottom bar, the `+`, the week strip, the month label and the block long-press ([issue #574](https://github.com/outlmd/outl/issues/574)).
+It opens once per device on a first launch and is re-openable from **Settings → What's what**.
+
+It is not the 30-second tour (`firstRunTips`, `@outl/shared/polish`), and the split is the point.
+That one teaches the **outline** (every line is a block, `[[` links a page) and only ever appears on an empty page, so a user whose journal already has content never sees it — and it names no chrome in any case.
+Hence a key of its own (`CHROME_TOUR_KEY`); sharing `TIPS_KEY` would hide this from exactly the person who has been tapping unlabelled buttons for a week.
+
+Two rules it keeps:
+
+- **Nothing in it has to be completed before writing.** No steps, no next, no progress. The backdrop, the drag handle and the button all close it.
+- **Any way out counts as read.** Someone who swiped it away has read as much of it as they intend to, and showing it again next launch would be the app not listening.
+
+The copy is mobile-only (`lib/chrome-tour.ts`) because every row names a control that exists on this client; what is shared is the "show it once, then remember" mechanism, which never becomes an Op.
+
 ## Opening a ref that may not exist yet
 
 `[[avelino/outl]]`, `[[2026-06-04]]`, `#code-review`, picker entries — every "tap a ref → see a page" path on the frontend goes through **one** Tauri command, `open_ref(target)`, which wraps `outl_actions::page::open_or_create_by_ref`.
@@ -78,6 +94,27 @@ ISO journal days sort last, so a journal-heavy workspace opened on 2019 and noth
 Both backends are debounced at 150 ms off one timer: `search_blocks` rebuilds the workspace index from disk per call, and `search_pages` rebuilds every `PageMeta` under the workspace lock before it scores anything.
 An empty query loads immediately, since there are no keystrokes behind it to coalesce.
 Blocks additionally wait for the query to reach `BLOCK_QUERY_MIN`.
+
+## Search sheet — starting a page that is not a daily note
+
+The `+` beside the search box opens a name sheet and `openRef`s whatever is typed.
+
+It exists because there was no "New page" control at all ([issue #573](https://github.com/outlmd/outl/issues/573)).
+Named pages have always worked.
+The only way to *start* one was to type `[[` into a block and tap the link, which a phone-only user has no reason to know.
+So writing in the journal every day led to the reasonable conclusion that every note has to live on a day.
+
+Three things it does not do, each deliberate:
+
+- **It does not decide what the name means.**
+  `openRef` runs the canonical tree — a date → that journal, an existing literal / slugified / title match → that page, otherwise a new page titled with what was typed.
+  So **a name that already exists opens that page** rather than making a second one.
+  Branching on the shape in TypeScript first is the regex-vs-parser drift that command exists to remove.
+- **It does not leave a `[[link]]` on today.** Opening the page is the whole v1; a page reachable only by search is a real concern, and it is the one `[[` already answers for anyone who wants the backlink.
+- **It is hidden while the list is picking a merge target.** There is nothing to merge a page into that does not exist yet.
+
+The sheet is `PageNameSheet` with `submitUnchanged`, the one prop this flow added.
+A rename refuses a name equal to what it opened with, because that write does nothing; a create prefilled from the search box is exactly the case where submitting it unchanged is the point.
 
 ## Page switcher — long-press to delete
 
@@ -136,6 +173,22 @@ Today that is `remind::`, which shows a bell and the accent and drops its key, s
 `created`, `edited` and `roam-uid` arrive from `outl import` and are on essentially every block of a migrated graph.
 They are still in the `.md` and still listed in the sheet — dimmer, and below what you wrote — because deleting one means seeing it first.
 A `created:: by Roberta` you typed yourself is not a stamp and renders normally; only an ISO-8601 value counts.
+
+## Remind me — authoring a `remind::` rule
+
+A long-press offers **Remind me…**, which opens `<RemindSheet />` rather than the `window.prompt` it used to ([issue #572](https://github.com/outlmd/outl/issues/572)).
+Time, repeat, an "until" that only appears for a rule that repeats, and an **Edit as text** field holding the rule verbatim.
+Why both halves exist, and why the text field is what keeps the picker honest: [`docs/reminders.md` → Mobile](reminders.md#mobile-outl-mobile).
+
+What is decided in this client, and nowhere else:
+
+- **The rule text is never written here.** `parseRemindRule` on open, `formatRemindRule` on save, both over `outl_md::remind`. Two round-trips per session, not per keystroke.
+- **A rule that does not parse opens in the text field**, carrying what the block actually says. Dropping the user into the controls would show them a 09:00 that has nothing to do with their rule.
+- **An interval the list does not offer keeps its own label** (`Every 45min`), because a list with nothing selected reads as "Once" and silently drops the repeat on the next save.
+- **Switching the "until" clause seeds it** — a time one hour past the anchor (a stop at or before it is a clause the parser drops), or today's date — so Save is never a button that fails on a half-filled field.
+- **Remove is a button**, not an empty value the user has to discover. It is the only way to stop a block nagging without deleting it.
+
+The Reminders tab's empty state names this gesture, so opening the tab with nothing scheduled is not a dead end.
 
 ## Blockquote chrome
 

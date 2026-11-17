@@ -12,6 +12,7 @@ export {
   dismissOnce,
   TIPS_KEY,
   CRASH_NOTICE_KEY,
+  CHROME_TOUR_KEY,
   type Tip,
   type TipClient,
 } from "./firstRun";

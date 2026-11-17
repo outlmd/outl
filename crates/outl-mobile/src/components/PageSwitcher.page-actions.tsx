@@ -1,6 +1,6 @@
 import { Show, createEffect, createSignal } from "solid-js";
 import type { PageMeta } from "@outl/shared/api/types";
-import { deletePage } from "@outl/shared/api/commands";
+import { deletePage, openRef } from "@outl/shared/api/commands";
 import {
   mergeConfirmMessage,
   mergeInto,
@@ -56,6 +56,9 @@ export function createPageActions(deps: PageActionDeps) {
   const [renaming, setRenaming] = createSignal<PageMeta | null>(null);
   const [mergeSource, setMergeSource] = createSignal<PageMeta | null>(null);
   const [confirmReq, setConfirmReq] = createSignal<ConfirmRequest | null>(null);
+  // The name sheet for a *new* page: `null` closed, a string (often
+  // the search box's text) is what it opens prefilled with.
+  const [creating, setCreating] = createSignal<string | null>(null);
 
   /** Ask in the app's own confirm dialog; resolves `false` on cancel. */
   function ask(title: string, message: string, confirmLabel: string): Promise<boolean> {
@@ -75,6 +78,7 @@ export function createPageActions(deps: PageActionDeps) {
     setActionsFor(null);
     setRenaming(null);
     setMergeSource(null);
+    setCreating(null);
     answerConfirm(false);
   });
 
@@ -173,6 +177,33 @@ export function createPageActions(deps: PageActionDeps) {
     ];
   }
 
+  /**
+   * Create a page by name and open it.
+   *
+   * `openRef` is the whole implementation on purpose: it runs the
+   * canonical decision tree (a date → that journal, an existing
+   * literal / slugified / title match → that page, otherwise a new
+   * page titled with what was typed), so a name that already belongs
+   * to a page **opens** it rather than minting a second one. Branching
+   * on the shape here first is the regex-vs-parser drift that command
+   * exists to remove.
+   *
+   * Before this existed the only way to start a page that is not a
+   * daily note was to type `[[` into a block and tap the link
+   * ([#573](https://github.com/outlmd/outl/issues/573)), which a
+   * phone-only user has no reason to know.
+   */
+  async function createPage(name: string) {
+    setCreating(null);
+    try {
+      const view = await openRef(name.trim());
+      deps.onPick(view.page.slug, view.page.kind);
+      deps.reload();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   /** A tapped page row: open it, or, while picking a merge target, merge into it. */
   function openPage(p: PageMeta) {
     if (mergeSource()) void confirmAndMerge(p);
@@ -182,6 +213,9 @@ export function createPageActions(deps: PageActionDeps) {
   return {
     mergeSource,
     setMergeSource,
+    creating,
+    startCreating: setCreating,
+    createPage,
     openPage,
     openActions: setActionsFor,
     actionsFor,
@@ -282,6 +316,15 @@ export function PageActionOverlays(props: { actions: PageActions }) {
         open={a().actionsFor() !== null}
         actions={a().pageActions()}
         onClose={() => a().openActions(null)}
+      />
+      <PageNameSheet
+        open={a().creating() !== null}
+        title="New page"
+        initial={a().creating() ?? ""}
+        submitLabel="Create"
+        submitUnchanged
+        onSubmit={(name) => void a().createPage(name)}
+        onCancel={() => a().startCreating(null)}
       />
       <PageNameSheet
         open={a().renaming() !== null}
