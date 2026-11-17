@@ -222,9 +222,7 @@ outl ships continuously across TUI, CLI, desktop, and mobile.
 Do **not** suggest work on:
 
 - Query DSL (`{{query: ...}}`).
-- Plugin system (`rhai`).
 - `ChronDbStorage` backend (tracked as issue #1).
-- Android mobile build (iOS only today).
 - Per-page op log shards (only when the workspace hits 10k pages).
 
 If the PR touches one of these, it should already be linked to its tracking issue.
