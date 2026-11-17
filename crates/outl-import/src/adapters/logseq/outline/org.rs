@@ -106,6 +106,23 @@ pub(super) fn is_org_block_line(trimmed: &str) -> bool {
     upper.starts_with("#+BEGIN_") || upper.starts_with("#+END_")
 }
 
+/// `#+BEGIN_SRC` / `EXAMPLE` / `VERSE` / … — an org block whose body is
+/// preformatted, so the outline parser must keep every line of it
+/// verbatim until the closer instead of reading `- x` as a child bullet,
+/// `k:: v` as a property, or a blank line as disposable. `QUOTE` is not
+/// one: its body is prose.
+pub(super) fn opens_verbatim_org_block(trimmed: &str) -> bool {
+    let upper = trimmed.to_ascii_uppercase();
+    upper
+        .strip_prefix("#+BEGIN_")
+        .is_some_and(|rest| rest.split_whitespace().next() != Some("QUOTE"))
+}
+
+/// `#+END_…`, the line that closes a verbatim org block.
+pub(super) fn closes_org_block(trimmed: &str) -> bool {
+    trimmed.to_ascii_uppercase().starts_with("#+END_")
+}
+
 /// Translate org blocks into the markdown shapes outl renders.
 ///
 /// Logseq accepts both syntaxes in a markdown graph, and a graph that

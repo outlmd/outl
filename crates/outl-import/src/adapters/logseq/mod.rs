@@ -71,7 +71,7 @@ impl SourceAdapter for LogseqAdapter {
 
         let format = names::read_name_format(src);
         let mut graph = ImportGraph::default();
-        for file in files::collect(src, report) {
+        for file in files::collect(src, report)? {
             convert_file(&file.path, file.is_journal, format, &mut graph, report)?;
         }
         // A Logseq block template is a block; an outl template is a

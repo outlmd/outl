@@ -26,6 +26,7 @@
 use super::outline::count_blocks;
 use crate::ir::{ImportBlock, ImportGraph, ImportPage, PageBody, PageName};
 use crate::report::ImportReport;
+use outl_md::slug::slugify;
 use std::collections::BTreeSet;
 
 /// Logseq's block-template property.
@@ -61,6 +62,20 @@ pub(crate) fn lift(graph: &mut ImportGraph, report: &mut ImportReport) {
         }
     }
 
+    // Every stem a named page already occupies. The emitter merges named
+    // pages that slugify alike, so `daily note` and `daily-note` would
+    // otherwise land on one `templates-daily-note` page with both bodies,
+    // and a lifted template could merge into a source page of the same
+    // slug. Each lifted page gets its own pinned stem instead.
+    let mut stems: BTreeSet<String> = graph
+        .pages
+        .iter()
+        .filter_map(|p| match &p.name {
+            PageName::Named(n) => Some(p.stem_override.clone().unwrap_or_else(|| slugify(n))),
+            PageName::Journal(_) => None,
+        })
+        .collect();
+
     let mut lifted: Vec<ImportPage> = Vec::new();
     for f in found {
         let key = f.name.to_lowercase();
@@ -89,17 +104,36 @@ pub(crate) fn lift(graph: &mut ImportGraph, report: &mut ImportReport) {
         }
         report.pages_added_as_templates += 1;
         report.blocks_copied_into_templates += f.body.iter().map(count_blocks).sum::<usize>();
+        let title = format!("{TEMPLATE_PAGE_PREFIX}{}", f.name);
+        let stem = free_stem(&slugify(&title), &mut stems);
         lifted.push(ImportPage {
-            name: PageName::Named(format!("{TEMPLATE_PAGE_PREFIX}{}", f.name)),
+            name: PageName::Named(title),
             props: vec![(TEMPLATE_KEY.to_string(), f.name.clone())],
             body: PageBody::Outline(f.body),
-            stem_override: None,
+            stem_override: Some(stem),
             created: None,
             edited: None,
             source_uid: None,
         });
     }
     graph.pages.extend(lifted);
+}
+
+/// `base`, or `base-2`, `base-3`… — the first stem no page holds yet,
+/// claimed before it is returned.
+fn free_stem(base: &str, taken: &mut BTreeSet<String>) -> String {
+    let stem = (1..)
+        .map(|n| {
+            if n == 1 {
+                base.to_string()
+            } else {
+                format!("{base}-{n}")
+            }
+        })
+        .find(|s| !taken.contains(s))
+        .expect("an unbounded range always yields a free stem");
+    taken.insert(stem.clone());
+    stem
 }
 
 /// One block template found in the source.
@@ -414,6 +448,50 @@ mod tests {
         };
         assert_eq!(text_of(&body[0]), "first");
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    }
+
+    /// Two names that slugify alike stay two templates: the emitter
+    /// merges named pages by slug, which would fold both bodies into one
+    /// page and leave only one `template::` name to invoke. A source page
+    /// already on that slug keeps it too.
+    #[test]
+    fn templates_whose_names_slugify_alike_get_their_own_stems() {
+        let mut g = graph_of(vec![
+            page(
+                "templates/daily note",
+                &[],
+                vec![block("a page someone wrote", &[], vec![])],
+            ),
+            page(
+                "Templates",
+                &[],
+                vec![
+                    block(
+                        "one",
+                        &[("template", "daily note")],
+                        vec![block("first", &[], vec![])],
+                    ),
+                    block(
+                        "two",
+                        &[("template", "daily-note")],
+                        vec![block("second", &[], vec![])],
+                    ),
+                ],
+            ),
+        ]);
+        let mut report = ImportReport::new("logseq");
+        lift(&mut g, &mut report);
+
+        assert_eq!(report.pages_added_as_templates, 2);
+        let a = template_page(&g, "daily note");
+        let b = template_page(&g, "daily-note");
+        let base = slugify("templates/daily note");
+        assert_eq!(a.stem_override, Some(format!("{base}-2")));
+        assert_eq!(b.stem_override, Some(format!("{base}-3")));
+        assert_eq!(
+            b.props,
+            vec![("template".to_string(), "daily-note".to_string())]
+        );
     }
 
     /// A template with no body stamps nothing; an empty template page

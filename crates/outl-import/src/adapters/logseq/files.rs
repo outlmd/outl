@@ -21,6 +21,7 @@
 //!   `draws/`) is in neither. It goes into one aggregate `(graph)`
 //!   warning, the same shape `logseq_db` uses for structural nodes.
 
+use crate::adapter::ImportError;
 use crate::report::ImportReport;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -43,14 +44,19 @@ const NON_PAGE_DIRS: &[&str] = &["assets", "logseq", "draws", "version-files"];
 ///
 /// Bumps `source_pages` for each page it finds *and* each page it
 /// refuses, so the reconciliation's denominator covers both.
-pub(crate) fn collect(src: &Path, report: &mut ImportReport) -> Vec<PageFile> {
+///
+/// A directory under `pages/`, `journals/` or `whiteboards/` that cannot
+/// be listed fails the import: its pages would enter neither the
+/// denominator nor `skipped`, so the books would balance over a missing
+/// subtree.
+pub(crate) fn collect(src: &Path, report: &mut ImportReport) -> Result<Vec<PageFile>, ImportError> {
     let mut pages = Vec::new();
     for (dir, is_journal) in [("pages", false), ("journals", true)] {
         let d = src.join(dir);
         if !d.is_dir() {
             continue;
         }
-        for path in walk(&d, usize::MAX) {
+        for path in walk(&d, usize::MAX)? {
             let rel = rel_label(src, &path);
             // Everything in these two directories is a page Logseq
             // would show, read or not, so all of it counts.
@@ -77,8 +83,8 @@ pub(crate) fn collect(src: &Path, report: &mut ImportReport) -> Vec<PageFile> {
         }
     }
     pages.sort_by(|a, b| a.path.cmp(&b.path));
-    survey_the_rest(src, report);
-    pages
+    survey_the_rest(src, report)?;
+    Ok(pages)
 }
 
 /// A page the importer will not read: into the page **denominator**
@@ -97,10 +103,10 @@ fn refuse_page(report: &mut ImportReport, path: String, reason: impl Into<String
 /// Whiteboards are pages (Logseq lists them beside `pages/`), so each
 /// one is a skip entry; everything else beside the graph is not, and
 /// goes into one aggregate warning.
-fn survey_the_rest(src: &Path, report: &mut ImportReport) {
+fn survey_the_rest(src: &Path, report: &mut ImportReport) -> Result<(), ImportError> {
     let whiteboards = src.join("whiteboards");
     if whiteboards.is_dir() {
-        for path in walk(&whiteboards, usize::MAX) {
+        for path in walk(&whiteboards, usize::MAX)? {
             refuse_page(
                 report,
                 rel_label(src, &path),
@@ -109,19 +115,26 @@ fn survey_the_rest(src: &Path, report: &mut ImportReport) {
         }
     }
 
-    let mut unread: BTreeMap<&str, usize> = BTreeMap::new();
+    // These hold no pages, so a listing failure here costs no content:
+    // it is named in the warning rather than failing the import.
+    let mut unread: BTreeMap<&str, String> = BTreeMap::new();
     for dir in NON_PAGE_DIRS {
         let d = src.join(dir);
         if d.is_dir() {
-            let n = walk(&d, usize::MAX).len();
-            if n > 0 {
-                unread.insert(*dir, n);
+            match walk(&d, usize::MAX) {
+                Ok(files) if files.is_empty() => {}
+                Ok(files) => {
+                    unread.insert(*dir, files.len().to_string());
+                }
+                Err(_) => {
+                    unread.insert(*dir, "could not be listed".to_string());
+                }
             }
         }
     }
-    let loose = walk(src, 1).len();
+    let loose = walk(src, 1)?.len();
     if unread.is_empty() && loose == 0 {
-        return;
+        return Ok(());
     }
     let mut parts: Vec<String> = unread
         .iter()
@@ -139,6 +152,7 @@ fn survey_the_rest(src: &Path, report: &mut ImportReport) {
             parts.join(", ")
         ),
     );
+    Ok(())
 }
 
 /// Every file under `dir`, down to `depth` levels, sorted.
@@ -146,19 +160,26 @@ fn survey_the_rest(src: &Path, report: &mut ImportReport) {
 /// `usize::MAX` for `pages/` and `journals/`, because Logseq reads them
 /// recursively and a page filed into a subdirectory is a page; `1` for
 /// the graph root, where only the loose files are this pass's business.
-fn walk(dir: &Path, depth: usize) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = walkdir::WalkDir::new(dir)
+///
+/// A traversal error is returned, never skipped: dropping it would read
+/// an unreadable directory as an empty one.
+fn walk(dir: &Path, depth: usize) -> Result<Vec<PathBuf>, ImportError> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for entry in walkdir::WalkDir::new(dir)
         .min_depth(1)
         .max_depth(depth)
         .sort_by_file_name()
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .filter(|p| !is_hidden(p))
-        .collect();
+    {
+        let entry = entry.map_err(|e| {
+            let path = e.path().unwrap_or(dir).to_path_buf();
+            ImportError::io(&path, e.into())
+        })?;
+        if entry.file_type().is_file() && !is_hidden(entry.path()) {
+            out.push(entry.into_path());
+        }
+    }
     out.sort();
-    out
+    Ok(out)
 }
 
 /// `.DS_Store`, `.gitignore`, editor droppings — never a page, and
@@ -194,7 +215,7 @@ mod tests {
     fn markdown_pages_are_collected_from_both_dirs_recursively() {
         let g = graph(&["pages/a.md", "pages/sub/deep.md", "journals/2026_01_01.md"]);
         let mut report = ImportReport::new("logseq");
-        let pages = collect(g.path(), &mut report);
+        let pages = collect(g.path(), &mut report).expect("collect");
         assert_eq!(pages.len(), 3);
         assert_eq!(report.source_pages, 3);
         assert!(report.skipped.is_empty(), "{:?}", report.skipped);
@@ -206,7 +227,7 @@ mod tests {
     fn an_unsupported_page_file_is_named_in_skipped() {
         let g = graph(&["pages/a.md", "pages/board.canvas", "pages/old.org"]);
         let mut report = ImportReport::new("logseq");
-        let pages = collect(g.path(), &mut report);
+        let pages = collect(g.path(), &mut report).expect("collect");
         assert_eq!(pages.len(), 1);
         assert_eq!(report.source_pages, 3, "refused pages are still counted");
         let reasons: Vec<&str> = report.skipped.iter().map(|s| s.path.as_str()).collect();
@@ -224,7 +245,7 @@ mod tests {
     fn whiteboards_are_pages_and_land_in_skipped() {
         let g = graph(&["pages/a.md", "whiteboards/w.edn"]);
         let mut report = ImportReport::new("logseq");
-        collect(g.path(), &mut report);
+        collect(g.path(), &mut report).expect("collect");
         assert_eq!(report.source_pages, 2);
         assert!(
             report.skipped.iter().any(|s| s.path.ends_with("w.edn")),
@@ -239,7 +260,7 @@ mod tests {
     fn non_page_files_are_warned_about_not_skipped() {
         let g = graph(&["pages/a.md", "logseq/config.edn", "assets/pic.png"]);
         let mut report = ImportReport::new("logseq");
-        collect(g.path(), &mut report);
+        collect(g.path(), &mut report).expect("collect");
         assert_eq!(report.source_pages, 1, "config and assets are not pages");
         assert!(report.skipped.is_empty());
         let w = report
@@ -261,7 +282,7 @@ mod tests {
             "assets/three.png",
         ]);
         let mut report = ImportReport::new("logseq");
-        collect(g.path(), &mut report);
+        collect(g.path(), &mut report).expect("collect");
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
         assert!(
             report.warnings[0].detail.contains("assets/ (3)"),
@@ -276,7 +297,7 @@ mod tests {
     fn a_loose_file_in_the_root_is_counted_too() {
         let g = graph(&["pages/a.md", "README.md"]);
         let mut report = ImportReport::new("logseq");
-        collect(g.path(), &mut report);
+        collect(g.path(), &mut report).expect("collect");
         assert_eq!(report.source_pages, 1, "the root file is not a page");
         assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
         assert!(
@@ -288,11 +309,36 @@ mod tests {
         );
     }
 
+    /// An unreadable directory under `pages/` is not an empty one: its
+    /// pages would enter neither the denominator nor `skipped`, and the
+    /// books would balance over the missing subtree.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_page_directory_fails_the_import() {
+        use std::os::unix::fs::PermissionsExt;
+        let g = graph(&["pages/a.md", "pages/private/secret.md"]);
+        let private = g.path().join("pages/private");
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        // Root reads through any mode bit; there is nothing to test then.
+        let readable = std::fs::read_dir(&private).is_ok();
+        let mut report = ImportReport::new("logseq");
+        let result = collect(g.path(), &mut report);
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod back");
+        if readable {
+            return;
+        }
+        let err = result
+            .err()
+            .expect("an unlistable page directory is an error");
+        assert!(err.to_string().contains("private"), "{err}");
+    }
+
     #[test]
     fn a_clean_graph_warns_about_nothing() {
         let g = graph(&["pages/a.md", "journals/2026_01_01.md"]);
         let mut report = ImportReport::new("logseq");
-        collect(g.path(), &mut report);
+        collect(g.path(), &mut report).expect("collect");
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 }

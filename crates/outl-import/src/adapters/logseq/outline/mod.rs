@@ -25,7 +25,10 @@ use crate::adapters::asset_scan::scan_assets;
 use crate::adapters::scan::{is_uid, parse_prop_line, parse_whole_fence};
 use crate::ir::{placeholder_ref, AssetRef, BlockContent, ImportBlock, TaskState};
 use crate::report::ImportReport;
-use org::{apply_org_stamp, convert_org_blocks, is_org_block_line, org_stamp};
+use org::{
+    apply_org_stamp, closes_org_block, convert_org_blocks, is_org_block_line,
+    opens_verbatim_org_block, org_stamp,
+};
 use std::path::Path;
 
 /// One bullet mid-parse, before inline tokenization.
@@ -72,10 +75,14 @@ pub(super) fn parse_outline(
         }
         if !trimmed.starts_with("- ") && trimmed != "-" {
             if let Some((k, v)) = parse_prop_line(trimmed) {
-                if k == "id" {
-                    report.artifacts_stripped += 1;
-                } else {
-                    page_props.push((k, v));
+                match k.as_str() {
+                    "id" => report.artifacts_stripped += 1,
+                    // `title::` becomes the page name, never a ref.
+                    "title" => page_props.push((k, v)),
+                    _ => {
+                        let v = refs_in_prop_value(&v, report);
+                        page_props.push((k, v));
+                    }
                 }
                 idx += 1;
                 continue;
@@ -118,12 +125,37 @@ pub(super) fn parse_outline(
     let space_unit = detect_space_unit(&lines[idx..]);
     let mut stack: Vec<RawBlock> = Vec::new();
     let mut in_fence = false;
+    let mut in_org_src = false;
     let mut in_logbook = false;
 
     while idx < lines.len() {
         let line = lines[idx];
         idx += 1;
         let trimmed = line.trim_start();
+
+        // An org source block's body is code, verbatim to its closer:
+        // `- x` is not a child, `k:: v` is not a property, and a blank
+        // line is part of the code. A bullet at the owning block's own
+        // depth or shallower still ends it, so an unclosed block cannot
+        // swallow the rest of the page.
+        if in_org_src
+            && bullet_content(trimmed).is_some()
+            && stack
+                .last()
+                .is_none_or(|top| indent_level(line, space_unit) <= top.level)
+        {
+            in_org_src = false;
+        }
+        if in_org_src {
+            if let Some(top) = stack.last_mut() {
+                top.text_lines
+                    .push(strip_indent(line, top.level + 1, space_unit));
+            }
+            if closes_org_block(trimmed) {
+                in_org_src = false;
+            }
+            continue;
+        }
 
         // Fence bodies swallow every classification below.
         if in_fence {
@@ -167,6 +199,7 @@ pub(super) fn parse_outline(
             if rest.trim_start().starts_with("```") && !fence_closes_inline(rest) {
                 in_fence = true;
             }
+            in_org_src = opens_verbatim_org_block(rest.trim_start());
             stack.push(block);
             continue;
         }
@@ -201,6 +234,12 @@ pub(super) fn parse_outline(
         }
         if trimmed.starts_with("```") {
             in_fence = !fence_closes_inline(trimmed);
+            top.text_lines
+                .push(strip_indent(line, top.level + 1, space_unit));
+            continue;
+        }
+        if opens_verbatim_org_block(trimmed) {
+            in_org_src = true;
             top.text_lines
                 .push(strip_indent(line, top.level + 1, space_unit));
             continue;

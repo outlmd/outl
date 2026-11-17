@@ -115,6 +115,24 @@ fn a_ref_in_a_property_value_resolves() {
     assert_eq!(report.refs_in_prop_values, 1);
 }
 
+/// The same ref in a **page** property, above the first bullet. That
+/// region is parsed separately from block properties, and the resolve
+/// pass has to visit the page root as well as its blocks.
+#[test]
+fn a_ref_in_a_page_property_value_resolves() {
+    let (page, report) = imported(&format!("related:: (({SRC_UID}))\n\n- item\n"));
+    assert!(
+        !page.contains("outl-import:"),
+        "placeholder survived on disk:\n{page}"
+    );
+    assert!(
+        page.contains("related:: ((blk-"),
+        "a ref in a page property must resolve to a handle:\n{page}"
+    );
+    assert_eq!(report.refs_in_prop_values, 1, "{report:?}");
+    assert_eq!(report.refs_resolved, 1, "{report:?}");
+}
+
 /// A ref to a uid the graph does not hold keeps its source text, so it
 /// is still searchable, and is counted as unresolved.
 #[test]

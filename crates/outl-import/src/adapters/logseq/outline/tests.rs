@@ -374,6 +374,28 @@ fn a_blank_line_inside_an_org_src_block_survives() {
     }
 }
 
+/// The body of an org src block is code, all of it: a `k:: v` line is
+/// not a property, a `- x` line is not a child, and blank lines stay
+/// where they were. Each of those used to be classified before the org
+/// conversion ran, so the fence came out with lines lost or moved.
+#[test]
+fn an_org_src_body_is_kept_verbatim() {
+    let (_, blocks, _) = parse_page(
+        "- #+BEGIN_SRC text\n  id:: example\n\n  - literal\n  key:: value\n  #+END_SRC\n- after\n",
+    );
+    assert_eq!(blocks.len(), 2, "{blocks:?}");
+    assert!(blocks[0].children.is_empty(), "{:?}", blocks[0].children);
+    assert!(blocks[0].props.is_empty(), "{:?}", blocks[0].props);
+    assert_eq!(blocks[0].uid, None);
+    match &blocks[0].content {
+        BlockContent::Code { lang, body } => {
+            assert_eq!(lang.as_deref(), Some("text"));
+            assert_eq!(body, "id:: example\n\n- literal\nkey:: value");
+        }
+        other => panic!("expected code, got {other:?}"),
+    }
+}
+
 /// A stamp with no angle brackets is not a stamp — it stays the text
 /// the user wrote rather than vanishing into a property.
 #[test]

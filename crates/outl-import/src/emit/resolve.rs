@@ -181,12 +181,14 @@ pub(super) fn apply(
         // the file-fallback sweep below a fallback. It used to be the
         // main road for these: one read, one `write_atomic` and one
         // `reconcile_md` per page, on top of the re-projection this
-        // path does anyway.
-        for entry in &sc.blocks {
+        // path does anyway. The page root is included: a page property
+        // (`related:: ((uid))` above the first bullet) lives there.
+        let nodes = std::iter::once(sc.page_id).chain(sc.blocks.iter().map(|b| b.id));
+        for node in nodes {
             let marked: Vec<(String, String)> = dest
                 .workspace
                 .tree()
-                .properties_of(entry.id)
+                .properties_of(node)
                 .filter_map(|(k, v)| match v {
                     outl_core::property::PropValue::Text(text) => {
                         Some((k.to_string(), text.clone()))
@@ -205,7 +207,7 @@ pub(super) fn apply(
                 outl_actions::page::set_property(
                     dest.workspace,
                     dest.hlc,
-                    entry.id,
+                    node,
                     &key,
                     Some(outl_core::property::PropValue::Text(resolved)),
                 )
