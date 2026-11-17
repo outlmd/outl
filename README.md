@@ -8,6 +8,9 @@
   <a href="https://discord.gg/fDDXRtFhA6">
     <img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" />
   </a>
+  <a href="https://github.com/sponsors/avelino">
+    <img alt="Sponsor outl" src="https://img.shields.io/badge/Sponsor-outl-db61a2?logo=githubsponsors&logoColor=white" />
+  </a>
 </p>
 
 <p align="center">
@@ -105,6 +108,22 @@ Logseq's new DB version stores a graph in SQLite; export it with **Export graph 
 The importers (Roam, Logseq, Logseq DB, Obsidian — or `auto` to detect) resolve `((uid))` block refs and `{{embed}}`s into real outl block references, keep folded state, and translate each dialect.
 Everything touched is counted in the import report — run with `--dry-run` first to measure fidelity against your backup.
 A ref whose target is not in the export stays as the source wrote it, `((UID))`, so it remains greppable for manual triage.
+
+## Support outl
+
+outl is built by one person, on nights and weekends. No account, no server holding your notes, nothing to upsell you on. Sponsors are what turn leftover hours into real, dedicated time.
+
+- **[Sponsor on GitHub](https://github.com/sponsors/avelino)**, from $5 a month, or a one-time coffee
+- **$5+**: a vote in the quarterly poll that decides what goes next on the roadmap, your name in the list below and the Sponsor role on [Discord](https://discord.gg/fDDXRtFhA6)
+- **$15+**: early access to beta builds and a monthly sponsors-only update
+- **Companies**: your logo here and on [outl.app](https://outl.app), from $100 a month
+
+### Supporters
+
+Thank you to everyone keeping outl moving. Updated once a month. [Add your name](https://github.com/sponsors/avelino).
+
+<!-- supporters:start -->
+<!-- supporters:end -->
 
 ## Contributing
 
