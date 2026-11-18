@@ -10,6 +10,7 @@
 //! and name — `cargo test <name>` still finds it.
 
 use super::*;
+use crate::sidecar::sidecar_path_for;
 use outl_core::id::ActorId;
 use std::fs;
 use tempfile::TempDir;
@@ -297,5 +298,52 @@ fn orphans_get_logged_when_log_path_set() {
     assert!(
         log.contains("id="),
         "orphans.log should contain entry:\n{log}"
+    );
+}
+
+/// A workspace from before the sidecar was un-hidden still carries
+/// `.<stem>.outl` next to its `.md`. Every other sidecar reader goes
+/// through `resolve_sidecar_path`, which renames that file to the modern
+/// `<stem>.outl` on first touch; the reconcile pass has to do the same,
+/// or it reads "no sidecar", mints a fresh id for every block while the
+/// old ids stay parented under the page, and every `((blk-…))` handle
+/// into the page stops resolving.
+#[test]
+fn a_legacy_dotted_sidecar_is_migrated_not_rebuilt() {
+    let (dir, mut ws, hlc) = setup_workspace();
+    let md_path = dir.path().join("foo.md");
+    fs::write(&md_path, "- alpha\n- beta\n").unwrap();
+    reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+
+    // Put the sidecar back where a pre-v0 build left it.
+    let modern = sidecar_path_for(&md_path);
+    let legacy = dir.path().join(".foo.outl");
+    fs::rename(&modern, &legacy).unwrap();
+    let before = sidecar::read(&legacy).unwrap();
+    let ids_before: Vec<NodeId> = before.blocks.iter().map(|b| b.id).collect();
+
+    let report = reconcile_md(&mut ws, &hlc, &md_path, None).unwrap();
+
+    assert!(
+        !report.created_sidecar,
+        "the legacy sidecar is the page's sidecar, not a missing one"
+    );
+    assert!(!legacy.exists(), "the dotted sidecar must be migrated");
+    let after = sidecar::read(&modern).unwrap();
+    assert_eq!(after.page_id, before.page_id);
+    let ids_after: Vec<NodeId> = after.blocks.iter().map(|b| b.id).collect();
+    assert_eq!(
+        ids_after, ids_before,
+        "block ids must survive the migration"
+    );
+
+    let children = ws
+        .tree()
+        .iter_nodes()
+        .filter(|(_, parent, _)| *parent == before.page_id)
+        .count();
+    assert_eq!(
+        children, 2,
+        "the page must not gain a second copy of its blocks"
     );
 }

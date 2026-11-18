@@ -81,6 +81,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Logseq's "Export as standard Markdown" hands you one, and `outl import logseq <that zip>` is the obvious next thing to type.
   A graph directory holding only `pages/` or only `journals/` is also recognised now, which is what such an export (or a graph whose owner never used journals) looks like.
 
+- **A page still carrying a pre-v0 `.<name>.outl` sidecar lost every block id on reconcile.**
+  `reconcile_md` looked only for the modern `<name>.outl`, so a dotted sidecar read as no sidecar at all: every block was minted a fresh id while the old block nodes stayed under the page, duplicating its content in the tree and breaking every `((blk-…))` handle into it, with nothing in `orphans.log` ([#582](https://github.com/outlmd/outl/issues/582)).
+  It now resolves the path through `resolve_sidecar_path`, the accessor every other sidecar reader already used, so the dotted file is read and renamed to `<name>.outl` on the first pass.
+
 - **Windows: `scoop install` could not install outl at all, on any release.**
   The Scoop manifest's `architecture.*.url` carried a literal `$version`.
   Scoop expands that token only inside `autoupdate` — the block a bucket maintainer runs against a new release — so a client downloaded the url exactly as written and GitHub answered `404` for `/download/v$version/outl-windows-x64.zip`.
