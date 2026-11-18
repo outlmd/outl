@@ -110,7 +110,7 @@
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
 612 crates/outl-cli/src/cmd/page.rs
 636 crates/outl-config/src/lib.rs
-716 crates/outl-core/src/storage/jsonl/read.rs
+706 crates/outl-core/src/storage/jsonl/read.rs
 805 crates/outl-core/src/storage/jsonl/tests.rs
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs

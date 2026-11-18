@@ -34,6 +34,7 @@ mod idx_lock;
 mod index_load;
 mod persist;
 mod read;
+mod read_at;
 #[cfg(test)]
 mod read_robustness;
 #[cfg(test)]

@@ -27,7 +27,7 @@ use tracing::{debug, info};
 
 use crate::engine::AppendLock;
 use crate::oplog::ingest_received_ops;
-use crate::oplog_census::local_vector_clock;
+use crate::oplog_census::{local_vector_clock, Census};
 use crate::oplog_select::ops_missing_for;
 use crate::peer_label::peer_log_label;
 use crate::peers::workspace_peers_path;
@@ -303,7 +303,14 @@ async fn delta_sync_inner(
     }
 
     // 4. push the ops the peer is missing under its own vector clock.
-    let to_push = ops_missing_for(&ops_dir, actor, &peer_clock)?;
+    //
+    // Read after step 3 on purpose, and NOT shared with the clock sent in
+    // step 1: the ingest in between appended the peer's ops to our log, so
+    // the step-1 census is a snapshot of a log that no longer exists. The
+    // selection must range over what we hold *now*, or an op that arrived
+    // from a third peer via this one would wait for the next exchange.
+    let census = Census::read(&ops_dir)?;
+    let to_push = ops_missing_for(&ops_dir, &census, &peer_clock)?;
     let blob = encode_ops_blob(&to_push)?;
     send.write_all(&blob).await.context("send our ops blob")?;
     send.finish().context("finish send")?;

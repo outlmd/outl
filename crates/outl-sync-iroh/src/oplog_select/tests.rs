@@ -17,7 +17,17 @@ use outl_core::id::NodeId;
 use outl_core::op::Op;
 use outl_core::storage::sidecar::{self, SidecarKind};
 use outl_core::storage::PageScope;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+/// The census the selection ranges over, read fresh from `ops_dir`.
+///
+/// The production callers read one per exchange and hand it to both the
+/// clock and the selection; a test re-reads it per assertion so each one
+/// states the log it is selecting against.
+fn census(ops_dir: &Path) -> Census {
+    Census::read(ops_dir).expect("census")
+}
 
 /// Write one actor's `ops-<actor>.jsonl` by hand, returning its ops.
 fn write_log(ops_dir: &Path, actor: ActorId, count: usize) -> Vec<LogOp> {
@@ -73,7 +83,7 @@ fn a_peer_that_is_current_costs_no_op_read() {
     write_log(&ops_dir, actor, 6);
 
     let theirs = local_vector_clock(&ops_dir).expect("clock");
-    assert!(ops_missing_for(&ops_dir, actor, &theirs)
+    assert!(ops_missing_for(&ops_dir, &census(&ops_dir), &theirs)
         .expect("delta")
         .is_empty());
     for path in sidecars(&ops_dir, actor) {
@@ -107,7 +117,7 @@ fn a_peer_behind_us_still_gets_every_op_it_lacks() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for(&ops_dir, a, &peer_clock).expect("delta");
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
     let sent_ts: BTreeSet<Hlc> = sent.iter().map(|op| op.ts).collect();
     let expected: BTreeSet<Hlc> = ops_a[2..].iter().chain(&ops_b).map(|op| op.ts).collect();
     assert_eq!(sent_ts, expected);
@@ -139,7 +149,7 @@ fn a_gap_below_the_peers_watermark_still_sends_what_the_peer_lacks() {
     .into_iter()
     .collect();
 
-    let sent: BTreeSet<Hlc> = ops_missing_for(&ops_dir, actor, &peer_clock)
+    let sent: BTreeSet<Hlc> = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock)
         .expect("delta")
         .iter()
         .map(|op| op.ts)
@@ -175,7 +185,8 @@ fn a_first_sync_is_capped_so_one_exchange_cannot_exhaust_memory() {
     let actor = ActorId::new();
     let ops = write_log(&ops_dir, actor, 50);
 
-    let sent = ops_missing_for_capped(&ops_dir, actor, &HashMap::new(), 10).expect("delta");
+    let sent =
+        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &HashMap::new(), 10).expect("delta");
 
     assert_eq!(sent.len(), 10, "one exchange must carry at most the budget");
     let sent_ts: Vec<Hlc> = sent.iter().map(|op| op.ts).collect();
@@ -207,7 +218,8 @@ fn a_capped_first_sync_still_converges_over_repeated_exchanges() {
             .iter()
             .map(|(actor, hlcs)| (*actor, clock_of(hlcs)))
             .collect();
-        let sent = ops_missing_for_capped(&ops_dir, a, &peer_clock, 7).expect("delta");
+        let sent =
+            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
         if sent.is_empty() {
             let got: BTreeSet<Hlc> = held.values().flatten().copied().collect();
             assert_eq!(
@@ -266,7 +278,7 @@ fn a_gap_resend_obeys_the_budget_so_the_frame_is_always_sendable() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, actor, &peer_clock, 5).expect("delta");
+    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 5).expect("delta");
     assert!(
         sent.len() <= 5,
         "a gap resend that cannot be framed is a repair that never runs"
@@ -299,7 +311,7 @@ fn the_window_opens_on_the_ops_the_peer_is_actually_missing() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, actor, &peer_clock, 5).expect("delta");
+    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 5).expect("delta");
     let first = sent.first().expect("a window").ts;
     assert_eq!(
         first, ops[20].ts,
@@ -327,7 +339,8 @@ fn a_budgeted_gap_resend_converges_over_repeated_exchanges() {
     for round in 0..100 {
         let peer_clock: HashMap<ActorId, ActorClock> =
             [(actor, clock_of(&held))].into_iter().collect();
-        let sent = ops_missing_for_capped(&ops_dir, actor, &peer_clock, 7).expect("delta");
+        let sent =
+            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
         if sent.is_empty() {
             assert_eq!(
                 held, everything,
@@ -371,7 +384,8 @@ fn a_window_that_teaches_the_peer_nothing_moves_on() {
     for round in 0..100 {
         let peer_clock: HashMap<ActorId, ActorClock> =
             [(actor, clock_of(&held))].into_iter().collect();
-        let sent = ops_missing_for_capped(&ops_dir, actor, &peer_clock, 7).expect("delta");
+        let sent =
+            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
         if sent.is_empty() {
             assert_eq!(held, everything, "a quiet round must mean convergence");
             return;
@@ -431,4 +445,81 @@ fn the_byte_guard_never_returns_an_empty_selection() {
         write_log(&ops_dir, ActorId::new(), 3)
     };
     assert_eq!(fit_in_frame(ops, 1).len(), 1);
+}
+
+/// **A selection that has something to send must not open storage either**,
+/// and that is the half the converged test above could never catch.
+///
+/// `a_peer_that_is_current_costs_no_op_read` passes on an early return: the
+/// selection is empty, so nothing downstream runs. The expensive path was
+/// the other branch — any non-empty selection called
+/// `JsonlStorage::open`, a full load of both index sidecars for every
+/// actor (160 MB resident and 55 ms on a real 23-actor workspace) to
+/// re-derive offsets the census already held. It ran on every exchange
+/// with any op to push, on both sides, per peer, which on a device that is
+/// behind means continuously.
+///
+/// The census carries the offsets now and `read_ops_at_offsets` spends
+/// them. A reappearing node sidecar is the signature of that regression,
+/// the same way it is in
+/// `the_actor_census_neither_reads_nor_writes_the_node_index`.
+#[test]
+fn a_selection_with_ops_to_send_still_costs_no_open() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let ops_dir = tmp.path().join("ops");
+    let actor = ActorId::new();
+    let ops = write_log(&ops_dir, actor, 9);
+
+    // The peer holds the first three, so six ops have to cross — the
+    // branch that used to open.
+    let held: BTreeSet<Hlc> = ops[..3].iter().map(|op| op.ts).collect();
+    let peer_clock = HashMap::from([(actor, clock_of(&held))]);
+
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
+    assert_eq!(sent.len(), 6, "the ops the peer lacks still cross");
+    assert_eq!(
+        sent.iter().map(|op| op.ts).collect::<BTreeSet<_>>(),
+        ops[3..].iter().map(|op| op.ts).collect::<BTreeSet<_>>()
+    );
+
+    for path in sidecars(&ops_dir, actor) {
+        assert!(
+            !path.exists(),
+            "{} came back: a non-empty selection went through a full open",
+            path.display()
+        );
+    }
+}
+
+/// The same for a **gap resend**, which is the other way into a non-empty
+/// selection and the one a workspace behind on sync actually takes.
+#[test]
+fn a_gap_resend_also_costs_no_open() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let ops_dir = tmp.path().join("ops");
+    let actor = ActorId::new();
+    let ops = write_log(&ops_dir, actor, 12);
+
+    // Holds the newest op and fewer ops below it than we do: a gap.
+    let peer_clock = HashMap::from([(
+        actor,
+        ActorClock {
+            max: ops.last().expect("ops").ts,
+            count: 4,
+        },
+    )]);
+
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
+    assert!(
+        !sent.is_empty(),
+        "a gap resends a window of that actor's log"
+    );
+
+    for path in sidecars(&ops_dir, actor) {
+        assert!(
+            !path.exists(),
+            "{} came back: the gap resend went through a full open",
+            path.display()
+        );
+    }
 }

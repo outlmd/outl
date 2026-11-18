@@ -7,6 +7,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The desktop burned a whole CPU core and froze while syncing, on a workspace that had nothing to sync.**
+  Measured on a 748,684-op / 23-actor graph with four paired devices: 30 % of a core at p90 and **131 % at peak** on an app sitting idle, with the window periodically refusing keystrokes.
+
+  Nothing was broken, which is why it ran for so long.
+  The sync census — *which ops does this device hold* — was already the cheap read, optimised once when it was killing the iOS app on launch.
+  That round cut the constant and left the shape: `O(total ops)` per call, nothing memoising it, no caller aware another had just asked.
+  One exchange asked six times, and twice opened the op log in full (both index sidecars for every actor, 160 MB resident each) to re-derive byte offsets the census was already holding.
+  ~710 ms of CPU per peer, every 8 s, to move zero ops.
+  The freeze was those allocations, not the CPU: against an already-large process, macOS started compressing memory.
+
+  One census per exchange now, carrying the offsets, so the clock, the delta selection and the op bodies all come out of a single pass — and the op bodies are read by seeking to those offsets instead of opening anything.
+  **221 ms → 39 ms per exchange side, and 160 MB → 0.**
+  The census itself went 100 ms → 38 ms by not rebuilding an index it had just read.
+
+  The always-visible sync dot also stopped paying for it.
+  `pending_ops` is the only field in a peer status that reads the op log, and only the Sync panel's device list shows it, but the dot polled for it every 8 s **and** once per op delivered — several full censuses a second during an active sync, for a number that was not on screen.
+
+  Pinned structurally rather than by timing: the no-open tests delete the index sidecars and fail if either comes back.
+  The fast-path test that existed throughout passed throughout, because a converged peer returns early and never reaches the branch that was expensive.
+  The rule this bought is root `CLAUDE.md` invariant 15, with the measurements and the per-client checklist in [`docs/performance.md`](docs/performance.md).
+
 - **Pasting a Roam or Logseq block that embedded something deleted the embed, page name and all.**
   Not "left it as literal text": the token reached the generic `{{…}}` strip and went with it.
   Measured on every spelling, only `{{embed: ((blk-…))}}` survived.

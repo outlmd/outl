@@ -63,7 +63,9 @@
 
 ## Project
 
+* [The reasoning invariants](invariants.md)
 * [Development guide](development.md)
+* [Performance](performance.md)
 * [Boot performance](boot-performance.md)
 * [CI and release](ci-and-release.md)
 * [Discussions mirror to Discord](discussions-discord.md)

@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 use crate::engine::{AppendLock, SharedWorkspaceId};
 use crate::engine_sync::{read_ops_blob, read_request};
 use crate::oplog::ingest_received_ops;
-use crate::oplog_census::local_vector_clock;
+use crate::oplog_census::Census;
 use crate::oplog_select::ops_missing_for;
 use crate::peer_label::peer_log_label;
 use crate::peers::{refresh_peer_direct_addr, workspace_peers_path};
@@ -196,16 +196,21 @@ impl SyncProtocolHandler {
         let ops_dir = self.workspace_root.join("ops");
 
         // 2. send our own vector clock so the initiator can compute its push.
-        let our_clock = local_vector_clock(&ops_dir)?;
+        //
+        // One census answers both this and step 3: nothing between them
+        // touches the op log (the initiator's ops are ingested in step 4),
+        // so a second read would re-derive the same answer at `O(total
+        // ops)`. See `oplog_census::Census`.
+        let census = Census::read(&ops_dir)?;
         let response = SyncResponse {
-            vector_clock: our_clock,
+            vector_clock: census.vector_clock(),
         };
         send.write_all(&encode_response(&response)?)
             .await
             .context("send sync response")?;
 
         // 3. send the ops the initiator is missing under A.
-        let to_push = ops_missing_for(&ops_dir, self.actor, &request.vector_clock)?;
+        let to_push = ops_missing_for(&ops_dir, &census, &request.vector_clock)?;
         let blob = encode_ops_blob(&to_push)?;
         send.write_all(&blob).await.context("send our ops blob")?;
         // Deliberately NOT finished here. The durable-ingest confirmation goes

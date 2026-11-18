@@ -300,6 +300,13 @@ the sequence moved.
   `finish_in_page_with` holds the workspace lock for a whole commit and drops the cached index from in there, so any thread that takes the index first and then waits on the workspace is an ABBA deadlock — `parking_lot::Mutex` has no timeout, so the app freezes until the user force-quits it.
   `compute_backlinks_offloaded` did exactly that and pasting was the reliable way in: a paste commits twice (draft flush + the paste) and every commit refreshes the panel, so the two collided within a keystroke.
   Pinned by `tests/backlinks_commit_deadlock.rs`, which stress-runs both paths against a watchdog — a re-inverted order fails the test instead of hanging the app.
+- **Do not ask a command for an expensive field nobody is rendering.**
+  `peer_status(with_pending)` is the worked example, and the third half of a fix whose first two halves are recorded on that command's own doc comment.
+  Moving it to the blocking pool stopped the iOS watchdog killing the app; making the read cheap was `outl-sync-iroh`'s side.
+  Neither noticed that `pending_ops` is the only field here that reads the op log, that `pendingLabel` renders it in exactly one place (the Sync panel's device list), and that the always-visible status dot — which reads `online` alone — polls this every 8 s **and** once per `peer-ops-changed`.
+  So during an active sync the dot re-counted every op in the workspace several times a second for a number that was not on screen.
+  `pending_ops` comes back `None` for a caller that did not ask, which is what it already means before a peer's first exchange, so no renderer needed changing.
+  The general rule is root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate) invariant 15; [`docs/performance.md`](../../docs/performance.md) has the numbers.
 - **A command body that is not O(1) is `async`.**
   Not O(1) means it builds a `WorkspaceIndex`, walks the op log, renders markdown, copies files, runs a user's code, or holds the workspace mutex for more than a lookup.
   `offload.rs` owns the mechanics and the crashes that bought the rule, including the one set that *cannot* move off the IPC thread yet (the mutations behind `finish_in_page*`) and why.

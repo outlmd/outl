@@ -242,6 +242,25 @@ Two things keep one from forming, and one repairs one that exists:
 
 `outl-sync-iroh`'s vector clock, its delta selection and its ingest dedup are the callers; see [`docs/iroh-internals.md`](iroh-internals.md#module-layout).
 
+#### The census keeps the offsets, so the sender never opens storage
+
+`JsonlStorage::actor_offset_indexes(ops_dir)` is the same read keeping each op's byte offset instead of discarding it, and `actor_timestamps` is its HLC-only projection — one owner, so the two cannot disagree about what the workspace holds.
+
+The offsets are what the sender needs next.
+Having learned *which* ops a peer lacks, it needs those op **bodies**.
+It used to get them by calling `JsonlStorage::open`: the full load of both index sidecars for every actor, 160 MB resident and 55 ms on a real 23-actor workspace, to re-derive numbers the census was already holding.
+`JsonlStorage::read_ops_at_offsets(ops_dir, &[(actor, ts, offset)])` seeks straight to each one.
+A pick that cannot be read back is a `StorageError::MissingOp`, never a silent omission, for the reason on `read_op_or_missing`: a short read here is indistinguishable from a healthy one, and a sync receiver would record the gap as settled.
+
+Two properties of the read itself, both measured on a 748,684-op / 23-actor workspace:
+
+- **A loaded index is taken whole when the file holds one producer**, which every writer's guard makes the normal case.
+  Regrouping by `Hlc::actor` anyway meant re-inserting every HLC in the workspace into a second `BTreeMap`, and that was the dominant cost: 100 ms → 38 ms, which also made this read cheaper than the `open` it exists to replace.
+- **The actors' files are read across lanes**, worth about 10 % on top and no more.
+  The reason is the one [`index_load.rs`](../crates/outl-core/src/storage/jsonl/index_load.rs) records about boot: the ceiling is one file, not the thread count, and a single actor holds 68 % of those ops.
+
+Why this read is on the performance-critical list at all, and the checklist it generalises to: [`docs/performance.md`](performance.md).
+
 ### The index sidecars: one owner, and a lifecycle
 
 > **What 134MB of dead cache cost, and what the GC refuses to touch:** [RFC 0265](rfcs/0265-index-sidecar-lifecycle.md).

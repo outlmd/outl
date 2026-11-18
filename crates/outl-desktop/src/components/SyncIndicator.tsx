@@ -59,7 +59,12 @@ export function SyncIndicator() {
 
   onMount(async () => {
     void refresh();
-    // Re-probe on the catch-up cadence; cheap (reads cached dial health).
+    // Re-probe on the catch-up cadence. Cheap because `peerStatus()`
+    // defaults to leaving `pending_ops` out: reachability is the
+    // transport's in-memory dial record, and the count is the only part
+    // that reads the op log. This comment used to claim the whole call
+    // was cheap, which is how a 38-100ms census ended up running every
+    // 8s plus once per delivered op for a number this dot never renders.
     const id = setInterval(() => {
       setNow(Date.now());
       void refresh();

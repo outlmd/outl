@@ -55,17 +55,7 @@ impl JsonlStorage {
     fn read_op_at(&self, actor: ActorId, ts: Hlc) -> Option<LogOp> {
         let offset = self.index.get(actor, ts)?;
         let path = self.ops_path_for_actor(actor)?;
-        let mut file = File::open(&path).ok()?;
-        file.seek(SeekFrom::Start(offset)).ok()?;
-        let mut line = String::new();
-        BufReader::new(file).read_line(&mut line).ok()?;
-        if line.is_empty() {
-            return None;
-        }
-        // A glued line yields multiple ops; pick the one whose HLC
-        // matches (same recovery semantics as the boot path).
-        let ops = parse_log_line(line.trim()).ok()?;
-        ops.into_iter().find(|o| o.ts == ts)
+        super::read_at::read_op_at_offset(&path, ts, offset)
     }
 
     /// Read one op, preferring a warm LRU entry over a disk seek.
