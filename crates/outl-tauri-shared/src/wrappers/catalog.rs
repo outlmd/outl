@@ -377,9 +377,14 @@ macro_rules! peer_commands {
             async fn outl_peer_remove(id: String) -> ::std::result::Result<bool, String>
                 => $crate::commands::peers::peer_remove;
 
-            /// Live reachability probe for every known peer. Polled every
-            /// 5s and reads the whole op log — never synchronous.
-            async fn outl_peer_status()
+            /// Live reachability for every known peer.
+            ///
+            /// `with_pending` asks for the `pending_ops` column too, which
+            /// is the only part that reads the op log. Reachability is an
+            /// in-memory snapshot of the transport's own dials, so a
+            /// status poll that leaves it `false` costs nothing. Never
+            /// synchronous either way.
+            async fn outl_peer_status(with_pending: bool)
                 -> ::std::result::Result<
                     ::std::vec::Vec<$crate::commands::peers::PeerStatusDto>,
                     String,

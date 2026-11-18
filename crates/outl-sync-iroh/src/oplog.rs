@@ -32,7 +32,7 @@ use outl_core::LogOp;
 use tracing::warn;
 
 use crate::engine::AppendLock;
-use crate::oplog_census::actor_census;
+use crate::oplog_census::Census;
 
 /// Cross-process append lock on `<ops_dir>/.append.lock` (advisory flock).
 ///
@@ -131,10 +131,16 @@ fn write_deduped_batch(
         .with_context(|| format!("create ops dir {}", ops_dir.display()))?;
     let _flock = OpsDirAppendLock::acquire(ops_dir)?;
 
-    let mut present: HashSet<Hlc> = actor_census(ops_dir)
+    // Read under the flock, and that is not negotiable: a census taken
+    // before the lock could miss a concurrent writer's op and let this
+    // batch append it twice. It is also why the read's cost is this
+    // function's problem and not just its own — every other op-log writer
+    // on the device queues behind it (see `Census`, which is what took it
+    // from ~100 ms to ~38 ms on a 748k-op workspace).
+    let mut present: HashSet<Hlc> = Census::read(ops_dir)
         .context("load present ops for dedup")?
-        .into_values()
-        .flatten()
+        .all_timestamps()
+        .copied()
         .collect();
 
     let mut per_actor: HashMap<ActorId, Vec<u8>> = HashMap::new();

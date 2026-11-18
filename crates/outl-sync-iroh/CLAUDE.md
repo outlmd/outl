@@ -230,6 +230,28 @@ The per-exchange budget (an Android phone, 253 MB first sync), the rotating gap 
 A caller that wants a clock reaches for the first; a caller deciding what crosses the wire reaches for the second.
 `oplog_select/tests.rs` is a sibling for the same reason `outl-md`'s `parse/tests.rs` is.
 
+**One `Census` per exchange, and it carries the byte offsets.**
+`Census::read` is one pass over `JsonlStorage::actor_offset_indexes`, and the three questions an exchange asks all come out of it: the clock (`vector_clock`), the selection (`ops_missing_for` ranges over the same indexes) and the op bodies (the offsets, spent by `JsonlStorage::read_ops_at_offsets`).
+
+Each of those used to re-read the census from scratch, and the third additionally called `JsonlStorage::open`.
+Counted on a real 748,684-op / 23-actor workspace: **six censuses and two full opens per exchange**, ~710 ms of CPU per peer, every 8 s, to move zero ops on a converged device — 160 MB of resident index per open, several concurrent, which is what took the desktop to 131 % of a core at peak and stopped the window taking keystrokes.
+Reducing the read's constant was the *previous* round of this fix (342 ms → 100 ms, the iOS watchdog); what was left was the shape.
+
+Three rules follow, and each is load-bearing:
+
+- **The responder shares one census between its clock and its selection.**
+  Nothing mutates the op log between those steps (the initiator's ops are ingested afterwards), so a second read re-derives the same answer at `O(total ops)`.
+- **The initiator deliberately does not.**
+  Its `ingest_received_ops` runs in between, so the step-1 census describes a log that no longer exists; the selection has to range over what we hold *now*, or an op that arrived from a third peer via this one waits for the next exchange.
+- **`ops_missing_for` never opens storage, on any branch.**
+  The guard that existed covered only `picks.is_empty()`, so the fast path was the idle device and a busy one paid the full index load.
+  `a_selection_with_ops_to_send_still_costs_no_open` and `a_gap_resend_also_costs_no_open` delete the sidecars and fail if either comes back; the pre-existing `a_peer_that_is_current_costs_no_op_read` passed throughout the incident, because it only ever reached the early return.
+
+The ingest's census (`oplog.rs`'s `write_deduped_batch`) is read **under** the append flock and must stay there: taken before the lock, it could miss a concurrent writer's op and let the batch append it twice.
+That makes its cost every other op-log writer's problem on the device, which is a reason to keep it cheap rather than a reason to move it.
+
+Root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate) invariant 15 is the rule; [`docs/performance.md`](../../docs/performance.md) has the measurements, the rejected cache design and the per-client checklist.
+
 The **gossip supervisor** lives in `engine_gossip.rs` (`run_gossip` + `GossipCtx`).
 It is one task that `select!`s over the op-announce drain, the periodic membership broadcast, the inbound gossip stream, AND the `wid_changed` signal — re-subscribing to the new topic on an id change (see "Gossip re-subscribes on id change").
 It runs even with zero peers at boot, so a device that pairs later still gets a live subscription via the id-change path (the old inline block only subscribed when boot-time peers existed).

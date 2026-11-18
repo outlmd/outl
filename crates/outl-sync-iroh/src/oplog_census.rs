@@ -21,49 +21,105 @@
 //! received batch *while holding the device-wide append flock*, so every
 //! other sync write on the machine queued behind a workspace load.
 //!
-//! [`actor_census`] is the single owner of the answer, and it delegates to
-//! `outl_core::storage::JsonlStorage::actor_timestamps`, which is the single
-//! owner of reading it off disk.
+//! [`Census`] is the single owner of the answer, and it delegates to
+//! `outl_core::storage::JsonlStorage::actor_offset_indexes`, which is the
+//! single owner of reading it off disk.
+//!
+//! **Those three callers now ask once per exchange, not once per
+//! question.** Reducing the constant was not enough: the read was
+//! `O(total ops)` whatever it cost, and an exchange asked for it six times
+//! (plus two `JsonlStorage::open`s) with the same answer every time. A
+//! [`Census`] is read once and carries the offsets, so the clock, the
+//! selection and the op bodies all come out of it. On the reference
+//! 748,684-op workspace that is ~710 ms per exchange down to ~38 ms, and
+//! the 160 MB of index the two opens allocated is not allocated at all.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use outl_core::hlc::Hlc;
 use outl_core::id::ActorId;
-use outl_core::storage::JsonlStorage;
+use outl_core::storage::{JsonlStorage, OffsetIndex};
 
 use crate::protocol::ActorClock;
 
-/// Per-actor census of the local op log: the set of DISTINCT HLCs held for
-/// each actor. Distinct because historic unsynchronized concurrent pulls left
-/// duplicated append lines on real disks — a raw line count would inflate the
-/// `count` and mask a genuine gap on the advertising side. The reference
-/// workspace carries 148 such duplicates among 222,536 lines.
+/// Per-actor census of the local op log: for each actor, every DISTINCT HLC
+/// this device holds **and the byte offset of the op behind it**.
 ///
-/// Read from the op log's offset index, never from the ops. See this module's
-/// header for what that replaced and why.
-pub(crate) fn actor_census(ops_dir: &std::path::Path) -> Result<HashMap<ActorId, BTreeSet<Hlc>>> {
-    JsonlStorage::actor_timestamps(ops_dir).context("read the actor census from the op-log index")
+/// Distinct because historic unsynchronized concurrent pulls left duplicated
+/// append lines on real disks — a raw line count would inflate the `count`
+/// and mask a genuine gap on the advertising side. The reference workspace
+/// carries 148 such duplicates among 222,536 lines.
+///
+/// Read from the op log's offset index, never from the ops. See this
+/// module's header for what that replaced and why.
+///
+/// **One read answers all three questions an exchange asks**, and that is
+/// the point of carrying the offsets rather than just the HLCs:
+///
+/// - *what do we hold* → [`Self::vector_clock`];
+/// - *what does this peer lack* → [`crate::oplog_select::ops_missing_for`],
+///   which ranges over the same indexes;
+/// - *where are those ops on disk* → the offsets, spent by
+///   `JsonlStorage::read_ops_at_offsets`.
+///
+/// Each of those used to re-read the whole census from disk, and the third
+/// additionally called `JsonlStorage::open` — a full load of both index
+/// sidecars for every actor. Measured on a real 748,684-op / 23-actor
+/// workspace: six censuses plus two opens per exchange, ~710 ms of CPU, to
+/// move ops that are usually zero in number. The catch-up loop runs that
+/// per peer every 8 s, so the device never left it.
+pub(crate) struct Census {
+    by_actor: HashMap<ActorId, OffsetIndex>,
 }
 
-/// Compute our vector clock (per-actor max HLC + distinct-op count) from the
-/// local op log. Max + count both fall out of the same census pass.
+impl Census {
+    /// Read the census off the op log's offset index.
+    pub(crate) fn read(ops_dir: &std::path::Path) -> Result<Self> {
+        Ok(Self {
+            by_actor: JsonlStorage::actor_offset_indexes(ops_dir)
+                .context("read the actor census from the op-log index")?,
+        })
+    }
+
+    /// Our vector clock: per-actor max HLC + distinct-op count. Both fall
+    /// out of the index this census already holds.
+    pub(crate) fn vector_clock(&self) -> HashMap<ActorId, ActorClock> {
+        self.by_actor
+            .iter()
+            .filter_map(|(actor_id, index)| {
+                Some((
+                    *actor_id,
+                    ActorClock {
+                        max: index.last_ts()?,
+                        count: index.len() as u64,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Every actor this device holds ops for, with its index.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&ActorId, &OffsetIndex)> {
+        self.by_actor.iter()
+    }
+
+    /// Every distinct HLC in the census, regardless of actor — the
+    /// present-set the ingest dedups a received batch against.
+    pub(crate) fn all_timestamps(&self) -> impl Iterator<Item = &Hlc> {
+        self.by_actor.values().flat_map(|index| index.timestamps())
+    }
+}
+
+/// Compute our vector clock from the local op log, for a caller that needs
+/// nothing else from the census.
+///
+/// Prefer [`Census::read`] + [`Census::vector_clock`] wherever the same
+/// exchange also asks what to send: that is one disk read instead of two.
 pub(crate) fn local_vector_clock(
     ops_dir: &std::path::Path,
 ) -> Result<HashMap<ActorId, ActorClock>> {
-    Ok(actor_census(ops_dir)?
-        .into_iter()
-        .filter_map(|(actor_id, hlcs)| {
-            let max = *hlcs.last()?;
-            Some((
-                actor_id,
-                ActorClock {
-                    max,
-                    count: hlcs.len() as u64,
-                },
-            ))
-        })
-        .collect())
+    Ok(Census::read(ops_dir)?.vector_clock())
 }
 
 #[cfg(test)]

@@ -124,6 +124,36 @@ agree with the op log.** A bare `apply_page_md_with_sidecar_guarded` is
 only correct when you can say which of the other four steps you are
 skipping and why — put that reason in a comment next to the call.
 
+### It times itself, because this is the path a keystroke waits on
+
+Every phase is measured and logged: `debug!("commit_page phases")` with
+`total_us` plus one field per step, and a `warn!` past
+`SLOW_COMMIT_US` (50ms) naming the same breakdown.
+
+`outl_core::boot_timing` covers the launch and nothing covered the edits
+after it — which is most of a session.
+"Creating a block feels slow" had no answer but a guess, on a path that
+touches five subsystems (a render for undo, the CRDT, an fsync, a peer
+announce and a projection), and the one that is slow is not knowable
+from the outside.
+
+Three decisions in it:
+
+- **`debug!`, not `info!`.** One line per keystroke at info level is a log
+  nobody reads; the GUI clients' default filter leaves this crate at
+  info, so collecting them means asking (`RUST_LOG=outl_actions=debug`).
+- **The slow line is a `warn!` and not a metric.** It fires on the
+  machine where it happened and says *which phase*, which is what a
+  maintainer reading a "it got slow" report needs first.
+  50ms is the budget a keystroke-to-paint window leaves for the whole
+  commit, the IPC hop and the render being the rest.
+- **Two `Instant` reads per phase is the whole cost**, and it is paid
+  whatever the log level, deliberately: a measurement behind a feature
+  flag is one nobody has when they need it.
+  Root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate)
+  invariant 15 is the rule this serves; [`docs/performance.md`](../../docs/performance.md)
+  is how to read it.
+
 ## The `tree → .md` executor
 
 `journal::survey_page_projections` is the **single owner** of "where does this page's `.md` stand relative to the op log", and `journal::reproject_stale_pages` is the executor built on it.

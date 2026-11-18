@@ -56,251 +56,73 @@ Violating any one breaks user trust irreversibly.
    The sidecar carries only **structural matching metadata** (ids, position, content hash, ref handle), not a sync surface.
 
 8. **A sidecar hash match is NOT evidence that the `.md` came from the op log.**
-   `sidecar.last_synced_hash == file_hash(disk)` answers exactly one question: *did outl write these bytes last?*
-   It does **not** answer *did these bytes come from the op log?*
-   Those are different questions, and a page can answer yes to the first and no to the second — that is precisely the state a `reconcile_md` leaves behind when it rewrites the sidecar without emitting ops covering everything it read.
-   So **never overwrite a `.md` on the strength of the hash gate alone.**
-   Before re-projecting, ask `outl_actions::content_lines_missing_from(disk, &sidecar.blocks)` and refuse when it returns anything (`ActionError::PageMarkdownAheadOfLog`).
-   **Ask it against the sidecar's blocks, never against a fresh render.**
-   The sidecar is what the log held when the two last agreed, so it answers *"does the log know this line"*; a render answers *"do disk and tree disagree"*, and that is also yes for every remote edit, remote delete and reorder.
-   The first version of this guard compared against the render and therefore refused to re-project any page a peer had touched — issue #166 reintroduced, with the blame moved.
-   That function is the single owner of the verdict; a second opinion about which pages are safe to overwrite is how a read-only listing promises a repair the writing pass then refuses.
-   **A refusal has to reach the user.**
-   Refusing freezes the page in both directions until `outl reconcile --ahead-of-log` runs.
-   A client that swallows the error into a log line therefore ships a page that silently stopped syncing — the same "silence is the defect" failure this invariant exists to prevent, moved one layer up.
-   Every surface names it: [`docs/clients.md` → Surfacing a page that stopped syncing](docs/clients.md#surfacing-a-page-that-stopped-syncing).
-
-   **Why this is an invariant and not a code comment.**
-   Issue #166 fixed a real bug (tree ahead of `.md`, page renders empty) by re-projecting whenever the tree outran a *faithful* projection, where faithful meant the hash matched.
-   That traded one divergence direction for its mirror image, and the mirror is worse: `.md` ahead of tree is content **deleted**, while tree ahead of `.md` was only content **hidden** — the op log still had it.
-   On a real 2,560-page workspace that cost 233 pages holding 1,426 lines of work that existed in no op.
-   They were deleted by `doctor --repair` (which printed `708 fixed`) and by every GUI page open, with the rebuilt sidecar making the loss undetectable afterwards.
-   Full reasoning, rejected alternatives and what this change makes *worse*: [RFC 0210](docs/rfcs/0210-md-content-outside-op-log.md).
-
-   **The producer is fixed too, not just the guard.**
-   The state above only exists because `render → parse` was not a roundtrip for a block whose text held a blank line or its own indentation.
-   `outl-md`'s permissive parser used to close continuation on the first blank line (dropping everything after it) and silently skip an unplaceable line at any depth below 0.
-   Both are fixed in `crates/outl-md/src/parse.rs`; see `crates/outl-md/CLAUDE.md` → "What this crate owns" and its own invariant 8 entry.
-   `reconcile_md` now enforces invariant 8 in code — it will not advance `last_synced_hash` over content it could not emit an op for.
-   The matching side has the mirrored guard: `reconcile_md_with_guard` refuses a bulk delete instead of trashing an oversized orphan list (`crates/outl-md/src/matching/guard.rs`).
-   `outl recover` (op log, a truncating `Op::Edit`'s still-live predecessor) and `outl reconcile --ahead-of-log` (the `.md`, content the log never saw) are the two routes to recover the 1,426 lines this incident already produced.
-   See `docs/cli.md` → "outl recover".
-   Full status: [issue #210](https://github.com/outlmd/outl/issues/210).
-
-   **The general rule this is an instance of:** when you fix one direction of a `.md` ↔ tree divergence, state what happens in the opposite direction *before* merging.
-   Reconciliation bugs come in mirrored pairs, and the pair that deletes is never the one being reported.
-
-   **The verdict is about the bytes on disk, not about the sidecar's shape.**
-   The gate is `outl_md::unlogged::sidecar_can_vouch_for`; `sidecar_can_answer` is one arm of it and answers a narrower question.
-   Asking only the second conflates a pre-0.11 sidecar with a page nobody has written in yet — both carry `text: ""` on every block, and the second has nothing to lose.
-   That froze every fresh journal day and every unfilled `[[link]]` page the moment a peer wrote into one, silently, since `Ok(None)` is what `reproject_stale_md` reads as success ([issue #332](https://github.com/outlmd/outl/issues/332)).
-   Measured: one such page and zero genuine pre-0.11 sidecars on a 2,874-page workspace.
-   **It narrows which pages are refused, never which content is protected** — a line the log does not hold still refuses, phrased by the same `unlogged_content_error`.
-
-   **The regression net.**
-   These tests exist to fail if someone re-simplifies the gate back to a hash comparison — do not delete or relax them:
-   `if_stale_refuses_when_the_md_carries_content_the_log_lacks`,
-   `if_stale_still_reprojects_when_the_md_holds_no_unlogged_content`,
-   `if_stale_ignores_whitespace_only_differences_when_deciding`,
-   `if_stale_declines_when_the_sidecar_cannot_answer` (an empty verdict from a reference that *cannot* answer is not permission to write — that is how a peer on an older binary re-arms the loss),
-   `if_stale_still_declines_when_an_unanswerable_sidecar_covers_real_text` (its other half: the decline is decided by what is on disk, so the narrowing above cannot reach the pre-0.11 case),
-   `if_stale_reprojects_a_page_whose_only_block_is_empty` (the #332 direction: a page holding one bare bullet has nothing to lose and must be re-projected),
-   `if_stale_still_projects_a_page_whose_sidecar_has_no_blocks` (the opposite case: nothing on disk to lose)
-   (`crates/outl-actions/src/journal/tests/if_stale.rs`), plus
-   `the_sweep_reprojects_a_page_whose_only_block_is_empty` and `the_sweep_still_declines_when_an_unanswerable_sidecar_covers_real_text`
-   (`crates/outl-actions/src/journal/survey/tests.rs` — the same pair through the classifier `outl serve`'s sweep and `doctor` read, because fixing the write path alone leaves them blind to it), plus
-   `crates/outl-md/tests/unlogged_vouching.rs` (the predicate itself, both directions), plus
-   `recovery_does_not_reproject_over_text_the_log_never_saw`
-   (`crates/outl-actions/tests/desync_recovery.rs`, the same defect reached through the desync recovery's re-projection), plus
-   `a_torn_op_log_never_lets_repair_overwrite_a_good_md`
-   (`crates/outl-cli/src/cmd/doctor/tests/safety.rs`), which pins the precedence order: a damaged op log is reported as the damaged log, not as 2,000 pages of "unlogged content".
-   The producer side has its own net, pinning that a line is never dropped rather than just refused-to-overwrite:
-   `crates/outl-md/tests/multiline_block_roundtrip.rs` (blank lines, indentation and unplaceable lines round-trip, never truncating the op log on the next reconcile).
-   `crates/outl-actions/src/recover/tests.rs` (the truncation signature and the additive-only restore).
+   It proves outl wrote those bytes last, never that the log holds them.
+   So never overwrite a `.md` on the hash gate alone: ask `outl_md::unlogged::sidecar_can_vouch_for` (against the **sidecar's** blocks, never a fresh render), and a refusal has to reach the user.
+   Bought by 233 pages / 1,426 lines of real work deleted by `doctor --repair`.
+   **The general rule:** when you fix one direction of a `.md` ↔ tree divergence, state what happens in the other *before* merging — reconciliation bugs come in mirrored pairs, and the pair that deletes is never the one being reported.
 
 9. **When state crosses a boundary, say what its new home requires.**
-   Moving state out of the workspace, out of a file, out of the op log, or into a process global does not delete its problems — it hands them to a place with different rules.
-   The RFC that moves state must answer four questions about the destination: **who can write it, who can read it, how does a test get its own copy, and what cleans it up?**
-
-   Not theory.
-   0.11.0 moved the write actor out of `.outl/config.toml` into a device-local store, correctly — the file rode every sync transport except iCloud, so two devices resolved the same actor and appended to one `ops-<actor>.jsonl`.
-   Question three went unanswered, so the test suite wrote into the developer's real `~/.config/outl` (64 entries, 15 of them orphaned `TempDir` paths) and three doctor tests went flaky.
-   Question four went unanswered for longer — nothing pruned a workspace the user deleted, and `actors/` reached 1,208 records on one machine, 1,166 of them orphaned.
-   `outl-core`'s `device/gc.rs` answers it now, reported by `outl doctor` and dropped by `--repair`.
-   What that took is the part worth carrying.
-   The obvious rule ("delete the ones whose directory is gone") is wrong: an unplugged drive and a deleted folder are the same observation, and a wrong delete forks the workspace's actor — the failure the store exists to prevent.
-   **A cleanup answer is only as good as what it refuses**, so the rule is three conditions, not one, and every reading it cannot make faithfully keeps the entry.
-   [RFC 0211](docs/rfcs/0211-state-that-leaves-a-boundary.md), [issue #211](https://github.com/outlmd/outl/issues/211).
-
-   **The general rule, of which invariant 8 is one instance:** a fix relocates a problem far more often than it removes one.
-   After "did I fix it?" comes **"where does the problem live now, and what does that place require that the old one did not?"**
-   Three separate defects in this codebase came from skipping that question — a divergence fixed in one direction only (invariant 8), state moved without an isolation story (this one), and a size guard with no escape hatch that turned into a wall.
+   Moving state out of a file, out of the op log, or into a process global hands its problems to a place with different rules.
+   Answer four questions about the destination: **who can write it, who can read it, how does a test get its own copy, and what cleans it up?**
+   A cleanup answer is only as good as what it refuses.
+   **The general rule:** a fix relocates a problem far more often than it removes one, so after "did I fix it?" comes **"where does the problem live now?"**
 
 10. **When you change who decides, enumerate who was standing on the old decision.**
-    Replacing a hardcoded policy with a runtime one is usually the right fix, and it is also the change most likely to break something that policy was quietly holding up.
     A policy has beneficiaries that never had to declare themselves, because under the old rule they always won.
-
-    Not theory.
-    Issue #220: "only the GUI binds the iroh endpoint" was a policy that fixed a real collision and assumed a GUI exists, so a headless `outl mcp serve` machine synced with nobody, silently.
-    Replacing it with a lease was correct.
-    What the change missed was everyone leaning on "the GUI always wins":
-
-    - **Desktop pairing** read the transport straight out of app state, because a GUI that always held the endpoint always had one.
-      Losing the election made adding a device impossible.
-    - **`outl peer status`** was documented as exempt from "never bind a second endpoint", on the grounds that the CLI has no running transport to conflict with.
-      True under the old policy.
-      False the moment the MCP server could hold the endpoint — and status is the command a user runs *to diagnose sync*.
-    - **`$OUTL_DEVICE_DIR`** already meant "throwaway actor".
-      Giving it a second job (moving the iroh identity) silently rotated the node id for anyone already exporting it.
-
-    Then the guard itself.
-    The lease was stored on the transport rather than on the endpoint thread, so a failed `bind()` killed the thread while the transport kept the claim, locking every process on the device out of an endpoint.
-    That is the #220 bug again, this time with a padlock.
-    Releasing it any earlier reopens the mirror image: two endpoints on one node id while the first is still closing.
-
-    Before merging a change that moves authority, answer:
-
-    1. **Who consumed the winner?**
-       Grep the consumers of the resource, not just its producers.
-       Every caller that assumed a particular process would own it is a caller you just broke.
-    2. **What does each loser do now?**
-       "Degrades gracefully" is a claim, not a design — name the path, and check it is reachable.
-    3. **Does the guard die with the thing it authorises?**
-       Too late strands the resource forever, too early admits a second owner, and both fail silently.
-    4. **Which exemptions existed because the old rule held?**
-       An exception is an argument and arguments have premises.
-       Re-check them; the exemption may have outlived its reason.
-    5. **Did the name already mean something?**
-       A flag, env var or file you are giving a second job still has its first one, and somebody is depending on it.
-
-    **The general rule:** invariant 9 asks where the problem moved to.
-    This one asks **who was standing on the thing you moved.**
+    Ask: who consumed the winner, what does each loser do now (name the path, check it is reachable), does the guard die with the thing it authorises, which exemptions existed only because the old rule held, and did the name already mean something?
 
 11. **A cost only argues against a design if that design causes it.**
-    Rejecting an approach because it is expensive is sound only after you have attributed the expense.
-    A cost the alternative pays too is not a tiebreaker — it is a separate problem, and folding it into an unrelated decision buys a worse design *and* leaves the real problem unfixed.
-
-    Not theory.
-    Issue #244 asked for a background sync daemon.
-    `outl serve` was already the long-lived background process and already had no P2P at all, so the obvious move was to give it the transport.
-    That got rejected on the grounds that a permanently-running `serve` holds the device write actor, which pushes every later GUI and TUI launch onto a fresh ephemeral actor and a fresh `ops-<ulid>.jsonl`.
-    16 such files, 1 to 221 ops each, had already accumulated in a real 20-actor workspace.
-    The conclusion drawn was "so sync needs its own command".
-
-    The attribution was wrong.
-    The actor cost comes from running *any* process permanently, not from what that process does while it runs.
-    `outl serve` under `launchd` holds the write actor whether or not it also syncs.
-    The proposed second command only dodged the cost because it dropped the **file watcher**.
-    A flag drops the watcher just as well, at the price of one boolean instead of a second daemon, a second `launchd` job, and a second thing that can die quietly.
-
-    Before a cost rules a design out:
-
-    1. **Would the alternative pay it too?**
-       If yes, it cannot choose between them, and quoting it as though it could hides that you have no argument yet.
-    2. **Does the cost track the feature, or the lifetime?**
-       "Runs forever" and "does X" are different properties, and only one of them is the thing you are deciding.
-    3. **What is the smallest thing that avoids it?**
-       A flag, a parameter and a whole new entry point are not equivalent.
-       The reflex to reach for the largest is strongest exactly when the argument feels settled.
-    4. **Did it already exist?**
-       A pre-existing cost you happened to discover while investigating is a finding that deserves its own issue, not evidence about the change in front of you.
-
-    **The general rule:** invariant 9 asks where a problem moved to, invariant 10 asks who was standing on what you moved.
-    This one asks **whether the problem you are avoiding is even caused by the thing you are changing.**
+    Attribute the expense before you let it decide.
+    Would the alternative pay it too?
+    Does the cost track the feature or the lifetime?
+    What is the smallest thing that avoids it?
+    Did it already exist?
+    A pre-existing cost you discovered while investigating deserves its own issue, not a vote on the change in front of you.
 
 12. **A capability without a per-client verdict is a gap nobody recorded.**
-    Every client does not do everything, and that is fine.
-    What is not fine is that the *difference* has no owner, because then it is discovered by a user pressing a key that does nothing.
-
-    Not theory.
-    "Does the desktop bind `y r`?" had three answers in three places and they disagreed.
-    `docs/shortcuts.md` listed `y r` (`CopyBlockRef`) and `:` (`OpenCommandPalette`) as desktop chords — neither had a handler, so both were dead keys that logged to a console the user never opens.
-    The same doc listed mobile undo / redo as "toolbar" when mobile had neither, and `Journal.tsx` carried a comment saying so — closed now by [RFC 0254](docs/rfcs/0254-mobile-capability-gaps.md) ([#14](https://github.com/outlmd/outl/issues/14)).
-    The desktop dispatcher's own comment called its `console.warn` something "the user sees".
-    Three hand-maintained copies of one fact, each stale in a different direction, and **nothing that could fail**.
-
-    `outl_shortcuts::support` owns it now: one exhaustive `match`, so a new `Action` variant does not compile until all three clients have declared their verdict.
-    `docs/client-parity.md` is generated from it and pinned by `the_parity_doc_matches_the_code`; `shortcuts.support.test.ts` pins the desktop's handler map against it in both directions.
-    A capability with no chord — page history, the plugin marketplace, a calendar grid — is invisible to that `match`.
-    `outl_shortcuts::capability_support` is a second exhaustive `match`, over `Capability` instead of `Action`, reusing the same `Support` states and the same generated, pinned doc table ([RFC 0253](docs/rfcs/0253-client-capability-catalog.md)).
-
-    Two things that took a second pass and are worth carrying:
-
-    - **The reason text belongs in the catalog, not the client.**
-      A client that writes its own wording is a fourth copy of the fact.
-      The desktop's `charCursorNudge` was already the right *shape* — one shared message for ten actions — and it still lived on the wrong side of the boundary.
-    - **"Reachable" and "has a handler" are different questions.**
-      `Backspace` on an empty textarea works on the desktop and has no handler, because the platform does it.
-      A boolean would have forced that row to lie in one direction or the other, so `Support::Native` is its own state: reachable, no handler, no nudge.
-
-    **The general rule** (9 → 10 → 11 above): this one asks **who does not have what you just built, and does anything fail if you don't say?**
+    Not every client does everything; what is not fine is that the *difference* has no owner, so it is discovered by a user pressing a key that does nothing.
+    `outl_shortcuts::support` and `capability_support` are exhaustive `match`es, so a new variant does not compile until all three clients declare their verdict, and `docs/client-parity.md` is generated from them.
+    The nudge wording belongs in the catalog, never in a client.
 
 13. **A colour token has exactly one meaning, on every client.**
-    A token name that resolves to `bg` in one client and `bg_elev` in another is not a naming inconsistency — it is two definitions of one fact, and the wrong one gets selected by whatever signal happens to be wired to it.
-
-    Not theory.
-    `applyPaletteToRoot()` mapped `--color-ios-bg` to `palette.bg` but `--color-iosd-bg` to `palette.bg_elev`, so on the desktop `iosd` meant *elevated*.
-    Mobile's stylesheet used the same prefix for something else entirely: *dark*.
-    `MarkdownInline.tsx` — one shared component — read both namespaces and reached the `iosd` set through Tailwind's `dark:` variant, which resolves off `prefers-color-scheme`.
-    So the **operating system appearance setting** changed the elevation of markdown blocks on the desktop, with no relationship to the theme the user picked.
-
-    The sharpest part: the regression test caught a real bug on its first run — a smaller one than this invariant used to claim.
-    The desktop's `@theme` boot block declared `--color-outl-ref-link` where the `Palette` field is `ref_link_fg`, so that token had no boot value.
-    That is **not** Tailwind dropping the class: Tailwind v4's `bg-(--var)` / `text-(--var)` arbitrary-property shorthand resolves a CSS custom property at paint time whether or not `@theme` declares it.
-    `--color-outl-status-normal-bg`, `--color-outl-help-title-fg` and `--color-outl-status-insert-bg` are three tokens absent from `@theme` today and still render correctly in the built desktop bundle — proof the class was never silently dropped.
-    What the missing boot value actually cost: the **first painted frame**, before `applyPaletteToRoot()` runs over the wire, had no value for `--color-outl-ref-link-fg`.
-    Refs, tags, markdown links, inline code and TODO markers rendered with that one property unset (inherited/transparent) for that single frame, then repainted correctly the instant the palette landed.
-    `@theme`'s job is supplying that boot default so the first frame is already branded, not making the utility resolve at all — the utility resolves either way, with or without `@theme`.
-
-    Colours come from `outl_theme::Palette` and reach a client through `applyPaletteToRoot()`.
-    A hex literal in a client stylesheet is a second definition.
-    The one exception is a client's `@theme` boot block, which exists so the first painted frame is branded before the palette arrives over the wire.
-    `the_theme_tokens_match_the_palette` pins those names to real `Palette` fields, which is exactly what caught the missing boot value above.
-
-    **The regression net:** `no_client_references_the_legacy_ios_namespace`, `the_theme_tokens_match_the_palette` (`crates/outl-theme/tests/tokens.rs`).
-    [RFC 0022](docs/rfcs/0022-unified-design-tokens.md).
-
-    **The general rule** (9 → 12 above): this one asks **does this name mean the same fact everywhere it appears?**
+    Colours come from `outl_theme::Palette` through `applyPaletteToRoot`; a hex literal in a client stylesheet is a second definition, and a token name that resolves to two things gets picked by whatever signal happens to be wired to it.
+    The one exception is a client's `@theme` boot block, which exists so the first painted frame is branded.
 
 14. **A filter that cannot be negated is half a filter, and the negation is never a second implementation.**
-    Every predicate a user can write — a ` ```query ` directive, an `outl query` flag, an MCP filter argument — ships with its complement in the same change.
-    The complement is `!` over the positive's own matcher, applied by one generic wrapper, not a `NotFoo` sibling that re-answers the question.
+    `not-<key>` parses `<key>` and wraps it in `Filter::Not`, so every predicate is negatable the moment it exists and the two sides cannot disagree.
+    **Refuse a hand-written `NotFoo` variant in review.**
+    A negative that drifts deletes rows the user cannot see are missing, and a value that can only match nothing (an empty tag, a dangling `prop: k:`) is a parse error for the same reason.
 
-    Not theory.
-    The ` ```query ` DSL shipped with six positive filters and no way to say "not".
-    ["open work tasks, minus anything parked under #someday"](https://github.com/outlmd/outl/issues/323) was unexpressible, which is a feature gap.
-    The first fix was worse than the gap: two hand-written variants, `NotTag` and `NotProp`, giving two of the six filters a negative and leaving four without one — and the two that existed each carried their own copy of "does this block have tag x".
+15. **Being fast is the product, so a repeated question is answered once and a cheap answer is never bought with an expensive read.**
+    Speed is not a bar applied after a feature works; it is the feature, and it fails in a shape no test catches — every function reasonable on its own, everything correct, and the app cooks.
+    Bought by a sync census that was already the *cheap* read, and still `O(total ops)` per call: one exchange asked six times with two full `JsonlStorage::open`s on top.
+    That is ~710 ms of CPU per peer every 8 s to move zero ops on a converged device, 131% of a core at peak, and a window that stopped taking keystrokes.
+    No test failed.
 
-    Two copies of one predicate drift, and **the direction a negative filter drifts is always the one that silently removes results.**
-    That asymmetry is the whole reason this is an invariant.
-    An over-inclusive positive shows the user an extra row they can see and ignore.
-    An over-inclusive negative deletes a row from the answer, and a user cannot notice a block that is not there.
-    `tag:` matched by substring, harmlessly, for months; negated, that same substring would have hidden every `#workflow` block behind a `not-tag: work` written to hide something else.
+    Four questions, and the first was skipped three times:
 
-    So the mechanism, not the discipline:
+    1. **Who else is asking this, in the same breath?**
+       Grep the read's callers, not just the one you are writing — six call sites with one answer is one read, passed along.
+    2. **Is anyone *looking* at this answer?**
+       An expensive column computed behind a closed panel is waste, and a polling loop is where waste multiplies.
+    3. **What does it cost at the size a real graph reaches?**
+       Not the fixture's nine ops: 750k ops, 170 MB of sidecar, 23 actors.
+       An `O(total ops)` read gets slower every day the user keeps using the app.
+    4. **Does the cheap path stay cheap on the branch that does something?**
+       An early return is not a budget.
 
-    - `not-<key>` **parses `<key>`** and wraps the result in `Filter::Not(Box<Filter>)` (`crates/outl-exec/src/runtimes/query/dsl.rs`).
-      The engine's only negative arm is `Filter::Not(inner) => !matches(inner, …)`.
-    - A new directive is therefore negatable the moment its variant and match arm exist.
-      **Adding a hand-written `NotFoo` variant is the thing to refuse in review** — it reintroduces the second opinion this wrapper removed.
-    - What is *not* a filter has no negative: `sort` and `limit` are rejected as unknown keys under a `not-` prefix, rather than read as some reversed ordering.
-    - The same pairing holds on surfaces that cannot share the enum. `outl query`'s flags are hand-paired, so each pair is pinned by a test instead: `query_every_filter_and_its_negation_return_nothing`.
+    **Measure on a real graph, on the device** — a process `sample` found this while the whole suite stayed green — and **make the net structural**, because a timing test is flaky and "the sidecar came back" is not.
+    The pre-existing fast-path test passed throughout: it only ever reached the early return.
 
-    **A filter whose complement reads oddly still gets the honest complement.**
-    `since: 7d` means "a journal dated within 7 days", so `not-since: 7d` matches every ordinary page too — they were never journals.
-    Inventing a friendlier meaning ("older than") would be a second matcher wearing a helpful name, and `tag: x` + `not-tag: x` returning rows is exactly the bug that buys.
-    Document the surprise; do not paper over it.
+    A performance fix owes **three** tests, and none of them covers another.
+    *Does it still do the right thing*: equivalence against the read it replaced, over real op bodies.
+    *Is it still cheap*: structural, on every branch, not just the early return.
+    *Is it cheap once*: read the call sites, because a type cannot bound how many times a caller asks.
 
-    **The regression net:** `no_filter_and_its_negation_can_both_match` (`crates/outl-exec/src/runtimes/query/engine.rs`) iterates the whole `Filter` set rather than the pairs that shipped first, so a new variant with a broken negation fails there.
-    `every_filter_key_has_a_negative`, `sort_and_limit_have_no_negative`, `a_double_negative_is_an_unknown_key_not_a_positive` (`dsl.rs`),
-    `every_directive_has_a_working_negative` (`crates/outl-exec/tests/query_negative_filters.rs`),
-    `query_every_filter_and_its_negation_return_nothing` (`crates/outl-cli/tests/cli_machine.rs`).
-
-    **A filter that can only match nothing fails loudly.**
-    `not-tag:` with no name, `not-text:` with no needle, `not-prop: status:` with a dangling colon, a tag name outside the tokenizer's alphabet — each parses to a predicate no block can satisfy, so the *negative* quietly excludes nothing and returns the rows the user asked to hide.
-    Every one is a parse error.
-
-    **The general rule** (9 → 13 above): this one asks **can the user say "not this", and is that answered by the same code that says "this"?**
+**Invariants 8-15 are questions to ask before merging, and each was bought by a measured incident.**
+The reasoning, the rejected alternatives and what each fix made worse live in [`docs/invariants.md`](docs/invariants.md).
+Read the one that covers your change before you touch it; the rule above is the summary, not the argument.
+Performance specifically — the incident behind 15, the per-client checklist and how to measure: [`docs/performance.md`](docs/performance.md).
 
 
 ## Repo layout
@@ -509,6 +331,14 @@ Full review policy (Rust quality, hot paths, architecture, simplicity, testing) 
   A background thread is not invisible: the premise is the *device*, and the deferred set reads the same disk and takes the same workspace lock the first paint needs.
 - ❌ Adding a `FirstPaintGate` without arming its deadline, or a readiness latch a client polls anyway.
   "Degrades gracefully" is a claim until the path is written down and reachable (invariant 10 item 2).
+- ❌ Asking for the same `O(total ops)` answer twice in one code path, or recomputing a read a caller one frame up already has (invariant 15).
+  Six call sites with one answer is one read, passed along: `Census` carries the clock, the selection and the offsets out of a single pass.
+- ❌ Reaching for `JsonlStorage::open` to read a handful of ops.
+  That is a full load of both index sidecars for every actor; the census already holds the offsets, and `read_ops_at_offsets` spends them.
+- ❌ Computing an expensive field for a caller that does not render it, above all on a polling path.
+  `peer_status(with_pending)` is the shape: the status dot asks for reachability, the panel asks for the count.
+- ❌ Shipping a fast path whose test only covers the early return.
+  A guard for "nothing to do" says nothing about the branch that does something, which is exactly where the cost hides.
 - ❌ Marking work "done" without `/check` passing
 - ❌ Re-introducing `"version"` in `crates/outl-mobile/src-tauri/tauri.conf.json` — Tauri must keep falling back to `Cargo.toml` (see `outl-mobile/CLAUDE.md`)
 - ❌ Hand-writing a `#[tauri::command]` wrapper in a client crate, or taking only part of a `*_commands!` module.

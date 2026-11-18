@@ -52,8 +52,11 @@
 //! that needs to surface the failure keeps it on itself. Aborting there
 //! would report an error for a change that did happen.
 
+use std::time::Instant;
+
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
+use tracing::{debug, warn};
 
 use crate::error::ActionError;
 use crate::journal::render_page_md;
@@ -133,31 +136,90 @@ where
     H: CommitHooks + ?Sized,
     F: FnOnce(&mut Workspace) -> Result<T, ActionError>,
 {
+    // Every phase is timed, because this is the path a keystroke waits
+    // on and nothing measured it. `boot_timing` covers the launch; this
+    // covers every edit after it, which is where a user actually lives.
+    // Two `Instant` reads per phase, behind a `debug!` — see the module
+    // doc's "What this costs to measure".
+    let t0 = Instant::now();
+
     // Step 1. Snapshot before, only if anyone is keeping undo.
     let before = hooks
         .records_undo()
         .then(|| render_page_md(workspace, page));
+    let snapshot_us = t0.elapsed().as_micros();
 
     // Step 2. The mutation. The only step that can fail the commit.
+    let t = Instant::now();
     let value = mutate(workspace)?;
+    let mutate_us = t.elapsed().as_micros();
 
     // Step 3. Keep the snapshot only when the render actually moved.
+    let t = Instant::now();
     if let Some(before) = before {
         if render_page_md(workspace, page) != before {
             hooks.record_undo(page, before);
         }
     }
+    let undo_us = t.elapsed().as_micros();
 
     // Step 4. The tree changed, so any cached backlinks index is stale.
+    let t = Instant::now();
     hooks.invalidate_backlinks();
+    let invalidate_us = t.elapsed().as_micros();
 
     // Step 5. Wake peers, then project. Slug resolution belongs to the
     // hook — see `CommitHooks::announce` for why it is not done here.
+    let t = Instant::now();
     hooks.announce(workspace, page);
+    let announce_us = t.elapsed().as_micros();
+    let t = Instant::now();
     hooks.project(workspace, page);
+    let project_us = t.elapsed().as_micros();
+
+    let total_us = t0.elapsed().as_micros();
+    // `debug!`, not `info!`: one line per keystroke at info level is a
+    // log nobody can read. The desktop's default filter already enables
+    // debug for the sync crate only, so reading these means asking for
+    // them (`RUST_LOG=outl_actions=debug`).
+    debug!(
+        total_us,
+        snapshot_us,
+        mutate_us,
+        undo_us,
+        invalidate_us,
+        announce_us,
+        project_us,
+        "commit_page phases"
+    );
+    // A commit a user can feel, said once and loudly enough to find.
+    // 50ms is the threshold a keystroke-to-paint budget leaves for the
+    // whole commit; past it the cause is one of the phases above.
+    if total_us > SLOW_COMMIT_US {
+        warn!(
+            total_ms = total_us / 1000,
+            snapshot_us,
+            mutate_us,
+            undo_us,
+            announce_us,
+            project_us,
+            "commit_page was slow enough for the user to notice"
+        );
+    }
 
     Ok(value)
 }
+
+/// Past this, a commit is slow enough that the user felt it, and the
+/// phase breakdown is worth a `warn!` rather than a `debug!` nobody
+/// enabled.
+///
+/// 50ms is not a guess: a keystroke that repaints within ~100ms reads as
+/// instant, and the commit is only part of that budget (the IPC hop and
+/// the render are the rest). It is deliberately a loud log and not a
+/// metric — this is the line that tells a maintainer *which* of the five
+/// phases to look at, on the machine where it actually happened.
+const SLOW_COMMIT_US: u128 = 50_000;
 
 #[cfg(test)]
 mod tests;

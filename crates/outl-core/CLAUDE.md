@@ -95,6 +95,16 @@ Treat every change as production-bound.
     `census::fresh_offset_index` is the single owner of "what does this sidecar cover".
     `try_fresh_actor_indexes` calls it and adds the node-extent check, because a second opinion about a sidecar's coverage is how a stale index becomes a wrong read.
     Pinned by `the_actor_census_neither_reads_nor_writes_the_node_index` (`tests/index_census.rs`), which deletes both sidecars and fails if either comes back — the signature of a reroute through `JsonlStorage::open`.
+  - **`actor_offset_indexes` is that census keeping the offsets, and `actor_timestamps` is its HLC-only projection.**
+    One owner, so the two cannot disagree about what the workspace holds (`the_timestamp_census_is_the_projection_of_the_offset_census`).
+    The offsets exist because the reader that asks *which* ops a peer lacks then needs those op **bodies**, and it used to get them by calling `JsonlStorage::open` — the full index load for every actor, 160 MB resident and 55 ms, to re-derive numbers the census already had.
+    `read_ops_at_offsets(ops_dir, &[(actor, ts, offset)])` spends them instead, through `read::read_op_at_offset`, which is the single owner of "seek to an offset the index gave us and parse the op back" (the instance method `read_op_at` is its other caller).
+    A pick that cannot be read back is a `StorageError::MissingOp`, never an omission, for `read_op_or_missing`'s reason.
+  - **The census takes each loaded index whole when it can, and that is where its cost went.**
+    One producer per file is the invariant every writer upholds, so regrouping by `Hlc::actor` is almost always the identity — and doing it anyway meant re-inserting every HLC in the workspace into a second `BTreeMap`.
+    On the reference 748,684-op workspace that was the dominant cost of the whole read: 100 ms → 38 ms, which is also what made it cheaper than the `open` it exists to replace.
+    Reading the actors' files across lanes is worth ~10 % on top, and no more, for the reason `index_load.rs` already records: the ceiling is one file, not the thread count.
+    Root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate) invariant 15 and [`docs/performance.md`](../../docs/performance.md) own why this read is on that list at all.
   - **The persisted index is a dotfile, kept off the sync surface (RFC #137 Front B).**
     The offset + node indexes are saved next to each op log as `.ops-<actor>.idx` / `.ops-<actor>.nodes.idx` so the next boot loads them instead of reparsing the whole log.
     They are **dot-prefixed on purpose**: a purely local boot cache (every device rebuilds it from its own `.jsonl`) must NOT ride the file-sync surface.

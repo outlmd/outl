@@ -194,7 +194,10 @@ export function DevicesSheet(props: DevicesSheetProps) {
       return;
     }
     try {
-      const statuses = await peerStatus();
+      // `true`: this sheet renders `pending_ops` through `<PeerList>`, so
+      // it is the one that pays for counting the op log. The header dot's
+      // 3s poll does not.
+      const statuses = await peerStatus(true);
       setStatusMap(new Map(statuses.map((s) => [s.node_id, s])));
     } catch {
       // Status is best-effort; leave the dots in "unknown".

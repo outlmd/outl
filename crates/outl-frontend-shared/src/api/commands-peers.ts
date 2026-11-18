@@ -46,9 +46,23 @@ export function peerRemove(id: string): Promise<boolean> {
  * them onto the full `peers.json` list, so a peer the transport hasn't
  * dialed yet (or the file-transport case) comes back `online: false`.
  * Returns one {@link PeerStatusDto} per paired peer.
+ *
+ * `withPending` asks for the `pending_ops` column as well, and it is
+ * **off by default on purpose**: reachability is an in-memory read,
+ * while `pending_ops` counts the op log. Only `pendingLabel` renders
+ * that number — the Sync panel's device list — and the always-visible
+ * status dot polls this on the catch-up cadence plus once per
+ * `peer-ops-changed`, so asking for it there spent a full census per
+ * poll on a number that was not on screen.
+ *
+ * Without it `pending_ops` comes back `null`, which already means "not
+ * measured" (the state before a peer's first exchange), so a renderer
+ * needs no new branch.
  */
-export function peerStatus(): Promise<PeerStatusDto[]> {
-  return invoke<PeerStatusDto[]>("outl_peer_status");
+export function peerStatus(withPending = false): Promise<PeerStatusDto[]> {
+  return invoke<PeerStatusDto[]>("outl_peer_status", {
+    withPending,
+  });
 }
 
 /**

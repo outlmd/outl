@@ -127,7 +127,21 @@ pub async fn peer_remove<S: AppHost>(state: &S, id: String) -> Result<bool, Stri
 /// sidecar (keyed by `Hlc`, so its keys *are* the distinct-op set)
 /// instead of folding every op, 342ms → 63ms. Without that half the
 /// watchdog stops firing and the phone just cooks instead.
-pub async fn peer_status<S: AppHost>(state: &S) -> Result<Vec<PeerStatusDto>, String> {
+/// **The third half: do not ask for the expensive column when nobody is
+/// showing it.** `pending_ops` is the only field here that reads the op
+/// log, and `pendingLabel` renders it in exactly one place — the Sync
+/// panel's device list. The always-visible status dot reads `online`
+/// alone, and it polls on the catch-up cadence plus once per
+/// `peer-ops-changed`. So during an active sync the dot was re-counting
+/// every op in the workspace several times a second for a number that was
+/// not on screen. `with_pending` is what the panel passes and the dot
+/// does not; `pending_ops` comes back `None` for a caller that did not
+/// ask, which is the same thing it already means before the first
+/// exchange ("nobody measured this"), so no renderer changed.
+pub async fn peer_status<S: AppHost>(
+    state: &S,
+    with_pending: bool,
+) -> Result<Vec<PeerStatusDto>, String> {
     // Snapshot the transport's per-peer health here, on the calling
     // thread: it is an in-memory read of the running transport's own dial
     // outcomes (no disk, no lock), and taking it now means the blocking
@@ -149,9 +163,13 @@ pub async fn peer_status<S: AppHost>(state: &S) -> Result<Vec<PeerStatusDto>, St
             .map_err(|e| e.to_string())?;
 
         // What each peer still has to receive. Best effort: a read error
-        // only costs the column, never the status list.
-        let pending: HashMap<String, u64> =
-            outl_sync_iroh::pending_by_peer(&root, actor).unwrap_or_default();
+        // only costs the column, never the status list. Skipped entirely
+        // for a caller that did not ask — this is the op-log read.
+        let pending: HashMap<String, u64> = if with_pending {
+            outl_sync_iroh::pending_by_peer(&root, actor).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
 
         Ok(peers
             .list()

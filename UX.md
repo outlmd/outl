@@ -275,6 +275,16 @@ When the answer to the second is "the page", it is the wrong element.
 When the answer to the third is "the workspace mutex, for the whole pass", the pass is wrong wherever its
 thread happens to be.
 
+**A fourth question is about how often, and it is the one that keeps being skipped: how many times does this
+run, and is anyone reading the result?**
+Nothing above is violated by a background read that is correct, offloaded, and simply asked for six times a
+second — and that is a frozen app all the same, because the device is the premise, not the thread.
+The sync census was exactly that: already offloaded, already optimised once, and still 131 % of a core on an
+idle workspace, partly for a `pending_ops` number only a closed panel renders.
+A cost that scales with the graph the user has been building for two years is a product that gets worse the
+more they use it, which is the one direction this product cannot go.
+[`docs/performance.md`](docs/performance.md) is the checklist; root `CLAUDE.md` invariant 15 is the rule.
+
 ### 3. Silence is the defect
 
 A refusal that reaches only a log line is the bug, not the fix.

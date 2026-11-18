@@ -16,18 +16,26 @@
 //! Nothing here opens storage to decide; the census answers first, and
 //! only the ops actually selected are read (`JsonlStorage::read_ops_at`).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::ops::Bound;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use outl_core::hlc::Hlc;
 use outl_core::id::ActorId;
-use outl_core::storage::JsonlStorage;
+use outl_core::storage::{JsonlStorage, OffsetIndex};
 use outl_core::LogOp;
 use tracing::{info, warn};
 
-use crate::oplog_census::actor_census;
+/// One op selected to cross: who produced it, its HLC, and the byte offset
+/// the census recorded for it.
+///
+/// The offset rides along so the read at the end of
+/// [`ops_missing_for_capped`] can address the op directly. Dropping it
+/// would mean re-deriving the same number through `JsonlStorage::open`,
+/// which is the full index load this selection exists to avoid.
+type Pick = (ActorId, Hlc, u64);
+
+use crate::oplog_census::Census;
 use crate::protocol::{encode_op, ActorClock, MAX_FRAME_BODY};
 
 /// Most ops one exchange may carry, when the selection is one a budget may
@@ -50,10 +58,10 @@ pub(crate) const MAX_OPS_PER_EXCHANGE: usize = 20_000;
 /// bounded to [`MAX_OPS_PER_EXCHANGE`] where bounding is safe.
 pub(crate) fn ops_missing_for(
     ops_dir: &std::path::Path,
-    actor: ActorId,
+    census: &Census,
     peer_clock: &HashMap<ActorId, ActorClock>,
 ) -> Result<Vec<LogOp>> {
-    ops_missing_for_capped(ops_dir, actor, peer_clock, MAX_OPS_PER_EXCHANGE)
+    ops_missing_for_capped(ops_dir, census, peer_clock, MAX_OPS_PER_EXCHANGE)
 }
 
 /// The slice of a gapped actor's log one exchange carries, and where it
@@ -97,12 +105,15 @@ pub(crate) fn ops_missing_for(
 /// on disk would be sync state about a peer living outside the op log
 /// (root `CLAUDE.md` invariant 9) to save exactly that.
 fn gap_resend_window(
-    hlcs: &BTreeSet<Hlc>,
+    index: &OffsetIndex,
     actor: ActorId,
     peer: &ActorClock,
     budget: usize,
-) -> Vec<Hlc> {
-    let below: Vec<Hlc> = hlcs.range(..=peer.max).copied().collect();
+) -> Vec<Pick> {
+    let below: Vec<Pick> = index
+        .entries_up_to(peer.max)
+        .map(|(ts, off)| (actor, *ts, *off))
+        .collect();
     // It all fits: send it all. The cut exists to choose *which* ops
     // cross when they cannot all fit, and skipping any here would be a
     // peer left short for no reason.
@@ -210,17 +221,15 @@ fn fit_in_frame(ops: Vec<LogOp>, limit: usize) -> Vec<LogOp> {
 /// trips the `below > count` check the next time it syncs with that origin.
 pub(crate) fn ops_missing_for_capped(
     ops_dir: &std::path::Path,
-    actor: ActorId,
+    census: &Census,
     peer_clock: &HashMap<ActorId, ActorClock>,
     budget: usize,
 ) -> Result<Vec<LogOp>> {
-    let census = actor_census(ops_dir)?;
-
     let gap_resend: HashSet<ActorId> = census
         .iter()
-        .filter_map(|(actor_id, hlcs)| {
+        .filter_map(|(actor_id, index)| {
             let peer = peer_clock.get(actor_id)?;
-            let below = hlcs.range(..=peer.max).count() as u64;
+            let below = index.count_up_to(peer.max) as u64;
             (below > peer.count).then(|| {
                 info!(
                     actor = %actor_id,
@@ -233,28 +242,30 @@ pub(crate) fn ops_missing_for_capped(
         })
         .collect();
 
-    let mut gapped: Vec<(ActorId, Hlc)> = Vec::new();
-    let mut budgeted: Vec<(ActorId, Hlc)> = Vec::new();
-    for (actor_id, hlcs) in &census {
+    // Each pick carries the byte offset the census recorded for it, so the
+    // read below addresses the op directly instead of opening a storage to
+    // look the same number up again.
+    let mut gapped: Vec<Pick> = Vec::new();
+    let mut budgeted: Vec<Pick> = Vec::new();
+    for (actor_id, index) in census.iter() {
         if gap_resend.contains(actor_id) {
             let peer = peer_clock
                 .get(actor_id)
                 .expect("a gap implies a peer clock");
-            gapped.extend(
-                gap_resend_window(hlcs, *actor_id, peer, budget)
-                    .into_iter()
-                    .map(|ts| (*actor_id, ts)),
-            );
+            gapped.extend(gap_resend_window(index, *actor_id, peer, budget));
             continue;
         }
-        let owed = match peer_clock.get(actor_id) {
-            None => hlcs.iter().copied().collect::<Vec<Hlc>>(),
-            Some(peer) => hlcs
-                .range((Bound::Excluded(peer.max), Bound::Unbounded))
-                .copied()
+        let owed: Vec<Pick> = match peer_clock.get(actor_id) {
+            None => index
+                .entries()
+                .map(|(ts, off)| (*actor_id, *ts, *off))
+                .collect(),
+            Some(peer) => index
+                .after(peer.max)
+                .map(|(ts, off)| (*actor_id, *ts, *off))
                 .collect(),
         };
-        budgeted.extend(owed.into_iter().map(|ts| (*actor_id, ts)));
+        budgeted.extend(owed);
     }
 
     // Oldest first, then cut. Sorting the whole selection by HLC leaves each
@@ -262,25 +273,24 @@ pub(crate) fn ops_missing_for_capped(
     // that matters: the receiver's `count` stays equal to what it holds below
     // its own `max`, so the next exchange reads as a fast path rather than
     // tripping the gap check this budget must never provoke.
-    budgeted.sort_unstable_by_key(|(_, ts)| *ts);
+    budgeted.sort_unstable_by_key(|(_, ts, _)| *ts);
     budgeted.truncate(budget);
 
     let mut picks = gapped;
     picks.extend(budgeted);
-    // Nothing to send? Then read nothing, and above all do not OPEN. The
-    // census already answered the question off the offset index, and
-    // "nothing" is the answer on a converged workspace — which is what the
-    // catch-up loop asks every 8s per peer and what every pull-to-refresh
-    // asks. Opening storage here is a full index load for an empty result.
+    // Nothing to send? Then read nothing. "Nothing" is the answer on a
+    // converged workspace — which is what the catch-up loop asks every 8s
+    // per peer and what every pull-to-refresh asks.
     if picks.is_empty() {
         return Ok(Vec::new());
     }
-    picks.sort_unstable_by_key(|(_, ts)| *ts);
+    picks.sort_unstable_by_key(|(_, ts, _)| *ts);
 
-    let storage =
-        JsonlStorage::open(ops_dir.to_path_buf(), actor).context("open storage for delta")?;
-    let ops = storage
-        .read_ops_at(&picks)
+    // Addressed by offset, so no `JsonlStorage::open`: that was a full load
+    // of both index sidecars for every actor (160 MB resident, 55 ms on the
+    // reference workspace) to re-derive offsets the census already had, on
+    // every exchange that had anything at all to send.
+    let ops = JsonlStorage::read_ops_at_offsets(ops_dir, &picks)
         .context("read the ops this peer is missing")?;
     // The count budget bounds how MANY ops cross; this bounds how many
     // BYTES, which is what the reader actually refuses. Last, because it

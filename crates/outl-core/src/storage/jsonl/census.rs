@@ -51,10 +51,16 @@ use tracing::warn;
 
 use crate::hlc::Hlc;
 use crate::id::ActorId;
+use crate::op::LogOp;
 use crate::storage::sidecar::{self, SidecarKind};
 use crate::storage::{OffsetIndex, PageScope, StorageError};
 
 use super::{parse_actor_from_ops_filename, JsonlStorage};
+
+/// One actor's file to census: its id, its `.jsonl`, and the offset
+/// sidecar beside it. The node sidecar is deliberately absent — building
+/// that map is what this read exists to skip.
+type CensusJob = (ActorId, std::path::PathBuf, std::path::PathBuf);
 
 /// How much of a `.jsonl` a loaded offset sidecar accounts for.
 pub(super) enum Coverage {
@@ -142,9 +148,80 @@ impl JsonlStorage {
     pub fn actor_timestamps(
         ops_dir: &Path,
     ) -> Result<HashMap<ActorId, BTreeSet<Hlc>>, StorageError> {
+        Ok(Self::actor_offset_indexes(ops_dir)?
+            .into_iter()
+            .map(|(actor, index)| (actor, index.timestamps().copied().collect()))
+            .collect())
+    }
+
+    /// The same census, keeping each op's **byte offset** instead of
+    /// discarding it.
+    ///
+    /// [`Self::actor_timestamps`] is the HLC-only projection of this, so the
+    /// two cannot disagree about what the workspace holds
+    /// (`the_timestamp_census_is_the_projection_of_the_offset_census`).
+    ///
+    /// The offsets are the point. A sync sender asks the census *which* ops
+    /// a peer is missing and then needs those op bodies — which it used to
+    /// get by calling [`JsonlStorage::open`], a full load of both index
+    /// sidecars for every actor (169 MB and 294 ms on a real 23-actor
+    /// workspace, the most expensive phase of a launch) paid once per
+    /// exchange per peer to read a few hundred ops. The offset is already
+    /// in hand here; [`Self::read_ops_at_offsets`] is what spends it.
+    ///
+    /// Reads no op body, builds no node index, and writes nothing — see
+    /// this module's header for why each of those matters. A missing
+    /// `ops_dir` answers "this device holds nothing" rather than creating
+    /// the directory: that is [`JsonlStorage::open`]'s job, and this is not
+    /// `open`.
+    ///
+    /// Each actor's file is independent, so the per-file work is spread
+    /// across lanes the way the boot loader spreads its own
+    /// (`crate::storage::jsonl::index_load`). That matters more here than
+    /// it looks: sequentially this read was measurably *slower* than the
+    /// full `open` it exists to avoid (100 ms against 55 ms on that same
+    /// workspace), because `open` already parallelized and this did not.
+    pub fn actor_offset_indexes(
+        ops_dir: &Path,
+    ) -> Result<HashMap<ActorId, OffsetIndex>, StorageError> {
+        let jobs = Self::census_jobs(ops_dir)?;
+        let mut out: HashMap<ActorId, OffsetIndex> = HashMap::new();
+        for (file_actor, index) in Self::load_offset_indexes_in_parallel(&jobs) {
+            // Grouped by the HLC's own actor, not by the file name. That is
+            // the producer the total order tiebreaks on, and the one actor
+            // derivable without reading the op; `LogOp::actor` carries the
+            // same value, so this groups what an `all_ops` fold groups
+            // (`the_index_census_matches_an_all_ops_fold` pins it).
+            //
+            // One producer per file is the invariant every writer upholds
+            // (`outl-sync-iroh`'s ingest refuses a foreign-actor op into our
+            // file, and `Storage::append_ops` refuses the mirror), so the
+            // regrouping is almost always the identity. Taking the loaded
+            // index **whole** in that case is what keeps this read from
+            // re-inserting every HLC in the workspace into a second
+            // `BTreeMap` — 748k inserts, which measured as the dominant
+            // cost of the whole census.
+            let homogeneous = index.timestamps().all(|ts| ts.actor == file_actor);
+            match out.entry(file_actor) {
+                std::collections::hash_map::Entry::Vacant(slot) if homogeneous => {
+                    slot.insert(index);
+                }
+                _ => {
+                    for (ts, offset) in index.entries() {
+                        out.entry(ts.actor).or_default().insert(*ts, *offset);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Every `ops-<actor>.jsonl` under `ops_dir` worth reading, as
+    /// `(actor, jsonl path, offset sidecar path)`.
+    fn census_jobs(ops_dir: &Path) -> Result<Vec<CensusJob>, StorageError> {
         let dir = match std::fs::read_dir(ops_dir) {
             Ok(d) => d,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => {
                 return Err(StorageError::Backend(format!(
                     "read {}: {e}",
@@ -153,7 +230,7 @@ impl JsonlStorage {
             }
         };
 
-        let mut out: HashMap<ActorId, BTreeSet<Hlc>> = HashMap::new();
+        let mut jobs = Vec::new();
         for entry in dir {
             let entry = match entry {
                 Ok(e) => e,
@@ -180,11 +257,82 @@ impl JsonlStorage {
             };
             let idx_path =
                 sidecar::path_for(ops_dir, file_actor, &PageScope::Global, SidecarKind::Offset);
-            for ts in Self::offset_index_only(&path, &idx_path).timestamps() {
-                out.entry(ts.actor).or_default().insert(*ts);
-            }
+            jobs.push((file_actor, path, idx_path));
         }
-        Ok(out)
+        Ok(jobs)
+    }
+
+    /// Read each job's offset index, spreading the files across lanes.
+    ///
+    /// Chunked rather than one thread per file, so a workspace with
+    /// hundreds of actors does not answer a status poll by spawning
+    /// hundreds of threads — the same shape and the same reason as
+    /// `index_load::load_in_parallel`, which cannot be reused directly
+    /// because it loads the node sidecar too and that map is exactly what
+    /// this read exists to skip.
+    fn load_offset_indexes_in_parallel(jobs: &[CensusJob]) -> Vec<(ActorId, OffsetIndex)> {
+        if jobs.is_empty() {
+            return Vec::new();
+        }
+        let lanes = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(jobs.len());
+        let chunk = jobs.len().div_ceil(lanes);
+
+        let mut loaded = Vec::with_capacity(jobs.len());
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(lanes);
+            for slice in jobs.chunks(chunk) {
+                handles.push(scope.spawn(move || {
+                    slice
+                        .iter()
+                        .map(|(actor, jsonl, idx)| (*actor, Self::offset_index_only(jsonl, idx)))
+                        .collect::<Vec<_>>()
+                }));
+            }
+            for handle in handles {
+                match handle.join() {
+                    Ok(batch) => loaded.extend(batch),
+                    // A panic here is a bug, not a damaged file: every read
+                    // below is fallible and falls back to a stream. Losing
+                    // the actor silently would advertise a clock short of
+                    // what we hold, so say so.
+                    Err(_) => warn!("census lane panicked; its actors are not counted"),
+                }
+            }
+        });
+        loaded
+    }
+
+    /// Read exactly these ops, addressing each by the byte offset the
+    /// census recorded for it.
+    ///
+    /// The whole point is what it does **not** do: no [`JsonlStorage`] is
+    /// opened, so no index sidecar is loaded, no node index is built and
+    /// nothing is persisted. See [`Self::actor_offset_indexes`] for what
+    /// that replaced.
+    ///
+    /// A pick that cannot be read back is an **error**, never a silent
+    /// omission, for the reason spelled out on `Self::read_op_or_missing`:
+    /// a short read here is indistinguishable from a healthy one, and a
+    /// sync receiver would record the gap as settled.
+    pub fn read_ops_at_offsets(
+        ops_dir: &Path,
+        picks: &[(ActorId, Hlc, u64)],
+    ) -> Result<Vec<LogOp>, StorageError> {
+        picks
+            .iter()
+            .map(|(actor, ts, offset)| {
+                let path = ops_dir.join(format!("ops-{actor}.jsonl"));
+                super::read_at::read_op_at_offset(&path, *ts, *offset).ok_or_else(|| {
+                    StorageError::MissingOp(format!(
+                        "op {ts:?} by actor {actor} is in the offset index at byte {offset} but \
+                         could not be read back from disk"
+                    ))
+                })
+            })
+            .collect()
     }
 
     /// The offset index for one `.jsonl`: from the sidecar when the ladder

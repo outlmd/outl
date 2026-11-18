@@ -138,7 +138,10 @@ export function SyncPanel() {
       // Status probe can fail (no network / no peers) — that's not fatal,
       // the dots just stay "unknown".
       try {
-        const probed = await peerStatus();
+        // `true`: this panel is the one surface that renders
+        // `pending_ops` (`pendingLabel`), so it is the one that pays for
+        // counting the op log. The status dot's poll does not.
+        const probed = await peerStatus(true);
         setStatuses(new Map(probed.map((s) => [s.node_id, s])));
       } catch {
         setStatuses(new Map());
