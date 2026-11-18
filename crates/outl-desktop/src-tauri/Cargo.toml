@@ -19,6 +19,8 @@ tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# `tauri::test::mock_builder`, for the `open_with` regression test.
+tauri = { workspace = true, features = ["test"] }
 
 [dependencies]
 outl-core = { workspace = true }

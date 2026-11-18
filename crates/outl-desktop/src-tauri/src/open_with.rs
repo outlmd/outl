@@ -32,7 +32,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, Runtime};
 
 /// Event the frontend listens on for a file opened while the app runs.
 pub const OPEN_FILE_EVENT: &str = "open-file://import";
@@ -108,6 +108,34 @@ impl PendingOpenFile {
     }
 }
 
+/// Register the buffer on the `Builder`, so it is managed for the whole
+/// life of the app rather than from some point inside `setup`.
+///
+/// **The ordering is the contract.** macOS delivers an "open documents"
+/// Apple Event while `NSApplication` is still launching (window and
+/// document restoration on relaunch, or a double-click on a cold start),
+/// and Tauri hands it to `RunEvent::Opened` without waiting for `setup`
+/// to finish. `setup` is also fallible, with several `?` ahead of any
+/// `app.manage` placed inside it, so a bail leaves the event loop alive
+/// with no buffer. Managing here means [`route`], `on_page_load` and the
+/// `argv` read always find it.
+pub fn install<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.manage(PendingOpenFile::empty())
+}
+
+/// The buffer, or `None` when nothing registered it.
+///
+/// An OS event must never take the process down, so every lookup that
+/// is reachable from one goes through here instead of `Manager::state`,
+/// which panics on a type that was never managed.
+pub fn pending<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<tauri::State<'_, PendingOpenFile>> {
+    let found = app.try_state::<PendingOpenFile>();
+    if found.is_none() {
+        tracing::warn!("open with: PendingOpenFile is not managed, ignoring the request");
+    }
+    found
+}
+
 /// Frontend command: take (and clear) the file buffered during cold
 /// start. Returns `null` when the app launched normally.
 #[tauri::command]
@@ -150,7 +178,7 @@ where
 
 /// Warm path: a file opened while the app is running. Emit to the
 /// listener (which is up) and bring the window forward.
-pub fn dispatch(app: &tauri::AppHandle, path: &str) {
+pub fn dispatch<R: Runtime>(app: &tauri::AppHandle<R>, path: &str) {
     if let Err(err) = app.emit(OPEN_FILE_EVENT, path) {
         tracing::warn!("open with: failed to emit {OPEN_FILE_EVENT}: {err}");
     }
@@ -167,11 +195,15 @@ pub fn dispatch(app: &tauri::AppHandle, path: &str) {
 /// when the user opens it during a slow boot — the app shows its
 /// loading screen until the workspace is ready, and the listener only
 /// exists after that.
-pub fn route(app: &tauri::AppHandle, raw: &str) {
+pub fn route<R: Runtime>(app: &tauri::AppHandle<R>, raw: &str) {
     let Some(path) = file_path_from(raw) else {
         return;
     };
-    let pending = app.state::<PendingOpenFile>();
+    // A missing buffer drops the file rather than the process: see
+    // [`pending`].
+    let Some(pending) = pending(app) else {
+        return;
+    };
     if pending.is_listening() {
         dispatch(app, &path);
     } else {
@@ -263,5 +295,52 @@ mod tests {
         assert!(!pending.is_listening(), "offering does not make it live");
         assert_eq!(pending.take().as_deref(), Some("/a.md"));
         assert!(pending.is_listening());
+    }
+
+    fn mock_app(with_buffer: bool) -> tauri::App<tauri::test::MockRuntime> {
+        let mut builder = tauri::test::mock_builder();
+        if with_buffer {
+            builder = install(builder);
+        }
+        builder
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds")
+    }
+
+    fn md_file(dir: &tempfile::TempDir) -> String {
+        let path = dir.path().join("notes.md");
+        std::fs::write(&path, "- hi\n").unwrap();
+        path.to_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn a_file_routed_before_setup_runs_is_buffered_not_a_panic() {
+        // The crash report: `RunEvent::Opened` reached `route` while
+        // `setup` had not run, and `state::<PendingOpenFile>()` panicked.
+        // `mock_app` never runs `setup`, so the buffer has to come from
+        // `install` alone.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = md_file(&dir);
+        let app = mock_app(true);
+
+        route(app.handle(), &format!("file://{file}"));
+
+        let pending = app.state::<PendingOpenFile>();
+        assert!(!pending.is_listening(), "nothing drained the buffer yet");
+        assert_eq!(pending.take().as_deref(), Some(file.as_str()));
+    }
+
+    #[test]
+    fn routing_with_no_buffer_registered_does_not_panic() {
+        // Defence in depth: if the registration is ever lost, an OS
+        // event still must not abort the app.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = md_file(&dir);
+        let app = mock_app(false);
+
+        route(app.handle(), &file);
+
+        assert!(app.try_state::<PendingOpenFile>().is_none());
+        assert!(pending(app.handle()).is_none());
     }
 }

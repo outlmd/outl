@@ -539,6 +539,10 @@ Three things a contributor will trip on:
   `take_pending_open_file` marks the flag and `AppShell` subscribes before calling it; both paths go through `route`, warm ones included, since a slow boot keeps the loading screen up long after the process is "running".
   `on_page_load` clears it again on `PageLoadEvent::Started`: a reload takes the listener with it while the process keeps running, and a latch that only goes up tells the same lie one layer in.
   `onMount` drains the open-file and deep-link buffers together — the deep link wins when both are set, but the other drains anyway, so an unread target cannot replay later.
+- **`PendingOpenFile` is managed on the `Builder` (`open_with::install`), never inside `setup`, and every lookup goes through `open_with::pending`.**
+  macOS can deliver `RunEvent::Opened` before `setup` finishes, and `Manager::state` panics on an unmanaged type (OUTL-5).
+  `pending` uses `try_state` and logs, so an OS event costs one file at worst.
+  Net: `a_file_routed_before_setup_runs_is_buffered_not_a_panic`.
 - **`run()` is `.build(…).run(|app, event| …)` now, not `.run(generate_context!())`.**
   The event callback is the only place `RunEvent::Opened` is reachable.
   Do not collapse it back.
