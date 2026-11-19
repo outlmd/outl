@@ -137,6 +137,66 @@ fn from_disk_matches_workspace_build() {
     );
 }
 
+#[test]
+fn both_builds_carry_the_same_crumb_tokens() {
+    // Every GUI client reads the from-disk index, and the breadcrumb is
+    // rendered from `tokens` (no client runs a tokenizer). The two
+    // builders take different routes to that field — the from-disk walk
+    // clones what the parse already produced, the workspace walk
+    // tokenizes the text it materialized — so they are a pair that can
+    // drift, and only one of them is on the path a user sees.
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let ops_dir = root.join("ops");
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let branch = "#alinhamento [[hub]] internet 0800";
+
+    {
+        let storage = JsonlStorage::open(ops_dir.clone(), actor).unwrap();
+        let mut w =
+            Workspace::open_with_storage(actor, Box::new(storage), Some(root.to_path_buf()))
+                .unwrap();
+        open_or_create_page(&mut w, &hlc, "hub", "hub", PageKind::Page).unwrap();
+        let note = open_or_create_page(&mut w, &hlc, "note", "note", PageKind::Page).unwrap();
+        let parent = append_block(&mut w, &hlc, Some(note), Some(branch)).unwrap();
+        append_block(&mut w, &hlc, Some(parent), Some("segue no [[hub]]")).unwrap();
+        for meta in list_pages(&w) {
+            let id = find_by_slug(&w, &meta.slug).unwrap();
+            apply_page_md_with_sidecar(&w, root, id).unwrap();
+        }
+    }
+
+    let storage = JsonlStorage::open(ops_dir, actor).unwrap();
+    let w =
+        Workspace::open_with_storage(actor, Box::new(storage), Some(root.to_path_buf())).unwrap();
+    let metas = list_pages(&w);
+    let hub = metas.iter().find(|m| m.slug == "hub").unwrap();
+
+    let crumbs = |links: Vec<outl_actions::Backlink>| {
+        links
+            .into_iter()
+            .filter(|b| !b.ancestors.is_empty())
+            .map(|b| b.ancestors)
+            .collect::<Vec<_>>()
+    };
+    let from_ws = crumbs(build_backlink_index(&w, root).for_page(&w, hub));
+    let from_disk = crumbs(build_backlink_index_from_disk(&metas, root).for_page(&w, hub));
+
+    assert_eq!(from_ws.len(), 1, "one nested reference, one breadcrumb");
+    assert_eq!(from_disk.len(), from_ws.len());
+    assert_eq!(from_disk[0][0].text, branch);
+    assert_eq!(
+        from_disk[0][0].tokens,
+        outl_md::tokenize_owned(branch),
+        "the from-disk crumb carries the branch's own tokens"
+    );
+    assert_eq!(
+        from_ws[0][0].tokens, from_disk[0][0].tokens,
+        "the two builders cannot disagree about how a crumb reads"
+    );
+}
+
 /// Keep the meta helper honest so an unused-import lint never masks a
 /// broken fixture.
 #[test]

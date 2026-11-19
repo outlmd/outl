@@ -137,6 +137,10 @@ A reservation that collapses still blinks, and one that does not is permanent de
 A **refetch** keeps its rows — blanking them reads as "this page lost its references" — and is the one case that still shows the `loading…` mark.
 Net: "the backlinks section never appears and then disappears" (`InlineBacklinks.test.tsx`).
 
+**The ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`.**
+A crumb carries inline tokens, so the trail renders like any other block and stays inert; the plain join survives only as the `title=` tooltip, through `crumbTrailText`.
+Mobile's `BacklinksSection` wraps the same component, which is what stops one client showing markdown source while the other renders it.
+
 **Toggling a task from a backlink row (issue #144)** mutates the *source* page, and the backlink effect is keyed on the slug, which didn't change.
 So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
 Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always empty now, so that blanks the section.

@@ -53,6 +53,7 @@ pub mod activity;
 pub mod alias_conflicts;
 pub mod asset;
 pub mod backlinks;
+pub mod backlinks_crumbs;
 pub mod backlinks_index;
 mod backlinks_keys;
 pub mod backlinks_sort;
@@ -107,9 +108,8 @@ pub mod tree;
 pub use activity::{device_activity, ActorActivity, DeviceActivity};
 pub use alias_conflicts::{alias_conflicts, AliasConflict, ConflictingPage};
 pub use asset::{assets_dir, import_asset, import_asset_bytes, resolve_asset_path, ImportedAsset};
-pub use backlinks::{
-    backlinks_for_page, backlinks_for_target, extract_refs, Backlink, BacklinkCrumb,
-};
+pub use backlinks::{backlinks_for_page, backlinks_for_target, extract_refs, Backlink};
+pub use backlinks_crumbs::BacklinkCrumb;
 pub use backlinks_index::{
     build_backlink_index, build_backlink_index_from_disk, BacklinkIndex, SplitBacklinks,
 };

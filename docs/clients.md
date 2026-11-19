@@ -648,7 +648,14 @@ When a citing block sits nested inside an outline (not at the page's root level)
 A block at root level has no breadcrumb.
 Consecutive references from the same branch collapse: the trail renders once, and the following reference(s) sit under it silently until the branch changes.
 
-`outl_actions::backlinks_for_page` / `backlinks_for_target` populate `Backlink::ancestors` (a `Vec<BacklinkCrumb>`) while walking the page tree, so every client reads the same data — nothing is recomputed client-side.
+**The trail is rendered markdown, not source.**
+A crumb carries inline tokens beside its text, so `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/...)` reads as a tag, a page name and a link label — the same way that block reads on its own page.
+It shipped as raw text until then, which made the one line describing *where* a reference lives the one line written in markup, with a URL swallowing the rest of a trail that is truncated to a single line anyway.
+
+*Dimmed* stays a styling rule: the trail is inert on every client (nothing in it opens a page — the row already has one destination, the citing block), and the dimming composes with the token colours underneath.
+`@outl/shared/markdown::CrumbTrail` is the one renderer both GUI clients use, with `crumbTrailText` for the plain reading a `title=` tooltip can hold; the TUI's `render_crumb_trail` puts the dim on the ratatui `Line` so prose inherits it while a ref keeps its hue.
+
+`outl_actions::backlinks_for_page` / `backlinks_for_target` populate `Backlink::ancestors` (a `Vec<BacklinkCrumb>`) while walking the page tree, so every client reads the same data — nothing is recomputed client-side, and no client holds a tokenizer to recompute it with.
 `@outl/shared/outline::sameCrumbTrail` (mirrored locally by the TUI as `same_trail`) is the one comparison every client uses to decide whether to collapse consecutive breadcrumbs, comparing trails by block id.
 
 Mobile's `BacklinksSection` groups references by source page and renders the breadcrumb the same way desktop and TUI do — it no longer shows a flat list of blocks.

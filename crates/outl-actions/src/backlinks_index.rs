@@ -35,7 +35,8 @@ use outl_core::workspace::Workspace;
 use tracing::warn;
 
 use crate::alias_conflicts::PageClaims;
-use crate::backlinks::{Backlink, BacklinkCrumb};
+use crate::backlinks::Backlink;
+use crate::backlinks_crumbs::{crumbs, CrumbFrame};
 use crate::backlinks_keys::{keys_for_page, mentions_of, TargetKey};
 use crate::journal::page_md_path;
 use crate::outline::{project_outline_node_shallow, read_page_outline, ChildrenIndex, OutlineNode};
@@ -179,7 +180,7 @@ impl BacklinkIndex {
         };
         let source_path = page_md_path(root, meta);
         let mut path: Vec<usize> = Vec::new();
-        let mut ancestors: Vec<BacklinkCrumb> = Vec::new();
+        let mut ancestors: Vec<CrumbFrame<'_>> = Vec::new();
         walk_parsed(
             &outline.nodes,
             meta,
@@ -272,7 +273,7 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
         let page_id = *page_id;
         let source_path = page_md_path(root, meta);
         let mut path: Vec<usize> = Vec::new();
-        let mut ancestors: Vec<BacklinkCrumb> = Vec::new();
+        let mut ancestors: Vec<CrumbFrame<'_>> = Vec::new();
         walk_page(
             workspace,
             page_id,
@@ -323,7 +324,7 @@ pub fn build_backlink_index_from_disk(metas: &[PageMeta], root: &Path) -> Backli
         };
         let source_path = page_md_path(root, meta);
         let mut path: Vec<usize> = Vec::new();
-        let mut ancestors: Vec<BacklinkCrumb> = Vec::new();
+        let mut ancestors: Vec<CrumbFrame<'_>> = Vec::new();
         walk_parsed(
             &outline.nodes,
             meta,
@@ -346,12 +347,12 @@ pub fn build_backlink_index_from_disk(metas: &[PageMeta], root: &Path) -> Backli
 /// block to `index`. The from-disk twin of [`walk_page`]: same shape,
 /// but reads the leaf + `from-template::` value off the already-parsed
 /// [`OutlineNode`] instead of the workspace tree.
-fn walk_parsed(
-    nodes: &[OutlineNode],
+fn walk_parsed<'a>(
+    nodes: &'a [OutlineNode],
     meta: &PageMeta,
     source_path: &Path,
     path: &mut Vec<usize>,
-    ancestors: &mut Vec<BacklinkCrumb>,
+    ancestors: &mut Vec<CrumbFrame<'a>>,
     index: &mut BacklinkIndex,
 ) {
     for (idx, node) in nodes.iter().enumerate() {
@@ -371,16 +372,13 @@ fn walk_parsed(
                     source_page: Some(meta.clone()),
                     source_block: shallow_parsed(node),
                     source_block_path: path.clone(),
-                    ancestors: ancestors.clone(),
+                    ancestors: crumbs(ancestors),
                     source_path: Some(source_path.to_path_buf()),
                 },
                 keys,
             );
         }
-        ancestors.push(BacklinkCrumb {
-            id: node.id.clone(),
-            text: node.text.clone(),
-        });
+        ancestors.push(CrumbFrame::Parsed(node));
         walk_parsed(&node.children, meta, source_path, path, ancestors, index);
         ancestors.pop();
         path.pop();
@@ -413,7 +411,7 @@ fn walk_page(
     meta: &PageMeta,
     source_path: &Path,
     path: &mut Vec<usize>,
-    ancestors: &mut Vec<BacklinkCrumb>,
+    ancestors: &mut Vec<CrumbFrame<'static>>,
     children: &ChildrenIndex,
     index: &mut BacklinkIndex,
 ) {
@@ -442,13 +440,13 @@ fn walk_page(
                     source_page: Some(meta.clone()),
                     source_block,
                     source_block_path: path.clone(),
-                    ancestors: ancestors.clone(),
+                    ancestors: crumbs(ancestors),
                     source_path: Some(source_path.to_path_buf()),
                 },
                 keys,
             );
         }
-        ancestors.push(BacklinkCrumb {
+        ancestors.push(CrumbFrame::Tree {
             id: child_id.to_string(),
             text: body.to_string(),
         });

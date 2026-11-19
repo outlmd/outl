@@ -137,6 +137,59 @@ fn siblings_share_the_same_ancestor_prefix() {
 }
 
 #[test]
+fn a_crumb_carries_the_tokens_of_its_own_text() {
+    // A client holds no tokenizer, so a crumb shipped as bare text can
+    // only be drawn as source: the backlinks panel's one line about
+    // *where* a reference lives read `#alinhamento [[buser/team/vendas]]
+    // … [email](https://mail.google.com/…)` while the citing block
+    // under it read as prose.
+    let (mut w, hlc) = ws();
+    let _ = target_metas(&mut w, &hlc);
+    let day = open_journal(&mut w, &hlc, NaiveDate::from_ymd_opt(2026, 7, 20).unwrap()).unwrap();
+    let branch = "#alinhamento [[buser/team/vendas]] internet 0800";
+    let parent = append_block(&mut w, &hlc, Some(day), Some(branch)).unwrap();
+    let leaf = append_block(&mut w, &hlc, Some(parent), Some("bater as [[metas]]")).unwrap();
+
+    let meta = target_metas(&mut w, &hlc);
+    let links = backlinks_for_page(&w, root(), &meta);
+    let bl = links
+        .iter()
+        .find(|l| l.block_id == leaf.to_string())
+        .expect("the leaf cites metas");
+
+    assert_eq!(bl.ancestors.len(), 1);
+    assert_eq!(
+        bl.ancestors[0].tokens,
+        outl_md::tokenize_owned(branch),
+        "the crumb's tokens are its text through the one tokenizer, \
+         not a second reading of it"
+    );
+}
+
+#[test]
+fn a_crumbs_tokens_follow_its_stripped_text_not_the_raw_block() {
+    // `text` drops the TODO marker, so the tokens have to be of that
+    // body. Tokenizing the raw block would put a stray `TODO ` back
+    // into a trail that already says it does not show markers.
+    let (mut w, hlc) = ws();
+    let _ = target_metas(&mut w, &hlc);
+    let day = open_journal(&mut w, &hlc, NaiveDate::from_ymd_opt(2026, 7, 20).unwrap()).unwrap();
+    let parent = append_block(&mut w, &hlc, Some(day), Some("TODO revisar [[okrs]]")).unwrap();
+    let leaf = append_block(&mut w, &hlc, Some(parent), Some("bater as [[metas]]")).unwrap();
+
+    let meta = target_metas(&mut w, &hlc);
+    let links = backlinks_for_page(&w, root(), &meta);
+    let crumb = &links
+        .iter()
+        .find(|l| l.block_id == leaf.to_string())
+        .expect("the leaf cites metas")
+        .ancestors[0];
+
+    assert_eq!(crumb.text, "revisar [[okrs]]");
+    assert_eq!(crumb.tokens, outl_md::tokenize_owned(&crumb.text));
+}
+
+#[test]
 fn alias_mention_lands_in_the_pages_backlinks() {
     // `alias:: Big Apple, NYC` on the New York page: a block holding
     // `[[NYC]]` must surface under that page's backlinks, not only

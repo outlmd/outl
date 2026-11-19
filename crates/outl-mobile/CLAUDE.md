@@ -129,6 +129,8 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   Both facts live in `Journal.tsx`'s JSX, so `PageSections.test.tsx` pins them by reading the source, the way the `backlinks` prop's own contract already is.
   The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
   `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
+  **A backlink's ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`** — a crumb carries inline tokens, so the trail renders like any other block and stays inert.
+  The desktop's `InlineBacklinks` wraps the same component, which is what stops one client drawing markdown source while the other renders it; `BacklinksSection.test.tsx` is this side of that net.
 That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see that module's entry above.
   **Nothing here draws until the scan answers for the page on screen** (`lateSectionVisible`, `@outl/shared/outline`).
   `Journal` is what makes that true: `createResource` keeps its last value through a source change, so the raw accessor left the page the user just left answering for the one they opened, while the card said "No backlinks yet" over a scan still running.

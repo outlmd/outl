@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use outl_core::workspace::Workspace;
 use serde::{Serialize, Serializer};
 
+use crate::backlinks_crumbs::BacklinkCrumb;
 use crate::backlinks_index::build_backlink_index;
 use crate::outline::OutlineNode;
 use crate::page::PageMeta;
@@ -104,23 +105,6 @@ impl Backlink {
         self.source_block.children.clear();
         self
     }
-}
-
-/// One ancestor step in a backlink's breadcrumb.
-///
-/// Plain text only (no inline tokens): the breadcrumb is dimmed
-/// context, not an interactive surface, so clients render it as a
-/// muted trail rather than re-rendering links/bold the way they do for
-/// the citing block itself. `text` already has the `TODO `/`DONE `
-/// prefix stripped, mirroring [`Backlink::block_text`]. `id` lets a
-/// client make a crumb tappable (jump to that ancestor) later without
-/// a shape change.
-#[derive(Debug, Clone, Serialize)]
-pub struct BacklinkCrumb {
-    /// Node id of the ancestor block.
-    pub id: String,
-    /// Ancestor block's text, TODO/DONE prefix stripped. Full block text, so it may span lines.
-    pub text: String,
 }
 
 fn serialize_todo_state<S>(state: &Option<TodoState>, ser: S) -> Result<S::Ok, S::Error>

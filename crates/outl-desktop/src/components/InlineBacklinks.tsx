@@ -6,7 +6,12 @@ import {
   setBacklinksOrder,
   toggleTodo,
 } from "@outl/shared/api/commands";
-import { MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
+import {
+  CrumbTrail,
+  crumbTrailText,
+  MarkdownInline,
+  MarkdownTable,
+} from "@outl/shared/markdown";
 import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
@@ -242,9 +247,6 @@ export function InlineBacklinks() {
                         link.ancestors.length > 0 &&
                         (!prev ||
                           !sameCrumbTrail(prev.ancestors, link.ancestors));
-                      const crumbTrail = link.ancestors
-                        .map((c) => c.text)
-                        .join(" › ");
                       return (
                         <li
                           // The selected state mirrors the outline's
@@ -261,9 +263,12 @@ export function InlineBacklinks() {
                           <Show when={showCrumbs}>
                             <div
                               class="truncate px-1 pt-0.5 text-xs opacity-40"
-                              title={crumbTrail}
+                              // The tooltip stays plain text — a
+                              // `title=` cannot hold markup — while the
+                              // row renders. One owner for both forms.
+                              title={crumbTrailText(link.ancestors)}
                             >
-                              {crumbTrail}
+                              <CrumbTrail crumbs={link.ancestors} />
                             </div>
                           </Show>
                           <div class="flex items-start">

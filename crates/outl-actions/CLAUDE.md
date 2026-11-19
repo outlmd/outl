@@ -351,6 +351,24 @@ It refuses a page that already has a title, and reports a slug two spellings cla
 `descendants` returns rows with `depth` and `label` already computed, so the TUI's `view/namespace.rs` and the desktop / mobile `<NestedPages />` render the same list without three copies of the split rule.
 Per-client coverage is recorded as `Capability::NestedPages` (the TUI lists them but has no cursor in the list).
 
+## A backlink's breadcrumb
+
+`backlinks_crumbs.rs` owns both halves of "where does this reference live": the `BacklinkCrumb` a client renders, and the deferred frame the index walk pushes.
+Its own module for the reason `backlinks_sort.rs` is — the breadcrumb is a distinct question from *what counts as a backlink* (`backlinks.rs`) and from *storage and traversal* (`backlinks_index.rs`) — and the two halves live together because they are two readings of one decision.
+
+Two rules:
+
+- **A crumb carries inline `tokens`, not just text.**
+  It shipped as plain text behind the sentence *"dimmed context, not an interactive surface"*, which conflated a styling rule with a parsing one: no client holds a tokenizer, so "no tokens" could only mean the trail was drawn as markdown source.
+  A branch reading `#alinhamento [[buser/team/vendas]] … [mail](https://…)` sat above a citing block that read as prose.
+  Dimming and inertness are still the rule — nothing in a trail opens a page — and both are the client's to apply.
+- **A frame is materialized only for an ancestor of a block that hosts a mention.**
+  The walk visits every block in the workspace and almost none of them ever becomes a crumb, so `CrumbFrame` borrows (from-disk: the parse already holds the tokens) or defers the tokenize (from-tree), and `crumbs()` spends it at the one point a `Backlink` is built.
+  Tokenizing at push time is `O(all blocks)` thrown away on the pop — root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate) invariant 15's second question.
+
+The two builders reach `tokens` by different routes, so `tests/backlinks_index_disk.rs` pins that they cannot disagree; only the from-disk one is on the path a user sees.
+Client-side: `@outl/shared/markdown::CrumbTrail` for both GUIs, `outl_tui::view::backlinks::render_crumb_trail` for the terminal.
+
 ## Merging and renaming pages
 
 Single owners, [RFC 0557](../../docs/rfcs/0557-page-merge-and-rename.md):

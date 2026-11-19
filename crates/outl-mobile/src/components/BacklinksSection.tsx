@@ -5,7 +5,7 @@ import type {
   PageKind,
   TodoState,
 } from "@outl/shared/api/types";
-import { MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
+import { CrumbTrail, MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
 import { sameCrumbTrail } from "@outl/shared/outline";
 import { PageGlyph } from "@outl/shared/icons";
 
@@ -143,9 +143,6 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                       link.ancestors.length > 0 &&
                       (!prev ||
                         !sameCrumbTrail(prev.ancestors, link.ancestors));
-                    const crumbTrail = link.ancestors
-                      .map((c) => c.text)
-                      .join(" › ");
                     return (
                       <button
                         type="button"
@@ -159,7 +156,7 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                         <div class="px-4 py-3">
                           <Show when={showCrumbs}>
                             <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
-                              {crumbTrail}
+                              <CrumbTrail crumbs={link.ancestors} />
                             </p>
                           </Show>
                           <div class="flex items-start gap-2">

@@ -25,11 +25,15 @@ vi.mock("@outl/shared/api/commands", () => ({
 
 let dispose: (() => void) | undefined;
 
-function backlink(id: string, todo: TodoState | null): Backlink {
+function backlink(
+  id: string,
+  todo: TodoState | null,
+  ancestors: Backlink["ancestors"] = [],
+): Backlink {
   return {
     block_id: id,
     todo,
-    ancestors: [],
+    ancestors,
     source_page: { id: "page-1", slug: "journal", title: "Journal", kind: "page" },
     source_block: {
       id,
@@ -314,5 +318,49 @@ describe("the backlinks section never appears and then disappears", () => {
     settle(backlinksReply([backlink("todo", "DONE")]));
     await done;
     expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
+  });
+});
+
+describe("InlineBacklinks breadcrumb", () => {
+  /** The trail from the bug report: a tag, a namespaced ref and a mail
+   *  link, in the branch a `#fup` reference sits under. */
+  const ancestors: Backlink["ancestors"] = [
+    {
+      id: "crumb-1",
+      text: "#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/mail?authuser=someone)",
+      tokens: [
+        { kind: "tag", value: "#alinhamento" },
+        { kind: "plain", value: " " },
+        { kind: "ref", value: "buser/team/vendas" },
+        { kind: "plain", value: " internet 0800 " },
+        {
+          kind: "link",
+          value: "email",
+          href: "https://mail.google.com/mail?authuser=someone",
+        },
+      ],
+    },
+  ];
+
+  it("renders the ancestor trail instead of its markdown source", () => {
+    const host = mount([backlink("ref", null, ancestors)]);
+
+    expect(host.textContent).toContain("buser/team/vendas");
+    expect(host.textContent).toContain("#alinhamento");
+    expect(host.textContent).toContain("email");
+    // The three the raw source showed, which is the whole defect.
+    expect(host.textContent).not.toContain("[[");
+    expect(host.textContent).not.toContain("](");
+    expect(host.textContent).not.toContain("mail.google.com");
+  });
+
+  it("keeps the plain source as the tooltip, where markup cannot go", () => {
+    const host = mount([backlink("ref", null, ancestors)]);
+
+    // The trail's own row, not the header's sort button and not the
+    // `title={href}` MarkdownInline puts on the link inside it.
+    expect(host.querySelector("li > [title]")?.getAttribute("title")).toBe(
+      ancestors[0].text,
+    );
   });
 });

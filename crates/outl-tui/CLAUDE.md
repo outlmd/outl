@@ -637,7 +637,7 @@ src/
 │   ├── properties.rs    # the `g p` property editor popup
 │   ├── ahead_of_log_banner.rs # red banner above the outline when the open page has stopped syncing (invariant 8); the one banner focus mode keeps
 │   ├── warnings_banner.rs # yellow banner above the outline when the current page has ParseWarnings
-│   ├── backlinks.rs     # inline backlinks section (below outline, ─ rule)
+│   ├── backlinks.rs     # inline backlinks section (below outline, ─ rule); `render_crumb_trail` draws the ancestor breadcrumb as markdown, dim on the Line so prose inherits it and a ref keeps its hue
 │   └── namespace.rs     # nested-pages section (below backlinks, ─ rule); read-only, no cursor
 ├── outline_ops.rs       # one-line re-export shim — helpers moved to outl_md::outline_ops so the mobile client can share them
 ├── edit_buffer.rs       # cursor + chars; isolated, well-tested

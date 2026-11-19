@@ -221,16 +221,19 @@ export interface PageMeta {
 }
 
 /**
- * One ancestor step in a backlink's breadcrumb. Plain text only — the
- * breadcrumb is dimmed context, so clients render a muted trail rather
- * than re-rendering inline markdown the way they do for the citing
- * block. `text` already has the `TODO `/`DONE ` prefix stripped. Mirrors
- * `outl_actions::BacklinkCrumb`. (Same shape as `FocusCrumb` from
- * `@outl/shared/outline`, but a distinct concept — zoom vs. backlink.)
+ * One ancestor step in a backlink's breadcrumb. Dimmed context, and
+ * *dimmed* is a styling rule rather than a parsing one: the trail is
+ * rendered from `tokens` like any other block (`<CrumbTrail />`) and
+ * stays inert — nothing in it opens a page. `text` already has the
+ * `TODO `/`DONE ` prefix stripped and is what a `title=` tooltip reads.
+ * Mirrors `outl_actions::BacklinkCrumb`. (`FocusCrumb` in
+ * `@outl/shared/outline` is a near-twin but a distinct concept — zoom
+ * vs. backlink — and carries no tokens.)
  */
 export interface BacklinkCrumb {
   id: string;
   text: string;
+  tokens: InlineToken[];
 }
 
 export interface Backlink {

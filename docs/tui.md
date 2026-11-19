@@ -482,6 +482,7 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
   Pages are ordered by how recently they referenced this page (default: most recent on top); `Ctrl+O` flips the direction, shown in the section header (`↓ newest (^O)` / `↑ oldest (^O)`).
   Within a page, blocks keep document order.
   When a citing block is nested inside an outline (not at page root level), its ancestor chain shows as a dimmed breadcrumb above it, root-first (e.g. `Planejamento Q3 › Objetivos`); a root-level block has no breadcrumb.
+  The trail renders its markdown — a `[[ref]]` reads as its name, a `#tag` keeps its colour — with the dim applied to the row rather than to each span.
   Consecutive references from the same branch collapse the trail — it renders once, then stays implicit for the following reference(s) until the branch changes.
   `j`/`k` navigation crosses the separator transparently: from the last outline block, `j` lands you on the first backlink; `k` from the first backlink walks back into the outline.
   Toggle the section with `B`.

@@ -12,6 +12,7 @@
 //! mobile client through `outl_actions::backlinks_for_page`.
 
 use crate::state::{App, EditTarget, Focus, Mode};
+use crate::view::inline::render_markdown_inline;
 use crate::view::outline::{emit_block_lines, RenderMode};
 use crate::view::row_chrome::{push_property_row, FoldMarker};
 use outl_actions::{Backlink, BacklinkCrumb, OutlineNode};
@@ -23,6 +24,34 @@ use ratatui::text::{Line, Span};
 /// `sameCrumbTrail` in `@outl/shared/outline`.
 fn same_trail(a: &[BacklinkCrumb], b: &[BacklinkCrumb]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.id == y.id)
+}
+
+/// The breadcrumb above a referencing block, as one dimmed row.
+///
+/// The crumbs render as markdown — a `[[ref]]` reads as its name and a
+/// `#tag` keeps its colour — because the trail is the branch the
+/// reference sits in, and that branch reads as prose on its own page.
+/// Drawing it as source was the panel's one spot written in markup.
+///
+/// Dim is the **line** style, so `Span::raw` prose inherits it while a
+/// ref or tag keeps the hue `render_markdown_inline` gave it: the row
+/// stays quieter than the block below it without erasing what the
+/// tokens are. Nothing here is navigable — `j`/`k` and `Enter` reach
+/// the citing block, never its ancestors.
+fn render_crumb_trail(ancestors: &[BacklinkCrumb], app: &App) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw("  ")];
+    for (i, crumb) in ancestors.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" › ", app.theme.dim));
+        }
+        spans.extend(render_markdown_inline(
+            &crumb.text,
+            &app.theme,
+            &app.index,
+            &app.icons,
+        ));
+    }
+    Line::from(spans).style(app.theme.dim)
 }
 
 /// Render the inline backlinks section.
@@ -142,16 +171,7 @@ pub(crate) fn render_backlinks_inline(
         let show_crumbs = !bl.ancestors.is_empty()
             && prev.is_none_or(|p| !same_trail(&p.ancestors, &bl.ancestors));
         if show_crumbs {
-            let trail = bl
-                .ancestors
-                .iter()
-                .map(|c| c.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" › ");
-            out.push(Line::from(Span::styled(
-                format!("  {trail}"),
-                app.theme.dim,
-            )));
+            out.push(render_crumb_trail(&bl.ancestors, app));
         }
 
         // Sub-path inside the source_block that's currently focused,
@@ -372,6 +392,72 @@ mod tests {
             render_backlinks_inline(&app, 40).0.is_empty(),
             "a zoom hides the page's backlinks"
         );
+    }
+
+    /// The breadcrumb is the one line on the panel that used to be
+    /// drawn as source: a branch reading `#alinhamento [[buser/…]] …`
+    /// above a citing block that reads as prose. Dimming it was never
+    /// a reason not to parse it.
+    #[test]
+    fn a_crumb_trail_renders_its_markdown_instead_of_the_source() {
+        let (app, _dir) = test_app();
+        let branch = "#alinhamento [[buser/team/vendas]] internet 0800";
+        let crumbs = vec![BacklinkCrumb {
+            id: "blk-anc001".into(),
+            text: branch.into(),
+            tokens: outl_md::tokenize_owned(branch),
+        }];
+
+        let text = row_text(&render_crumb_trail(&crumbs, &app));
+
+        assert!(text.contains("buser/team/vendas"), "{text:?}");
+        assert!(text.contains("#alinhamento"), "{text:?}");
+        assert!(!text.contains("[["), "{text:?}");
+        assert!(!text.contains("]]"), "{text:?}");
+    }
+
+    /// Dim is the **line** style, so prose takes it while a ref keeps
+    /// the hue the tokenizer's render gave it. A per-span dim would
+    /// flatten the trail back to one colour and lose what the tokens
+    /// are; styling nothing would make it as loud as the block below.
+    #[test]
+    fn a_crumb_trail_dims_its_prose_and_keeps_its_ref_colour() {
+        let (app, _dir) = test_app();
+        let text = "ver [[hub]]";
+        let crumbs = vec![BacklinkCrumb {
+            id: "blk-anc001".into(),
+            text: text.into(),
+            tokens: outl_md::tokenize_owned(text),
+        }];
+
+        let line = render_crumb_trail(&crumbs, &app);
+
+        assert_eq!(line.style, app.theme.dim);
+        let hub = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "hub")
+            .expect("the ref renders as its name");
+        assert_eq!(hub.style, app.theme.ref_link);
+    }
+
+    /// The separator carries the same `›` every GUI client draws
+    /// (`CRUMB_SEPARATOR` in `@outl/shared/markdown`).
+    #[test]
+    fn a_crumb_trail_joins_its_steps_with_one_separator() {
+        let (app, _dir) = test_app();
+        let crumb = |text: &str| BacklinkCrumb {
+            id: text.into(),
+            text: text.into(),
+            tokens: outl_md::tokenize_owned(text),
+        };
+
+        let text = row_text(&render_crumb_trail(
+            &[crumb("parent"), crumb("child")],
+            &app,
+        ));
+
+        assert_eq!(text, "  parent › child");
     }
 
     /// #319, third caller. `render_block` has the same rule and its own

@@ -2,6 +2,7 @@ export { MarkdownInline, type EmbedMap } from "./MarkdownInline";
 export { MarkdownTable, type MarkdownTableProps } from "./MarkdownTable";
 export { EmbeddedSubtree } from "./EmbeddedSubtree";
 export { PageEmbedTitle, type PageEmbedMap } from "./PageEmbed";
+export { CrumbTrail, crumbTrailText } from "./CrumbTrail";
 export {
   QUOTE_PREFIX,
   isQuote,

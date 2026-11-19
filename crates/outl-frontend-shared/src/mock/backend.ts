@@ -125,7 +125,7 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
         block_id: node.id,
         todo: node.todo,
         source_page: src.meta,
-        ancestors: path.map((a) => ({ id: a.id, text: a.text })),
+        ancestors: path.map((a) => ({ id: a.id, text: a.text, tokens: a.tokens })),
         source_block: node,
         source_block_path: [],
       });

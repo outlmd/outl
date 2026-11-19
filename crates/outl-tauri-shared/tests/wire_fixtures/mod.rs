@@ -64,9 +64,14 @@ pub fn table_view() -> outl_md::TableView {
 }
 
 pub fn backlink_crumb() -> BacklinkCrumb {
+    // Tokenized through the real tokenizer, so the fixture cannot
+    // disagree with what a crumb actually carries: the whole point of
+    // the field is that a client has no tokenizer to fall back on.
+    let text = "week 34 — [[infra]]";
     BacklinkCrumb {
         id: "01JQ0000000000000000000002".into(),
-        text: "week 34".into(),
+        text: text.into(),
+        tokens: outl_md::tokenize_owned(text),
     }
 }
 

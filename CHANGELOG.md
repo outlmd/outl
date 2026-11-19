@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A backlink's breadcrumb was drawn as markdown source.**
+  The trail above a nested reference read `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/mail?authuser=...)` while the citing block right under it read as prose — so the one line on the panel saying *where* a reference lives was the one line written in markup, with a URL eating a row that truncates to a single line anyway.
+
+  The cause was a sentence rather than a bug: `BacklinkCrumb` called itself "dimmed context, not an interactive surface" and shipped plain text on that basis.
+  Dimming is a styling rule, and no client holds a tokenizer — `@outl/shared` says so in its own doc — so "no tokens" could only mean "unparsed".
+
+  A crumb carries its inline tokens now, and all three clients render it: `@outl/shared/markdown::CrumbTrail` for the desktop and the phone, `render_crumb_trail` in the TUI.
+  It stays **inert** — nothing in a trail opens a page, because the row already has one destination — and the TUI puts the dim on the ratatui `Line` so prose inherits it while a ref keeps its hue.
+  `crumbTrailText` keeps the plain reading for the `title=` tooltip, which cannot hold markup.
+
+  The index build does not pay for it: a crumb is materialized only for an ancestor of a block that actually hosts a mention, so the walk still pushes a borrowed frame per block instead of tokenizing every block in the workspace to throw it away on the pop.
+
 - **The desktop burned a whole CPU core and froze while syncing, on a workspace that had nothing to sync.**
   Measured on a 748,684-op / 23-actor graph with four paired devices: 30 % of a core at p90 and **131 % at peak** on an app sitting idle, with the window periodically refusing keystrokes.
 
