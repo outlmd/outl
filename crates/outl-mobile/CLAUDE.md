@@ -143,6 +143,14 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   Its own module because `applyView` cannot answer the question it asks. `applyView` compares slugs, which is the right net for "the page changed however it happened" and blind to the case that bit: **asking for the page you are already on.**
   Today's journal is usually the open page, so the Today button, the week strip's current day, a `[[ref]]` pointing back here and a deep link to this page all resolved to the same slug, and the zoom they were supposed to leave stayed up with nothing on screen moving.
   `Journal.day-nav.ts` and the deep-link listener take `openView` rather than `applyView` for that reason; a commit, a background poll, a peer reload and a capture into today keep `applyView` and keep the zoom.
+- **`Journal.caret-nav.ts`** — `createCaretNav(deps)`: an arrow key that walks out of the block being edited, with a hardware keyboard.
+  The decision is `@outl/shared/caret-nav`'s, so what is here is the ordering, and both halves of it have a failure mode.
+  **The answer is synchronous and the work is not**: the textarea decides whether to swallow the key from the return value, while the commit is a backend round-trip — so the target is resolved up front and the commit runs behind it.
+  **The commit lands before the neighbour is opened**, because `commitEdit` ends with `setEditingId(null)`; opening first would drop the user straight back out of Insert.
+  A commit that fails moves nothing, since `commitEdit` keeps the editor open on the draft and walking away from that would strand text the user can no longer see.
+  `commitEdit` **resolves `false`** on that path rather than rejecting, so the step reads its answer; catching a rejection alone let `startEdit` overwrite the unsaved draft.
+  A key repeat landing while a step is in flight is swallowed, so a held arrow never commits the same draft twice.
+  The caret is handed over through a pending offset applied in `onTextareaMount` rather than a prop threaded down three components: the element is what has to be written to, `Journal` already receives it there, and `parkCaret` survives the Solid `value=` re-binding that a raw `setSelectionRange` loses on iOS.
 - **`Journal.remind.ts`** — `createRemindAuthoring(deps)`: which block the "Remind me…" sheet is open on, the rule it opened with, and the write back.
   It owns the signal, like `Journal.embeds.ts`, so the component holds no state for the feature.
   The order is the part with a failure mode.
@@ -175,6 +183,9 @@ The haptics stay on that side on purpose — a buzz is feedback for a *decision*
   Presentational only — neither knows what a tap means.
 - **`BlockTextarea.tsx`** — `EditableTextarea`.
   Its own file because the rules in it are about iOS text input, not about outlines: `beforeinput` rather than `keydown` (WKWebView emits no reliable per-character key events) and `parkCaret` twice around every programmatic `value =`.
+  **Its one `keydown` branch is the arrow keys**, and that is not a contradiction of the rule above: cross-block caret nav only ever fires from a *hardware* keyboard (an iPad, or an Android phone with one attached), which does emit reliable key events — the soft keyboard the `beforeinput` rules exist for has no arrow keys at all.
+  The contract is **when the key is swallowed**: `onCaretExit` answers synchronously whether the step was taken, and only then does the handler `preventDefault`, so at the outline's edge the webview's own caret motion still happens.
+  `@outl/shared/caret-nav` owns the decision and `Journal.caret-nav.ts` owns this client's walk; the desktop wraps the same pair.
   **The third rule is that nothing writes `ta.value` while an IME composes** ([#399](https://github.com/outlmd/outl/issues/399)).
   WebKit reports `selectionStart` at the start of the marked run, so pair completion read `[[` plus the pinyin as an unclosed ref and appended a second `]]`.
   Writing a different string then commits that run as plain text, which is how `nihao` typed inside `[[]]` became `[[]]nihao]]niha]]nih]]ni]]n]]`.

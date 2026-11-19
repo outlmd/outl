@@ -129,14 +129,34 @@ impl EditBuffer {
         }
     }
 
-    /// Move cursor to the start of the line.
+    /// Move cursor to the start of the **current line**.
+    ///
+    /// Equivalent to `cursor = 0` for a single-line buffer, which is
+    /// every ordinary block. It differs inside a multi-line one (a
+    /// fenced code block typed with soft newlines), where `Home` means
+    /// the start of the line the cursor is on — not the top of the
+    /// fence, which is what this used to do while its doc comment
+    /// already said "line".
+    ///
+    /// Line math is [`outl_md::view`]'s, like [`Self::move_up`]'s: one
+    /// owner for the `(line, col) ↔ char_idx` mapping, shared with the
+    /// renderer.
     pub fn move_home(&mut self) {
-        self.cursor = 0;
+        let text = self.as_string();
+        let (line, _) = outl_md::view::char_to_line_col(&text, self.cursor);
+        self.cursor = outl_md::view::line_col_to_char(&text, line, 0);
     }
 
-    /// Move cursor to the end of the line.
+    /// Move cursor to the end of the **current line**. Mirror of
+    /// [`Self::move_home`].
     pub fn move_end(&mut self) {
-        self.cursor = self.chars.len();
+        let text = self.as_string();
+        let (line, _) = outl_md::view::char_to_line_col(&text, self.cursor);
+        // `usize::MAX` is the documented way to ask `line_col_to_char`
+        // for a line's end: it clamps a column past EOL to the last
+        // char of that line, which is the same vim-style clamp
+        // `move_up` / `move_down` lean on for the preferred column.
+        self.cursor = outl_md::view::line_col_to_char(&text, line, usize::MAX);
     }
 
     /// Move cursor one *visual* line up inside the buffer (across
@@ -176,6 +196,27 @@ impl EditBuffer {
         }
         self.cursor = outl_md::view::line_col_to_char(&text, line + 1, col);
         true
+    }
+
+    /// Park the cursor on the buffer's first or last line at `col`,
+    /// clamped to that line's end. This is where a cross-block `↓` / `↑`
+    /// arrives, carrying the preferred column of the block it left.
+    ///
+    /// The line is the one that **faces** the block being left: stepping
+    /// up arrives on the last line, stepping down on the first. A raw
+    /// `cursor = col` gets both wrong inside a multi-line buffer (it
+    /// always lands on the first line, and overshoots into the second
+    /// when `col` is past the first line's end), which is where
+    /// `@outl/shared/caret-nav`'s `entryCaretOffset` and this client
+    /// used to disagree.
+    pub fn land_on_edge_line(&mut self, last_line: bool, col: usize) {
+        let text = self.as_string();
+        let line = if last_line {
+            text.chars().filter(|c| *c == '\n').count()
+        } else {
+            0
+        };
+        self.cursor = outl_md::view::line_col_to_char(&text, line, col);
     }
 
     /// Column the cursor sits on within its current visual line.
@@ -393,5 +434,63 @@ mod tests {
         let mut b = EditBuffer::from_text("foo\nbar baz");
         b.cursor = 7; // 3 chars into line 1
         assert_eq!(b.visual_column(), 3);
+    }
+
+    #[test]
+    fn home_and_end_stay_on_the_cursors_own_line() {
+        // A fenced code block typed with soft newlines. `Home` used to
+        // jump to the top of the fence and `End` to the bottom of it,
+        // while both doc comments already said "line".
+        let text = "```rust\nfn main() {}\n```";
+        let body_start = "```rust\n".chars().count();
+
+        let mut b = EditBuffer::from_text(text);
+        b.cursor = body_start + 3; // inside `fn main() {}`
+        b.move_home();
+        assert_eq!(b.cursor, body_start);
+        b.move_end();
+        assert_eq!(b.cursor, body_start + "fn main() {}".chars().count());
+    }
+
+    #[test]
+    fn home_and_end_are_the_whole_buffer_on_a_single_line_block() {
+        // Which is every ordinary block, so the fix must not move this.
+        let mut b = EditBuffer::from_text("ship it");
+        b.cursor = 3;
+        b.move_home();
+        assert_eq!(b.cursor, 0);
+        b.move_end();
+        assert_eq!(b.cursor, 7);
+    }
+
+    #[test]
+    fn landing_from_below_arrives_on_the_last_line() {
+        let mut b = EditBuffer::from_text("abc\nde");
+        b.land_on_edge_line(true, 1);
+        assert_eq!(b.cursor, "abc\n".chars().count() + 1);
+        // A column past the line's end clamps to it.
+        b.land_on_edge_line(true, 9);
+        assert_eq!(b.cursor, "abc\nde".chars().count());
+    }
+
+    #[test]
+    fn landing_from_above_stays_on_the_first_line() {
+        let mut b = EditBuffer::from_text("ab\ncdef");
+        b.land_on_edge_line(false, 1);
+        assert_eq!(b.cursor, 1);
+        // Past the first line's end clamps there instead of spilling
+        // into the second line.
+        b.land_on_edge_line(false, 4);
+        assert_eq!(b.cursor, 2);
+    }
+
+    #[test]
+    fn end_on_an_empty_trailing_line_stays_there() {
+        let mut b = EditBuffer::from_text("one\n");
+        b.cursor = 4; // the empty line after the newline
+        b.move_end();
+        assert_eq!(b.cursor, 4);
+        b.move_home();
+        assert_eq!(b.cursor, 4);
     }
 }

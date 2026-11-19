@@ -46,6 +46,7 @@
     "./autocomplete": "./src/autocomplete/index.ts",
     "./boot": "./src/boot/index.ts",
     "./capture": "./src/capture/index.ts",
+    "./caret-nav": "./src/caret-nav/index.ts",
     "./trust": "./src/trust/index.ts",
     "./trust/styles": "./src/trust/styles.css",
     "./drag-drop": "./src/drag-drop/index.ts",

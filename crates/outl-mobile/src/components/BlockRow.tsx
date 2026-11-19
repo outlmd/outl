@@ -1,6 +1,7 @@
 import { For, JSX, Show } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
 import type { EmbedMap, PageEmbedMap } from "@outl/shared/markdown";
+import type { CaretExit } from "@outl/shared/caret-nav";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { createSettle } from "@outl/shared/polish";
 import { haptic } from "../lib/haptics";
@@ -80,6 +81,13 @@ interface BlockRowProps {
    * `caret` is a `char` offset into the host block's text.
    */
   onPasteMarkdown?: (blockId: string, caret: number, text: string) => void;
+  /**
+   * An arrow key walked the caret off the edge of the block being
+   * edited, with a hardware keyboard. Answers synchronously whether the
+   * step was taken, so the textarea knows whether to swallow the key —
+   * see `@outl/shared/caret-nav`.
+   */
+  onCaretExit?: (blockId: string, exit: CaretExit) => boolean;
   /**
    * RFC 0254 phase 3 — touch-native multi-block selection. `true`
    * while a range selection is active anywhere on the page (entered
@@ -169,6 +177,11 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
           onOpenProperties={props.onOpenProperties}
           embeds={props.embeds}
           pageEmbeds={props.pageEmbeds}
+          onCaretExit={
+            props.onCaretExit
+              ? (exit) => props.onCaretExit!(props.block.id, exit)
+              : undefined
+          }
           onDeleteEmpty={() => {
             // Backspace on an already-empty block (RFC 0254 phase 4b,
             // `DeleteEmptyBlock`) — same destructive haptic and the
@@ -245,6 +258,7 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
                 onLinkClick={props.onLinkClick}
                 onTextareaMount={props.onTextareaMount}
                 onPasteMarkdown={props.onPasteMarkdown}
+                onCaretExit={props.onCaretExit}
                 onOpenProperties={props.onOpenProperties}
                 embeds={props.embeds}
                 pageEmbeds={props.pageEmbeds}

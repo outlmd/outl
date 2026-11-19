@@ -100,6 +100,14 @@ pub(super) fn cross_block_step(app: &mut App, delta: i32) {
     }
     app.cursor_col = pref_col;
     app.enter_insert(crate::actions::block::InsertCursor::AtCursor);
+    // `AtCursor` reads `pref_col` as a char offset, which is only right
+    // for a single-line neighbour. Re-park it on the line that faces
+    // the block we left: `↑` arrives on the last line, `↓` on the
+    // first, the same landing `@outl/shared/caret-nav` gives the GUI
+    // clients.
+    if let Mode::Insert { buffer, .. } = &mut app.mode {
+        buffer.land_on_edge_line(delta < 0, pref_col);
+    }
 }
 
 /// Is a `KeyCode::Char` carrying these modifiers a character the user

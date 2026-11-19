@@ -58,6 +58,8 @@ function makeCb(over: Partial<BlockCallbacks> = {}): BlockCallbacks {
     onCommit: vi.fn().mockResolvedValue(undefined),
     onEnter: vi.fn().mockResolvedValue(undefined),
     onCreateBefore: vi.fn().mockResolvedValue(undefined),
+    resolveCaretExit: vi.fn().mockReturnValue(null),
+    openCaretLanding: vi.fn(),
     onIndent: vi.fn().mockResolvedValue(undefined),
     onOutdent: vi.fn().mockResolvedValue(undefined),
     onDeleteEmpty: vi.fn().mockResolvedValue(undefined),

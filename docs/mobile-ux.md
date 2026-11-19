@@ -281,6 +281,24 @@ The in-app quick capture (`+` → `<CaptureSheet />`) is a different thing and i
 Full behaviour and the per-client table: [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app).
 Android's components, the JNI boundary and why they need no "a capture arrived" notification: [`android-platform.md`](android-platform.md#capture-from-outside-the-app).
 
+## Arrow keys walk between blocks (hardware keyboard)
+
+With a keyboard attached — an iPad, or an Android phone with one — the arrows do not stop at the edge of the block being edited: the outline reads as one continuous document, the same way it does on the desktop and in the TUI.
+
+| Keystroke | Where the caret goes |
+|---|---|
+| `←` with the caret at offset 0 | end of the block above |
+| `→` with the caret at the end | start of the block below |
+| `↑` on the block's first line | block above, same column |
+| `↓` on the block's last line | block below, same column |
+
+The draft is saved on the way out, and the step waits for that save: a failed write leaves the user on their text with the error, rather than walking away from it.
+At the top or bottom of the outline the key is handed back to the webview, so it still moves the caret inside the block instead of doing nothing.
+A modified arrow never walks, and an arrow with text selected collapses the selection.
+
+The soft keyboard has no arrow keys, so on a bare phone none of this is reachable — which is why it is not in the accessory bar either (that catalog is the `window.__outlToolbar` wire contract shared with Swift, and adding a row to it is a change to both).
+Decision shared with the desktop in `@outl/shared/caret-nav`, including the one limit: a *line* is a logical `\n` line, not a soft-wrapped visual one.
+
 ## Keyboard accessory bar (Android web bar / iOS native bar)
 
 The keyboard toolbar + suggester strip have two renderings.

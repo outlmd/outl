@@ -202,6 +202,10 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Indent (stay in Insert) | `Tab` | `Tab` | drag |
 | Outdent (stay in Insert) | `Shift+Tab` | `Shift+Tab` | drag |
 | Delete block on empty | `Backspace` on empty | `Backspace` on empty | — |
+| Caret to start / end of the current line | `Home` / `End` | native | native |
+| Walk into the **previous** block, caret at its end | `←` at offset 0 | `←` at offset 0 | `←` at offset 0 _(hardware keyboard)_ |
+| Walk into the **next** block, caret at its start | `→` at the end | `→` at the end | `→` at the end _(hardware keyboard)_ |
+| Walk into the previous / next block keeping the column | `↑` / `↓` on the block's first / last line | same | same _(hardware keyboard)_ |
 | Auto-pair `(` `[` `{` `[[` `((` | yes | yes | yes |
 | Ref autocomplete | `[[` triggers picker | `[[` triggers picker | `[[` triggers picker |
 | Tag autocomplete | `#` triggers picker | `#` triggers picker | `#` triggers chip strip |
@@ -210,6 +214,15 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Cycle task state on current (`TODO` → `DOING` → `DONE` → none) | `Ctrl+T` / `Ctrl+Enter` | `Cmd/Ctrl+T` / `Cmd/Ctrl+Enter` | tap checkbox / long-press menu |
 | Cut / copy / paste **text** (native) | — | `Cmd/Ctrl+X` / `Cmd/Ctrl+C` / `Cmd/Ctrl+V` | native |
 | Run code block | `g x` chord | _(commit with `Esc`, then `Cmd/Ctrl+Shift+X`)_ | tap "Run" |
+
+> **The outline reads as one continuous document in Insert mode.**
+> Holding `←` walks back through the page and `↑` at the top of a block lands inside the one above, without ever leaving Insert — the four rows above are one behaviour seen from four keys.
+> `@outl/shared/caret-nav` is the single owner of the decision on the GUI clients and mirrors `outl_tui::input`'s `cross_block_nav_eligible` / `cross_block_step`, so the three clients agree on when a keystroke leaves a block and where the caret lands in the next one.
+>
+> Two limits are deliberate and shared.
+> A **line** here is a logical line (a `\n` inside the block, as in a fenced code block), never a soft-wrapped visual one, so `↑` from the middle of a long wrapped block steps to the previous block rather than to the row above — a textarea exposes no per-visual-line caret API, and both ways to work around that are worse (that module's doc carries the reasoning).
+> And the walk **stops at the outline's edges** instead of continuing into the backlinks section: that is another page, and opening it for editing from an arrow key aimed at this one is not what the user pressed.
+> On mobile this only ever fires from a hardware keyboard, since a soft keyboard has no arrow keys.
 
 ---
 

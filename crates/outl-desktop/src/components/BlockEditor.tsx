@@ -1,6 +1,7 @@
 import { createEffect, onMount } from "solid-js";
 
 import { autoDeletePair, autoPairBracket } from "@outl/shared/autocomplete";
+import { caretExit, caretNavKey } from "@outl/shared/caret-nav";
 import { detectFence } from "@outl/shared/highlight";
 import {
   charOffsetToUtf16Offset,
@@ -113,6 +114,9 @@ export function BlockEditor(props: {
     });
   });
 
+  /** An arrow-key step's commit is in flight. */
+  let caretStepping = false;
+
   async function commit() {
     // Draft is already wire format (prefix included if any). The
     // backend re-runs `split_todo` on it and re-projects the block
@@ -172,6 +176,54 @@ export function BlockEditor(props: {
     if (e.key === "Escape") {
       e.preventDefault();
       await commit();
+      return;
+    }
+    // An arrow key at the edge of the block walks into the neighbour
+    // without leaving Insert — the outline reads as one continuous
+    // document, which is what the TUI has shipped all along.
+    // `@outl/shared/caret-nav` owns *when* (`caretNavKey` is also what
+    // decides a modified arrow is a different chord); `./outline-caret-nav`
+    // owns *where*.
+    const navKey = caretNavKey(e);
+    if (navKey && caretStepping) {
+      // A held arrow repeats faster than the commit round-trip, and
+      // this textarea stays mounted until it lands. Swallow the repeat
+      // rather than committing the same draft a second time.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    if (navKey) {
+      const ta = textareaRef;
+      if (!ta) return;
+      const exit = caretExit(
+        navKey,
+        ta.value,
+        utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0),
+        utf16OffsetToCharOffset(ta.value, ta.selectionEnd ?? 0),
+      );
+      if (!exit) return; // the caret still has room inside this block
+      // Resolved before anything is awaited: a `preventDefault` only
+      // counts during the synchronous dispatch, and at the outline's
+      // edges this keystroke belongs to the browser (`←` in the first
+      // block must not drop the user out of Insert).
+      const target = props.cb.resolveCaretExit(props.blockId, exit);
+      if (!target) return;
+      e.preventDefault();
+      // Load-bearing, for the same reason as the Tab handler below:
+      // `commit()` flips `editingBlockId` to `null`, unmounting this
+      // textarea mid-dispatch, so the `window` listener would resolve
+      // `ArrowUp` / `ArrowDown` against the catalog's Normal rows
+      // (`SelectionUp` / `SelectionDown`) and move the cursor a second
+      // time on one keystroke.
+      e.stopImmediatePropagation();
+      caretStepping = true;
+      try {
+        await commit();
+      } finally {
+        caretStepping = false;
+      }
+      props.cb.openCaretLanding(target);
       return;
     }
     // Plain `Enter` (no modifiers) → commit + create a sibling below.

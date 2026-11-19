@@ -5,7 +5,46 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **Arrow keys walk between blocks while you are typing, on every client.**
+  `←` at the start of a block lands at the end of the one above, `→` at the end lands at the start of the one below, and `↑` / `↓` on a block's first or last line carry your column over.
+  The outline reads as one continuous document, so holding `←` walks back through the page without ever leaving Insert.
+  The draft is committed on the way out, so the step is a save.
+
+  The TUI has shipped this for a while.
+  The desktop and mobile apps stopped the caret at the block boundary, which is the keystroke you press most often in an outliner and the one place the three clients disagreed.
+
+  **`@outl/shared/caret-nav` is the one owner now**, and the split is what makes it one: it answers *does this keystroke leave the block* and *which block does it hand the caret to*, so a client keeps only what it alone knows — which rows are on screen, and how it enters Insert.
+  It mirrors the TUI's `cross_block_nav_eligible` / `cross_block_step`, which is what stops the terminal from drifting away from the other two.
+
+  Three things it deliberately does not do, each of which was the alternative.
+  A **modified** arrow never walks, because those chords already mean something (`Alt+↑` moves the block, `Cmd+↑` is the OS's document-edge motion).
+  An arrow with text **selected** collapses the selection in place, the way it does everywhere else — hijacking that would make the first arrow after a drag jump to another block.
+  And the walk **stops at the outline's edges** rather than continuing into the backlinks below: those rows belong to another page, and opening one for editing from an arrow aimed at this one is not what you pressed.
+  At the first or last block the keystroke stays inside the block and nothing is committed, so `←` there cannot drop you out of Insert.
+
+  **A line is a logical line, never a soft-wrapped one**, and that limit is shared on purpose.
+  `↑` from the middle of a long wrapped block steps to the previous block instead of the row above it.
+  A textarea exposes no per-visual-line caret API, and both ways around that are worse: measuring through a mirror element means copying a dozen font properties that rot silently, and reading the caret back after the browser's own default makes the decision asynchronous *and* still ambiguous at column 0 of a wrapped row.
+  A rule three clients agree on beats a rule that is right more often on one of them.
+
+  On mobile this needs a hardware keyboard, since a soft keyboard has no arrows.
+
+  Two guards carry the regressions.
+  On the desktop, `↑` / `↓` are the catalog's Normal-mode `SelectionUp` / `SelectionDown`, and committing the draft unmounts the textarea mid-dispatch — so without `stopImmediatePropagation` the `window` listener resolves the same keystroke a second time and the caret lands two blocks away, with the cursor and the editor disagreeing about where it went.
+  And the target is resolved **before** anything is awaited, because a `preventDefault` only counts during the synchronous dispatch; a handler that committed first and looked for a neighbour after had already let the browser move the caret.
+  `BlockRow.caret-nav.test.tsx` fails when either is removed.
+
 ### Fixed
+
+- **TUI: `Home` and `End` moved the whole block, not the line the cursor was on.**
+  Identical for an ordinary single-line block, which is why it went unnoticed; inside a block with soft newlines — a fenced code block — `Home` jumped to the top of the fence while its own doc comment already said "line".
+
+- **TUI: `←` / `→` at a block's edge moved the outline's cursor while you were editing a backlink.**
+  `↑` / `↓` asked `cross_block_nav_eligible` and correctly declined a source-page edit, which has its own commit semantics; the other two arms skipped the check.
+  Since `enter_insert` dispatches on `Focus`, spilling out of one committed a cross-page write per keystroke and opened the *next backlink's* file.
+  All four arms ask now.
 
 - **The desktop cursor jumped to a backlink instead of staying where the user left it.**
   `j` walked a citing block on someone else's page, `Enter` navigated away instead of entering Insert, and two rows drew the selection accent at once — intermittently, on pages that have backlinks at all.

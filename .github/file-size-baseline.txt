@@ -123,7 +123,7 @@
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1793 crates/outl-mobile/src/components/Journal.tsx
+1801 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 636 crates/outl-plugins/src/host_tests.rs
 805 crates/outl-shortcuts/src/defaults.rs

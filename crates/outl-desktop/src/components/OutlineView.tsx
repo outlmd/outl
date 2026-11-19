@@ -59,6 +59,7 @@ import { BlockRow, type BlockCallbacks } from "./BlockRow";
 import { installBacklinksEffect } from "../lib/backlinks-effect";
 import { installPageChangeEffect, resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
+import { createCaretNavOps } from "./outline-caret-nav";
 import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
 import { PageSections } from "./PageSections";
@@ -207,6 +208,15 @@ export function OutlineView() {
     handleError,
   });
 
+  /** An arrow key stepping off the edge of the block being edited.
+   *  See `./outline-caret-nav`. */
+  const caretNavOps = createCaretNavOps({
+    navBlocks: rootBlocks,
+    setCaretIntent: (offset) => setAppState("caretIntent", offset),
+    setSelectedBlockId: (id) => setAppState("selectedBlockId", id),
+    setEditingId,
+  });
+
   /** Tab / Shift-Tab indent and outdent. See `./outline-structure`. */
   const structureOps = createStructureOps({
     pageId: () => appState.page?.id,
@@ -342,6 +352,8 @@ export function OutlineView() {
       setAppState("selectedBlockId", reply.new_id);
       setEditingId(reply.new_id);
     },
+    resolveCaretExit: caretNavOps.resolveCaretExit,
+    openCaretLanding: caretNavOps.openCaretLanding,
     onIndent: structureOps.onIndent,
     onOutdent: structureOps.onOutdent,
     onDeleteEmpty: async (id) => {

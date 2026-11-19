@@ -106,6 +106,7 @@ import { haptic } from "../lib/haptics";
 import { armKeyboard, installKeyboardKeeper } from "../lib/keyboard-keeper";
 import { createEmbedResolver } from "./Journal.embeds";
 import { createBlockOps, type JournalBlockDeps } from "./Journal.block-ops";
+import { createCaretNav } from "./Journal.caret-nav";
 import { createNewBlockOps } from "./Journal.new-block";
 import { createSelectionOps } from "./Journal.selection-ops";
 import {
@@ -794,10 +795,17 @@ export function Journal() {
     haptic("light");
   }
 
-  async function commitEdit() {
+  /** Arrow keys stepping off the edited block. See `./Journal.caret-nav`. */
+  const caretNav = createCaretNav({
+    navBlocks: outlineRoots,
+    commitEdit,
+    startEdit,
+  });
+
+  async function commitEdit(): Promise<boolean> {
     const id = editingId();
     const pid = pageId();
-    if (!id || !pid) return;
+    if (!id || !pid) return false;
     const text = draft();
 
     // Nothing typed — leave without writing. The draft was seeded
@@ -812,7 +820,7 @@ export function Journal() {
     const current = findBlock(view()?.outline ?? [], id);
     if (current && text === rawTextWithTodo(current)) {
       setEditingId(null);
-      return;
+      return true;
     }
     // Serialize: if an earlier edit is still in flight, wait for it
     // to land before we send this one. Without this, a quick
@@ -877,6 +885,7 @@ export function Journal() {
         void commitEdit();
       });
     }
+    return !!next;
   }
 
   // ── Block + range operations (issue #265 phases 1-2) ────────────
@@ -1533,9 +1542,11 @@ export function Journal() {
                   onTagClick={handleTagClick}
                   onLinkClick={handleLinkClick}
                   onPasteMarkdown={blockOps.pasteMarkdownAt}
+                  onCaretExit={caretNav.onCaretExit}
                   onTextareaMount={(el) => {
                     activeTextarea = el;
                     setActiveTextareaSignal(el);
+                    caretNav.applyPendingCaret(el);
                   }}
                   selectionMode={selection() !== null}
                   selectionSet={selectionSet()}
