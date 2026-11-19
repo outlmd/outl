@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, onCleanup, onMount } from "solid-js";
 
 import { FirstRunTips, isBlankOutline } from "@outl/shared/polish";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -14,7 +14,6 @@ import {
   openExternalUrl,
   openPageBySlug,
   openRef,
-  pageBacklinks,
   pasteMarkdown,
   pastePlain,
   pluginRun,
@@ -50,14 +49,14 @@ import {
 import { setPageProperty } from "../lib/api";
 import { spliceTextAtCaret } from "../lib/markdown-wrap";
 import {
-  appState, emptyBacklinks,
+  appState,
   savedMarks,
   setAppState,
-  trackBacklinks,
   visibleRoots,
   zoomView,
 } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
+import { installBacklinksEffect } from "../lib/backlinks-effect";
 import { installPageChangeEffect, resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
 import { createPasteOps } from "./outline-paste";
@@ -119,35 +118,13 @@ export function OutlineView() {
   // see `installPageChangeEffect` for why commits must not trigger it.
   installPageChangeEffect();
 
-  /**
-   * Lazily fetch backlinks — but ONLY when the page slug changes
-   * (navigation), via `on(slug)`. It must NOT refetch on every mutation.
-   *
-   * `applyView` after a commit replaces `appState.page` with a fresh
-   * object carrying the *same* slug, which a bare `createEffect` reading
-   * `appState.page?.slug` re-runs anyway (the store tracks `page`). Each
-   * re-run hit `pageBacklinks`, and since a mutation invalidated the
-   * backend index, that rebuilt the whole index (reading every `.md`)
-   * on every keystroke-commit — the "Esc is slow" bug. Editing the
-   * current page almost never changes *its own* backlinks (backlinks are
-   * other pages pointing here), so refetching per edit is pure waste.
-   * `on(slug)` fires once per navigation; the peer-reload path refetches
-   * explicitly (`AppShell::refreshActivePage`) since it keeps the slug.
-   * Never awaited: `trackBacklinks` runs it behind the page, and the only
-   * thing that waits is that section (`UX.md` → Never block a keystroke).
-   */
-  createEffect(
-    on(
-      () => appState.page?.slug,
-      (slug) => {
-        if (!slug) return;
-        // Clear first: a failed fetch is swallowed, and the nested-page
-        // rows are navigation buttons.
-        setAppState(emptyBacklinks());
-        void trackBacklinks(pageBacklinks(slug));
-      },
-    ),
-  );
+  // Backlinks are fetched on navigation, by `installBacklinksEffect`
+  // (`lib/backlinks-effect.ts`). Its own module because the question it
+  // answers — did the page actually change? — is answered by
+  // `@outl/shared`'s key and had been answered wrong here with nothing
+  // failing. The peer-reload path refetches explicitly
+  // (`AppShell::refreshActivePage`) since it keeps the key.
+  installBacklinksEffect();
 
   /**
    * Fold a reply into the page's state — `applyPageState`

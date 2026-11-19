@@ -59,6 +59,7 @@
     "./markdown": "./src/markdown/index.ts",
     "./mock": "./src/mock/index.ts",
     "./namespace": "./src/namespace/index.ts",
+    "./navigation": "./src/navigation/index.ts",
     "./onboarding": "./src/onboarding/index.ts",
     "./outline": "./src/outline/index.ts",
     "./pages/rename-merge": "./src/pages/rename-merge.ts",

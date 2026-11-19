@@ -7,6 +7,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The desktop's backlinks section blinked on every block created or deleted.**
+  It vanished and came back roughly a second later with the same rows, on every structural edit, on every page that has backlinks at all.
+
+  The cause was a sentence that was never true. `<OutlineView />` fetched backlinks under `createEffect(on(() => appState.page?.slug, …))`, with a comment saying it fired once per navigation and must not refetch per mutation.
+  Solid's `on` does not compare values — it only makes a dependency explicit — and `applyPageState` writes the page as **one object** (`setAppState({ page, … })`), which `setState` merges key by key, so `page` is assigned a fresh `PageMeta` on every reply and its node fires.
+  (A *path* write, `setAppState("page", …)`, merges into the object already there and does not, which is why a store test written that way passes against the broken code.)
+
+  So every commit ran `emptyBacklinks()`, `lateSectionVisible` correctly unmounted a section with no rows, and the page paid an `O(blocks-in-workspace)` scan to re-derive an answer that could not have changed — backlinks are *other* pages pointing here.
+  The same defect sat in the sidebar's recents queue, where it rebuilt the array and wrote `localStorage` synchronously on each keystroke-commit.
+
+  **The mechanism now has one owner across the clients.** `createPageKey` (`@outl/shared/navigation`) is a value-compared memo over one field of the open page; `createBacklinksKey`, which mobile already sourced its `createResource` from, is that with two fields.
+  The desktop takes both, and with the backlinks key it also gains a half it never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
+  The TUI needed no change — it holds `backlink_index` and keeps the old one live until a rebuild lands, which is the same rule in a client with no Solid in it.
+
+  `navigation/page-key.parity.test.ts` reads **both clients' sources** and refuses the shape itself, with a declared exception per file and a reason: `installPageChangeEffect` must re-run on every reply (it repairs a selection whose block left the tree), and two backlinks refetches are not navigation decisions at all.
+  A first version of that guard paired the shape with "but the file imports the key" and passed against a file holding both, which is the regression rather than the fix.
+
 - **A backlink's breadcrumb was drawn as markdown source.**
   The trail above a nested reference read `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/mail?authuser=...)` while the citing block right under it read as prose — so the one line on the panel saying *where* a reference lives was the one line written in markup, with a URL eating a row that truncates to a single line anyway.
 

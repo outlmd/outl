@@ -125,8 +125,19 @@ Declining a confirm writes nothing and leaves the dialog open; the outcome (bloc
 There is no chord and no menu entry: delete has none in `menu.rs` either, so these did not get one.
 The sidebar list is keyed on the page id **and** slug and title, since a rename keeps the id.
 
-`OutlineView.tsx` refetches backlinks via `createEffect(on(slug, …))` — per navigation, not per commit (the "Esc is slow" fix).
-All three fetch sites (that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`) go through `trackBacklinks` in `lib/store.ts`, none of them awaited on a render or keystroke path.
+**Backlinks are fetched per navigation, by `installBacklinksEffect` (`lib/backlinks-effect.ts`), and "per navigation" is `@outl/shared`'s answer, not this crate's.**
+It sources `createBacklinksKey`, which is `createPageKey` with two fields — read [`outl-frontend-shared/CLAUDE.md`](../outl-frontend-shared/CLAUDE.md) before changing either.
+
+This used to be `createEffect(on(() => appState.page?.slug, …))` inline in `OutlineView.tsx`, under a comment saying it fired once per navigation.
+It did not: `on()` makes a dependency explicit and **compares nothing**, and `applyPageState` writes the page as one object (`setAppState({ page, … })`), which `setState` merges key by key — so `page` is assigned a fresh `PageMeta` on every reply and its node fires.
+So every created or deleted block ran `emptyBacklinks()`, `lateSectionVisible` unmounted the whole section, and it came back an `O(blocks-in-workspace)` scan later with the same rows.
+A *path* write (`setAppState("page", …)`) merges in place and would not fire, which is why a store test written that way passes against the broken code — `backlinks-effect.test.ts` goes through the real `applyPageState` for that reason.
+The sidebar's recents queue had the identical defect and now takes `createPageKey` directly.
+`navigation/page-key.parity.test.ts` in `@outl/shared` reads both clients' sources and refuses the shape outright.
+
+Taking the shared key also fixed a half this client never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
+
+All three fetch sites (that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`) go through `trackBacklinks` in `lib/store.ts`, none of them awaited on a render or keystroke path; the latter two are declared exceptions in that parity test, with the reason each re-asks.
 It owns `appState.backlinksLoading`, which `<InlineBacklinks />` is the **only** reader of.
 A page-wide load state here is the regression [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) names; `InlineBacklinks.test.tsx` → "backlinks load behind the page" is the net.
 

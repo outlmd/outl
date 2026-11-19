@@ -25,6 +25,7 @@ import {
   type WeekStart,
 } from "@outl/shared/journal";
 import { CalendarIcon, PageGlyph, SearchIcon } from "@outl/shared/icons";
+import { createPageKey } from "@outl/shared/navigation";
 
 import { rovingKeydown } from "../lib/keyboard-reach";
 import { isMac } from "../lib/palette-results";
@@ -106,15 +107,17 @@ export function Sidebar(props: {
     });
   }
 
-  // Whenever the active page changes, push its slug onto the
-  // recents queue.
+  // Whenever the active page changes, push its slug onto the recents
+  // queue. Keyed through `createPageKey`, which is the only thing that
+  // makes "changes" true: a commit hands the store a fresh `PageMeta`
+  // with the same slug, and `on()` compares nothing — so this used to
+  // rewrite the array and `localStorage.setItem` it synchronously on
+  // every keystroke-commit, re-rendering the list each time.
+  const activeSlug = createPageKey(() => appState.page, (p) => p.slug);
   createEffect(
-    on(
-      () => appState.page?.slug,
-      (slug) => {
-        if (slug) pushRecent(slug);
-      },
-    ),
+    on(activeSlug, (slug) => {
+      if (slug) pushRecent(slug);
+    }),
   );
 
   // ── calendar state ────────────────────────────────────────────

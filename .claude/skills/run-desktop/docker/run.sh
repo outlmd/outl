@@ -31,7 +31,16 @@ curl -sf -o /dev/null http://localhost:1421/ || {
 #    matches the shell running this script and kills its own parent.
 for p in $(pgrep -x -f "/build/target/debug/outl-desktop" || true); do kill "$p"; done
 sleep 1
-cd / && nohup /build/target/debug/outl-desktop >/tmp/app.log 2>&1 &
+# `cd / && nohup … &` backgrounds the whole AND-list, so bash forks a
+#    subshell that WAITS on the app rather than exec'ing it. That subshell
+#    inherits this exec's stdout, so `docker exec` never reaches EOF and
+#    `battery/run.sh` hangs right after printing the window id, one line
+#    before the probe it exists to run. A forked subshell also keeps the
+#    parent's argv, so `ps` shows a second `bash /skill/docker/run.sh`
+#    and the script reads as if it never exited. Backgrounding one simple
+#    command execs nohup in the child, and nothing is left on the pipe.
+cd /
+nohup /build/target/debug/outl-desktop >/tmp/app.log 2>&1 &
 
 for _ in $(seq 1 40); do
   sleep 1

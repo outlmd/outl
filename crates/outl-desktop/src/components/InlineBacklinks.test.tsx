@@ -1,3 +1,4 @@
+import { createRoot } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,15 +14,29 @@ import {
   toggleTodo,
 } from "@outl/shared/api/commands";
 
+import { installBacklinksEffect } from "../lib/backlinks-effect";
+import { applyPageState } from "../lib/page-view";
 import { InlineBacklinks } from "./InlineBacklinks";
 import { setAppState, trackBacklinks } from "../lib/store";
 
 vi.mock("@outl/shared/api/commands", () => ({
   openRef: vi.fn(),
   pageBacklinks: vi.fn(),
+  resolveEmbeds: vi.fn(() => Promise.resolve([])),
+  resolvePageEmbeds: vi.fn(() => Promise.resolve([])),
   setBacklinksOrder: vi.fn(),
   toggleTodo: vi.fn(),
 }));
+
+/** The real navigation effect, owned beside the rendered section so a
+ *  commit travels the whole chain the user sees. */
+let disposeEffect: (() => void) | undefined;
+function installEffect(): void {
+  createRoot((d) => {
+    disposeEffect = d;
+    installBacklinksEffect();
+  });
+}
 
 let dispose: (() => void) | undefined;
 
@@ -64,6 +79,19 @@ function mount(backlinks: Backlink[]): HTMLElement {
   return host;
 }
 
+/** Settle the `trackBacklinks` promise chain (then → catch → finally). */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A reply for the page `mount` opens, as a mutation returns it. */
+function openPageView(): PageView {
+  return {
+    ...pageView(),
+    page: { id: "tag-page", slug: "project", title: "project", kind: "page" },
+  };
+}
+
 function pageView(): PageView {
   return {
     page: { id: "page-1", slug: "journal", title: "Journal", kind: "page" },
@@ -100,6 +128,8 @@ function focusedEditor(): HTMLTextAreaElement {
 afterEach(() => {
   dispose?.();
   dispose = undefined;
+  disposeEffect?.();
+  disposeEffect = undefined;
   vi.clearAllMocks();
   setAppState({
     page: null,
@@ -318,6 +348,37 @@ describe("the backlinks section never appears and then disappears", () => {
     settle(backlinksReply([backlink("todo", "DONE")]));
     await done;
     expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
+  });
+
+  /**
+   * The reported blink, end to end: the effect that decides when to
+   * fetch, the store write it performs, and this section's own
+   * visibility rule, in one assertion against the DOM.
+   *
+   * Each half was covered and the chain was not. `backlinks-effect.test.ts`
+   * proves the effect no longer fires on a commit; this proves what that
+   * was costing — the section leaving the page and coming back.
+   */
+  it("stays on screen while the user creates and deletes blocks", async () => {
+    vi.mocked(pageBacklinks).mockResolvedValue(
+      backlinksReply([backlink("todo", "TODO")]),
+    );
+    const host = mount([]);
+    installEffect();
+    await flush();
+    expect(host.querySelector("section")).not.toBeNull();
+
+    // Three mutation replies for the page already on screen: a fresh
+    // `PageMeta` each time, same slug and title, as `create_block` /
+    // `delete_block` hand back.
+    for (const _ of [0, 1, 2]) {
+      applyPageState(openPageView());
+      expect(host.querySelector("section")).not.toBeNull();
+      expect(host.querySelector('[data-todo="TODO"]')).not.toBeNull();
+    }
+
+    // One fetch, for the open. Not one per commit.
+    expect(pageBacklinks).toHaveBeenCalledTimes(1);
   });
 });
 
