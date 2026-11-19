@@ -102,3 +102,127 @@ describe("EditableTextarea with an IME", () => {
     expect(ta.value).toBe("[[n]]");
   });
 });
+
+/**
+ * Cross-block caret nav, from a hardware keyboard (an iPad, or an
+ * Android phone with one attached — the soft keyboard has no arrows).
+ *
+ * This is the one `keydown` branch in the file, and the contract that
+ * matters is *when the key is swallowed*: `preventDefault` only on a
+ * step the parent actually took, so at the outline's edge the webview's
+ * own caret motion still happens.
+ */
+describe("EditableTextarea arrow keys", () => {
+  function mountWithNav(value: string, taken: boolean) {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const onCaretExit = vi.fn().mockReturnValue(taken);
+    dispose = render(
+      () => (
+        <EditableTextarea
+          value={value}
+          onInput={() => {}}
+          onBlur={() => {}}
+          onCaretExit={onCaretExit}
+        />
+      ),
+      host,
+    );
+    const ta = host.querySelector("textarea")!;
+    return { ta, onCaretExit };
+  }
+
+  function arrow(
+    ta: HTMLTextAreaElement,
+    key: string,
+    init: KeyboardEventInit = {},
+  ): KeyboardEvent {
+    const e = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    ta.dispatchEvent(e);
+    return e;
+  }
+
+  it("asks the parent, and swallows the key, at the block's edges", () => {
+    const { ta, onCaretExit } = mountWithNav("ship it", true);
+
+    ta.setSelectionRange(0, 0);
+    const left = arrow(ta, "ArrowLeft");
+    expect(onCaretExit).toHaveBeenLastCalledWith({
+      to: "previous",
+      landing: "end",
+    });
+    expect(left.defaultPrevented).toBe(true);
+
+    ta.setSelectionRange(7, 7);
+    const right = arrow(ta, "ArrowRight");
+    expect(onCaretExit).toHaveBeenLastCalledWith({
+      to: "next",
+      landing: "start",
+    });
+    expect(right.defaultPrevented).toBe(true);
+  });
+
+  it("carries the column out on ↑ / ↓", () => {
+    const { ta, onCaretExit } = mountWithNav("ship it", true);
+    ta.setSelectionRange(4, 4);
+    arrow(ta, "ArrowUp");
+    expect(onCaretExit).toHaveBeenLastCalledWith({
+      to: "previous",
+      landing: { column: 4 },
+    });
+    arrow(ta, "ArrowDown");
+    expect(onCaretExit).toHaveBeenLastCalledWith({
+      to: "next",
+      landing: { column: 4 },
+    });
+  });
+
+  it("does not ask while the caret still has room inside the block", () => {
+    const { ta, onCaretExit } = mountWithNav("ship it", true);
+    ta.setSelectionRange(3, 3);
+    const e = arrow(ta, "ArrowLeft");
+    expect(onCaretExit).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("leaves the key to the webview when the parent did not take the step", () => {
+    // The outline's edge. Swallowing it anyway would make `←` in the
+    // page's first block a key that does nothing at all.
+    const { ta, onCaretExit } = mountWithNav("ship it", false);
+    ta.setSelectionRange(0, 0);
+    const e = arrow(ta, "ArrowLeft");
+    expect(onCaretExit).toHaveBeenCalledTimes(1);
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("leaves a modified arrow alone — those chords mean something else", () => {
+    const { ta, onCaretExit } = mountWithNav("ship it", true);
+    ta.setSelectionRange(0, 0);
+    for (const init of [
+      { shiftKey: true },
+      { altKey: true },
+      { metaKey: true },
+      { ctrlKey: true },
+    ]) {
+      expect(arrow(ta, "ArrowLeft", init).defaultPrevented).toBe(false);
+    }
+    expect(onCaretExit).not.toHaveBeenCalled();
+  });
+
+  it("is inert with no parent handler, so a client can opt out", () => {
+    const { ta } = mount("ship it");
+    ta.setSelectionRange(0, 0);
+    const e = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      bubbles: true,
+      cancelable: true,
+    });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+  });
+});

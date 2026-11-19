@@ -4,6 +4,11 @@ import {
   autoDeletePair,
   autoPairBracket,
 } from "@outl/shared/autocomplete";
+import {
+  type CaretExit,
+  type CaretNavKey,
+  caretExit,
+} from "@outl/shared/caret-nav";
 import { detectFence } from "@outl/shared/highlight";
 import {
   choosePasteRoute,
@@ -36,6 +41,18 @@ export function EditableTextarea(props: {
   /** See `BlockBody`'s doc — fires on Backspace when the textarea is
    *  already empty, instead of the pair-collapse logic below. */
   onDeleteEmpty?: () => void;
+  /**
+   * An arrow key walked the caret off the edge of this block, with a
+   * hardware keyboard (an iPad or an Android phone with one attached;
+   * a soft keyboard has no arrows to press).
+   *
+   * Returns whether the step was taken: `false` is the outline's edge,
+   * where the keystroke goes back to the webview so the caret still
+   * moves inside the block. The parent must answer **synchronously**,
+   * because `preventDefault` only counts during the dispatch — see
+   * `@outl/shared/caret-nav`.
+   */
+  onCaretExit?: (exit: CaretExit) => boolean;
 }) {
   let ref!: HTMLTextAreaElement;
   let resizeRaf = 0;
@@ -62,7 +79,12 @@ export function EditableTextarea(props: {
   onMount(() => {
     autoResize();
     ref.focus();
-    // Place cursor at end.
+    // End of the text: a tap into a block means "type here". A
+    // cross-block arrow step wants a specific offset instead, and
+    // `onMount` is where it gets it — the parent owns that caret (it is
+    // what resolved the landing) and re-places it with `parkCaret`,
+    // which survives the Solid `value=` re-binding this raw
+    // `setSelectionRange` would lose on iOS.
     const len = ref.value.length;
     ref.setSelectionRange(len, len);
     props.onMount?.(ref);
@@ -88,6 +110,39 @@ export function EditableTextarea(props: {
       // to `Const`.
       autocapitalize="off"
       onKeyDown={(e) => {
+        // An arrow at the edge of the block walks into the neighbour
+        // without leaving Insert, the way the TUI and the desktop do.
+        // Unlike every other handler in this file, this one is a
+        // `keydown`: it only ever fires from a hardware keyboard, which
+        // does emit reliable key events — the iOS soft keyboard the
+        // `beforeinput` rules below exist for has no arrow keys at all.
+        // A modifier means something else (`Alt+↑/↓` moves the block),
+        // so only the bare key walks.
+        if (
+          (e.key === "ArrowUp" ||
+            e.key === "ArrowDown" ||
+            e.key === "ArrowLeft" ||
+            e.key === "ArrowRight") &&
+          !e.shiftKey &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey
+        ) {
+          if (!props.onCaretExit) return;
+          const el = e.currentTarget;
+          const exit = caretExit(
+            e.key as CaretNavKey,
+            el.value,
+            utf16OffsetToCharOffset(el.value, el.selectionStart ?? 0),
+            utf16OffsetToCharOffset(el.value, el.selectionEnd ?? 0),
+          );
+          if (!exit) return; // the caret still has room inside this block
+          // Only swallow the key once the parent confirms it took the
+          // step: at the outline's edge the webview's own motion is
+          // still the right answer.
+          if (props.onCaretExit(exit)) e.preventDefault();
+          return;
+        }
         if (e.key !== "Backspace") return;
         const ta = e.currentTarget;
         // Backspace on an already-empty block deletes the block

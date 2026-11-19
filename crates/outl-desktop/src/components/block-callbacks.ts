@@ -1,4 +1,7 @@
+import type { CaretExit } from "@outl/shared/caret-nav";
 import type { PasteEditorUpdate } from "@outl/shared/paste";
+
+import type { CaretLandingTarget } from "./outline-caret-nav";
 
 /**
  * What a block row asks of whoever renders it.
@@ -25,6 +28,22 @@ export interface BlockCallbacks {
    * a sibling *before* this one + focus it. The textarea mirror of vim `O`.
    */
   onCreateBefore: (id: string, text: string) => Promise<void>;
+  /**
+   * An arrow key walked the caret off the edge of this block.
+   *
+   * Two calls, in this order, because a `preventDefault` only counts
+   * during the synchronous dispatch and the editor must not commit on a
+   * keystroke that goes nowhere:
+   *
+   * 1. `resolveCaretExit` — pure, answers `null` at the outline's
+   *    edges, where the editor leaves the keystroke to the browser.
+   * 2. `openCaretLanding` — called after the draft is committed, puts
+   *    Insert mode (and the caret) on the neighbour.
+   *
+   * See `./outline-caret-nav`.
+   */
+  resolveCaretExit: (id: string, exit: CaretExit) => CaretLandingTarget | null;
+  openCaretLanding: (target: CaretLandingTarget) => void;
   /** Tab pressed inside the textarea. */
   onIndent: (id: string) => Promise<void>;
   /** Shift-Tab pressed inside the textarea. */

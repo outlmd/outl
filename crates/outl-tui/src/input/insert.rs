@@ -151,8 +151,16 @@ pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
             // (cursor == 0), spill into the *previous* block and place
             // the cursor at its end — so holding Left walks the user
             // back through the document like a single document.
+            //
+            // `cross_block_nav_eligible` gates this for the same reason
+            // it gates Up/Down below: a source-page backlink edit has
+            // its own commit semantics, and `enter_insert` dispatches on
+            // `Focus`, so spilling from one would commit a cross-page
+            // write per keystroke and open the *next backlink's* file.
+            // These two arms used to skip the check, so `←` / `→` did
+            // exactly that while `↑` / `↓` correctly declined.
             let at_start = matches!(&app.mode, Mode::Insert { buffer, .. } if buffer.cursor == 0);
-            if at_start && app.selected > 0 {
+            if at_start && cross_block_nav_eligible(app) && app.selected > 0 {
                 app.commit_insert();
                 app.move_selection(-1);
                 app.enter_insert(InsertCursor::AtCursor); // cursor lands at end
@@ -166,7 +174,7 @@ pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let at_end = matches!(&app.mode, Mode::Insert { buffer, .. }
                 if buffer.cursor == buffer.len());
             let last_idx = app.flat_len.saturating_sub(1);
-            if at_end && app.selected < last_idx {
+            if at_end && cross_block_nav_eligible(app) && app.selected < last_idx {
                 app.commit_insert();
                 app.move_selection(1);
                 app.enter_insert(InsertCursor::Start); // cursor at start
@@ -330,6 +338,118 @@ mod modifier_guard_tests {
             buffer_text(&app),
             "TODO ship it",
             "the guard must not shadow the Ctrl+T arm above it"
+        );
+    }
+}
+
+#[cfg(test)]
+mod cross_block_nav_tests {
+    //! `←` / `→` at a block's edge walk the outline, and must decline
+    //! the same case `↑` / `↓` decline.
+    //!
+    //! A source-page backlink edit has its own commit semantics, and
+    //! `enter_insert` dispatches on `Focus` — so spilling out of one
+    //! commits a cross-page write per keystroke and opens the *next
+    //! backlink's* file for editing. These two arms used to skip
+    //! `cross_block_nav_eligible` while Up/Down checked it.
+
+    use super::handle_insert_key;
+    use crate::actions::block::InsertCursor;
+    use crate::state::{App, EditTarget, Mode};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use outl_core::{ActorId, Workspace};
+    use tempfile::TempDir;
+
+    fn app_with_two_blocks() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let mut app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        app.page.blocks.clear();
+        for text in ["first", "second"] {
+            app.page.blocks.push(outl_md::parse::OutlineNode {
+                text: text.to_string(),
+                children: vec![],
+                properties: vec![],
+            });
+        }
+        app.flat_len = 2;
+        (app, dir)
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        handle_insert_key(app, KeyEvent::new(code, KeyModifiers::NONE)).unwrap();
+    }
+
+    #[test]
+    fn left_at_the_start_walks_into_the_previous_block() {
+        let (mut app, _d) = app_with_two_blocks();
+        app.selected = 1;
+        app.cursor_col = 0;
+        app.enter_insert(InsertCursor::Start);
+
+        press(&mut app, KeyCode::Left);
+
+        assert_eq!(app.selected, 0, "`←` at offset 0 should step back a block");
+        assert!(
+            matches!(&app.mode, Mode::Insert { .. }),
+            "the step must stay in Insert"
+        );
+    }
+
+    #[test]
+    fn right_at_the_end_walks_into_the_next_block() {
+        let (mut app, _d) = app_with_two_blocks();
+        app.selected = 0;
+        app.cursor_col = "first".chars().count();
+        app.enter_insert(InsertCursor::AtCursor);
+
+        press(&mut app, KeyCode::Right);
+
+        assert_eq!(app.selected, 1);
+        assert!(matches!(&app.mode, Mode::Insert { .. }));
+    }
+
+    #[test]
+    fn left_stays_put_while_editing_a_backlinks_source_page() {
+        let (mut app, d) = app_with_two_blocks();
+        app.selected = 1;
+        // A source-page edit, the state `enter_insert_backlink` leaves
+        // behind. The buffer's cursor is at 0, so the arm would fire.
+        app.mode = Mode::Insert {
+            target: EditTarget::SourcePage {
+                // Inside the tempdir, so a guard that regressed writes
+                // there rather than into the test runner's cwd.
+                path: d.path().join("pages").join("other.md"),
+                page: outl_md::parse::ParsedPage::default(),
+            },
+            block_path: vec![0],
+            buffer: crate::edit_buffer::EditBuffer::from_text("borrowed"),
+            original_text: "borrowed".to_string(),
+        };
+
+        press(&mut app, KeyCode::Left);
+
+        assert_eq!(
+            app.selected, 1,
+            "a cross-page edit must not move the outline's cursor"
+        );
+        assert!(
+            matches!(
+                &app.mode,
+                Mode::Insert {
+                    target: EditTarget::SourcePage { .. },
+                    ..
+                }
+            ),
+            "the user is still editing the source page"
         );
     }
 }

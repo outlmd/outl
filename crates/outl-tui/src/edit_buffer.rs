@@ -129,14 +129,34 @@ impl EditBuffer {
         }
     }
 
-    /// Move cursor to the start of the line.
+    /// Move cursor to the start of the **current line**.
+    ///
+    /// Equivalent to `cursor = 0` for a single-line buffer, which is
+    /// every ordinary block. It differs inside a multi-line one (a
+    /// fenced code block typed with soft newlines), where `Home` means
+    /// the start of the line the cursor is on — not the top of the
+    /// fence, which is what this used to do while its doc comment
+    /// already said "line".
+    ///
+    /// Line math is [`outl_md::view`]'s, like [`Self::move_up`]'s: one
+    /// owner for the `(line, col) ↔ char_idx` mapping, shared with the
+    /// renderer.
     pub fn move_home(&mut self) {
-        self.cursor = 0;
+        let text = self.as_string();
+        let (line, _) = outl_md::view::char_to_line_col(&text, self.cursor);
+        self.cursor = outl_md::view::line_col_to_char(&text, line, 0);
     }
 
-    /// Move cursor to the end of the line.
+    /// Move cursor to the end of the **current line**. Mirror of
+    /// [`Self::move_home`].
     pub fn move_end(&mut self) {
-        self.cursor = self.chars.len();
+        let text = self.as_string();
+        let (line, _) = outl_md::view::char_to_line_col(&text, self.cursor);
+        // `usize::MAX` is the documented way to ask `line_col_to_char`
+        // for a line's end: it clamps a column past EOL to the last
+        // char of that line, which is the same vim-style clamp
+        // `move_up` / `move_down` lean on for the preferred column.
+        self.cursor = outl_md::view::line_col_to_char(&text, line, usize::MAX);
     }
 
     /// Move cursor one *visual* line up inside the buffer (across
@@ -393,5 +413,42 @@ mod tests {
         let mut b = EditBuffer::from_text("foo\nbar baz");
         b.cursor = 7; // 3 chars into line 1
         assert_eq!(b.visual_column(), 3);
+    }
+
+    #[test]
+    fn home_and_end_stay_on_the_cursors_own_line() {
+        // A fenced code block typed with soft newlines. `Home` used to
+        // jump to the top of the fence and `End` to the bottom of it,
+        // while both doc comments already said "line".
+        let text = "```rust\nfn main() {}\n```";
+        let body_start = "```rust\n".chars().count();
+
+        let mut b = EditBuffer::from_text(text);
+        b.cursor = body_start + 3; // inside `fn main() {}`
+        b.move_home();
+        assert_eq!(b.cursor, body_start);
+        b.move_end();
+        assert_eq!(b.cursor, body_start + "fn main() {}".chars().count());
+    }
+
+    #[test]
+    fn home_and_end_are_the_whole_buffer_on_a_single_line_block() {
+        // Which is every ordinary block, so the fix must not move this.
+        let mut b = EditBuffer::from_text("ship it");
+        b.cursor = 3;
+        b.move_home();
+        assert_eq!(b.cursor, 0);
+        b.move_end();
+        assert_eq!(b.cursor, 7);
+    }
+
+    #[test]
+    fn end_on_an_empty_trailing_line_stays_there() {
+        let mut b = EditBuffer::from_text("one\n");
+        b.cursor = 4; // the empty line after the newline
+        b.move_end();
+        assert_eq!(b.cursor, 4);
+        b.move_home();
+        assert_eq!(b.cursor, 4);
     }
 }

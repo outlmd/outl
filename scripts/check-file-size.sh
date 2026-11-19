@@ -193,6 +193,26 @@ if [ "${1:-}" = "--update" ]; then
 #     to pay for six lines is the larger change, and the silent failure
 #     it risks is a destructured prop frozen at first render.
 #
+#   outl-mobile/src/components/Journal.tsx  1790 -> 1801  (cross-block caret nav)
+#     Eleven lines of call site, the same shape as the embeds raise
+#     above and for the same reason: one import, two comment lines, the
+#     const with its three deps, a blank, the prop on BlockRow and the
+#     one call in onTextareaMount. The logic is not here -
+#     Journal.caret-nav.ts is 112 lines and its test 120, and the module
+#     owns the pending-caret signal too, so the component holds no state
+#     for the feature. The decision is not even in this crate: it is
+#     @outl/shared/caret-nav, shared with the desktop and mirroring
+#     outl-tui's cross_block_step, which is the point - the arrows
+#     stopped at the block boundary here while the terminal walked the
+#     outline as one document.
+#     The caret deliberately does NOT ride a prop: threading one down
+#     through BlockRow and BlockBody to reach the textarea is three more
+#     call sites in this file, not fewer, and a destructured prop frozen
+#     at first render is the silent failure the embeds note names.
+#     Extracting more of the edit lifecycle to pay for eleven lines is
+#     the larger change that outl-mobile/CLAUDE.md records as wanting
+#     its own plan.
+#
 # None of these arguments generalises. A further raise makes its own case.
 HEADER
     printf '%s\n' "$scanned" | oversized

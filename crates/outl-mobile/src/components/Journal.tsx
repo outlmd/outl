@@ -106,6 +106,7 @@ import { haptic } from "../lib/haptics";
 import { armKeyboard, installKeyboardKeeper } from "../lib/keyboard-keeper";
 import { createEmbedResolver } from "./Journal.embeds";
 import { createBlockOps, type JournalBlockDeps } from "./Journal.block-ops";
+import { createCaretNav } from "./Journal.caret-nav";
 import { createNewBlockOps } from "./Journal.new-block";
 import { createSelectionOps } from "./Journal.selection-ops";
 import {
@@ -793,6 +794,14 @@ export function Journal() {
     });
     haptic("light");
   }
+
+  /** An arrow key stepping off the edge of the block being edited
+   *  (hardware keyboard only). See `./Journal.caret-nav`. */
+  const caretNav = createCaretNav({
+    navBlocks: outlineRoots,
+    commitEdit,
+    startEdit,
+  });
 
   async function commitEdit() {
     const id = editingId();
@@ -1533,9 +1542,11 @@ export function Journal() {
                   onTagClick={handleTagClick}
                   onLinkClick={handleLinkClick}
                   onPasteMarkdown={blockOps.pasteMarkdownAt}
+                  onCaretExit={caretNav.onCaretExit}
                   onTextareaMount={(el) => {
                     activeTextarea = el;
                     setActiveTextareaSignal(el);
+                    caretNav.applyPendingCaret(el);
                   }}
                   selectionMode={selection() !== null}
                   selectionSet={selectionSet()}

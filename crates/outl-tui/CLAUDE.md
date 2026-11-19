@@ -218,6 +218,15 @@ TUI-specific contracts worth remembering:
   Cursor at the start empties the head and pushes the whole line down into the sibling — "open an empty block above".
   The Insert-mode commit path also drains `pending_reload` (peer-ops poller held it back during the edit).
 - **`Backspace` on an empty block deletes the block** and moves selection to the previous one — the only structural mutation that can happen from Insert.
+- **An arrow key at the block's edge walks into the neighbour, still in Insert** — the outline reads as one continuous document.
+  `←` at offset 0 lands at the end of the block above, `→` at the end lands at the start of the one below, and `↑` / `↓` on the buffer's first / last line carry the cursor's preferred column over (`EditBuffer::move_up` / `move_down` absorb the move inside a multi-line buffer first, so a fenced code block navigates internally).
+  **All four arms ask `cross_block_nav_eligible` now**, and `←` / `→` used to skip it: `enter_insert` dispatches on `Focus`, so spilling out of a source-page backlink edit committed a cross-page write per keystroke and opened the *next backlink's* file, while `↑` / `↓` correctly declined the same case.
+  `cross_block_step` carries the other half of that guard, stopping in Normal when `move_selection` crosses into the backlinks panel.
+  Nets: `cross_block_nav_tests` at the bottom of `input/insert.rs`.
+  A **line** here is a logical `\n` line, never a soft-wrapped visual one; the GUI clients hold the same rule through `@outl/shared/caret-nav`, which mirrors these two functions.
+- **`Home` / `End` move within the cursor's own line**, not the whole buffer.
+  Identical for a single-line block, which is every ordinary one; it differs inside a multi-line buffer, where `Home` used to jump to the top of the fence while its doc comment already said "line".
+  The `(line, col) ↔ char_idx` math is `outl_md::view`'s, like `move_up`'s — one owner, shared with the renderer.
 - **A `Char` arm that writes text asks `input::is_typed_text(key.modifiers)` first.**
   crossterm reports `Ctrl+W` as `Char('w')` plus `CONTROL`, so an arm matching `Char(ch)` and inserting it turns the whole readline set (`Ctrl+A/E/W/U/K/B/F`) into literal letters in the block ([#429](https://github.com/outlmd/outl/issues/429)).
   Six arms write text and all six ask: the Insert text arm plus the five overlay query handlers in `input/overlay.rs`.

@@ -15,6 +15,7 @@ import { DiagramFence, chooseFence, diagramsMode } from "@outl/shared/diagram";
 import { HighlightedCode, detectFence } from "@outl/shared/highlight";
 import { transformerFor } from "@outl/shared/plugins/transformer-registry";
 import { pageEmbedOnlyName } from "@outl/shared/outline";
+import type { CaretExit } from "@outl/shared/caret-nav";
 import { createLongPress } from "../lib/long-press";
 import { BulletOrCheckbox, CollapseTriangle } from "./BlockMarkers";
 import { EditableTextarea } from "./BlockTextarea";
@@ -72,6 +73,9 @@ export function BlockBody(props: {
    *  (`DeleteEmptyBlock`, RFC 0254 phase 4b) — the caller decides
    *  whether that's an immediate delete or a confirm prompt. */
   onDeleteEmpty?: () => void;
+  /** An arrow key walked the caret off this block's edge — see
+   *  `BlockTextarea`. Returns whether the step was taken. */
+  onCaretExit?: (exit: CaretExit) => boolean;
   onToggleTodo: () => void;
   /** Zoom in on this block. When set, a tap on the plain bullet dot
    *  focuses instead of marking TODO. `undefined` keeps the dot's
@@ -402,6 +406,7 @@ export function BlockBody(props: {
                 onMount={props.onTextareaMount}
                 onPaste={props.onPasteMarkdown}
                 onDeleteEmpty={props.onDeleteEmpty}
+                onCaretExit={props.onCaretExit}
               />
             </Show>
           </div>
