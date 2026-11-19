@@ -36,7 +36,7 @@ import {
 export interface JournalNewBlockDeps {
   pageId: () => string | null;
   editingId: () => string | null;
-  commitEdit: () => Promise<void>;
+  commitEdit: () => Promise<unknown>;
   applyView: (v: PageView) => void;
   startEdit: (id: string, initial: string) => void;
   withError: <T>(fn: () => Promise<T>) => Promise<T | undefined>;

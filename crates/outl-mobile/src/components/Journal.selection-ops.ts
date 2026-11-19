@@ -49,7 +49,7 @@ export interface JournalSelectionDeps extends JournalBlockDeps {
   setLastSelection: (sel: BlockSelection) => void;
   setPendingRangeDelete: (ids: string[]) => void;
   /** Flush an in-flight edit before selection mode takes over the row. */
-  commitEdit: () => Promise<void>;
+  commitEdit: () => Promise<unknown>;
 }
 
 export function createSelectionOps(deps: JournalSelectionDeps) {
