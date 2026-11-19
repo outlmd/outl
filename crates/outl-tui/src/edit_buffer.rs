@@ -198,6 +198,27 @@ impl EditBuffer {
         true
     }
 
+    /// Park the cursor on the buffer's first or last line at `col`,
+    /// clamped to that line's end. This is where a cross-block `↓` / `↑`
+    /// arrives, carrying the preferred column of the block it left.
+    ///
+    /// The line is the one that **faces** the block being left: stepping
+    /// up arrives on the last line, stepping down on the first. A raw
+    /// `cursor = col` gets both wrong inside a multi-line buffer (it
+    /// always lands on the first line, and overshoots into the second
+    /// when `col` is past the first line's end), which is where
+    /// `@outl/shared/caret-nav`'s `entryCaretOffset` and this client
+    /// used to disagree.
+    pub fn land_on_edge_line(&mut self, last_line: bool, col: usize) {
+        let text = self.as_string();
+        let line = if last_line {
+            text.chars().filter(|c| *c == '\n').count()
+        } else {
+            0
+        };
+        self.cursor = outl_md::view::line_col_to_char(&text, line, col);
+    }
+
     /// Column the cursor sits on within its current visual line.
     /// Equivalent to `cursor` for single-line buffers; for multi-line
     /// buffers it's the offset past the last `\n` before the cursor.
@@ -440,6 +461,27 @@ mod tests {
         assert_eq!(b.cursor, 0);
         b.move_end();
         assert_eq!(b.cursor, 7);
+    }
+
+    #[test]
+    fn landing_from_below_arrives_on_the_last_line() {
+        let mut b = EditBuffer::from_text("abc\nde");
+        b.land_on_edge_line(true, 1);
+        assert_eq!(b.cursor, "abc\n".chars().count() + 1);
+        // A column past the line's end clamps to it.
+        b.land_on_edge_line(true, 9);
+        assert_eq!(b.cursor, "abc\nde".chars().count());
+    }
+
+    #[test]
+    fn landing_from_above_stays_on_the_first_line() {
+        let mut b = EditBuffer::from_text("ab\ncdef");
+        b.land_on_edge_line(false, 1);
+        assert_eq!(b.cursor, 1);
+        // Past the first line's end clamps there instead of spilling
+        // into the second line.
+        b.land_on_edge_line(false, 4);
+        assert_eq!(b.cursor, 2);
     }
 
     #[test]

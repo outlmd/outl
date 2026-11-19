@@ -361,6 +361,10 @@ mod cross_block_nav_tests {
     use tempfile::TempDir;
 
     fn app_with_two_blocks() -> (App, TempDir) {
+        app_with_blocks(&["first", "second"])
+    }
+
+    fn app_with_blocks(texts: &[&str]) -> (App, TempDir) {
         let dir = TempDir::new().unwrap();
         let actor = ActorId::new();
         let ws = Workspace::open_in_memory(actor).unwrap();
@@ -373,14 +377,14 @@ mod cross_block_nav_tests {
         )
         .unwrap();
         app.page.blocks.clear();
-        for text in ["first", "second"] {
+        for text in texts {
             app.page.blocks.push(outl_md::parse::OutlineNode {
                 text: text.to_string(),
                 children: vec![],
                 properties: vec![],
             });
         }
-        app.flat_len = 2;
+        app.flat_len = texts.len();
         (app, dir)
     }
 
@@ -451,5 +455,24 @@ mod cross_block_nav_tests {
             ),
             "the user is still editing the source page"
         );
+    }
+
+    #[test]
+    fn up_into_a_multi_line_block_lands_on_its_last_line() {
+        // The line that faces the block being left, carrying the column:
+        // what `@outl/shared/caret-nav` does on the GUI clients. Reading
+        // the column as a raw offset put the cursor on the first line.
+        let (mut app, _d) = app_with_blocks(&["abc\ndefg", "xy"]);
+        app.selected = 1;
+        app.cursor_col = 2;
+        app.enter_insert(InsertCursor::AtCursor);
+
+        press(&mut app, KeyCode::Up);
+
+        assert_eq!(app.selected, 0);
+        let Mode::Insert { buffer, .. } = &app.mode else {
+            panic!("the step must stay in Insert");
+        };
+        assert_eq!(buffer.cursor, "abc\nde".chars().count());
     }
 }

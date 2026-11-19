@@ -795,18 +795,17 @@ export function Journal() {
     haptic("light");
   }
 
-  /** An arrow key stepping off the edge of the block being edited
-   *  (hardware keyboard only). See `./Journal.caret-nav`. */
+  /** Arrow keys stepping off the edited block. See `./Journal.caret-nav`. */
   const caretNav = createCaretNav({
     navBlocks: outlineRoots,
     commitEdit,
     startEdit,
   });
 
-  async function commitEdit() {
+  async function commitEdit(): Promise<boolean> {
     const id = editingId();
     const pid = pageId();
-    if (!id || !pid) return;
+    if (!id || !pid) return false;
     const text = draft();
 
     // Nothing typed — leave without writing. The draft was seeded
@@ -821,7 +820,7 @@ export function Journal() {
     const current = findBlock(view()?.outline ?? [], id);
     if (current && text === rawTextWithTodo(current)) {
       setEditingId(null);
-      return;
+      return true;
     }
     // Serialize: if an earlier edit is still in flight, wait for it
     // to land before we send this one. Without this, a quick
@@ -886,6 +885,7 @@ export function Journal() {
         void commitEdit();
       });
     }
+    return !!next;
   }
 
   // ── Block + range operations (issue #265 phases 1-2) ────────────

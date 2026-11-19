@@ -9,8 +9,9 @@
  * the block ({@link caretExit}) and which block it hands the caret to
  * ({@link resolveCaretExit}) — so the desktop and mobile cannot
  * disagree about it. It mirrors the TUI's `cross_block_nav_eligible` /
- * `cross_block_step` + `EditBuffer::move_up`, so neither can disagree
- * with the terminal either. A client is left with only what it alone
+ * `cross_block_step` + `EditBuffer::move_up` / `land_on_edge_line`,
+ * so neither can disagree with the terminal either. A client is left
+ * with only what it alone
  * knows: which blocks are on screen, and how it enters Insert.
  *
  * Four cases, and they are the whole surface:

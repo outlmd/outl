@@ -28,7 +28,12 @@ function block(id: string, text: string, todo: string | null = null): BlockNode 
 
 const up: CaretExit = { to: "previous", landing: "end" };
 
-function harness(blocks: BlockNode[], commitRejects = false) {
+/** How the harness's `commitEdit` ends. `"fails"` is what the real one
+ *  does on a backend error or a timeout: it surfaces the message itself
+ *  and resolves `false`, leaving the editor open on the draft. */
+type CommitOutcome = "saves" | "fails" | "throws";
+
+function harness(blocks: BlockNode[], outcome: CommitOutcome = "saves") {
   const calls: string[] = [];
   let release!: () => void;
   const committed = new Promise<void>((resolve) => (release = resolve));
@@ -37,7 +42,8 @@ function harness(blocks: BlockNode[], commitRejects = false) {
     commitEdit: async () => {
       calls.push("commitEdit");
       await committed;
-      if (commitRejects) throw new Error("backend said no");
+      if (outcome === "throws") throw new Error("backend said no");
+      return outcome === "saves";
     },
     startEdit: (id, initial) => calls.push(`startEdit:${id}:${initial}`),
   };
@@ -129,16 +135,33 @@ describe("createCaretNav", () => {
     expect(el.selectionStart).toBe(2);
   });
 
-  it("leaves the user where they are when the commit fails", async () => {
-    const { calls, nav, release } = harness(page(), true);
-    nav.onCaretExit("b", up);
-    release();
-    // `commitEdit` surfaces its own error and keeps the editor open on
-    // the draft; the step must not then also move the cursor onto
-    // another block, which would strand the unsaved text.
-    await expect(
-      vi.waitFor(() => expect(calls).toHaveLength(2), { timeout: 150 }),
-    ).rejects.toThrow();
+  it.each<CommitOutcome>(["fails", "throws"])(
+    "leaves the user on their draft when the commit %s",
+    async (outcome) => {
+      const { calls, nav, release } = harness(page(), outcome);
+      nav.onCaretExit("b", up);
+      release();
+      // `commitEdit` surfaces its own error and keeps the editor open
+      // on the draft; a `startEdit` now would overwrite that draft with
+      // the neighbour's text. The real one *resolves* on failure, so a
+      // net that only covered a rejection let exactly that through.
+      await expect(
+        vi.waitFor(() => expect(calls).toHaveLength(2), { timeout: 150 }),
+      ).rejects.toThrow();
+      expect(calls).toEqual(["commitEdit"]);
+    },
+  );
+
+  it("swallows a key repeat while a step is in flight", async () => {
+    const { calls, nav, release } = harness(page());
+    expect(nav.onCaretExit("b", up)).toBe(true);
+    // A held arrow repeats faster than the save round-trip: the repeat
+    // must still be swallowed, and must not commit the same draft twice.
+    expect(nav.onCaretExit("b", up)).toBe(true);
     expect(calls).toEqual(["commitEdit"]);
+
+    release();
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls).toEqual(["commitEdit", "startEdit:a:first"]);
   });
 });

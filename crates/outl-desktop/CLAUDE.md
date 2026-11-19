@@ -368,6 +368,7 @@ Load-bearing notes a contributor needs:
   **nothing is committed when the keystroke goes nowhere**, because `commit()` writes `editingBlockId = null`, so a `←` in the page's first block would otherwise drop the user out of Insert instead of doing nothing;
   and **`stopImmediatePropagation` is what stops a double move** — `↑` / `↓` are the catalog's Normal `SelectionUp` / `SelectionDown`, and the commit unmounts the textarea mid-dispatch, so the `window` listener would resolve the same keystroke a second time.
   Removing that line moves the caret two blocks and leaves the cursor and the editor disagreeing about where it went; `BlockRow.caret-nav.test.tsx` is the net, verified to fail without it, and it also pins that a modified arrow (`Alt+↑` moves the block) never walks.
+  **A held arrow's repeat is swallowed while a step's commit is in flight** (`caretStepping`): a changed draft keeps the textarea mounted for a backend round-trip, and every repeat in that window would otherwise commit the same draft again.
   The walk is `visibleRoots()`, so a zoom is honoured, and it stops at the outline's edges rather than stepping into the read-only backlinks — opening *another page* for editing from a keystroke aimed at this one.
 - **`Tab` / `Shift+Tab` indent / outdent the block and keep it in edit mode, on itself** (issue #477).
   `commit()` (called first, so the backend sees the latest draft) flips `editingBlockId` to `null`, and the moved block's row remounts a fresh `<BlockEditor />` elsewhere in the tree.

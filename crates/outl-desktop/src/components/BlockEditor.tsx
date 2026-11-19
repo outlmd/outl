@@ -114,6 +114,9 @@ export function BlockEditor(props: {
     });
   });
 
+  /** An arrow-key step's commit is in flight. */
+  let caretStepping = false;
+
   async function commit() {
     // Draft is already wire format (prefix included if any). The
     // backend re-runs `split_todo` on it and re-projects the block
@@ -182,6 +185,14 @@ export function BlockEditor(props: {
     // decides a modified arrow is a different chord); `./outline-caret-nav`
     // owns *where*.
     const navKey = caretNavKey(e);
+    if (navKey && caretStepping) {
+      // A held arrow repeats faster than the commit round-trip, and
+      // this textarea stays mounted until it lands. Swallow the repeat
+      // rather than committing the same draft a second time.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (navKey) {
       const ta = textareaRef;
       if (!ta) return;
@@ -206,7 +217,12 @@ export function BlockEditor(props: {
       // (`SelectionUp` / `SelectionDown`) and move the cursor a second
       // time on one keystroke.
       e.stopImmediatePropagation();
-      await commit();
+      caretStepping = true;
+      try {
+        await commit();
+      } finally {
+        caretStepping = false;
+      }
       props.cb.openCaretLanding(target);
       return;
     }

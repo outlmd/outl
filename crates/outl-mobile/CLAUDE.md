@@ -148,6 +148,8 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   **The answer is synchronous and the work is not**: the textarea decides whether to swallow the key from the return value, while the commit is a backend round-trip — so the target is resolved up front and the commit runs behind it.
   **The commit lands before the neighbour is opened**, because `commitEdit` ends with `setEditingId(null)`; opening first would drop the user straight back out of Insert.
   A commit that fails moves nothing, since `commitEdit` keeps the editor open on the draft and walking away from that would strand text the user can no longer see.
+  `commitEdit` **resolves `false`** on that path rather than rejecting, so the step reads its answer; catching a rejection alone let `startEdit` overwrite the unsaved draft.
+  A key repeat landing while a step is in flight is swallowed, so a held arrow never commits the same draft twice.
   The caret is handed over through a pending offset applied in `onTextareaMount` rather than a prop threaded down three components: the element is what has to be written to, `Journal` already receives it there, and `parkCaret` survives the Solid `value=` re-binding that a raw `setSelectionRange` loses on iOS.
 - **`Journal.remind.ts`** — `createRemindAuthoring(deps)`: which block the "Remind me…" sheet is open on, the rule it opened with, and the write back.
   It owns the signal, like `Journal.embeds.ts`, so the component holds no state for the feature.

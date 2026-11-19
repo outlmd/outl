@@ -287,6 +287,33 @@ describe("what the walk must not do", () => {
     expect(cb.resolveCaretExit).not.toHaveBeenCalled();
   });
 
+  it("swallows a held arrow's repeat while the step's commit is in flight", async () => {
+    // A changed draft makes `commit()` a backend round-trip, and the
+    // textarea stays mounted until it lands. A held arrow repeats inside
+    // that window; each repeat must not commit the same draft again.
+    let land!: () => void;
+    const onCommit = vi.fn(
+      () => new Promise<void>((resolve) => (land = resolve)),
+    );
+    const cb = makeCb({ onCommit });
+    const ta = mountEditing(makeBlock("blk-8"), cb);
+    ta.value = "hello!";
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    caretAt(ta, 0);
+
+    press(ta, "ArrowUp");
+    await Promise.resolve();
+    press(ta, "ArrowUp");
+    press(ta, "ArrowUp");
+    await Promise.resolve();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(fired).toEqual([]);
+
+    land();
+    await vi.waitFor(() => expect(cb.openCaretLanding).toHaveBeenCalledTimes(1));
+  });
+
   it("still lets ↑ reach the Normal-mode handler in view mode", () => {
     press(document.body, "ArrowUp");
     expect(fired).toEqual(["SelectionUp"]);

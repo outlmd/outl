@@ -27,7 +27,13 @@
  *   A commit that fails therefore moves nothing: `commitEdit` keeps the
  *   editor open on the draft so the user can retry, and walking the
  *   cursor onto another block on top of that would strand text they
- *   can no longer see.
+ *   can no longer see. It **resolves** `false` there rather than
+ *   rejecting (`withError` already surfaced the message), so the step
+ *   reads the answer: `startEdit` would overwrite the unsaved draft.
+ * - **One step at a time.** Holding an arrow is the gesture this
+ *   exists for, and the key repeats faster than a save round-trip, so
+ *   a repeat landing while a step is in flight is swallowed rather
+ *   than starting a second commit of the same draft.
  *
  * Deps are accessors, never values: a destructured prop freezes at
  * first render in Solid, and the same rule governs a dependency object.
@@ -43,8 +49,9 @@ import { parkCaret } from "../lib/textarea";
 export interface CaretNavDeps {
   /** The blocks the cursor may walk: the zoom's subtree, else the page. */
   navBlocks: () => BlockNode[];
-  /** Flush the in-flight draft and leave Insert. */
-  commitEdit: () => Promise<void>;
+  /** Flush the in-flight draft and leave Insert. Resolves `false`
+   *  when the save failed and the editor is still open on the draft. */
+  commitEdit: () => Promise<boolean>;
   /** Enter Insert on a block, seeding the draft with its wire text. */
   startEdit: (id: string, initial: string) => void;
 }
@@ -61,6 +68,8 @@ export function createCaretNav(deps: CaretNavDeps) {
    * through `onTextareaMount`.
    */
   const [pending, setPending] = createSignal<number | null>(null);
+  /** A step's commit is still in flight. */
+  let stepping = false;
   /**
    * Hand Insert mode to `id`'s neighbour in `exit`'s direction.
    *
@@ -70,20 +79,24 @@ export function createCaretNav(deps: CaretNavDeps) {
    * in the page's first block must not drop the user out of Insert.
    */
   function onCaretExit(id: string, exit: CaretExit): boolean {
+    // Swallowed: the caret is already on its way out of this block.
+    if (stepping) return true;
     const target = resolveCaretExit(deps.navBlocks(), id, exit);
     if (!target) return false;
+    stepping = true;
     void (async () => {
+      let left = false;
       try {
-        await deps.commitEdit();
+        left = await deps.commitEdit();
       } catch {
-        // `commitEdit` owns reporting its own failure (it surfaces the
-        // message and leaves the editor open on the draft). Anything
-        // that escapes it is a bug there, and the right answer here is
-        // still to leave the user on their unsaved text rather than to
-        // walk away from it. Caught rather than left to `void`, which
-        // would make it an unhandled rejection.
-        return;
+        // Anything that escapes `commitEdit` is a bug there, and the
+        // right answer here is still to leave the user on their unsaved
+        // text. Caught rather than left to `void`, which would make it
+        // an unhandled rejection.
+      } finally {
+        stepping = false;
       }
+      if (!left) return;
       setPending(target.caret);
       deps.startEdit(target.id, target.text);
     })();
