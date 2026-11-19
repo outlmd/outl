@@ -66,6 +66,43 @@ export interface CaretExit {
   landing: CaretLanding;
 }
 
+/**
+ * Is this keystroke one that can carry the caret out of a block, and
+ * which one?
+ *
+ * The **only** reader of the raw event, which is why it is here and not
+ * in a client: both the desktop's `handleKeydown` and mobile's
+ * `onKeyDown` had this spelled out, so a modifier guard added to one
+ * and not the other is two clients disagreeing about what `Alt+↑`
+ * means.
+ *
+ * A modified arrow is a different chord and answers `null`: `Alt+↑` /
+ * `Alt+↓` move the block, `Cmd+↑` / `Cmd+↓` are the OS's own
+ * document-edge motion, and `Shift+↑` extends a selection. Takes the
+ * four flags structurally rather than a `KeyboardEvent`, so it is
+ * testable without a DOM.
+ */
+export function caretNavKey(event: {
+  key: string;
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+}): CaretNavKey | null {
+  if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+    return null;
+  }
+  switch (event.key) {
+    case "ArrowUp":
+    case "ArrowDown":
+    case "ArrowLeft":
+    case "ArrowRight":
+      return event.key;
+    default:
+      return null;
+  }
+}
+
 /** Zero-based logical line of `caret`, and its column within that line. */
 function lineColumnAt(chars: string[], caret: number): {
   line: number;
@@ -135,21 +172,16 @@ export function caretExit(
  * instead of overshooting into the line after.
  */
 export function entryCaretOffset(text: string, exit: CaretExit): number {
-  const chars = [...text];
-  if (exit.landing === "end") return chars.length;
+  if (exit.landing === "end") return [...text].length;
   if (exit.landing === "start") return 0;
-
-  const lines: string[][] = [[]];
-  for (const ch of chars) {
-    if (ch === "\n") lines.push([]);
-    else lines[lines.length - 1].push(ch);
-  }
+  // Each line's length in codepoints. `\n` is BMP, so splitting on it
+  // cannot land inside a surrogate pair.
+  const lines = text.split("\n").map((line) => [...line].length);
   const target = exit.to === "previous" ? lines.length - 1 : 0;
-  // Offset of the target line's first character: every earlier line
-  // plus its `\n`.
+  // The target line's first character: every earlier line plus its `\n`.
   let lineStart = 0;
-  for (let i = 0; i < target; i += 1) lineStart += lines[i].length + 1;
-  return lineStart + Math.min(exit.landing.column, lines[target].length);
+  for (let i = 0; i < target; i += 1) lineStart += lines[i] + 1;
+  return lineStart + Math.min(exit.landing.column, lines[target]);
 }
 
 /** The block an arrow key hands Insert mode to, and where the caret

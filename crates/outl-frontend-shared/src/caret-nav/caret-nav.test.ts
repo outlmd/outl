@@ -4,9 +4,42 @@ import type { BlockNode } from "../api/types";
 import {
   type CaretExit,
   caretExit,
+  caretNavKey,
   entryCaretOffset,
   resolveCaretExit,
 } from "./index";
+
+describe("caretNavKey", () => {
+  const bare = (key: string) => ({
+    key,
+    shiftKey: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+  });
+
+  it("names the four bare arrows", () => {
+    for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+      expect(caretNavKey(bare(key))).toBe(key);
+    }
+  });
+
+  it("is not any other key", () => {
+    for (const key of ["Enter", "Tab", "a", "Home", "End", "Backspace"]) {
+      expect(caretNavKey(bare(key))).toBeNull();
+    }
+  });
+
+  it("refuses a modified arrow, because those chords mean something else", () => {
+    // `Alt+↑` moves the block, `Cmd+↑` is the OS's document-edge
+    // motion, `Shift+↑` extends a selection. Both clients spelled this
+    // guard out before, so one gaining a modifier and the other not was
+    // two clients disagreeing about the same keystroke.
+    for (const mod of ["shiftKey", "metaKey", "ctrlKey", "altKey"] as const) {
+      expect(caretNavKey({ ...bare("ArrowUp"), [mod]: true })).toBeNull();
+    }
+  });
+});
 
 describe("caretExit — ← / →", () => {
   it("steps to the previous block's end from offset 0", () => {

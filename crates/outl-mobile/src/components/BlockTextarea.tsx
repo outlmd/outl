@@ -6,8 +6,8 @@ import {
 } from "@outl/shared/autocomplete";
 import {
   type CaretExit,
-  type CaretNavKey,
   caretExit,
+  caretNavKey,
 } from "@outl/shared/caret-nav";
 import { detectFence } from "@outl/shared/highlight";
 import {
@@ -116,22 +116,14 @@ export function EditableTextarea(props: {
         // `keydown`: it only ever fires from a hardware keyboard, which
         // does emit reliable key events — the iOS soft keyboard the
         // `beforeinput` rules below exist for has no arrow keys at all.
-        // A modifier means something else (`Alt+↑/↓` moves the block),
-        // so only the bare key walks.
-        if (
-          (e.key === "ArrowUp" ||
-            e.key === "ArrowDown" ||
-            e.key === "ArrowLeft" ||
-            e.key === "ArrowRight") &&
-          !e.shiftKey &&
-          !e.metaKey &&
-          !e.ctrlKey &&
-          !e.altKey
-        ) {
+        // `caretNavKey` is what reads a modified arrow as a different
+        // chord (`Alt+↑/↓` moves the block), so only the bare key walks.
+        const navKey = caretNavKey(e);
+        if (navKey) {
           if (!props.onCaretExit) return;
           const el = e.currentTarget;
           const exit = caretExit(
-            e.key as CaretNavKey,
+            navKey,
             el.value,
             utf16OffsetToCharOffset(el.value, el.selectionStart ?? 0),
             utf16OffsetToCharOffset(el.value, el.selectionEnd ?? 0),

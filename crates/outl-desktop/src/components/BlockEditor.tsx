@@ -1,7 +1,7 @@
 import { createEffect, onMount } from "solid-js";
 
 import { autoDeletePair, autoPairBracket } from "@outl/shared/autocomplete";
-import { type CaretNavKey, caretExit } from "@outl/shared/caret-nav";
+import { caretExit, caretNavKey } from "@outl/shared/caret-nav";
 import { detectFence } from "@outl/shared/highlight";
 import {
   charOffsetToUtf16Offset,
@@ -178,24 +178,15 @@ export function BlockEditor(props: {
     // An arrow key at the edge of the block walks into the neighbour
     // without leaving Insert — the outline reads as one continuous
     // document, which is what the TUI has shipped all along.
-    // `@outl/shared/caret-nav` owns *when*; `./outline-caret-nav` owns
-    // *where*. A modifier means something else entirely here
-    // (`Alt+↑/↓` moves the block, `Cmd+↑/↓` is the OS's own
-    // document-edge motion), so only the bare key walks.
-    if (
-      (e.key === "ArrowUp" ||
-        e.key === "ArrowDown" ||
-        e.key === "ArrowLeft" ||
-        e.key === "ArrowRight") &&
-      !e.shiftKey &&
-      !e.metaKey &&
-      !e.ctrlKey &&
-      !e.altKey
-    ) {
+    // `@outl/shared/caret-nav` owns *when* (`caretNavKey` is also what
+    // decides a modified arrow is a different chord); `./outline-caret-nav`
+    // owns *where*.
+    const navKey = caretNavKey(e);
+    if (navKey) {
       const ta = textareaRef;
       if (!ta) return;
       const exit = caretExit(
-        e.key as CaretNavKey,
+        navKey,
         ta.value,
         utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0),
         utf16OffsetToCharOffset(ta.value, ta.selectionEnd ?? 0),
