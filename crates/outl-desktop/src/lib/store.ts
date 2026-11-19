@@ -507,6 +507,35 @@ export function visibleRoots(): BlockNode[] {
 }
 
 /**
+ * Which backlink row holds the keyboard cursor, or `null` when the
+ * cursor is in the outline.
+ *
+ * **The single owner of that precedence**, and it is the mechanism
+ * behind the "mutually exclusive" the two fields are declared with.
+ * That used to be a sentence: ~20 call sites write `selectedBlockId`
+ * directly and each had to remember to clear `selectedBacklinkBlockId`.
+ * The ones that did not left both set, and since every reader checked
+ * the backlink field *first*, the keyboard was in the backlinks section
+ * while the outline still drew a highlight on the block the user left
+ * the cursor on — `j` walked someone else's page and `Enter` navigated
+ * away instead of editing.
+ *
+ * The outline wins because releasing it is the deliberate act: the two
+ * navigation handlers that cross the separator write `selectedBlockId`
+ * to `null` in the same breath. So a writer that sets one field without
+ * clearing the other can no longer put the cursor in two places, which
+ * is what the TUI gets from `Focus` being an enum.
+ *
+ * Every reader of `appState.selectedBacklinkBlockId` goes through this,
+ * including the section's own highlight — a stale id painting an accent
+ * bar is the visible half of the same bug.
+ */
+export function backlinkCursor(): string | null {
+  if (state.selectedBlockId !== null) return null;
+  return state.selectedBacklinkBlockId;
+}
+
+/**
  * Per-block "saved to disk" marks. `OutlineView`'s commit marks a block
  * once `edit_block` resolves (the op is in this device's log and the
  * `.md` is rewritten); `BlockRow` renders the fading dot.

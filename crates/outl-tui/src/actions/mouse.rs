@@ -105,3 +105,117 @@ impl App {
         idx.checked_sub(1).map(|i| self.block_starts[i].1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use outl_core::{ActorId, Workspace};
+    use ratatui::layout::Rect;
+    use tempfile::TempDir;
+
+    use crate::state::{App, Focus, Mode};
+
+    fn fresh_app() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        (app, dir)
+    }
+
+    /// A page of three blocks, with the frame state the renderer
+    /// persists so `block_at_position` can resolve a click: a bordered
+    /// 20x10 rect at the origin, one visual line per block.
+    fn seed_clickable(app: &mut App) {
+        app.page = outl_md::parse::parse("- a\n- b\n- c\n");
+        app.flat_len = outl_md::outline_ops::flat_count(&app.page.blocks);
+        app.selected = 0;
+        app.outline_area = Some(Rect::new(0, 0, 20, 10));
+        app.block_starts = vec![(0, 0), (1, 1), (2, 2)];
+        app.outline_line_count = 3;
+        app.scroll_y = 0;
+    }
+
+    fn left_click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_click_selects_the_block_under_the_pointer() {
+        let (mut app, _dir) = fresh_app();
+        seed_clickable(&mut app);
+
+        // Row 2 is the second block: one cell of top border, then one
+        // visual line per block.
+        app.handle_mouse(left_click(3, 2));
+
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.cursor_col, 0);
+        assert!(matches!(app.mode, Mode::Normal), "a click starts in Normal");
+    }
+
+    /// The cursor is in one region at a time, and a click is the user
+    /// pointing at the outline — so it has to bring the cursor back out
+    /// of the backlinks section, not merely move `selected` underneath
+    /// a cursor still parked down there.
+    ///
+    /// `Focus` being an enum is what makes that hold for every other
+    /// path in this crate: `selected` and the backlink position cannot
+    /// both be live, so no writer has to remember the rule. This one
+    /// line is the exception the compiler cannot check, because
+    /// `Focus::Outline` is a value it has to assign rather than a state
+    /// it falls into — and the desktop, where the same two positions
+    /// are two nullable fields, shipped exactly this bug on exactly
+    /// this gesture (`lib/cursor-region.test.tsx`).
+    #[test]
+    fn a_click_brings_the_cursor_back_from_the_backlinks() {
+        let (mut app, _dir) = fresh_app();
+        seed_clickable(&mut app);
+        app.focus = Focus::Backlink {
+            idx: 0,
+            sub_path: Vec::new(),
+        };
+
+        app.handle_mouse(left_click(3, 2));
+
+        assert!(
+            matches!(app.focus, Focus::Outline),
+            "a click on a block puts the cursor in the outline"
+        );
+        assert_eq!(app.selected, 1, "and on the block that was clicked");
+    }
+
+    /// A click below the last block lands in the backlinks tail, which
+    /// `block_at_position` refuses. Nothing may move then — resetting
+    /// `focus` on a miss would eject a cursor the user walked into the
+    /// backlinks with `j`.
+    #[test]
+    fn a_click_past_the_last_block_moves_nothing() {
+        let (mut app, _dir) = fresh_app();
+        seed_clickable(&mut app);
+        app.focus = Focus::Backlink {
+            idx: 0,
+            sub_path: Vec::new(),
+        };
+
+        app.handle_mouse(left_click(3, 6));
+
+        assert_eq!(app.selected, 0);
+        assert!(
+            matches!(app.focus, Focus::Backlink { .. }),
+            "a miss is not a selection"
+        );
+    }
+}

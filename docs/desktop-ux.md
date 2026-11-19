@@ -162,6 +162,11 @@ A backlink row carries its own `▢` / `▣` / `•` indicator ahead of the text
 Clicking the indicator toggles the **source** block's TODO without leaving the page; clicking the text navigates.
 They are two buttons in one flex row, so the gestures cannot collide.
 
+**Hovering a row highlights it and nothing else.**
+`j` / `k` cross into this section from the outline's last block, and the row holding that cursor draws the same accent bar a selected block does — so a pointer merely passing over the section on its way elsewhere must not move it.
+It used to: `onMouseEnter` wrote the keyboard's own cursor, which took `j` and `Enter` off the block the user had left them on, from a gesture they never aimed.
+The highlight is CSS now, and which row owns the cursor is `backlinkCursor()`'s answer alone ([`outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md#the-cursor-lives-in-one-region)).
+
 ## Properties (`key:: value`) chip row
 
 `components/PropertyEditor.tsx` renders the chip row and owns three verbs:

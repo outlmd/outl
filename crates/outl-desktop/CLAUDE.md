@@ -152,6 +152,22 @@ Net: "the backlinks section never appears and then disappears" (`InlineBacklinks
 A crumb carries inline tokens, so the trail renders like any other block and stays inert; the plain join survives only as the `title=` tooltip, through `crumbTrailText`.
 Mobile's `BacklinksSection` wraps the same component, which is what stops one client showing markdown source while the other renders it.
 
+### The cursor lives in one region
+
+**`backlinkCursor()` (`lib/store.ts`) is the single owner of "is the cursor in this section", and every reader goes through it — the row's own highlight included.**
+`selectedBlockId` and `selectedBacklinkBlockId` are declared mutually exclusive because each reader checks the backlink one *first*.
+With both set, `j` walks someone else's page and `Enter` navigates away instead of editing, while the outline still paints the block the user left the cursor on.
+That exclusion was a sentence: ~20 call sites write `selectedBlockId` directly and each had to clear the other field, and most did not.
+The outline wins because releasing it is the deliberate act — the two handlers that cross the separator null it in the same breath, so no other writer has to know the rule exists.
+A stale id painting a second accent bar is the visible half of the same bug, which is why the highlight may not read the raw field either.
+
+**A pointer crossing the section is not a cursor move**, so a backlink row has no `onMouseEnter`.
+It wrote the keyboard's own cursor, which is what made the bug read as intermittent: the user never aimed the gesture.
+The hover affordance is the row's `hover:bg-…`, which costs no state.
+
+This is what the TUI gets from `Focus` being an enum; its one path that still has to *assign* `Focus::Outline` is a mouse click, the same gesture that broke here.
+Net: `lib/cursor-region.test.tsx`, plus `a_click_brings_the_cursor_back_from_the_backlinks` in `outl-tui`.
+
 **Toggling a task from a backlink row (issue #144)** mutates the *source* page, and the backlink effect is keyed on the slug, which didn't change.
 So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
 Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always empty now, so that blanks the section.

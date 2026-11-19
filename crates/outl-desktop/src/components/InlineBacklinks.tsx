@@ -16,7 +16,13 @@ import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
-import { appState, setAppState, setOutline, trackBacklinks } from "../lib/store";
+import {
+  appState,
+  backlinkCursor,
+  setAppState,
+  setOutline,
+  trackBacklinks,
+} from "../lib/store";
 
 /** What one click on a backlink's bullet does next. The toggle walks
  *  the cycle a step at a time, so the label names the *next* stop,
@@ -51,12 +57,18 @@ function backlinkTodoLabel(todo: Backlink["todo"]): string {
  *   skeleton that collapses into one is the blink.
  *
  * Each backlink row is **navigable**: vim `j/k` extends past the
- * outline's last block into this section (cursor lives at
- * `appState.selectedBacklinkBlockId`), and `Enter` opens the
+ * outline's last block into this section, and `Enter` opens the
  * source page positioned on the referencing block. Mouse click
  * does the same — both flows funnel through `openBacklink` so the
  * cursor lands at the same place no matter how the user
  * triggered the open.
+ *
+ * **Which row holds that cursor is `backlinkCursor()`'s answer, never
+ * `appState.selectedBacklinkBlockId` directly.** The outline owns the
+ * cursor until it releases it, so a writer that sets `selectedBlockId`
+ * without clearing this field cannot leave two cursors on screen —
+ * `lib/store.ts` carries the rule and the regression behind it. For the
+ * same reason a *hover* is not a cursor move; see the row's own note.
  */
 export function InlineBacklinks() {
   async function openBacklink(link: Backlink) {
@@ -235,8 +247,12 @@ export function InlineBacklinks() {
                 <ul class="mt-1 space-y-1 pl-6">
                   <For each={group.entries}>
                     {(link, index) => {
+                      // Through `backlinkCursor`, never the raw field:
+                      // the outline holds the cursor until it releases
+                      // it, so a stale id cannot paint an accent bar on
+                      // a row the keyboard is not on.
                       const selected = () =>
-                        appState.selectedBacklinkBlockId === link.block_id;
+                        backlinkCursor() === link.block_id;
                       // Breadcrumb of ancestor blocks as dimmed context.
                       // Collapsed against the previous entry in the same
                       // group: consecutive references in the same branch
@@ -298,12 +314,15 @@ export function InlineBacklinks() {
                             <button
                               type="button"
                               onClick={() => void openBacklink(link)}
-                              onMouseEnter={() =>
-                                setAppState(
-                                  "selectedBacklinkBlockId",
-                                  link.block_id,
-                                )
-                              }
+                              // No `onMouseEnter`: a pointer crossing
+                              // this section is not a cursor move. It
+                              // used to write `selectedBacklinkBlockId`,
+                              // which is the keyboard's own cursor, so
+                              // merely passing over a row on the way
+                              // elsewhere took `j` and `Enter` off the
+                              // block the user had left them on. The
+                              // hover affordance is the `hover:bg-…`
+                              // below, which costs no state.
                               class={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-sm leading-snug opacity-90 hover:bg-(--color-outl-fg)/5 hover:opacity-100 ${
                                 link.todo === "DONE"
                                   ? "line-through opacity-60"

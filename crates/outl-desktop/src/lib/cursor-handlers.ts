@@ -25,7 +25,13 @@ import {
 
 import { type HandlerCtx } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
-import { appState, setAppState, visibleRoots, zoomView } from "./store";
+import {
+  appState,
+  backlinkCursor,
+  setAppState,
+  visibleRoots,
+  zoomView,
+} from "./store";
 
 /** Block ids of each visible backlink, in render order. The
  *  selection cursor traverses this list with `j/k` when the
@@ -105,7 +111,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     // behaviour the TUI ships when `show_backlinks == false`.
     SelectionDown: () => {
       const backlinkIds = backlinkBlockIds();
-      const curBacklink = appState.selectedBacklinkBlockId;
+      const curBacklink = backlinkCursor();
       if (curBacklink) {
         const idx = backlinkIds.indexOf(curBacklink);
         if (idx >= 0 && idx < backlinkIds.length - 1) {
@@ -128,7 +134,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     },
     SelectionUp: () => {
       const backlinkIds = backlinkBlockIds();
-      const curBacklink = appState.selectedBacklinkBlockId;
+      const curBacklink = backlinkCursor();
       if (curBacklink) {
         const idx = backlinkIds.indexOf(curBacklink);
         if (idx > 0) {
@@ -174,7 +180,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
       // ref-carrying block impossible to edit via Enter. Following
       // a ref on the desktop is the click on the token
       // (`onRefClick` in OutlineView).
-      const curBacklink = appState.selectedBacklinkBlockId;
+      const curBacklink = backlinkCursor();
       if (curBacklink) {
         const link = appState.backlinks.find((b) => b.block_id === curBacklink);
         const target = link?.source_page?.slug;

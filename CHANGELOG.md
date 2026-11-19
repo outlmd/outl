@@ -7,6 +7,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The desktop cursor jumped to a backlink instead of staying where the user left it.**
+  `j` walked a citing block on someone else's page, `Enter` navigated away instead of entering Insert, and two rows drew the selection accent at once — intermittently, on pages that have backlinks at all.
+
+  The trigger was the mouse, which is why it read as random.
+  A backlink row carried an `onMouseEnter` that wrote `selectedBacklinkBlockId`, the **keyboard's** own cursor, so a pointer merely crossing the section on its way elsewhere moved it.
+  The user never aimed that gesture and had no reason to connect it to the next keystroke.
+
+  Underneath it, the exclusion that was supposed to make this impossible was a sentence rather than a mechanism.
+  `selectedBlockId` and `selectedBacklinkBlockId` are documented as mutually exclusive because every reader — `SelectionDown`, `SelectionUp`, `OpenRefUnderCursor`, and the row's own highlight — checks the backlink field **first**.
+  Nothing enforced it: ~20 call sites write `selectedBlockId` directly (a row click, `onStartEdit`, a zoom, every `create_block` reply, the picker, the task and reminder panels), each had to remember to clear the other field, and most did not.
+  So the hover was one door of several, and the mouse was simply the easiest to walk through by accident.
+
+  **`backlinkCursor()` (`lib/store.ts`) is the mechanism now**, and every reader goes through it, the highlight included — a stale id painting a second accent bar is the visible half of the same bug.
+  The outline wins because releasing it is the deliberate act: the two handlers that cross the separator write `selectedBlockId` to `null` in the same breath, so no other writer has to know the rule exists.
+  The `onMouseEnter` is gone; the hover affordance is the row's `hover:bg-…`, which costs no state.
+
+  **The TUI was already correct, structurally**, which is what the fix is modelled on: `Focus` is an enum there, so the two positions cannot both be live and the compiler is the net.
+  Its one path that still has to *assign* `Focus::Outline` is a mouse click — the same gesture that broke the desktop — and `actions/mouse.rs` had no tests at all.
+  It has three now, including `a_click_brings_the_cursor_back_from_the_backlinks`, verified to fail when that line is removed.
+  Mobile has no backlink cursor and was never affected.
+
 - **The desktop's backlinks section blinked on every block created or deleted.**
   It vanished and came back roughly a second later with the same rows, on every structural edit, on every page that has backlinks at all.
 
