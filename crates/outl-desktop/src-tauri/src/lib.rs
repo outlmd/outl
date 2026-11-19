@@ -177,8 +177,13 @@ pub fn run() {
     // boot. Install `ring` (the provider in our dep graph) explicitly.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // `install` is a no-op off macOS, see `menu.rs`.
-    menu::install(tauri::Builder::default())
+    // `PendingOpenFile` is managed here, not in `setup`: on macOS the
+    // "open documents" Apple Event can reach `RunEvent::Opened` before
+    // `setup` has run (and `setup` can bail on a `?`), and a state that
+    // is not managed makes `Manager::state` panic.
+    //
+    // `menu::install` is a no-op off macOS, see `menu.rs`.
+    menu::install(open_with::install(tauri::Builder::default()))
         // Single-instance MUST be the first plugin. Its `deep-link`
         // feature forwards an `outl://` URL opened while the app is
         // already running to `on_open_url` (Linux/Windows); the callback
@@ -233,10 +238,9 @@ pub fn run() {
             if payload.event() == tauri::webview::PageLoadEvent::Started
                 && webview.label() == "main"
             {
-                webview
-                    .app_handle()
-                    .state::<open_with::PendingOpenFile>()
-                    .listener_gone();
+                if let Some(pending) = open_with::pending(webview.app_handle()) {
+                    pending.listener_gone();
+                }
             }
         })
         .plugin(tauri_plugin_dialog::init())
@@ -353,15 +357,16 @@ pub fn run() {
             });
             app.manage(plugins);
             app.manage(PendingDeepLink(parking_lot::Mutex::new(None)));
-            app.manage(open_with::PendingOpenFile::empty());
 
             // Cold start on Linux / Windows: the file the user chose
             // "Open With → outl" for is an argument. Buffer it — the
             // frontend drains it in `AppShell`'s `onMount`, the same
             // way it drains a cold-start deep link, because an emit
             // here would land before any listener exists.
-            for path in open_with::file_paths_from_argv(std::env::args()) {
-                app.state::<open_with::PendingOpenFile>().offer(path);
+            if let Some(pending) = open_with::pending(app.handle()) {
+                for path in open_with::file_paths_from_argv(std::env::args()) {
+                    pending.offer(path);
+                }
             }
 
             // `outl://` deep links (issue #98). On Linux (and Windows in
