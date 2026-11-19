@@ -7,6 +7,7 @@
  */
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { createMockBackend } from "./backend";
+import { CHROME_TOUR_KEY, dismissOnce } from "../polish/firstRun";
 
 export { createMockBackend } from "./backend";
 export { MockWorkspace } from "./workspace";
@@ -28,4 +29,10 @@ export function installMockBackend(): void {
   } catch {
     // storage disabled, onboarding will show; harmless
   }
+  // The chrome walkthrough carries its own key, deliberately, so that
+  // flag does not cover it: it is the surface aimed at the user whose
+  // journal already has content, which is exactly what the mock is. It
+  // covers the whole screen, so leaving it armed hides every page a
+  // reviewer or the release screenshots came to look at.
+  dismissOnce(CHROME_TOUR_KEY);
 }
