@@ -45,10 +45,10 @@
  */
 import { createEffect, on } from "solid-js";
 
-import { pageBacklinks } from "@outl/shared/api/commands";
 import { createBacklinksKey } from "@outl/shared/namespace";
 
-import { appState, emptyBacklinks, setAppState, trackBacklinks } from "./store";
+import { emptyBacklinks, trackBacklinks } from "./backlinks-fetch";
+import { appState, setAppState } from "./store";
 
 export function installBacklinksEffect(): void {
   const key = createBacklinksKey(() => appState.page);
@@ -63,8 +63,9 @@ export function installBacklinksEffect(): void {
       setAppState(emptyBacklinks());
       // Never awaited: `trackBacklinks` runs it behind the page, and
       // the only thing that waits is that section (`UX.md` → Never
-      // block a keystroke).
-      void trackBacklinks(pageBacklinks(current.slug));
+      // block a keystroke). It takes no slug: the page it asks about is
+      // the open one, which `key` has just become.
+      void trackBacklinks();
     }),
   );
 }

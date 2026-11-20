@@ -191,7 +191,8 @@ workspace every navigation took the outline, the caret and the keystrokes with i
 The missing piece was never the background fetch, which has been off the page-open path since the "Esc is
 slow" fix.
 It was a home for "this part is still loading" that was smaller than the page.
-`trackBacklinks` (`outl-desktop/src/lib/store.ts`) is the single owner of that flag for all three fetch sites,
+`trackBacklinks` (`outl-desktop/src/lib/backlinks-fetch.ts`) is the single owner of that flag for all five fetch
+sites — and of how many scans a burst of them is allowed to start,
 `<InlineBacklinks />` is its only reader, and `InlineBacklinks.test.tsx` → "backlinks load behind the page"
 pins that the editor keeps focus while the reply is in flight.
 The backend half is the same sentence one layer down: a synchronous `#[tauri::command]` runs on the IPC

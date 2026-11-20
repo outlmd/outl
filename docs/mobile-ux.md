@@ -132,6 +132,29 @@ A navigation showed the page the user just left answering for the one they opene
 Once the scan replies, a regular page keeps the empty box (a newcomer discovers that pages can cite each other) and a journal stays hidden.
 `lateSectionVisible` (`@outl/shared/outline`) owns the rule; `PageSections.test.tsx` is the net.
 
+## Backlink rows — a place you can work
+
+A backlink row shows a block that lives on another page, and tapping it **edits that block in place** rather than navigating.
+The editor is this client's own `EditableTextarea`, through `<BacklinkRowEditor />`, so the iOS text-input rules (`beforeinput`, `parkCaret`, no write while an IME composes) come with it.
+**The commit is on blur**, never per keystroke: it writes to another page and then re-asks an `O(blocks-in-workspace)` scan.
+The row keeps showing the editor until the fresh rows are in, so you never watch your edit revert and reappear.
+
+The **checkbox** toggles the task on the source page — it used to draw the state and do nothing, and the way out it offered was to leave for that page.
+The **card header** is what still opens the source page.
+
+A **long press** opens the same `<BlockContextMenu>` the outline raises, with task state, indent, outdent, move up / down, create below / above, and delete.
+Seven of those rows take their label and glyph from one shared table, so an action cannot look like two things depending on which sheet you are in.
+Create below / above is the one pair that does **not** raise the keyboard: the new block cites nothing, so no row here will ever render it and there would be no textarea to focus — you are told which page it landed on instead.
+Delete asks when the block has children, in the same prompt the outline uses; the case is stronger here, because the row draws one flat block and the subtree is not on screen at all.
+
+**The card takes one write at a time.**
+The acting row dims and goes `aria-busy` while its write is in flight, and a gesture on another row of the card is dropped in that window.
+None of these is idempotent from your seat — a second toggle flips the task back — and a timeout would be worse than no guard, since firing one while the write still lands means the task flips twice on the retry.
+
+A row whose citing block lives outside any page is **inert**: no editor, no sheet, no jump, because there is no page to address.
+
+Contract, including why a cross-page edit refuses rather than keeping your text somewhere else: [`clients.md` → Editing a backlink where it is cited](clients.md#editing-a-backlink-where-it-is-cited).
+
 ## Page switcher - rename and merge
 
 The long-press sheet that offers delete also offers **Rename page** and **Merge into...**, for regular pages only: journals are excluded, because a journal's slug is its date.
@@ -143,7 +166,7 @@ The commands are the shared `rename_page` / `merge_pages` bodies, so every link 
 - **Merge into...** opens a page picker without the source page, and always asks for a confirmation before writing.
 - **Afterwards** the app opens the resulting page (renamed, or the merge target) and shows a summary with blocks moved, links updated and any property conflicts (the target's value is kept, the dropped one is named).
 
-There is no undo for either action, and a merge does not come apart: see "The opposite direction" in the RFC.
+There is no undo for either action, and a merge does not come apart: see [RFC 0557 → The opposite direction](rfcs/0557-page-merge-and-rename.md#the-opposite-direction).
 Neither has a keyboard chord, so the long-press sheet is the only trigger on touch devices.
 `Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md).
 
@@ -155,7 +178,8 @@ Tapping an external link opens it in the system browser via **`tauri-plugin-open
 An `assets/…` link routes instead (via `isAssetLink`) to `openAsset` — `open_asset` opens the file in the OS viewer.
 The block long-press **Attach file** action picks a file (`@tauri-apps/plugin-dialog`) → `attachAsset` (shared `commands::asset`).
 On iPad, dragging a file onto a block imports it the same way via the shared `installFileDrop` + `importAssetFile` (`@outl/shared/drag-drop`), best-effort — iPhone rarely delivers a webview drop, so long-press stays the only import path there.
-`[[ref]]`/`#tag` taps still route through `openRef`; backlink rows stay inert.
+`[[ref]]`/`#tag` taps in the outline still route through `openRef`.
+A **backlink** row's own tokens do not: the row's one gesture is editing the block it shows, so `<MarkdownInline>` there gets no `onRefClick` / `onLinkClick` and a ref inside it renders without navigating.
 
 ## Properties (`key:: value`) on a block
 

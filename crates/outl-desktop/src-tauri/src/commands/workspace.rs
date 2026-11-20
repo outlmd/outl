@@ -75,7 +75,7 @@ pub(crate) fn set_workspace(
     state.history.lock().clear();
     // As does the backlinks index — drop it so the next `page_backlinks`
     // rebuilds against the new workspace.
-    outl_tauri_shared::helpers::invalidate_backlink_index(state.inner());
+    outl_tauri_shared::commit::invalidate_backlink_index(state.inner());
 
     // (Re)start the FS watcher for the new root. Dropping the
     // previous handle inside `swap_watcher` stops watching the

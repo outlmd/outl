@@ -74,7 +74,7 @@ pub fn run<S: AppHost>(
     if run.applied > 0 {
         // The plugin mutated the workspace (any page), so the backlinks
         // index is stale — drop it; the next `page_backlinks` rebuilds.
-        crate::helpers::invalidate_backlink_index(state);
+        crate::commit::invalidate_backlink_index(state);
     }
 
     // Re-render the on-screen page from the now-mutated + re-projected
@@ -196,7 +196,7 @@ pub fn sync_hooks<S: AppHost>(
     let view = if outcome.applied > 0 {
         // A plugin mutated the workspace (any page), so the backlinks
         // index is stale — drop it; the next `page_backlinks` rebuilds.
-        crate::helpers::invalidate_backlink_index(state);
+        crate::commit::invalidate_backlink_index(state);
         match page_id {
             Some(id) => {
                 let page = parse_node_id(&id)?;

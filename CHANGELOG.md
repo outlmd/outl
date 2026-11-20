@@ -7,6 +7,41 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **A backlink is editable where it is cited, on every client.**
+  A backlink row shows a block that lives on another page, and it used to be a destination: you acted on it by *leaving*, and the page that assembled the references was gone.
+  Click it, tap it, or press `i` / `Enter` on it, and you edit that block in place.
+  Task state, delete, indent, outdent, move up / down and `o` / `O` all work there too, each landing on the citing block on its **own** page.
+  `g D` is the one that does not cross over to the phone: mobile's long-press sheet has no mark-done row, so you tap the checkbox through to DONE instead.
+  Opening the source page stays one gesture away on the desktop and the phone, on the group header rather than on the row.
+  The TUI has no such gesture at all — not the header, not a click, not `Enter` — so getting to the page a row's block lives on is `Ctrl+P` and the page name, which is why its column reads `Partial`.
+
+  The daily shape of the graph is the reason.
+  A journal day accumulates `#fup` lines and `[[person]]` mentions, and the page they point at is where you read them together.
+  Checking one off or fixing a typo cost a navigation away from the one view that assembled them, and a navigation back.
+
+  **The TUI already did all of this, and its mechanism is what changed.**
+  It used to render the source page's whole `.md`, write it, and let `reconcile_md` infer which ops that implied.
+  Under concurrency that is not the same operation: it depends on markdown matching to decide which block your text belongs to, where an op *names* the block.
+  So all three clients now reach one shared mutation path by block id, and `apply_to_backlink_source` plus the seven `Focus::Backlink` branches in `structural.rs` were deleted rather than ported.
+
+  **A cross-page edit refuses rather than putting your text somewhere else.**
+  A backlink's block id comes from the `.md` on disk, so on a page whose sidecar is missing or misaligned it can name no live block — a fresh import, a page a peer shipped without a sidecar, a `vim` edit nothing has swept yet.
+  The ordinary edit recovers from that by appending your text at the end of the page, which keeps it visible on the page you are reading and moves it to a page you are *not* looking at here.
+  The backlink path propagates the error instead, and you are told.
+  A source page that has stopped syncing is refused before anything is written too, and the gate sits in a different place on each side.
+  The TUI asks in `commit_backlink_mutation`, the one place every gesture in the panel commits through, so every one of them refuses.
+  The GUI clients ask inside `edit_backlink_block`, so the text edit refuses and the structural gestures write the op and say nothing — they name a block id instead of applying to text, so a peer still converges through the op log and what stays behind is the local `.md` of a page you are not looking at.
+  That notice gap is recorded in `docs/clients.md`.
+
+  Two limits are deliberate and worth knowing.
+  Indent, outdent and move have **no visible result** on a desktop or mobile row: it draws one flat block, its siblings and children are not on screen, and the effect lands on another page.
+  They ship anyway, so the three clients agree on what a chord does, and this paragraph is where the cost is written down instead of a nudge you would read once.
+  And creating a sibling does not put the cursor in it, because the new block cites nothing and so is a backlink of no page that no row will ever render — unless the page cites *itself*, where the block really is in the outline in front of you.
+
+  Namespace-mention rows stay read-only: that list is capped and answers a different question.
+
+  Per-client reach is `Capability::BacklinkInlineEdit` in `docs/client-parity.md`; the contract is `docs/clients.md` → "Editing a backlink where it is cited".
+
 - **Arrow keys walk between blocks while you are typing, on every client.**
   `←` at the start of a block lands at the end of the one above, `→` at the end lands at the start of the one below, and `↑` / `↓` on a block's first or last line carry your column over.
   The outline reads as one continuous document, so holding `←` walks back through the page without ever leaving Insert.
@@ -38,6 +73,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **TUI: the editor opened on a deleted block and lost what you typed into it.**
+  Press `i` on a backlink row whose block a peer had deleted, type, press `Esc`, and the commit refused — the text was gone and the only sign was a status line.
+  The entry gate asked `block_text`, which answers from the content cache or the Yrs doc, and **neither consults the trash**: the text survives a delete inside the document, so a trashed block read as an ordinary one.
+  The gate asks `is_trashed` as well now, so the refusal arrives *before* you start typing instead of after, in the same words the commit would have used.
+  Found while writing a test about the wording.
+
+- **Desktop: `o` / `O` on a backlink row added an empty block to the page you were reading.**
+  `NewBlockBelow` / `NewBlockAbove` read the open page's id and had no backlink branch, so a gesture aimed at a block on another page created a block at the end of the page in front of you, under a cursor that was not there.
+  The branch comes before that read now, and the sibling is created on the cited block's own page.
+
 - **TUI: `Home` and `End` moved the whole block, not the line the cursor was on.**
   Identical for an ordinary single-line block, which is why it went unnoticed; inside a block with soft newlines — a fenced code block — `Home` jumped to the top of the fence while its own doc comment already said "line".
 
@@ -58,7 +103,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Nothing enforced it: ~20 call sites write `selectedBlockId` directly (a row click, `onStartEdit`, a zoom, every `create_block` reply, the picker, the task and reminder panels), each had to remember to clear the other field, and most did not.
   So the hover was one door of several, and the mouse was simply the easiest to walk through by accident.
 
-  **`backlinkCursor()` (`lib/store.ts`) is the mechanism now**, and every reader goes through it, the highlight included — a stale id painting a second accent bar is the visible half of the same bug.
+  **`backlinkCursor()` (`lib/cursor-region.ts`) is the mechanism now**, and every reader goes through it, the highlight included — a stale id painting a second accent bar is the visible half of the same bug.
   The outline wins because releasing it is the deliberate act: the two handlers that cross the separator write `selectedBlockId` to `null` in the same breath, so no other writer has to know the rule exists.
   The `onMouseEnter` is gone; the hover affordance is the row's `hover:bg-…`, which costs no state.
 
@@ -81,8 +126,36 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The desktop takes both, and with the backlinks key it also gains a half it never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
   The TUI needed no change — it holds `backlink_index` and keeps the old one live until a rebuild lands, which is the same rule in a client with no Solid in it.
 
-  `navigation/page-key.parity.test.ts` reads **both clients' sources** and refuses the shape itself, with a declared exception per file and a reason: `installPageChangeEffect` must re-run on every reply (it repairs a selection whose block left the tree), and two backlinks refetches are not navigation decisions at all.
+  `navigation/page-key.parity.test.ts` reads **both clients' sources** and refuses the shape itself, with a declared exception per file and a reason: `installPageChangeEffect` must re-run on every reply (it repairs a selection whose block left the tree), and the desktop's one fetch owner re-asks for four reasons that are not navigation decisions at all.
   A first version of that guard paired the shape with "but the file imports the key" and passed against a file holding both, which is the regression rather than the fix.
+
+- **Desktop: holding `Alt+↑` or `Tab` on a backlink row fired one full workspace rebuild per key repeat.**
+  Every gesture on a row commits, and every commit drops the cached backlink index, so the next `page_backlinks` reads and parses every `.md` in the workspace.
+  Held down, that was one of those scans per repeat, all in flight at once: the latency per keystroke was a wash either way (30.0 ms against 34.1 ms), and the two were ten whole index rebuilds of CPU apart.
+
+  The refresh policy is not what changed, and that was measured before it was ruled out: `BacklinkRefresh::PatchPage` on the structural gestures would pay 25 ms on the IPC thread — the thread that accepts keystrokes — for every *single* gesture, to fix the burst case.
+  `outl-tauri-shared/tests/backlink_commit_cost.rs` carries both tables.
+
+  `trackBacklinks` now coalesces instead, and it moved to `lib/backlinks-fetch.ts` to own that: a burst is **one scan in flight plus one queued**, whatever the repeat rate.
+  The trailing scan is not droppable — each repeat is a real mutation, so the rows genuinely changed and the last answer has to be fetched.
+
+  **It takes no argument now, and that is the fix as much as the queue is.**
+  It used to be handed the promise (`trackBacklinks(pageBacklinks(slug))`), which puts the IPC call on the wire before the one owner is reached, so there was nothing left to coalesce and nothing could ask for it.
+  Naming no page also closed a stale-rows path that was reachable without a held key: `BacklinkRowEditor` read the slug *before* its `await`, so navigating during a cross-page save asked about the page the user had just left and drew its rows under the new one.
+  A reply is now checked against the open page through `sameBacklinksKey` — the same `@outl/shared` comparison the fetch is keyed on — so a reply for a page that has been navigated away from, or whose `title::` changed under it, is dropped rather than drawn.
+
+  The section itself is untouched throughout: the pending mark is raised once for the whole chain rather than once per scan, because lowering it in between unmounts and remounts the section inside one tick, taking an open row editor's focus and draft with it.
+  `lib/backlinks-fetch.test.ts` pins the queue and the three rules, `lib/backlink-handlers.cost.test.ts` pins the count through the real handler (a signature cannot bound how many times a caller asks), and `InlineBacklinks.test.tsx` pins the section's **node identity** across a burst.
+
+  **Mobile was never affected** and needs no coalescer: its card refuses a second gesture while one is in flight, and that guard spans the mutation *and* the awaited re-ask.
+
+  Two things came out of measuring the rest of that section.
+  `groupedBySource()` is a plain function rather than a memo, which on a 1,556-row page looked like the obvious cost: it is not, so it was left alone — it runs once per render, zero times on a cursor move or a commit reply, and costs 0.035 ms against a 153 ms mount.
+  The row **highlight** was the real one, and it is the same defect class one ingredient deeper than the earlier `backlinkCursor` fix.
+  It is evaluated once per rendered row and asks whether the section is on screen, which includes `zoomView()` — `focusSubtree(outline, focusBlockId)`, a full page walk — whenever `focusBlockId` names a block the outline has lost.
+  That state lasts exactly one render, because the self-heal that clears it is a `createEffect` and runs after the one that paid for it: 851 ms against 166 ms to mount 1,556 rows over a 688-block page, and 724.7 ms against 2.6 ms for a single cursor move, which is a keystroke.
+  The section now reads the cursor through a `createMemo`, the shape `focus()` and `visualSet` already use, so the walk runs once per render and each row subscribes to one signal instead of five.
+  `InlineBacklinks.cursor-cost.test.tsx` counts the walks instead of timing them: 1 at 40 rows and 1 at 400, against 41 and 401 without the memo.
 
 - **A backlink's breadcrumb was drawn as markdown source.**
   The trail above a nested reference read `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/mail?authuser=...)` while the citing block right under it read as prose — so the one line on the panel saying *where* a reference lives was the one line written in markup, with a URL eating a row that truncates to a single line anyway.

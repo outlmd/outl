@@ -19,6 +19,7 @@
  */
 
 import {
+  type BacklinkRowOp,
   createBlock,
   deleteBlock,
   editBlock,
@@ -37,6 +38,7 @@ import {
 import type { PageView } from "@outl/shared/api/types";
 import { embedOnlyHandle, previousVisibleId } from "@outl/shared/outline";
 
+import { backlinkRowOps } from "./backlink-handlers";
 import { type HandlerCtx, lookupBlock, targetBlockId } from "./handler-context";
 import { cycleTodoInDraft, insertLink, wrapSelection } from "./markdown-wrap";
 import { playPluginViews } from "./plugin-views";
@@ -46,24 +48,46 @@ import { appState, setAppState } from "./store";
 export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
   // Plain record, not Solid props — see `HandlerCtx`.
   const { deps, runOn, safeCall } = ctx;
+  /** The cross-page half of every mutation below: the cursor may be on a
+   *  backlink row, where the block lives on another page. Each op asks
+   *  this first and falls through on `false`; `backlink-handlers.ts` owns
+   *  the whole decision, including which replies may reach the screen. */
+  const onBacklink = backlinkRowOps(ctx);
 
-  /** Run a `(pageId, blockId)` command on whatever block the
-   *  keystroke is aimed at, and show what it returns. The four
-   *  structure ops below are this shape and nothing else, so a fifth
-   *  cannot forget `targetBlockId`'s focused-textarea-first fallback
-   *  and quietly act on the selection instead. */
+  /** Run an op on whatever block the keystroke is aimed at, and show
+   *  what it returns. The four structure ops below are this shape and
+   *  nothing else, so a fifth cannot forget `targetBlockId`'s
+   *  focused-textarea-first fallback and quietly act on the selection
+   *  instead — nor the backlinks branch, where `targetBlockId` answers
+   *  `null` and the page the command needs is not the page on screen.
+   *
+   *  **Two names per op, and the pairing is the point.** The cursor can
+   *  be in either region, and the two regions take *different commands*
+   *  for the same gesture: `cmd` is the outline's, which may tolerate a
+   *  stale id because the page is on screen, and `op` names the
+   *  cross-page one, which refuses. Collapsing them to one argument is
+   *  how a backlink row would get the tolerant recovery back. */
   const onTarget = async (
+    op: BacklinkRowOp,
     cmd: (pageId: string, id: string) => Promise<PageView>,
   ) => {
+    if (await onBacklink.run(op)) return;
     const pageId = appState.page?.id;
     const id = targetBlockId();
     if (!pageId || !id) return;
     await runOn(cmd(pageId, id));
   };
 
-  /** Park edit mode on the selected block. Three catalog entries
-   *  share it; see the Insert section below for why. */
+  /** Park edit mode on the block under the cursor. Three catalog
+   *  entries share it; see the Insert section below for why.
+   *
+   *  The cursor may be in the backlinks section, where the block lives
+   *  on another page — `onBacklink.enterInsert` is the one owner of that
+   *  case, shared with `Enter` (`OpenRefUnderCursor`), so the two chords
+   *  cannot disagree about which rows are editable, and a row with
+   *  nothing to edit says so on both. */
   const enterInsert = () => {
+    if (onBacklink.enterInsert()) return;
     const id = appState.selectedBlockId;
     if (!id) return;
     setAppState("editingBlockId", id);
@@ -137,6 +161,10 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
     },
     // ── create siblings (o / O) ──────────────────────────────────
     NewBlockBelow: async () => {
+      // Before the `pageId` read, not after: on a backlink row the
+      // selection cursor is null, so `{ afterId: null }` would append
+      // the block to the page the user is *reading*.
+      if (await onBacklink.createSibling("below")) return;
       const pageId = appState.page?.id;
       const after = appState.selectedBlockId;
       if (!pageId) return;
@@ -153,6 +181,9 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
       setAppState("editingBlockId", reply.new_id);
     },
     NewBlockAbove: async () => {
+      // Same guard as `NewBlockBelow`, for the same reason: the fallback
+      // below appends at the open page's root when nothing is selected.
+      if (await onBacklink.createSibling("above")) return;
       const pageId = appState.page?.id;
       const anchor = appState.selectedBlockId;
       if (!pageId) return;
@@ -172,11 +203,15 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
     },
 
     // ── block structure ops on the selected block ────────────────
-    IndentBlock: () => onTarget(indentBlock),
-    OutdentBlock: () => onTarget(outdentBlock),
-    MoveBlockUp: () => onTarget(moveBlockUp),
-    MoveBlockDown: () => onTarget(moveBlockDown),
+    IndentBlock: () => onTarget("indent", indentBlock),
+    OutdentBlock: () => onTarget("outdent", outdentBlock),
+    MoveBlockUp: () => onTarget("move-up", moveBlockUp),
+    MoveBlockDown: () => onTarget("move-down", moveBlockDown),
     DeleteBlock: async () => {
+      // Its own branch rather than `onTarget`: the row the cursor is on
+      // is the one that disappears, so the cursor moves within the
+      // backlinks section, not through `previousVisibleId`.
+      if (await onBacklink.del()) return;
       const pageId = appState.page?.id;
       const id = targetBlockId();
       if (!pageId || !id) return;
@@ -203,7 +238,18 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
       // updated the outline behind a textarea whose draft is seeded
       // once and never re-syncs, so the new state only appeared after
       // leaving Insert. The commit on blur persists it.
+      //
+      // The draft branch comes first on a backlink row too: this is the
+      // one Global binding here, so it fires inside the backlink editor,
+      // and `<BacklinkRowEditor />`'s commit persists the spliced prefix
+      // through `edit_backlink_block`.
       if (cycleTodoInDraft()) return;
+      // The plugin `onOp` sweep below is deliberately not reached from a
+      // backlink row: its reply is a `PageView` of whichever page it was
+      // asked about, and painting the source page's view over the open
+      // one is what `backlinkCommitPlan` exists to refuse. Confetti on a
+      // DONE two pages away is worth less than that.
+      if (await onBacklink.run("toggle-todo")) return;
       const pageId = appState.page?.id;
       if (!pageId) return;
       const id = targetBlockId();
@@ -243,6 +289,11 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
     // honest answer is a message pointing at the source until that
     // resolution lands.
     MarkDone: async () => {
+      // The embed-row guard below is not owed here: a block whose only
+      // token is `!((blk-…))` references no page, so it can never appear
+      // as a backlink row in the first place. Same plugin-sweep reasoning
+      // as `ToggleTodo`.
+      if (await onBacklink.run("mark-done")) return;
       const pageId = appState.page?.id;
       if (!pageId) return;
       const id = targetBlockId();

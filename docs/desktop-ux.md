@@ -139,7 +139,7 @@ Both call the shared `outl_actions` functions through the `rename_page` / `merge
 - **Afterwards** the app opens the resulting page (the renamed one, or the merge target) and shows a summary toast: blocks moved, links updated, and one line per property both pages held with different values (the target's value is kept, the dropped one is named).
 
 There is **no undo** for either action, and a merge in particular does not come apart.
-The blocks stay under the target, the links stay rewritten and the old name stays as an alias: see "The opposite direction" in the RFC.
+The blocks stay under the target, the links stay rewritten and the old name stays as an alias: see [RFC 0557 → The opposite direction](rfcs/0557-page-merge-and-rename.md#the-opposite-direction).
 
 The two actions have no chord on any client.
 `Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md): rename is missing in the TUI, merge is full on every client.
@@ -159,8 +159,20 @@ A **refetch** is the opposite case and keeps everything it has, marked `loading�
 `lateSectionVisible` (`@outl/shared/outline`) owns that rule, the measurement behind it and what each case costs.
 
 A backlink row carries its own `▢` / `▣` / `•` indicator ahead of the text.
-Clicking the indicator toggles the **source** block's TODO without leaving the page; clicking the text navigates.
+Clicking the indicator toggles the **source** block's TODO without leaving the page.
 They are two buttons in one flex row, so the gestures cannot collide.
+
+**Clicking the text edits the block in place**, in the same editor the outline uses — the chords and the four autocomplete popups come with it.
+The two paste routes do not: they live in `commands/block.rs`, where a stale block id is re-targeted, which is the recovery `edit_backlink_block` exists to refuse, so a paste is the webview's literal splice and commits through the one audited command.
+`i` and `Enter` on the row do the same thing, and `Esc` commits and returns to the row.
+Every structural chord lands on that block on **its own** page: `Cmd+T` / `g D`, `dd`, `Tab` / `Shift+Tab`, `Alt+↑` / `Alt+↓`, and `o` / `O`.
+A commit writes to a page you are not looking at, so nothing moves in the outline to confirm it: the row keeps its place and shows the committed text (backlink rows carry no saved mark, which is an outline-row affordance).
+
+The row used to **navigate** instead, and the source page is still one click away: the group header is the page's title, and it is a `<button>`, so `F6` and the arrows reach it without a chord to memorise.
+`o` / `O` creates the sibling on the source page and says so, because the new block cites nothing and no row here will ever show it — unless the page cites *itself*, in which case the block is in the outline on screen and the cursor lands in it.
+A row whose citing block lives outside any page is inert: there is nothing to write to and nothing to open.
+
+Contract, including why a cross-page edit **refuses** where an ordinary one re-targets: [`clients.md` → Editing a backlink where it is cited](clients.md#editing-a-backlink-where-it-is-cited).
 
 **Hovering a row highlights it and nothing else.**
 `j` / `k` cross into this section from the outline's last block, and the row holding that cursor draws the same accent bar a selected block does — so a pointer merely passing over the section on its way elsewhere must not move it.
@@ -302,7 +314,7 @@ Template contract: [`clients.md` → Structural templates](clients.md#structural
 ## Opening an external `[label](url)` link
 
 `<MarkdownInline />` renders external links clickable through an `onLinkClick(href)` prop, and `OutlineView` wires it to `openExternalUrl`.
-Failures land on the status line; ref and tag clicks still navigate, and backlink rows stay inert.
+Failures land on the status line; ref and tag clicks still navigate; a backlink row edits in place, and only an orphan row stays inert.
 
 An `assets/…` link routes to `openAsset` instead (via `isAssetLink`, `@outl/shared/links`), which opens it in the OS default app.
 Two import paths share the backend `commands::asset`.

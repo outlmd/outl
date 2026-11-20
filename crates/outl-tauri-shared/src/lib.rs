@@ -35,6 +35,7 @@
 pub mod boot_ready;
 pub mod capture_inbox;
 pub mod commands;
+pub mod commit;
 pub mod first_paint;
 pub mod helpers;
 pub mod history_external;
@@ -51,6 +52,7 @@ pub mod projection;
 pub mod reconcile;
 pub mod reminder_runtime;
 pub mod state;
+pub mod surface;
 pub mod workspace_open;
 pub mod workspace_reload;
 pub mod wrappers;

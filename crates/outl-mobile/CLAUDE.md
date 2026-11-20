@@ -135,6 +135,54 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   **Nothing here draws until the scan answers for the page on screen** (`lateSectionVisible`, `@outl/shared/outline`).
   `Journal` is what makes that true: `createResource` keeps its last value through a source change, so the raw accessor left the page the user just left answering for the one they opened, while the card said "No backlinks yet" over a scan still running.
 
+- **A backlink row is a place you can work, not just a destination.**
+  Tapping it opens `<BacklinkRowEditor />` over this client's own `EditableTextarea`; the card header is what still opens the source page, and the checkbox toggles the task there.
+  `BacklinkCheckbox` **drew task state and performed nothing** until this landed — its own doc said so, and the way out it named was to leave for the source page.
+  Which `(page, block)` a gesture targets is `@outl/shared/backlink-edit`'s — an orphan row has no page to address, so it is **inert**: no editor, no sheet, no jump.
+  Three rules with a failure mode each.
+  **`editBacklinkBlock` / `backlinkRowOp` / `createBacklinkSibling`, never the `block.rs` twin**, which tolerates a stale id — as a backlink's routinely is.
+  The twin appends to a page the user cannot see, or re-parents a peer-trashed block *inside* the trash and reports success.
+  **Commit on blur**, because the commit projects and then rescans `O(blocks-in-workspace)` (invariant 15).
+  And **a refusal keeps the editor up on its draft**, since nothing was written.
+
+  **The section reports, the host decides.**
+  `onEditCommitted({ sourcePageId, view })` is the whole upward surface: this card never learns the open page's id, because `backlinkCommitPlan` needs *both* ids and only `Journal.backlinks.ts` holds them.
+  A section taking `openPageId` plus an `onApplySourceView` was one question split four ways, with `PageSections` threading props it never read.
+
+- **`BacklinksSection.row-ops.ts`** — `createBacklinkRowOps`: every mutation a row can perform,
+  and all of the section's state (editing, pending, the sheet's row, the delete prompt), so the component carries no signals of its own — the arrangement `Journal.remind.ts` and `Journal.embeds.ts` already use.
+  **Mobile has no chord surface at all**, so where the desktop binds a key, a long press offers a row in the same `<BlockContextMenu>` the outline uses:
+  task state, create below / above, indent, outdent, both moves, delete, each routed to the source page.
+  The list is `buildBacklinkContextActions` in `Journal.context-actions.ts`, beside the outline's,
+  and the eight rows it draws take their label and glyph from the same `SHARED_ROWS` table the outline's sheet reads — two icon literals is how one action comes to look like two.
+  **There is no mark-done row**, here or anywhere on this client: `Action::MarkDone` is `Missing` on mobile, and row one cycles task state through to DONE instead.
+  `Capability::BacklinkInlineEdit` covers the other nine operations for exactly that reason — a capability row may not claim an operation this client has nowhere.
+  Three decisions in it, each written down because the honest answer is not the obvious one:
+
+  - **Indent / outdent / move ship with no nudge and no `enabled` guard.**
+    They have no visible result on a flat row, which was weighed and accepted — the capability row says `Full` for this client, and the TUI's `Partial` on it is about a missing source-page gesture rather than about these three.
+    The outline's builder hides a move at the ends by resolving a sibling index, and a backlink row has no sibling list on screen, so guessing that position is worse than offering both.
+  - **Create below / above ship, and give up only the keyboard.**
+    A new sibling cites nothing, so it is a backlink of no page, appears in no row here,
+    and has no editor to focus — so these two rows are the only ones that omit `armsKeyboard`, which would otherwise raise the keyboard over a textarea that never mounts.
+    The block is created anyway and the user is told where it went, because a declared limit beats a wrong target: the TUI hit the same wall from the other side and its re-entry parked the caret on the *citing* block.
+    The sentence is `@outl/shared/backlink-edit`'s `backlinkCreatedElsewhere` and `Journal.backlinks.ts` passes it the open page id, because it returns `null` when the source page *is* the one on screen.
+  - **Delete asks when the block has children**, through `<BlockDeleteConfirm />` — the same prompt and wording the outline raises (`JournalDeleteDialogs.tsx` owns both).
+    The case is *stronger* here, because a backlink renders one flat block and the subtree about to be trashed is not on screen at all.
+
+  **The card takes one write at a time**, and the guard is card-wide rather than per-row because the re-ask replaces every row.
+  Every op is a cross-page mutation plus an `O(blocks-in-workspace)` scan, so the window is long enough for a second gesture to land in it —
+  a tap back into a blurred-but-mounted editor, a double tap on a checkbox, a long press that was still reachable — and **none of these ops is idempotent from the user's seat**: a second toggle flips the task back.
+  **A timeout is not the guard** and would be worse than none: fire one while the write still lands and the user retries, so the task flips twice.
+  The row is dimmed and `aria-busy` while pending; only the **acting** row shows it, so a gesture refused on another row of the card is silently dropped — recorded, not claimed fixed.
+  **The direction toggle is behind the same guard**, wrapped in this component rather than in the host: a reorder is a write too, and the host holds `onToggleOrder` but not `pending`.
+
+- **`Journal.backlinks.ts`** — `createBacklinkCard`: the card's direction (issue #142) and what happens after a mutation through one of its rows.
+  Both go through **`mutate`, never the resource's `refetch`** — a refetch flips `loading`, and the rule above hands `undefined` down while that is true, so it would unmount the card the user just typed into for the length of the scan.
+  This is also where `backlinkCommitPlan` runs, read **before** `applyView` replaces `view()`: `applyView` happens only when the mutated page *is* the page on screen (a page can cite itself), and the re-ask is unconditional.
+  **`committed` resolves only once the fresh rows are in**, and the section awaits it before closing its editor —
+  close on the write's own reply and the row renders the pre-edit tokens it still holds, so the user watches their edit revert and then reappear.
+
 - **`Journal.boot.ts`** — `createJournalBoot`: the two workspace-open paths (`loadTodayWithRetry`, `pullAndReload`).
   Every await in here is capped. The open is the one the journal's skeleton waits on, so an uncapped call there is not a slow page, it is a page that never comes back.
 - **`Journal.polls.ts`** — `installJournalPolls`: the connectivity listeners and every ticker (peers 3s, reminders 30s).

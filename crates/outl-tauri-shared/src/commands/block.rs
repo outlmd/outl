@@ -2,7 +2,7 @@
 //!
 //! Each parses ids, delegates the mutation to `outl-actions`, and
 //! projects the result back to `.md` + sidecar via
-//! [`crate::helpers::finish_in_page`]. The only deliberate exception is
+//! [`crate::commit::finish_in_page`]. The only deliberate exception is
 //! [`set_block_collapsed`], which bypasses reprojection — see its doc.
 
 use outl_actions::{
@@ -17,10 +17,8 @@ use outl_actions::{
 use outl_md::index::WorkspaceIndex;
 use tracing::warn;
 
-use crate::helpers::{
-    announce_after_commit, build_page_view, finish_in_page, finish_in_page_with, parse_node_id,
-    with_ws, with_ws_mut,
-};
+use crate::commit::{announce_after_commit, finish_in_page, finish_in_page_with};
+use crate::helpers::{build_page_view, parse_node_id, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::{CreateBlockReply, CutBlockReply, DroppedEdit, PageView, PasteReply};
 

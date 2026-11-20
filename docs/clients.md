@@ -629,6 +629,70 @@ Every button calls `e.preventDefault()` on `onPointerDown` so the tap can't blur
 With the `interactive-widget=resizes-content` meta the visual viewport then shrinks on keyboard show and `useKeyboardInset()` collapses to ~0, so `bottom: inset` rests the bar on the keys; drop `adjustResize` and it floats behind the keyboard.
 Validation needs an Android device/emulator build — docking and `visualViewport` don't exercise under host `cargo check` or `bun run dev`.
 
+## Editing a backlink where it is cited
+
+A backlink row shows a block that lives on **another** page.
+It used to be a destination: you acted on it by leaving, and the page that assembled the references was gone.
+It is a place you can work now, on every client.
+
+Ten operations reach a row, and each lands on the citing block on **its own** page: the text edit, task state, mark done (`g D`), delete, indent, outdent, move up, move down, and create a sibling below and above.
+Mobile's long-press sheet has no mark-done row today (`Action::MarkDone` is `Missing` there in [`client-parity.md`](client-parity.md)), so it offers nine.
+`Capability::BacklinkInlineEdit` covers exactly those nine, leaving mark done to the action row that owns it rather than claiming an operation one client has nowhere.
+Opening the source page stays reachable on the desktop and mobile, on the group header rather than on the row; the TUI has no gesture for it at all, which is the whole of why its column reads `Partial`.
+Per-client reach is `Capability::BacklinkInlineEdit` in [`client-parity.md`](client-parity.md), which is generated from `outl_shortcuts::capability_support`.
+
+| Client | Edit in place | Everything else | Open the source page |
+|---|---|---|---|
+| TUI | `i` / `Enter` on the focused row | the same Normal-mode chords the outline uses | nothing in the panel opens it — `Ctrl+P`, then the page name from the row's header |
+| Desktop | click the row, or `i` / `Enter` on it | the same chords, consulted on the row first | the group header (a `<button>`, so a keyboard stop) |
+| Mobile | tap the row | long-press for the same sheet the outline raises | the card header |
+
+Four rules hold across all three, and each was the alternative:
+
+- **A mutation is an `Op` on a `NodeId`, never a `.md` the client rewrote.**
+  The TUI used to render the source page's whole `.md`, write it, and let `reconcile_md` infer which ops that implied.
+  Under concurrency that is not the same operation: it depends on `outl-md`'s matching heuristics to decide which block the new text belongs to, where an op *names* the block.
+  Root [`CLAUDE.md`](../CLAUDE.md#critical-invariants-never-violate) invariant 1 says the op log is the source of truth, so all three clients now reach `outl-actions` by id, through `outl_actions::commit_page`.
+- **A cross-page write refuses rather than re-targets — all ten of them, not just the text edit.**
+  A backlink's `block_id` can be a transient `NodeId` — the index is built from the `.md` on disk, and a page whose sidecar is absent or misaligned mints one per uncovered block — so the id may name no node in the tree.
+  The ordinary `block.rs` commands tolerate that, because they act on the page you are reading: `edit_block` and `create_block` append at the page's end, which keeps the result where you can still see it there and moves it to a page you are not looking at here.
+  So the GUI clients call the cross-page family instead — `edit_backlink_block`, `backlink_row_op`, `create_backlink_sibling` — which refuse, and the refusal reaches you.
+  A source page that has stopped syncing is refused **before** anything is written too, and **which gestures ask is decided per operation, not per client**.
+  The criterion is whether the operation's result is computed from text the draft or the row showed — never whether it is "structural".
+  Two shapes answer yes.
+  A **text edit** on the desktop and mobile, because both seed the draft from the backlink row, which is built from the `.md` on disk: on a frozen page the user types over bytes the op log does not hold.
+  And **task state / mark done on every client**, because both read the block's logged text, move a marker and write the result back, while the row the user acted on was rendered from that same stale `.md`.
+  Everything else names a node by id — delete, indent, outdent, both moves, create a sibling — reads no text, and converges through the op log whatever the local `.md` says.
+  **The TUI's text edit is the one place the answer differs between clients, and the reason is where the draft comes from.** `enter_insert_backlink` seeds its buffer from the op log, so there the logged text *is* what the user edited and the question has nothing to protect.
+  Gating it anyway cost the one unrecoverable thing in this feature: the Insert buffer is consumed before the commit runs, so the refusal dropped the keystrokes while the status line described a *file* and told the user to run a command.
+  **What is left is a notice gap, not a capability one.**
+  A structural op still converges, because peers sync through the op log and never through the `.md`.
+  What stays behind is the local `.md` of a page that is not on screen, and the user is told nothing: the refusal rides the reply (`outl-tauri-shared/src/commit.rs`), which reaches the screen only when the source page *is* the page on screen.
+  Nobody has built that notice yet, and the fix is a notice rather than a wider gate — withholding an op that names a node buys nothing and the stale `.md` is the pre-existing condition.
+- **The refusal's words come from `outl_actions::refusal`**, so a stale row says the same thing in a terminal, a window and a phone.
+  Two sentences, because the cost differs: a text edit lost your keystrokes, a chord typed nothing and only failed to land.
+  Both GUI clients reached that catalog for the text edit and printed a raw block id for the other nine, until each was routed through the family above — the desktop first, the phone a day later.
+- **A refused text edit keeps the editor open on what you typed.**
+  Nothing was written, so that text exists nowhere else; closing the editor would be the one loss in this feature that cannot be undone.
+  You leave by navigating, closing the panel, or editing another row, each of which gives you the chance to copy it first.
+- **The list is re-asked per commit, never per keystroke.**
+  `backlinks_for_page` is an `O(blocks-in-workspace)` scan (invariant 15), and the section keeps its rows across that refetch rather than blanking and coming back.
+
+Two limits are deliberate, and written down rather than discovered:
+
+- **Indent, outdent and move have no visible result on a GUI row.**
+  The row is one flat block, its siblings and children are not drawn, and the effect lands on a page you are not looking at.
+  Shipping them anyway is a decision taken against declaring them `Partial`, and it is **not** what the TUI's `Partial` records — that one is the missing way to the source page, and nothing else.
+- **Creating a sibling does not put the cursor in it.**
+  The new block cites nothing, so it is a backlink of no page and no row will ever render it, which leaves nothing on screen to aim an editor at — so you are told which page it landed on instead.
+  **The two chord clients make one exception, and mobile does not**, because a page can cite itself and the new block is then in the outline in front of you.
+  The TUI drops out of the panel and opens Insert on it; the desktop writes it to `editingBlockId`.
+  Mobile applies the view and says nothing at all — there is no cursor to place and the keyboard deliberately stays down, since a `.focus()` outside the tap's gesture window raises it over nothing.
+  That asymmetry is the right behaviour on each, not a gap: the notice would be a lie on a page you are looking straight at, which is why it is skipped on all three.
+
+**Namespace-mention rows stay read-only.**
+That list is capped and answers a different question, so it is a different surface.
+
 ## Backlinks order (issue #142)
 
 Every client sorts the "Linked from" list the same way: `outl_actions::sort_backlinks` groups backlinks by source page (each page's blocks stay contiguous, in document order) and orders the pages by how recently each was referenced.

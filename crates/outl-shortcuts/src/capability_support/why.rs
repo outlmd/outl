@@ -99,6 +99,27 @@ pub const TUI_NESTED_PAGES_ARE_READ_ONLY: &str =
     "The TUI lists nested pages but can't open one from that list — press Ctrl+P and type \
      the page name (`os/linux`) to jump there.";
 
+/// The TUI edits every backlink row where it is cited and has **no
+/// gesture anywhere in that panel** that opens the page the row's block
+/// lives on. `Focus` has exactly two variants (`Outline`,
+/// `Backlink { idx }`); the group header is a styled `Line` with no
+/// click region and no `block_starts` entry (`view/backlinks.rs`), and
+/// a click below the outline is refused outright
+/// (`a_click_past_the_last_block_moves_nothing`). `Enter` on a row
+/// enters Insert, and following a `[[link]]` inside the row is not the
+/// route either: a citing block refers to the page being read, by
+/// construction, so it re-opens the page the user is already on.
+///
+/// So the *edit it where it is cited* half of this capability is
+/// present and the *go to where it lives* half is not, which is what
+/// `Partial` means — the same shape as
+/// `TUI_NESTED_PAGES_ARE_READ_ONLY`, one section further down the
+/// same pane, and the reason the nudge names the quick switcher rather
+/// than apologising.
+pub const TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE: &str =
+    "The TUI edits a backlink row in place but can't open the page the block lives on — \
+     press Ctrl+P and type the page name from the row's header to jump there.";
+
 /// The TUI has no pairing flow (no ticket display, no scanner) —
 /// pairing a device against a TUI-run workspace goes through the
 /// CLI's `outl peer pair` / `outl peer qr`, run from a separate

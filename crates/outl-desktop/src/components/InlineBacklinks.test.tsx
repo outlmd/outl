@@ -8,24 +8,41 @@ import type {
   PageView,
   TodoState,
 } from "@outl/shared/api/types";
-import {
-  openRef,
-  pageBacklinks,
-  toggleTodo,
-} from "@outl/shared/api/commands";
+import { backlinkRowOp, openRef, pageBacklinks } from "@outl/shared/api/commands";
 
 import { installBacklinksEffect } from "../lib/backlinks-effect";
 import { applyPageState } from "../lib/page-view";
 import { InlineBacklinks } from "./InlineBacklinks";
-import { setAppState, trackBacklinks } from "../lib/store";
+import { trackBacklinks } from "../lib/backlinks-fetch";
+import { appState, setAppState } from "../lib/store";
 
+// A row opens `<BacklinkRowEditor />` now, which mounts the shared
+// `<BlockEditor />` — hence the autocomplete and clipboard stubs below
+// alongside the section's own commands.
 vi.mock("@outl/shared/api/commands", () => ({
+  backlinkRowOp: vi.fn(),
+  createBacklinkSibling: vi.fn(),
+  editBacklinkBlock: vi.fn(),
+  editBlock: vi.fn(),
+  listTemplates: vi.fn(() => Promise.resolve([])),
   openRef: vi.fn(),
   pageBacklinks: vi.fn(),
+  pluginList: vi.fn(() => Promise.resolve([])),
   resolveEmbeds: vi.fn(() => Promise.resolve([])),
   resolvePageEmbeds: vi.fn(() => Promise.resolve([])),
+  searchBlocks: vi.fn(() => Promise.resolve([])),
+  searchEmojis: vi.fn(() => Promise.resolve([])),
+  searchPages: vi.fn(() => Promise.resolve([])),
+  searchPersons: vi.fn(() => Promise.resolve([])),
   setBacklinksOrder: vi.fn(),
   toggleTodo: vi.fn(),
+}));
+vi.mock("@outl/shared/plugins/transformer-registry", () => ({
+  runTransform: vi.fn(),
+  transformerFor: vi.fn(() => null),
+}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  readText: vi.fn(),
 }));
 
 /** The real navigation effect, owned beside the rendered section so a
@@ -72,11 +89,25 @@ function mount(backlinks: Backlink[]): HTMLElement {
     backlinksOpen: true,
     backlinks,
     backlinksOrder: "newest",
+    // A row left in edit mode by an earlier test re-opens its editor
+    // here the moment a matching `block_id` lands, and the editor
+    // autofocuses — which is how it stole focus from the standalone
+    // textarea in "leaves the editor alone while a first load runs".
+    editingBacklink: null,
   });
   const host = document.createElement("div");
   document.body.appendChild(host);
   dispose = render(() => <InlineBacklinks />, host);
   return host;
+}
+
+/** The source-page group header — the only control that navigates. */
+function groupHeader(host: HTMLElement): HTMLButtonElement {
+  const found = Array.from(host.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes("Journal"),
+  );
+  if (!found) throw new Error("source-page header did not render");
+  return found as HTMLButtonElement;
 }
 
 /** Settle the `trackBacklinks` promise chain (then → catch → finally). */
@@ -137,6 +168,7 @@ afterEach(() => {
     backlinksOpen: true,
     backlinksOrder: "newest",
     backlinksLoading: false,
+    editingBacklink: null,
   });
   document.body.innerHTML = "";
 });
@@ -159,7 +191,7 @@ describe("InlineBacklinks task state — #144", () => {
   });
 
   it("toggles the source task and refreshes the current tag view", async () => {
-    vi.mocked(toggleTodo).mockResolvedValue(pageView());
+    vi.mocked(backlinkRowOp).mockResolvedValue(pageView());
     vi.mocked(pageBacklinks).mockResolvedValue(
       backlinksReply([backlink("todo", "DONE")]),
     );
@@ -168,7 +200,14 @@ describe("InlineBacklinks task state — #144", () => {
     (host.querySelector('[data-todo="TODO"]') as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
-      expect(toggleTodo).toHaveBeenCalledWith("page-1", "todo");
+      // The cross-page command, not `toggle_todo`: a click on the
+      // bullet of a row a peer has trashed is the commonest way to
+      // reach the refusal, and `toggle_todo` reports it as a ULID.
+      expect(backlinkRowOp).toHaveBeenCalledWith(
+        "page-1",
+        "todo",
+        "toggle-todo",
+      );
       // Refetch the *current* page's backlinks, not a re-open: the
       // slug didn't change, so OutlineView's per-slug effect won't fire.
       expect(pageBacklinks).toHaveBeenCalledWith("project");
@@ -178,7 +217,7 @@ describe("InlineBacklinks task state — #144", () => {
   });
 
   it("starts a plain backlink as TODO", async () => {
-    vi.mocked(toggleTodo).mockResolvedValue(pageView());
+    vi.mocked(backlinkRowOp).mockResolvedValue(pageView());
     vi.mocked(pageBacklinks).mockResolvedValue(
       backlinksReply([backlink("plain", "TODO")]),
     );
@@ -187,13 +226,16 @@ describe("InlineBacklinks task state — #144", () => {
     (host.querySelector('[data-todo="none"]') as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
-      expect(toggleTodo).toHaveBeenCalledWith("page-1", "plain");
+      expect(backlinkRowOp).toHaveBeenCalledWith(
+        "page-1",
+        "plain",
+        "toggle-todo",
+      );
       expect(host.querySelector('[data-todo="TODO"]')?.textContent).toBe("▢");
     });
   });
 
-  it("keeps text clicks navigating to the source block", async () => {
-    vi.mocked(openRef).mockResolvedValue(pageView());
+  it("edits the cited block on a text click, without navigating", () => {
     const host = mount([backlink("todo", "TODO")]);
     const textButton = Array.from(host.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("task"),
@@ -202,10 +244,79 @@ describe("InlineBacklinks task state — #144", () => {
     if (!textButton) throw new Error("backlink text button did not render");
     textButton.click();
 
+    // A row used to be a destination, so acting on one cost the user
+    // the very view that assembled these references.
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(openRef).not.toHaveBeenCalled();
+    expect(backlinkRowOp).not.toHaveBeenCalled();
+  });
+
+  it("still opens the source page from the group header", async () => {
+    vi.mocked(openRef).mockResolvedValue(pageView());
+    const host = mount([backlink("todo", "TODO")]);
+
+    groupHeader(host).click();
+
+    // The "open the page" half of the gesture split — the only half
+    // that navigates, and the one the row's click gave up.
     await vi.waitFor(() => {
       expect(openRef).toHaveBeenCalledWith("journal");
     });
-    expect(toggleTodo).not.toHaveBeenCalled();
+    expect(host.querySelector("textarea")).toBeNull();
+  });
+
+  /**
+   * The group header is the **only** door to the source page now —
+   * `Enter` and the row click both became edit gestures — and it was
+   * the one path that did not go through `applyPageState`.
+   *
+   * It wrote `page` + outline and nothing else, which is exactly the
+   * second `applyView` this client paid to delete. So the new page
+   * arrived wearing the previous one's `key:: value` chips, its parse
+   * warnings, and its **"this page isn't syncing" banner** — and that
+   * last one is not cosmetic: `<PageAheadOfLogBanner />` claims a page
+   * has stopped converging with the user's other devices, so carrying
+   * it over names a healthy page as broken, over a page that is fine,
+   * until some later reply happens to run through the real writer.
+   *
+   * Pinned on the **resulting state**, not on `openRef` having been
+   * called: the test that existed asserted the call and nothing about
+   * what it installed, which is why the body survived the branch that
+   * made this path the only one.
+   */
+  it("installs the whole reply when the group header opens the source page", async () => {
+    // The page on screen is unhealthy and carries its own chips; the
+    // page being opened is healthy and has neither.
+    applyPageState({
+      ...openPageView(),
+      page_properties: [["type", "person"]],
+      warnings: [{ kind: "unrecognized_block_marker", line: 3, raw: "~~ huh" }],
+      md_ahead_of_log: {
+        path: "journals/2026-11-19.md",
+        lines: 2,
+        sample: "- only ever on disk",
+      },
+      md_ahead_of_log_checked: true,
+    });
+    expect(appState.mdAheadOfLog).not.toBeUndefined();
+    vi.mocked(openRef).mockResolvedValue({
+      ...pageView(),
+      md_ahead_of_log_checked: true,
+    });
+    const host = mount([backlink("todo", "TODO")]);
+
+    groupHeader(host).click();
+
+    await vi.waitFor(() => {
+      expect(appState.page?.slug).toBe("journal");
+    });
+    // None of the previous page's claims may follow the user over.
+    expect(appState.mdAheadOfLog).toBeUndefined();
+    expect(appState.pageProperties).toEqual([]);
+    expect(appState.parseWarnings).toEqual([]);
+    // And it is a navigation, so the zoom and the row cursor go too.
+    expect(appState.focusBlockId).toBeNull();
+    expect(appState.selectedBacklinkBlockId).toBeNull();
   });
 });
 
@@ -230,7 +341,7 @@ describe("backlinks load behind the page", () => {
     const editor = focusedEditor();
     const host = mount([]);
 
-    const done = trackBacklinks(pageBacklinks("project"));
+    const done = trackBacklinks();
 
     // The input the user is in is untouched: mounted, enabled, caret kept.
     expect(document.activeElement).toBe(editor);
@@ -252,7 +363,7 @@ describe("backlinks load behind the page", () => {
     );
     const host = mount([backlink("todo", "TODO")]);
 
-    const done = trackBacklinks(pageBacklinks("project"));
+    const done = trackBacklinks();
 
     // Blanking the list to show a placeholder would make a refetch read
     // as "this page lost its references".
@@ -270,7 +381,7 @@ describe("backlinks load behind the page", () => {
     // about a section that was never on screen in the first place.
     const host = mount([backlink("todo", "TODO")]);
 
-    await trackBacklinks(pageBacklinks("project"));
+    await trackBacklinks();
 
     // A swallowed failure that leaves the mark up is a section that
     // loads forever; the rows it already had stay.
@@ -303,7 +414,7 @@ describe("the backlinks section never appears and then disappears", () => {
     );
     const host = mount([]);
 
-    const done = trackBacklinks(pageBacklinks("project"));
+    const done = trackBacklinks();
     expect(host.querySelector("section")).toBeNull();
 
     settle(backlinksReply([]));
@@ -320,7 +431,7 @@ describe("the backlinks section never appears and then disappears", () => {
     );
     const host = mount([]);
 
-    const done = trackBacklinks(pageBacklinks("project"));
+    const done = trackBacklinks();
     expect(host.querySelector("section")).toBeNull();
 
     settle(backlinksReply([backlink("todo", "TODO")]));
@@ -340,7 +451,7 @@ describe("the backlinks section never appears and then disappears", () => {
     );
     const host = mount([backlink("todo", "TODO")]);
 
-    const done = trackBacklinks(pageBacklinks("project"));
+    const done = trackBacklinks();
     // The user is looking at a section that is about to change: the
     // mark is owed here, and only here.
     expect(host.querySelector("[data-backlinks-pending]")).not.toBeNull();
@@ -379,6 +490,52 @@ describe("the backlinks section never appears and then disappears", () => {
 
     // One fetch, for the open. Not one per commit.
     expect(pageBacklinks).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The same promise under a **held** chord, which is the shape the
+   * dedupe had to be built without breaking.
+   *
+   * A held `Alt+↑` or `Tab` on a row commits once per key repeat, and
+   * each commit re-asks. Coalescing those asks is only half the job: the
+   * half that reaches the user is that the section keeps the **same**
+   * `<section>` node throughout. An unmount and remount inside one tick
+   * is still an unmount — the DOM node is destroyed, and a
+   * `<BacklinkRowEditor />` open inside it loses its focus and the draft
+   * the user was typing. That is what `emptyBacklinks()` on a refetch
+   * used to cause, and what commit `4817abd2` exists to undo.
+   */
+  it("keeps the same section node through a burst of commits", async () => {
+    const scans: Array<(r: PageBacklinks) => void> = [];
+    vi.mocked(pageBacklinks).mockImplementation(
+      () => new Promise<PageBacklinks>((resolve) => scans.push(resolve)),
+    );
+    const host = mount([backlink("todo", "TODO")]);
+    const before = host.querySelector("section");
+    expect(before).not.toBeNull();
+
+    // Ten repeats, each re-asking the way a committed chord does.
+    for (let i = 0; i < 10; i++) void trackBacklinks();
+    await flush();
+
+    // Node identity, not merely presence: `toBe` is what refuses a
+    // remount that `not.toBeNull()` would call a pass.
+    expect(host.querySelector("section")).toBe(before);
+    expect(host.querySelector('[data-todo="TODO"]')).not.toBeNull();
+    expect(host.querySelector("[data-backlinks-pending]")).not.toBeNull();
+
+    // One scan in flight; the trailing one runs when it lands.
+    expect(scans).toHaveLength(1);
+    scans[0](backlinksReply([backlink("todo", "DONE")]));
+    await flush();
+    expect(scans).toHaveLength(2);
+    expect(host.querySelector("section")).toBe(before);
+
+    scans[1](backlinksReply([backlink("todo", "DONE")]));
+    await flush();
+    expect(host.querySelector("section")).toBe(before);
+    expect(host.querySelector('[data-todo="DONE"]')).not.toBeNull();
+    expect(host.querySelector("[data-backlinks-pending]")).toBeNull();
   });
 });
 

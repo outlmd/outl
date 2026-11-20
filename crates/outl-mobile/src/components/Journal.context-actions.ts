@@ -12,9 +12,59 @@
  * `Journal.buildContextActions.test.ts` could drive it without mounting
  * the whole component; the export is now honest about where it lives.
  */
+import type { Backlink } from "@outl/shared/api/types";
+import { backlinkEditTarget } from "@outl/shared/backlink-edit";
 import { detectFence } from "@outl/shared/highlight";
 import { findBlock } from "@outl/shared/outline";
 import type { BlockContextAction } from "./BlockContextMenu";
+
+/** An action both long-press sheets offer. */
+type SharedRowId =
+  | "toggleTodo"
+  | "newBlockBelow"
+  | "newBlockAbove"
+  | "indent"
+  | "outdent"
+  | "moveUp"
+  | "moveDown"
+  | "delete";
+
+/**
+ * Label and glyph for the rows **both** sheets draw — the outline's and
+ * a backlink row's.
+ *
+ * One action, one label, one glyph, whichever sheet it was reached
+ * from. Two icon literals for "Indent" is how the same action comes to
+ * look like two different ones, and the user has no way to tell which
+ * of the two is the one they meant.
+ */
+const SHARED_ROWS: Record<
+  SharedRowId,
+  { label: string; iconPath: string; destructive?: boolean }
+> = {
+  toggleTodo: { label: "Toggle TODO", iconPath: "M5 12l4 4 10-10" },
+  // Plus above a rule / below a rule — "insert before" and "insert
+  // after". Only `newBlockAbove` has an outline twin: the outline
+  // reaches "below" through Enter at the end of a block.
+  newBlockAbove: { label: "New block above", iconPath: "M12 4v8 M8 8h8 M4 20h16" },
+  newBlockBelow: { label: "New block below", iconPath: "M4 4h16 M12 12v8 M8 16h8" },
+  indent: {
+    label: "Indent",
+    iconPath: "M3 5h12M3 12h8M3 19h12M15 9l3 3-3 3",
+  },
+  outdent: {
+    label: "Outdent",
+    iconPath: "M3 5h12M3 12h8M3 19h12M21 9l-3 3 3 3",
+  },
+  moveUp: { label: "Move up", iconPath: "M12 19V5M5 12l7-7 7 7" },
+  moveDown: { label: "Move down", iconPath: "M12 5v14M19 12l-7 7-7-7" },
+  delete: {
+    label: "Delete",
+    iconPath:
+      "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6",
+    destructive: true,
+  },
+};
 
 /**
  * Wire the long-press block id into a typed action list for
@@ -123,8 +173,7 @@ export function buildContextActions(
       : []),
     {
       id: "toggleTodo",
-      label: "Toggle TODO",
-      iconPath: "M5 12l4 4 10-10",
+      ...SHARED_ROWS.toggleTodo,
       onSelect: () => handlers.toggleTodo(blockId),
     },
     // Touch-native range selection (RFC 0254 phase 3) — the one
@@ -207,9 +256,7 @@ export function buildContextActions(
     },
     {
       id: "newBlockAbove",
-      label: "New block above",
-      // Plus above a horizontal rule — reads as "insert before".
-      iconPath: "M12 4v8 M8 8h8 M4 20h16",
+      ...SHARED_ROWS.newBlockAbove,
       // Ends in an empty block waiting to be typed into, and the menu
       // was opened with the keyboard down.
       armsKeyboard: true,
@@ -251,38 +298,100 @@ export function buildContextActions(
     },
     {
       id: "indent",
-      label: "Indent",
-      iconPath: "M3 5h12M3 12h8M3 19h12M15 9l3 3-3 3",
+      ...SHARED_ROWS.indent,
       onSelect: () => handlers.indent(blockId),
     },
     {
       id: "outdent",
-      label: "Outdent",
-      iconPath: "M3 5h12M3 12h8M3 19h12M21 9l-3 3 3 3",
+      ...SHARED_ROWS.outdent,
       onSelect: () => handlers.outdent(blockId),
     },
     {
       id: "moveUp",
-      label: "Move up",
-      iconPath: "M12 19V5M5 12l7-7 7 7",
+      ...SHARED_ROWS.moveUp,
       enabled: () => canMoveUp,
       onSelect: () => handlers.moveUp(blockId),
     },
     {
       id: "moveDown",
-      label: "Move down",
-      iconPath: "M12 5v14M19 12l-7 7-7-7",
+      ...SHARED_ROWS.moveDown,
       enabled: () => canMoveDown,
       onSelect: () => handlers.moveDown(blockId),
     },
     {
       id: "delete",
-      label: "Delete",
-      iconPath:
-        "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6",
-      destructive: true,
+      ...SHARED_ROWS.delete,
       onSelect: () => handlers.delete(blockId),
     },
+  ];
+}
+
+/**
+ * The same sheet, long-pressed on a **backlink row**.
+ *
+ * Mobile has no chord surface at all, so where the desktop binds a key
+ * to act on a focused backlink, this client offers a row. Each one acts
+ * on the citing block, on the page it lives on — which is why the
+ * handlers take the whole {@link Backlink}: it is what carries
+ * `source_page.id`, and the only page id otherwise in scope on this
+ * card is the one on screen, i.e. the wrong one.
+ *
+ * Three differences from the outline's list, each with a reason:
+ *
+ * - **An orphan backlink gets nothing.** `backlinkEditTarget` is `null`
+ *   when the citing block lives outside any page, so there is no page
+ *   to address a mutation to and guessing one writes to the wrong
+ *   document. Not an empty sheet — no sheet.
+ * - **Move up / down carry no `enabled` guard.** The outline's builder
+ *   resolves a sibling index to hide them at the ends; a backlink row
+ *   renders one flat block with no siblings on screen, so that position
+ *   does not exist here. Offering both is the honest answer.
+ * - **A create row arms no keyboard**, and that is the only thing the
+ *   create rows give up. A new sibling cites nothing, so it is a
+ *   backlink of no page, appears in no row on this screen, and has no
+ *   editor to focus — `armsKeyboard` would raise the keyboard over
+ *   nothing. The block is still created and the user is told where it
+ *   landed (`backlinkCreatedElsewhere`, called by the host, which
+ *   knows the open page and gets `null` back when it is the source).
+ *   A declared limit beats a wrong target: the TUI hit the same wall
+ *   from the other side and reached the same answer.
+ *
+ * Editing the row's **text** is not here either, because the tap is the
+ * gesture for it (`BacklinksSection`).
+ *
+ * `enabled` is deliberately absent from every row: a long press only
+ * reaches this with a row under the finger, and the card refuses a
+ * second write while one is in flight before the sheet ever opens
+ * (`BacklinksSection.row-ops.ts`).
+ */
+export function buildBacklinkContextActions(
+  link: Backlink | null,
+  handlers: {
+    toggleTodo: (link: Backlink) => void;
+    createBelow: (link: Backlink) => void;
+    createAbove: (link: Backlink) => void;
+    indent: (link: Backlink) => void;
+    outdent: (link: Backlink) => void;
+    moveUp: (link: Backlink) => void;
+    moveDown: (link: Backlink) => void;
+    delete: (link: Backlink) => void;
+  },
+): BlockContextAction[] {
+  if (!link || !backlinkEditTarget(link)) return [];
+  const row = (id: SharedRowId, run: (l: Backlink) => void) => ({
+    id,
+    ...SHARED_ROWS[id],
+    onSelect: () => run(link),
+  });
+  return [
+    row("toggleTodo", handlers.toggleTodo),
+    row("newBlockBelow", handlers.createBelow),
+    row("newBlockAbove", handlers.createAbove),
+    row("indent", handlers.indent),
+    row("outdent", handlers.outdent),
+    row("moveUp", handlers.moveUp),
+    row("moveDown", handlers.moveDown),
+    row("delete", handlers.delete),
   ];
 }
 

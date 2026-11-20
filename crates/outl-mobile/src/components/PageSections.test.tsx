@@ -75,6 +75,8 @@ function mount(
         pageKind={pageKind}
         zoomed={zoomed}
         onToggleOrder={vi.fn()}
+        onEditCommitted={vi.fn()}
+        onError={vi.fn()}
         onOpenPage={vi.fn()}
       />
     ),
@@ -140,6 +142,44 @@ describe("Journal hands PageSections an answer for the page on screen", () => {
       "backlinks={backlinks.loading ? undefined : backlinks()}",
     );
   });
+
+  // The other side of that line: an edit committed through a backlink
+  // row has to re-ask for the rows **without** re-running the resource,
+  // or the `undefined` above unmounts the card the user just typed
+  // into. `Journal.backlinks.ts` owns the swap; this is the wiring.
+  it("re-asks for the rows after a commit through a row", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "Journal.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("onEditCommitted={backlinkCard.committed}");
+  });
+
+  // The refusal's last mile. A cross-page write can be rejected (a
+  // stale block id, a source page that stopped syncing), and mobile has
+  // no status line — `UX.md`'s channel table gives it the toast. Delete
+  // this prop and every component test still passes while the refusal
+  // vanishes, which is why the line itself is pinned.
+  it("routes a refusal from a backlink row into the toast", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "Journal.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("onError={backlinkCard.refused}");
+  });
+
+  // The other half of the collapse: the section reports *which* page a
+  // reply describes, and the host is where both page ids exist, so
+  // `backlinkCommitPlan` runs there. A section taking `openPageId` is
+  // the leak this replaced.
+  it("keeps the open page's identity out of the section", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "PageSections.tsx"),
+      "utf8",
+    );
+    expect(source).not.toContain("openPageId");
+    expect(source).not.toContain("onApplySourceView");
+  });
 });
 
 /**
@@ -189,5 +229,68 @@ describe("Journal scopes the page's own surfaces to the full page", () => {
 
   it("keeps the page property row out of a zoom", () => {
     expect(source()).toContain('<Show when={!focusView()}>\n          <BlockProperties');
+  });
+});
+
+/**
+ * `<PageSections />` hands the card its callbacks, and a prop it
+ * declares but does not forward compiles: both are optional on the
+ * child. `onEditCommitted` and `onError` are exactly that shape — drop
+ * either from the `<BacklinksSection>` call and every row edit still
+ * writes, but the host never re-asks for the rows, or a refusal never
+ * reaches the toast.
+ *
+ * Read from the JSX, the way `BlockRow.recursion.test.ts` reads its own:
+ * every prop this component accepts is either referenced inside the
+ * `<BacklinksSection>` call or listed below with a reason.
+ */
+describe("PageSections forwards what the card needs", () => {
+  const SOURCE = readFileSync(
+    join(import.meta.dirname, "PageSections.tsx"),
+    "utf8",
+  );
+
+  /** Props the card is right not to receive: this component consumes them. */
+  const NOT_FORWARDED: Record<string, string> = {
+    pageKind: "decides whether the empty card shows (`keepWhenEmpty`)",
+    blank: "drives the first-run tips, which sit above the card",
+    zoomed: "hides every section, the card included",
+  };
+
+  function declaredProps(): string[] {
+    const start = SOURCE.indexOf("export interface PageSectionsProps {");
+    expect(start, "interface PageSectionsProps not found").toBeGreaterThan(-1);
+    const body = SOURCE.slice(start, SOURCE.indexOf("\n}", start));
+    return [...body.matchAll(/^\s{2}(\w+)\??:/gm)].map((m) => m[1]);
+  }
+
+  function cardCall(): string {
+    const start = SOURCE.indexOf("<BacklinksSection");
+    expect(start, "<BacklinksSection> not found").toBeGreaterThan(-1);
+    return SOURCE.slice(start, SOURCE.indexOf("/>", start));
+  }
+
+  it("passes every prop it accepts to the card, or says why not", () => {
+    const call = cardCall();
+    const missing = declaredProps().filter(
+      (name) => !call.includes(`props.${name}`) && !(name in NOT_FORWARDED),
+    );
+    expect(
+      missing,
+      `these props stop at PageSections: ${missing.join(", ")}. ` +
+        "Forward them to <BacklinksSection>, or add a row to NOT_FORWARDED.",
+    ).toEqual([]);
+  });
+
+  it("reads a non-trivial prop list", () => {
+    // A guard on the guard: a regex that stops matching would pass the
+    // test above vacuously.
+    expect(declaredProps().length).toBeGreaterThan(6);
+  });
+
+  it("hands the card the commit and the refusal by name", () => {
+    const call = cardCall();
+    expect(call).toContain("onEditCommitted={props.onEditCommitted}");
+    expect(call).toContain("onError={props.onError}");
   });
 });

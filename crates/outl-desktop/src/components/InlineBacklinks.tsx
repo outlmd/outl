@@ -1,11 +1,14 @@
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 
 import {
+  backlinkRowOp,
   openRef,
-  pageBacklinks,
   setBacklinksOrder,
-  toggleTodo,
 } from "@outl/shared/api/commands";
+import {
+  backlinkCommitPlan,
+  backlinkEditTarget,
+} from "@outl/shared/backlink-edit";
 import {
   CrumbTrail,
   crumbTrailText,
@@ -16,13 +19,12 @@ import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
-import {
-  appState,
-  backlinkCursor,
-  setAppState,
-  setOutline,
-  trackBacklinks,
-} from "../lib/store";
+import { backlinkCursor, startBacklinkEdit } from "../lib/cursor-region";
+import { resetForNavigation } from "../lib/page-change";
+import { applyPageState } from "../lib/page-view";
+import { trackBacklinks } from "../lib/backlinks-fetch";
+import { appState, setAppState } from "../lib/store";
+import { BacklinkRowEditor } from "./BacklinkRowEditor";
 
 /** What one click on a backlink's bullet does next. The toggle walks
  *  the cycle a step at a time, so the label names the *next* stop,
@@ -56,12 +58,17 @@ function backlinkTodoLabel(todo: Backlink["todo"]): string {
  *   to take away. An empty section doesn't earn its space here, and a
  *   skeleton that collapses into one is the blink.
  *
- * Each backlink row is **navigable**: vim `j/k` extends past the
- * outline's last block into this section, and `Enter` opens the
- * source page positioned on the referencing block. Mouse click
- * does the same — both flows funnel through `openBacklink` so the
- * cursor lands at the same place no matter how the user
- * triggered the open.
+ * Each backlink row is **navigable and editable**: vim `j/k` extends
+ * past the outline's last block into this section, and a click, `i` or
+ * `Enter` on a row edits the cited block **in place**, on the page it
+ * lives on (`<BacklinkRowEditor />`). A row used to be a destination
+ * instead — acting on one cost the user the very view that assembled
+ * these references.
+ *
+ * Opening the source page is the **group header**, which is where it
+ * already was. An orphan row (`source_page` null) has no page to address
+ * and stays read-only; `backlinkEditTarget` is the one owner of that
+ * verdict, shared with mobile.
  *
  * **Which row holds that cursor is `backlinkCursor()`'s answer, never
  * `appState.selectedBacklinkBlockId` directly.** The outline owns the
@@ -71,37 +78,82 @@ function backlinkTodoLabel(todo: Backlink["todo"]): string {
  * same reason a *hover* is not a cursor move; see the row's own note.
  */
 export function InlineBacklinks() {
-  async function openBacklink(link: Backlink) {
-    const target = link.source_page?.slug;
-    if (!target) return;
-    try {
-      const view = await openRef(target);
-      // Backlinks refetch via OutlineView's per-slug effect once the
-      // new page's outline lands; the view no longer carries them.
-      setAppState({ page: view.page });
-      setOutline(view.outline);
-      // Position cursor on the source block (the one we just came
-      // from). Reset backlink cursor so j/k keep working in the
-      // freshly-opened outline.
-      setAppState("selectedBacklinkBlockId", null);
-      setAppState("selectedBlockId", link.block_id);
-    } catch (e) {
-      setAppState("lastError", e instanceof Error ? e.message : String(e));
-    }
-  }
+  /**
+   * Which row holds the keyboard cursor, resolved **once per render**
+   * rather than once per row.
+   *
+   * The same shape `<OutlineView />` gives `focus()` and `<BlockRow />`
+   * gives `visualSet`, and for the same reason: a per-row predicate is
+   * O(N²) the moment anything inside it is not O(1), and one of
+   * `backlinkCursor`'s ingredients is not. It asks whether the section
+   * is on screen, which includes `zoomView()` — and that is
+   * `focusSubtree(outline, focusBlockId)`, an O(page) walk, whenever
+   * `focusBlockId` is set but the block it names has left the outline.
+   *
+   * That state is reachable and this branch made it expensive: a peer
+   * deletes or moves the zoomed block, so `zoomView()` answers `null`,
+   * `<PageSections zoomed>` is false and this section renders — with
+   * `focusBlockId` still set, because the self-heal that clears it is a
+   * `createEffect` and therefore runs *after* the render. One render,
+   * measured on the busiest real page (1,556 rows, a 688-block
+   * outline): **851 ms against 166 ms** to mount, and **724.7 ms
+   * against 2.6 ms** for a single cursor move, which is a keystroke.
+   * Linear in rows with the whole page as its constant.
+   *
+   * The memo removes the shape rather than the state: the walk runs
+   * once, and each row's subscription set shrinks to this one signal.
+   * **Reading `appState.focusBlockId` instead would be wrong**, not
+   * merely cheaper — a stale id means "not zoomed" to what is drawn and
+   * would mean "zoomed" here, which is a cursor in a section nothing
+   * painted. `lib/cursor-region.ts` owns that rule and keeps it.
+   */
+  const cursor = createMemo(backlinkCursor);
 
+  /**
+   * The click on a row's bullet, the mouse twin of the keyboard's
+   * `Cmd+T` (`backlink-handlers.ts`).
+   *
+   * **Both go through `backlinkCommitPlan`**, which is what stops the
+   * two answering differently: a page can cite itself, and then the
+   * reply *is* a fresh view of the page on screen. Discarding it there
+   * left the outline's own checkbox stale while the keyboard path
+   * refreshed it — one block showing two states on one screen,
+   * depending on how the user had toggled it.
+   *
+   * It is still a second *call site* rather than a second owner: this
+   * one targets the row the mouse hit, not `backlinkCursor()`'s.
+   *
+   * **`backlinkRowOp`, never `toggleTodo`** — the same rule the chord
+   * follows, for the same reason. `toggle_todo` acts on the page the
+   * user is looking at and reports a stale block id as a raw
+   * `ActionError`, which is a ULID in the status line; the cross-page
+   * command refuses in `outl_actions::refusal`'s words. A click on the
+   * bullet of a row a peer has trashed is the commonest way to reach
+   * that refusal, because it needs no keyboard.
+   */
   async function toggleBacklinkTodo(link: Backlink) {
     const sourcePage = link.source_page;
     const currentSlug = appState.page?.slug;
     if (!sourcePage || !currentSlug) return;
+    const plan = backlinkCommitPlan({
+      sourcePageId: sourcePage.id,
+      openPageId: appState.page?.id,
+    });
     try {
-      await toggleTodo(sourcePage.id, link.block_id);
+      const view = await backlinkRowOp(
+        sourcePage.id,
+        link.block_id,
+        "toggle-todo",
+      );
+      if (plan.applyView) applyPageState(view);
       // The mutation lands on the *source* page, so nothing on this page
-      // re-renders on its own — and OutlineView's backlink effect is keyed
-      // on the slug, which didn't change. Refetch the projection directly:
-      // this is the one mutation that changes the current page's own
+      // re-renders on its own — and the backlinks effect is keyed on the
+      // page, which didn't change. Refetch the projection directly: this
+      // is one of the mutations that changes the current page's own
       // backlinks, the exception that effect's comment calls out.
-      await trackBacklinks(pageBacklinks(currentSlug));
+      if (plan.refetchBacklinks) {
+        await trackBacklinks();
+      }
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     }
@@ -121,16 +173,42 @@ export function InlineBacklinks() {
     }
   }
 
-  /** Open the source page from a group header (jumps to the page,
-   *  no per-block positioning). */
+  /**
+   * Open the source page from a group header (jumps to the page, no
+   * per-block positioning).
+   *
+   * **Through `applyPageState`, like every other reply.** That function
+   * is the single writer of what a `PageView` says about the page —
+   * the page, its `key:: value` chips, the parser's warnings, and the
+   * sticky "this page isn't syncing" banner — and this used to write
+   * `page` + outline and nothing else, which is exactly the second
+   * `applyView` the desktop paid to delete.
+   *
+   * The banner is why this is not cosmetic. `<PageAheadOfLogBanner />`
+   * claims a page has stopped converging with the user's other
+   * devices; carried over from the page they just left, it names the
+   * wrong page as broken — and the page it names is healthy, so
+   * nothing the user does makes it go away until the next reply that
+   * does run through here.
+   *
+   * Pre-existing, and this branch is what made it reachable in one
+   * gesture: `Enter` and the row click both became edit gestures, so
+   * the group header is now the **only** door to the source page.
+   *
+   * `resetForNavigation()` first, the shape `<RemindersPanel />`'s own
+   * `jumpTo` uses: this is a navigation, so the zoom and any backlink
+   * cursor or open row editor go with it.
+   * `installPageChangeEffect` would also catch it on an id change, but
+   * not when the user asks for the page they are already on — which a
+   * self-citing page's header is.
+   */
   async function jumpTo(sourceSlug: string | undefined) {
     if (!sourceSlug) return;
     try {
       const view = await openRef(sourceSlug);
-      // Backlinks refetch via OutlineView's per-slug effect.
-      setAppState({ page: view.page });
-      setOutline(view.outline);
-      setAppState("selectedBacklinkBlockId", null);
+      // Backlinks refetch via `installBacklinksEffect`'s page key.
+      resetForNavigation();
+      applyPageState(view);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     }
@@ -247,12 +325,26 @@ export function InlineBacklinks() {
                 <ul class="mt-1 space-y-1 pl-6">
                   <For each={group.entries}>
                     {(link, index) => {
-                      // Through `backlinkCursor`, never the raw field:
-                      // the outline holds the cursor until it releases
-                      // it, so a stale id cannot paint an accent bar on
-                      // a row the keyboard is not on.
-                      const selected = () =>
-                        backlinkCursor() === link.block_id;
+                      // Through the `cursor` memo over
+                      // `backlinkCursor`, never the raw field: the
+                      // outline holds the cursor until it releases it,
+                      // so a stale id cannot paint an accent bar on a
+                      // row the keyboard is not on. The memo is why
+                      // this is one comparison per row and not one
+                      // page walk per row — see its doc.
+                      const selected = () => cursor() === link.block_id;
+                      // The `(page, block)` pair an edit of this row is
+                      // addressed to, or `null` for an orphan — one
+                      // owner across both GUI clients, so neither
+                      // decides for itself which rows are editable.
+                      const editTarget = () => backlinkEditTarget(link);
+                      // The same pair, but only while *this* row is the
+                      // one in Insert — the editing identity is global
+                      // (one row at a time) and the row has to match it.
+                      const editing = () =>
+                        appState.editingBacklink?.blockId === link.block_id
+                          ? editTarget()
+                          : null;
                       // Breadcrumb of ancestor blocks as dimmed context.
                       // Collapsed against the previous entry in the same
                       // group: consecutive references in the same branch
@@ -263,6 +355,69 @@ export function InlineBacklinks() {
                         link.ancestors.length > 0 &&
                         (!prev ||
                           !sameCrumbTrail(prev.ancestors, link.ancestors));
+                      /**
+                       * The row in read mode — the cited block's text,
+                       * and the gesture that starts editing it.
+                       *
+                       * A named local rather than an inline `fallback`,
+                       * the shape `<BlockRow />` uses for its own
+                       * bullet and body: the two states are 50 lines
+                       * and 10, and nesting the long one inside the
+                       * short one's prop buries the branch.
+                       */
+                      const rowText = () => (
+                        <button
+                          type="button"
+                          // Editing in place, rather than opening the
+                          // source page: the view that assembled these
+                          // references is the one the user came to act
+                          // in, and acting on a row used to cost it.
+                          // Opening the page stays on the group header.
+                          //
+                          // An orphan backlink has no page to address
+                          // (`source_page` is null when the citing
+                          // block lives outside any page), so its row
+                          // stays read-only.
+                          onClick={() => {
+                            const target = editTarget();
+                            if (target) startBacklinkEdit(target);
+                          }}
+                          // No `onMouseEnter`: a pointer crossing this
+                          // section is not a cursor move. It used to
+                          // write `selectedBacklinkBlockId`, which is
+                          // the keyboard's own cursor, so merely
+                          // passing over a row on the way elsewhere
+                          // took `j` and `Enter` off the block the user
+                          // had left them on. The hover affordance is
+                          // the `hover:bg-…` below, which costs no
+                          // state.
+                          class={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-sm leading-snug opacity-90 hover:bg-(--color-outl-fg)/5 hover:opacity-100 ${
+                            link.todo === "DONE"
+                              ? "line-through opacity-60"
+                              : ""
+                          }`}
+                        >
+                          <Show
+                            when={link.source_block.table}
+                            fallback={
+                              <MarkdownInline
+                                tokens={link.source_block.tokens}
+                                variant="inline"
+                              />
+                            }
+                          >
+                            {/* A citing block that is a table reads as
+                                a grid here too. Inert (no `onEdit`) —
+                                the row's own click is the edit
+                                gesture, and a table has no cell
+                                editor by design (#329). */}
+                            <MarkdownTable
+                              table={link.source_block.table!}
+                              variant="inline"
+                            />
+                          </Show>
+                        </button>
+                      );
                       return (
                         <li
                           // The selected state mirrors the outline's
@@ -311,43 +466,23 @@ export function InlineBacklinks() {
                                     ? "▢"
                                     : "•"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => void openBacklink(link)}
-                              // No `onMouseEnter`: a pointer crossing
-                              // this section is not a cursor move. It
-                              // used to write `selectedBacklinkBlockId`,
-                              // which is the keyboard's own cursor, so
-                              // merely passing over a row on the way
-                              // elsewhere took `j` and `Enter` off the
-                              // block the user had left them on. The
-                              // hover affordance is the `hover:bg-…`
-                              // below, which costs no state.
-                              class={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-sm leading-snug opacity-90 hover:bg-(--color-outl-fg)/5 hover:opacity-100 ${
-                                link.todo === "DONE"
-                                  ? "line-through opacity-60"
-                                  : ""
-                              }`}
+                            <Show
+                              when={editing()}
+                              fallback={rowText()}
                             >
-                              <Show
-                                when={link.source_block.table}
-                                fallback={
-                                  <MarkdownInline
-                                    tokens={link.source_block.tokens}
-                                    variant="inline"
+                              {/* Mounted only while this row is the one
+                                  being edited, which is what seeds its
+                                  draft once per edit session rather than
+                                  once per row — see the editor's doc. */}
+                              {(target) => (
+                                <div class="min-w-0 flex-1 px-1 py-0.5 text-sm leading-snug">
+                                  <BacklinkRowEditor
+                                    link={link}
+                                    target={target()}
                                   />
-                                }
-                              >
-                                {/* A citing block that is a table reads
-                                    as a grid here too. Inert (no
-                                    `onEdit`) — a backlink is a read-only
-                                    view of someone else's page. */}
-                                <MarkdownTable
-                                  table={link.source_block.table!}
-                                  variant="inline"
-                                />
-                              </Show>
-                            </button>
+                                </div>
+                              )}
+                            </Show>
                           </div>
                         </li>
                       );

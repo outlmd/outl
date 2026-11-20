@@ -19,7 +19,8 @@ use outl_core::property::PropValue;
 use outl_md::remind::{RemindAnchor, RemindRule, RemindStop};
 use serde::{Deserialize, Serialize};
 
-use crate::helpers::{finish_in_page, parse_node_id, with_ws, with_ws_mut};
+use crate::commit::finish_in_page;
+use crate::helpers::{parse_node_id, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::PageView;
 

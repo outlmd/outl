@@ -137,9 +137,19 @@ The sidebar's recents queue had the identical defect and now takes `createPageKe
 
 Taking the shared key also fixed a half this client never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
 
-All three fetch sites (that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`) go through `trackBacklinks` in `lib/store.ts`, none of them awaited on a render or keystroke path; the latter two are declared exceptions in that parity test, with the reason each re-asks.
+**All five fetch sites go through `trackBacklinks` (`lib/backlinks-fetch.ts`), which takes no argument, and that is the point.**
+The five are that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`, `BacklinkRowEditor`'s text commit, and `backlinkRowOps.settle` (the nine cross-page chords).
+None is awaited on a render or keystroke path.
 It owns `appState.backlinksLoading`, which `<InlineBacklinks />` is the **only** reader of.
 A page-wide load state here is the regression [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) names; `InlineBacklinks.test.tsx` → "backlinks load behind the page" is the net.
+
+Its own module and not `store.ts` for the reason `cursor-region.ts` is one: that file is the state *shape*, and this is an async policy.
+The parity test's declared exception moved with it and shrank to one row, since no caller can build a fetch any more.
+
+It used to take the promise, which puts the IPC call on the wire before the owner is reached — nothing left to coalesce, and a **held** `Alt+↑` or `Tab` was one `O(blocks-in-workspace)` scan per key repeat.
+A burst is now one scan in flight plus one queued, whatever the repeat rate.
+That module's doc owns the three rules and the measurements; `lib/backlinks-fetch.test.ts` and `lib/backlink-handlers.cost.test.ts` are the nets (the second is invariant 15's *is it cheap once*, driven through the real `backlinkRowOps`).
+**Mobile needs no coalescer:** `BacklinksSection.row-ops.ts` refuses a second gesture while one is in flight, `busy()` spans the mutation *and* the awaited re-ask, and a touch gesture has no key repeat.
 
 **The section's own pending state had the mirror defect, and reserving space is not the fix.**
 It mounted a 95px header + skeleton when the scan started and unmounted it when the answer came back empty — on a workspace where most journal days have no backlinks, a blink on most journal days, re-armed by every peer refresh.
@@ -154,12 +164,17 @@ Mobile's `BacklinksSection` wraps the same component, which is what stops one cl
 
 ### The cursor lives in one region
 
-**`backlinkCursor()` (`lib/store.ts`) is the single owner of "is the cursor in this section", and every reader goes through it — the row's own highlight included.**
+**`backlinkCursor()` (`lib/cursor-region.ts`, over that module's `backlinkRowIds()`) is the single owner of "is the cursor in this section", and every reader goes through it — the row's own highlight and `isEditing()` included.**
 `selectedBlockId` and `selectedBacklinkBlockId` are declared mutually exclusive because each reader checks the backlink one *first*.
 With both set, `j` walks someone else's page and `Enter` navigates away instead of editing, while the outline still paints the block the user left the cursor on.
 That exclusion was a sentence: ~20 call sites write `selectedBlockId` directly and each had to clear the other field, and most did not.
 The outline wins because releasing it is the deliberate act — the two handlers that cross the separator null it in the same breath, so no other writer has to know the rule exists.
 A stale id painting a second accent bar is the visible half of the same bug, which is why the highlight may not read the raw field either.
+
+**The highlight reads it through a `createMemo`, not per row.**
+`backlinkCursor()` asks whether the section is on screen, which includes `zoomView()` — `focusSubtree(outline, focusBlockId)`, an O(page) walk — whenever `focusBlockId` names a block the outline has lost.
+That is the one render before `<OutlineView />`'s self-heal effect clears it, and per row it cost 851 ms against 166 ms to mount 1,556 rows over a 688-block page, and 724.7 ms against 2.6 ms for one cursor move.
+Same shape as `focus()` and `visualSet`; `InlineBacklinks.cursor-cost.test.tsx` counts the walks rather than timing them.
 
 **A pointer crossing the section is not a cursor move**, so a backlink row has no `onMouseEnter`.
 It wrote the keyboard's own cursor, which is what made the bug read as intermittent: the user never aimed the gesture.
@@ -171,6 +186,49 @@ Net: `lib/cursor-region.test.tsx`, plus `a_click_brings_the_cursor_back_from_the
 **Toggling a task from a backlink row (issue #144)** mutates the *source* page, and the backlink effect is keyed on the slug, which didn't change.
 So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
 Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always empty now, so that blanks the section.
+
+### A backlink row is a place you can work
+
+Every gesture that acts on an outline block acts on a backlink row too — the text edit, task state, `g D`, delete, indent, outdent, both moves, and create below / above — each addressed to the citing block's **own** page.
+User-facing behaviour is [`docs/desktop-ux.md`](../../docs/desktop-ux.md#backlinks-and-nested-pages-below-the-outline).
+The cross-client contract is [`docs/clients.md` → Editing a backlink where it is cited](../../docs/clients.md#editing-a-backlink-where-it-is-cited).
+
+**`lib/backlink-handlers.ts` (`backlinkRowOps`) is the cross-page half, and it is not a spread group in `action-handlers.ts`.**
+A group has to own its `Action` keys outright, and every key here is already `block-handlers.ts`'s for the outline case.
+Two groups holding `IndentBlock` would make the spread order precedence, which that assembly's own comment says is readability.
+So `block-handlers.ts` consults this module **first** and falls through on `false`, the shape `enterInsertOnBacklink` already had.
+`false` means "the cursor is in the outline"; a **refusal** answers `true`, because falling through from a row acts on `appState.selectedBlockId`, which is `null` there by construction.
+
+Five rules a contributor will trip on:
+
+- **Never a `block.rs` command, for any of the ten gestures.**
+  The cross-page family is `editBacklinkBlock` (text), `backlinkRowOp` (the seven chords) and `createBacklinkSibling` (`o` / `O`).
+  A `block.rs` body acts on the page the user is looking at, so it may *tolerate* a stale id — three different ways, each of which reached the user from a row.
+  `createBlock` appended an empty block at the source page's end and answered `Ok`.
+  Six printed `ActionError`'s `Display`, a ULID, while the catalog's own sentence went uncalled (invariant 12).
+  And `moveBlockUp` / `moveBlockDown` / `indentBlock` answered success while doing nothing.
+  `commands/backlink_edit.rs` owns the argument and the one liveness gate behind all ten.
+  Net: `lib/backlink-commands.test.ts` — a twin called **at all** from a row fails, whatever page id it was handed.
+- **A refused commit keeps the row's editor up, on the user's draft.**
+  The typed text exists in no op, in no `.md` and on no peer, only in that textarea, so closing it is the one loss here nothing can undo — and it is reachable whenever a peer trashes the citing block mid-edit.
+  Leaving is still possible (a navigation, `Cmd+Shift+B`, a click into another row), and holding `editingBacklink` also keeps `isEditing()` true, so no background refresh remounts the row and re-seeds the draft.
+  Same rule mobile ships; the net asserts the **text**, not that an error was reported.
+- **The editing identity carries a page.**
+  `appState.editingBacklink` is `{ pageId, blockId }`, a sibling of `editingBlockId` rather than a widening of it.
+  `startBacklinkEdit` (`lib/cursor-region.ts`) is its one writer, and it releases the outline's editing id in the same breath: two mounted editors is two drafts, and the second commit overwrites the first.
+- **The rows are re-asked per commit, never per keystroke — and a held chord is one scan in flight plus one queued.**
+  `pageBacklinks` is an `O(blocks-in-workspace)` scan (invariant 15), and it is spent in three places: `settle()`, `BacklinkRowEditor`'s text commit (which has its own `backlinkCommitPlan` and does not call `settle`) and `toggleBacklinkTodo`.
+  "Per commit" is not a bound on a **held** `Alt+↑` or `Tab`: every repeat is a commit, so the count is `trackBacklinks`'s to keep and not any of the three's to remember.
+  What the reply may touch is `backlinkCommitPlan`'s answer, not this client's: a cross-page reply describes the *source* page, so it reaches the screen only when that page is the one on screen — which a page citing itself makes reachable.
+- **Nothing here nudges.**
+  Indent, outdent and move have no visible result on a flat row, and shipping them anyway is a recorded decision rather than a `Partial`, which is why `Capability::BacklinkInlineEdit` reads `Full` here and on mobile.
+  The TUI's `Partial` on that row is a different gap: it has no gesture at all that opens a cited block's page, where this client's group header is a `<button>` that does.
+  The two messages the module carries are for a row with no block to act on at all: an orphan backlink, and a cursor naming a row the list no longer holds.
+
+**`o` / `O` on a row used to append a block to the page being read.**
+`NewBlockBelow` / `NewBlockAbove` read `appState.page?.id` and had no backlink branch, so a gesture aimed at another page's block created an empty block at the end of the open one.
+The branch comes **before** the `pageId` read now, and the new sibling is created on the source page; a self-citing page is the one case where it also enters Insert, because the block really is in the outline on screen.
+Aiming it at the right page was only half of it: through `createBlock` a stale row id still appended at that page's end, which is the same defect one door along and why the first rule above exists.
 
 ## Properties (`key:: value`) — `PropertyEditor.tsx`
 
@@ -369,7 +427,8 @@ Load-bearing notes a contributor needs:
   and **`stopImmediatePropagation` is what stops a double move** — `↑` / `↓` are the catalog's Normal `SelectionUp` / `SelectionDown`, and the commit unmounts the textarea mid-dispatch, so the `window` listener would resolve the same keystroke a second time.
   Removing that line moves the caret two blocks and leaves the cursor and the editor disagreeing about where it went; `BlockRow.caret-nav.test.tsx` is the net, verified to fail without it, and it also pins that a modified arrow (`Alt+↑` moves the block) never walks.
   **A held arrow's repeat is swallowed while a step's commit is in flight** (`caretStepping`): a changed draft keeps the textarea mounted for a backend round-trip, and every repeat in that window would otherwise commit the same draft again.
-  The walk is `visibleRoots()`, so a zoom is honoured, and it stops at the outline's edges rather than stepping into the read-only backlinks — opening *another page* for editing from a keystroke aimed at this one.
+  The walk is `visibleRoots()`, so a zoom is honoured, and it stops at the outline's edges rather than stepping into the backlinks below —
+  those rows are editable now, so walking into one would open *another page* for editing from a keystroke aimed at this one.
 - **`Tab` / `Shift+Tab` indent / outdent the block and keep it in edit mode, on itself** (issue #477).
   `commit()` (called first, so the backend sees the latest draft) flips `editingBlockId` to `null`, and the moved block's row remounts a fresh `<BlockEditor />` elsewhere in the tree.
   `onIndent` / `onOutdent` (`components/outline-structure.ts`'s `createStructureOps`) re-select and re-edit the block's own id once the move settles.
@@ -414,7 +473,7 @@ This section captures only the **architectural decisions** a contributor needs b
 - **Visual mode is real, and reachable without vim (issue #23).**
   `Mode::"vim-visual"` in the store with `visualAnchorId` + `lastVisualRange`.
   `SelectRange{Down,Up}` is bound in **both** Normal and Visual and grows the range via the DOM "nothing focused" → Normal fallback, so one machinery serves vim and non-vim.
-  `extendVisualRange` stays in the outline, never crossing into read-only backlinks.
+  `extendVisualRange` stays in the outline, never crossing into the backlinks — a range op would land on another page's blocks.
   Every exit funnels through one `exitVisual()`, which captures `lastVisualRange` for `g v`.
   Nothing writes `mode` back afterwards, so `detectMode` lets a focused textarea or input outrank a stale resting `vim-normal` (issue #489); `vim-visual` and open overlays stay ahead of focus.
 
@@ -430,10 +489,14 @@ This section captures only the **architectural decisions** a contributor needs b
 
 ### `Enter` outside a textarea (Normal mode)
 
-With a block selected and nothing focused (the DOM fallback puts the dispatcher in Normal even with `vim_mode == false`), `Enter` resolves to the shared `OpenRefUnderCursor` — but the desktop handler **always enters Insert on the selected block**.
-The one exception: on a **backlink row** (read-only), `Enter` opens the source page and lands the cursor on the referencing block.
+With a block selected and nothing focused (the DOM fallback puts the dispatcher in Normal even with `vim_mode == false`), `Enter` resolves to the shared `OpenRefUnderCursor` —
+and the desktop handler **always enters Insert on the block under the cursor, with no exceptions**.
+A **backlink row** used to be the one carve-out: `Enter` opened the source page, because the row was read-only.
+It is not read-only any more, so the exception went with the thing that justified it, and both chords that can reach a row (`i` and `Enter`) go through the single `onBacklink.enterInsert()`.
+That is also what the TUI answers, where `Focus::Backlink` means `enter_insert_backlink` — so the two clients agree on `Enter` for the same reason rather than by coincidence.
+The source page stays reachable without a chord: the group header is a `<button>`, which `lib/keyboard-reach.ts` makes a keyboard stop.
 
-Why diverge from the TUI: it has a char cursor, so "open the ref under cursor" is well-defined there; the desktop only has a selected block, so **following a ref is the click on the token** (`onRefClick`) and `Enter` means edit.
+Why diverge from the TUI on the *ref*: it has a char cursor, so "open the ref under cursor" is well-defined there; the desktop only has a selected block, so **following a ref is the click on the token** (`onRefClick`) and `Enter` means edit.
 
 ## Zoom / focus into a block
 
@@ -443,10 +506,10 @@ Five decisions beyond that contract:
 
 - **`zoomView()` (`lib/store.ts`) is the one owner of "is this window zoomed, and into what".**
   Three surfaces have to agree — what the body renders, where `j` / `k` may go, and whether the page's own sections are drawn — and each used to resolve `focusBlockId` against the outline itself.
-  A stale id read as zoomed by one and unzoomed by another is a cursor walking into a section nothing painted, which is exactly what `backlinkBlockIds()` did.
+  A stale id read as zoomed by one and unzoomed by another is a cursor walking into a section nothing painted, which is exactly what the local `backlinkBlockIds()` did before `backlinkRowIds()` (`lib/cursor-region.ts`) owned it.
   `<OutlineView />` wraps it in the `focus()` memo so the walk runs once per render, and passes the answer down as `<PageSections zoomed>` rather than letting that component ask a second time.
 - **Nothing belonging to the page renders while zoomed.**
-  `<PageSections />` draws nothing (backlinks, nested pages, namespace mentions), the page-property row is already hidden, and `backlinkBlockIds()` returns `[]` so `j` clamps at the zoom's last row.
+  `<PageSections />` draws nothing (backlinks, nested pages, namespace mentions), the page-property row is already hidden, and `backlinkRowIds()` returns `[]` so `j` clamps at the zoom's last row.
   The reason is the one the property row carries: the header is a *block* there, so the page's references under a block title are a wrong answer, not merely a distraction.
   Net: `PageSections.test.tsx`, plus "j stays inside the zoom instead of entering the page's backlinks" (`action-handlers.zoom.test.ts`).
 - **`resetForNavigation()` (`lib/page-change.ts`) is what a navigation drops, and it has two callers on purpose.**

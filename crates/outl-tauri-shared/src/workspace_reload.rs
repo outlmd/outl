@@ -54,7 +54,7 @@ use outl_core::hlc::HlcGenerator;
 use outl_core::workspace::Workspace;
 use tracing::warn;
 
-use crate::helpers::invalidate_backlink_index;
+use crate::commit::invalidate_backlink_index;
 use crate::history_external::record_external_changes;
 use crate::host::AppHost;
 

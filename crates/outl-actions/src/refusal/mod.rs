@@ -52,7 +52,12 @@
 //! surfaces print `trash::refusal_for`'s sentence already. What they did
 //! not have was a true second half to it.
 
+mod backlink_edit;
 mod trash;
+pub use backlink_edit::{
+    stale_backlink_block_refusal, stale_backlink_block_text,
+    stale_backlink_block_unchanged_refusal, stale_backlink_block_unchanged_text,
+};
 pub use trash::trash_refusal_text;
 pub use trash::{remedy_action, remedy_for, Remedy, RemedyAction};
 

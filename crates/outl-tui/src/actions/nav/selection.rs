@@ -7,7 +7,6 @@
 //! that boundary without the caller knowing there is one.
 
 use crate::state::{App, Focus};
-use outl_actions::flatten_subtree_paths;
 
 impl App {
     pub(crate) fn move_selection(&mut self, delta: i32) {
@@ -62,43 +61,24 @@ impl App {
                 // the renderers ask too), so `j` stops at the subtree
                 // edge instead of parking the cursor on an invisible row.
                 if self.page_sections_visible() && self.backlinks_navigable() {
-                    self.focus = Focus::Backlink {
-                        idx: 0,
-                        sub_path: Vec::new(),
-                    };
+                    self.focus = Focus::Backlink { idx: 0 };
                     self.cursor_col = 0;
                     return true;
                 }
                 false
             }
-            Focus::Backlink { idx, sub_path } => {
-                // Borrow the backlinks slice directly instead of
-                // cloning the whole `Vec<Backlink>` (each entry
-                // carries an `OutlineNode` subtree — non-trivial to
-                // clone per keystroke).
+            Focus::Backlink { idx } => {
+                // One row per backlink: the citing block. The index
+                // builders ship `source_block` shallow, so there was
+                // never a subtree here to step into (see `Focus`).
                 let slug = self.current_slug();
-                let new_focus = {
-                    let backlinks = self.backlinks_for_slug(&slug);
-                    let Some(bl) = backlinks.get(idx) else {
-                        return false;
-                    };
-                    let paths = flatten_subtree_paths(&bl.source_block);
-                    let cur_pos = paths.iter().position(|p| p == &sub_path).unwrap_or(0);
-                    if cur_pos + 1 < paths.len() {
-                        Focus::Backlink {
-                            idx,
-                            sub_path: paths[cur_pos + 1].clone(),
-                        }
-                    } else if idx + 1 < backlinks.len() {
-                        Focus::Backlink {
-                            idx: idx + 1,
-                            sub_path: Vec::new(),
-                        }
-                    } else {
-                        return false;
-                    }
-                };
-                self.focus = new_focus;
+                // Also the stale-`idx` guard: a cursor past the end of
+                // a list a background rebuild shrank steps nowhere.
+                let len = self.backlinks_count_for_slug(&slug);
+                if idx + 1 >= len {
+                    return false;
+                }
+                self.focus = Focus::Backlink { idx: idx + 1 };
                 self.cursor_col = 0;
                 true
             }
@@ -130,41 +110,20 @@ impl App {
                 self.cursor_col = 0;
                 true
             }
-            Focus::Backlink { idx, sub_path } => {
+            Focus::Backlink { idx } => {
                 let slug = self.current_slug();
-                // Resolve the new focus value while only borrowing the
-                // backlinks slice — no `to_vec` clone per keystroke.
-                let new_focus_opt = {
-                    let backlinks = self.backlinks_for_slug(&slug);
-                    let Some(bl) = backlinks.get(idx) else {
-                        return false;
-                    };
-                    let paths = flatten_subtree_paths(&bl.source_block);
-                    let cur_pos = paths.iter().position(|p| p == &sub_path).unwrap_or(0);
-                    if cur_pos > 0 {
-                        Some(Focus::Backlink {
-                            idx,
-                            sub_path: paths[cur_pos - 1].clone(),
-                        })
-                    } else if idx > 0 {
-                        // Jump to the last block of the previous backlink.
-                        let prev_paths = flatten_subtree_paths(&backlinks[idx - 1].source_block);
-                        let last = prev_paths.last().cloned().unwrap_or_default();
-                        Some(Focus::Backlink {
-                            idx: idx - 1,
-                            sub_path: last,
-                        })
-                    } else {
-                        // Topping out → fall back into the outline.
-                        None
-                    }
-                };
-                match new_focus_opt {
-                    Some(f) => self.focus = f,
-                    None => {
-                        self.focus = Focus::Outline;
-                        self.selected = self.flat_len.saturating_sub(1);
-                    }
+                // A stale `idx` moves nothing, same as before: the row
+                // the cursor claims is not in the list any more, so
+                // neither of the two answers below is about it.
+                if idx >= self.backlinks_count_for_slug(&slug) {
+                    return false;
+                }
+                if idx > 0 {
+                    self.focus = Focus::Backlink { idx: idx - 1 };
+                } else {
+                    // Topping out → fall back into the outline.
+                    self.focus = Focus::Outline;
+                    self.selected = self.flat_len.saturating_sub(1);
                 }
                 self.cursor_col = 0;
                 true
@@ -187,5 +146,89 @@ impl App {
         let vp = self.viewport_height.max(1) as i32;
         let target = (self.selected as i32) - vp / 2;
         self.scroll_y = target.max(0) as u16;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{App, Focus, View};
+    use outl_core::hlc::HlcGenerator;
+    use outl_core::{ActorId, Workspace};
+    use outl_md::reconcile::reconcile_md;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// `pages/target.md` on screen, cited by two blocks of `pages/source.md`,
+    /// with the real index built from disk (a faked list would not run
+    /// the count the steps are gated on). Focus starts on the outline.
+    fn target_cited_twice() -> (App, TempDir) {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("pages")).unwrap();
+        let target = dir.path().join("pages").join("target.md");
+        let source = dir.path().join("pages").join("source.md");
+        fs::write(&target, "- target body\n").unwrap();
+        fs::write(&source, "- first [[target]]\n- second [[target]]\n").unwrap();
+
+        let actor = ActorId::new();
+        let mut ws = Workspace::open_in_memory(actor).unwrap();
+        let hlc = HlcGenerator::new(actor);
+        reconcile_md(&mut ws, &hlc, &target, None).unwrap();
+        reconcile_md(&mut ws, &hlc, &source, None).unwrap();
+        let metas: Vec<_> = ["target", "source"]
+            .iter()
+            .filter_map(|s| outl_actions::find_by_slug(&ws, s))
+            .filter_map(|id| outl_actions::page_meta(&ws, id))
+            .collect();
+        let index = outl_actions::build_backlink_index_from_disk(&metas, dir.path());
+
+        let mut app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        *app.backlink_index.borrow_mut() = Some(index);
+        app.view = View::Page(target);
+        app.load_current_no_autorun();
+        app.show_backlinks = true;
+        (app, dir)
+    }
+
+    #[test]
+    fn j_walks_the_backlinks_and_stops_at_the_last_one() {
+        let (mut app, _d) = target_cited_twice();
+        assert_eq!(app.backlinks_for_current().len(), 2, "setup");
+        app.selected = app.flat_len - 1;
+
+        app.move_selection(1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+        app.move_selection(1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 1 });
+        app.move_selection(1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 1 }, "no row past the end");
+    }
+
+    #[test]
+    fn k_walks_back_up_and_leaves_the_panel_into_the_last_block() {
+        let (mut app, _d) = target_cited_twice();
+        app.focus = Focus::Backlink { idx: 1 };
+
+        app.move_selection(-1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+        app.move_selection(-1);
+        assert_eq!(app.focus, Focus::Outline);
+        assert_eq!(app.selected, app.flat_len - 1);
+    }
+
+    #[test]
+    fn a_stale_index_past_the_end_moves_nowhere() {
+        let (mut app, _d) = target_cited_twice();
+        app.focus = Focus::Backlink { idx: 7 };
+        app.move_selection(1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 7 });
+        app.move_selection(-1);
+        assert_eq!(app.focus, Focus::Backlink { idx: 7 });
     }
 }

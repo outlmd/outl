@@ -38,17 +38,17 @@ pub(crate) const MAX_HISTORY: usize = 200;
 ///
 /// `CurrentPage` is the historical path: mutate `App.page` and save
 /// through `current_path()`. `SourcePage` is the cross-page route used
-/// when the user edits a backlink in place — the buffer commits
-/// directly into the source page's `.md` without changing `App.view`.
+/// when the user edits a backlink in place — the buffer commits as an
+/// op on the citing block, keyed by id, leaving `App.view` alone.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EditTarget {
     CurrentPage,
     SourcePage {
-        path: PathBuf,
-        /// Working copy of the source page's AST. Mutated by the
-        /// buffer commit, then written back to `path` via
-        /// `App::save_page`.
-        page: ParsedPage,
+        /// Root of the page the citing block lives on.
+        page: NodeId,
+        /// The citing block itself, which is the whole cursor here —
+        /// see `actions::block::backlink_target`.
+        block: NodeId,
     },
 }
 
@@ -60,9 +60,9 @@ pub(crate) enum EditTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Mode {
     Normal,
-    /// Editing the block at `path`. `block_path` is interpreted
-    /// against `App.page` when `target == CurrentPage`, otherwise
-    /// against `target.page` (the loaded source AST).
+    /// Editing the block at `block_path`, interpreted against
+    /// `App.page`. A `SourcePage` target carries the block's id
+    /// instead, so `block_path` is unused on that route.
     Insert {
         target: EditTarget,
         block_path: Vec<usize>,
@@ -142,18 +142,18 @@ pub(crate) struct PendingSidebarDelete {
 /// touch ~40 call sites for a feature that's really a different mode
 /// with a different commit target.
 ///
-/// `Focus::Backlink { idx, sub_path }`:
-/// - `idx` indexes `app.backlinks_for_current()` (the workspace-driven
-///   list produced by `outl_actions::backlinks_for_page`).
-/// - `sub_path` is a DFS path *inside* `Backlink.source_block` — empty
-///   means the source block itself; `[0]` its first child; etc.
+/// `Focus::Backlink { idx }` indexes `app.backlinks_for_current()`. The
+/// citing block is the whole cursor: both index builders ship
+/// `source_block` shallow (`children: Vec::new()`, the #179 freeze fix),
+/// so the `sub_path` this carried was always empty and `j` never walked
+/// into a backlink's subtree. `idx` is positional, so a stale one reads
+/// as "nothing focused" (`actions::block::backlink_target`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum Focus {
     #[default]
     Outline,
     Backlink {
         idx: usize,
-        sub_path: Vec<usize>,
     },
 }
 

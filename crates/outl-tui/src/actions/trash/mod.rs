@@ -459,11 +459,6 @@ impl App {
             }
         }
     }
-
-    /// Whether `page` is the view the user is looking at.
-    fn page_is_open(&self, page: NodeId) -> bool {
-        outl_actions::find_by_slug(&self.workspace, &self.current_slug()) == Some(page)
-    }
 }
 
 /// This crate's [`CommitHooks`] for a restore.

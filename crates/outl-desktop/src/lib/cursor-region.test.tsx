@@ -63,8 +63,11 @@ vi.mock("./api", () => ({
 }));
 
 import { InlineBacklinks } from "../components/InlineBacklinks";
+import { PageSections } from "../components/PageSections";
 import { buildHandlers } from "./action-handlers";
-import { appState, backlinkCursor, setAppState, setOutline } from "./store";
+import { backlinkCursor } from "./cursor-region";
+import { isEditing } from "./mode";
+import { appState, setAppState, setOutline, zoomView } from "./store";
 
 function block(id: string): BlockNode {
   return {
@@ -115,6 +118,11 @@ function mountPage(): HTMLElement {
     backlinksOrder: "newest",
     focusBlockId: null,
     selectedBacklinkBlockId: null,
+    // Both editing ids, explicitly: `isEditing()` reads them, and one
+    // left behind by an earlier test reports an editor on screen that
+    // this page never mounted.
+    editingBlockId: null,
+    editingBacklink: null,
   });
   setOutline([block("blk-1"), block("blk-2"), block("blk-3")]);
   setAppState("selectedBlockId", "blk-2");
@@ -151,6 +159,8 @@ afterEach(() => {
     selectedBlockId: null,
     selectedBacklinkBlockId: null,
     focusBlockId: null,
+    editingBlockId: null,
+    editingBacklink: null,
   });
   setOutline([]);
   document.body.innerHTML = "";
@@ -214,7 +224,8 @@ describe("the cursor lives in one region", () => {
 
   it("the outline holds the cursor until it releases it", () => {
     mountPage();
-    // `selectedBlockId` set is the whole condition: the two handlers
+    // `selectedBlockId` is not the whole condition — see the describe
+    // below — but it is the half this rule started as: the two handlers
     // that cross the separator null it in the same breath, so no other
     // writer has to know this rule exists.
     setAppState("selectedBacklinkBlockId", "src-1");
@@ -222,5 +233,105 @@ describe("the cursor lives in one region", () => {
 
     setAppState("selectedBlockId", null);
     expect(backlinkCursor()).toBe("src-1");
+  });
+});
+
+/**
+ * A cursor cannot be in a section that is not on screen, and this is the
+ * **agreement** half of that: the row's render condition and the two
+ * accessors have to answer the same question, or the keyboard acts on a
+ * row nobody drew.
+ *
+ * It is a behavioural net rather than a source read, because what matters
+ * is that the three agree — not how each spells it. The rule used to live
+ * in `cursor-handlers.ts`'s `backlinkBlockIds()` (which decided whether
+ * `j` may *enter* the section) and nowhere else, so `backlinkCursor()`
+ * said "the cursor is on a row" after `Cmd+Shift+B` had taken the row
+ * away. Nine mutating chords then wrote to another page from there, and
+ * `isEditing()` reported an editor that had been unmounted, deferring
+ * every peer reload for the rest of the session.
+ *
+ * `ToggleBacklinks` is **`Global`** (`defaults.rs`), so the chord fires
+ * from anywhere, and `togglePanel` flips the flag and nothing else — no
+ * writer of either field is reached, and a DOM removal does not reliably
+ * fire `blur`. So clearing the fields in the *writer* was never an
+ * option; the question belongs in the accessor.
+ */
+describe("a cursor cannot be in a section that is not drawn", () => {
+  /** Rows the section actually painted — the editor's own row included,
+   *  which is why this counts `<li>`s rather than looking for the
+   *  read-mode button's text. */
+  const rowsDrawn = (host: HTMLElement) => host.querySelectorAll("li").length;
+
+  it("the row, the cursor and the editor all go when the panel closes", () => {
+    const host = mountPage();
+    setAppState({
+      selectedBlockId: null,
+      selectedBacklinkBlockId: "src-1",
+      editingBacklink: { pageId: "other-page", blockId: "src-1" },
+    });
+    // All three agree the row is there.
+    expect(rowsDrawn(host)).toBe(1);
+    expect(backlinkCursor()).toBe("src-1");
+    expect(isEditing()).toBe(true);
+
+    handlers().ToggleBacklinks?.();
+
+    // …and all three agree it is gone. Before this, the first assertion
+    // flipped and the other two did not: nine mutating chords then wrote
+    // to another page from a row nobody could see, and every deferred
+    // peer reload waited on an editor that had been unmounted.
+    expect(rowsDrawn(host)).toBe(0);
+    expect(backlinkCursor()).toBeNull();
+    expect(isEditing()).toBe(false);
+  });
+
+  it("the same three answers while zoomed", () => {
+    mountPage();
+    setAppState({
+      selectedBlockId: null,
+      selectedBacklinkBlockId: "src-1",
+      editingBacklink: { pageId: "other-page", blockId: "src-1" },
+      namespaceChildren: [],
+      namespaceMentions: [],
+      namespaceMentionsTotal: 0,
+    });
+
+    // The render side has to be `<PageSections />`, not `<InlineBacklinks />`:
+    // the zoom gate lives there, and it takes `zoomed` as a **prop** on
+    // purpose, so the component cannot be asked whether the page is
+    // zoomed. Mounting it with the prop derived from `zoomView()` is what
+    // ties the three together — the same `zoomView()` that empties
+    // `backlinkRowIds()` is the one `<OutlineView />` passes down.
+    // Asserting the prop's own effect instead would only prove `<Show>`
+    // works.
+    const sections = document.createElement("div");
+    document.body.appendChild(sections);
+    const unmount = render(
+      () => (
+        <PageSections onOpenPage={() => {}} zoomed={zoomView() !== null} />
+      ),
+      sections,
+    );
+    // `<li>`s, not the row's text: `editingBacklink` is set here, so the
+    // row mounts its editor and the text lives in a `<textarea>`'s value
+    // rather than in `textContent`. The sibling sections are given empty
+    // slices above so they contribute no rows of their own.
+    const rowsDrawn = () => sections.querySelectorAll("li").length;
+
+    try {
+      expect(rowsDrawn()).toBe(1);
+      expect(backlinkCursor()).toBe("src-1");
+      expect(isEditing()).toBe(true);
+
+      setAppState("focusBlockId", "blk-1");
+
+      expect(rowsDrawn()).toBe(0);
+      expect(backlinkCursor()).toBeNull();
+      expect(isEditing()).toBe(false);
+    } finally {
+      unmount();
+      sections.remove();
+    }
   });
 });

@@ -423,18 +423,19 @@ mod cross_block_nav_tests {
 
     #[test]
     fn left_stays_put_while_editing_a_backlinks_source_page() {
-        let (mut app, d) = app_with_two_blocks();
+        let (mut app, _d) = app_with_two_blocks();
         app.selected = 1;
         // A source-page edit, the state `enter_insert_backlink` leaves
         // behind. The buffer's cursor is at 0, so the arm would fire.
+        // The ids name nothing in this workspace on purpose: a guard
+        // that regressed must stop before the mutation would, not
+        // because the mutation happened to fail.
         app.mode = Mode::Insert {
             target: EditTarget::SourcePage {
-                // Inside the tempdir, so a guard that regressed writes
-                // there rather than into the test runner's cwd.
-                path: d.path().join("pages").join("other.md"),
-                page: outl_md::parse::ParsedPage::default(),
+                page: outl_core::id::NodeId::new(),
+                block: outl_core::id::NodeId::new(),
             },
-            block_path: vec![0],
+            block_path: Vec::new(),
             buffer: crate::edit_buffer::EditBuffer::from_text("borrowed"),
             original_text: "borrowed".to_string(),
         };

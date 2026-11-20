@@ -23,12 +23,19 @@ function outlineIds(blocks: BlockNode[], out: string[] = []): string[] {
 }
 
 /**
- * What opening a page throws away: the zoom, and a cursor parked on a
- * backlink row.
+ * What opening a page throws away: the zoom, a cursor parked on a
+ * backlink row, and an editor open on one.
  *
- * Both are statements about the page the user was looking at, so both
- * are wrong the moment another page (or the same page, asked for again)
- * is on screen.
+ * All three are statements about the page the user was looking at, so
+ * all three are wrong the moment another page (or the same page, asked
+ * for again) is on screen.
+ *
+ * `editingBacklink` is here because a keyboard navigation does not blur
+ * the textarea, so without it the field outlived the page. One block
+ * citing two pages is ordinary, so a backlink on the *new* page carrying
+ * the same `block_id` would open an autofocusing editor nobody asked
+ * for. It is also what keeps `isEditing()` (`lib/mode.ts`) honest after
+ * a navigation.
  *
  * **The single owner of that list**, because it has two callers that
  * cannot be merged: the effect below, which notices a page id change
@@ -45,6 +52,7 @@ function outlineIds(blocks: BlockNode[], out: string[] = []): string[] {
  */
 export function resetForNavigation(): void {
   setAppState("selectedBacklinkBlockId", null);
+  setAppState("editingBacklink", null);
   setAppState("focusBlockId", null);
 }
 

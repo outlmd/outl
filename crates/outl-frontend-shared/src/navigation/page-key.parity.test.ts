@@ -45,13 +45,18 @@ const DELIBERATE_TRACKING: Record<string, string> = {
  * changed". The reason has to name what re-asks instead.
  */
 const DELIBERATE_REFETCH: Record<string, string> = {
-  "outl-desktop/src/components/AppShell.tsx":
-    "refreshActivePage — a peer edited another page, which can change this " +
-    "page's backlinks while its key stays identical. Keeps its rows up " +
-    "(no emptyBacklinks) and carries the pending mark instead.",
-  "outl-desktop/src/components/InlineBacklinks.tsx":
-    "toggleBacklinkTodo (#144) — the mutation lands on the *source* page, " +
-    "so this page's key does not change and nothing else would re-ask.",
+  "outl-desktop/src/lib/backlinks-fetch.ts":
+    "`trackBacklinks` is the desktop's one owner of the fetch, and it names " +
+    "no page: it reads the open one, so a caller cannot ask about a page " +
+    "the user is not on. Four of its five callers re-ask for a reason that " +
+    "is NOT 'the page changed' — a peer reload (AppShell.refreshActivePage), " +
+    "a task toggle from a row (InlineBacklinks, #144), a text commit through " +
+    "a row (BacklinkRowEditor) and the nine cross-page chords " +
+    "(backlink-handlers.settle) — because every one of them writes to the " +
+    "*source* page and leaves this page's key identical. The fifth is " +
+    "`backlinks-effect.ts`, which does source `createBacklinksKey`. A key " +
+    "would not have bounded a **held** chord either, since each repeat is a " +
+    "real commit; this module coalesces instead (invariant 15).",
 };
 
 /**

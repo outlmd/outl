@@ -102,28 +102,46 @@
 #     to pay for six lines is the larger change, and the silent failure
 #     it risks is a destructured prop frozen at first render.
 #
+#   outl-mobile/src/components/Journal.tsx  1790 -> 1801  (cross-block caret nav)
+#     Eleven lines of call site, the same shape as the embeds raise
+#     above and for the same reason: one import, two comment lines, the
+#     const with its three deps, a blank, the prop on BlockRow and the
+#     one call in onTextareaMount. The logic is not here -
+#     Journal.caret-nav.ts is 112 lines and its test 120, and the module
+#     owns the pending-caret signal too, so the component holds no state
+#     for the feature. The decision is not even in this crate: it is
+#     @outl/shared/caret-nav, shared with the desktop and mirroring
+#     outl-tui's cross_block_step, which is the point - the arrows
+#     stopped at the block boundary here while the terminal walked the
+#     outline as one document.
+#     The caret deliberately does NOT ride a prop: threading one down
+#     through BlockRow and BlockBody to reach the textarea is three more
+#     call sites in this file, not fewer, and a destructured prop frozen
+#     at first render is the silent failure the embeds note names.
+#     Extracting more of the edit lifecycle to pay for eleven lines is
+#     the larger change that outl-mobile/CLAUDE.md records as wanting
+#     its own plan.
+#
 # None of these arguments generalises. A further raise makes its own case.
-645 crates/outl-actions/src/backlinks.rs
+640 crates/outl-actions/src/backlinks.rs
 689 crates/outl-actions/src/page.rs
 683 crates/outl-actions/src/sync.rs
 679 crates/outl-actions/tests/ref_extraction_divergence.rs
 710 crates/outl-cli/src/cmd/doctor/repair/mod.rs
-612 crates/outl-cli/src/cmd/page.rs
 636 crates/outl-config/src/lib.rs
 706 crates/outl-core/src/storage/jsonl/read.rs
 805 crates/outl-core/src/storage/jsonl/tests.rs
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
-618 crates/outl-desktop/src-tauri/src/lib.rs
 620 crates/outl-desktop/src-tauri/src/settings.rs
-865 crates/outl-desktop/src/components/OutlineView.tsx
-861 crates/outl-frontend-shared/src/api/commands.ts
-711 crates/outl-frontend-shared/src/api/types.ts
+780 crates/outl-desktop/src/components/OutlineView.tsx
+834 crates/outl-frontend-shared/src/api/commands.ts
+707 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1801 crates/outl-mobile/src/components/Journal.tsx
+1800 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 636 crates/outl-plugins/src/host_tests.rs
 805 crates/outl-shortcuts/src/defaults.rs

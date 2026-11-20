@@ -14,6 +14,7 @@ use outl_actions::merges::{self, MergedEditDto};
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::actions::node_id;
 use crate::state::{App, Overlay, ToastKind};
 
 /// What the panel shows. Rows are the merged edits; the pending list is
@@ -141,10 +142,6 @@ pub(crate) fn handle_key(app: &mut App, key: KeyEvent) -> anyhow::Result<bool> {
 
 fn page_slug(ws: &outl_core::workspace::Workspace, page_id: &str) -> Option<String> {
     outl_actions::page_meta(ws, node_id(page_id)?).map(|m| m.slug)
-}
-
-fn node_id(s: &str) -> Option<outl_core::id::NodeId> {
-    ulid::Ulid::from_string(s).ok().map(outl_core::id::NodeId)
 }
 
 #[cfg(test)]

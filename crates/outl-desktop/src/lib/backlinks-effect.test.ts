@@ -72,7 +72,36 @@ function reply(backlinks: Backlink[]): PageBacklinks {
 
 let dispose: () => void = () => {};
 
-afterEach(() => {
+/**
+ * A reply the test holds the resolver for.
+ *
+ * A bare `new Promise(() => {})` is tempting for "the scan is still
+ * running" and is a state production cannot reach: `invoke` always
+ * settles, and `trackBacklinks` deliberately starts no second scan
+ * while one is in flight — so a scan that never settles parks the whole
+ * queue, and the *next* test in this file sees zero calls instead of
+ * its own. The `afterEach` below is what makes that fail where it
+ * happens rather than one test later.
+ */
+function deferred(): {
+  promise: Promise<PageBacklinks>;
+  settle: (r: PageBacklinks) => void;
+} {
+  let settle: (r: PageBacklinks) => void = () => {};
+  const promise = new Promise<PageBacklinks>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
+}
+
+afterEach(async () => {
+  // Drain whatever is queued before asserting on the flag: the chain
+  // lowers it in its own `finally`, one microtask after the last reply.
+  await Promise.resolve();
+  // `backlinksLoading` is the chain's own liveness, so this needs no
+  // test-only hatch into the module: a test that leaves a scan in
+  // flight fails here, under its own name.
+  expect(appState.backlinksLoading, "a scan was left in flight").toBe(false);
   dispose();
   dispose = () => {};
   setAppState({ page: null, backlinks: [] as Backlink[] });
@@ -143,13 +172,16 @@ describe("installBacklinksEffect", () => {
     mount("today");
     await Promise.resolve();
 
-    vi.mocked(pageBacklinks).mockReturnValue(new Promise<PageBacklinks>(() => {}));
+    const running = deferred();
+    vi.mocked(pageBacklinks).mockReturnValue(running.promise);
     applyPageState(view("other"));
 
     // Page A's rows must not sit under page B's title while the scan runs.
     expect(appState.backlinks).toHaveLength(0);
     expect(pageBacklinks).toHaveBeenCalledTimes(2);
     expect(pageBacklinks).toHaveBeenLastCalledWith("other");
+
+    running.settle(reply([]));
   });
 
   it("refetches the same slug after the page went away (workspace switch)", async () => {

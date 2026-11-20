@@ -89,6 +89,8 @@ crates/outl-desktop/
 │   │                         #   Onboarding, WorkspacePicker
 │   └── lib/                   # api.ts (desktop-only cmds), code-block.ts, events.ts,
 │                             #   shortcuts.ts, mode.ts (detectMode), store.ts,
+│                             #   backlinks-fetch.ts (the one owner of the backlinks
+│                             #     fetch: when it is asked, how often, which answer),
 │                             #   keyboard-reach.ts (roving focus, F6 regions,
 │                             #     focusFirstRowOnOpen, followSelection),
 │                             #   action-handlers.ts (assembly) → handler-context

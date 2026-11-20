@@ -36,8 +36,9 @@
 //! block ids (invariant 2), so a shared string handed a desktop user
 //! `outl block tree <ULID>` and a phone user `outl doctor` — both
 //! measured, both printed verbatim by `TrashPanel.tsx`.
-//! [`trash::list`] therefore takes a [`Surface`], and `SURFACE` is
-//! which one this build is.
+//! [`trash::list`] therefore takes a
+//! [`Surface`](outl_actions::refusal::Surface), and
+//! [`crate::surface::SURFACE`] is which one this build is.
 //!
 //! [`restore_trash_entry`]'s error is deliberately left as the bare
 //! diagnosis: both clients re-list after a failed restore *on purpose*
@@ -50,29 +51,15 @@ use serde::Serialize;
 
 use outl_actions::trash;
 
-use outl_actions::refusal::Surface;
-
-use crate::helpers::{finish_in_page_with, parse_node_id, with_ws_mut};
-
-/// Which surface a refusal reaching this backend is worded for.
-///
-/// The two GUI clients share this crate and do **not** share the answer:
-/// a desktop user is sitting next to a shell, a phone has no `outl`
-/// binary at all. So `trash::list` cannot be handed one shared string
-/// (it used to name `outl doctor` and `outl block tree <ULID>` on both).
-///
-/// A `cfg` rather than an [`AppHost`] method, the same way
-/// `capture_inbox` picks its inbox location in this crate: the fact is a
-/// property of the build target, not of the host's runtime state, and an
-/// associated const with no default would make the ten test hosts in
-/// `tests/` declare a client they are not.
-#[cfg(any(target_os = "ios", target_os = "android"))]
-const SURFACE: Surface = Surface::Mobile;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-const SURFACE: Surface = Surface::Desktop;
+use crate::commit::finish_in_page_with;
+use crate::helpers::{parse_node_id, with_ws_mut};
 use crate::host::AppHost;
 use crate::offload;
 use crate::state::PageView;
+// Which surface this build words a refusal for lives in `crate::surface`:
+// `commands::block`'s cross-page refusal asks the same question, and a
+// second `cfg` pair would be a second owner of what this build is.
+use crate::surface::SURFACE;
 
 /// One top-level deletion on the wire.
 ///

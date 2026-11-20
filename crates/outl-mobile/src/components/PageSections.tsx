@@ -6,6 +6,7 @@ import { lateSectionVisible } from "@outl/shared/outline";
 import { FirstRunTips } from "@outl/shared/polish";
 
 import { BacklinksSection } from "./BacklinksSection";
+import type { BacklinkCommit } from "./BacklinksSection.row-ops";
 
 export interface PageSectionsProps {
   /**
@@ -22,6 +23,17 @@ export interface PageSectionsProps {
   pageKind: PageMeta["kind"] | undefined;
   /** Flip newest ⇄ oldest; the host persists it and swaps the reply in. */
   onToggleOrder: () => void;
+  /**
+   * A mutation through a backlink row landed, naming the page it landed
+   * on. Everything that follows is the host's (`Journal.backlinks.ts`):
+   * the rows are swapped in place rather than refetched, and
+   * `backlinkCommitPlan` decides whether the reply may be installed as
+   * the open page's view. This component only forwards the fact — it is
+   * deliberately not given the open page's id to compare against.
+   */
+  onEditCommitted: (commit: BacklinkCommit) => void | Promise<void>;
+  /** A refusal from a backlink commit. Nothing was written. */
+  onError: (message: string) => void;
   /** Navigate to a page. `kind` routes journals to the journal opener. */
   onOpenPage: (slug: string, kind: PageMeta["kind"]) => void;
   /** The page holds only empty blocks: show the first-run tips. */
@@ -87,6 +99,8 @@ export function PageSections(props: PageSectionsProps): JSX.Element {
           backlinks={props.backlinks?.backlinks ?? []}
           order={props.backlinks?.backlinks_order ?? "newest"}
           onToggleOrder={props.onToggleOrder}
+          onEditCommitted={props.onEditCommitted}
+          onError={props.onError}
           onJump={(link) => {
             const source = link.source_page;
             if (source) props.onOpenPage(source.slug, source.kind);

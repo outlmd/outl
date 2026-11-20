@@ -18,10 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type {
-  BacklinksOrder,
   CreateBlockReply,
   CutBlockReply,
-  PageBacklinks,
   PageMeta,
   PageView,
   Palette,
@@ -190,33 +188,6 @@ export function resolveRef(target: string): Promise<PageMeta | null> {
  */
 export function deletePage(slug: string): Promise<PageView> {
   return invoke<PageView>("delete_page", { slug });
-}
-
-/**
- * Compute a page's backlinks lazily, off the page-open path.
- *
- * `backlinks_for_page` is an O(blocks-in-workspace) scan, so it's no
- * longer bundled into {@link PageView} — computing it there blocked the
- * first journal paint on a large workspace. Call this after the outline
- * renders (keyed on the current page slug) and fill the backlinks panel
- * when it resolves. Mirrors the TUI's lazy/cached backlinks.
- */
-export function pageBacklinks(slug: string): Promise<PageBacklinks> {
-  return invoke<PageBacklinks>("page_backlinks", { slug });
-}
-
-/**
- * Persist the backlinks-list direction (issue #142) and get `slug`'s
- * backlinks back re-sorted under it. A pure display preference — it lives
- * in `config.toml`, never the op log, so it does not converge between
- * devices (same policy as the theme). Returns only the re-sorted
- * backlinks (not a whole `PageView`): the panel already has the outline.
- */
-export function setBacklinksOrder(
-  order: BacklinksOrder,
-  slug: string,
-): Promise<PageBacklinks> {
-  return invoke<PageBacklinks>("set_backlinks_order", { order, slug });
 }
 
 /**
@@ -493,6 +464,19 @@ export function redoPage(pageId: string): Promise<PageView> {
 // `PasteReply` they return; re-exported here so the import path is
 // unchanged.
 export { pasteMarkdown, pastePlain } from "./paste";
+
+// The backlinks panel's commands live in `./backlinks`, together because
+// two return the same `PageBacklinks` and the rest are the mutations
+// that act on a row of it; re-exported here so the import path stays one
+// (the `./paste` move's precedent).
+export {
+  backlinkRowOp,
+  createBacklinkSibling,
+  editBacklinkBlock,
+  pageBacklinks,
+  setBacklinksOrder,
+} from "./backlinks";
+export type { BacklinkRowOp, BacklinkSide } from "./backlinks";
 
 /**
  * Serialize a block selection — each block plus its full subtree — to

@@ -41,16 +41,10 @@ export function JournalDeleteDialogs(props: {
 }): JSX.Element {
   return (
     <>
-      <ConfirmDialog
-        open={props.pendingBlock !== null}
-        title="Delete block?"
-        message={blockDeleteMessage(props.pendingBlock)}
+      <BlockDeleteConfirm
+        pending={props.pendingBlock}
         onCancel={props.onCancelBlock}
-        onConfirm={() => {
-          const pending = props.pendingBlock;
-          props.onCancelBlock();
-          if (pending) props.onConfirmBlock(pending.id);
-        }}
+        onConfirm={props.onConfirmBlock}
       />
 
       <ConfirmDialog
@@ -65,6 +59,39 @@ export function JournalDeleteDialogs(props: {
         }}
       />
     </>
+  );
+}
+
+/**
+ * The single-block prompt on its own, because a **second** surface
+ * raises it: a long press on a backlink row can delete the citing block
+ * on the page it lives on, and the subtree going with it is not on
+ * screen there at all (`BacklinksSection.row-ops.ts`).
+ *
+ * Exported so that surface reuses the question and the wording instead
+ * of writing a third copy of "this block has N children" — the drift
+ * this file exists to prevent, one door along.
+ *
+ * Presentational, like its parent: it owns no state and fires no
+ * command. The caller keeps the pending signal and performs the delete.
+ */
+export function BlockDeleteConfirm(props: {
+  pending: PendingBlockDelete | null;
+  onCancel: () => void;
+  onConfirm: (id: string) => void;
+}): JSX.Element {
+  return (
+    <ConfirmDialog
+      open={props.pending !== null}
+      title="Delete block?"
+      message={blockDeleteMessage(props.pending)}
+      onCancel={props.onCancel}
+      onConfirm={() => {
+        const pending = props.pending;
+        props.onCancel();
+        if (pending) props.onConfirm(pending.id);
+      }}
+    />
   );
 }
 

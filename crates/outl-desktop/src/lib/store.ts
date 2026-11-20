@@ -19,7 +19,6 @@ import type {
   BlockNode,
   MdAheadOfLog,
   NamespaceChild,
-  PageBacklinks,
   PageEmbedContent,
   ParseWarning,
   PageMeta,
@@ -126,6 +125,24 @@ export interface AppStateShape {
    * callback through `buildHandlers`.
    */
   editingBlockId: string | null;
+  /**
+   * Backlink row currently in edit mode, as the `(page, block)` pair a
+   * cross-page mutation is addressed to. `null` outside Insert on a
+   * backlink row.
+   *
+   * A sibling field rather than a wider `editingBlockId`, for the reason
+   * `selectedBacklinkBlockId` is a sibling of `selectedBlockId`: the two
+   * cursors are declared mutually exclusive and ~20 call sites write the
+   * outline one directly. Widening the editing id into a tagged object
+   * would make every one of them a type error for a distinction only two
+   * of them care about.
+   *
+   * **Set one, clear the other** — `startBacklinkEdit` /
+   * `stopBacklinkEdit` are the mechanism, so the rule is not a sentence
+   * each writer has to remember. `pageId` is the **source** page, never
+   * `appState.page`.
+   */
+  editingBacklink: { pageId: string; blockId: string } | null;
   /** Editor mode. `edit` while a block's textarea is mounted. */
   mode: Mode;
   /**
@@ -317,10 +334,11 @@ export interface AppStateShape {
   /** Last error surfaced to the user (status line). */
   lastError: string | null;
   /**
-   * What a page rename / merge did, one line per fact (blocks moved,
-   * links updated, each property conflict). Read by `<NoticeToast />`
-   * only; written by `lib/page-actions.ts`. A property conflict is data
-   * the user chose to drop without seeing it, so it has to be on screen.
+   * What an operation **did**, one line per fact — never a failure, which
+   * is `lastError`. Read by `<NoticeToast />` only; written by
+   * `page-actions.ts` (every property conflict a merge dropped) and
+   * `backlink-handlers.ts` (which page a sibling created from a backlink
+   * row landed on). Both report what no surface on screen can show.
    */
   notice: string[] | null;
 }
@@ -344,6 +362,7 @@ const [state, setState] = createStore<AppStateShape>({
   selectedBlockId: null,
   selectedBacklinkBlockId: null,
   editingBlockId: null,
+  editingBacklink: null,
   mode: "normal",
   visualAnchorId: null,
   lastVisualRange: null,
@@ -412,63 +431,6 @@ export function setOutline(outline: BlockNode[]): void {
 }
 
 /**
- * Every backlinks-derived slice, emptied together.
- *
- * Navigation must clear all of them: the fetch's `.catch` swallows a
- * failure, and leaving page A's rows under page B is worse than an
- * empty section — the nested-page rows are navigation buttons.
- * `backlinksOrder` is a display preference, not page data, so it is
- * carried over rather than reset.
- */
-export function emptyBacklinks() {
-  return {
-    backlinks: [] as Backlink[],
-    backlinksOrder: state.backlinksOrder,
-    namespaceChildren: [] as NamespaceChild[],
-    namespaceMentions: [] as Backlink[],
-    namespaceMentionsTotal: 0,
-  };
-}
-
-/** The same slices, filled from a reply. One owner, so a new field
- *  cannot be wired into one call site and forgotten in the other. */
-export function backlinksState(r: PageBacklinks) {
-  return {
-    backlinks: r.backlinks,
-    backlinksOrder: r.backlinks_order,
-    namespaceChildren: r.namespace_children,
-    namespaceMentions: r.namespace_backlinks,
-    namespaceMentionsTotal: r.namespace_backlinks_total,
-  };
-}
-
-/**
- * Run a `page_backlinks` fetch behind the page.
- *
- * Every backlinks fetch goes through here, and none of them is awaited
- * on a render or a keystroke path: the scan is
- * `O(blocks-in-workspace)`, and the outline has to stay editable with
- * the caret where the user left it while it runs (`UX.md` → Never block
- * a keystroke). The pending flag it sets is read by
- * `<InlineBacklinks />` alone, so the one thing that waits is the
- * section that has nothing to show yet.
- *
- * One owner for the three call sites (navigation, a peer refresh, the
- * source-task toggle) because the alternative — each flipping its own
- * flag around its own `.then` — is how a section ends up loading
- * forever on the one path that forgot the `catch`. A failure is
- * swallowed here for the same reason it always was: the rows are
- * navigation affordances, and stale ones are worse than none.
- */
-export function trackBacklinks(reply: Promise<PageBacklinks>): Promise<void> {
-  setState("backlinksLoading", true);
-  return reply
-    .then((r) => setState(backlinksState(r)))
-    .catch(() => {})
-    .finally(() => setState("backlinksLoading", false));
-}
-
-/**
  * The zoom, resolved against the live outline: the focused block's
  * subtree plus its ancestor breadcrumb, or `null` when there is no zoom
  * **or** the focused block has left the page (a peer deleted it, a move
@@ -504,35 +466,6 @@ export function zoomView(): FocusView | null {
 export function visibleRoots(): BlockNode[] {
   const fv = zoomView();
   return fv ? fv.root.children : state.outline;
-}
-
-/**
- * Which backlink row holds the keyboard cursor, or `null` when the
- * cursor is in the outline.
- *
- * **The single owner of that precedence**, and it is the mechanism
- * behind the "mutually exclusive" the two fields are declared with.
- * That used to be a sentence: ~20 call sites write `selectedBlockId`
- * directly and each had to remember to clear `selectedBacklinkBlockId`.
- * The ones that did not left both set, and since every reader checked
- * the backlink field *first*, the keyboard was in the backlinks section
- * while the outline still drew a highlight on the block the user left
- * the cursor on — `j` walked someone else's page and `Enter` navigated
- * away instead of editing.
- *
- * The outline wins because releasing it is the deliberate act: the two
- * navigation handlers that cross the separator write `selectedBlockId`
- * to `null` in the same breath. So a writer that sets one field without
- * clearing the other can no longer put the cursor in two places, which
- * is what the TUI gets from `Focus` being an enum.
- *
- * Every reader of `appState.selectedBacklinkBlockId` goes through this,
- * including the section's own highlight — a stale id painting an accent
- * bar is the visible half of the same bug.
- */
-export function backlinkCursor(): string | null {
-  if (state.selectedBlockId !== null) return null;
-  return state.selectedBacklinkBlockId;
 }
 
 /**

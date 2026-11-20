@@ -12,7 +12,7 @@ import {
 import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { appState, setAppState } from "../lib/store";
-import type { BlockCallbacks } from "./block-callbacks";
+import type { EditorCallbacks } from "./block-callbacks";
 import { createBlockSuggest } from "./block-suggest";
 import {
   BlockSuggestPopup,
@@ -45,7 +45,18 @@ export function BlockEditor(props: {
    *  to decide whether leaving edit mode is a real change or a ghost op
    *  (#213). */
   wireText: () => string;
-  cb: BlockCallbacks;
+  /**
+   * Leave Insert without writing anything — Esc or blur on an unchanged
+   * draft, where there is no op to emit and the row still has to flip
+   * back to render mode (the "Esc didn't exit edit mode" bug).
+   *
+   * Optional because the outline's answer is the default, and it is the
+   * **only** thing in here that names where the editing identity lives.
+   * A backlink row's lives in `editingBacklink`, so a host editing one
+   * passes its own.
+   */
+  onLeave?: () => void;
+  cb: EditorCallbacks;
 }) {
   let textareaRef: HTMLTextAreaElement | undefined;
 
@@ -134,7 +145,8 @@ export function BlockEditor(props: {
     // block leaves the textarea visible with raw markdown showing
     // (`**bold**` instead of the rendered **bold**), which is the
     // "Esc didn't exit edit mode" bug.
-    setAppState("editingBlockId", null);
+    if (props.onLeave) props.onLeave();
+    else setAppState("editingBlockId", null);
   }
 
   async function handleKeydown(e: KeyboardEvent) {
@@ -147,6 +159,10 @@ export function BlockEditor(props: {
       e.shiftKey &&
       (e.key === "v" || e.key === "V")
     ) {
+      // A host that cannot route a paste to the workspace leaves the
+      // keystroke alone rather than eating it — see `EditorCallbacks`.
+      const route = props.cb.onPastePlain;
+      if (!route) return;
       e.preventDefault();
       const ta = textareaRef;
       if (!ta) return;
@@ -163,9 +179,7 @@ export function BlockEditor(props: {
       }
       if (!clip) return;
       const caretChars = utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0);
-      applyPaste(
-        await props.cb.onPastePlain(props.blockId, caretChars, clip, ta.value),
-      );
+      applyPaste(await route(props.blockId, caretChars, clip, ta.value));
       return;
     }
     // An open autocomplete popup owns the arrows / Enter / Tab / Esc
@@ -376,6 +390,10 @@ export function BlockEditor(props: {
     // preserved), exactly like typing it — `onInput` keeps the draft in
     // sync. Cmd+Shift+V (paste without formatting) already splices raw.
     if (detectFence(ta.value)) return;
+    // Same early return for a host that cannot route the paste: the
+    // webview splices it literally and the text commits with the draft.
+    const route = props.cb.onPasteMarkdown;
+    if (!route) return;
     // "Paste with formatting" (Cmd+V). `choosePasteRoute` (shared with
     // mobile) decides between: rich (text/html converted to markdown so a
     // Slack/Docs/Notion paste keeps its **bold** + lists), structured
@@ -393,12 +411,7 @@ export function BlockEditor(props: {
       ta.selectionStart ?? 0,
     );
     applyPaste(
-      await props.cb.onPasteMarkdown(
-        props.blockId,
-        caretChars,
-        decision.text,
-        ta.value,
-      ),
+      await route(props.blockId, caretChars, decision.text, ta.value),
     );
   }
 

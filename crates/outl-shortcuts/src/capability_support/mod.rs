@@ -390,6 +390,51 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
+
+        // Direct backlink rows only; the namespace-mention rows stay
+        // read-only.
+        //
+        // **This row covers nine operations and a way to the source
+        // page.** The nine are the text edit, task state, delete,
+        // indent, outdent, move up / down and create a sibling below /
+        // above, each acting on the citing block on its *own* page, and
+        // all three clients perform every one of them. A one-tap
+        // "mark DONE" is deliberately **not** among them:
+        // `Action::MarkDone` owns that verdict and declares it
+        // `Missing` on mobile, whose long-press sheet draws eight rows
+        // and no mark-done. Claiming it here too would be two catalogs
+        // disagreeing about one operation — the thing this module's
+        // sibling rule forbids.
+        //
+        // Indent / outdent / move having no visible result on a GUI row
+        // is **not** what the TUI's lesser state is about: that cost is
+        // accepted on all three and written down under "Decisions made
+        // while writing this" in
+        // docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md
+        // rather than declared `Partial`.
+        //
+        // The TUI is `Partial` for the half it does not have at all:
+        // nothing in its backlinks panel opens the page a row's block
+        // lives on — not the header, not a click, not `Enter`. See
+        // `why::TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE`, which is
+        // `NestedPages`' shape one section further down the same pane.
+        //
+        // This row is the warning at the top of this file, lived
+        // through: it read `Full` on all three for a stretch while no
+        // GUI client called `edit_backlink_block` at all, because the
+        // verdict was declared ahead of the clients that would make it
+        // true. The user found it by pressing the key. So it is worth
+        // saying where each third is now checked: the TUI's
+        // `commit_backlink_mutation` call sites, `outl-mobile`'s
+        // `capability_parity.rs` (which names all eight commands), and
+        // the desktop's `backlink-handlers.test.ts`. The desktop has no
+        // `capability_parity.rs` of its own — no capability does, which
+        // is its own gap and not this row's.
+        Capability::BacklinkInlineEdit => ClientSupport {
+            tui: Partial(why::TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE),
+            desktop: Full,
+            mobile: Full,
+        },
     }
 }
 
@@ -423,6 +468,33 @@ mod tests {
     use crate::support::Client;
 
     #[test]
+    fn backlink_inline_edit_is_partial_on_the_tui_and_full_on_the_gui_clients() {
+        let s = capability_support(Capability::BacklinkInlineEdit);
+        // The TUI performs all nine operations this row covers and has
+        // no gesture at all that opens the page a row's block lives on,
+        // so the nudge has to name the route that exists. `Full` here
+        // is the state this row already shipped in once, before any
+        // GUI client called `edit_backlink_block` — a wrong verdict is
+        // found by pressing the key.
+        assert!(matches!(s.tui, Partial(_)));
+        assert!(
+            s.tui.nudge().is_some_and(|why| why.contains("Ctrl+P")),
+            "the TUI's only route to a cited block's page is the quick switcher — the nudge \
+             has to name it",
+        );
+        assert!(matches!(s.desktop, Full));
+        // `Full` on mobile is a claim about those nine, never about a
+        // one-tap finish: `Action::MarkDone` owns that one and says
+        // `Missing` here, and two catalogs may not disagree about the
+        // same operation.
+        assert!(matches!(s.mobile, Full));
+        assert!(matches!(
+            crate::support::support(crate::Action::MarkDone).mobile,
+            Support::Missing(_)
+        ));
+    }
+
+    #[test]
     fn the_desktop_has_a_task_list() {
         assert!(matches!(
             capability_support(Capability::TaskList).desktop,
@@ -443,7 +515,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Capability::ALL.len(), 24, "Capability::ALL changed size");
+        assert_eq!(Capability::ALL.len(), 25, "Capability::ALL changed size");
     }
 
     #[test]

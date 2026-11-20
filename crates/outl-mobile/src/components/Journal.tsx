@@ -35,7 +35,6 @@ import {
   searchEmojis,
   searchPages,
   searchPersons,
-  setBacklinksOrder,
   setBlockCollapsed,
   splitBlock,
   undoPage,
@@ -87,6 +86,7 @@ import { DevicesSheet } from "./DevicesSheet";
 import { RemindersSheet } from "./RemindersSheet";
 import { RemindSheet } from "./RemindSheet";
 import { createRemindAuthoring } from "./Journal.remind";
+import { backlinkToast, createBacklinkCard } from "./Journal.backlinks";
 import { GuideSheet } from "./GuideSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { JournalDeleteDialogs } from "./JournalDeleteDialogs";
@@ -205,6 +205,15 @@ export function Journal() {
     pageId,
     applyView: (v) => applyView(v),
     onError: (m) => setError(m),
+  });
+  // The backlinks card's writes: its direction, and the re-ask after a
+  // commit through one of its rows. See `./Journal.backlinks`.
+  const backlinkCard = createBacklinkCard({
+    view,
+    order: () => backlinks()?.backlinks_order ?? "newest",
+    mutate: mutateBacklinks,
+    applyView: (v) => applyView(v),
+    ...backlinkToast(() => setErrorRetry(null), (m) => setError(m)),
   });
   // The chrome walkthrough ([#574]): once per device, re-openable from
   // Settings. Read in the body, so a device that saw it never arms.
@@ -1562,19 +1571,9 @@ export function Journal() {
           pageKind={view()?.page.kind}
           blank={isBlankOutline(outlineRoots())}
           zoomed={focusView() !== null}
-          onToggleOrder={async () => {
-            const v = view();
-            if (!v) return;
-            haptic("light");
-            const next =
-              (backlinks()?.backlinks_order ?? "newest") === "newest"
-                ? "oldest"
-                : "newest";
-            const r = await withError(() =>
-              setBacklinksOrder(next, v.page.slug),
-            );
-            if (r) mutateBacklinks(r);
-          }}
+          onToggleOrder={backlinkCard.toggleOrder}
+          onEditCommitted={backlinkCard.committed}
+          onError={backlinkCard.refused}
           onOpenPage={async (slug, kind) => {
             haptic("light");
             const next =

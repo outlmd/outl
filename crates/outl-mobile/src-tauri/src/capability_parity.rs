@@ -14,11 +14,14 @@
 //! changes without this crate noticing.
 //!
 //! **What this does not catch:** a command dropped from `lib.rs`'s
-//! `invoke_handler!` list while its function stays defined. The
-//! function-item reference only proves the item still exists in
-//! source — it says nothing about whether Tauri still dispatches to
-//! it. Catching that would mean inspecting the `generate_handler!`
-//! macro invocation itself, which this module doesn't attempt.
+//! `generate_handler!` list while its function stays defined, for every
+//! row above except the three backlink commands, whose registration is
+//! read out of `lib.rs` itself. The function-item reference only
+//! proves the item still exists in source.
+//!
+//! The `BacklinkInlineEdit` row asserts on what the client *calls*,
+//! not on names that exist: it reads the frontend source (comments
+//! stripped) and fails if a backlink row reaches an outline command.
 //!
 //! Test-only — there is nothing here for the running app to call.
 
@@ -139,5 +142,167 @@ mod tests {
              deliver_due_reminders stamps onto every banner) — the catalog's \
              ReminderNotificationActions verdict for mobile must track that.",
         );
+
+        // The one row where the catalog's verdict covers *nine*
+        // operations rather than one surface, which is exactly how a
+        // per-client difference goes unrecorded: `Full` stayed `Full`
+        // while this client performed a subset of them, and nothing in
+        // any build could notice. The tap reaches the text edit and the
+        // long-press sheet (`buildBacklinkContextActions`, eight rows)
+        // reaches the rest, each addressed to the backlink's *source*
+        // page.
+        //
+        // A one-tap **mark DONE** is not one of the nine, and this is
+        // why the count is worth stating: this client has no mark-done
+        // row anywhere (`Action::MarkDone` is `Missing` on mobile, and
+        // `Journal.buildContextActions.test.ts` pins the eight ids), so
+        // a capability row claiming ten would contradict the action
+        // catalog about one operation. The TUI and the desktop perform
+        // the nine as well; what the TUI lacks is a gesture that opens
+        // the source page, which is its own `Partial` and not this
+        // client's business.
+        // Naming the cross-page commands proves they exist; it says
+        // nothing about whether a row *calls* them. The outline twins
+        // (`toggle_todo`, `create_block`, ...) still exist and are still
+        // registered for the outline's own use, so a pin that named them
+        // stayed green when the rows were routed back through them. What
+        // would be the defect is the rows' source calling a twin, so that
+        // is what is asserted.
+        let _ = crate::commands::edit_backlink_block;
+        let _ = crate::commands::backlink_row_op;
+        let _ = crate::commands::create_backlink_sibling;
+        backlink_rows_call_only_the_cross_page_commands();
+        assert_eq!(
+            capability_support(Capability::BacklinkInlineEdit).mobile,
+            Support::Full,
+            "outl-mobile edits a backlink row in place (the tap) and reaches \
+             task state, create below / above, indent, outdent, both moves and \
+             delete from its long-press sheet — all through the cross-page commands \
+             asserted above, addressed to the citing block's own page. `Full` here is a claim \
+             about every one of them; drop a row from the sheet and this is the \
+             assertion that has to change with it.",
+        );
+    }
+
+    const ROW_OPS: &str = include_str!("../../src/components/BacklinksSection.row-ops.ts");
+    const SECTION: &str = include_str!("../../src/components/BacklinksSection.tsx");
+    const ROW_EDITOR: &str = include_str!("../../src/components/BacklinkRowEditor.tsx");
+    const LIB: &str = include_str!("lib.rs");
+
+    /// Outline commands a backlink row must never reach: each tolerates
+    /// a stale block id (appends to the page's end, reports a ULID, or
+    /// answers success) where the cross-page family refuses with the
+    /// catalog's sentence.
+    const OUTLINE_TWINS: [&str; 7] = [
+        "toggleTodo",
+        "createBlock",
+        "deleteBlock",
+        "indentBlock",
+        "outdentBlock",
+        "moveBlockUp",
+        "moveBlockDown",
+    ];
+    const CROSS_PAGE: [&str; 3] = [
+        "backlinkRowOp",
+        "createBacklinkSibling",
+        "editBacklinkBlock",
+    ];
+
+    /// Comments quote the names under test ("never `createBlock`"), so a
+    /// scan of raw source is satisfied by prose.
+    fn strip_comments(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut chars = src.chars().peekable();
+        while let Some(c) = chars.next() {
+            match (c, chars.peek()) {
+                ('/', Some('/')) => {
+                    for n in chars.by_ref() {
+                        if n == '\n' {
+                            out.push('\n');
+                            break;
+                        }
+                    }
+                }
+                ('/', Some('*')) => {
+                    chars.next();
+                    let mut prev = ' ';
+                    for n in chars.by_ref() {
+                        if prev == '*' && n == '/' {
+                            break;
+                        }
+                        prev = n;
+                    }
+                }
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+
+    fn is_ident(c: char) -> bool {
+        c.is_alphanumeric() || c == '_' || c == '$'
+    }
+
+    /// Whether `name(` occurs as a call, not as a suffix of a longer name.
+    fn calls(src: &str, name: &str) -> bool {
+        let needle = format!("{name}(");
+        src.match_indices(&needle)
+            .any(|(i, _)| !src[..i].chars().next_back().is_some_and(is_ident))
+    }
+
+    /// Names imported from `@outl/shared/api/commands`, if the file has
+    /// such an import.
+    fn commands_imports(src: &str) -> String {
+        let marker = "from \"@outl/shared/api/commands\"";
+        let Some(end) = src.find(marker) else {
+            return String::new();
+        };
+        let start = src[..end].rfind("import").unwrap_or(0);
+        src[start..end].to_string()
+    }
+
+    fn backlink_rows_call_only_the_cross_page_commands() {
+        let row_ops = strip_comments(ROW_OPS);
+        for name in CROSS_PAGE {
+            assert!(
+                calls(&row_ops, name),
+                "BacklinksSection.row-ops.ts no longer calls {name}: the mobile \
+                 backlink gestures must reach the source page through the \
+                 cross-page command family",
+            );
+        }
+        for (file, src) in [
+            ("BacklinksSection.row-ops.ts", row_ops.as_str()),
+            ("BacklinksSection.tsx", &strip_comments(SECTION)),
+            ("BacklinkRowEditor.tsx", &strip_comments(ROW_EDITOR)),
+        ] {
+            let imports = commands_imports(src);
+            for twin in OUTLINE_TWINS {
+                assert!(
+                    !calls(src, twin) && !imports.contains(twin),
+                    "{file} reaches the outline command {twin}: it tolerates a stale \
+                     block id (appends to the end of the page, prints a ULID, or \
+                     reports success) where the cross-page family refuses with the \
+                     catalog's sentence",
+                );
+            }
+        }
+
+        // A command defined but dropped from the handler list is a
+        // button that does nothing.
+        let lib = strip_comments(LIB);
+        let handlers = &lib[lib
+            .find("generate_handler!")
+            .expect("lib.rs registers its commands through generate_handler!")..];
+        for command in [
+            "edit_backlink_block",
+            "backlink_row_op",
+            "create_backlink_sibling",
+        ] {
+            assert!(
+                handlers.contains(&format!("{command},")),
+                "lib.rs's generate_handler! no longer registers {command}",
+            );
+        }
     }
 }

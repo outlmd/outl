@@ -106,7 +106,7 @@ Only the mutation can fail the commit. A projection failure arrives after
 the op log already holds the truth, so `project` returns nothing and an
 implementation that needs to surface the failure keeps it on `self` — the
 Tauri clients do exactly that (`TauriCommitHooks` in
-`outl-tauri-shared/src/helpers.rs`). Aborting there would report an error
+`outl-tauri-shared/src/commit.rs`). Aborting there would report an error
 for a change that did happen.
 
 **Why it lives here.** The sequence had one implementation, generic over
@@ -153,6 +153,15 @@ Three decisions in it:
   Root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate)
   invariant 15 is the rule this serves; [`docs/performance.md`](../../docs/performance.md)
   is how to read it.
+
+### A projection reads the property map once, not once per block
+
+`tree::group_properties_of` is the single owner of "the properties of these nodes", because `outl_core::tree::Tree::properties_of` **scans the whole workspace-wide map on every call**.
+Its doc comment promised the opposite; that sentence is gone, and the accessor names this function now.
+`render_page_md` had collapsed its per-node reads into one pass; `project_outline`, the DTO every GUI mutation replies with, had not, which was **2,588 ms to project one page** on the maintainer's workspace against 10.8 ms to render it.
+`ids` must be sorted (the pass binary-searches it), the scope is the walk (`outline::workspace_properties` is the explicit opt-out), and the value mapping is a parameter because the renderer drops a `PropValue::List` the outline DTO joins.
+`tests/outline_property_pass.rs` is the ratchet and found a third instance while being written.
+The incident and what is still unfixed: [`docs/performance.md`](../../docs/performance.md).
 
 ## The `tree → .md` executor
 
@@ -518,8 +527,12 @@ When adding a new operation here:
    If a client crate already has a helper for the same concept, lift it here (and delete the client copy) — even if it's a small refactor.
    The `flatten_backlink_subtree` → `flatten_subtree_paths` move from `outl-md` is the canonical pattern: one owner, every client wraps.
 3. **Generalize the parameter set** when migrating.
-   The Backlink rewrite added `source_block: OutlineNode` + `source_path` so *both* the mobile linear renderer and the TUI subtree renderer could share the same struct.
+   The Backlink rewrite added `source_block: OutlineNode` + `source_path` so *both* the mobile linear renderer and the TUI's then-subtree renderer could share the same struct.
    Capping features at "what mobile needs today" would force the TUI to keep its own copy.
+   **The subtree half of that is now unused**, which is the other edge of the same rule.
+   `source_block` carries no children on either builder (the #179 freeze fix), so every client draws one row per citing block.
+   Generalising is still right at migration time — you cannot know which client needs the wider shape.
+   But a parameter no caller fills is a claim the type keeps making, which is how `Focus::Backlink`'s `sub_path` stayed alive as dead code for months.
 
 The root [`CLAUDE.md`](../../CLAUDE.md#reuse-first) "Reuse-first" section documents the policy at the workspace level, in full at [`docs/contributing.md`](../../docs/contributing.md#reuse-first-no-parallel-implementations).
 

@@ -80,4 +80,14 @@ impl App {
             .unwrap_or("")
             .to_string()
     }
+
+    /// Is `page` the view the user is looking at?
+    ///
+    /// Every cross-page write asks it, for the same reason: a notice
+    /// about the page on screen belongs on its banner, and a reload is
+    /// only owed to an AST that is actually being rendered. Two copies
+    /// of this could disagree about which page that is.
+    pub(crate) fn page_is_open(&self, page: outl_core::id::NodeId) -> bool {
+        outl_actions::find_by_slug(&self.workspace, &self.current_slug()) == Some(page)
+    }
 }

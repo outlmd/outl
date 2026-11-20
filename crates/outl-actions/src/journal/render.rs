@@ -1,19 +1,14 @@
 //! Tree → markdown projection (page and single-block forms).
 
-use std::collections::HashMap;
-
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use outl_md::parse::{OutlineNode, ParsedPage};
 use outl_md::render::render;
 
 use crate::outline::ChildrenIndex;
-use crate::tree::{is_page_model_key, renderable_prop_value, sort_in_presentation_order};
-
-/// Renderable properties of the nodes in one projection, grouped by the
-/// node carrying them and alpha-sorted per node — exactly the shape a
-/// rendered block wants, so the per-node path is a map lookup.
-type PropertiesByNode = HashMap<NodeId, Vec<(String, String)>>;
+use crate::tree::{
+    group_properties_of, is_page_model_key, renderable_prop_value, PropertiesByNode,
+};
 
 /// The subtree as walked, before properties are attached.
 ///
@@ -53,49 +48,6 @@ fn collect_ids(skeletons: &[Skeleton], out: &mut Vec<NodeId>) {
         out.push(node.id);
         collect_ids(&node.children, out);
     }
-}
-
-/// Every renderable property carried by one of `ids`, grouped by node.
-///
-/// `ids` must be sorted — the scan binary-searches it per property.
-///
-/// **One scan for the whole projection, not one per node.**
-/// [`outl_core::tree::Tree::properties_of`] filters the workspace-wide
-/// property map on *every* call, so asking it per node is
-/// `O(nodes × properties)`; its own doc comment says as much. Measured
-/// on a synthetic 64k-node / 192k-property workspace, `render_page_md`
-/// went from 13.8 ms/page to 4.4 ms/page purely from collapsing those
-/// per-node filters into this single `iter_properties` pass.
-///
-/// Note this scan is **subtree-scoped**, which is the part that is easy
-/// to get wrong. Grouping the *whole* workspace instead — the obvious
-/// reading of "build the map once" — is a net loss here, because a page
-/// render then allocates a `Vec` and two `String`s for all 192k
-/// properties to read the ~80 belonging to its own blocks. Measured, it
-/// was 2.7× *slower* than the per-node filtering it replaced. The
-/// whole-workspace map is right for a whole-workspace pass (see
-/// `crate::index::build_properties_index`) and wrong for a single page.
-fn subtree_properties(workspace: &Workspace, ids: &[NodeId]) -> PropertiesByNode {
-    let mut grouped: PropertiesByNode = HashMap::new();
-    for (node, key, value) in workspace.tree().iter_properties() {
-        if ids.binary_search(&node).is_err() {
-            continue;
-        }
-        let Some(text) = renderable_prop_value(value) else {
-            continue;
-        };
-        grouped
-            .entry(node)
-            .or_default()
-            .push((key.to_string(), text));
-    }
-    // Order comes from `crate::tree::sort_in_presentation_order`, which
-    // owns why it is alphabetical and what the `HashMap`'s per-process
-    // seed costs a reader of the `.md` diff.
-    for props in grouped.values_mut() {
-        sort_in_presentation_order(props);
-    }
-    grouped
 }
 
 /// Turn the walked skeleton into outline nodes, attaching each block's
@@ -139,7 +91,10 @@ fn project_subtree(
     collect_ids(&skeleton, &mut ids);
     ids.sort_unstable();
 
-    let properties = subtree_properties(workspace, &ids);
+    // One pass over the property map for the whole page, never one per
+    // block — `group_properties_of` owns why, and what the per-node
+    // version costs.
+    let properties = group_properties_of(workspace, &ids, renderable_prop_value);
     let own = properties.get(&parent).cloned().unwrap_or_default();
     (own, build_outline(skeleton, &properties))
 }

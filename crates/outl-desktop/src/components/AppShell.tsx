@@ -5,7 +5,6 @@ import {
   openJournalFor,
   openPageBySlug,
   openTodayJournal,
-  pageBacklinks,
   reloadWorkspace,
   todaySlug,
 } from "@outl/shared/api/commands";
@@ -16,11 +15,8 @@ import { createDayClock } from "@outl/shared/journal";
 import { flattenAll } from "@outl/shared/outline";
 import { CrashReportsNotice } from "@outl/shared/polish";
 
-import {
-  appState,
-  setAppState,
-  trackBacklinks,
-} from "../lib/store";
+import { trackBacklinks } from "../lib/backlinks-fetch";
+import { appState, setAppState } from "../lib/store";
 import {
   takePendingDeepLink,
   takePendingOpenFile,
@@ -41,6 +37,7 @@ import { installShortcuts, type ActionHandlers } from "../lib/shortcuts";
 import { loadTransformers } from "@outl/shared/plugins/transformer-registry";
 import { buildHandlers } from "../lib/action-handlers";
 import { followSelection, installRegionKeys } from "../lib/keyboard-reach";
+import { isEditing } from "../lib/mode";
 import { resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
 import { BatchToolbar } from "./BatchToolbar";
@@ -182,12 +179,14 @@ export function AppShell() {
           ? await openJournalFor(page.slug)
           : await openPageBySlug(page.slug);
       applyView(view);
-      // A peer reload keeps the same slug, so OutlineView's `on(slug)`
-      // backlinks effect won't refire — but a peer's edit CAN change this
-      // page's backlinks. Refetch them here explicitly, behind the page:
-      // the rows already on screen stay up and the section carries its
-      // own pending mark (`UX.md` → Never block a keystroke).
-      void trackBacklinks(pageBacklinks(page.slug));
+      // A peer reload keeps the same slug, so the backlinks effect's
+      // key won't refire — but a peer's edit CAN change this page's
+      // backlinks. Refetch them here explicitly, behind the page: the
+      // rows already on screen stay up and the section carries its own
+      // pending mark (`UX.md` → Never block a keystroke). A streaming
+      // peer fires this repeatedly; `trackBacklinks` is what keeps that
+      // to one scan at a time.
+      void trackBacklinks();
     } catch {
       await loadToday();
     }
@@ -197,14 +196,19 @@ export function AppShell() {
   // its op log fires many `peer-ops-changed` events; firing a full
   // `reloadWorkspace` per event pegged the CPU and queued the workspace lock
   // that `create_block` needs (the `esc+o` delay). And reloading while the user
-  // edits re-materializes the tree under the cursor. So: defer while
-  // `editingBlockId` is set, run at most one reload at a time, and collapse any
+  // edits re-materializes the tree under the cursor. So: defer while the user
+  // is in an editor, run at most one reload at a time, and collapse any
   // events that arrive during a reload into a single follow-up.
+  //
+  // "In an editor" is `isEditing()` (`lib/mode.ts`), never `editingBlockId`:
+  // a backlink row holds a real editor too, and reading the outline's field
+  // alone is what let a refetch replace `appState.backlinks` under a mounted
+  // textarea and re-seed its draft over the user's typing.
   let peerChangeInFlight = false;
   let peerChangePending = false;
 
   async function onPeerChange() {
-    if (appState.editingBlockId !== null || peerChangeInFlight) {
+    if (isEditing() || peerChangeInFlight) {
       peerChangePending = true;
       return;
     }
@@ -215,7 +219,7 @@ export function AppShell() {
         await reloadWorkspace();
         await refreshActivePage();
         await refreshStats();
-      } while (peerChangePending && appState.editingBlockId === null);
+      } while (peerChangePending && !isEditing());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -232,7 +236,7 @@ export function AppShell() {
   // reload instead of resetting the textarea; the drain below re-reads
   // the page once the user leaves edit mode.
   async function onReconciled() {
-    if (appState.editingBlockId !== null || peerChangeInFlight) {
+    if (isEditing() || peerChangeInFlight) {
       peerChangePending = true;
       return;
     }
@@ -244,11 +248,7 @@ export function AppShell() {
   // moment they leave edit mode. Guarded so it only fires on the edit→idle
   // transition, and only when a reload is actually pending.
   createEffect(() => {
-    if (
-      appState.editingBlockId === null &&
-      peerChangePending &&
-      !peerChangeInFlight
-    ) {
+    if (!isEditing() && peerChangePending && !peerChangeInFlight) {
       void onPeerChange();
     }
   });
@@ -317,7 +317,7 @@ export function AppShell() {
     resolve: todaySlug,
     wake: {
       currentSlug: () => appState.page?.slug ?? null,
-      editing: () => appState.editingBlockId !== null,
+      editing: isEditing,
       jumpToday: () => void loadToday(),
     },
   });
@@ -378,7 +378,7 @@ export function AppShell() {
     installForegroundRefresh({
       pull: async () => {
         await initialNav.catch(() => undefined);
-        if (appState.editingBlockId === null) await refreshActivePage();
+        if (!isEditing()) await refreshActivePage();
       },
       notify: setError,
     });

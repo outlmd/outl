@@ -1,9 +1,11 @@
 //! Cross-cutting helpers used by every command body.
 //!
-//! Argument parsing, workspace-lock acquisition, and the
-//! `finish_in_page` pattern that every mutation funnels through. Pure
-//! glue — anything that mutates the workspace semantically belongs in
-//! `outl-actions`.
+//! Argument parsing, workspace-lock acquisition, building a [`PageView`]
+//! off the tree or off disk, and the stale-`.md` refresh every open path
+//! runs. Pure glue — anything that mutates the workspace semantically
+//! belongs in `outl-actions`, and what happens *around* a mutation
+//! (the `finish_in_page*` pipeline, the backlink-index policy, the peer
+//! announce) is [`crate::commit`].
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,9 +13,9 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use outl_actions::{
-    apply_page_md_with_sidecar_guarded, commit_page, date_from_slug, page_meta as page_meta_action,
-    project_outline, read_page_outline_with_workspace, render_page_md, ActionError, CommitHooks,
-    HistoryStacks, PageOutline, ProjectionRefusal,
+    date_from_slug, page_meta as page_meta_action, project_outline,
+    read_page_outline_with_workspace, render_page_md, ActionError, HistoryStacks, PageOutline,
+    ProjectionRefusal,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
@@ -252,163 +254,6 @@ pub fn reproject_stale_md(
             }
         }
     }
-}
-
-/// Apply a workspace mutation `f` and project the result back to
-/// `.md` + sidecar.
-///
-/// The op log is the source of truth: the `.md` and the sidecar are
-/// projections regenerated after the mutation so what the user reads on
-/// disk matches the op-log state. We do **not** run `reconcile_md`
-/// before `f` — the op log is already up to date with whatever peers
-/// delivered, and "catching up" from a lagging on-disk `.md` would risk
-/// emitting Delete cascades.
-pub fn finish_in_page<S, F>(state: &S, page_id: NodeId, f: F) -> Result<PageView, String>
-where
-    S: AppHost,
-    F: FnOnce(&mut Workspace) -> Result<(), ActionError>,
-{
-    finish_in_page_with(state, page_id, f).map(|(_, view)| view)
-}
-
-/// Variant of [`finish_in_page`] that also returns whatever value the
-/// mutation produced (the new `NodeId` for `create_block`, etc.) so the
-/// frontend never has to re-discover it from a DFS diff of the outline.
-///
-/// When the host exposes undo stacks ([`AppHost::history`] returns
-/// `Some`), the pre-mutation `.md` render is recorded — but only when
-/// the mutation actually changed the page render, so no-op commands
-/// don't turn `Cmd+Z` into a visible nothing.
-pub fn finish_in_page_with<S, F, T>(
-    state: &S,
-    page_id: NodeId,
-    f: F,
-) -> Result<(T, PageView), String>
-where
-    S: AppHost,
-    F: FnOnce(&mut Workspace) -> Result<T, ActionError>,
-{
-    let root = state.storage_root()?;
-    with_ws_mut(state, |ws| {
-        let mut hooks = TauriCommitHooks {
-            state,
-            root: &root,
-            projection_failure: None,
-        };
-        let value = commit_page(ws, &mut hooks, page_id, f).map_err(|e| e.to_string())?;
-        let projection_failure = hooks.projection_failure;
-
-        if state.projection_writer().is_some() {
-            // Async-writes default: the hook queued the write, so the
-            // `.md` on disk is momentarily behind. Read the reply off the
-            // tree, which is the source of truth either way.
-            let view = build_page_view_from_tree(ws, page_id).map_err(|e| e.to_string())?;
-            Ok((value, view))
-        } else {
-            let mut view = build_page_view(ws, &root, page_id).map_err(|e| e.to_string())?;
-            if let Some(e) = projection_failure {
-                let failure = crate::state::ProjectionWriteFailed::from_error(page_id, &e);
-                view.md_ahead_of_log = failure.md_ahead_of_log.clone();
-                view.projection_error = failure.md_ahead_of_log.is_none().then_some(failure.error);
-            }
-            Ok((value, view))
-        }
-    })
-}
-
-/// The Tauri clients' half of [`commit_page`].
-///
-/// Holds the borrowed host plus the one thing the sequence produces that
-/// the caller still needs: a projection failure. That failure arrives
-/// *after* the op log already holds the mutation, which is why
-/// [`CommitHooks::project`] returns nothing — the commit succeeded, and
-/// what is left is reporting.
-struct TauriCommitHooks<'a, S: AppHost> {
-    state: &'a S,
-    root: &'a Path,
-    projection_failure: Option<ActionError>,
-}
-
-impl<S: AppHost> CommitHooks for TauriCommitHooks<'_, S> {
-    fn project(&mut self, workspace: &Workspace, page: NodeId) {
-        if let Some(writer) = self.state.projection_writer() {
-            // The op log already has the truth, so queue the render +
-            // SHA-256 + disk write off-thread. The commit never blocks
-            // the next keystroke (the outl async-writes default).
-            writer.queue(page);
-            return;
-        }
-        // This *is* step 5 of the commit pipeline, not a caller taking it
-        // alone: synchronous fallback for a host with no projection worker.
-        if let Err(e) = apply_page_md_with_sidecar_guarded(workspace, self.root, page) {
-            warn!("page md+sidecar sync failed: {e}");
-            self.projection_failure = Some(e);
-        }
-    }
-
-    fn records_undo(&self) -> bool {
-        self.state.history().is_some()
-    }
-
-    fn record_undo(&mut self, page: NodeId, before: String) {
-        if let Some(history) = self.state.history() {
-            history.lock().entry(page).or_default().record(before);
-        }
-    }
-
-    fn invalidate_backlinks(&mut self) {
-        // Dropped under the workspace lock, so it serializes with the
-        // rebuild `page_backlinks` does; the next read rebuilds it.
-        invalidate_backlink_index(self.state);
-    }
-
-    fn announce(&mut self, workspace: &Workspace, page: NodeId) {
-        // One owner: `set_block_collapsed` bypasses the commit pipeline
-        // and calls the same function directly.
-        announce_after_commit(self.state, workspace, page);
-    }
-}
-
-/// Drop the host's cached backlinks index so the next `page_backlinks`
-/// rebuilds it. Call after any change that can alter backlinks — a local
-/// mutation (via [`finish_in_page_with`]) or a peer reload. No-op when
-/// the host doesn't cache one ([`AppHost::backlink_index`] is `None`).
-pub fn invalidate_backlink_index<S: AppHost>(state: &S) {
-    if let Some(index) = state.backlink_index() {
-        *index.lock() = None;
-    }
-}
-
-/// Post-commit hook: tell connected peers this device just produced new
-/// ops so a peer pulls **immediately** over iroh gossip, instead of
-/// waiting for the catch-up loop's maintenance re-sync.
-///
-/// Best-effort and non-fatal by design:
-/// - no transport wired (file-sync / not yet started) → nothing to
-///   announce;
-/// - the announce never crosses (flaky link) → the catch-up loop's
-///   periodic re-sync still converges.
-///
-/// This is the GUI mirror of the TUI's `save()` tail. Without it, edits
-/// committed the op locally but never woke peers — so propagation
-/// depended entirely on the catch-up timing.
-///
-/// Called through [`CommitHooks::announce`] for every commit, and
-/// directly by `commands::block::set_block_collapsed`, which skips the
-/// commit pipeline on purpose (it does not reproject).
-///
-/// The transport check comes **before** `page_meta` deliberately: a host
-/// running the file transport has nothing to announce, and resolving the
-/// slug costs five property lookups plus a `block_text` on a path that
-/// runs once per keystroke commit.
-pub fn announce_after_commit<S: AppHost>(state: &S, ws: &Workspace, page_id: NodeId) {
-    let Some(transport) = state.sync_transport() else {
-        return;
-    };
-    let Some(meta) = page_meta_action(ws, page_id) else {
-        return;
-    };
-    transport.announce_local_ops(&meta.slug, state.hlc().next());
 }
 
 /// Surgical undo invalidation across a peer-driven reload.
