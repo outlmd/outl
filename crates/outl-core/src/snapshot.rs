@@ -452,16 +452,22 @@ pub fn read_best_from_disk(
     snapshots_dir: &Path,
     prefer_actor: ActorId,
 ) -> Result<Option<SnapshotBody>, SnapshotError> {
-    // Read this device's own first — but only to catch an unusable one
-    // and drop it. It no longer short-circuits the choice: `survey` ranks
-    // it against the peers like any other candidate. Returning it
-    // unconditionally is what stranded a freshly paired device, whose own
-    // first-launch snapshot names a single actor and shadowed a peer's
-    // covering every actor in the workspace.
     // Rank on headers, then decode only what won. `select::adopt_order`
     // reads a few hundred bytes per candidate instead of the whole body,
     // which is the difference between 124 MB and 16 KB on a real
     // four-snapshot directory — paid at launch, every launch.
+    //
+    // This device's own file is one candidate in that order and gets no
+    // head start. Returning it unconditionally is what stranded a
+    // freshly paired device, whose own first-launch snapshot names a
+    // single actor and shadowed a peer's covering every actor in the
+    // workspace. `own_name` below is only used to decide who may delete
+    // an unusable file, never to decide which file wins.
+    //
+    // `gc::survey` is NOT the ranker here, and does not rank the own
+    // snapshot against peers at all: its winner is `peer_best`,
+    // deliberately peers-only, because its output is a delete. The two
+    // passes share `select::selection_key` and nothing else.
     let own_name = format!("snap-{prefer_actor}.bin");
     let mut last_err: Option<SnapshotError> = None;
 

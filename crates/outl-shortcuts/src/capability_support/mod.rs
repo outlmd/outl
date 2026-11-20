@@ -59,9 +59,9 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         //
         // Mobile's verdict was `Missing` while this client registered
         // `page_timeline` and mounted `HistorySheet.tsx` off the page
-        // properties sheet — a surface `outl-mobile/CLAUDE.md` lists
-        // under "Trust surfaces". The sentence sent a user who already
-        // had the feature to another device to go and find it.
+        // properties sheet, the surface `docs/mobile-internals.md` → "Trust
+        // surfaces" records. The sentence sent a user who already had
+        // the feature to another device to go and find it.
         //
         // Worth stating because it is the failure an exhaustive `match`
         // cannot catch: invariant 12 forces every client to *declare* a

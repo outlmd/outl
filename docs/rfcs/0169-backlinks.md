@@ -119,7 +119,7 @@ Each source page's blocks stay contiguous and in DFS order; pages sort by their 
 The direction comes from `[display] backlinks_order` and is a pure display preference that never converges between devices — same class as `theme.preset`.
 Every client calls this one function, so the direction cannot drift: the TUI toggles it with `Ctrl+O`, the desktop and mobile panels expose a header button, and all three persist through `outl_config`.
 
-Client wiring lives with the clients: [`docs/clients.md` → Backlinks order](../clients.md), plus `outl-tauri-shared/CLAUDE.md` for the lazy `page_backlinks` command.
+Client wiring lives with the clients: [`docs/client-backlinks.md` → "Backlinks order"](../client-backlinks.md#backlinks-order-issue-142), plus `outl-tauri-shared/CLAUDE.md` for the lazy `page_backlinks` command.
 `PageView.backlinks` always comes back empty, because computing backlinks on the first-paint path was what blocked the first journal render.
 
 ## Why not the alternatives
@@ -210,7 +210,8 @@ A page with 100,000 backlinks renders 100,000 rows.
    The enforcing surface is `outl-actions/CLAUDE.md`, whose `backlinks` / `backlinks_index` / `backlinks_sort` rows carry the single-owner rule, name the deleted `outl_md::index` cache as the reason, and state why entries are shallow leaves.
    Its "Reuse-first" section uses the `outl_md::index::Backlink` → `outl_actions::Backlink` consolidation as its worked example of promote-don't-fork.
    On the other side of the boundary, `outl-md/CLAUDE.md`'s workspace-index row says **"Does not carry backlinks"** so an editor adding a cache there reads the rule before writing it.
-   Client wiring is pinned in `outl-tauri-shared/CLAUDE.md` — lazy `page_backlinks`, plus the explicit note that `compute_backlinks` no longer exists in `helpers.rs` — and in [`docs/clients.md` → Backlinks order](../clients.md).
+   Client wiring is pinned in `outl-tauri-shared/CLAUDE.md` — lazy `page_backlinks`, plus the explicit note that `compute_backlinks` no longer exists in `helpers.rs`.
+   It is pinned again in [`docs/client-backlinks.md` → "Backlinks order"](../client-backlinks.md#backlinks-order-issue-142).
    The config key is [`docs/config.md` → `[display]`](../config.md), and the reuse rows are [`docs/primitives-actions.md`](../primitives-actions.md) §3.
    This RFC is the rationale layer those five point at.
 

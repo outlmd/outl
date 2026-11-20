@@ -280,9 +280,9 @@ pub const NO_SLASH_MENU_ON_THE_PHONE: &str =
 /// type here is worse than the gap: the same reason
 /// `NO_MOBILE_TRASH_SHEET` dropped its `outl trash list` clause.
 pub const TYPE_THE_QUOTE_MARKER: &str =
-    "There's no one-gesture blockquote here yet — type `> ` at the front of a block and it \
-     reads as a quote, which is exactly what the gesture would have written. Typing it again \
-     removes it.";
+    "There's no one-gesture blockquote here yet. Type `> ` at the front of a block to quote \
+     it, and delete those two characters to unquote it. On a task block it goes after the \
+     marker rather than before it, which is what keeps the checkbox.";
 
 pub const DESKTOP_HOSTS_ONLY: &str =
     "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \

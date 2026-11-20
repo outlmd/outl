@@ -178,7 +178,7 @@ Rules:
   Anything doing cursor math around the marker must measure the prefix it is adding or removing (`TodoState::prefix`), never assume five.
 - Progress counters (the TUI's `●● 3/7` chip) count `DOING` toward the **total**, never toward the done half — a started task is unfinished work.
 - Markers compose in a **canonical order**: `"TODO > body"` / `"DONE > body"` (TODO/DONE before the quote marker).
-  `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so a block authored in the other order (`"> TODO foo"`) is normalised by the next toggle of either.
+  `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so `"> TODO foo"` is normalised — by the first `cycle_todo`, or the second `toggle_quote`.
   A **todo** toggle is the route every client has; `toggle_quote` is reached only from the desktop's `/quote` row, and on the TUI and mobile a quote is authored by typing `> `.
   Per-client: `BlockquoteToggle` in [client-parity.md](client-parity.md#capability-parity), and [client-editing.md](client-editing.md#blockquote-convention) owns the convention.
   Why canonical order matters: the backend's `split_todo` reads from the **start** of the text.

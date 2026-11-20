@@ -7,7 +7,7 @@
  * from the Rust catalog that stamps them onto the banner.
  *
  * Why any of this is mobile-only, and who owns the ids:
- * `crates/outl-mobile/CLAUDE.md` → Reminders → Actionable banners.
+ * `docs/mobile-internals.md` → "Reminders", "Actionable banners".
  */
 
 /**

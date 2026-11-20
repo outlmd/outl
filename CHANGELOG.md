@@ -92,7 +92,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The row rides the inline `/` menu under a reserved sentinel `plugin_id`, the same escape hatch `/upload` and `/date-today` already use for a core feature with no chord.
   A chord is what it cannot have: that needs an `Action` in `outl-shortcuts`, and both `support()` and `defaults.rs` sit at their recorded file-size baseline, so declaring one would mean raising a ceiling to carry a gesture nothing has asked for.
   `outl_actions::quote::toggle_quote` owns both directions and the ordering against a task marker, so nothing on the client side reads or writes the prefix.
-  An externally authored `"> TODO foo"` therefore comes back as the canonical `"TODO > foo"` on the first toggle.
+  An externally authored `"> TODO foo"` therefore normalises to the canonical `"TODO > foo"` over two toggles: the first strips the quote and leaves `"TODO foo"`, the second puts the marker back in canonical order.
 
   **The TUI and the phone still have no gesture, and that is now written down** as `Capability::BlockquoteToggle` in `docs/client-parity.md`.
   Recording it needed a client rather than just a verdict.
@@ -109,7 +109,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Its doc claimed to be `read_best_from_disk`'s directory-scan half, "one owner, so the selector and the GC cannot develop separate opinions about which file matters".
   That stopped being true when `read_best_from_disk` moved to `select::adopt_order` with its own header-ranking decode loop, so the two already ranked independently and this was the orphaned remnant of the design the comment described.
 
-- **Five more `pub` items and seven icons with no caller.**
+- **Three more `pub` items and seven icons with no caller.**
   `OffsetIndexSet::ts_iter` allocated a `Vec` of every `(actor, ts)` in the log, an `O(total ops)` read whose filtered siblings are what the sync census deliberately uses instead (invariant 15).
   `sidecar::gc::Survey::reclaimable_bytes` summed what `prunable()` already returns.
   `EditBuffer::move_word_right` was the unimplemented half of a symmetric pair: no key path in the TUI reaches an `EditBuffer` word motion at all.
@@ -123,12 +123,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   So the read below it failed the user's execution where a recompile was the right answer.
   `outl_exec::wasm::cache::is_fresh` already asked `is_file()` and already owned this question; the runtime had a copy of the check instead of a call to it, and that copy is the half that drifted.
 
-- **Desktop: opening a `[[ref]]` whose page could not be written said nothing.**
+- **Opening a `[[ref]]` whose page could not be written said nothing, on either client.**
   `open_ref` resolves or creates the page in the op log and then writes `pages/<slug>.md`, and when that write fails the backend emits `ref-projection-failed` so the client can say the link is not visible to peers yet.
   Nothing listened, on either client, since the event shipped in 0.8.0.
   So the ref landed in the block, the page existed only in the log, and the failure reached a `tracing` line and stopped there.
   The desktop routes it to the error toast now, in the backend's own words, beside the async writer's refusal it already reported.
-  Mobile emits the same event and still swallows it.
+  Mobile routes it to its error surface in the same change, through `listenForRefProjectionFailed` in `Journal.listeners.ts`.
+  Neither client's listener is covered by `docs/client-parity.md`: `ref-projection-failed` has no `Capability` row, so nothing contradicts a stale claim about who listens.
 
 - **TUI: the editor opened on a deleted block and lost what you typed into it.**
   Press `i` on a backlink row whose block a peer had deleted, type, press `Esc`, and the commit refused — the text was gone and the only sign was a status line.

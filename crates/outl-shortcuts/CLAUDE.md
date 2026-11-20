@@ -75,7 +75,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   Each client maps `Action -> {do_something}` itself.
   The TUI's `App::dispatch` and the desktop's `lib/action-handlers.ts` are the dispatchers; this crate doesn't know how a "commit insert buffer" actually commits.
   > **Handler behaviour contracts** (e.g. `FoldAll` skipping leaves, `UnfoldAll` walking the full tree, `DeleteRange` iterating bottom-up)
-  > live in the per-client CLAUDE.md (`outl-tui/CLAUDE.md`, `outl-desktop/CLAUDE.md`) under their vim / mode sections,
+  > live with each client (`outl-tui/CLAUDE.md` → "Modes", "Insert mode", and `docs/desktop-keybindings.md` → "Vim parity", "Block-editor chords"),
   > and in `docs/tui.md` / `docs/shortcuts.md` for user-facing copy.
   > This file owns *which `Action` exists*; the *what the handler does* is a per-client concern documented next to the dispatcher.
   > The `doc-sync-guard` hook flags edits to `action-handlers.ts` here as a heuristic —
@@ -147,7 +147,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
 
    The first pins `docs/client-parity.md` to the code; the second pins the desktop handler map to the catalog **in both directions** — a promised handler that is missing, and a shipped handler the catalog still calls absent.
 7. **Update both user-visible tables in the same commit:**
-   - `crates/outl-desktop/CLAUDE.md` "OS-standard chrome" / "Block-editor chords" / "Inline markdown" — whichever the chord belongs to.
+   - `docs/desktop-keybindings.md` → "OS-standard chrome", "Block-editor chords", "Inline markdown" — whichever the chord belongs to.
    - `docs/tui.md` if the binding has a TUI counterpart.
    - This `CLAUDE.md`'s mode-semantics example list if the chord is a load-bearing illustration (e.g. the `Cmd+B`-in-Insert vs. `Cmd+B`-in-Global rationale below).
 
@@ -169,7 +169,8 @@ Bound in **both** `Normal` and `Visual`, they start a contiguous selection from 
 
 - `Global` mode → no binding (we want bold-in-insert to take priority).
 - `Insert` mode → `WrapBold`.
-- `Normal` mode → no binding either (the desktop frontend used to wire it to "toggle sidebar"; that's `Cmd+Shift+E` now to avoid hijacking markdown's universal bold chord — see `crates/outl-desktop/CLAUDE.md` for the rationale).
+- `Normal` mode → no binding either: the desktop frontend used to wire it to "toggle sidebar", and that's `Cmd+Shift+E` now, to avoid hijacking markdown's universal bold chord.
+  See `docs/shortcuts.md` → "Why the shifted variants for sidebar / backlinks".
 
 If you find yourself wanting two different actions on the same chord across modes, the catalog already supports it — just add two `Binding` rows with different `mode` fields and the `no_duplicate_chord_in_same_mode` test will let them through.
 `Cmd+Shift+X` ships exactly that split today: `WrapStrike` in Insert (textarea focused) and `RunCodeBlock` in Global — inside a textarea the mode-specific row wins, everywhere else the Global one fires.

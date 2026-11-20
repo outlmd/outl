@@ -58,6 +58,10 @@ use crate::surface::SURFACE;
 ///   never named one are told apart there) rather than the
 ///   `ActionError`'s `Display`, which is a raw id and an
 ///   implementation noun.
+///   It is refused **first**, before the ahead-of-log check below,
+///   because that check *writes* on a merely-stale page — see
+///   `refuse_a_dead_row`, which owns the ordering and why the
+///   in-closure verdict is still asked underneath it.
 /// - **A page ahead of its log is refused before anything is written.**
 ///   Those lines exist in no op, so the edit would apply to the *logged*
 ///   text — and here that is **not** the text the user edited: both
@@ -97,6 +101,7 @@ pub fn edit_backlink_block<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
+    refuse_a_dead_row(state, node, stale_backlink_block_refusal)?;
     let root = state.storage_root()?;
     let outcome = with_ws(state, |ws| {
         Ok(reproject_stale_md(ws, &root, page, "edit_backlink_block"))
@@ -246,10 +251,16 @@ pub enum BacklinkSide {
 /// not happen.
 ///
 /// Nothing is typed on any of these seven, so a refusal costs the user
-/// nothing to weigh against it — which is why the write side is the
-/// right side here, and why
+/// nothing to weigh against it — which is why
 /// `outl_actions::refusal::stale_backlink_block_unchanged_refusal` is
 /// the half `stale_row_block` returns.
+///
+/// **The liveness verdict is asked twice, deliberately, and the first
+/// ask comes before the ahead-of-log check** — which *writes* on a
+/// merely-stale page, so a chord aimed at a deleted block used to
+/// rewrite a `.md` and then refuse. `refuse_a_dead_row` owns that
+/// ordering, the TUI's argument for it, and why `stale_row_block` is
+/// still asked under the commit's own lock.
 ///
 /// Three of the ops would not even have refused. `move_up` / `move_down`
 /// answer `Ok(())` when they find no sibling, and a node the tree never
@@ -284,6 +295,7 @@ pub fn backlink_row_op<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
+    refuse_a_dead_row(state, node, stale_backlink_block_unchanged_refusal)?;
     if op.shape().computed_from_the_logged_text() {
         let root = state.storage_root()?;
         let outcome = with_ws(state, |ws| {
@@ -405,6 +417,61 @@ fn stale_row_block(workspace: &Workspace, node: NodeId) -> Option<&'static str> 
         return None;
     }
     Some(stale_backlink_block_unchanged_refusal(workspace, node))
+}
+
+/// The same verdict, asked **before** the command touches the disk.
+///
+/// The second half of a pair, and both halves are load-bearing.
+///
+/// **Why a pre-check.** [`edit_backlink_block`] and [`backlink_row_op`]
+/// ran [`reproject_stale_md`] *first* and asked about the row's block
+/// only inside the commit closure. That call does not merely read: on a
+/// page whose `.md` is **merely stale** it refreshes it, so a gesture
+/// aimed at a block a peer had already deleted rewrote a file on a page
+/// the user was not looking at and then refused. The TUI asks in the
+/// other order and documents why —
+/// *"a chord aimed at a block that is gone should not touch the disk at
+/// all"* — and it is right: the disk write is a side effect of a check
+/// for a gesture that is about to be declined, and the commit behind it
+/// renders the page once more for the undo snapshot before the closure
+/// gets to refuse. Two clients, opposite order, different outcome for
+/// one gesture.
+///
+/// It also decides the **sentence**. On a page ahead of its log the old
+/// order reported the ahead-of-log notice for a row whose block was
+/// deleted, where the TUI said the block was gone. The block is the
+/// nearer fact and the one the user acted on.
+///
+/// **Why the in-closure verdict stays.** `stale_row_block` is still
+/// asked under the commit's own lock, because this read and that one are
+/// not the same question asked twice: a peer's delete can land in the
+/// window between them (`backlink_edit_concurrent.rs` is the suite for
+/// exactly that window), and there the workspace is in hand so the
+/// sentence describes the state the gesture actually landed on. Dropping
+/// it would trade a refusal for a write into the trash.
+///
+/// **What the second read costs.** [`is_live`] is `contains` plus a
+/// bounded parent walk, so the live path pays one extra lock
+/// acquisition and an `O(depth)` walk — against a `render_page_md` of
+/// the whole source page, and on two of the nine gestures a `.md` +
+/// sidecar fsync pair, on the refused path. `tests/backlink_commit_cost.rs`
+/// is the census that would have to change if this ever stopped being
+/// worth it; it counts *page walks*, and this is not one.
+///
+/// `wording` is a parameter rather than a constant because the two
+/// commands owe different costs: a chord typed nothing, a text edit has
+/// a draft behind it. Both sentences are the catalog's either way.
+fn refuse_a_dead_row<S: AppHost>(
+    state: &S,
+    node: NodeId,
+    wording: fn(&Workspace, NodeId) -> &'static str,
+) -> Result<(), String> {
+    match with_ws(state, |ws| {
+        Ok((!is_live(ws, node)).then(|| wording(ws, node)))
+    })? {
+        Some(words) => Err(words.to_string()),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]

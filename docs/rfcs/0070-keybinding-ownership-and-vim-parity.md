@@ -159,7 +159,8 @@ Two rows in different modes always pass, so a genuinely ambiguous pair is a desi
    Two parallel implementations is the bug that was paid to remove, `Cmd+P` and `Ctrl+P` drifted within a sprint, and adding a key on any client without going through `defaults.rs` puts that drift back.
    The root "What you're NOT building yet" list states the desktop char-cursor gap and names the ten chords that nudge, so a contributor cannot read the stubs as unfinished work to helpfully finish.
    `outl-shortcuts/CLAUDE.md` carries the mode-semantics table and uses `Cmd+B`, `Cmd+Shift+X`, `Cmd+Shift+Enter`, `Cmd+Z` and `Cmd+X` as the worked examples.
-   `outl-desktop/CLAUDE.md` carries the three-category vim breakdown and the deliberate Normal-not-Global reasoning for undo.
+   [`docs/desktop-keybindings.md`](../desktop-keybindings.md) → "Vim parity" carries the three-category vim breakdown.
+   `docs/desktop-keybindings.md` → "Undo / redo" carries the deliberate Normal-not-Global reasoning for undo.
    `outl-tui/CLAUDE.md` carries the `Enter`-splits contract including both degenerate cases.
    `outl-md/CLAUDE.md` records why `outline_ops` sits in `outl-md` rather than `outl-actions`.
 

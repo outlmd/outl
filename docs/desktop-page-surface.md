@@ -84,7 +84,7 @@ The parity test's declared exception moved with it and shrank to one row, since 
 
 It used to take the promise, which puts the IPC call on the wire before the owner is reached — nothing left to coalesce, and a **held** `Alt+↑` or `Tab` was one `O(blocks-in-workspace)` scan per key repeat.
 A burst is now one scan in flight plus one queued, whatever the repeat rate.
-That module's doc owns the three rules and the measurements; `lib/backlinks-fetch.test.ts` and `lib/backlink-handlers.cost.test.ts` are the nets (the second is invariant 15's *is it cheap once*, driven through the real `backlinkRowOps`).
+That module's doc owns the rules and the measurements; `lib/backlinks-fetch.test.ts` and `lib/backlink-handlers.cost.test.ts` are the nets (the second is invariant 15's *is it cheap once*, driven through the real `backlinkRowOps`).
 **Mobile needs no coalescer:** `BacklinksSection.row-ops.ts` refuses a second gesture while one is in flight, `busy()` spans the mutation *and* the awaited re-ask, and a touch gesture has no key repeat.
 
 **The section's own pending state had the mirror defect, and reserving space is not the fix.**

@@ -36,8 +36,9 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   The walk order is the subtle part and is pinned by test, not comment: indent / move-up walk top-down, **move-down and delete walk bottom-up** (a move-down has to clear the block below the range first; a delete has to take children before parents or the parent trashes the subtree and the follow-up fails).
   *What* the range contains is not decided here at all — `visibleRangeSlice` in `@outl/shared/outline` owns it, so this client and the desktop cannot disagree about it. The first version of this module carried a comment claiming it "mirrors the desktop's `applyVisualBlockOp` exactly", which is a parity invariant nothing could fail.
 
-- **`Journal.listeners.ts`** — the four listeners the journal installs, over five backend events, plus `navigateDeepLink` which the cold-start path calls directly.
-  The events are `deep-link://navigate`, the webview file drop, `ref-projection-failed`, and `projection-write-failed` + `workspace-ready` together.
+- **`Journal.listeners.ts`** — the four listeners the journal installs, over four backend events and one webview event, plus `navigateDeepLink` which the cold-start path calls directly.
+  The backend events are `deep-link://navigate`, `ref-projection-failed`, and `projection-write-failed` + `workspace-ready` together.
+  The fifth subscription is `installFileDrop`, a webview drag-and-drop event rather than a backend one — it breaks in the webview and is debugged there, not in the Rust bridge.
   **`installJournalListeners` is the one entry point the component calls**, the shape `installJournalPolls` already has, so which listeners exist is one fact in one place.
   Four call sites in `Journal.tsx` was four chances to add a listener here and never reach it, which is how `ref-projection-failed` had a subscriber on the desktop and nothing at all here.
   They must still be **called from inside the component body**: `onCleanup` needs a Solid owner, and there is deliberately no `runWithOwner` wrapper hiding that.

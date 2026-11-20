@@ -4,7 +4,8 @@
  *
  * That is a different answer to "what does this keystroke change" than
  * `block-handlers.ts` gives, which is why it is its own file along the
- * axis `outl-desktop/CLAUDE.md` describes. It is **not** a spread group
+ * axis `docs/desktop-keybindings.md` → "`action-handlers.ts` is eight
+ * files" describes. It is **not** a spread group
  * in `action-handlers.ts`, though: a group has to own its `Action` keys
  * outright, and every key here is already owned by `block-handlers.ts`
  * for the outline case. Two groups holding `IndentBlock` would make the

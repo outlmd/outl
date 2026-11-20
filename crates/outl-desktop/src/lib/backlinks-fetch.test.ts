@@ -16,6 +16,8 @@
  * an answer for a page the user has left, is a stale-rows bug — worse
  * than slow rows, because nothing on screen says so.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createRenderEffect, createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +31,11 @@ import type {
 
 vi.mock("@outl/shared/api/commands", () => ({ pageBacklinks: vi.fn() }));
 
-import { trackBacklinks } from "./backlinks-fetch";
+import {
+  backlinksState,
+  emptyBacklinks,
+  trackBacklinks,
+} from "./backlinks-fetch";
 import { appState, setAppState } from "./store";
 
 function page(slug: string, title = slug): PageMeta {
@@ -57,10 +63,10 @@ function row(id: string): Backlink {
   } as unknown as Backlink;
 }
 
-function reply(ids: string[]): PageBacklinks {
+function reply(ids: string[], order: "newest" | "oldest" = "newest"): PageBacklinks {
   return {
     backlinks: ids.map(row),
-    backlinks_order: "newest",
+    backlinks_order: order,
     namespace_children: [] as NamespaceChild[],
     namespace_backlinks: [] as Backlink[],
     namespace_backlinks_total: 0,
@@ -112,6 +118,7 @@ beforeEach(() => {
   setAppState({
     page: page("project"),
     backlinks: [] as Backlink[],
+    backlinksOrder: "newest",
     backlinksLoading: false,
   });
 });
@@ -233,6 +240,175 @@ describe("only the open page's answer reaches the screen", () => {
     await done;
 
     expect(ids()).toEqual(["still-mine"]);
+  });
+});
+
+describe("only the order the user currently wants reaches the screen", () => {
+  /**
+   * Flipping the direction while a scan is running used to be undone by
+   * that scan's own reply.
+   *
+   * The backend reads `[display] backlinks_order` from `config.toml`
+   * **before** its whole-workspace index build
+   * (`commands/page_backlinks.rs`), and `set_backlinks_order` writes
+   * that key and then computes its own reply. So a scan that read the
+   * old order and answers after the toggle's answer is sorted the
+   * other way round — and the page-identity guard waves it through,
+   * because the page did not change.
+   *
+   * **Rows and label, together.** The reply's `backlinks` are sorted by
+   * the `backlinks_order` it reports, so refusing only the label would
+   * paint the new direction over the old sort: the same lie, one field
+   * along. `backlinksState` writes the pair, and the guard refuses the
+   * pair.
+   */
+  function toggleLands(order: "newest" | "oldest", ids: string[]) {
+    // What `toggleOrder` in `<InlineBacklinks />` writes when
+    // `set_backlinks_order` answers: the new direction, and the rows the
+    // backend re-sorted under it.
+    setAppState({ backlinksOrder: order, backlinks: ids.map(row) });
+  }
+
+  it("drops a scan the user flipped the direction under", async () => {
+    const running = deferred();
+    vi.mocked(pageBacklinks).mockReturnValueOnce(running.promise);
+
+    const seen = recordLoading();
+    const done = trackBacklinks();
+    toggleLands("oldest", ["b", "a"]);
+    // Read `config.toml` before the toggle wrote it, so it is sorted
+    // newest-first and says so.
+    running.settle(reply(["a", "b"], "newest"));
+    await done;
+    seen.dispose();
+
+    // Neither half of the stale answer: the direction the user picked
+    // stays on the button, and the rows under it stay in that order.
+    // Installed, the UI would read "Oldest" over a newest-first list
+    // while `config.toml` held `oldest`.
+    expect(appState.backlinksOrder).toBe("oldest");
+    expect(ids()).toEqual(["b", "a"]);
+    // And the drop is a *refusal to write*, not a clear: the rows above
+    // are still on screen and the mark was raised and lowered once, so
+    // `lateSectionVisible` never reads the section as unanswered.
+    // Emptying here is the defect `4817abd2` exists to fix, arrived at
+    // from a new direction.
+    expect(seen.values).toEqual([false, true, false]);
+  });
+
+  it("still runs the scan queued behind a reply it dropped", async () => {
+    const first = deferred();
+    const second = deferred();
+    vi.mocked(pageBacklinks)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    const done = trackBacklinks();
+    void trackBacklinks();
+
+    toggleLands("oldest", ["from-the-toggle"]);
+    first.settle(reply(["stale-sort"], "newest"));
+    await flush();
+
+    // A dropped reply may not take the re-ask with it. The queued scan
+    // is the one that reads the *new* order, so dropping both would
+    // leave the rows of every mutation in the burst unfetched, with
+    // nothing on screen saying so.
+    expect(pageBacklinks).toHaveBeenCalledTimes(2);
+
+    second.settle(reply(["from-last-scan"], "oldest"));
+    await done;
+
+    expect(appState.backlinksOrder).toBe("oldest");
+    expect(ids()).toEqual(["from-last-scan"]);
+  });
+
+  it("installs a reply whose direction changed with no toggle under it", async () => {
+    // `config.toml` edited by hand, or by another process, while the app
+    // runs: the reply is the only thing that knows, and nothing
+    // superseded it. Refusing on "the reply disagrees with the store"
+    // instead of "the store moved under the ask" would drop this one —
+    // and every one after it, since the store would never catch up.
+    vi.mocked(pageBacklinks).mockResolvedValueOnce(reply(["b", "a"], "oldest"));
+
+    await trackBacklinks();
+
+    expect(appState.backlinksOrder).toBe("oldest");
+    expect(ids()).toEqual(["b", "a"]);
+  });
+});
+
+describe("the two slice owners cannot drift from the DTO", () => {
+  /** The field names `export interface PageBacklinks` declares, read from
+   *  the mirror's source — the way `wire_types.rs` reads its key set
+   *  rather than listing keys. */
+  function declaredFields(): string[] {
+    const src = readFileSync(
+      // vitest runs from the package root (`crates/outl-desktop`).
+      resolve(process.cwd(), "../outl-frontend-shared/src/api/types.ts"),
+      "utf8",
+    );
+    const start = src.indexOf("export interface PageBacklinks {");
+    expect(start, "PageBacklinks interface not found").toBeGreaterThanOrEqual(0);
+    const body = src.slice(start, src.indexOf("\n}", start));
+    return [...body.matchAll(/^ {2}([A-Za-z_]+)\??:/gm)].map((m) => m[1]).sort();
+  }
+
+  it("reads every field the DTO declares, and no other", () => {
+    const read = new Set<string>();
+    const spy = new Proxy(reply([]), {
+      get(target, key, receiver) {
+        if (typeof key === "string") read.add(key);
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    backlinksState(spy);
+
+    // A field added to the interface and wired nowhere is read by no
+    // one, so it shows up here as declared-but-unread.
+    expect([...read].sort()).toEqual(declaredFields());
+  });
+
+  it("fills exactly the slices that emptying clears", () => {
+    // A field wired into `backlinksState` and forgotten in
+    // `emptyBacklinks` would leave page A's rows under page B.
+    expect(Object.keys(backlinksState(reply([]))).sort()).toEqual(
+      Object.keys(emptyBacklinks()).sort(),
+    );
+  });
+});
+
+describe("the pending mark is lowered only once the chain is no longer joinable", () => {
+  it("lets a render effect that re-asks on the mark start a fresh scan", async () => {
+    vi.mocked(pageBacklinks)
+      .mockResolvedValueOnce(reply(["first"]))
+      .mockResolvedValueOnce(reply(["asked-from-the-effect"]));
+
+    let reAsked = false;
+    let wasLoading = false;
+    let dispose = () => {};
+    createRoot((d) => {
+      dispose = d;
+      createRenderEffect(() => {
+        const loading = appState.backlinksLoading;
+        if (wasLoading && !loading && !reAsked) {
+          reAsked = true;
+          void trackBacklinks();
+        }
+        wasLoading = loading;
+      });
+    });
+
+    await trackBacklinks();
+    await flush();
+    dispose();
+
+    // `draining = null` runs before the mark is lowered. Reversed, the
+    // effect above joins the finished chain: its `queued` is written, no
+    // drain is running to read it, and the section stays on its
+    // placeholder with the second scan never asked for.
+    expect(pageBacklinks).toHaveBeenCalledTimes(2);
+    expect(ids()).toEqual(["asked-from-the-effect"]);
   });
 });
 

@@ -4,9 +4,10 @@
  *
  * Split out of `store.ts` rather than grown there — the same axis
  * `cursor-region.ts` was split on, and for the same reason: that file
- * is the app's state *shape*, and this is an async policy with three
+ * is the app's state *shape*, and this is an async policy with four
  * rules of its own (coalesce, last answer wins, only the open page's
- * answer). `backlinks-effect.ts` is deliberately not that file either:
+ * answer, and only an answer the sort direction did not move under).
+ * `backlinks-effect.ts` is deliberately not that file either:
  * it owns **whether the question changed**, which is
  * `@outl/shared`'s `createBacklinksKey`, and this owns what happens
  * once somebody asks.
@@ -130,6 +131,26 @@ let draining: Promise<void> | null = null;
  *   instead of drawn. Stale rows are worse than slow rows, because
  *   nothing on screen says so. `@outl/shared/namespace` owns that
  *   comparison; a second opinion here is how the two drift.
+ * - **It must be the direction the user currently wants.** The page key
+ *   compares page identity, so it does not cover the sort. The backend
+ *   reads `[display] backlinks_order` from `config.toml` *before* its
+ *   whole-workspace index build (`commands/page_backlinks.rs`), and
+ *   `set_backlinks_order` writes that key and then computes its own
+ *   reply — so a scan that read the old direction and answers after the
+ *   toggle's answer is a same-page reply sorted the other way round.
+ *   Dropping only its `backlinks_order` would be the same lie one field
+ *   along: the reply's **rows are sorted by the direction it reports**,
+ *   so the new label would land over the old sort. The pair is refused
+ *   together, exactly as a wrong-page reply is.
+ *
+ *   The question is *"did the direction move under this ask"*, not
+ *   *"does this reply agree with the store"*. The second wedges: a
+ *   `config.toml` edited by another process while the app runs makes
+ *   every reply disagree, and the store never catches up, so the rows
+ *   would freeze for the rest of the session. The first cannot leave
+ *   the rows older than the drop's cause, because the only thing that
+ *   moves the direction is the toggle, whose own reply has already
+ *   landed — and it scanned *after* the ask being dropped.
  * - **The section does not blink.** `backlinksLoading` stays true for
  *   the whole chain and nothing here empties the rows, so
  *   `lateSectionVisible` keeps them up with the `loading…` mark. Only
@@ -162,10 +183,17 @@ async function drainBacklinks(): Promise<void> {
   try {
     while (queued !== undefined) {
       const asked = queued;
+      // Read here rather than at `trackBacklinks`: an ask queued behind
+      // a running scan goes on the wire at *this* line, which is the
+      // moment the backend reads `config.toml`.
+      const askedOrder = appState.backlinksOrder;
       queued = undefined;
       try {
         const reply = await pageBacklinks(asked.slug);
-        if (sameBacklinksKey(asked, backlinksKeyOf(appState.page))) {
+        const stillWanted =
+          sameBacklinksKey(asked, backlinksKeyOf(appState.page)) &&
+          askedOrder === appState.backlinksOrder;
+        if (stillWanted) {
           setAppState(backlinksState(reply));
         }
       } catch {

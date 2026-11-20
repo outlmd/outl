@@ -160,7 +160,8 @@ The prefix is the CommonMark `"> "` (greater-than + single space), so an `.md` r
 
 `outl-actions::quote::toggle_quote` flips the prefix on/off; `split_quote` separates the marker from the body for UI rendering.
 Composition with TODO/DONE follows a canonical order: `"TODO > body"` (task state before quote marker), so the backend's `split_todo` still surfaces `block.todo` in the DTO when the block is also quoted.
-Both `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so an externally authored `"> TODO foo"` is normalised by the next toggle of either.
+Both `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so an externally authored `"> TODO foo"` is normalised rather than compounded into a double marker.
+A `cycle_todo` reaches canonical order on the first toggle: `"> TODO foo"` becomes `"DOING > foo"`, the task state advanced as usual.
 **A todo toggle is the route every client has**, and it is the one most users reach it by: `"> ship it"` toggled becomes `"TODO > ship it"`.
 `toggle_quote` has exactly one caller — the desktop's `/quote` slash row.
 It is not an `Action`, so no chord reaches it anywhere, and on the TUI and mobile a quote is authored by typing `> `.
@@ -182,7 +183,8 @@ Switching pages drops the zoom, so focus is scoped to the page it was set on.
 
 **Zooming is a request for one subtree, so the page's own surfaces go with it.**
 Backlinks, nested pages, namespace mentions and the page's `key:: value` row answer questions about the *page*; drawn under a block title they read as the block's, which is a wrong answer rather than a noisy one.
-All three clients hide them, and each keeps its cursor out of them too — the desktop through `backlinkBlockIds()`, the TUI through `page_sections_visible()` (which `z i` also uses to bring a cursor back out of the backlinks panel), mobile through having no cursor to move.
+All three clients hide them, and each keeps its cursor out of them too.
+The desktop does it through `backlinkBlockIds()`, the TUI through `page_sections_visible()` (which `z i` also uses to bring a cursor back out of the backlinks panel), mobile through having no cursor to move.
 The owner per client: `<PageSections zoomed>` (desktop and mobile) and `App::page_sections_visible` (TUI).
 
 **Asking for a page means the whole page, including when it is the page already open.**

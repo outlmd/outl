@@ -170,7 +170,8 @@ Every client surfaces these warnings to the user instead of pretending the file 
 | Mobile / Desktop | `<ParseWarningsBanner>` from `@outl/shared` renders above the outline. Tap a row to scroll to the offending line in the raw view. |
 | CLI | `outl doctor` lists every page with warnings and writes a structured row per warning to `.outl/orphans.log`. |
 
-The shared entry point that bundles outline + warnings in one trip is `outl_actions::outline::read_page_outline` (and the workspace-aware variant `read_page_outline_with_workspace`) returning `PageOutline { nodes, warnings }`.
+The shared entry point that bundles outline + warnings in one trip is `outl_actions::outline::read_page_outline` (and the workspace-aware variant `read_page_outline_with_workspace`) returning `PageOutline { nodes, warnings, sidecar_identity }`.
+The third field reports whether the sidecar those ids came from describes **this** page — reported, never enforced, since an `Err` on the page-open path is the deleting half of invariant 8.
 Tauri commands on mobile + desktop expose this directly; the TUI calls it via `lifecycle::load_current`.
 
 The contract is intentionally non-blocking: a file with warnings is still editable, still saves cleanly (render normalises it to `- <raw>` on the next write), and never refuses to load.

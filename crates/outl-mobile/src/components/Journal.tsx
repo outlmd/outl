@@ -277,8 +277,8 @@ export function Journal() {
   // Membership set for the active range, memoised once per (selection,
   // outline) change — every `<BlockRow />` answers "am I selected?"
   // with `.has(id)` in O(1) instead of re-walking the outline per row.
-  // Mirrors the desktop's `visualSet` (`outl-desktop/CLAUDE.md` → vim
-  // parity).
+  // Mirrors the desktop's `visualSet`
+  // (`docs/desktop-keybindings.md` → "Vim parity").
   const selectionSet = createMemo(() => {
     const sel = selection();
     const cur = view();

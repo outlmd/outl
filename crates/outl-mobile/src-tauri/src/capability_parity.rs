@@ -40,7 +40,7 @@ mod tests {
         // page in the desktop app and use the ⏱ button" — while this
         // client registered `page_timeline` and mounted
         // `HistorySheet.tsx` off the page properties sheet, which
-        // `outl-mobile/CLAUDE.md` lists under "Trust surfaces".
+        // `docs/mobile-internals.md` → "Trust surfaces" records.
         //
         // That is the failure mode an exhaustive `match` does **not**
         // close. Invariant 12 forces every client to *declare* a
