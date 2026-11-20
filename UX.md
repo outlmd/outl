@@ -165,7 +165,7 @@ A page you have to navigate to is a page you write in less.
 
 Every client is async-on-write: the op log write is synchronous, the `.md` projection is not, and no
 keystroke, command reply, or frame waits on a render, an fsync, or a backlink rebuild
-([`docs/clients.md` → Async projection writes](docs/clients.md#async-projection-writes-performance)).
+([`docs/client-sync.md` → Async projection writes](docs/client-sync.md#async-projection-writes-performance)).
 
 The same rule governs everything that is not the user: automatic backups run on a background thread after a
 startup delay, and never on the edit path, the quit path, or an idle hook the render loop waits on.

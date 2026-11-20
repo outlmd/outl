@@ -9,7 +9,6 @@ import {
   deleteBlock,
   editBlock,
   importAssetFile,
-  instantiateTemplateAt,
   openAsset,
   openExternalUrl,
   openPageBySlug,
@@ -36,10 +35,7 @@ import {
   rawTextWithTodo,
   visualRangeSet,
 } from "@outl/shared/outline";
-import {
-  NATIVE_ASSET_PLUGIN_ID,
-  NATIVE_TEMPLATE_PLUGIN_ID,
-} from "../lib/slash-commands";
+import { createNativeSlashOps } from "./outline-native-slash";
 import { playPluginViews } from "../lib/plugin-views";
 import {
   appendMarkdownToBlock,
@@ -217,6 +213,18 @@ export function OutlineView() {
     setEditingId,
   });
 
+  /** `/template`, `/upload` and `/quote` — the slash rows that are
+   *  this client's own rather than a plugin's. See
+   *  `./outline-native-slash`. */
+  const nativeSlashOps = createNativeSlashOps({
+    pageId: () => appState.page?.id,
+    selectedBlockId: () => appState.selectedBlockId,
+    applyView,
+    handleError,
+    setLastError: (message) => setAppState("lastError", message),
+    attachFile: () => attachFile(),
+  });
+
   /** Tab / Shift-Tab indent and outdent. See `./outline-structure`. */
   const structureOps = createStructureOps({
     pageId: () => appState.page?.id,
@@ -260,29 +268,10 @@ export function OutlineView() {
       setEditingId(id);
     },
     onRunPluginCommand: async (pluginId, commandId) => {
-      // Native `/template <name>`: instantiate the structural template
-      // under the block the slash was typed in (or the current
-      // selection). Intercepted here because it reuses the slash popup
-      // but is a core feature, not a plugin — `commandId` is the
-      // template name (see `templateSlashCommands`).
-      if (pluginId === NATIVE_TEMPLATE_PLUGIN_ID) {
-        const target = appState.selectedBlockId;
-        if (!target) {
-          setAppState("lastError", "select a block to insert a template");
-          return;
-        }
-        const view = await handleError(
-          instantiateTemplateAt(commandId, target),
-        );
-        if (view) applyView(view);
-        return;
-      }
-      // Native `/upload`: open the OS file picker and attach the chosen
-      // file's link — the same flow as the 📎 button, reachable inline.
-      if (pluginId === NATIVE_ASSET_PLUGIN_ID) {
-        await attachFile();
-        return;
-      }
+      // This client's own rows (`/template`, `/upload`, `/quote`) ride
+      // the plugin popup under a reserved sentinel `plugin_id`. See
+      // `./outline-native-slash`.
+      if (await nativeSlashOps.run(pluginId, commandId)) return;
       // Same dispatch the `⧉` PluginPalette runs: surface the command's
       // notifications / errors on the status line, re-render from the
       // returned view, and play any `ui-render` overlays.

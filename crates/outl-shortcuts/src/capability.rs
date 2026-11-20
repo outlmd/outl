@@ -305,6 +305,30 @@ pub enum Capability {
     /// desktop and mobile both have that gesture on the card header,
     /// so they are `Full`.
     BacklinkInlineEdit,
+
+    /// Turning the selected block into a blockquote, or back, in one
+    /// gesture — without typing the `"> "` marker.
+    ///
+    /// **Not about rendering one.** Every client draws a quoted block
+    /// with its own chrome (`split_quote` / `stripQuoteFromTokens` are
+    /// shared), so a row about the visual would say nothing. This row
+    /// is only whether the client has something that *writes* the
+    /// marker for you. That is the half `toggle_quote` owns — and the
+    /// half that normalises `"> TODO foo"` into the canonical
+    /// `"TODO > foo"` on the way through, so an externally authored
+    /// block comes back in order.
+    ///
+    /// A capability and not an [`crate::Action`] because the catalog's
+    /// `support()` match and `defaults.rs` both sit at their file-size
+    /// baseline, so no chord can be declared for it yet — and a chord
+    /// is not what any client reaches it by today. The desktop's route
+    /// is the inline `/` menu, which takes rows that are not actions
+    /// (`/upload`, `/date-today`) by the same sentinel it uses here.
+    ///
+    /// The lesser states name the route that exists rather than
+    /// apologising: `> ` at the front of the block is still a quote on
+    /// every client, and it is the same text this writes.
+    BlockquoteToggle,
 }
 
 impl Capability {
@@ -342,6 +366,7 @@ impl Capability {
         Capability::AboutAndSupport,
         Capability::PageEmbed,
         Capability::BacklinkInlineEdit,
+        Capability::BlockquoteToggle,
     ];
 }
 
@@ -353,7 +378,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_25: usize = 25;
+    const EXPECTED_26: usize = 26;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -382,6 +407,7 @@ mod tests {
             Capability::AboutAndSupport => "AboutAndSupport",
             Capability::PageEmbed => "PageEmbed",
             Capability::BacklinkInlineEdit => "BacklinkInlineEdit",
+            Capability::BlockquoteToggle => "BlockquoteToggle",
         }
     }
 
@@ -398,9 +424,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_25,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_25} variants \
-             : add the new variant to Capability::ALL (and bump EXPECTED_25)",
+            EXPECTED_26,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_26} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_26)",
             names.len(),
         );
     }

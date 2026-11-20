@@ -265,6 +265,25 @@ pub const NO_SLASH_MENU_ON_THE_PHONE: &str =
      plugins button in the top bar, and templates are under \"Insert template\" when you \
      long-press a block.";
 
+/// One string for two clients, because the route out is identical and
+/// client-agnostic: `"> "` at the front of the block is a quote
+/// everywhere, and it is the same text `toggle_quote` writes.
+///
+/// So it names no client and no command of its own. A per-client
+/// sentence here would be two copies of one fact, and the fact is a
+/// markdown convention rather than a surface — `docs/client-editing.md`
+/// is its owner, not this catalog.
+///
+/// It does not mention the desktop's `/quote`. The nudge is read by
+/// someone already holding a block they want quoted, and a sentence
+/// that sends them to another device to type two characters they can
+/// type here is worse than the gap: the same reason
+/// `NO_MOBILE_TRASH_SHEET` dropped its `outl trash list` clause.
+pub const TYPE_THE_QUOTE_MARKER: &str =
+    "There's no one-gesture blockquote here yet — type `> ` at the front of a block and it \
+     reads as a quote, which is exactly what the gesture would have written. Typing it again \
+     removes it.";
+
 pub const DESKTOP_HOSTS_ONLY: &str =
     "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \
      to join an existing workspace from a desktop, run `outl peer pair` in a terminal.";

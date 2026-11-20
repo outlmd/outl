@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   NATIVE_ACTION_PLUGIN_ID,
+  NATIVE_BLOCK_PLUGIN_ID,
   actionSlashCommands,
+  blockSlashCommands,
   rankSlashCommands,
 } from "./slash-commands";
 import type { PluginCommand } from "@outl/shared/api/types";
@@ -105,5 +107,34 @@ describe("actionSlashCommands", () => {
       "today",
     );
     expect(out.map((c) => c.command_id)).toEqual(["today"]);
+  });
+});
+
+describe("blockSlashCommands", () => {
+  it("offers /quote under the block sentinel", () => {
+    // The desktop's only route to `toggle_quote`. Before this row the
+    // command was registered on both GUI clients, documented in two
+    // places as in use, and called by nothing — so the row *existing*
+    // is the assertion, not its label.
+    expect(blockSlashCommands()).toEqual([
+      {
+        plugin_id: NATIVE_BLOCK_PLUGIN_ID,
+        command_id: "quote",
+        title: "quote: make this block a blockquote (or undo it)",
+      },
+    ]);
+  });
+
+  it("is found by the name a user types", () => {
+    const out = rankSlashCommands([...ALL, ...blockSlashCommands()], "quo");
+    expect(out[0].command_id).toBe("quote");
+  });
+
+  it("does not shadow a plugin's own id", () => {
+    // The sentinel is not a loadable plugin directory, so a real
+    // plugin can never claim it — but two rows answering `/quote`
+    // would still be two things one key means.
+    const ids = [...ALL, ...blockSlashCommands()].map((c) => c.command_id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

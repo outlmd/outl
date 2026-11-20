@@ -6,7 +6,6 @@
 //! `save()` (current page) or `commit_backlink_mutation` (source page,
 //! one op on the op log). Abort throws away the in-flight buffer.
 
-use super::backlink_commit::backlink_block_is_live;
 use super::backlink_gesture::BacklinkGesture;
 use super::backlink_target::BacklinkTarget;
 use crate::edit_buffer::EditBuffer;
@@ -83,12 +82,13 @@ impl App {
             return;
         };
         // Whether the block is live is asked here, before the edit
-        // starts — and through `backlink_block_is_live`, the one owner
-        // of that question in this crate, so this gate and the write
-        // gate in `commit_backlink_mutation` cannot ask it differently.
-        // The two spellings used to be one inline pair here and nothing
-        // at all over there, which is how the structural chords ended up
-        // acting on trashed blocks.
+        // starts — and through `outl_actions::is_live`, the one owner of
+        // that question, so this gate, the write gate in
+        // `commit_backlink_mutation` and the backend's own
+        // `block::ensure_live` cannot ask it differently. This crate
+        // used to spell the pair out inline here and nothing at all over
+        // there, which is how the structural chords ended up acting on
+        // trashed blocks.
         //
         // **`block_text` alone is not that question.** It answers from
         // the content cache or the Yrs doc and neither consults the
@@ -104,7 +104,7 @@ impl App {
         let live_text = self
             .workspace
             .block_text(target.block)
-            .filter(|_| backlink_block_is_live(&self.workspace, target.block));
+            .filter(|_| outl_actions::is_live(&self.workspace, target.block));
         let Some(original_text) = live_text else {
             self.status = outl_actions::refusal::stale_backlink_block_unchanged_refusal(
                 &self.workspace,

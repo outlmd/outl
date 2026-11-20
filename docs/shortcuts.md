@@ -210,7 +210,7 @@ The chords are the ones the tables above already carry — this says what each o
 
 Three of those have no visible result, deliberately: indent, outdent and move act on a row drawn as one flat block, with its siblings and children off screen.
 `o` / `O` does not put the cursor in the new block either, because a brand-new sibling cites nothing and so is a backlink of no page — except when the page cites *itself*, where the block really is in the outline on screen.
-The full reasoning, and why a cross-page edit **refuses** where an ordinary one re-targets: [`clients.md` → Editing a backlink where it is cited](clients.md#editing-a-backlink-where-it-is-cited).
+The full reasoning, and why a cross-page edit **refuses** where an ordinary one re-targets: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
 
 On mobile there is no chord surface at all, so these arrive as a tap plus a long-press sheet: [`mobile-ux.md`](mobile-ux.md#backlink-rows--a-place-you-can-work).
 **Mark DONE is the one row that does not cross over**, because `Action::MarkDone` is `Missing` on that client everywhere and not just here — the sheet toggles task state through to DONE instead, which is what its nudge in the catalog says.
@@ -384,7 +384,7 @@ See [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) for 
 **This one is for contributors, not for looking up a key.**
 It sits under the table above because it is the next question after it: having found the handler, what does the handler have to do?
 Six decisions behind individual desktop handlers, each a rule rather than a preference, and each with an obvious alternative that is wrong in a way that is quiet.
-The architectural half (the three categories of vim op, why the char-cursor ops have no handler, how Visual mode is reachable without vim) is in [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md) → "Vim parity".
+The architectural half (the three categories of vim op, why the char-cursor ops have no handler, how Visual mode is reachable without vim) is in [`docs/desktop-keybindings.md`](desktop-keybindings.md) → "Vim parity".
 
 **This section is a declared home for desktop handler behaviour contracts, alongside the per-client CLAUDE.md — and that is a widening, not what the catalog crate already said.**
 [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) → "What this crate does NOT own" sends those contracts to the per-client doc and gives *this* page a different job: "`docs/tui.md` / `docs/shortcuts.md` for user-facing copy".

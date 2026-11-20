@@ -88,7 +88,7 @@ That is the gap recorded on the TUI column of [`client-parity.md`](client-parity
 A file in the inbox that cannot be read is left there and named, with the folder it is sitting in, rather than being dropped silently.
 `outl capture --list` shows everything still waiting.
 
-Full behaviour, and why this is not `outl daily append`: [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app) and [`cli.md` → Capture](cli.md#capture).
+Full behaviour, and why this is not `outl daily append`: [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app) and [`cli.md` → Capture](cli.md#capture).
 
 ## Config
 

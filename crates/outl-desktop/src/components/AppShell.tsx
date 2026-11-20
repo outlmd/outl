@@ -28,7 +28,6 @@ import {
   onQuickCaptureHotkey,
   onMenuSwitchWorkspace,
   onPeerOpsChanged,
-  onProjectionWriteFailed,
   onWorkspaceReady,
   onWorkspaceReconciled,
 } from "../lib/events";
@@ -40,6 +39,7 @@ import { followSelection, installRegionKeys } from "../lib/keyboard-reach";
 import { isEditing } from "../lib/mode";
 import { resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
+import { installProjectionNotices } from "../lib/projection-notices";
 import { BatchToolbar } from "./BatchToolbar";
 import { Sidebar } from "./Sidebar";
 import { OutlineView } from "./OutlineView";
@@ -415,16 +415,12 @@ export function AppShell() {
     });
     onCleanup(() => unlistenReconciled());
 
-    const unlistenProjection = await onProjectionWriteFailed((failure) => {
-      if (failure.md_ahead_of_log && appState.page?.id === failure.page_id) {
-        setAppState("mdAheadOfLog", failure.md_ahead_of_log);
-      } else {
-        // An off-screen refusal still froze a page. It cannot use the
-        // current page's sticky banner, but it must reach the user.
-        setError(failure.error);
-      }
-    });
-    onCleanup(() => unlistenProjection());
+    // Both projection-failure events, routed by `projection-notices.ts`:
+    // an off-screen refusal cannot use the open page's sticky banner and
+    // must still reach the user, and `open_ref`'s is a toast because its
+    // retry is automatic but not immediate.
+    const unlistenProjection = await installProjectionNotices();
+    onCleanup(unlistenProjection);
 
     // `outl://` deep links opened while the app is running (issue #98).
     const unlistenDeepLink = await onDeepLinkNavigate((payload) => {

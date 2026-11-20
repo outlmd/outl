@@ -80,6 +80,27 @@ pub fn is_trashed(workspace: &Workspace, node: NodeId) -> bool {
     is_under(workspace, node, NodeId::trash())
 }
 
+/// Whether `node` is still **live**: the tree holds a record for it, and
+/// that record is not under the trash.
+///
+/// **The single owner of what "live" means**, and the `bool` half of
+/// `block::ensure_live`, which is the `Result` half and asks this. The
+/// two were spelled out separately — twice more in the clients, where
+/// the gate in front of a cross-page backlink write hand-rolled
+/// `contains(..) && !is_trashed(..)` because `ensure_live` is private —
+/// and the whole point of the question is that a `bool`-shaped caller
+/// and a `Result`-shaped one must not disagree about it.
+///
+/// `contains` is not redundant with the trash walk and not reachable on
+/// its own today: invariant 6 makes delete a `Move(.., TRASH_ROOT)`, so
+/// a block is never physically absent. It covers an id the tree never
+/// held — a transient `NodeId` a sidecar-less page minted, or a block
+/// this device has not received yet — which is the common case on a
+/// graph whose sidecars lag.
+pub fn is_live(workspace: &Workspace, node: NodeId) -> bool {
+    workspace.tree().contains(node) && !is_trashed(workspace, node)
+}
+
 /// Whether `node` is `ancestor` or sits anywhere beneath it.
 ///
 /// The walk [`is_trashed`] always was, with the sentinel as a

@@ -39,24 +39,6 @@ use super::backlink_gesture::BacklinkGesture;
 use super::backlink_target::BacklinkTarget;
 use crate::state::{App, Focus, ToastKind};
 
-/// Whether `block` is still **live**: the tree holds it, and not under
-/// the trash.
-///
-/// `outl_actions::ensure_live`'s two halves, and the single owner of
-/// that question in this crate — both gates in the panel ask it, so the
-/// one in front of an edit and the one in front of a write cannot
-/// disagree. The pair used to be spelled out inline in
-/// `enter_insert_backlink` alone, which is why the write side went
-/// without.
-///
-/// `contains` is unreachable on its own today — invariant 6 makes
-/// delete a `Move(…, TRASH_ROOT)`, so a block is never physically
-/// absent — and it is here because `ensure_live` has it, not because
-/// this crate can reach the case.
-pub(super) fn backlink_block_is_live(workspace: &Workspace, block: NodeId) -> bool {
-    workspace.tree().contains(block) && !outl_actions::is_trashed(workspace, block)
-}
-
 impl App {
     /// Run `mutate` on the block a backlink row names, through the
     /// shared commit pipeline. `true` when the op landed.
@@ -139,7 +121,7 @@ impl App {
             return false;
         };
         let source_path = outl_actions::page_md_path(&self.workspace_root, &meta);
-        if gesture.computed_from_the_logged_text()
+        if gesture.shape().computed_from_the_logged_text()
             && !self.source_page_can_take_the_write(&meta.slug, target.page)
         {
             return false;
@@ -271,6 +253,13 @@ impl App {
     /// tolerance is load-bearing and is not a bug to fix one layer
     /// down — the missing question was the caller's.
     ///
+    /// **The predicate is still the backend's.**
+    /// [`outl_actions::is_live`] is `ensure_live`'s own `bool` half, so
+    /// this gate cannot come to a different conclusion about "live" than
+    /// the guard behind the three actions that do ask. This crate used
+    /// to spell the pair out itself, which is the duplication that
+    /// `ensure_live`'s own doc already warned about one layer down.
+    ///
     /// **Why this crate's boundary predicates could not fill the gap.**
     /// `has_previous_sibling` / `has_next_sibling` / `can_outdent` ask
     /// the tree about **position**, and a trashed node's parent is
@@ -316,7 +305,7 @@ impl App {
         block: NodeId,
         gesture: BacklinkGesture,
     ) -> bool {
-        if backlink_block_is_live(&self.workspace, block) {
+        if outl_actions::is_live(&self.workspace, block) {
             return true;
         }
         self.status = gesture
@@ -364,9 +353,9 @@ impl App {
     /// There is no entry-side twin because the two gestures that ask
     /// have no entry: a chord is one atomic act with nothing typed, so
     /// here the write side *is* the first opportunity. Where a gesture
-    /// does have an entry, the gate belongs there — `backlink_block_is_live`
-    /// in `enter_insert_backlink` is the worked example, and its own
-    /// comment says why.
+    /// does have an entry, the gate belongs there —
+    /// `enter_insert_backlink`'s `outl_actions::is_live` call is the
+    /// worked example, and its own comment says why.
     ///
     /// Four things about the shape:
     ///

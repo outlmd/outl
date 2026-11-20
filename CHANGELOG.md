@@ -71,7 +71,64 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   And the target is resolved **before** anything is awaited, because a `preventDefault` only counts during the synchronous dispatch; a handler that committed first and looked for a neighbour after had already let the browser move the caret.
   `BlockRow.caret-nav.test.tsx` fails when either is removed.
 
+- **A sidecar that describes a different page is now reported instead of being used in silence.**
+  `read_page_outline` carries the verdict on `PageOutline.sidecar_identity` (`Absent`, `MatchesPage`, or `NamesAnotherPage { page_id }`), plus one `tracing::warn!`.
+  A page's block ids come from the `.outl` beside its `.md`, and nothing ever compared the two ids.
+  The read zips the parsed markdown against `sidecar.blocks` **by position**, so a sidecar belonging to another page root hands out ids naming another page's blocks, or a generation of this one the tree no longer holds under its root.
+  On the maintainer's own graph that is 1,775 of 3,390 sidecars, left by a Roam re-import that moved the previous generation of the graph to the trash and re-projected none of the `.md` / `.outl` pairs.
+
+  **It reports and never refuses, and that is the design rather than caution.**
+  This read is on the page-open path of every client, so an `Err` would trade a stale page for no page at all.
+  And `build_backlink_index_from_disk` skips a page whose read fails, so refusing would take 1,775 pages' `[[ref]]`s out of the backlinks panel the mismatch was noticed in.
+  That is invariant 8's mirrored pair, arrived at by fixing the half that was reported.
+  There is also nothing to refuse *for*: opening a page re-projects it, so the condition is already draining and the only thing missing was being able to watch it happen.
+  `tests/sidecar_identity.rs` is the net, and it asserts the no-refusal half on all three shapes a page with nothing on disk takes.
+
+- **`/quote` on the desktop turns the block you are typing in into a blockquote, and back.**
+  Until now no user, on any client, could toggle one: a quote was authored by typing `> ` at the front of the block and nothing else wrote it for you.
+  The backend has been live and tested the whole time (`outl_actions::block::toggle_quote`, the `toggle_quote` command, registered in **both** GUI clients' handler lists), and nothing called it.
+  `toggleQuote` in `@outl/shared` was the only client-side route to it and had no caller either, while `docs/desktop-ux.md` and `docs/mobile-ux.md` both described their client as going through it.
+
+  The row rides the inline `/` menu under a reserved sentinel `plugin_id`, the same escape hatch `/upload` and `/date-today` already use for a core feature with no chord.
+  A chord is what it cannot have: that needs an `Action` in `outl-shortcuts`, and both `support()` and `defaults.rs` sit at their recorded file-size baseline, so declaring one would mean raising a ceiling to carry a gesture nothing has asked for.
+  `outl_actions::quote::toggle_quote` owns both directions and the ordering against a task marker, so nothing on the client side reads or writes the prefix.
+  An externally authored `"> TODO foo"` therefore comes back as the canonical `"TODO > foo"` on the first toggle.
+
+  **The TUI and the phone still have no gesture, and that is now written down** as `Capability::BlockquoteToggle` in `docs/client-parity.md`.
+  Recording it needed a client rather than just a verdict.
+  `no_capability_is_out_of_reach_on_every_client` rejects a capability nobody reaches, and the `CLI_ONLY` exemption would have been a false reason here, because no `outl` subcommand and no MCP tool toggles a quote either.
+  So the gap had nowhere to be recorded until something reached it, which is how two documents came to describe a route with no caller on it.
+  Both lesser states carry one sentence, naming the two characters that stand in for the gesture.
+
+### Removed
+
+- **A snapshot body stayed decoded in memory for the whole GC scan to feed an accessor nobody called.**
+  `snapshot::gc::Survey::into_best` and the private `best` field behind it are gone.
+  `survey()`'s own doc says "exactly one decoded body is resident at a time: the running best", which is true and was the cost.
+  On a 2,500-page workspace that body is around 13 MB, held across the entire directory scan, and the only reader of the field was an accessor with no caller anywhere.
+  Its doc claimed to be `read_best_from_disk`'s directory-scan half, "one owner, so the selector and the GC cannot develop separate opinions about which file matters".
+  That stopped being true when `read_best_from_disk` moved to `select::adopt_order` with its own header-ranking decode loop, so the two already ranked independently and this was the orphaned remnant of the design the comment described.
+
+- **Five more `pub` items and seven icons with no caller.**
+  `OffsetIndexSet::ts_iter` allocated a `Vec` of every `(actor, ts)` in the log, an `O(total ops)` read whose filtered siblings are what the sync census deliberately uses instead (invariant 15).
+  `sidecar::gc::Survey::reclaimable_bytes` summed what `prunable()` already returns.
+  `EditBuffer::move_word_right` was the unimplemented half of a symmetric pair: no key path in the TUI reaches an `EditBuffer` word motion at all.
+  The doc on `move_word_left` says so now, so restoring the right-hand half for symmetry puts back exactly what came out.
+  `ClockIcon`, `LinkIcon`, `PinIcon`, `ListIcon`, `HashIcon`, `IndentIcon` and `OutdentIcon` leave `@outl/shared/icons`; their neighbours in the same file are all imported by a client, so the module stays.
+
 ### Fixed
+
+- **A ` ```rust ` fence failed instead of recompiling when its cache slot was not a file.**
+  The runtime decided "the cached `.wasm` is good" from `path.exists()` and a non-zero length, which a *directory* at that path satisfies on macOS and Linux (64 bytes on APFS, 4096 on ext4).
+  So the read below it failed the user's execution where a recompile was the right answer.
+  `outl_exec::wasm::cache::is_fresh` already asked `is_file()` and already owned this question; the runtime had a copy of the check instead of a call to it, and that copy is the half that drifted.
+
+- **Desktop: opening a `[[ref]]` whose page could not be written said nothing.**
+  `open_ref` resolves or creates the page in the op log and then writes `pages/<slug>.md`, and when that write fails the backend emits `ref-projection-failed` so the client can say the link is not visible to peers yet.
+  Nothing listened, on either client, since the event shipped in 0.8.0.
+  So the ref landed in the block, the page existed only in the log, and the failure reached a `tracing` line and stopped there.
+  The desktop routes it to the error toast now, in the backend's own words, beside the async writer's refusal it already reported.
+  Mobile emits the same event and still swallows it.
 
 - **TUI: the editor opened on a deleted block and lost what you typed into it.**
   Press `i` on a backlink row whose block a peer had deleted, type, press `Esc`, and the commit refused — the text was gone and the only sign was a status line.
@@ -399,7 +456,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   A commit, a peer refresh, a background poll, a capture into today and a timeline restore are **not** navigations and keep the zoom; a failed open changes nothing.
   The TUI never had this one: it clears the zoom on every view **load** rather than on a comparison.
 
-  The per-client owners are in [`docs/clients.md` → Zoom / focus on a block](docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
+  The per-client owners are in [`docs/client-editing.md` → Zoom / focus on a block](docs/client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
 - **The iOS widget was a white card, and the Lock Screen control was a button that did nothing.**
   Two separate faults in the same extension, both silent.

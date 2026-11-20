@@ -101,16 +101,74 @@ fn ensure_in_tree(workspace: &Workspace, node: NodeId) -> Result<(), ActionError
 /// fallback in [`create_after_or_append`](siblings::create_after_or_append)
 /// keys on it, so a trashed anchor now appends to the page instead of
 /// disappearing.
+///
+/// The predicate is [`crate::tree::is_live`]'s, not a local pair of
+/// conditions. This function used to spell the walk out itself — its
+/// own `in_trash`, bounded, beside a `tree::is_under` that was not —
+/// and *"two copies of one walk where only one is safe is how the
+/// unbounded one ends up on the hottest path"*. The bound moved to the
+/// survivor then; the same argument is why the **question** has one
+/// owner now, because this function was private and both GUI and TUI
+/// clients hand-rolled their own `bool`-shaped copy of it in front of a
+/// cross-page backlink write.
 fn ensure_live(workspace: &Workspace, node: NodeId) -> Result<(), ActionError> {
-    ensure_in_tree(workspace, node)?;
-    // `crate::tree::is_trashed`, not a local walk. This module carried its
-    // own `in_trash` — the same parents walk, bounded, with a `root()`
-    // early-out — while `tree::is_under` underneath `is_trashed` had no
-    // bound at all. Two copies of one walk where only one is safe is how
-    // the unbounded one ends up on the hottest path; the bound moved to
-    // the survivor.
-    if crate::tree::is_trashed(workspace, node) {
-        return Err(ActionError::NotInTree(node.to_string()));
+    if crate::tree::is_live(workspace, node) {
+        Ok(())
+    } else {
+        Err(ActionError::NotInTree(node.to_string()))
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_block, delete, ensure_live};
+    use crate::page::{open_or_create as open_or_create_page, PageKind};
+    use crate::tree::is_live;
+    use outl_core::hlc::HlcGenerator;
+    use outl_core::id::{ActorId, NodeId};
+    use outl_core::workspace::Workspace;
+
+    /// **The `bool` and the `Result` cannot disagree about "live".**
+    ///
+    /// `ensure_live` is private, so both clients' cross-page write gates
+    /// re-derived the predicate as a `bool`; now all three ask
+    /// [`is_live`]. The four states are asserted together rather than
+    /// each against its own expectation, because the defect this
+    /// prevents is not a wrong answer — it is two answers.
+    ///
+    /// Drop the trash half from either side and the two trashed rows
+    /// fail.
+    #[test]
+    fn the_bool_and_the_result_cannot_disagree_about_live() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).expect("in-memory workspace");
+        let page = open_or_create_page(&mut ws, &hlc, "notes", "Notes", PageKind::Page)
+            .expect("a page to hang the blocks off");
+        let live = append_block(&mut ws, &hlc, Some(page), Some("live")).expect("live block");
+        let trashed = append_block(&mut ws, &hlc, Some(page), Some("doomed")).expect("doomed");
+        let under_trashed =
+            append_block(&mut ws, &hlc, Some(trashed), Some("child")).expect("its child");
+        delete(&mut ws, &hlc, trashed).expect("a peer deletes the subtree root");
+
+        for (what, node) in [
+            ("a live block", live),
+            ("a trashed block", trashed),
+            // The whole reason `is_trashed` is an ancestor walk: one
+            // `Op::Move` on the subtree root leaves every block under it
+            // still pointing at the trashed parent.
+            ("a block under a trashed one", under_trashed),
+            ("an id the tree never held", NodeId::new()),
+        ] {
+            assert_eq!(
+                is_live(&ws, node),
+                ensure_live(&ws, node).is_ok(),
+                "{what}: the predicate and the guard answer differently",
+            );
+        }
+        // And the guard is not vacuously agreeing with itself: the four
+        // rows above have to cover both verdicts.
+        assert!(is_live(&ws, live));
+        assert!(!is_live(&ws, under_trashed));
+    }
 }

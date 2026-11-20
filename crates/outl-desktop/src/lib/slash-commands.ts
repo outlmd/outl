@@ -43,6 +43,47 @@ export function assetSlashCommands(): PluginCommand[] {
 }
 
 /**
+ * Reserved `plugin_id` for a command that **acts on the block the slash
+ * was typed in**, rather than inserting text or opening a picker.
+ *
+ * `/quote` is the one row today. It is not an `Action` and cannot be
+ * one yet: `outl_shortcuts`' `support()` match and `defaults.rs` are
+ * both at their file-size baseline, so declaring a chord would mean
+ * raising a ratchet to carry a gesture nothing has asked for. A
+ * sentinel row is the same escape hatch `/upload` and `/date-today`
+ * already use for a core feature with no chord, and
+ * `Capability::BlockquoteToggle` is where the per-client verdict is
+ * recorded instead.
+ *
+ * Same interception shape as {@link NATIVE_ASSET_PLUGIN_ID}:
+ * `OutlineView`'s `onRunPluginCommand` takes it before `pluginRun`.
+ */
+export const NATIVE_BLOCK_PLUGIN_ID = "@outl/block";
+
+/**
+ * The native `/quote` row — toggles the CommonMark `"> "` prefix on
+ * the block the slash was typed in.
+ *
+ * A one-element array for the same reason {@link assetSlashCommands}
+ * is one: it merges into the command list the way every other
+ * contributor does, so a second row later is an entry rather than a
+ * new plumbing path.
+ *
+ * The `title` says what the key does in both directions, because the
+ * row is the only place a desktop user meets the gesture — there is no
+ * chord and no help-overlay entry to carry it.
+ */
+export function blockSlashCommands(): PluginCommand[] {
+  return [
+    {
+      plugin_id: NATIVE_BLOCK_PLUGIN_ID,
+      command_id: "quote",
+      title: "quote: make this block a blockquote (or undo it)",
+    },
+  ];
+}
+
+/**
  * Project the workspace's structural templates onto synthetic
  * {@link PluginCommand} rows for the slash menu. `command_id` carries the
  * template's invocation name (what `instantiateTemplateAt` needs);

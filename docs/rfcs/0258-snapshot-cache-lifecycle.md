@@ -123,8 +123,16 @@ Instead the GC runs at the two moments the evidence is already in hand:
   This is the "full replay on every boot, forever" case: the selector reads that exact file first on every launch.
   This boot still full-replays, exactly as before; the next one does not have to.
 
-`read_best_from_disk`'s directory scan **is** `gc::survey` — one decode loop, one owner, so the selector and the GC cannot develop separate opinions about which file matters.
-Exactly one decoded body is resident at a time, so a survey does not spike a mobile boot by the size of the directory.
+**Superseded — the shared-scan claim.**
+As shipped, `read_best_from_disk`'s directory scan **was** `gc::survey`: one decode loop, one owner.
+That stopped being true when the boot selector moved to header ranking.
+`snapshot::select::adopt_order` reads a few hundred bytes per candidate instead of the whole body, which took a real four-snapshot directory from 124 MB of reads to 16 KB.
+The two now scan independently, over different evidence, and what keeps them from developing separate opinions about which file matters is the one function they both rank through, `select::selection_key`.
+The survey keeps the full decode deliberately, because its output is a delete.
+`Survey::into_best`, the accessor the selector used to read, was removed once nothing called it.
+
+A survey still does not spike a mobile boot by the size of the directory: no decoded body outlives the candidate it came from.
+
 It nonetheless **prunes nothing**, and that is invariant 10 doing its work.
 Opening a workspace is something `outl doctor` does in its documented **read-only** mode, and `ops_guard.rs` restores `ops/` only.
 A read that silently reclaimed 28 MB would break that promise, for a gain the next background write collects anyway.

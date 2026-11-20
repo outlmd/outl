@@ -199,11 +199,6 @@ impl Survey {
         self.entries.iter().filter(|e| e.verdict.is_prunable())
     }
 
-    /// Bytes the prunable entries were holding when surveyed.
-    pub fn reclaimable_bytes(&self) -> u64 {
-        self.prunable().map(|e| e.bytes).sum()
-    }
-
     /// Remove every prunable entry, best-effort. Returns what went.
     ///
     /// Best-effort on purpose: these are caches, so a delete that fails

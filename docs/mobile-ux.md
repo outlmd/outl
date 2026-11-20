@@ -153,7 +153,7 @@ None of these is idempotent from your seat — a second toggle flips the task ba
 
 A row whose citing block lives outside any page is **inert**: no editor, no sheet, no jump, because there is no page to address.
 
-Contract, including why a cross-page edit refuses rather than keeping your text somewhere else: [`clients.md` → Editing a backlink where it is cited](clients.md#editing-a-backlink-where-it-is-cited).
+Contract, including why a cross-page edit refuses rather than keeping your text somewhere else: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
 
 ## Page switcher - rename and merge
 
@@ -221,8 +221,11 @@ The outline bullet and `<CollapseTriangle />` stay outside the quote chrome; a n
 Detection is `splitQuote` + `stripQuoteFromTokens` (`@outl/shared/markdown`, mirror of `outl_actions::quote::split_quote`) so the `> ` isn't rendered twice; it composes with the task checkbox.
 The checkbox has three filled states: DONE is a solid accent circle with a tick, **DOING is an accent ring with a small filled centre**, TODO is a neutral empty ring.
 One tap walks one stop of `TODO → DOING → DONE → none`.
-Toggling: `toggleQuote(id)` → `toggle_quote` → `outl_actions::block::toggle_quote` (no TS string surgery).
-Convention (three-surface parity): [`docs/clients.md` → Blockquote convention](clients.md#blockquote-convention).
+**Nothing in this client toggles it**: a quote is authored by typing `> ` at the front of the block, and the long-press sheet has no quote row.
+The route is wired and this client is not on it: `toggleQuote` (`@outl/shared/api/commands`) → the registered `toggle_quote` command → `outl_actions::block::toggle_quote`, which the desktop reaches through `/quote`.
+So adding a sheet row is a caller rather than a feature, and it needs no TS string surgery when it lands.
+Recorded as `Capability::BlockquoteToggle` → `❌` on mobile in [`client-parity.md`](client-parity.md); the nudge names the marker to type instead.
+Convention (three-surface parity): [`docs/client-editing.md` → Blockquote convention](client-editing.md#blockquote-convention).
 
 ## Zoom / focus on a block
 
@@ -234,7 +237,7 @@ Mobile owns only the touch chrome: the bullet tap moves mark-as-TODO to the long
 **Opening a page leaves the zoom, including the page already open** — Today, the week strip, the calendar, a tap on a `[[ref]]`, the page switcher, a deep link and wake-to-today.
 A commit, a background poll, a peer reload and a capture into today keep it: none of those is the user asking to go somewhere.
 
-Convention: [`docs/clients.md` → Zoom / focus on a block](clients.md#zoom--focus-on-a-block-roamworkflowy).
+Convention: [`docs/client-editing.md` → Zoom / focus on a block](client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
 ## Paste from external apps
 
@@ -302,7 +305,7 @@ A file that cannot be read stays there and is counted in what the app reports af
 
 The in-app quick capture (`+` → `<CaptureSheet />`) is a different thing and is unchanged: it writes through the op log directly, because the app is already open.
 
-Full behaviour and the per-client table: [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app).
+Full behaviour and the per-client table: [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app).
 Android's components, the JNI boundary and why they need no "a capture arrived" notification: [`android-platform.md`](android-platform.md#capture-from-outside-the-app).
 
 ## Arrow keys walk between blocks (hardware keyboard)
@@ -329,7 +332,7 @@ The keyboard toolbar + suggester strip have two renderings.
 iOS is native (`OutlToolbarView` swizzled onto `WKContentView`), untouched.
 Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToolbar />`, gated in `Journal.tsx` on `isAndroid && editingId()`.
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
-Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/clients.md` → Keyboard accessory bar](clients.md#keyboard-accessory-bar-mobile).
+Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/client-editing.md` → Keyboard accessory bar](client-editing.md#keyboard-accessory-bar-mobile).
 
 ### The row only changes shape between editing sessions
 
@@ -364,10 +367,10 @@ The two storage keys are pinned on both sides — `ToolbarStoreTests` in Swift, 
 Long-press a `` ```lang …``` `` block → "Run `<lang>`" fires `runCodeBlock`.
 Mobile's `src-tauri/src/exec.rs` is a **thin adapter** over `outl_actions::exec::run_code_block` (shared with desktop), wrapping the outcome with a refreshed `PageView`.
 The action only shows when `detectFence` matches; the backend re-validates in `run_block_at_index`, so a false-positive is a toast, not damage.
-Runtimes on iOS: **JS, Python, Lua**. `lang-rust` is off in `Cargo.toml`, and `lang-lisp` is off everywhere by default (see [`docs/clients.md`](clients.md#running-code-blocks)).
-Flow + runtime-catalog rationale: [`docs/clients.md` → Running code blocks](clients.md#running-code-blocks).
+Runtimes on iOS: **JS, Python, Lua**. `lang-rust` is off in `Cargo.toml`, and `lang-lisp` is off everywhere by default (see [`docs/client-editing.md`](client-editing.md#running-code-blocks)).
+Flow + runtime-catalog rationale: [`docs/client-editing.md` → Running code blocks](client-editing.md#running-code-blocks).
 
 ## Insert template (structural templates)
 
 The block long-press menu's "Insert template" action opens `TemplateSheet` (bottom sheet listing `listTemplates()`); picking one calls `instantiateTemplateAt(name, blockId)` and applies the returned `PageView`.
-Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/clients.md` → Structural templates](clients.md#structural-templates).
+Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/client-editing.md` → Structural templates](client-editing.md#structural-templates).

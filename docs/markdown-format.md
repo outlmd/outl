@@ -178,7 +178,9 @@ Rules:
   Anything doing cursor math around the marker must measure the prefix it is adding or removing (`TodoState::prefix`), never assume five.
 - Progress counters (the TUI's `●● 3/7` chip) count `DOING` toward the **total**, never toward the done half — a started task is unfinished work.
 - Markers compose in a **canonical order**: `"TODO > body"` / `"DONE > body"` (TODO/DONE before the quote marker).
-  `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so a user who authors them in the other order (`"> TODO foo"`) gets normalised on the next toggle.
+  `toggle_quote` and `cycle_todo` peel both prefixes off and re-emit in canonical order, so a block authored in the other order (`"> TODO foo"`) is normalised by the next toggle of either.
+  A **todo** toggle is the route every client has; `toggle_quote` is reached only from the desktop's `/quote` row, and on the TUI and mobile a quote is authored by typing `> `.
+  Per-client: `BlockquoteToggle` in [client-parity.md](client-parity.md#capability-parity), and [client-editing.md](client-editing.md#blockquote-convention) owns the convention.
   Why canonical order matters: the backend's `split_todo` reads from the **start** of the text.
   A `"> TODO foo"` would surface in the `OutlineNode` DTO as `todo = null` and the literal `"> TODO foo"` in `text` — checkbox disappears mid-flight on mobile / desktop.
   The TUI's `split_block_prefixes` still accepts either order for *display* (so externally authored `.md` reads correctly), but every mutation in `outl-actions` emits the canonical form.
@@ -436,7 +438,7 @@ Two consequences: `[[os/linux]]` and a page named `os linux` are the same page, 
 
 What the nesting buys you is on the parent page — it lists its descendants and collects their mentions.
 `#os` and `#os/linux` stay *different tags* either way.
-See [clients.md → Nested pages](clients.md#nested-pages-issue-275).
+See [client-backlinks.md → Nested pages](client-backlinks.md#nested-pages-issue-275).
 
 #### Block refs and embeds
 
@@ -503,7 +505,7 @@ Per-client coverage: `PageEmbed` in [client-parity.md](client-parity.md#capabili
 
 An uploaded file is copied into `<workspace>/assets/` under its content hash and referenced from a block.
 `outl asset add`, the MCP `outl_asset_add` tool, and the desktop/mobile "Attach file" action all do this.
-So does dropping a file onto an outline row (desktop, and mobile on iPad) or pasting a dropped file's path in the TUI's Insert mode — see [clients.md → Attach / drag-and-drop file import](clients.md#attach--drag-and-drop-file-import).
+So does dropping a file onto an outline row (desktop, and mobile on iPad) or pasting a dropped file's path in the TUI's Insert mode — see [client-editing.md → Attach / drag-and-drop file import](client-editing.md#attach--drag-and-drop-file-import).
 
 The reference takes one of two forms, chosen by the file kind:
 

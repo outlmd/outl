@@ -558,7 +558,7 @@ This means concurrent `outl serve` is OK — both go through the same reconcile 
 The GUI clients run the same pass.
 It is a detached background thread on purpose: a snapshot walks the whole workspace and forks `git`, which on a large graph is seconds, so it must never sit on the event loop, a commit boundary, or the quit path.
 Don't "improve" this by hanging it off the idle tick or `flush_pending_save` — the interval floor is read back out of the git history, so a session that ends before a snapshot simply gets one on the next launch.
-Policy + the "which client snapshots" table live in [`docs/clients.md` → Automatic backups](../../docs/clients.md#automatic-backups).
+Policy + the "which client snapshots" table live in [`docs/client-sync.md` → Automatic backups](../../docs/client-sync.md#automatic-backups).
 
 ## The commit pipeline this crate does not use yet
 
@@ -614,12 +614,14 @@ That entry gate plus `pending_reload` is why the commit arm can use the chord ha
 So the four structural chords had no backend gate, and this crate's boundary predicates ask about *position* — a trashed node's parent is `TRASH_ROOT`, whose children are every deletion in the workspace.
 `Tab` re-parented a peer-deleted block under an unrelated deletion, out of `trash::list`'s reach.
 `d d` reported success and cleared `redo`, `Alt`+arrows swapped two deletions, `Shift+Tab` put a ULID on the status line.
-`backlink_block_is_live` is the one owner of the question, and both gates ask it — the entry one in `enter_insert_backlink` and this one.
+`outl_actions::is_live` is the one owner of the question, and both gates ask it — the entry one in `enter_insert_backlink` and this one — alongside `block::ensure_live`, whose `bool` half it is.
+This crate used to spell the pair out itself (`contains(..) && !is_trashed(..)`), which made it a third opinion on what "live" means, beside the GUI's and the backend's own.
 It sits in the write gate because `commit_insert`'s `SourcePage` arm never goes through `focused_backlink_target_or_report`.
 Net: `backlink_commit/liveness_tests.rs`, on the tree and `ws.log().len()`, plus the three cases the gate must leave alone (a trash restore, an outline indent, a live row).
 
 **A source page ahead of its log is refused *before* the mutation for `Ctrl+T` and `g D`, and for nothing else**, through `App::source_page_can_take_the_write`.
-Which gestures ask is `actions/block/backlink_gesture.rs`'s answer, and the criterion is **whether the op's result is computed from the block's logged text** — not whether it is "structural".
+The criterion is **whether the op's result is computed from the block's logged text** — not whether it is "structural" — and it is `outl_actions::CrossPageWrite`'s, shared with the GUI clients because a drift there means one client refusing an operation the other performs.
+`actions/block/backlink_gesture.rs` holds this client's half of it: the exhaustive mapping from a gesture onto one of the three shapes, nothing more.
 `toggle_todo` / `mark_done` read `block_text`, move a marker and write the result back, while the row the chord was aimed at was rendered from the `.md`.
 So on a frozen page they compute an op from text the user never saw, the projection is then withheld, and the row comes back unchanged while the state walks on invisibly.
 A structural op names a node and converges through the log whatever the local `.md` says.

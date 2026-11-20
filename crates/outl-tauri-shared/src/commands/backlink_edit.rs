@@ -26,8 +26,8 @@ use outl_actions::refusal::{
     ahead_of_log_notice, stale_backlink_block_refusal, stale_backlink_block_unchanged_refusal,
 };
 use outl_actions::{
-    create_after, create_before, delete, edit_text, indent, is_trashed, mark_done, move_down,
-    move_up, outdent, toggle_todo, ActionError,
+    create_after, create_before, delete, edit_text, indent, is_live, mark_done, move_down, move_up,
+    outdent, toggle_todo, ActionError, CrossPageWrite,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
@@ -153,39 +153,55 @@ pub enum BacklinkRowOp {
 }
 
 impl BacklinkRowOp {
-    /// Whether this op's result is **computed from the block's logged
-    /// text** — the one question the ahead-of-log gate turns on.
+    /// Which [`CrossPageWrite`] shape this op is — the mapping, and
+    /// nothing more.
     ///
-    /// Not "is it structural". That was the recorded reason for asking
-    /// only [`edit_backlink_block`], and it is false for two of the
-    /// seven here: `toggle_todo` reads `workspace.block_text`, runs
-    /// `cycle_todo` on it and writes the result back as an `Op::Edit`,
-    /// and `mark_done` does the same through `set_todo` + `edit_text`.
-    /// Both therefore compute an op from the **logged** text while the
-    /// row the user tapped rendered the text on **disk** — which is the
-    /// property the text edit has a gate for, arriving through a
-    /// different door. On a frozen page the commit's projection is
-    /// withheld (invariant 8), the frontend refetches `pageBacklinks`
-    /// from disk, and the row comes back unchanged: the tap looks like
-    /// it did nothing while the task state walks `TODO → DOING → DONE`
-    /// in the log, and `outl reconcile --ahead-of-log` later drops all
-    /// of it.
+    /// The **answer** (whether a shape's op is computed from the logged
+    /// text, and so is the one the ahead-of-log gate refuses) belongs to
+    /// `outl-actions`, because the TUI gates on it too. It used to be a
+    /// second `computed_from_the_logged_text` here, under the same name,
+    /// over these seven ops — and a drift between the two copies meant
+    /// one client refusing an operation the other performed, which costs
+    /// user text.
     ///
-    /// The other five are `Op::Move`s naming a node. They read no text,
-    /// so a stale local `.md` cannot change what they do, and they
-    /// converge through the op log whatever that file says — the frozen
-    /// `.md` is the pre-existing condition rather than something the
-    /// gesture caused (root `CLAUDE.md` invariant 11). What they still
-    /// lack is a *notice*, which is the open item recorded in
-    /// [`docs/clients.md`](https://github.com/outlmd/outl/blob/main/docs/clients.md),
-    /// not a reason to withhold their op.
+    /// Why each arm, since the mapping is the half that can still be
+    /// wrong:
+    ///
+    /// - `ToggleTodo` / `MarkDone` are **not** structural. `toggle_todo`
+    ///   reads `workspace.block_text`, runs `cycle_todo` on it and
+    ///   writes the result back as an `Op::Edit`; `mark_done` does the
+    ///   same through `set_todo` + `edit_text`. Both therefore compute
+    ///   an op from the **logged** text while the row the user tapped
+    ///   rendered the text on **disk**. On a frozen page the commit's
+    ///   projection is withheld (invariant 8), the frontend refetches
+    ///   `pageBacklinks` from disk, and the row comes back unchanged:
+    ///   the tap looks like it did nothing while the task state walks
+    ///   `TODO → DOING → DONE` in the log, and
+    ///   `outl reconcile --ahead-of-log` later drops all of it.
+    /// - The other five are `Op::Move`s naming a node. They read no
+    ///   text, so a stale local `.md` cannot change what they do, and
+    ///   they converge through the op log whatever that file says — the
+    ///   frozen `.md` is the pre-existing condition rather than
+    ///   something the gesture caused (root `CLAUDE.md` invariant 11).
+    ///   What they still lack is a *notice*, which is the open item
+    ///   recorded in
+    ///   [`docs/client-backlinks.md`](https://github.com/outlmd/outl/blob/main/docs/client-backlinks.md),
+    ///   not a reason to withhold their op.
+    ///
+    /// `CrossPageWrite::TypedText` has no arm here on purpose: a text
+    /// edit is [`edit_backlink_block`], not a row op, and these clients
+    /// seed its draft from the `.md` rather than from the log — so it is
+    /// not that shape and asks unconditionally. That variant's own doc
+    /// owns the asymmetry.
     ///
     /// Exhaustive on purpose: an eighth variant cannot compile without
-    /// declaring which side of this line it is on.
-    fn computed_from_the_logged_text(self) -> bool {
+    /// declaring its shape.
+    fn shape(self) -> CrossPageWrite {
         match self {
-            Self::ToggleTodo | Self::MarkDone => true,
-            Self::Delete | Self::Indent | Self::Outdent | Self::MoveUp | Self::MoveDown => false,
+            Self::ToggleTodo | Self::MarkDone => CrossPageWrite::MarkerFromLoggedText,
+            Self::Delete | Self::Indent | Self::Outdent | Self::MoveUp | Self::MoveDown => {
+                CrossPageWrite::Structural
+            }
         }
     }
 }
@@ -219,14 +235,15 @@ pub enum BacklinkSide {
 ///
 /// **Two of the seven also refuse a source page ahead of its log,
 /// before anything is written**, and which two is
-/// `BacklinkRowOp::computed_from_the_logged_text`'s answer rather
-/// than a classification of "structural". `ToggleTodo` and `MarkDone`
-/// are text read-modify-write: they compute an op from the logged text
-/// while the row the user tapped was rendered from the `.md`. The check
-/// and the wording are [`edit_backlink_block`]'s, asked the same way
-/// for the same reason, and it runs **before** the commit so a refusal
-/// does not pay a `render_page_md` for the undo snapshot of a mutation
-/// that will not happen.
+/// `BacklinkRowOp::shape`'s mapping put to
+/// [`CrossPageWrite::computed_from_the_logged_text`] rather than a
+/// classification of "structural". `ToggleTodo` and `MarkDone` are text
+/// read-modify-write: they compute an op from the logged text while the
+/// row the user tapped was rendered from the `.md`. The check and the
+/// wording are [`edit_backlink_block`]'s, asked the same way for the
+/// same reason, and it runs **before** the commit so a refusal does not
+/// pay a `render_page_md` for the undo snapshot of a mutation that will
+/// not happen.
 ///
 /// Nothing is typed on any of these seven, so a refusal costs the user
 /// nothing to weigh against it — which is why the write side is the
@@ -267,7 +284,7 @@ pub fn backlink_row_op<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
-    if op.computed_from_the_logged_text() {
+    if op.shape().computed_from_the_logged_text() {
         let root = state.storage_root()?;
         let outcome = with_ws(state, |ws| {
             Ok(reproject_stale_md(ws, &root, page, "backlink_row_op"))
@@ -373,13 +390,66 @@ pub fn create_backlink_sibling<S: AppHost>(
 /// not be saved" on `Ctrl+T` names a loss that did not happen; that half
 /// belongs to [`edit_backlink_block`] alone.
 ///
-/// The liveness test is `block::ensure_live`'s, which is private to
-/// `outl-actions`: a node the tree never held, **or** one sitting under
-/// the trash (a peer's delete is an `Op::Move`, so the record survives
-/// and `contains` still answers yes — root `CLAUDE.md` invariant 6).
+/// The liveness test is [`outl_actions::is_live`], the `bool` half of
+/// `block::ensure_live`: a node the tree never held, **or** one sitting
+/// under the trash (a peer's delete is an `Op::Move`, so the record
+/// survives and `contains` still answers yes — root `CLAUDE.md`
+/// invariant 6).
+///
+/// Asked, not re-derived. The pair used to be spelled out inline here,
+/// because `ensure_live` was private to `outl-actions`, and the TUI had
+/// a third copy — so what "live" means could have come apart between
+/// the guard behind the actions and the two gates in front of them.
 fn stale_row_block(workspace: &Workspace, node: NodeId) -> Option<&'static str> {
-    if workspace.tree().contains(node) && !is_trashed(workspace, node) {
+    if is_live(workspace, node) {
         return None;
     }
     Some(stale_backlink_block_unchanged_refusal(workspace, node))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BacklinkRowOp, CrossPageWrite};
+
+    /// **This client's half of the shared criterion: the mapping.**
+    ///
+    /// The shapes and the verdict are `outl-actions`' (and
+    /// `backlinks_write`'s
+    /// `every_shape_verdict_matches_what_the_action_behind_it_reads` is
+    /// what keeps the verdict honest against the actions both clients
+    /// call). What can still go wrong here is an op mapped onto the
+    /// wrong shape, which is the only way these clients and the TUI can
+    /// now disagree about an operation — so the table is the mapping,
+    /// with the verdict it produces beside it.
+    ///
+    /// `tests/backlink_row_ops.rs` asserts the same split on the op log
+    /// and the `.md` for all seven. This is the cheap, direct net at the
+    /// mapping site; that one is the behavioural one.
+    #[test]
+    fn each_row_op_declares_the_shape_of_the_write_it_performs() {
+        for (op, shape, gated) in [
+            (
+                BacklinkRowOp::ToggleTodo,
+                CrossPageWrite::MarkerFromLoggedText,
+                true,
+            ),
+            (
+                BacklinkRowOp::MarkDone,
+                CrossPageWrite::MarkerFromLoggedText,
+                true,
+            ),
+            (BacklinkRowOp::Delete, CrossPageWrite::Structural, false),
+            (BacklinkRowOp::Indent, CrossPageWrite::Structural, false),
+            (BacklinkRowOp::Outdent, CrossPageWrite::Structural, false),
+            (BacklinkRowOp::MoveUp, CrossPageWrite::Structural, false),
+            (BacklinkRowOp::MoveDown, CrossPageWrite::Structural, false),
+        ] {
+            assert_eq!(op.shape(), shape, "{op:?} is mapped wrong");
+            assert_eq!(
+                op.shape().computed_from_the_logged_text(),
+                gated,
+                "{op:?}: the gate would change for this op",
+            );
+        }
+    }
 }

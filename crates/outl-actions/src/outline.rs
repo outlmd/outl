@@ -392,17 +392,9 @@ pub fn read_page_outline(root: &Path, meta: &PageMeta) -> Result<PageOutline, Ac
     read_page_outline_inner(root, meta, SidecarAccess::Migrating)
 }
 
-/// Whether reading the sidecar may also migrate a legacy dotted one to
-/// its modern name.
-#[derive(Clone, Copy)]
-enum SidecarAccess {
-    /// `outl_md::resolve_sidecar_path`, which renames a legacy sidecar
-    /// in place. Every ordinary caller: they run inside an open
-    /// workspace, so the guards are held.
-    Migrating,
-    /// `outl_md::readable_sidecar_path`, which never writes.
-    ReadOnly,
-}
+mod sidecar;
+use sidecar::SidecarAccess;
+pub use sidecar::SidecarIdentity;
 
 /// [`read_page_outline`] for a caller that holds no workspace guards.
 ///
@@ -431,14 +423,7 @@ fn read_page_outline_inner(
     // next commit writes that emptiness back. See `read_for_rewrite`.
     let md_text = outl_md::read_for_rewrite(&md_path)?;
     let parsed = outl_md::parse::parse(&md_text);
-    let sidecar = match access {
-        SidecarAccess::Migrating => {
-            outl_md::sidecar::read(&outl_md::resolve_sidecar_path(&md_path)).ok()
-        }
-        SidecarAccess::ReadOnly => {
-            outl_md::readable_sidecar_path(&md_path).and_then(|p| outl_md::sidecar::read(&p).ok())
-        }
-    };
+    let sidecar = self::sidecar::read(&md_path, access);
 
     let mut nodes = Vec::with_capacity(parsed.blocks.len());
     let mut iter = sidecar
@@ -451,6 +436,7 @@ fn read_page_outline_inner(
     Ok(PageOutline {
         nodes,
         warnings: parsed.warnings,
+        sidecar_identity: self::sidecar::identify(&md_path, sidecar.as_ref(), &meta.id),
     })
 }
 
@@ -496,6 +482,10 @@ pub struct PageOutline {
     /// Non-fatal parser recoveries — empty when the `.md` is clean.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<outl_md::parse::ParseWarning>,
+    /// Whether the sidecar these ids came from describes **this** page.
+    /// Reported, never enforced: [`SidecarIdentity`] carries why an
+    /// `Err` on the page-open path is the deleting half of invariant 8.
+    pub sidecar_identity: SidecarIdentity,
 }
 
 /// Walk `nodes` in place, setting `collapsed` from

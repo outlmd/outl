@@ -150,7 +150,7 @@ The warning about an alias that another page shadows (`alias_conflicts`) is deli
 `components/PageSections.tsx` is what `OutlineView` mounts below the outline: `<InlineBacklinks />`, then `<NestedPages />` (`@outl/shared/namespace`, issue #275).
 
 `InlineBacklinks.tsx`'s header direction button calls `setBacklinksOrder` to flip newest / oldest; `appState.backlinksOrder` hydrates at boot.
-Contract: [`clients.md` → Backlinks order](clients.md#backlinks-order-issue-142).
+Contract: [`client-backlinks.md` → Backlinks order](client-backlinks.md#backlinks-order-issue-142).
 
 The scan lands after the first paint, so **the section is on screen only once it has rows**.
 A first load draws nothing at all, and the section then appears once, complete, below the last block.
@@ -172,12 +172,12 @@ The row used to **navigate** instead, and the source page is still one click awa
 `o` / `O` creates the sibling on the source page and says so, because the new block cites nothing and no row here will ever show it — unless the page cites *itself*, in which case the block is in the outline on screen and the cursor lands in it.
 A row whose citing block lives outside any page is inert: there is nothing to write to and nothing to open.
 
-Contract, including why a cross-page edit **refuses** where an ordinary one re-targets: [`clients.md` → Editing a backlink where it is cited](clients.md#editing-a-backlink-where-it-is-cited).
+Contract, including why a cross-page edit **refuses** where an ordinary one re-targets: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
 
 **Hovering a row highlights it and nothing else.**
 `j` / `k` cross into this section from the outline's last block, and the row holding that cursor draws the same accent bar a selected block does — so a pointer merely passing over the section on its way elsewhere must not move it.
 It used to: `onMouseEnter` wrote the keyboard's own cursor, which took `j` and `Enter` off the block the user had left them on, from a gesture they never aimed.
-The highlight is CSS now, and which row owns the cursor is `backlinkCursor()`'s answer alone ([`outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md#the-cursor-lives-in-one-region)).
+The highlight is CSS now, and which row owns the cursor is `backlinkCursor()`'s answer alone ([`desktop-page-surface.md`](desktop-page-surface.md#the-cursor-lives-in-one-region)).
 
 ## Properties (`key:: value`) chip row
 
@@ -204,7 +204,7 @@ Edits render as a word diff (`@outl/shared/trust`'s `DiffText`).
 Two kinds of row carry a one-click restore, both decided by `restorePlan`: an edit puts the block's previous text back (`edit_block`), and a deletion brings the lost text back as a new block at the end of the page (`create_block`).
 Moves, property changes, and an edit on a block that is now in the trash get no button — a deletion row offers that text back instead.
 
-Contract and what a history counts as an event: [`clients.md` → Page history](clients.md#page-history).
+Contract and what a history counts as an event: [`client-page-lifecycle.md` → Page history](client-page-lifecycle.md#page-history).
 
 ## Trash panel
 
@@ -224,13 +224,22 @@ No chord yet.
 A chord needs an `Action` in `outl-shortcuts`, whose per-client `support()` match is at its frozen size baseline, which is the same reason the page-history panel has none.
 Per-client reach is `Capability::Trash` in [`client-parity.md`](client-parity.md).
 
-Contract, the three refusals and why a page cannot come back: [`clients.md` → Restoring a deleted block](clients.md#restoring-a-deleted-block).
+Contract, the three refusals and why a page cannot come back: [`client-page-lifecycle.md` → Restoring a deleted block](client-page-lifecycle.md#restoring-a-deleted-block).
 
 ## Blockquote chrome
 
 A `"> "`-prefixed block renders with a left border and a ~6% tint, right-rounded, body at full colour; the outline bullet stays outside the quote chrome.
-Detection is `splitQuote` plus `stripQuoteFromTokens`, and toggling routes `toggleQuote` → `toggle_quote` → `outl_actions::block::toggle_quote`.
-Convention: [`clients.md` → Blockquote convention](clients.md#blockquote-convention).
+Detection is `splitQuote` plus `stripQuoteFromTokens`.
+
+**`/quote` toggles it**, in the inline slash menu, on the block the slash was typed in.
+The route is `blockSlashCommands` (`lib/slash-commands.ts`) → `createNativeSlashOps` (`components/outline-native-slash.ts`) → `toggleQuote` → the registered `toggle_quote` command → `outl_actions::block::toggle_quote`.
+Typing `> ` at the front of the block still works and is the only route on the other two clients.
+
+The row rides a reserved sentinel `plugin_id` (`@outl/block`), the same escape hatch `/upload` and `/date-today` use for a core feature with no chord.
+**There is no chord and cannot be one yet**: that needs a `ToggleQuote` `Action` in `outl-shortcuts`, whose `support()` match and `defaults.rs` are both at their recorded file-size baseline.
+Same reason the trash and page-history panels have none.
+So the per-client reach is `Capability::BlockquoteToggle` in [`client-parity.md`](client-parity.md), where the TUI and mobile read `❌` with the marker to type instead.
+Convention: [`client-editing.md` → Blockquote convention](client-editing.md#blockquote-convention).
 
 ## Zoom / focus on a block
 
@@ -251,7 +260,7 @@ The page's `key:: value` row, the backlinks section, the nested-pages list and t
 `Cmd+J` zoomed into a block of today's journal returns to today's full journal; so do the sidebar's Today, a `Cmd+P` pick, a click on a `[[ref]]` or `#tag` that points back at this page, `[` / `]`, and an `outl://` deep link.
 A commit, a batch op, a quick capture into today, a timeline restore and a peer-driven refresh all **keep** it — none of them is the user asking to go somewhere.
 
-Cross-client contract: [`clients.md` → Zoom / focus on a block](clients.md#zoom--focus-on-a-block-roamworkflowy).
+Cross-client contract: [`client-editing.md` → Zoom / focus on a block](client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
 ## Arrow keys walk between blocks in Insert mode
 
@@ -309,7 +318,7 @@ An inline `((blk))` renders the source text; an orphan renders a raw chip.
 A block whose whole text is one embed (`embedOnlyHandle`) renders `<EmbeddedSubtree />` beneath it: read-only, depth 4, from `ResolvedBlock.children`.
 
 In a `call:<name>` fence, `CodeFenceView`'s `CALL:<NAME>` chip links to the template page through `onOpenPage` → `openPageBySlug` (exact, not `openRef`), resolving the slug via `listTemplates()`; an unknown name is an inert chip.
-Template contract: [`clients.md` → Structural templates](clients.md#structural-templates).
+Template contract: [`client-editing.md` → Structural templates](client-editing.md#structural-templates).
 
 ## Opening an external `[label](url)` link
 

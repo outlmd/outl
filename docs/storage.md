@@ -479,7 +479,9 @@ Nothing deleted a snapshot until [RFC 0258](rfcs/0258-snapshot-cache-lifecycle.m
 The rule is about the **reader**, not the actor.
 "Drop the snapshots of actors that are gone" is unanswerable — an unpulled peer log, an undownloaded iCloud placeholder and a dead actor are one observation — and it is also irrelevant, because a snapshot is never read by its own actor.
 Its only readers are `read_best_from_disk` and iroh's snapshot responder, so the deciding question is *can the selector ever choose this file again*, which the directory alone answers.
-`snapshot::gc::survey` is the single owner of that verdict; `read_best_from_disk` is built on it, so the boot selector and the GC cannot disagree.
+`snapshot::gc::survey` is the single owner of that verdict.
+It is **not** what `read_best_from_disk` scans with: the boot selector ranks headers through `snapshot::select::adopt_order` and decodes only the winner, while the survey ranks the bodies that decode, because its output is a delete.
+The two therefore rank independently, over different evidence, and what keeps them from disagreeing is the one function they both rank through, `snapshot::select::selection_key`.
 
 Prunable is `Superseded` (decodes, is not ours, and loses under the selector's own key) or `Unusable` (read end to end, `decode` refused).
 Kept: our own snapshot, the selected one, a **newer** schema than this build's, and anything we failed to *read* at all — "could not read" is not "read and proved bad".

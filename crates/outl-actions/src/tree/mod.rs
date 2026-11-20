@@ -33,4 +33,4 @@ pub(crate) use props::{
 };
 pub use props::{is_page_model_key, sort_in_presentation_order};
 pub(crate) use traverse::is_under;
-pub use traverse::{enclosing_page_id, is_trashed, page_slug_of, walk_subtree};
+pub use traverse::{enclosing_page_id, is_live, is_trashed, page_slug_of, walk_subtree};

@@ -240,7 +240,7 @@ done
 ```
 
 A launch reports itself: `outl_core::boot_timing` writes one `info!` line per workspace open naming each phase, the delta size and the resident block count.
-On iOS that lands in `$HOME/Library/Logs/outl-backend.log` inside the sandbox ([`outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md) → "The backend's log").
+On iOS that lands in `$HOME/Library/Logs/outl-backend.log` inside the sandbox ([`docs/mobile-internals.md`](mobile-internals.md) → "The backend's log").
 
 A one-off micro-benchmark against the real workspace, with no risk to it:
 

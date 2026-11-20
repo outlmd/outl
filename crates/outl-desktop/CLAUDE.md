@@ -41,63 +41,14 @@ Plus the cross-platform `notify` FS watcher that signals the frontend when peer 
 
 The frontend / `src-tauri` file tree (which component owns what, where each `lib/*.ts` helper lives) is in [`docs/development.md`](../../docs/development.md#desktop-crate-layout).
 
-### `action-handlers.ts` is eight files
+Two parts of this client are reference rather than rule, and they live under `docs/`:
 
-It was 1,038 lines, and it sat at its recorded size baseline, so nothing could be added to it.
-It is the **assembly** now: build the context, spread the groups, carry the "deliberately absent" note.
+| Page | What it covers |
+|---|---|
+| [`docs/desktop-keybindings.md`](../../docs/desktop-keybindings.md) | How a keystroke resolves, group by group: the `action-handlers.ts` assembly, keyboard reach, undo / redo, inline markdown, paste, block-editor chords, vim parity |
+| [`docs/desktop-page-surface.md`](../../docs/desktop-page-surface.md) | The `BlockRow.tsx` split, the sections below the outline and their loading rule, the cursor regions, the property editor, the history panel, `applyPageState`, the day clock, zoom, the task panel |
 
-The split axis is **what a keystroke changes**, not what kind of code the handler is.
-A new handler goes in the sibling that owns its answer to that question, never back in the parent.
-The siblings and the one-line responsibility of each are in the [layout tree](../../docs/development.md#desktop-crate-layout); each file's header doc carries the reasoning for its own boundary.
-
-Three things the split decided on purpose:
-
-- **Only `buildHandlers` is exported from the parent.**
-  `AppShell` and every test that reaches the map import it and nothing else, so there were no import paths to update.
-- **The split moved declarations, and a pass after it deduplicated the bodies.**
-  Two passes on purpose: a declaration move is reviewable on sight, a body change is not.
-  Same net for both: `shortcuts.support.test.ts` pins the **presence** of all 66 keys in both directions, and nothing about what one does.
-  That is why `clipboard-handlers.test.ts` exists for the two it never reached, `YankCurrentBlock` and `YankRange`.
-  The dedup collapsed eight inline copies of `ctx.runOn`, three copies of one batch loop (`ctx.runEach` owns it now), the `Esc` cascade's second list of panels, and seven toggles written two ways.
-  `store.togglePanel` owns that flip now, including the chrome buttons, which were a list of their own.
-- **`exitVisual` still writes `mode: "vim-normal"` and nothing writes it back.**
-  Left alone deliberately.
-  `detectMode` (`lib/mode.ts`) is what resolves the stale mode, by letting a focused textarea outrank it (issue #489).
-  Changing what `exitVisual` writes would be a behaviour change wearing a refactor's clothes.
-
-### `BlockRow.tsx` is five files
-
-It was 1,425 lines.
-It is the row **chrome** now: selection / Visual / pending-cut / drop-target state, indent guides, fold chevron, the bullet-vs-checkbox gesture split, the [quote wrapper](../../docs/desktop-ux.md#blockquote-chrome), the recursion.
-**New code of one of these shapes goes in the sibling, not back in the parent** — the same axis `action-handlers.ts` splits on.
-The siblings are in the [layout tree](../../docs/development.md#desktop-crate-layout), and each one's header doc carries the reasoning for its own boundary.
-`outline-structure.ts` (`createStructureOps`) re-selects and re-edits a block on itself after `indent_block` / `outdent_block`; see "Block-editor chords" below ([#477](https://github.com/outlmd/outl/issues/477)).
-Five of those boundaries rest on a rule, not a preference.
-`BlockBody.tsx`'s read-mode branches are flat and mutually exclusive because a table has no cell editor and a fence has no fence editor, by design ([#329](https://github.com/outlmd/outl/issues/329)).
-It is also where a transclusion expands: a block whose whole text is `!((blk-X))` (`embedOnlyHandle`) or `![[page]]` (`pageEmbedOnlyName`) appends the borrowed rows *below* its own content, through the shared read-only `<EmbeddedSubtree />`.
-**Both expansions draw nothing until their resolve answers with rows, and that is not an optimisation.**
-The resolve lands a round-trip after the first paint, in a block the user may be typing in.
-A placeholder that reserves vertical space and then releases it moves every row below the caret — so this is `lateSectionVisible`'s rule ("a first load draws nothing") reduced to `count > 0`, an embed having no empty state worth keeping.
-The maps come from `appState.embeds` / `appState.pageEmbeds`, both filled by `<OutlineView />`'s `resolveTransclusions` (one skip key per kind, so a newly typed `[[ref]]` does not invalidate the page-embed answer).
-**Each is read through an accessor, never a `const` in the component body.**
-A body runs once and is not a tracking scope, so `const x = appState.embeds[h]` captures what the map held at mount.
-The resolve lands a round-trip after the page is on screen and `setOutline` reconciles on id, so the expansion showed up only when the map happened to be warm already.
-`BlockEditor.tsx` is mounted only while editing, which is why focus and pending caret intent are `onMount` and not an effect on an `editing` flag.
-`block-suggest.ts` is one module because **only one popup is ever open at a time** is the invariant all of it rests on; detection and span replacement stay in `@outl/shared/autocomplete`.
-`CodeFenceView.tsx`'s `RichFenceFrame` iframe is sandboxed `allow-scripts`, never `allow-same-origin`.
-And `block-callbacks.ts` holds the `BlockCallbacks` interface alone, re-exported from `BlockRow.tsx` so `import { type BlockCallbacks } from "./BlockRow"` keeps resolving.
-
-Two things the split decided on purpose:
-
-- **The draft signal stays on `<BlockRow />`.**
-  Its lifetime is the row, not the edit session.
-  Moving it into `<BlockEditor />` would re-seed it from `props.block` on every entry into Insert, which is a behaviour change (it would mask the bug below), not a move.
-- **`startEdit` no longer calls `focusTextarea()`.**
-  The editor focuses itself on mount, in the microtask the removed call landed in anyway.
-
-**Known, pre-existing, not fixed here:** the draft is seeded once per row instance, and only `startEdit` re-seeds it.
-`setOutline` reconciles on id, so a block a peer rewrote keeps its row instance and its old draft.
-Entering Insert by a path that bypasses `startEdit` (`i` / `A`, which write `editingBlockId` straight from the handler modules) then shows the stale text and commits it over the peer's.
+Read the matching one before editing those modules.
 
 ## First-run onboarding
 
@@ -107,170 +58,6 @@ The "has the user onboarded" flag is a **per-install UI flag in `localStorage`**
 It is intentionally not in `settings.json` either, since `settings.last_workspace` is the only first-run signal the backend tracks.
 The **copy** lives in `@outl/shared/onboarding`, identical to mobile, and pairing is **not** reimplemented — `Onboarding` renders the real `<SyncPanel />`.
 
-## Backlinks, nested pages, and the loading rule
-
-`components/PageSections.tsx` mounts `<InlineBacklinks />` then `<NestedPages />` below the outline (issue #275); what each renders is in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#backlinks-and-nested-pages-below-the-outline).
-They look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace — which is why the second is **not** gated on `backlinksOpen`.
-Folding the toggles together would hide one when the user muted the other.
-
-**Page deletion has two doors and one flow.**
-`g d` routes through `DeletePage`, which runs the same `window.confirm` + `deletePage(slug)` path as the sidebar row's hover `×` ([gesture](../../docs/desktop-ux.md#sidebar--hover--to-delete-a-page)).
-Journals are refused, and the body is the shared `outl_tauri_shared::commands::page::delete_page` — no desktop logic on either door.
-
-**Rename and merge are the same two doors, and the same flow.**
-The sidebar row's hover `✎` (rename) and `⇥` (merge into) sit beside the `×`; journals get none of the three.
-Both open `PageActionDialog.tsx` (a name field prefilled with the title, or a page search that leaves the source out), because the webview has no `window.prompt`; the questions that follow are `window.confirm`, like delete.
-The flow itself is `@outl/shared/pages/rename-merge` (a taken name asks before merging, a merge **always** asks, the wording is owned there), wrapped by `lib/page-actions.ts`, which only adds the confirm, the toast and the error surface.
-Declining a confirm writes nothing and leaves the dialog open; the outcome (blocks moved, links updated, every property conflict) goes to `<NoticeToast />` via `appState.notice`, because a dropped property value the user never saw is the failure the report exists to prevent.
-There is no chord and no menu entry: delete has none in `menu.rs` either, so these did not get one.
-The sidebar list is keyed on the page id **and** slug and title, since a rename keeps the id.
-
-**Backlinks are fetched per navigation, by `installBacklinksEffect` (`lib/backlinks-effect.ts`), and "per navigation" is `@outl/shared`'s answer, not this crate's.**
-It sources `createBacklinksKey`, which is `createPageKey` with two fields — read [`outl-frontend-shared/CLAUDE.md`](../outl-frontend-shared/CLAUDE.md) before changing either.
-
-This used to be `createEffect(on(() => appState.page?.slug, …))` inline in `OutlineView.tsx`, under a comment saying it fired once per navigation.
-It did not: `on()` makes a dependency explicit and **compares nothing**, and `applyPageState` writes the page as one object (`setAppState({ page, … })`), which `setState` merges key by key — so `page` is assigned a fresh `PageMeta` on every reply and its node fires.
-So every created or deleted block ran `emptyBacklinks()`, `lateSectionVisible` unmounted the whole section, and it came back an `O(blocks-in-workspace)` scan later with the same rows.
-A *path* write (`setAppState("page", …)`) merges in place and would not fire, which is why a store test written that way passes against the broken code — `backlinks-effect.test.ts` goes through the real `applyPageState` for that reason.
-The sidebar's recents queue had the identical defect and now takes `createPageKey` directly.
-`navigation/page-key.parity.test.ts` in `@outl/shared` reads both clients' sources and refuses the shape outright.
-
-Taking the shared key also fixed a half this client never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
-
-**All five fetch sites go through `trackBacklinks` (`lib/backlinks-fetch.ts`), which takes no argument, and that is the point.**
-The five are that effect, `AppShell::refreshActivePage`, `toggleBacklinkTodo`, `BacklinkRowEditor`'s text commit, and `backlinkRowOps.settle` (the nine cross-page chords).
-None is awaited on a render or keystroke path.
-It owns `appState.backlinksLoading`, which `<InlineBacklinks />` is the **only** reader of.
-A page-wide load state here is the regression [`UX.md` → Never block a keystroke](../../UX.md#2-never-block-a-keystroke) names; `InlineBacklinks.test.tsx` → "backlinks load behind the page" is the net.
-
-Its own module and not `store.ts` for the reason `cursor-region.ts` is one: that file is the state *shape*, and this is an async policy.
-The parity test's declared exception moved with it and shrank to one row, since no caller can build a fetch any more.
-
-It used to take the promise, which puts the IPC call on the wire before the owner is reached — nothing left to coalesce, and a **held** `Alt+↑` or `Tab` was one `O(blocks-in-workspace)` scan per key repeat.
-A burst is now one scan in flight plus one queued, whatever the repeat rate.
-That module's doc owns the three rules and the measurements; `lib/backlinks-fetch.test.ts` and `lib/backlink-handlers.cost.test.ts` are the nets (the second is invariant 15's *is it cheap once*, driven through the real `backlinkRowOps`).
-**Mobile needs no coalescer:** `BacklinksSection.row-ops.ts` refuses a second gesture while one is in flight, `busy()` spans the mutation *and* the awaited re-ask, and a touch gesture has no key repeat.
-
-**The section's own pending state had the mirror defect, and reserving space is not the fix.**
-It mounted a 95px header + skeleton when the scan started and unmounted it when the answer came back empty — on a workspace where most journal days have no backlinks, a blink on most journal days, re-armed by every peer refresh.
-A reservation that collapses still blinks, and one that does not is permanent dead space under every page.
-`lateSectionVisible` (`@outl/shared/outline`) owns the rule and the measurement: a **first load draws nothing**.
-A **refetch** keeps its rows — blanking them reads as "this page lost its references" — and is the one case that still shows the `loading…` mark.
-Net: "the backlinks section never appears and then disappears" (`InlineBacklinks.test.tsx`).
-
-**The ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`.**
-A crumb carries inline tokens, so the trail renders like any other block and stays inert; the plain join survives only as the `title=` tooltip, through `crumbTrailText`.
-Mobile's `BacklinksSection` wraps the same component, which is what stops one client showing markdown source while the other renders it.
-
-### The cursor lives in one region
-
-**`backlinkCursor()` (`lib/cursor-region.ts`, over that module's `backlinkRowIds()`) is the single owner of "is the cursor in this section", and every reader goes through it — the row's own highlight and `isEditing()` included.**
-`selectedBlockId` and `selectedBacklinkBlockId` are declared mutually exclusive because each reader checks the backlink one *first*.
-With both set, `j` walks someone else's page and `Enter` navigates away instead of editing, while the outline still paints the block the user left the cursor on.
-That exclusion was a sentence: ~20 call sites write `selectedBlockId` directly and each had to clear the other field, and most did not.
-The outline wins because releasing it is the deliberate act — the two handlers that cross the separator null it in the same breath, so no other writer has to know the rule exists.
-A stale id painting a second accent bar is the visible half of the same bug, which is why the highlight may not read the raw field either.
-
-**The highlight reads it through a `createMemo`, not per row.**
-`backlinkCursor()` asks whether the section is on screen, which includes `zoomView()` — `focusSubtree(outline, focusBlockId)`, an O(page) walk — whenever `focusBlockId` names a block the outline has lost.
-That is the one render before `<OutlineView />`'s self-heal effect clears it, and per row it cost 851 ms against 166 ms to mount 1,556 rows over a 688-block page, and 724.7 ms against 2.6 ms for one cursor move.
-Same shape as `focus()` and `visualSet`; `InlineBacklinks.cursor-cost.test.tsx` counts the walks rather than timing them.
-
-**A pointer crossing the section is not a cursor move**, so a backlink row has no `onMouseEnter`.
-It wrote the keyboard's own cursor, which is what made the bug read as intermittent: the user never aimed the gesture.
-The hover affordance is the row's `hover:bg-…`, which costs no state.
-
-This is what the TUI gets from `Focus` being an enum; its one path that still has to *assign* `Focus::Outline` is a mouse click, the same gesture that broke here.
-Net: `lib/cursor-region.test.tsx`, plus `a_click_brings_the_cursor_back_from_the_backlinks` in `outl-tui`.
-
-**Toggling a task from a backlink row (issue #144)** mutates the *source* page, and the backlink effect is keyed on the slug, which didn't change.
-So `toggleBacklinkTodo` refetches `pageBacklinks(currentSlug)` itself — the exception that effect's comment calls out.
-Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always empty now, so that blanks the section.
-
-### A backlink row is a place you can work
-
-Every gesture that acts on an outline block acts on a backlink row too — the text edit, task state, `g D`, delete, indent, outdent, both moves, and create below / above — each addressed to the citing block's **own** page.
-User-facing behaviour is [`docs/desktop-ux.md`](../../docs/desktop-ux.md#backlinks-and-nested-pages-below-the-outline).
-The cross-client contract is [`docs/clients.md` → Editing a backlink where it is cited](../../docs/clients.md#editing-a-backlink-where-it-is-cited).
-
-**`lib/backlink-handlers.ts` (`backlinkRowOps`) is the cross-page half, and it is not a spread group in `action-handlers.ts`.**
-A group has to own its `Action` keys outright, and every key here is already `block-handlers.ts`'s for the outline case.
-Two groups holding `IndentBlock` would make the spread order precedence, which that assembly's own comment says is readability.
-So `block-handlers.ts` consults this module **first** and falls through on `false`, the shape `enterInsertOnBacklink` already had.
-`false` means "the cursor is in the outline"; a **refusal** answers `true`, because falling through from a row acts on `appState.selectedBlockId`, which is `null` there by construction.
-
-Five rules a contributor will trip on:
-
-- **Never a `block.rs` command, for any of the ten gestures.**
-  The cross-page family is `editBacklinkBlock` (text), `backlinkRowOp` (the seven chords) and `createBacklinkSibling` (`o` / `O`).
-  A `block.rs` body acts on the page the user is looking at, so it may *tolerate* a stale id — three different ways, each of which reached the user from a row.
-  `createBlock` appended an empty block at the source page's end and answered `Ok`.
-  Six printed `ActionError`'s `Display`, a ULID, while the catalog's own sentence went uncalled (invariant 12).
-  And `moveBlockUp` / `moveBlockDown` / `indentBlock` answered success while doing nothing.
-  `commands/backlink_edit.rs` owns the argument and the one liveness gate behind all ten.
-  Net: `lib/backlink-commands.test.ts` — a twin called **at all** from a row fails, whatever page id it was handed.
-- **A refused commit keeps the row's editor up, on the user's draft.**
-  The typed text exists in no op, in no `.md` and on no peer, only in that textarea, so closing it is the one loss here nothing can undo — and it is reachable whenever a peer trashes the citing block mid-edit.
-  Leaving is still possible (a navigation, `Cmd+Shift+B`, a click into another row), and holding `editingBacklink` also keeps `isEditing()` true, so no background refresh remounts the row and re-seeds the draft.
-  Same rule mobile ships; the net asserts the **text**, not that an error was reported.
-- **The editing identity carries a page.**
-  `appState.editingBacklink` is `{ pageId, blockId }`, a sibling of `editingBlockId` rather than a widening of it.
-  `startBacklinkEdit` (`lib/cursor-region.ts`) is its one writer, and it releases the outline's editing id in the same breath: two mounted editors is two drafts, and the second commit overwrites the first.
-- **The rows are re-asked per commit, never per keystroke — and a held chord is one scan in flight plus one queued.**
-  `pageBacklinks` is an `O(blocks-in-workspace)` scan (invariant 15), and it is spent in three places: `settle()`, `BacklinkRowEditor`'s text commit (which has its own `backlinkCommitPlan` and does not call `settle`) and `toggleBacklinkTodo`.
-  "Per commit" is not a bound on a **held** `Alt+↑` or `Tab`: every repeat is a commit, so the count is `trackBacklinks`'s to keep and not any of the three's to remember.
-  What the reply may touch is `backlinkCommitPlan`'s answer, not this client's: a cross-page reply describes the *source* page, so it reaches the screen only when that page is the one on screen — which a page citing itself makes reachable.
-- **Nothing here nudges.**
-  Indent, outdent and move have no visible result on a flat row, and shipping them anyway is a recorded decision rather than a `Partial`, which is why `Capability::BacklinkInlineEdit` reads `Full` here and on mobile.
-  The TUI's `Partial` on that row is a different gap: it has no gesture at all that opens a cited block's page, where this client's group header is a `<button>` that does.
-  The two messages the module carries are for a row with no block to act on at all: an orphan backlink, and a cursor naming a row the list no longer holds.
-
-**`o` / `O` on a row used to append a block to the page being read.**
-`NewBlockBelow` / `NewBlockAbove` read `appState.page?.id` and had no backlink branch, so a gesture aimed at another page's block created an empty block at the end of the open one.
-The branch comes **before** the `pageId` read now, and the new sibling is created on the source page; a self-citing page is the one case where it also enters Insert, because the block really is in the outline on screen.
-Aiming it at the right page was only half of it: through `createBlock` a stale row id still appended at that page's end, which is the same defect one door along and why the first rule above exists.
-
-## Properties (`key:: value`) — `PropertyEditor.tsx`
-
-`components/PropertyEditor.tsx` replaced `@outl/shared`'s `<BlockProperties />` here, which edits an existing chip's value and nothing else.
-Creating the first property therefore meant the TUI or the `.md`, and deleting was an invisible gesture (issue #13).
-The three verbs it owns are in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#properties-key-value-chip-row).
-
-The chord has no chip to click, so `AddProperty` writes `appState.addPropertyBlockId` and `<BlockRow />` opens a blank editor on that id.
-`OpenProperties` (the TUI's `g p`) resolves to the same handler: that overlay exists to *list* a block's properties, and the chip row is already that list permanently, so the only half it lacks is the blank pair.
-The editor calls `onAddOpenChange(false)` on close, which is what lets a second press re-open it on the same block.
-The page-property row is hidden while zoomed — the header is a *block* then, and page metadata under a block title reads as the block's.
-
-`propertyChips` stays in `@outl/shared/markdown` — wrapped, never reimplemented.
-Promoting `PropertyEditor` itself waits on mobile: its answer to the same issue is a sheet with tappable key chips, not an inline row, so promoting a desktop-shaped API first would freeze the wrong contract.
-
-## Page history — `TimelinePanel.tsx`
-
-The panel (issue #241) and its two restore rows are in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#page-history-panel); `appState.timelineOpen` is the flag.
-
-Three things a contributor should not undo:
-
-- **It is not the undo stack.**
-  `Cmd+Z` walks this session's mutations (`outl_actions::history`); this walks every device's, from the workspace's start.
-  The panel and the command are named `timeline` precisely so the two don't get merged.
-- **A restore is new ops, never a rewind**, and `@outl/shared/trust`'s `restorePlan` is the single owner of which rows carry one.
-  It refuses the cases where "the version before" is a position or a value whose meaning depends on its neighbours.
-- **Nothing here decides what an event is.**
-  `outl_actions::timeline` owns which blocks count as the page's, which ops are not events, and the order.
-  `formatAt` renders `at_ms` and must never *re-sort* on it — the ordering is HLC with actor tiebreak and already applied, so a device with a skewed clock can legitimately show a time that reads out of order.
-
-The fetch is gated on `timelineOpen && appState.page`: the read walks every block in the page under the workspace lock, which is not something to do on every navigation on the chance the user might open the panel.
-No chord yet — a global binding means an entry in `outl-shortcuts`, which every client consumes, and the TUI has no timeline surface to bind it to.
-
-## Applying a `PageView` — `lib/page-view.ts`
-
-`applyPageState(view)` is the **single writer** of what a reply says about the page: `page`, `pageProperties`, `parseWarnings`, the sticky `mdAheadOfLog`, the outline and a `projection_error`.
-There used to be two `applyView`s, and the shell's wrote only `page` + outline.
-That one is every page opened from the chrome (sidebar, picker, Today, a task row, a deep link), so each kept the previous page's property chips and its "this page isn't syncing" banner.
-A caller adds only what is its own: cursor repair in the shell, auto-run and embeds in the outline.
-The module doc owns the rest, including why the write order is load-bearing.
-Net: `lib/page-view.test.ts`, which also pins by source-read that neither component writes those fields again.
-
 ## "This page isn't syncing" banner
 
 `<PageAheadOfLogBanner client="desktop" />` (`@outl/shared/warnings`) renders above the outline when `PageView.md_ahead_of_log` comes back set.
@@ -279,25 +66,6 @@ What the condition means and why it has to reach the user: [`docs/clients.md` �
 
 `appState.mdAheadOfLog` is sticky per page (`stickyAheadOfLog`), because only the open commands carry the flag — a mutation reply would otherwise clear the banner on the user's first edit, the very action it warns against.
 Sticky stops at `PageView.md_ahead_of_log_checked`: a reply that ran the check is authoritative both ways, so the next open after a reconcile clears the banner instead of leaving a healthy page marked broken.
-
-## Which day it is
-
-`<AppShell />` wires `createDayClock` (`@outl/shared/journal`) into `appState.todaySlug`, and **every surface that names a day reads that field**: `<PageTitle />`, the sidebar calendar's today ring, `<TasksPanel />`'s journal headings.
-
-It exists because the desktop held two frozen copies of the day instead.
-`<PageTitle />` had a `createResource` keyed on the page slug, so it re-asked on navigation and never otherwise; the sidebar calendar had a `new Date()` in a component body, read once at mount **and** on the browser clock rather than the configured `[calendar] timezone`.
-A window left open overnight therefore called yesterday "Today" in the header, in the accent colour, over the page the user was about to write into, and ringed yesterday on the calendar.
-
-Three rules a contributor will trip on:
-
-- **The day comes from the backend, the schedule comes from the browser.**
-  `today_slug` resolves in `outl_actions::clock`'s timezone; `nextDayCheckDelay` only decides *when to ask*, and is capped at an hour precisely because that schedule can be wrong.
-  A `new Date()` used as the answer is the bug, not a shortcut.
-- **Midnight relabels; it does not navigate.**
-  The user may be looking at the window. Returning to today happens on the way *back* in (`focus` / `visibilitychange`), under `shouldWakeToToday` — the same rule the phone uses, so the two clients cannot disagree about when a session counts as "opening the app".
-- **The clock is created in the component body**, not in `AppShell`'s `async onMount`: it registers an `onCleanup`, and the owner is gone once that body awaits.
-
-Net: `PageTitle.test.tsx` → "stops calling it Today once the day rolls over under an untouched window", plus `day-clock.test.ts` in `@outl/shared`.
 
 ## What a launch waits for
 
@@ -338,202 +106,11 @@ Details: [`docs/theming.md`](../../docs/theming.md#desktop-css-custom-property-n
 Dev + bundle commands, why Vite runs on port 1421, and what a terminal-launched dev build logs: [`docs/development.md`](../../docs/development.md#desktop-tauri-2).
 Test layers, tooling and the frontend suites: [`docs/development.md`](../../docs/development.md#per-client-test-suites).
 
-## Shortcuts
-
-Catalog: **`crates/outl-shortcuts`**, the single source of truth, also consumed by the TUI.
-The desktop fetches it via `list_shortcut_bindings` on boot, then **resolves every keystroke in TypeScript** against that cached catalog, in `installShortcuts` (`lib/shortcuts.ts`), into the handler map `lib/action-handlers.ts` builds.
-No Rust resolver sits on this path: `commands/shortcuts.rs` ships every binding and states that mode filtering is the frontend's job, since the active mode shifts as the user clicks into a textarea or opens the picker.
-**A mode-specific match wins over Global, and that precedence is load-bearing.**
-`Cmd+Shift+X` is `WrapStrike` in Insert and `RunCodeBlock` in Global, and `defaults.rs` lists the Global chrome rows first for help-overlay readability.
-So a single-pass match fires `RunCodeBlock` inside a textarea, executing the fence instead of striking the user's selection; `cmd_shift_x_splits_between_insert_and_global` (`outl-shortcuts/src/lib.rs`) pins the split.
-Chord tables are [`docs/shortcuts.md`](../../docs/shortcuts.md); which client performs which action is `outl_shortcuts::support`, rendered in [`docs/client-parity.md`](../../docs/client-parity.md).
-
-Two chords also have **visible icon affordances**, and quick capture is its own surface: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#chrome-toggle-bar-and-quick-capture).
-An affordance carries no business logic — clicking flips the same store signal the dispatcher flips, so button and keyboard cannot drift.
-
-### Keyboard reach for the chrome — `lib/keyboard-reach.ts`
-
-Everything the mouse can hit, the keyboard reaches without a chord to memorise.
-`rovingKeydown` is the roving-focus handler every toolbar and panel list wires as `onKeyDown` (Sidebar, ChromeToggleBar, SettingsModal, and the Reminders / Tasks / Timeline / Trash / Marketplace panels).
-`cycleRegion` is what `F6` / `Shift+F6` walk, over the elements marked `data-outl-region`.
-These are chrome navigation, not catalog actions, so they are **not** in `outl-shortcuts`: a binding there is one every client consumes, and only this client has regions.
-
-Three rules a contributor will trip on, each bought by a regression:
-
-- **`items` is the container saying what its stops are, and that question is only the container's.**
-  `FOCUSABLE` is a selector *list*, so a row holding a button is two stops and arrowing off row 0 lands on row 0's own button.
-  `tabindex="-1"` removes nothing, because `button` still matches on its tag.
-- **Focus is resolved *up* to its item before the index is taken** (`activeItem`), and not with `closest`.
-  Clicking a button focuses it on WebKitGTK, and a mutation that then refuses leaves focus there, outside the narrowed stops.
-  `indexOf` answered `-1`, `(-1 + 1) % len` is `0`, so ArrowDown jumped to row 0 and ArrowUp to row n-2.
-  `closest` does not cover it either: `TrashPanel`'s Restore button is the row's *sibling*, so the walk has to accept an ancestor that **is, or holds,** an item.
-  Focus genuinely outside every item keeps `-1`, which is what lets an arrow from the container still enter at the top.
-- **`focusFirstRowOnOpen` fires once per open, never per fetch, and never while loading.**
-  Every panel mutation refetches, so a rule keyed on the data throws the user back to the top each time; and on a reopen the resource still holds the previous open's rows, so focus landed on one of those is lost when the fresh fetch replaces them.
-
-`followSelection` is the fourth export and answers a different question: it keeps the selected block on screen (`block: "nearest"`, so it is inert while the row is visible).
-It is keyed on the selected id rather than wired into the two movement handlers, so `g g`, `G`, a search hit and a jump out of a panel all inherit it.
-
-### OS-standard chrome and undo / redo
-
-Desktop-specific: `Cmd/Ctrl+Shift+X` runs the focused / selected code block, since plain `Cmd/Ctrl+X` is OS cut / view-mode block cut.
-
-### Undo / redo (Normal mode — fire when no textarea is focused)
-
-Deliberately **Normal**, not Global: with a textarea focused the chord falls through to the webview (the in-flight draft is the textarea's own undo domain), and a Global binding would `preventDefault` it away.
-History is **block-level**: every mutation that goes through `finish_in_page` pushes the page's pre-mutation `.md` render onto a bounded per-page stack (`outl_actions::history::HistoryStacks`).
-Undo restores that snapshot through `outl_md::reconcile_md`, so the restore is itself ops in the log — nothing is rewritten.
-Fold toggles bypass `finish_in_page` and are not undoable, matching their "view state, not content" semantics.
-Invalidation is **surgical**: a workspace **switch** clears every stack, but a peer-driven **reload** drops only the stacks of pages whose projection actually changed across it.
-Restoring one of those would silently revert the peer's edits; pages the peer did not touch keep their full depth.
-
-### Inline markdown (Insert mode — fire when a textarea is focused)
-
-`lib/markdown-wrap.ts` owns these: each handler reads `document.activeElement`, splices the value, dispatches an `input` event so the Solid signal stays in sync, then repositions the caret / selection.
-
-### Paste (with and without formatting)
-
-Behaviour + routing: [`docs/paste.md`](../../docs/paste.md).
-Three guards, which mobile mirrors.
-A code-fence host bails `Cmd/Ctrl+V` to the native splice (`detectFence` early-return) so it stays literal.
-`Cmd/Ctrl+Shift+V` reads through `tauri-plugin-clipboard-manager` to dodge the macOS webview "Paste" gate.
-And both pass `textarea.value`, so the draft commits first.
-
-`components/outline-paste.ts` (`createPasteOps(deps)`) owns the three steps between the route decision and the workspace: flush the draft, run the command, fold the reply back in.
-Its own module, not two closures in `<OutlineView />`, like mobile's `Journal.block-ops.ts` — so the sequence has `outline-paste.test.ts`, which no component test replaces.
-
-**The third step is not optional.**
-Applying the view alone left the editor on the pre-paste string, which `commit()` wrote straight back on the next Esc or blur.
-That lost the paste from the block *and* the `.md`, with nothing on screen ([#488](https://github.com/outlmd/outl/issues/488)).
-`@outl/shared/paste`'s `pasteEditorUpdate` owns that decision.
-`<BlockEditor />`'s `applyPaste` writes `ta.value` as well as calling `setText`, because the caret has to move in the same frame.
-Solid's `value` binding lands in a later effect, and `setSelectionRange` against the stale value clamps to the old length.
-Regression net: `outline-paste.test.ts` plus `BlockRow.test.tsx` → "BlockRow paste into the block being edited — #488".
-
-`create_block`: stale `after_id` (`NotInTree`) → append at page end (fixes `o`-key crash after peer reload).
-
-### Block-editor chords (inside a block's textarea)
-
-Load-bearing notes a contributor needs:
-
-- **Plain `Enter` → splits the block at the caret** (`onEnter`, issue #184).
-  `Shift+Enter` → literal `\n` soft break (issue #119), handled in `BlockEditor`'s `handleKeydown` (not the catalog; see the code comment).
-- **A bare arrow key at the block's edge walks into the neighbour without leaving Insert.**
-  The outline reads as one continuous document, which the TUI has shipped all along; `components/outline-caret-nav.ts` is this client's half.
-  `@outl/shared/caret-nav` owns the whole decision, so the three clients cannot disagree about when a keystroke leaves a block or where the caret lands in the next one.
-  Three things here are load-bearing, and the editor's own comments carry the mechanism:
-  **the target is resolved before anything is awaited** (a `preventDefault` only counts during the synchronous dispatch, so a handler that commits first and looks for a neighbour after has already let the browser move the caret);
-  **nothing is committed when the keystroke goes nowhere**, because `commit()` writes `editingBlockId = null`, so a `←` in the page's first block would otherwise drop the user out of Insert instead of doing nothing;
-  and **`stopImmediatePropagation` is what stops a double move** — `↑` / `↓` are the catalog's Normal `SelectionUp` / `SelectionDown`, and the commit unmounts the textarea mid-dispatch, so the `window` listener would resolve the same keystroke a second time.
-  Removing that line moves the caret two blocks and leaves the cursor and the editor disagreeing about where it went; `BlockRow.caret-nav.test.tsx` is the net, verified to fail without it, and it also pins that a modified arrow (`Alt+↑` moves the block) never walks.
-  **A held arrow's repeat is swallowed while a step's commit is in flight** (`caretStepping`): a changed draft keeps the textarea mounted for a backend round-trip, and every repeat in that window would otherwise commit the same draft again.
-  The walk is `visibleRoots()`, so a zoom is honoured, and it stops at the outline's edges rather than stepping into the backlinks below —
-  those rows are editable now, so walking into one would open *another page* for editing from a keystroke aimed at this one.
-- **`Tab` / `Shift+Tab` indent / outdent the block and keep it in edit mode, on itself** (issue #477).
-  `commit()` (called first, so the backend sees the latest draft) flips `editingBlockId` to `null`, and the moved block's row remounts a fresh `<BlockEditor />` elsewhere in the tree.
-  `onIndent` / `onOutdent` (`components/outline-structure.ts`'s `createStructureOps`) re-select and re-edit the block's own id once the move settles.
-  That holds whether the move landed, was a backend no-op (`indent_block` / `outdent_block` swallow `NoPreviousSibling` / `AlreadyAtRoot`), or the command rejected outright.
-  The caret survives the remount through `appState.caretIntent`, widened from the `"end"` / `"start"` sentinels to also carry a codepoint offset.
-  The Tab handler captures it before `commit()` runs; the fresh `<BlockEditor />` applies it on mount and clears it, the same contract `EnterInsertAtEnd` already had.
-  **The handler calls `stopImmediatePropagation`, and removing it moves the block twice** — the editor unmounts itself mid-dispatch, so `window` then resolves the same keystroke as the catalog's Normal row.
-  The handler's comment carries the mechanism; `BlockRow.tab-dispatch.test.tsx` is the net, in both directions.
-- `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
-  Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
-- Bracket auto-pairing lives in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity), never here.
-- The four inline autocomplete popups share one keyboard contract via `handlePopupNav` (`lib/popup-nav.ts`, unit-tested): arrows cycle, `Enter`/`Tab` with no modifiers accept, `Esc` closes.
-  `Shift+Tab` outdents on every popup now (the page-ref one used to accept it).
-- What each popup is triggered by and inserts: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#inline-autocomplete-popups).
-  How a clicked `[label](url)` or `assets/…` link is routed (scheme guard, OS default app, the two import paths): [same page](../../docs/desktop-ux.md#opening-an-external-labelurl-link).
-- **The `/` menu lists this client's own actions, plus `/upload`, the workspace's templates and every plugin command.**
-  Without the native half it was only those last three, so a workspace with no templates and no plugins opened a **one-row** popup while the TUI's `/` listed 31 built-ins.
-  The rows come from `paletteActions` (`lib/palette-results.ts`) — the `Cmd+K` palette's own list, so "what can this client run" is answered once.
-  **The name on each row is `outl_shortcuts::command_name`, read off `ActionSupportDto.command`, never derived here.**
-  This client kebab-cased the variant (`/open-today`) while the TUI carried its own literal (`today`); two of 66 names coincided.
-  An action the catalog did not name is **dropped** rather than named locally — the variant is not typeable after a `/`, so a fallback row would be visible and unreachable.
-  **A native pick runs through `runNativeSlashCommand` (`lib/shortcuts.ts`), never a dispatcher of its own**, so a command cannot mean one thing from a chord and another from the menu.
-  `installShortcuts` publishes that list and drops it on teardown, for the reason `loadPluginBindings` is not module-cached: a workspace swap brings a new handler map.
-  Only the plugin / template half is cached in `block-suggest.ts` — an empty native list cached before the dispatcher installed would leave the menu short forever.
-  Net: `BlockRow.slash-menu.test.tsx`, a real `<BlockRow />` against a real dispatcher.
-
-### Vim parity (Normal + Visual)
-
-Chord list: [`docs/shortcuts.md`](../../docs/shortcuts.md) — don't duplicate it here.
-This section captures only the **architectural decisions** a contributor needs before touching the handler modules.
-
-- **Three categories of vim op**, by what each needs from the cursor model.
-  **Block-level** ops work on `selectedBlockId` or a range of ids, and are implemented.
-  **Char-cursor** ops need a character cursor inside the block, which the desktop does not have (only an id).
-  **Pending-input** ops read a second character first, which the dispatcher cannot do, so they count as char-cursor — blocked either way.
-  Which chord sits in which bucket is `outl_shortcuts::support`, never a list here.
-
-- **The 10 char-cursor entries have no handler at all.**
-  `support` marks them `Missing(why::NO_CHAR_CURSOR)` and the dispatcher shows the catalog's sentence, so the message can't drift (invariant 12).
-  Their catalog entries stay, so the help overlay still lists them.
-
-- **Visual mode is real, and reachable without vim (issue #23).**
-  `Mode::"vim-visual"` in the store with `visualAnchorId` + `lastVisualRange`.
-  `SelectRange{Down,Up}` is bound in **both** Normal and Visual and grows the range via the DOM "nothing focused" → Normal fallback, so one machinery serves vim and non-vim.
-  `extendVisualRange` stays in the outline, never crossing into the backlinks — a range op would land on another page's blocks.
-  Every exit funnels through one `exitVisual()`, which captures `lastVisualRange` for `g v`.
-  Nothing writes `mode` back afterwards, so `detectMode` lets a focused textarea or input outrank a stale resting `vim-normal` (issue #489); `vim-visual` and open overlays stay ahead of focus.
-
-- **`<BatchToolbar />`** (`src/components/BatchToolbar.tsx`) floats while `mode === "vim-visual"` and fires the **same** `handlers` the keyboard does, so button and chord can't drift.
-  Its **Delete** confirms when a selected block has children; keyboard `d` does not (vim convention).
-
-- **The block clipboard is Normal-mode only**, and two neighbours are tried-and-rejected rather than merely true.
-  `O` creates with `beforeId` → `create_before`; **never reintroduce** the old create-at-tail plus `moveBlockDown` loop.
-  The Visual highlight is a memoised `visualSet` (`Set<id>`) at the parent, because a per-row predicate is O(N²) per keystroke.
-  `isInVisualRange` survives in `@outl/shared/outline` for tests only, and mobile's `Journal.tsx` mirrors `visualSet` by that name.
-  The rest are rules too — range-op walk order, the fold walks, `A`'s caret intent, the clipboard's tagged value — each with an obvious alternative that is wrong quietly.
-  They live in [`docs/shortcuts.md` → Desktop internals](../../docs/shortcuts.md#desktop-internals-the-range-and-fold-handlers); read one before changing it.
-
-### `Enter` outside a textarea (Normal mode)
-
-With a block selected and nothing focused (the DOM fallback puts the dispatcher in Normal even with `vim_mode == false`), `Enter` resolves to the shared `OpenRefUnderCursor` —
-and the desktop handler **always enters Insert on the block under the cursor, with no exceptions**.
-A **backlink row** used to be the one carve-out: `Enter` opened the source page, because the row was read-only.
-It is not read-only any more, so the exception went with the thing that justified it, and both chords that can reach a row (`i` and `Enter`) go through the single `onBacklink.enterInsert()`.
-That is also what the TUI answers, where `Focus::Backlink` means `enter_insert_backlink` — so the two clients agree on `Enter` for the same reason rather than by coincidence.
-The source page stays reachable without a chord: the group header is a `<button>`, which `lib/keyboard-reach.ts` makes a keyboard stop.
-
-Why diverge from the TUI on the *ref*: it has a char cursor, so "open the ref under cursor" is well-defined there; the desktop only has a selected block, so **following a ref is the click on the token** (`onRefClick`) and `Enter` means edit.
-
-## Zoom / focus into a block
-
-The chrome (page-like header, zoom path, which blocks render) is in [`docs/desktop-ux.md`](../../docs/desktop-ux.md#zoom--focus-on-a-block), the cross-client contract in [`docs/clients.md`](../../docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
-
-Five decisions beyond that contract:
-
-- **`zoomView()` (`lib/store.ts`) is the one owner of "is this window zoomed, and into what".**
-  Three surfaces have to agree — what the body renders, where `j` / `k` may go, and whether the page's own sections are drawn — and each used to resolve `focusBlockId` against the outline itself.
-  A stale id read as zoomed by one and unzoomed by another is a cursor walking into a section nothing painted, which is exactly what the local `backlinkBlockIds()` did before `backlinkRowIds()` (`lib/cursor-region.ts`) owned it.
-  `<OutlineView />` wraps it in the `focus()` memo so the walk runs once per render, and passes the answer down as `<PageSections zoomed>` rather than letting that component ask a second time.
-- **Nothing belonging to the page renders while zoomed.**
-  `<PageSections />` draws nothing (backlinks, nested pages, namespace mentions), the page-property row is already hidden, and `backlinkRowIds()` returns `[]` so `j` clamps at the zoom's last row.
-  The reason is the one the property row carries: the header is a *block* there, so the page's references under a block title are a wrong answer, not merely a distraction.
-  Net: `PageSections.test.tsx`, plus "j stays inside the zoom instead of entering the page's backlinks" (`action-handlers.zoom.test.ts`).
-- **`resetForNavigation()` (`lib/page-change.ts`) is what a navigation drops, and it has two callers on purpose.**
-  `installPageChangeEffect` only notices a page *id* change, so it cannot see the user asking for the page they are already on — `Cmd+J` while zoomed into a block of today's journal navigated to today and left the zoom standing, so the chord looked dead.
-  The handlers go through `ctx.navigateTo` (`handler-context.ts`) and the shell's chrome through `AppShell`'s `openView`; both are `applyView` plus that reset, and **a failed open resets nothing**.
-  `applyView` stays the one for everything that is not a navigation: a commit, a batch op, `refreshActivePage` (a peer reload keeps the page *and* the user's zoom), a quick capture into today, and a timeline restore.
-  `RemindersPanel` calls the reset inside its own `jumpTo`, because one `applyView` prop cannot answer for both that and `markDone`.
-  Net: "OpenToday leaves a zoom held on today's journal" and "a failed OpenToday keeps the zoom".
-- **No zoom stack:** `ZoomOut` reads the current focus's breadcrumb — last crumb is the parent, empty breadcrumb means top-level so it exits to the full page.
-- **Bullet gesture split**, so zoom cannot collide with task state: a `•` bullet zooms via `onFocusBlock`, a `▢` / `▨` / `▣` checkbox keeps its one-stop-per-click toggle, and the fold **chevron** stays collapse.
-  DOING shares TODO's colour and is told apart by the half-filled glyph; only DONE strikes the body.
-- **`j`/`k` stay inside the zoom:** `SelectionUp`/`SelectionDown` walk `navBlocks()` (`[fv.root]` when zoomed) so the cursor can't escape the subtree.
-
 ## Reminders (`remind::`)
 
 `<RemindersPanel />` lists them, `set_block_remind` authors a rule, `<AppShell />` polls `deliver_due_reminders` every 30s.
 Panel wiring, the chord choices and the `[reminders] enabled` default: [`docs/reminders.md`](../../docs/reminders.md#desktop-outl-desktop).
 The one rule here: **nothing about when a reminder fires is computed in the frontend** — the instants come from `outl_actions::reminders`, the labels from `@outl/shared`.
-
-## Task list — `TasksPanel.tsx`
-
-What the panel lists and how it opens: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#task-list-panel).
-No longer mobile-only: `Capability::TaskList` is `Full` here, and only the TUI keeps the `query`-block nudge.
-Order and grouping are the backend's — `outl_actions::tasks` decides, `groupTasksByPage` sections, and nothing here ranks.
 
 ## Trust and polish
 
@@ -631,7 +208,7 @@ Only the cheap tail — history invalidation, the `Mutex` swap, the reconcile sp
 ## "Open With → outl" (`.md` / `.txt` from the OS)
 
 `src-tauri/src/open_with.rs` is the plumbing and all this crate adds, alongside `bundle.fileAssociations`' deliberate `role: "Viewer"` + `rank: "Alternate"`.
-The namespace, the re-open rule, the refusals and the three delivery paths belong to `outl_actions::open_with` and [`docs/clients.md`](../../docs/clients.md#opening-a-file-from-the-os-open-with--outl).
+The namespace, the re-open rule, the refusals and the three delivery paths belong to `outl_actions::open_with` and [`docs/client-outside-the-app.md`](../../docs/client-outside-the-app.md#opening-a-file-from-the-os-open-with--outl).
 
 Three things a contributor will trip on:
 

@@ -435,6 +435,40 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
+
+        // The desktop's `/quote` row in the inline slash menu, which
+        // calls the `toggle_quote` command every Tauri client already
+        // registers. The TUI and mobile register or reach nothing: the
+        // terminal has no caller at all, and mobile's long-press sheet
+        // draws no quote row.
+        //
+        // This row is the one the catalog could not hold until a client
+        // reached it. `toggle_quote`'s body, its wrapper and its
+        // registration in **both** `generate_handler!`s have shipped for
+        // releases with no caller on any surface — and
+        // `docs/desktop-ux.md` plus `docs/mobile-ux.md` both described
+        // their client as routing through it, for months. An undeclared
+        // gap is what let two documents say that: there was nowhere a
+        // wrong answer would have been contradicted.
+        //
+        // Declaring it needed a client, not just a verdict.
+        // `no_capability_is_out_of_reach_on_every_client` rejects a row
+        // no client reaches, and `CLI_ONLY` is not the exemption for
+        // this one — there is no `outl` subcommand and no `outl_*` MCP
+        // tool that toggles a quote either, so the row would have been a
+        // false reason rather than a recorded gap.
+        //
+        // The lesser states are `Missing`, not `NotApplicable`: a
+        // terminal and a phone can both hold a quoted block and both
+        // render one, so the question is not meaningless there the way
+        // `ToolbarOrderLock` is on a client with no soft keyboard. What
+        // is absent is the gesture, and `why::TYPE_THE_QUOTE_MARKER`
+        // names the two characters that stand in for it.
+        Capability::BlockquoteToggle => ClientSupport {
+            tui: Missing(why::TYPE_THE_QUOTE_MARKER),
+            desktop: Full,
+            mobile: Missing(why::TYPE_THE_QUOTE_MARKER),
+        },
     }
 }
 
@@ -463,136 +497,4 @@ pub(crate) fn capability_parity_table_markdown() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::support::Client;
-
-    #[test]
-    fn backlink_inline_edit_is_partial_on_the_tui_and_full_on_the_gui_clients() {
-        let s = capability_support(Capability::BacklinkInlineEdit);
-        // The TUI performs all nine operations this row covers and has
-        // no gesture at all that opens the page a row's block lives on,
-        // so the nudge has to name the route that exists. `Full` here
-        // is the state this row already shipped in once, before any
-        // GUI client called `edit_backlink_block` — a wrong verdict is
-        // found by pressing the key.
-        assert!(matches!(s.tui, Partial(_)));
-        assert!(
-            s.tui.nudge().is_some_and(|why| why.contains("Ctrl+P")),
-            "the TUI's only route to a cited block's page is the quick switcher — the nudge \
-             has to name it",
-        );
-        assert!(matches!(s.desktop, Full));
-        // `Full` on mobile is a claim about those nine, never about a
-        // one-tap finish: `Action::MarkDone` owns that one and says
-        // `Missing` here, and two catalogs may not disagree about the
-        // same operation.
-        assert!(matches!(s.mobile, Full));
-        assert!(matches!(
-            crate::support::support(crate::Action::MarkDone).mobile,
-            Support::Missing(_)
-        ));
-    }
-
-    #[test]
-    fn the_desktop_has_a_task_list() {
-        assert!(matches!(
-            capability_support(Capability::TaskList).desktop,
-            Support::Full
-        ));
-    }
-
-    #[test]
-    fn every_client_declares_support_for_every_capability() {
-        // The `match` in `capability_support` is exhaustive, so this
-        // cannot fail for a missing arm — it fails for a missing
-        // *variant* in `Capability::ALL`, which would silently shrink
-        // every other test in this module and the parity table with
-        // it. Mirrors `support`'s `every_client_declares_support_for_every_action`.
-        for cap in Capability::ALL {
-            let s = capability_support(*cap);
-            for client in Client::ALL {
-                let _ = s.get(client);
-            }
-        }
-        assert_eq!(Capability::ALL.len(), 25, "Capability::ALL changed size");
-    }
-
-    #[test]
-    fn every_degraded_capability_explains_itself() {
-        for cap in Capability::ALL {
-            let s = capability_support(*cap);
-            for client in Client::ALL {
-                let why = match s.get(client) {
-                    Support::Full => continue,
-                    Support::Native(w)
-                    | Support::Partial(w)
-                    | Support::Missing(w)
-                    | Support::NotApplicable(w) => w,
-                };
-                assert!(
-                    !why.trim().is_empty(),
-                    "{cap:?} on {client:?} has an empty reason",
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn capability_nudges_are_written_for_the_user_not_the_developer() {
-        // Reuses `support`'s DEV_WORDS list rather than copying it —
-        // a second, drifting list of banned words would be its own
-        // instance of the problem this whole RFC is about.
-        for cap in Capability::ALL {
-            let s = capability_support(*cap);
-            for client in Client::ALL {
-                let Some(why) = s.get(client).nudge() else {
-                    continue;
-                };
-                let lower = why.to_lowercase();
-                for bad in crate::support::DEV_WORDS {
-                    assert!(
-                        !lower.contains(bad),
-                        "nudge for {cap:?} on {client:?} says {bad:?} — \
-                         write what the user can do instead: {why:?}",
-                    );
-                }
-                assert!(
-                    why.len() > 20,
-                    "nudge for {cap:?} on {client:?} is too terse to help: {why:?}",
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn no_capability_is_out_of_reach_on_every_client() {
-        for cap in Capability::ALL {
-            if CLI_ONLY.iter().any(|(declared, _)| declared == cap) {
-                continue;
-            }
-            let s = capability_support(*cap);
-            assert!(
-                Client::ALL.iter().any(|c| s.get(*c).is_reachable()),
-                "{cap:?} is unreachable on every client — if that is deliberate because \
-                 its only surface is the CLI, add it to CLI_ONLY with the reason",
-            );
-        }
-    }
-
-    #[test]
-    fn a_cli_only_capability_is_declared_with_a_reason_and_really_unreachable() {
-        for (cap, reason) in CLI_ONLY {
-            assert!(
-                reason.len() > 20,
-                "{cap:?} is exempted from the reachability rule without a real reason",
-            );
-            let s = capability_support(*cap);
-            assert!(
-                !Client::ALL.iter().any(|c| s.get(*c).is_reachable()),
-                "{cap:?} is on CLI_ONLY but a client reaches it — drop the row, or the \
-                 exemption starts hiding a real gap",
-            );
-        }
-    }
-}
+mod tests;

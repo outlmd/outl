@@ -112,9 +112,7 @@ import { createSelectionOps } from "./Journal.selection-ops";
 import {
   type DeepLinkNavigate,
   type JournalListenerDeps,
-  listenForDeepLink,
-  listenForFileDrop,
-  listenForWorkspaceReady,
+  installJournalListeners,
   navigateDeepLink,
 } from "./Journal.listeners";
 import { installForegroundRefresh } from "@outl/shared/capture";
@@ -548,9 +546,7 @@ export function Journal() {
     // Listeners first: registering them costs nothing (no command, no
     // workspace), and `workspace-ready` can fire while the load below is
     // still in flight.
-    listenForWorkspaceReady(listenerDeps);
-    listenForDeepLink(listenerDeps);
-    listenForFileDrop(listenerDeps);
+    installJournalListeners(listenerDeps);
     // Order lives in `Journal.boot.ts` — including why the force-sync that
     // used to run here, ahead of the load, now runs as `firstSync` one
     // painted frame later.

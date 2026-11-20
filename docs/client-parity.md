@@ -188,6 +188,7 @@ the drift this RFC exists to prevent.
 | `AboutAndSupport` | ❌ The terminal has no About screen. Run `outl --version` for the build you are running, and the project, its issue tracker and its sponsor page are at github.com/outlmd/outl. | ✅ | ❌ The phone app doesn't show its version or link out yet. Check the build in the App Store or TestFlight, and open github.com/outlmd/outl in a browser to report something or support the project. |
 | `PageEmbed` | ✅ | ✅ | ✅ |
 | `BacklinkInlineEdit` | ⚠️ The TUI edits a backlink row in place but can't open the page the block lives on — press Ctrl+P and type the page name from the row's header to jump there. | ✅ | ✅ |
+| `BlockquoteToggle` | ❌ There's no one-gesture blockquote here yet — type `> ` at the front of a block and it reads as a quote, which is exactly what the gesture would have written. Typing it again removes it. | ✅ | ❌ There's no one-gesture blockquote here yet — type `> ` at the front of a block and it reads as a quote, which is exactly what the gesture would have written. Typing it again removes it. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

@@ -280,7 +280,7 @@ This one is your consent, which belongs to you rather than to the hardware — s
 Backups default **on** for the same reason reminders do.
 The failures they catch — a bad projection, an `outl import` aimed at a workspace that already had pages, a page deleted with the app then closed — are ones you discover *after* the moment when you could have enabled a safety net.
 
-Which clients run the automatic pass today, and the rules a client that wires it up must keep, live in [clients.md → Automatic backups](clients.md#automatic-backups).
+Which clients run the automatic pass today, and the rules a client that wires it up must keep, live in [client-sync.md → Automatic backups](client-sync.md#automatic-backups).
 
 They are **device-local**, and the repository lives **outside the workspace** — under `~/.config/outl/backups/<name>-<hash>.git`, with the workspace as git's `--work-tree`.
 Two reasons:

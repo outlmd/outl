@@ -32,7 +32,7 @@ pub(super) fn shift_ch(c: char) -> ChordSequence {
     ChordSequence::chord(Chord::new(Modifiers::SHIFT, Key::char(c)))
 }
 pub(super) fn shift_meta_ch(c: char) -> ChordSequence {
-    ChordSequence::chord(Chord::new(Modifiers::META | Modifiers::SHIFT, Key::char(c)))
+    ChordSequence::chord(Chord::shift_meta(c))
 }
 pub(super) fn shift_ctrl_ch(c: char) -> ChordSequence {
     ChordSequence::chord(Chord::new(Modifiers::CTRL | Modifiers::SHIFT, Key::char(c)))

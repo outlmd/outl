@@ -107,6 +107,9 @@ pub fn build_page_view(
         .unwrap_or_else(|_| PageOutline {
             nodes: Vec::new(),
             warnings: Vec::new(),
+            // Nothing was read, so there is no sidecar to have an
+            // opinion about — which is what `Absent` means here.
+            sidecar_identity: Default::default(),
         });
     // Backlinks are deliberately NOT computed here. `backlinks_for_page`
     // is an O(blocks-in-workspace) scan, and this function is on the

@@ -45,7 +45,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   The reason text lives here, not in the client: a client that writes its own wording is a second copy of the fact, which is how three docs ended up disagreeing about `y r`, `:` and mobile undo.
   Rendered to [`docs/client-parity.md`](../../docs/client-parity.md) and pinned by `the_parity_doc_matches_the_code`.
   `Support::Native` is deliberately its own state — reachable, no handler, no nudge (`Backspace` on an empty textarea) — because a boolean would force that row to lie in one direction or the other.
-- **`Capability` / `capability_support`** (`src/capability.rs`, `src/capability_support.rs`) — the sibling catalog for a feature with no chord at all.
+- **`Capability` / `capability_support`** (`src/capability.rs`, `src/capability_support/`) — the sibling catalog for a feature with no chord at all.
   Page history, the plugin marketplace, a calendar grid, templates, attaching a file, pairing a new device, the inline `/` menu.
   `support()` above only covers what a chord can fire; `capability_support()` is a second exhaustive `match`, over `Capability` instead of `Action`, reusing `Support` / `ClientSupport` / `Client` unchanged rather than inventing a parallel type.
   A capability that already has an `Action` (backlinks, block properties, reminders) stays tracked there only — a `Capability` entry for the same fact would be two catalogs disagreeing about one thing.
@@ -59,7 +59,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   Names are unique across the catalog, because a `/` menu dispatches on this string.
   The TUI's shared built-ins read it directly, and `outl-tui`'s `catalog_name_tests` pins the overlap in both directions.
   It rides the wire on `ActionSupportDto.command` (`outl-tauri-shared`), not on `Binding`: the name is per-action and a binding is per-chord, so a field there would ship `OpenToday`'s name three times.
-- **`CLI_ONLY`** (`src/capability_support.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
+- **`CLI_ONLY`** (`src/capability_support/mod.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
   That test is right in general: a capability no client reaches is normally a feature that does not exist, and recording it would be noise.
   A **CLI-only** capability is the case where "missing on all three" is a true and useful statement instead — the feature ships, the surface does not.
   `Capability::Trash` is the first (issue [#287](https://github.com/outlmd/outl/issues/287)): `outl trash list` / `outl trash restore` and the `outl_trash_*` MCP tools exist, no client has a recycle bin.
@@ -131,7 +131,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
    Then wire the handlers the row promised:
    - TUI: `crates/outl-tui/src/input/normal.rs` (its own `match`, not `lookup` — see the note under "What this crate does NOT own").
    - Desktop: the handler group under `crates/outl-desktop/src/lib/` that owns what your action changes — `chrome-`, `cursor-`, `block-`, `page-`, `visual-` or `clipboard-handlers.ts`.
-     `action-handlers.ts` is the assembly and takes no new entries; see `outl-desktop/CLAUDE.md` → "`action-handlers.ts` is eight files".
+     `action-handlers.ts` is the assembly and takes no new entries; see `docs/desktop-keybindings.md` → "`action-handlers.ts` is eight files".
 
    > **This step used to read:** *"A client that doesn't need the action just doesn't add a handler — `lookup` returns `Some(Action::Foo)` and the dispatcher no-ops with a debug log."*
    >

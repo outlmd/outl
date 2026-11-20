@@ -998,7 +998,7 @@ No change to the `.md` + `.outl` wire format, so older clients reading the proje
 - **[Tree CRDT walkthrough](crdt.md)** — the algorithm with code, worked examples, and the full invariant list.
 - **[Markdown dialect + matching](markdown-format.md)** — how external edits get reconciled with the sidecar.
 - **[Storage trait](storage.md)** — why `Storage` is a trait and how the ChronDB backend slots in.
-- **[Clients](clients.md)** — how the TUI and mobile share the `SyncEngine` and where they diverge.
+- **[What reaches disk and the other devices](client-sync.md)** — how the TUI and mobile share the `SyncEngine` and where they diverge.
 - **Original paper:** Kleppmann, Mulligan, Gomes, Beresford.
   *"A highly-available move operation for replicated trees."* IEEE TPDS 2022.
   <https://martin.kleppmann.com/papers/move-op.pdf>

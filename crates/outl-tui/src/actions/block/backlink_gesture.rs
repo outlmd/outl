@@ -11,7 +11,10 @@
 //!   and for one in the GUI clients, on the premise that "a structural
 //!   op names an identity, where a text edit applies to the logged
 //!   text". That premise is true of neither client as stated — see
-//!   [`BacklinkGesture::computed_from_the_logged_text`];
+//!   [`outl_actions::CrossPageWrite`], which owns the classification
+//!   and its answer for every client, and
+//!   [`BacklinkGesture::shape`], which is this client's mapping onto
+//!   it;
 //! - the refusal catalog has a "nothing changed" half and a "your text
 //!   could not be saved" half, and the second was written and then
 //!   reached by nothing, so a refusal that dropped a consumed Insert
@@ -19,6 +22,7 @@
 //!
 //! [`App::commit_backlink_mutation`]: crate::state::App
 
+use outl_actions::CrossPageWrite;
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 
@@ -26,11 +30,13 @@ use outl_core::workspace::Workspace;
 /// `App::commit_backlink_mutation` cannot read off the closure it is
 /// handed, and each one decides something.
 ///
-/// **Is the op's result computed from the block's *logged* text?** That
-/// is the whole of what the ahead-of-log gate turns on. It is not "is
-/// this structural": a marker flip is as much a text read-modify-write
-/// as a text edit, and in this client the text edit is the one gesture
-/// whose result the logged text cannot surprise.
+/// **What does the op's result come from?** That is the whole of what
+/// the ahead-of-log gate turns on, and the shapes and the answer are
+/// [`outl_actions::CrossPageWrite`]'s: this type's job is only to say
+/// which shape each gesture is ([`BacklinkGesture::shape`]). It is not
+/// "is this structural": a marker flip is as much a text
+/// read-modify-write as a text edit, and in this client the text edit is
+/// the one gesture whose result the logged text cannot surprise.
 ///
 /// **Were the user's keystrokes already consumed?** That decides which
 /// half of `outl_actions::refusal` is the true sentence. A gesture that
@@ -66,12 +72,24 @@ pub(crate) enum BacklinkGesture {
 }
 
 impl BacklinkGesture {
-    /// Whether this gesture's op is computed from the block's logged
-    /// text, and so must not run against a `.md` the log does not hold.
-    pub(super) fn computed_from_the_logged_text(self) -> bool {
+    /// Which [`CrossPageWrite`] shape this gesture is — the mapping, and
+    /// nothing more.
+    ///
+    /// The **answer** (whether a shape's op is computed from the logged
+    /// text, and so must not run against a `.md` the log does not hold)
+    /// belongs to `outl-actions`, because the GUI clients gate on it
+    /// too. It used to be a second `computed_from_the_logged_text` here,
+    /// under the same name, over this client's three gestures — and a
+    /// drift between the two meant one client gating an operation the
+    /// other did not, which costs user text.
+    ///
+    /// Exhaustive, so a fourth gesture cannot compile without declaring
+    /// its shape.
+    pub(super) fn shape(self) -> CrossPageWrite {
         match self {
-            Self::MarkerFromLoggedText => true,
-            Self::Structural | Self::TypedText => false,
+            Self::Structural => CrossPageWrite::Structural,
+            Self::MarkerFromLoggedText => CrossPageWrite::MarkerFromLoggedText,
+            Self::TypedText => CrossPageWrite::TypedText,
         }
     }
 
@@ -94,14 +112,38 @@ impl BacklinkGesture {
 mod tests {
     use super::BacklinkGesture::{MarkerFromLoggedText, Structural, TypedText};
 
-    /// The criterion, stated as a table rather than left to the three
-    /// `match` arms: exactly one gesture reads the logged text, and the
-    /// text edit is deliberately **not** it in this client.
+    /// **This client's half of the shared criterion: the mapping.**
+    ///
+    /// The shapes and the verdict are `outl-actions`' (and
+    /// `every_shape_verdict_matches_what_the_action_behind_it_reads`
+    /// there is what keeps the verdict honest against the actions both
+    /// clients call). What can still go wrong on this side is a gesture
+    /// mapped onto the wrong shape, which is the only way the two
+    /// clients can now disagree about an operation — so the table is the
+    /// mapping, with the verdict it produces beside it.
+    ///
+    /// Exactly one gesture reads the logged text, and the text edit is
+    /// deliberately **not** it in this client.
     #[test]
-    fn only_the_marker_chords_are_computed_from_the_logged_text() {
-        assert!(MarkerFromLoggedText.computed_from_the_logged_text());
-        assert!(!TypedText.computed_from_the_logged_text());
-        assert!(!Structural.computed_from_the_logged_text());
+    fn each_gesture_declares_the_shape_of_the_write_it_performs() {
+        use outl_actions::CrossPageWrite;
+
+        for (gesture, shape, gated) in [
+            (
+                MarkerFromLoggedText,
+                CrossPageWrite::MarkerFromLoggedText,
+                true,
+            ),
+            (Structural, CrossPageWrite::Structural, false),
+            (TypedText, CrossPageWrite::TypedText, false),
+        ] {
+            assert_eq!(gesture.shape(), shape, "{gesture:?} is mapped wrong");
+            assert_eq!(
+                gesture.shape().computed_from_the_logged_text(),
+                gated,
+                "{gesture:?}: the gate would change for this gesture",
+            );
+        }
     }
 
     /// The two costs, and the half that had no caller: only a gesture

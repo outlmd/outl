@@ -329,16 +329,6 @@ impl ActorIndex {
             .collect()
     }
 
-    /// Every `(actor, ts)` the index knows about, in no particular
-    /// order. Callers rehydrate each op and sort by HLC afterwards.
-    pub fn ts_iter(&self) -> Vec<(crate::id::ActorId, Hlc)> {
-        let mut out = Vec::new();
-        for (actor, idx) in self.inner.read().iter() {
-            out.extend(idx.timestamps().map(|ts| (*actor, *ts)));
-        }
-        out
-    }
-
     /// Every `(actor, ts)` whose HLC sorts strictly after `cutoff`,
     /// across every actor.
     pub fn ts_after(&self, cutoff: Hlc) -> Vec<(crate::id::ActorId, Hlc)> {

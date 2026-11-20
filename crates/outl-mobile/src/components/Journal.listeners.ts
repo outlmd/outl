@@ -2,7 +2,7 @@
  * Everything the journal listens to from outside the webview — the
  * platform-wiring half of issue #265 phase 3.
  *
- * Three listeners, one shape, and that shape has exactly one
+ * Four listeners, one shape, and that shape has exactly one
  * implementation: {@link armCleanup}. It arms `onCleanup` **synchronously**
  * so the handle is torn down even if the component unmounts before the
  * dynamic `import()` resolves, then disposes a late-arriving handle on the
@@ -42,6 +42,22 @@ export type DeepLinkNavigate =
   | { kind: "page"; slug: string }
   /** `outl://capture`: the quick capture sheet, nothing written yet (RFC 0363). */
   | { kind: "capture" };
+
+/**
+ * Payload of `ref-projection-failed`: `open_ref` resolved the target, so
+ * the page is in the op log, and writing `pages/<slug>.md` + sidecar
+ * failed.
+ *
+ * A copy of the desktop's `RefProjectionFailedPayload`, which is the
+ * pinned mirror of `outl_tauri_shared::state::RefProjectionFailed`
+ * (`wire_mirrors.rs`). Not added to `ts_parser::MIRROR_FILES`: pinning a
+ * copy twice pins nothing extra, the same reason `DeepLinkNavigate`
+ * above is absent from that list.
+ */
+interface RefProjectionFailedPayload {
+  target: string;
+  error: string;
+}
 
 /** What the listeners need from `Journal`. Accessors, never values. */
 export interface JournalListenerDeps {
@@ -118,6 +134,26 @@ export async function navigateDeepLink(
   } catch (err) {
     deps.setError(String(err));
   }
+}
+
+/**
+ * Install every listener the journal needs, in the order below.
+ *
+ * The one entry point the component calls, the shape
+ * `installJournalPolls` already has. Which listeners exist is then one
+ * fact in one place: a call site per listener was a chance each to add
+ * one here and never reach it — which is how `ref-projection-failed`
+ * ended up with a subscriber on the desktop and nothing at all here —
+ * and a chance each to get {@link armCleanup}'s ordering rule wrong.
+ *
+ * Must be called from inside the component body, like everything else
+ * here — the `onCleanup` each one arms needs a Solid owner.
+ */
+export function installJournalListeners(deps: JournalListenerDeps): void {
+  listenForWorkspaceReady(deps);
+  listenForRefProjectionFailed(deps);
+  listenForDeepLink(deps);
+  listenForFileDrop(deps);
 }
 
 /**
@@ -238,5 +274,38 @@ export function listenForWorkspaceReady(deps: JournalListenerDeps): void {
     })
     .catch((error) => {
       console.warn("failed to register workspace listeners", error);
+    });
+}
+
+/**
+ * `open_ref`'s projection refusal — the other half of the pair above,
+ * and the one this client used to drop on the floor.
+ *
+ * The failure is real: `open_ref` put the page in the op log, the
+ * `pages/<slug>.md` write did not land, and until the next save or the
+ * orphan scanner retries it the ref the user just inserted points at a
+ * page no peer can see. That is the condition the ahead-of-log banner
+ * exists for, and it used to die in a `tracing::warn!` (root
+ * `CLAUDE.md` invariant 8 — a refusal nothing says out loud ships a
+ * page that silently stopped syncing).
+ *
+ * Always the error surface, never `setAheadOfLog`: the backend keeps
+ * `ahead_of_log` off this event on purpose, because the refusal is
+ * transient and a sticky banner belongs to a page that stays frozen
+ * until a command runs. Transient is not invisible, which is why this
+ * reports at all. The sentence is the backend's — nothing here writes
+ * copy, and the only dep it touches is `setError`.
+ */
+export function listenForRefProjectionFailed(deps: JournalListenerDeps): void {
+  const keep = armCleanup();
+  import("@tauri-apps/api/event")
+    .then(({ listen }) =>
+      listen<RefProjectionFailedPayload>("ref-projection-failed", (event) => {
+        deps.setError(event.payload.error);
+      }),
+    )
+    .then(keep)
+    .catch((error) => {
+      console.warn("failed to register ref-projection listener", error);
     });
 }
