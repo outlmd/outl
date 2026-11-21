@@ -124,8 +124,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   So `./C:foo` parsed as one ordinary component named `C:foo`, and a layer down that was read as the drive-relative path `C:foo`, which goes through ambient APIs instead of the sandboxed directory.
   A fence with read access could read anything the host process can read, on any drive.
   With write access it could create, overwrite and delete outside the sandbox too.
-  `wasmtime` and `wasmtime-wasi` 50.0.2 → **51.0.0**, which needed no code change.
-  The advisory's 50.x line is fixed at 50.0.3, but the workspace policy is to take the latest major a bump compiles cleanly against.
+  `wasmtime` and `wasmtime-wasi` 50.0.2 → **50.0.3**, which needed no code change.
+  The workspace policy is to take the latest major a bump compiles cleanly against, and 51.0.0 does not: it requires `libc` 0.2.191, which dropped iOS items that `netdev` 0.46.3 (under iroh) still names, so the mobile iOS build stops compiling.
 
   **This reached three of the four clients.**
   `lang-rust` is a default feature of `outl-exec` and expands to `wasm`, and the CLI, the TUI and the desktop all take `default-features = true`.
