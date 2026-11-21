@@ -441,6 +441,14 @@ If you're not using Claude Code, run `cargo fmt -p <crate> && cargo clippy -p <c
 
 The agents are in `.claude/agents/` if you want to inspect or extend them.
 
+### The roadmap is generated, not written
+
+[Issue #376](https://github.com/outlmd/outl/issues/376) is output.
+The project board owns `Status`, [`scripts/roadmap.py`](../scripts/roadmap.py) renders the issue from it, and editing that issue by hand is overwritten by the next run.
+To move a line, move the card.
+
+Modes, triggers, the PAT it needs and why a board edit fires no workflow: [`docs/roadmap.md`](roadmap.md).
+
 ### `cargo doc` gotcha
 
 CI runs `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude outl-mobile --exclude outl-desktop --no-deps` and blocks on **`rustdoc::private_intra_doc_links`**.

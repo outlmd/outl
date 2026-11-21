@@ -1,0 +1,93 @@
+name: Roadmap
+
+# Keeps the project board and the roadmap issue (#376) in agreement, with the
+# board as the source and the issue as output. `scripts/roadmap.py` carries the
+# reasoning; what belongs here is why the triggers look like this.
+#
+# **There is no board trigger, and that is a platform limit rather than a
+# choice.** Projects v2 emits no event a repository workflow can listen to:
+# `project`, `project_card` and `project_column` are the *classic* Projects
+# API, and this board is v2. The `projects_v2_item` event exists only for
+# GitHub Apps with an organization webhook. So a card moved on the board
+# reaches the issue on the next cron tick, not immediately.
+#
+# Hence three triggers that between them cover what actually changes:
+#
+#   `schedule`          catches a moved card. Every 6 hours: a roadmap is not
+#                       a dashboard, and `--publish` makes no API call when the
+#                       body already matches, so a quiet day costs one read.
+#   `issues`            catches the repo side, where there *are* events. A new
+#                       issue is on the board within a minute instead of
+#                       waiting for the tick, which is what kept #148 and #153
+#                       off it for weeks. `closed` moves the card to Shipped
+#                       and drops the bullet in the same run.
+#   `workflow_dispatch` for after an edit to the generator's prose.
+#
+# A push that changes the generator does NOT trigger this. Publishing is how
+# the change reaches people, and a workflow that publishes from a branch would
+# do it before review. `hygiene.yml` runs `--check` on the PR instead, and the
+# cron picks the new wording up once it is on main.
+
+on:
+  schedule:
+    # 02:00, 08:00, 14:00, 20:00 UTC.
+    - cron: "0 2,8,14,20 * * *"
+  issues:
+    types: [opened, closed, reopened, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would change without writing"
+        type: boolean
+        default: false
+
+# One at a time. Two runs racing would have both read the board, both render
+# the same body, and the loser's `--sync` re-add a card the winner just moved.
+# Not cancel-in-progress: a half-applied `--sync` is the one state worth
+# avoiding, so a queued run waits for the current one to finish.
+concurrency:
+  group: roadmap
+  cancel-in-progress: false
+
+jobs:
+  roadmap:
+    runs-on: ubuntu-latest
+    # `GITHUB_TOKEN` cannot reach a user-owned Projects v2 board at any
+    # permission level, so the work runs on `ROADMAP_PROJECT_TOKEN` (a PAT with
+    # `project` + `repo`). The declaration below is still here so the default
+    # token is least-privilege for anything that falls back to it.
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Skip the whole thing when the secret is absent — on a fork, or before
+      # it has been created. A missing PAT is a setup gap, not a red build on
+      # every issue anyone opens.
+      - name: check for the project token
+        id: token
+        env:
+          PAT: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "ROADMAP_PROJECT_TOKEN is not set; skipping." >> "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The board side first: a card has to exist before it can be rendered.
+      - name: sync the board
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
+          DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: ./scripts/roadmap.py --sync $DRY | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: publish the roadmap issue
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
+          DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: ./scripts/roadmap.py --publish $DRY | tee -a "$GITHUB_STEP_SUMMARY"

@@ -209,7 +209,7 @@ Issue #298 measured the pile: each one is an entry in every sync handshake and e
    A lock file is 0 bytes, and deleting one a live process holds lets a second process append to the same jsonl.
    What bounds the *new* growth is that a read no longer mints.
    `outl doctor` reports the actor-log count and warns when this device's write locks reach `EPHEMERAL_ACTOR_WARN_AT`.
-   Retiring an actor from the handshake once every peer's snapshot covers it, and bounding the writers that still mint, stay open on #298.
+   Retiring an actor from the handshake once every peer's snapshot covers it, and bounding the writers that still mint, stay open on #594.
 
 **Full detail — the compare-and-swap publish, why `link(2)` and not `O_EXCL`, the GC's three-condition staleness rule and every reading it refuses, the TTL and lossy-record traps, and where migration lives: [`docs/device-store.md`](../../docs/device-store.md).**
 

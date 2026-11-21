@@ -30,6 +30,11 @@ jobs:
   hygiene:
     name: hygiene
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Job-level so a step's `if` can test it: the `secrets` context is not
+    # available in a step condition, and an `env` the step declares itself is
+    # not readable by that step's own `if` either.
+    env:
+      GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Ratchet, not a cliff: the 66 files already past the threshold are
@@ -90,3 +95,21 @@ jobs:
       # suite fails if the pin script or the publish job stops doing that.
       - name: publish dep pin
         run: python3 scripts/tests/test_pin_workspace_deps.py
+
+      # `scripts/roadmap.py` generates the roadmap issue from the project
+      # board. Its own suite runs here because the cron publishes without a
+      # review step: a wrong `headline` or a `THEMES` typo reaches a public
+      # page directly, and the first version of `headline` rendered
+      # `search_blocks` as `Search_blocks`.
+      - name: roadmap generator
+        run: python3 scripts/tests/test_roadmap.py
+
+      # The drift check needs the board, so it needs the PAT and is skipped
+      # without it (forks, and before the secret exists). It is advisory on
+      # purpose: a PR that happens to coincide with the cron, or one opened
+      # before `--sync` has run, would otherwise go red for a board state the
+      # author did not touch and cannot fix from the PR.
+      - name: roadmap drift
+        if: ${{ env.GH_TOKEN != '' }}
+        continue-on-error: true
+        run: ./scripts/roadmap.py --check

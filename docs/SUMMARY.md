@@ -77,6 +77,7 @@
 
 * [The reasoning invariants](invariants.md)
 * [Development guide](development.md)
+  * [The roadmap is generated from the board](roadmap.md)
 * [Performance](performance.md)
 * [Boot performance](boot-performance.md)
 * [CI and release](ci-and-release.md)
