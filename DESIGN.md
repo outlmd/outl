@@ -821,8 +821,13 @@ Floating and full-pane surfaces: `Picker` (the quick switcher), `QuickCapture`, 
 `SettingsModal`, `TimelinePanel` (page history), `RemindersPanel`, `TasksPanel` (the open-task
 list beside it), `PluginMarketplace`, `PluginEffectLayer`, `WorkspacePicker`, `Onboarding`,
 `TrustSection`.
-Status and transient: `StatusBar` (vim mode badge, transient message), `ErrorToast`,
+Status and transient: `ErrorToast`, `NoticeToast` (what an operation *did*, never a failure),
 `SyncPanel` / `SyncIndicator`, `ChromeToggleBar`.
+
+**There is no status bar.**
+`StatusBar.tsx` exists and has never been mounted — not dropped from the shell, never in it — so its vim-mode badge, its hint strip and its own copy of the error row are not on screen.
+The chords are `<HelpOverlay />`'s (`?`) and the error row is `ErrorToast`'s, which is why mounting it now would be a second owner of a surface that already has one.
+Its only caller is `lib/shortcuts.mode.test.tsx`, which renders it as the sole probe for `detectMode`.
 
 `SettingsModal` owns the entire `[theme]` triple — mode selector plus a picker per side — and each change
 reinstalls the draft pair through `installTheme`, so the preview is the real thing rather than an approximation.
@@ -995,8 +1000,13 @@ backups on iOS — is [`UX.md` → What each client can do](UX.md#what-each-clie
   preset carry their measured ratio in a trailing comment, which is the form a preset's contrast argument
   should take: a number next to the hex, not a claim in a doc. Reusing the dark palette's hues on a light
   canvas is the most common preset mistake.
-- **Selection is never colour-only.** The selected block gets both an accent rail and a background change;
-  vim mode is both a hue and the word (`NORMAL` / `INSERT` / `VISUAL`) in `StatusBar`.
+- **Selection is never colour-only.** The selected block gets both an accent rail and a background change.
+  In the TUI vim mode is both a hue and the word (`NORMAL` / `INSERT` / `VISUAL`), in `outl-tui`'s `view::chrome`.
+  **The desktop has neither**, so the rule is unmet there rather than met colour-only: `StatusBar.tsx` is the
+  only thing that would print the word or read `--color-outl-status-{normal,insert,visual}-*`, and no shell
+  mounts it, which leaves those six palette fields with no desktop reader at all.
+  A gap, not an exception — the mode a keystroke will land in is invisible, and closing it is a layout
+  decision about the bottom chrome the top-right capsule replaced. Do not cite it for a colour-only state.
 - **Caret and selection are branded**, which is also a legibility choice: `caret-color: var(--color-outl-accent)`
   and `::selection { background: color-mix(in srgb, var(--color-outl-accent) 25%, transparent) }` — the
   default iOS blue caret on a deep-purple canvas is low contrast.

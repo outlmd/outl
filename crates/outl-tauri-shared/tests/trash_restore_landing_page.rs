@@ -33,7 +33,7 @@ use outl_core::id::{ActorId, NodeId};
 use outl_core::op::Op;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
-use outl_tauri_shared::helpers::finish_in_page_with;
+use outl_tauri_shared::commit::finish_in_page_with;
 use outl_tauri_shared::host::AppHost;
 use parking_lot::Mutex;
 use tempfile::TempDir;

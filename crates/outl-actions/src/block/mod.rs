@@ -101,16 +101,110 @@ fn ensure_in_tree(workspace: &Workspace, node: NodeId) -> Result<(), ActionError
 /// fallback in [`create_after_or_append`](siblings::create_after_or_append)
 /// keys on it, so a trashed anchor now appends to the page instead of
 /// disappearing.
+///
+/// The predicate is [`crate::tree::is_live`]'s, not a local pair of
+/// conditions. This function used to spell the walk out itself — its
+/// own `in_trash`, bounded, beside a `tree::is_under` that was not —
+/// and *"two copies of one walk where only one is safe is how the
+/// unbounded one ends up on the hottest path"*. The bound moved to the
+/// survivor then; the same argument is why the **question** has one
+/// owner now, because this function was private and both GUI and TUI
+/// clients hand-rolled their own `bool`-shaped copy of it in front of a
+/// cross-page backlink write.
 fn ensure_live(workspace: &Workspace, node: NodeId) -> Result<(), ActionError> {
-    ensure_in_tree(workspace, node)?;
-    // `crate::tree::is_trashed`, not a local walk. This module carried its
-    // own `in_trash` — the same parents walk, bounded, with a `root()`
-    // early-out — while `tree::is_under` underneath `is_trashed` had no
-    // bound at all. Two copies of one walk where only one is safe is how
-    // the unbounded one ends up on the hottest path; the bound moved to
-    // the survivor.
-    if crate::tree::is_trashed(workspace, node) {
-        return Err(ActionError::NotInTree(node.to_string()));
+    if crate::tree::is_live(workspace, node) {
+        Ok(())
+    } else {
+        Err(ActionError::NotInTree(node.to_string()))
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_block, delete, ensure_live, ActionError};
+    use crate::page::{open_or_create as open_or_create_page, PageKind};
+    use crate::tree::is_live;
+    use outl_core::hlc::HlcGenerator;
+    use outl_core::id::{ActorId, NodeId};
+    use outl_core::workspace::Workspace;
+
+    /// **What "live" answers for each of the four states a node can be
+    /// in** — and, beside it, the error `ensure_live` raises for the
+    /// three that are not.
+    ///
+    /// This test used to assert `is_live(x) == ensure_live(x).is_ok()`
+    /// over the same four rows, under the name
+    /// `the_bool_and_the_result_cannot_disagree_about_live`. **That
+    /// assertion could not fail.** `ensure_live` *is*
+    /// `if is_live { Ok } else { Err }` — it was de-duplicated onto
+    /// [`is_live`] precisely so the two could not come apart — so the
+    /// equality holds for every input and under every mutation of
+    /// either side. Its doc claimed "drop the trash half from either
+    /// side and the two trashed rows fail"; there is no trash half on
+    /// `ensure_live`'s side to drop. The de-duplication removed the
+    /// thing the test existed to catch, which is the point of the
+    /// de-duplication, and an assertion that two expressions sharing
+    /// one body agree is then ceremony.
+    ///
+    /// What is left is not ceremony, and neither half had another net:
+    ///
+    /// - **`is_live`'s four answers.** This is the only direct test of
+    ///   it anywhere. The `under_trashed` row is the one that bites: a
+    ///   `parent == NodeId::trash()` implementation looks right and is
+    ///   wrong for the whole inside of a deleted subtree, because
+    ///   delete is one `Op::Move` on the subtree root (invariant 6).
+    ///   The `NodeId::new()` row is the other half, `contains`, which
+    ///   covers a transient id a sidecar-less page minted.
+    /// - **`ensure_live`'s error variant.** `NotInTree` is load-bearing
+    ///   rather than incidental: `create_after_or_append`'s stale-anchor
+    ///   fallback keys on it, so a new variant here would compile and
+    ///   silently route a trashed anchor back into the trash.
+    ///   `siblings::a_trashed_anchor_appends_to_the_page_instead_of_the_trash`
+    ///   pins the consequence; this pins the cause, next to the code.
+    #[test]
+    fn live_is_a_record_in_the_tree_that_is_not_under_the_trash() {
+        let actor = ActorId::new();
+        let hlc = HlcGenerator::new(actor);
+        let mut ws = Workspace::open_in_memory(actor).expect("in-memory workspace");
+        let page = open_or_create_page(&mut ws, &hlc, "notes", "Notes", PageKind::Page)
+            .expect("a page to hang the blocks off");
+        let live = append_block(&mut ws, &hlc, Some(page), Some("live")).expect("live block");
+        let trashed = append_block(&mut ws, &hlc, Some(page), Some("doomed")).expect("doomed");
+        let under_trashed =
+            append_block(&mut ws, &hlc, Some(trashed), Some("child")).expect("its child");
+        delete(&mut ws, &hlc, trashed).expect("a peer deletes the subtree root");
+
+        for (what, node, expected) in [
+            ("a live block", live, true),
+            ("a trashed block", trashed, false),
+            // The whole reason `is_trashed` is an ancestor walk: one
+            // `Op::Move` on the subtree root leaves every block under it
+            // still pointing at the trashed parent, so a direct-parent
+            // test answers `true` for everything the user deleted.
+            ("a block under a trashed one", under_trashed, false),
+            // The `contains` half, unreachable through a delete because
+            // invariant 6 keeps the record: a transient id from a page
+            // with no sidecar, or a block not received yet.
+            ("an id the tree never held", NodeId::new(), false),
+        ] {
+            assert_eq!(
+                is_live(&ws, node),
+                expected,
+                "{what}: `is_live` is the single owner of what live means, and \
+                 this is the only direct test of it",
+            );
+            // The variant, not just the failure: the stale-anchor
+            // fallback in `create_after_or_append` keys on `NotInTree`.
+            match ensure_live(&ws, node) {
+                Ok(()) => assert!(expected, "{what}: the guard admitted a dead node"),
+                Err(e) => assert!(
+                    matches!(e, ActionError::NotInTree(_)),
+                    "{what}: `ensure_live` must refuse with `NotInTree` — \
+                     `create_after_or_append` keys its stale-anchor fallback on \
+                     that variant, so another one sends a trashed anchor's new \
+                     block into the trash. Got {e:?}",
+                ),
+            }
+        }
+    }
 }

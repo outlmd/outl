@@ -28,7 +28,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::runtime::{ExecContext, ExecError, ExecOutput, Runtime};
-use crate::wasm::{cache_path_for_source, engine::make_engine, WasmModule};
+use crate::wasm::{cache::is_fresh, cache_path_for_source, engine::make_engine, WasmModule};
 
 /// Rust → WASM runtime.
 ///
@@ -63,17 +63,16 @@ impl Runtime for RustRuntime {
         let start = Instant::now();
         let wrapped = wrap_in_main(source);
 
-        // Try the cache first.
+        // Try the cache first. [`is_fresh`] owns "are these bytes worth
+        // reading back", so this runtime asks it rather than restating
+        // the check. The inline copy that used to sit here tested
+        // `path.exists() && len > 0`, which on a Unix host a
+        // *directory* at the cache path also satisfies — see
+        // `is_fresh`'s own doc for why `is_file()` is the half that
+        // matters.
         let cache_target = cache_path_for_source("rust", &wrapped);
         let wasm_bytes = match &cache_target {
-            Some(path)
-                if path.exists()
-                    && std::fs::metadata(path)
-                        .map(|m| m.len() > 0)
-                        .unwrap_or(false) =>
-            {
-                std::fs::read(path).map_err(ExecError::Io)?
-            }
+            Some(path) if is_fresh(path) => std::fs::read(path).map_err(ExecError::Io)?,
             Some(path) => {
                 let bytes = compile_rust_to_wasm(&wrapped, ctx)?;
                 // Best-effort write — if the cache dir vanished mid-run

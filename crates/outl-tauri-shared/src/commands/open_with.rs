@@ -6,7 +6,7 @@
 //! adapter: normalise the path the OS handed us, read the file off the
 //! filesystem *before* taking the workspace lock (the bytes are not
 //! workspace state), then run the create + import as one
-//! [`crate::helpers::finish_in_page`] commit.
+//! [`crate::commit::finish_in_page`] commit.
 //!
 //! The commit needs the page's `NodeId` before the mutation runs, and
 //! an unimported file has no page yet. That works because page ids are
@@ -34,7 +34,8 @@ use outl_actions::{apply_page_md_with_sidecar_guarded, ActionError};
 use outl_core::id::NodeId;
 
 use crate::commands::page_open::open_page_by_slug;
-use crate::helpers::{finish_in_page_with, normalize_picker_path, with_ws, with_ws_mut};
+use crate::commit::finish_in_page_with;
+use crate::helpers::{normalize_picker_path, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::PageView;
 

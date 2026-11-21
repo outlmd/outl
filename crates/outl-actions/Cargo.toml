@@ -36,3 +36,10 @@ ulid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# `tests/outline_property_pass.rs` only. The invariant-15 ratchet there
+# has to see a *call*, not a line of text: rustfmt breaks
+# `workspace.tree().properties_of(node)` across three lines and leaves
+# the same accessor named in doc comments, so a string match scored zero
+# against the file it exists to refuse. proc-macro2 lexes the file, which
+# makes the ident the unit and prose invisible.
+proc-macro2 = "1"

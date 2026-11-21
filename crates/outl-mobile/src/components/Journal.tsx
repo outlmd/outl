@@ -35,7 +35,6 @@ import {
   searchEmojis,
   searchPages,
   searchPersons,
-  setBacklinksOrder,
   setBlockCollapsed,
   splitBlock,
   undoPage,
@@ -87,6 +86,7 @@ import { DevicesSheet } from "./DevicesSheet";
 import { RemindersSheet } from "./RemindersSheet";
 import { RemindSheet } from "./RemindSheet";
 import { createRemindAuthoring } from "./Journal.remind";
+import { backlinkToast, createBacklinkCard } from "./Journal.backlinks";
 import { GuideSheet } from "./GuideSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { JournalDeleteDialogs } from "./JournalDeleteDialogs";
@@ -112,9 +112,7 @@ import { createSelectionOps } from "./Journal.selection-ops";
 import {
   type DeepLinkNavigate,
   type JournalListenerDeps,
-  listenForDeepLink,
-  listenForFileDrop,
-  listenForWorkspaceReady,
+  installJournalListeners,
   navigateDeepLink,
 } from "./Journal.listeners";
 import { installForegroundRefresh } from "@outl/shared/capture";
@@ -206,6 +204,15 @@ export function Journal() {
     applyView: (v) => applyView(v),
     onError: (m) => setError(m),
   });
+  // The backlinks card's writes: its direction, and the re-ask after a
+  // commit through one of its rows. See `./Journal.backlinks`.
+  const backlinkCard = createBacklinkCard({
+    view,
+    order: () => backlinks()?.backlinks_order ?? "newest",
+    mutate: mutateBacklinks,
+    applyView: (v) => applyView(v),
+    ...backlinkToast(() => setErrorRetry(null), (m) => setError(m)),
+  });
   // The chrome walkthrough ([#574]): once per device, re-openable from
   // Settings. Read in the body, so a device that saw it never arms.
   const [guideOpen, setGuideOpen] = createSignal(!dismissedOnce(CHROME_TOUR_KEY));
@@ -270,8 +277,8 @@ export function Journal() {
   // Membership set for the active range, memoised once per (selection,
   // outline) change — every `<BlockRow />` answers "am I selected?"
   // with `.has(id)` in O(1) instead of re-walking the outline per row.
-  // Mirrors the desktop's `visualSet` (`outl-desktop/CLAUDE.md` → vim
-  // parity).
+  // Mirrors the desktop's `visualSet`
+  // (`docs/desktop-keybindings.md` → "Vim parity").
   const selectionSet = createMemo(() => {
     const sel = selection();
     const cur = view();
@@ -539,9 +546,7 @@ export function Journal() {
     // Listeners first: registering them costs nothing (no command, no
     // workspace), and `workspace-ready` can fire while the load below is
     // still in flight.
-    listenForWorkspaceReady(listenerDeps);
-    listenForDeepLink(listenerDeps);
-    listenForFileDrop(listenerDeps);
+    installJournalListeners(listenerDeps);
     // Order lives in `Journal.boot.ts` — including why the force-sync that
     // used to run here, ahead of the load, now runs as `firstSync` one
     // painted frame later.
@@ -1562,19 +1567,9 @@ export function Journal() {
           pageKind={view()?.page.kind}
           blank={isBlankOutline(outlineRoots())}
           zoomed={focusView() !== null}
-          onToggleOrder={async () => {
-            const v = view();
-            if (!v) return;
-            haptic("light");
-            const next =
-              (backlinks()?.backlinks_order ?? "newest") === "newest"
-                ? "oldest"
-                : "newest";
-            const r = await withError(() =>
-              setBacklinksOrder(next, v.page.slug),
-            );
-            if (r) mutateBacklinks(r);
-          }}
+          onToggleOrder={backlinkCard.toggleOrder}
+          onEditCommitted={backlinkCard.committed}
+          onError={backlinkCard.refused}
           onOpenPage={async (slug, kind) => {
             haptic("light");
             const next =

@@ -95,6 +95,88 @@ It was not built, for two reasons that are worth keeping:
 If it is ever needed, the cache belongs in `outl-sync-iroh`: all six call sites live there, so the owner is single and the scope closed.
 It owes invariant 9's four questions, in particular *what cleans it up* — a global keyed by workspace path grows with every `TempDir` a test opens.
 
+## The second incident: an accessor that lied, on the reply every mutation returns
+
+`outl_core::tree::Tree::properties_of` answers *what properties does this block have*.
+Its doc comment said it does that "in one pass without scanning the whole property map".
+It does the opposite: `self.properties.iter().filter(|((n, _), _)| *n == node)` over the workspace-wide `HashMap<(NodeId, String), PropValue>`.
+That sentence is gone: the accessor now states the cost, carries the number, and names the pass a caller walking a subtree wants instead.
+Fixing the call sites and leaving the doc would have left the cause armed for the next reader, which is how the second instance arrived in the first place.
+
+Two projections of the same subtree ended up on opposite sides of that.
+`render_page_md` collapsed its per-node reads into a single `iter_properties` pass years ago and wrote the measurement down (13.8 ms → 4.4 ms per page).
+`project_outline` — the other one, in the same crate, ~200 lines away — kept asking per node.
+
+That is the DTO **every GUI mutation replies with**: `build_page_view_from_tree` is two lines over `project_outline`, and both clients wire a `ProjectionWriter`, so it is the only reply arm either one ships.
+
+Reported as "saving a backlink edit is extremely slow", found by running the real desktop app.
+Measured on the maintainer's workspace — 175,096 nodes, 193k properties, 5,257 pages — editing a block whose page holds 688 top-level blocks and 4,670 in the whole subtree:
+
+| | Before | After |
+|---|---|---|
+| `build_page_view_from_tree` (the reply) | **2,588 ms** | 14 ms |
+| `render_page_md`, the same walk through the pass that existed | 10.8 ms | 10.8 ms |
+| `edit_backlink_block`, end to end | **2,650 ms** | 110 ms |
+| `edit_block` on the same page, end to end | **2,515 ms** | 56-93 ms |
+
+The per-node read, timed on its own over that subtree, is **2,788 ms** — the whole of it.
+
+Three things worth keeping:
+
+- **The reported path was not the guilty one.**
+  The cross-page backlink commit was blamed for four `.md` touches; those sum to ~85 ms, and the in-page `edit_block` was equally slow on the same page.
+  The asymmetry was only *which page*: an in-page edit lands on today's journal (a dozen blocks), a backlink row lands on whatever hub page the citing block lives on.
+  The diagnosis has to survive being measured against the path that is supposedly fine.
+- **An accessor's doc comment is not a measurement.**
+  Both readers were written by someone who had read that sentence.
+- **Cost scales with the whole workspace, not the page.**
+  A 13-block journal day paid 31 ms of property scanning for its reply; the number grows with every property anyone adds anywhere, forever.
+
+The fix is `outl_actions::tree::group_properties_of` — one pass, subtree-scoped, with the value mapping as a parameter so the renderer can keep dropping a `PropValue::List` the outline DTO joins.
+The ratchet is `outl-actions/tests/outline_property_pass.rs`, which refuses the `properties_of` **ident** — read off the file's token stream, not matched as text — in any file that projects a node from the tree.
+It found a third instance while being written: `project_outline_node_shallow`, called per referencing block by `build_backlink_index`.
+
+Its first version was lexical and scored **zero** against the file it exists to refuse, because rustfmt breaks `workspace.tree().properties_of(node)` across three lines; its other assertion was satisfied by a doc comment naming the pass.
+That is why the pre-fix `outline.rs` is committed verbatim as a fixture and the ratchet is run against it (`the_ratchet_fires_on_the_projection_it_replaced`).
+**A ratchet nobody has pointed at the defect is a ratchet nobody has tested** — the lesson generalises past this file.
+
+**What is still true after it is a different question.**
+A cross-page commit walks its page five times: the ahead-of-log pre-check, the undo snapshot, the comparison that decides whether to keep it, the inline projection `BacklinkRefresh::PatchPage` forces, and the reply.
+At ~12 ms a render that is ~60 ms of the remaining 110 ms.
+The census that pins the number is `outl-tauri-shared/tests/backlink_commit_cost.rs`.
+
+### The synchronous projection, and why it was left
+
+Of those five, the inline projection is the one structural item left: **~45 ms**, on the IPC thread, holding the workspace lock.
+It is not a mystery and it is not cheap to take — this is the record so the next person to profile this path does not re-derive it, or take it without knowing the price.
+
+It is feasible.
+`BacklinkRefresh::PatchPage` forces an inline write because the backlink patch re-reads the `.md` it just wrote (`reindex_page_from_disk`).
+`build_backlink_index`'s `walk_page` already walks the **tree**, so a `reindex_page_from_tree` would remove that reason and let the projection be queued like any other.
+
+It was not taken because the two walks disagree in three ways, and each one changes what a backlink row *is* rather than how fast it arrives:
+
+- **Block id provenance.**
+  The from-disk walk takes ids from the sidecar, the tree walk from the node.
+  A page whose sidecar is stale or absent indexes under different ids, so a row would point somewhere else.
+- **`block_text` todo-stripping.**
+  The two builders reach the row's text by different routes, and only one of them splits a `TODO ` prefix the way `split_todo` does.
+- **Crumb-frame shape.**
+  `backlinks_crumbs::CrumbFrame` borrows already-parsed tokens on the from-disk path and defers the tokenize on the tree path; the trail a row renders is built from whichever it got.
+
+So it is a change to backlink **correctness**, owed its own diff and its own review, not a rider on a perf fix whose dominant term was already 24× down.
+`crates/outl-actions/CLAUDE.md` → "A backlink's breadcrumb" and `backlinks_index_disk.rs` are where the two builders' agreement is pinned today; that suite is what a `reindex_page_from_tree` would have to satisfy.
+
+Three smaller items were left for reasons that are **not** this one, recorded so nobody re-opens them as perf work:
+
+- **The reply still comes from the tree** (13.4 ms) rather than from disk (6.6 ms).
+  On a writer-wired host the tree is the source of truth, and swapping would couple the reply to the inline write having landed, for 7 ms.
+- **Four renders where two would do** (~22 ms).
+  Collapsing them means threading a rendered string through `reproject_stale_md` and the invariant-8 write gates.
+  Recorded in the census instead.
+- **The undo snapshot of a page the user is not looking at** (~22 ms).
+  `commit_page` does this for every commit, so invariant 11 applies: the in-page path pays it too and it is not this design's cost.
+
 ## The checklist
 
 Before merging anything on a hot path — a sync exchange, a boot phase, a command the frontend polls, a render:
@@ -158,7 +240,7 @@ done
 ```
 
 A launch reports itself: `outl_core::boot_timing` writes one `info!` line per workspace open naming each phase, the delta size and the resident block count.
-On iOS that lands in `$HOME/Library/Logs/outl-backend.log` inside the sandbox ([`outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md) → "The backend's log").
+On iOS that lands in `$HOME/Library/Logs/outl-backend.log` inside the sandbox ([`docs/mobile-internals.md`](mobile-internals.md) → "The backend's log").
 
 A one-off micro-benchmark against the real workspace, with no risk to it:
 

@@ -230,23 +230,29 @@ impl EditBuffer {
     }
 
     /// Move cursor to the previous word boundary.
+    ///
+    /// **Deliberately half a pair.** `move_word_right` was the other
+    /// half, nothing ever called it, and it is gone. No key path reaches
+    /// an `EditBuffer` word motion: Insert mode has none at all
+    /// (`Ctrl+W` / `Ctrl+B` / `Ctrl+F` are only *guarded* against being
+    /// typed into the block, [#429]), and Normal mode's `w` / `b` / `e`
+    /// walk `App::cursor_col` in `actions::nav::cursor` and
+    /// `actions::text_ops`, because outside Insert there is no buffer to
+    /// walk.
+    ///
+    /// What keeps this half is one in-crate caller,
+    /// [`Self::delete_word_back`] — which has no caller of its own
+    /// outside its test either. So add the right-hand motion when a
+    /// chord actually needs it; restoring it for symmetry puts back
+    /// exactly what was removed.
+    ///
+    /// [#429]: https://github.com/outlmd/outl/issues/429
     pub fn move_word_left(&mut self) {
         while self.cursor > 0 && self.chars[self.cursor - 1].is_whitespace() {
             self.cursor -= 1;
         }
         while self.cursor > 0 && !self.chars[self.cursor - 1].is_whitespace() {
             self.cursor -= 1;
-        }
-    }
-
-    /// Move cursor to the next word boundary.
-    pub fn move_word_right(&mut self) {
-        let len = self.chars.len();
-        while self.cursor < len && !self.chars[self.cursor].is_whitespace() {
-            self.cursor += 1;
-        }
-        while self.cursor < len && self.chars[self.cursor].is_whitespace() {
-            self.cursor += 1;
         }
     }
 

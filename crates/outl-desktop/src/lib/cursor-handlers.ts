@@ -12,7 +12,6 @@
 import {
   nextDay,
   openJournalFor,
-  openRef,
   openTodayJournal,
   previousDay,
   todaySlug,
@@ -23,28 +22,11 @@ import {
   previousVisibleId,
 } from "@outl/shared/outline";
 
+import { backlinkRowOps } from "./backlink-handlers";
+import { backlinkCursor, backlinkRowIds } from "./cursor-region";
 import { type HandlerCtx } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
-import {
-  appState,
-  backlinkCursor,
-  setAppState,
-  visibleRoots,
-  zoomView,
-} from "./store";
-
-/** Block ids of each visible backlink, in render order. The
- *  selection cursor traverses this list with `j/k` when the
- *  backlinks section is reachable.
- *
- *  Empty while zoomed, because the page's sections are not drawn then
- *  (`<PageSections zoomed>`): the backlinks belong to the page, and the
- *  header is a block. Without this, `j` off the zoom's last row parked
- *  the cursor on a row nobody could see. */
-function backlinkBlockIds(): string[] {
-  if (!appState.backlinksOpen || zoomView()) return [];
-  return appState.backlinks.map((b) => b.block_id);
-}
+import { appState, setAppState, visibleRoots, zoomView } from "./store";
 
 /** Pop one level of zoom, to the parent crumb or all the way out. */
 function zoomOut() {
@@ -57,6 +39,7 @@ function zoomOut() {
 export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
   // Plain record, not Solid props — see `HandlerCtx`.
   const { navigateTo, safeCall } = ctx;
+  const onBacklink = backlinkRowOps(ctx);
 
   /** Walk one journal day from wherever the user is: the open journal
    *  when they are on one, today when they are not (`[[` / `]]` from an
@@ -105,12 +88,19 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     // `selectedBlockId` / `selectedBacklinkBlockId` is non-null at
     // any time so navigation stays a single linear motion.
     //
-    // Backlinks are only reachable when the section is visible
-    // (`backlinksOpen` + the page has at least one ref); otherwise
-    // `j` past the last outline block clamps at the bottom — same
-    // behaviour the TUI ships when `show_backlinks == false`.
+    // Backlinks are only reachable when the section is on screen
+    // (`backlinksOpen`, not zoomed, at least one ref); otherwise `j`
+    // past the last outline block clamps at the bottom — same behaviour
+    // the TUI ships when `show_backlinks == false`.
+    //
+    // That condition is `backlinkRowIds()`'s (`lib/cursor-region.ts`),
+    // never a copy here. It used to live in a local helper, and it was
+    // the **only** place that knew it: `backlinkCursor()` did not, so
+    // after `Cmd+Shift+B` the cursor still claimed to be on a row the
+    // section had taken away, and nine mutating chords wrote to another
+    // page from there.
     SelectionDown: () => {
-      const backlinkIds = backlinkBlockIds();
+      const backlinkIds = backlinkRowIds();
       const curBacklink = backlinkCursor();
       if (curBacklink) {
         const idx = backlinkIds.indexOf(curBacklink);
@@ -133,7 +123,7 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
       if (next) setAppState("selectedBlockId", next);
     },
     SelectionUp: () => {
-      const backlinkIds = backlinkBlockIds();
+      const backlinkIds = backlinkRowIds();
       const curBacklink = backlinkCursor();
       if (curBacklink) {
         const idx = backlinkIds.indexOf(curBacklink);
@@ -165,13 +155,8 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     },
 
     OpenRefUnderCursor: async () => {
-      // Normal-mode `Enter`. Two branches in priority order:
-      //
-      // 1. Selection is on a backlink row → open the source page and
-      //    snap the selection to the referencing block on that page
-      //    (backlink rows are read-only, so "open" is the only
-      //    meaningful gesture there).
-      // 2. Otherwise → enter Insert on the selected block.
+      // Normal-mode `Enter`: **edit the block under the cursor**,
+      // wherever that cursor is.
       //
       // Unlike the TUI, the desktop's Normal mode has no character
       // cursor — only a selected block — so "the ref under the
@@ -180,17 +165,15 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
       // ref-carrying block impossible to edit via Enter. Following
       // a ref on the desktop is the click on the token
       // (`onRefClick` in OutlineView).
-      const curBacklink = backlinkCursor();
-      if (curBacklink) {
-        const link = appState.backlinks.find((b) => b.block_id === curBacklink);
-        const target = link?.source_page?.slug;
-        if (!target) return;
-        if (!(await navigateTo(openRef(target)))) return;
-        // Reset cursor to the source block on the freshly-opened
-        // page so the user lands exactly where the ref lives.
-        setAppState("selectedBlockId", curBacklink);
-        return;
-      }
+      //
+      // A backlink row used to be the one exception: it opened the
+      // source page instead, because the row was read-only. It is not
+      // any more, so the exception goes with the thing that justified
+      // it — this now answers `Enter` the same way the TUI does, where
+      // `Focus::Backlink` means `enter_insert_backlink`. The source
+      // page stays reachable from the group header, which
+      // `lib/keyboard-reach.ts` makes a keyboard stop.
+      if (onBacklink.enterInsert()) return;
       const id = appState.selectedBlockId;
       if (!id) return;
       setAppState("editingBlockId", id);

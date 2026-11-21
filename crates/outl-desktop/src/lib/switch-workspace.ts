@@ -18,7 +18,8 @@ import { platform } from "@tauri-apps/plugin-os";
 import { reconcile } from "solid-js/store";
 
 import { setWorkspace } from "./api";
-import { emptyBacklinks, setAppState, setOutline } from "./store";
+import { emptyBacklinks } from "./backlinks-fetch";
+import { setAppState, setOutline } from "./store";
 
 /** Title of the folder dialog. */
 export const SWITCH_WORKSPACE_DIALOG_TITLE = "Switch outl workspace";
@@ -70,6 +71,7 @@ export function resetPageState(): void {
     selectedBlockId: null,
     selectedBacklinkBlockId: null,
     editingBlockId: null,
+    editingBacklink: null,
     addPropertyBlockId: null,
     visualAnchorId: null,
     lastVisualRange: null,

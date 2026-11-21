@@ -61,17 +61,28 @@ pub struct Backlink {
     /// Page that contains the source block, if any. `None` only when
     /// the block lives outside any page (legacy / migrated workspaces).
     pub source_page: Option<PageMeta>,
-    /// Source block as a self-contained outline subtree (children +
-    /// properties). Mirrors the shape `read_page_view_with_workspace`
-    /// would return for the same block. UI clients that render
-    /// backlinks as a mini-outline (TUI today, mobile in the future)
-    /// consume this; light clients can ignore it and use only
-    /// `block_text` + `todo`.
+    /// Source block as an outline node — text, tokens, todo state and
+    /// properties, **and no children**.
+    ///
+    /// The type can carry a subtree and neither production builder
+    /// fills one: `backlinks_index.rs`'s from-disk path goes through
+    /// `shallow_parsed` and its from-tree path through
+    /// `project_outline_node_shallow`, both hard-coding
+    /// `children: Vec::new()`. That is the #179 fix — descending every
+    /// referencing block's children across the whole workspace, under
+    /// the workspace lock, is what froze input — so a client renders
+    /// one row per citing block on every surface, including the TUI's
+    /// panel. Light clients can ignore this and use only `block_text`
+    /// + `todo`.
     pub source_block: OutlineNode,
     /// DFS path of the source block inside its `source_page`. Empty
     /// vector means the block is a direct child of the page root.
-    /// Used by the TUI to track which block inside a backlink's
-    /// subtree the cursor is on (`Focus::Backlink { sub_path }`).
+    ///
+    /// What reads it is the **ordering**: `BacklinkIndex::collect_*`
+    /// sorts a page's hits by this path so they come back in outline
+    /// order. It is not a cursor: the TUI's `Focus::Backlink { idx }`
+    /// names a whole row, since `source_block` has no children to
+    /// descend into.
     pub source_block_path: Vec<usize>,
     /// Ancestor blocks between the page root and the source block,
     /// **root-first**: `ancestors[0]` is the direct child of the page
@@ -95,12 +106,12 @@ impl Backlink {
     /// Drop the source block's subtree (children), keeping the leaf
     /// itself (text, tokens, todo, properties) plus `ancestors`.
     ///
-    /// The GUI clients render only `source_block.tokens` for a backlink
-    /// row, so shipping the whole descendant subtree over the IPC wire
-    /// is pure waste. The TUI, which renders the subtree as a
-    /// mini-outline, keeps the full form (it reads the index in-process,
-    /// no serialization). Apply this on the GUI `page_backlinks` path
-    /// only.
+    /// **Idempotent against both production builders**, which already
+    /// ship `source_block` shallow (see that field's doc). It stays on
+    /// the GUI `page_backlinks` path as the narrowing the IPC wire
+    /// needs in its own right: every client renders one row per citing
+    /// block, so a subtree that reached a `Backlink` by another route
+    /// would be serialized for nothing.
     pub fn into_shallow(mut self) -> Self {
         self.source_block.children.clear();
         self

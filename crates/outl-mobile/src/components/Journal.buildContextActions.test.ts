@@ -20,8 +20,11 @@ import { describe, expect, it, vi } from "vitest";
 // re-adding one is ever necessary here, that is the signal a Tauri
 // dependency leaked into what is meant to stay a pure function.
 
-import { buildContextActions } from "./Journal.context-actions";
-import type { BlockNode, PageView } from "@outl/shared/api/types";
+import {
+  buildBacklinkContextActions,
+  buildContextActions,
+} from "./Journal.context-actions";
+import type { Backlink, BlockNode, PageView } from "@outl/shared/api/types";
 
 const BLOCK_ID = "blk-1";
 
@@ -162,6 +165,176 @@ describe("buildContextActions — cut / ref / new-above (RFC 0254 phase 4b)", ()
     expect(above).toBeTruthy();
     above!.onSelect();
     expect(h.newBlockAbove).toHaveBeenCalledWith(BLOCK_ID);
+  });
+});
+
+/**
+ * A long-press on a **backlink row** reaches the same sheet, because
+ * mobile has no chord surface at all — so where the desktop binds a
+ * key, this client offers a row. The list is a different question from
+ * the outline's, though, and the differences are the point:
+ *
+ * - **An orphan backlink offers nothing.** `backlinkEditTarget` is
+ *   `null` there, so there is no page to address a mutation to, and
+ *   guessing one writes to the wrong document.
+ * - **Move up / down carry no `enabled` guard.** The row is one flat
+ *   block with no sibling list rendered, so the position the outline's
+ *   builder resolves does not exist here. Hiding them on a guess would
+ *   be a worse answer than offering them.
+ * - **Nothing creates a block.** See the test for why.
+ */
+describe("buildBacklinkContextActions", () => {
+  function link(over: Partial<Backlink> = {}): Backlink {
+    return {
+      block_id: "b1",
+      todo: null,
+      ancestors: [],
+      source_page: {
+        id: "p1",
+        slug: "journal",
+        title: "Journal",
+        kind: "journal",
+      },
+      source_block: {
+        id: "b1",
+        text: "cites [[project]]",
+        todo: null,
+        tokens: [],
+        collapsed: false,
+        properties: [],
+        children: [],
+      },
+      source_block_path: [],
+      ...over,
+    } as unknown as Backlink;
+  }
+
+  function backlinkHandlers() {
+    return {
+      toggleTodo: vi.fn(),
+      indent: vi.fn(),
+      outdent: vi.fn(),
+      moveUp: vi.fn(),
+      moveDown: vi.fn(),
+      delete: vi.fn(),
+      createBelow: vi.fn(),
+      createAbove: vi.fn(),
+    };
+  }
+
+  it("a backlink row's context actions target the source page", () => {
+    const h = backlinkHandlers();
+    const l = link();
+    const actions = buildBacklinkContextActions(l, h);
+
+    // Every row hands the whole `Backlink` back, which is what carries
+    // `source_page.id`. An action that took a bare block id would have
+    // to be told which page separately, and the only page this client
+    // holds in that scope is the one on screen — the wrong one.
+    for (const action of actions) action.onSelect();
+
+    expect(h.toggleTodo).toHaveBeenCalledWith(l);
+    expect(h.indent).toHaveBeenCalledWith(l);
+    expect(h.outdent).toHaveBeenCalledWith(l);
+    expect(h.moveUp).toHaveBeenCalledWith(l);
+    expect(h.moveDown).toHaveBeenCalledWith(l);
+    expect(h.delete).toHaveBeenCalledWith(l);
+  });
+
+  it("offers every operation the row supports, text aside", () => {
+    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+
+    // Parity with the TUI's `Focus::Backlink` chords and the desktop's
+    // `BacklinkRowOps` — the text edit is missing because the tap is
+    // the gesture for it.
+    expect(ids(actions)).toEqual([
+      "toggleTodo",
+      "newBlockBelow",
+      "newBlockAbove",
+      "indent",
+      "outdent",
+      "moveUp",
+      "moveDown",
+      "delete",
+    ]);
+  });
+
+  it("an orphan backlink offers no structural actions", () => {
+    const actions = buildBacklinkContextActions(
+      link({ source_page: null }),
+      backlinkHandlers(),
+    );
+
+    expect(actions).toEqual([]);
+  });
+
+  it("returns nothing with no row long-pressed (menu closed)", () => {
+    expect(buildBacklinkContextActions(null, backlinkHandlers())).toEqual([]);
+  });
+
+  it("creates on the source page, below and above", () => {
+    const h = backlinkHandlers();
+    const l = link();
+    const actions = buildBacklinkContextActions(l, h);
+
+    actions.find((a) => a.id === "newBlockBelow")!.onSelect();
+    expect(h.createBelow).toHaveBeenCalledWith(l);
+    expect(h.createAbove).not.toHaveBeenCalled();
+
+    actions.find((a) => a.id === "newBlockAbove")!.onSelect();
+    expect(h.createAbove).toHaveBeenCalledWith(l);
+  });
+
+  it("no row arms the keyboard, the create rows included", () => {
+    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+
+    // `armsKeyboard` is the outline's contract for an action that ends
+    // with a caret in a textarea. A block created here cites nothing,
+    // so it is a backlink of no page, appears in no row on this screen
+    // and has no editor to focus — arming the keyboard would raise it
+    // over nothing. The block is still created, and the user is told
+    // where it went (`backlinkCreatedElsewhere`): a declared limit
+    // beats a wrong target, which is the TUI's answer to the same wall.
+    expect(actions.some((a) => a.armsKeyboard)).toBe(false);
+  });
+
+  it("keeps both moves offered, since a flat row has no sibling list", () => {
+    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+
+    for (const id of ["moveUp", "moveDown"]) {
+      const action = actions.find((a) => a.id === id)!;
+      expect(action.enabled).toBeUndefined();
+    }
+  });
+
+  it("marks only delete destructive, as the outline's menu does", () => {
+    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+
+    expect(actions.filter((a) => a.destructive).map((a) => a.id)).toEqual([
+      "delete",
+    ]);
+  });
+
+  it("draws each action with the glyph the outline's menu uses", () => {
+    const outline = buildContextActions(BLOCK_ID, pageView([block()]), handlers());
+    const rows = buildBacklinkContextActions(link(), backlinkHandlers());
+
+    // One action, one glyph, whichever sheet it was reached from — two
+    // icon literals for "Indent" is how the same action comes to look
+    // like two different ones.
+    let compared = 0;
+    for (const row of rows) {
+      const twin = outline.find((a) => a.id === row.id);
+      // `newBlockBelow` has no twin: the outline's sheet offers only
+      // "New block above" (its Enter-at-end gesture covers below).
+      if (!twin) continue;
+      expect(row.iconPath, row.id).toBe(twin.iconPath);
+      expect(row.label, row.id).toBe(twin.label);
+      compared += 1;
+    }
+    // Without this the loop passes by comparing nothing, which is what
+    // a renamed id would silently turn it into.
+    expect(compared).toBe(7);
   });
 });
 

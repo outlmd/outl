@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { BlockNode, PageMeta } from "@outl/shared/api/types";
 
-import { installPageChangeEffect } from "./page-change";
+import { installPageChangeEffect, resetForNavigation } from "./page-change";
 import { appState, setAppState, setOutline } from "./store";
 
 function block(id: string, children: BlockNode[] = []): BlockNode {
@@ -104,5 +104,39 @@ describe("installPageChangeEffect", () => {
     setAppState("focusBlockId", "x");
     expect(appState.focusBlockId).toBe("x");
     expect(appState.selectedBlockId).toBe("x1");
+  });
+});
+
+/**
+ * Everything the list throws away belongs to the page being left, and an
+ * editor open on a backlink row is one of those things.
+ *
+ * A keyboard navigation does not blur the textarea, so without this the
+ * field outlives the page. One block citing two pages is ordinary, so a
+ * backlink on the *new* page carrying the same `block_id` would open an
+ * autofocusing editor nobody asked for — and until then `isEditing()`
+ * would report the user as mid-edit on a page that is no longer there.
+ */
+describe("resetForNavigation", () => {
+  afterEach(() => {
+    setAppState({
+      selectedBacklinkBlockId: null,
+      editingBacklink: null,
+      focusBlockId: null,
+    });
+  });
+
+  it("drops the zoom, the backlink cursor and the backlink editor", () => {
+    setAppState({
+      focusBlockId: "a",
+      selectedBacklinkBlockId: "blk-a",
+      editingBacklink: { pageId: "pg-source", blockId: "blk-a" },
+    });
+
+    resetForNavigation();
+
+    expect(appState.focusBlockId).toBeNull();
+    expect(appState.selectedBacklinkBlockId).toBeNull();
+    expect(appState.editingBacklink).toBeNull();
   });
 });

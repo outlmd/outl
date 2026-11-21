@@ -103,7 +103,7 @@ interface BlockRowProps {
    *  a row answers "am I selected?" with `selectionSet?.has(id)` in
    *  O(1) rather than recomputing the range itself. Same convention
    *  the desktop's `<BlockRow />` uses for its own Visual highlight —
-   *  see the Vim-parity section of `outl-desktop/CLAUDE.md`, which
+   *  see `docs/desktop-keybindings.md` → "Vim parity", which
    *  memoises the range as a `Set<id>` at the parent for the same
    *  reason. `null`/`undefined` while `selectionMode` is false. */
   selectionSet?: Set<string> | null;

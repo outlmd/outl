@@ -6,7 +6,7 @@
 | **Issue** | [#44](https://github.com/outlmd/outl/issues/44), [#114](https://github.com/outlmd/outl/issues/114) |
 | **PR** | — |
 | **Date** | 2026-08-06 |
-| **Reference doc** | [paste.md](../paste.md), [clients.md § Copy and paste](../clients.md#copy-and-paste) |
+| **Reference doc** | [paste.md](../paste.md), [client-editing.md § Copy and paste](../client-editing.md#copy-and-paste) |
 | **Invariant** | root `CLAUDE.md` invariant 1 (every pasted block arrives as an `Op`), invariant 7 (block properties converge as `Op::SetProp`) |
 | **Guarded by** | `roundtrips_through_paste_with_properties`, `roundtrips_todo_done_and_quote_markers` (`crates/outl-actions/src/clipboard.rs`), `paste_user_prompt_fixture` (`crates/outl-actions/src/paste/tests.rs`) |
 

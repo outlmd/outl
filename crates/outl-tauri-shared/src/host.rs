@@ -51,7 +51,7 @@ pub trait AppHost: Send + Sync {
 
     /// Per-page undo / redo stacks, when the client supports block-level
     /// undo (desktop). `None` (the default) skips snapshot recording in
-    /// [`crate::helpers::finish_in_page_with`] entirely — no per-mutation
+    /// [`crate::commit::finish_in_page_with`] entirely — no per-mutation
     /// render is paid on clients without undo.
     fn history(&self) -> Option<&Mutex<HashMap<NodeId, HistoryStacks<String>>>> {
         None
@@ -71,7 +71,7 @@ pub trait AppHost: Send + Sync {
     }
 
     /// Background `.md` + sidecar projection writer, when the client
-    /// wires one. `Some` makes [`crate::helpers::finish_in_page_with`]
+    /// wires one. `Some` makes [`crate::commit::finish_in_page_with`]
     /// build the reply view from the tree and **queue** the projection
     /// off-thread instead of rendering + hashing + writing it inline —
     /// the async-writes default (see [`crate::projection`]). The default

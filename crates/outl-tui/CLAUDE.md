@@ -11,6 +11,10 @@ That's the spec; don't change it.
 - Quick switcher (`Ctrl+P`) for fuzzy page/journal jumping.
 - Outline panel for current page with inline visible cursor.
 - Inline backlinks rendered below the outline (`B` toggles, `j/k` crosses the separator, `Ctrl+O` flips the sort direction).
+  **One row per citing block, and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
+  Recorded as `Capability::BacklinkInlineEdit` → `Partial` here and `Full` on the GUI clients, because **nothing in this panel opens the page a row's block lives on**.
+  Not the header (a styled `Line` with no `block_starts` entry), not a click (refused below the outline), not `Enter` (it enters Insert), and not a `[[link]]` in the row, which points back at the page being read.
+  The route is `Ctrl+P` and the page name, which is what the nudge says; the mechanism for the edits themselves is under "The commit pipeline this crate does not use yet" below.
 - Nested pages listed below the backlinks (`os` shows `os/linux`, `os/linux/debian`) — **read-only**: `j`/`k` stop at the backlinks section, so opening one goes through the picker (`Ctrl+P`).
   Recorded as `Capability::NestedPages` → `Partial` in `outl_shortcuts::capability_support`, and the section header says so rather than leaving the user guessing.
 - Block references and embeds: `((blk-XXXXXX))` resolves to the source block's text + page icon.
@@ -132,14 +136,22 @@ One contract, and it was the alternative:
   The regression net is `undo_on_another_page_keeps_the_snapshot`, `repeated_undo_on_another_page_never_drains_the_stack`, `redo_on_another_page_keeps_the_snapshot`, plus `undo_on_its_own_page_still_consumes_the_snapshot` so the guard cannot pass by blocking everything.
 
 - **A cross-page op snapshots the page it changes, not the page on screen.**
-  `snapshot_page_for_undo(path, page)` is the sibling of `snapshot_for_undo`, and `apply_to_backlink_source` calls it once for all seven structural ops reachable from the backlinks panel; `toggle_todo_backlink` calls it on its own path.
+  `snapshot_page_for_undo(path, page)` is the sibling of `snapshot_for_undo`, and **`App::commit_backlink_mutation` is the one caller**.
+  Every chord reachable from the backlinks panel goes through it — the text edit, `Ctrl+T`, `g D`, and the seven structural ops — so recording it once covers all of them instead of each branch remembering to.
   The snapshot carries the *source* page's path, so `top_applies_here` only lets it be restored once the user opens that page — pressing `u` while still on the referencing page reports `no undo for this page` and keeps it.
   This is why the guard above had to land first ([#431](https://github.com/outlmd/outl/issues/431) depends on [#430](https://github.com/outlmd/outl/issues/430)).
-  `toggle_todo_backlink` used to document the opposite ("undo in this view shouldn't silently flip TODOs in a different file"), which was correct while a popped snapshot was applied blind.
+  The `.md`-first `g D` used to document the opposite ("undo in this view shouldn't silently flip TODOs in a different file"), which was correct while a popped snapshot was applied blind.
   That is root `CLAUDE.md` invariant 10 item 4: the exemption outlived its premise.
   `selected` / `cursor_col` are zeroed, because they index a page the user was not looking at.
+  It takes the snapshot itself rather than through `CommitHooks::record_undo`, because that hook hands over a rendered `String` keyed by `NodeId` while this stack is keyed by `view_path`.
 
-**Still not covered**: `commit_insert` on an `EditTarget::SourcePage` records nothing and is the last instance of the old reasoning. Neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
+- **The caller owes the "did anything change" question**, because the snapshot is unconditional and pushing one clears `redo`.
+  A boundary no-op — moving the first sibling up — would otherwise bury the displayed page's history under a foreign entry.
+  `commit_insert` gates on `new_text != original_text`; the structural branches in `actions/block/structural.rs` ask the **tree** (`has_previous_sibling` / `has_next_sibling` / `can_outdent`) before committing.
+  `move_up` / `move_down` report a boundary as `Ok(())`, so without that they would snapshot; `indent` / `outdent` return an `Err` there, which is history-safe but names a `NodeId` in the status line, and no outl surface shows a user a block id.
+  Net: `a_boundary_no_op_leaves_both_history_stacks_unchanged`, `outdenting_a_top_level_backlink_says_nothing_and_records_nothing`.
+
+**Still not covered**: neither `undid` nor `redid` says *what* came back, which is [#438](https://github.com/outlmd/outl/issues/438).
 
 ### Trash (`/trash`)
 
@@ -546,7 +558,7 @@ This means concurrent `outl serve` is OK — both go through the same reconcile 
 The GUI clients run the same pass.
 It is a detached background thread on purpose: a snapshot walks the whole workspace and forks `git`, which on a large graph is seconds, so it must never sit on the event loop, a commit boundary, or the quit path.
 Don't "improve" this by hanging it off the idle tick or `flush_pending_save` — the interval floor is read back out of the git history, so a session that ends before a snapshot simply gets one on the next launch.
-Policy + the "which client snapshots" table live in [`docs/clients.md` → Automatic backups](../../docs/clients.md#automatic-backups).
+Policy + the "which client snapshots" table live in [`docs/client-sync.md` → Automatic backups](../../docs/client-sync.md#automatic-backups).
 
 ## The commit pipeline this crate does not use yet
 
@@ -556,7 +568,80 @@ It takes `&mut Workspace`, so this crate *can* call it.
 **One path here already does**: the capture drain (`actions/lifecycle/capture.rs`), whose `CaptureCommit` is this crate's first `CommitHooks` impl.
 It is the model for the rest.
 
-The editing path does not, yet.
+**A second does**: every mutation reachable from the backlinks panel, through `App::commit_backlink_mutation` (`actions/block/backlink_commit.rs`).
+That is the one place a cross-page mutation is committed — the text edit, `Ctrl+T`, `g D`, and the seven structural chords, each one op keyed on the citing block's `NodeId`.
+Its `BacklinkCommit` is `CaptureCommit`'s shape with owned fields,
+plus the `WorkspaceIndex` patch `save_page_with` owes — `/` search, the `((` autocomplete and `((blk-X))` resolution all read that index and **navigation does not rebuild it**, so skipping the patch went stale for the rest of the session.
+The branches in `actions/block/structural.rs` own two things the helper does not: landing an in-flight Insert buffer (it drains the AST save queue and knows nothing about a buffer), and asking whether the op has anywhere to go.
+
+`actions/block/backlink_edit.rs` is **gone**, and with it the last `.md`-first cross-page write in the panel: it rendered the source page's whole `.md` and let `reconcile_md` infer which ops that implied, against root invariant 1.
+One cross-page writer is left on `save_page_with`, and it is about **embeds**, not backlinks: `cycle_embed_source_status` / `mark_embed_source_done` in `actions/block/metadata.rs`.
+That is **scope, not a blocker** — `WorkspaceIndex::resolve_block_ref` returns a `BlockEntry` carrying `id: NodeId` and `source_slug`, both keys a commit needs, and the current code destructures the path pair and discards `entry.id`.
+What a migration owes is the half the backlink path has no equivalent for: the auto-run re-run and the same-page reload those two do after the write.
+
+**`Focus::Backlink { idx }` is the whole cursor, and the `sub_path` it used to carry was dead code the type made look alive.**
+That field was a DFS path into `Backlink.source_block`'s subtree, and it was **always empty**.
+Both index builders ship `source_block` shallow (`children: Vec::new()`, the fix for the #179 input freeze), so `flatten_subtree_paths` returned exactly one path and the descend branch in `actions::nav::selection` was unreachable.
+`j` never walked into a backlink's subtree; the panel has always drawn one row per citing block.
+**This crate's call to `flatten_subtree_paths` went with the field** — grep finds no caller here now — while the function itself still exists in `outl-actions` (definition, re-export and its own tests) with **no caller left** in the workspace.
+So removing it was inert rather than a behaviour change, which is why `backlink_target.rs` pins the premise **structurally**.
+That pin asserts `source_block.children.is_empty()` over every row, and reads its precondition from the workspace tree rather than from the index it is testing.
+A claim somebody verified once is not a net: revert #179's shallow builders and the pin is what fails.
+`idx` is positional, so a stale one reads as "nothing focused" rather than as a different row (`actions/block/backlink_target.rs`).
+
+**`o` / `O` on a backlink row create the block and do not enter Insert, and `Enter` from Insert inherits that.**
+`Focus::Backlink { idx }` names a *backlink row*; a brand-new sibling cites nothing, so it is not a row — `view/backlinks.rs` paints the edit buffer on the row whose `idx` matches, and there is none to paint on.
+Entering Insert anyway is what the `.md`-first route did, and it put the caret back on the **citing** block, so the next keystroke edited text the user had not aimed at.
+So the block is created on the source page, Insert is not entered, and the status line names the page plus the limit (`not editable from the panel`).
+**A self-citing page is the exception and it does finish**: the commit's reload has already put the new block in `App.page`,
+so `outline_row_of` finds its row, `Focus` goes back to `Outline` and Insert opens on it —
+the same thing the desktop does, and the alternative was telling a user looking straight at the block that it is not editable.
+`Enter` *from Insert* inherits whichever of the two applies; on a cross-page row that means it commits and drops to Normal rather than splitting.
+Closing that for the cross-page case needs `outl_actions::split_block` plus a focus model that can name a block the panel has no row for, which is a feature rather than a fix.
+Net: `opening_a_block_from_the_backlinks_panel_does_not_enter_insert`, `opening_a_block_above_a_backlink_row_does_not_enter_insert_either`,
+`opening_a_block_from_the_backlinks_panel_still_creates_it_on_the_source_page`, `opening_a_block_on_a_self_citing_page_lands_the_caret_in_it`.
+
+**A refusal in this panel is `outl_actions::refusal`'s sentence, never one written here.**
+`stale_backlink_block_unchanged_refusal` is the half that fits a chord — nothing was typed, so nothing was lost —
+and `commit_backlink_mutation` uses it for the one `ActionError` reachable from an ordinary state (`NotInTree`, which `ensure_live` returns for gone *and* trashed, on a row the from-disk index kept after a peer's delete).
+`ActionError`'s own `Display` names a `NodeId` there, and no outl surface shows a user a block id.
+`enter_insert_backlink` refuses in the same words **before** the edit starts,
+and its gate asks `is_trashed` as well as `block_text`: the text survives a delete inside the Yrs doc, so `block_text` alone let the user type into a trashed block and lose it at `Esc`.
+That entry gate plus `pending_reload` is why the commit arm can use the chord half for every reachable case; the "your text could not be saved" half belongs to a surface with no entry gate (the desktop's strict edit).
+
+**A row whose block is not live is refused *before* the mutation too**, through `App::backlink_block_can_take_the_write`.
+`outl_actions::block::moves` guards with `ensure_in_tree`, not `ensure_live`, and says why: `trash::restore` is a move out of the trash.
+So the four structural chords had no backend gate, and this crate's boundary predicates ask about *position* — a trashed node's parent is `TRASH_ROOT`, whose children are every deletion in the workspace.
+`Tab` re-parented a peer-deleted block under an unrelated deletion, out of `trash::list`'s reach.
+`d d` reported success and cleared `redo`, `Alt`+arrows swapped two deletions, `Shift+Tab` put a ULID on the status line.
+`outl_actions::is_live` is the one owner of the question, and both gates ask it — the entry one in `enter_insert_backlink` and this one — alongside `block::ensure_live`, whose `bool` half it is.
+This crate used to spell the pair out itself (`contains(..) && !is_trashed(..)`), which made it a third opinion on what "live" means, beside the GUI's and the backend's own.
+It sits in the write gate because `commit_insert`'s `SourcePage` arm never goes through `focused_backlink_target_or_report`.
+Net: `backlink_commit/liveness_tests.rs`, on the tree and `ws.log().len()`, plus the three cases the gate must leave alone (a trash restore, an outline indent, a live row).
+
+**A source page ahead of its log is refused *before* the mutation for `Ctrl+T` and `g D`, and for nothing else**, through `App::source_page_can_take_the_write`.
+The criterion is **whether the op's result is computed from the block's logged text** — not whether it is "structural" — and it is `outl_actions::CrossPageWrite`'s, shared with the GUI clients because a drift there means one client refusing an operation the other performs.
+`actions/block/backlink_gesture.rs` holds this client's half of it: the exhaustive mapping from a gesture onto one of the three shapes, nothing more.
+`toggle_todo` / `mark_done` read `block_text`, move a marker and write the result back, while the row the chord was aimed at was rendered from the `.md`.
+So on a frozen page they compute an op from text the user never saw, the projection is then withheld, and the row comes back unchanged while the state walks on invisibly.
+A structural op names a node and converges through the log whatever the local `.md` says.
+**The text edit does not ask, and that is the difference from the GUI clients**: `enter_insert_backlink` seeds the buffer from `workspace.block_text` — the op log — so here the logged text *is* what the user edited.
+The desktop and mobile seed theirs from `link.source_block`, built from the `.md`, which is why `outl_tauri_shared::commands::backlink_edit::edit_backlink_block` does ask.
+Gating the text edit here cost the only unrecoverable thing in the feature.
+`commit_insert` consumes the Insert buffer on its first line, so the refusal dropped the keystrokes and reported a *file* condition (`run outl reconcile`) that named none of it.
+The gate asks `outl_actions::reproject_stale_md`, the same call every open path makes; that method's doc owns why, and the three states it must *not* refuse.
+`report_backlink_projection_failure` keeps the other half: a projection refused *after* a mutation this path did authorise, plus the `Retryable` class.
+Net: `backlink_commit/ahead_of_log_tests.rs`, asserting on `ws.log().len()` and the block's text rather than on the message — including that the text edit **lands**, because the test it replaced asserted the loss as the contract.
+
+**The cursor is re-clamped at the end of every cross-page commit**, not inside the self-citing reload.
+`clamp_backlink_focus` pulls an out-of-range `idx` back into the list and drops to `Focus::Outline` when the list is empty, and it has to run on the path with **no** reload:
+a `d d` on the only backlink of an off-screen page empties the panel, and `Focus::Backlink` over zero rows has no keyboard way out (`j` / `k` both decline a stale `idx` by design, and every chord declines it too).
+Net: `a_cross_page_delete_that_empties_the_panel_returns_the_cursor_to_the_outline`, `an_edit_that_drops_the_last_self_citation_returns_the_cursor_to_the_outline`.
+
+**One `Tab` mid-edit records two undo entries**, where the `.md`-first route recorded one: the in-flight `commit_insert` snapshots, then the reparent commit snapshots again.
+Both belong to the source page and `top_applies_here` still gates them, so this is finer granularity rather than a leak — written down because it is a behaviour change and `u` now takes two presses to get back past a `Tab` typed into.
+
+The editing path for the page on screen does not, yet.
 `save_page_with` in `actions/lifecycle/persistence.rs` writes the same sequence by hand.
 `render` → `write_atomic` → `reconcile_md` → `index.patch_page` → `spawn_backlink_index_rebuild` → `announce_local_ops`.
 It does that because this crate mutates an in-memory AST and derives ops from the rendered markdown — the inverted direction [issue 263](https://github.com/outlmd/outl/issues/263) tracks.

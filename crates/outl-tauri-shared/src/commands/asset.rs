@@ -16,7 +16,8 @@ use outl_actions::{
     ImportedAsset,
 };
 
-use crate::helpers::{finish_in_page, normalize_picker_path, parse_node_id, storage_root_or_err};
+use crate::commit::finish_in_page;
+use crate::helpers::{normalize_picker_path, parse_node_id, storage_root_or_err};
 use crate::host::AppHost;
 use crate::state::PageView;
 

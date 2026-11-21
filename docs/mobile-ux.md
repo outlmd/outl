@@ -132,6 +132,29 @@ A navigation showed the page the user just left answering for the one they opene
 Once the scan replies, a regular page keeps the empty box (a newcomer discovers that pages can cite each other) and a journal stays hidden.
 `lateSectionVisible` (`@outl/shared/outline`) owns the rule; `PageSections.test.tsx` is the net.
 
+## Backlink rows — a place you can work
+
+A backlink row shows a block that lives on another page, and tapping it **edits that block in place** rather than navigating.
+The editor is this client's own `EditableTextarea`, through `<BacklinkRowEditor />`, so the iOS text-input rules (`beforeinput`, `parkCaret`, no write while an IME composes) come with it.
+**The commit is on blur**, never per keystroke: it writes to another page and then re-asks an `O(blocks-in-workspace)` scan.
+The row keeps showing the editor until the fresh rows are in, so you never watch your edit revert and reappear.
+
+The **checkbox** toggles the task on the source page — it used to draw the state and do nothing, and the way out it offered was to leave for that page.
+The **card header** is what still opens the source page.
+
+A **long press** opens the same `<BlockContextMenu>` the outline raises, with task state, indent, outdent, move up / down, create below / above, and delete.
+Seven of those rows take their label and glyph from one shared table, so an action cannot look like two things depending on which sheet you are in.
+Create below / above is the one pair that does **not** raise the keyboard: the new block cites nothing, so no row here will ever render it and there would be no textarea to focus — you are told which page it landed on instead.
+Delete asks when the block has children, in the same prompt the outline uses; the case is stronger here, because the row draws one flat block and the subtree is not on screen at all.
+
+**The card takes one write at a time.**
+The acting row dims and goes `aria-busy` while its write is in flight, and a gesture on another row of the card is dropped in that window.
+None of these is idempotent from your seat — a second toggle flips the task back — and a timeout would be worse than no guard, since firing one while the write still lands means the task flips twice on the retry.
+
+A row whose citing block lives outside any page is **inert**: no editor, no sheet, no jump, because there is no page to address.
+
+Contract, including why a cross-page edit refuses rather than keeping your text somewhere else: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
+
 ## Page switcher - rename and merge
 
 The long-press sheet that offers delete also offers **Rename page** and **Merge into...**, for regular pages only: journals are excluded, because a journal's slug is its date.
@@ -143,7 +166,7 @@ The commands are the shared `rename_page` / `merge_pages` bodies, so every link 
 - **Merge into...** opens a page picker without the source page, and always asks for a confirmation before writing.
 - **Afterwards** the app opens the resulting page (renamed, or the merge target) and shows a summary with blocks moved, links updated and any property conflicts (the target's value is kept, the dropped one is named).
 
-There is no undo for either action, and a merge does not come apart: see "The opposite direction" in the RFC.
+There is no undo for either action, and a merge does not come apart: see [RFC 0557 → The opposite direction](rfcs/0557-page-merge-and-rename.md#the-opposite-direction).
 Neither has a keyboard chord, so the long-press sheet is the only trigger on touch devices.
 `Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md).
 
@@ -155,7 +178,8 @@ Tapping an external link opens it in the system browser via **`tauri-plugin-open
 An `assets/…` link routes instead (via `isAssetLink`) to `openAsset` — `open_asset` opens the file in the OS viewer.
 The block long-press **Attach file** action picks a file (`@tauri-apps/plugin-dialog`) → `attachAsset` (shared `commands::asset`).
 On iPad, dragging a file onto a block imports it the same way via the shared `installFileDrop` + `importAssetFile` (`@outl/shared/drag-drop`), best-effort — iPhone rarely delivers a webview drop, so long-press stays the only import path there.
-`[[ref]]`/`#tag` taps still route through `openRef`; backlink rows stay inert.
+`[[ref]]`/`#tag` taps in the outline still route through `openRef`.
+A **backlink** row's own tokens do not: the row's one gesture is editing the block it shows, so `<MarkdownInline>` there gets no `onRefClick` / `onLinkClick` and a ref inside it renders without navigating.
 
 ## Properties (`key:: value`) on a block
 
@@ -197,8 +221,11 @@ The outline bullet and `<CollapseTriangle />` stay outside the quote chrome; a n
 Detection is `splitQuote` + `stripQuoteFromTokens` (`@outl/shared/markdown`, mirror of `outl_actions::quote::split_quote`) so the `> ` isn't rendered twice; it composes with the task checkbox.
 The checkbox has three filled states: DONE is a solid accent circle with a tick, **DOING is an accent ring with a small filled centre**, TODO is a neutral empty ring.
 One tap walks one stop of `TODO → DOING → DONE → none`.
-Toggling: `toggleQuote(id)` → `toggle_quote` → `outl_actions::block::toggle_quote` (no TS string surgery).
-Convention (three-surface parity): [`docs/clients.md` → Blockquote convention](clients.md#blockquote-convention).
+**Nothing in this client toggles it**: a quote is authored by typing `> ` at the front of the block, and the long-press sheet has no quote row.
+The route is wired and this client is not on it: `toggleQuote` (`@outl/shared/api/commands`) → the registered `toggle_quote` command → `outl_actions::block::toggle_quote`, which the desktop reaches through `/quote`.
+So adding a sheet row is a caller rather than a feature, and it needs no TS string surgery when it lands.
+Recorded as `Capability::BlockquoteToggle` → `❌` on mobile in [`client-parity.md`](client-parity.md); the nudge names the marker to type instead.
+Convention (three-surface parity): [`docs/client-editing.md` → Blockquote convention](client-editing.md#blockquote-convention).
 
 ## Zoom / focus on a block
 
@@ -210,7 +237,7 @@ Mobile owns only the touch chrome: the bullet tap moves mark-as-TODO to the long
 **Opening a page leaves the zoom, including the page already open** — Today, the week strip, the calendar, a tap on a `[[ref]]`, the page switcher, a deep link and wake-to-today.
 A commit, a background poll, a peer reload and a capture into today keep it: none of those is the user asking to go somewhere.
 
-Convention: [`docs/clients.md` → Zoom / focus on a block](clients.md#zoom--focus-on-a-block-roamworkflowy).
+Convention: [`docs/client-editing.md` → Zoom / focus on a block](client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
 ## Paste from external apps
 
@@ -278,7 +305,7 @@ A file that cannot be read stays there and is counted in what the app reports af
 
 The in-app quick capture (`+` → `<CaptureSheet />`) is a different thing and is unchanged: it writes through the op log directly, because the app is already open.
 
-Full behaviour and the per-client table: [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app).
+Full behaviour and the per-client table: [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app).
 Android's components, the JNI boundary and why they need no "a capture arrived" notification: [`android-platform.md`](android-platform.md#capture-from-outside-the-app).
 
 ## Arrow keys walk between blocks (hardware keyboard)
@@ -305,7 +332,7 @@ The keyboard toolbar + suggester strip have two renderings.
 iOS is native (`OutlToolbarView` swizzled onto `WKContentView`), untouched.
 Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToolbar />`, gated in `Journal.tsx` on `isAndroid && editingId()`.
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
-Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/clients.md` → Keyboard accessory bar](clients.md#keyboard-accessory-bar-mobile).
+Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/client-editing.md` → Keyboard accessory bar](client-editing.md#keyboard-accessory-bar-mobile).
 
 ### The row only changes shape between editing sessions
 
@@ -340,10 +367,10 @@ The two storage keys are pinned on both sides — `ToolbarStoreTests` in Swift, 
 Long-press a `` ```lang …``` `` block → "Run `<lang>`" fires `runCodeBlock`.
 Mobile's `src-tauri/src/exec.rs` is a **thin adapter** over `outl_actions::exec::run_code_block` (shared with desktop), wrapping the outcome with a refreshed `PageView`.
 The action only shows when `detectFence` matches; the backend re-validates in `run_block_at_index`, so a false-positive is a toast, not damage.
-Runtimes on iOS: **JS, Python, Lua**. `lang-rust` is off in `Cargo.toml`, and `lang-lisp` is off everywhere by default (see [`docs/clients.md`](clients.md#running-code-blocks)).
-Flow + runtime-catalog rationale: [`docs/clients.md` → Running code blocks](clients.md#running-code-blocks).
+Runtimes on iOS: **JS, Python, Lua**. `lang-rust` is off in `Cargo.toml`, and `lang-lisp` is off everywhere by default (see [`docs/client-editing.md`](client-editing.md#running-code-blocks)).
+Flow + runtime-catalog rationale: [`docs/client-editing.md` → Running code blocks](client-editing.md#running-code-blocks).
 
 ## Insert template (structural templates)
 
 The block long-press menu's "Insert template" action opens `TemplateSheet` (bottom sheet listing `listTemplates()`); picking one calls `instantiateTemplateAt(name, blockId)` and applies the returned `PageView`.
-Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/clients.md` → Structural templates](clients.md#structural-templates).
+Wire commands are the shared `list_templates_cmd` / `instantiate_template_at` bodies — no mobile logic; contract in [`docs/client-editing.md` → Structural templates](client-editing.md#structural-templates).

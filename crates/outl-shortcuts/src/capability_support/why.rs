@@ -99,6 +99,27 @@ pub const TUI_NESTED_PAGES_ARE_READ_ONLY: &str =
     "The TUI lists nested pages but can't open one from that list — press Ctrl+P and type \
      the page name (`os/linux`) to jump there.";
 
+/// The TUI edits every backlink row where it is cited and has **no
+/// gesture anywhere in that panel** that opens the page the row's block
+/// lives on. `Focus` has exactly two variants (`Outline`,
+/// `Backlink { idx }`); the group header is a styled `Line` with no
+/// click region and no `block_starts` entry (`view/backlinks.rs`), and
+/// a click below the outline is refused outright
+/// (`a_click_past_the_last_block_moves_nothing`). `Enter` on a row
+/// enters Insert, and following a `[[link]]` inside the row is not the
+/// route either: a citing block refers to the page being read, by
+/// construction, so it re-opens the page the user is already on.
+///
+/// So the *edit it where it is cited* half of this capability is
+/// present and the *go to where it lives* half is not, which is what
+/// `Partial` means — the same shape as
+/// `TUI_NESTED_PAGES_ARE_READ_ONLY`, one section further down the
+/// same pane, and the reason the nudge names the quick switcher rather
+/// than apologising.
+pub const TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE: &str =
+    "The TUI edits a backlink row in place but can't open the page the block lives on — \
+     press Ctrl+P and type the page name from the row's header to jump there.";
+
 /// The TUI has no pairing flow (no ticket display, no scanner) —
 /// pairing a device against a TUI-run workspace goes through the
 /// CLI's `outl peer pair` / `outl peer qr`, run from a separate
@@ -243,6 +264,25 @@ pub const NO_SLASH_MENU_ON_THE_PHONE: &str =
     "Typing `/` doesn't open a command list on the phone yet — plugin commands are behind the \
      plugins button in the top bar, and templates are under \"Insert template\" when you \
      long-press a block.";
+
+/// One string for two clients, because the route out is identical and
+/// client-agnostic: `"> "` at the front of the block is a quote
+/// everywhere, and it is the same text `toggle_quote` writes.
+///
+/// So it names no client and no command of its own. A per-client
+/// sentence here would be two copies of one fact, and the fact is a
+/// markdown convention rather than a surface — `docs/client-editing.md`
+/// is its owner, not this catalog.
+///
+/// It does not mention the desktop's `/quote`. The nudge is read by
+/// someone already holding a block they want quoted, and a sentence
+/// that sends them to another device to type two characters they can
+/// type here is worse than the gap: the same reason
+/// `NO_MOBILE_TRASH_SHEET` dropped its `outl trash list` clause.
+pub const TYPE_THE_QUOTE_MARKER: &str =
+    "There's no one-gesture blockquote here yet. Type `> ` at the front of a block to quote \
+     it, and delete those two characters to unquote it. On a task block it goes after the \
+     marker rather than before it, which is what keeps the checkbox.";
 
 pub const DESKTOP_HOSTS_ONLY: &str =
     "The desktop can host a pairing (show the QR / ticket) but has no camera to scan one — \

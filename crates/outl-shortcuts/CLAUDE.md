@@ -45,7 +45,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   The reason text lives here, not in the client: a client that writes its own wording is a second copy of the fact, which is how three docs ended up disagreeing about `y r`, `:` and mobile undo.
   Rendered to [`docs/client-parity.md`](../../docs/client-parity.md) and pinned by `the_parity_doc_matches_the_code`.
   `Support::Native` is deliberately its own state — reachable, no handler, no nudge (`Backspace` on an empty textarea) — because a boolean would force that row to lie in one direction or the other.
-- **`Capability` / `capability_support`** (`src/capability.rs`, `src/capability_support.rs`) — the sibling catalog for a feature with no chord at all.
+- **`Capability` / `capability_support`** (`src/capability.rs`, `src/capability_support/`) — the sibling catalog for a feature with no chord at all.
   Page history, the plugin marketplace, a calendar grid, templates, attaching a file, pairing a new device, the inline `/` menu.
   `support()` above only covers what a chord can fire; `capability_support()` is a second exhaustive `match`, over `Capability` instead of `Action`, reusing `Support` / `ClientSupport` / `Client` unchanged rather than inventing a parallel type.
   A capability that already has an `Action` (backlinks, block properties, reminders) stays tracked there only — a `Capability` entry for the same fact would be two catalogs disagreeing about one thing.
@@ -59,7 +59,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   Names are unique across the catalog, because a `/` menu dispatches on this string.
   The TUI's shared built-ins read it directly, and `outl-tui`'s `catalog_name_tests` pins the overlap in both directions.
   It rides the wire on `ActionSupportDto.command` (`outl-tauri-shared`), not on `Binding`: the name is per-action and a binding is per-chord, so a field there would ship `OpenToday`'s name three times.
-- **`CLI_ONLY`** (`src/capability_support.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
+- **`CLI_ONLY`** (`src/capability_support/mod.rs`) — the one declared exemption from `no_capability_is_out_of_reach_on_every_client`.
   That test is right in general: a capability no client reaches is normally a feature that does not exist, and recording it would be noise.
   A **CLI-only** capability is the case where "missing on all three" is a true and useful statement instead — the feature ships, the surface does not.
   `Capability::Trash` is the first (issue [#287](https://github.com/outlmd/outl/issues/287)): `outl trash list` / `outl trash restore` and the `outl_trash_*` MCP tools exist, no client has a recycle bin.
@@ -75,7 +75,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   Each client maps `Action -> {do_something}` itself.
   The TUI's `App::dispatch` and the desktop's `lib/action-handlers.ts` are the dispatchers; this crate doesn't know how a "commit insert buffer" actually commits.
   > **Handler behaviour contracts** (e.g. `FoldAll` skipping leaves, `UnfoldAll` walking the full tree, `DeleteRange` iterating bottom-up)
-  > live in the per-client CLAUDE.md (`outl-tui/CLAUDE.md`, `outl-desktop/CLAUDE.md`) under their vim / mode sections,
+  > live with each client (`outl-tui/CLAUDE.md` → "Modes", "Insert mode", and `docs/desktop-keybindings.md` → "Vim parity", "Block-editor chords"),
   > and in `docs/tui.md` / `docs/shortcuts.md` for user-facing copy.
   > This file owns *which `Action` exists*; the *what the handler does* is a per-client concern documented next to the dispatcher.
   > The `doc-sync-guard` hook flags edits to `action-handlers.ts` here as a heuristic —
@@ -131,7 +131,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
    Then wire the handlers the row promised:
    - TUI: `crates/outl-tui/src/input/normal.rs` (its own `match`, not `lookup` — see the note under "What this crate does NOT own").
    - Desktop: the handler group under `crates/outl-desktop/src/lib/` that owns what your action changes — `chrome-`, `cursor-`, `block-`, `page-`, `visual-` or `clipboard-handlers.ts`.
-     `action-handlers.ts` is the assembly and takes no new entries; see `outl-desktop/CLAUDE.md` → "`action-handlers.ts` is eight files".
+     `action-handlers.ts` is the assembly and takes no new entries; see `docs/desktop-keybindings.md` → "`action-handlers.ts` is eight files".
 
    > **This step used to read:** *"A client that doesn't need the action just doesn't add a handler — `lookup` returns `Some(Action::Foo)` and the dispatcher no-ops with a debug log."*
    >
@@ -147,7 +147,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
 
    The first pins `docs/client-parity.md` to the code; the second pins the desktop handler map to the catalog **in both directions** — a promised handler that is missing, and a shipped handler the catalog still calls absent.
 7. **Update both user-visible tables in the same commit:**
-   - `crates/outl-desktop/CLAUDE.md` "OS-standard chrome" / "Block-editor chords" / "Inline markdown" — whichever the chord belongs to.
+   - `docs/desktop-keybindings.md` → "OS-standard chrome", "Block-editor chords", "Inline markdown" — whichever the chord belongs to.
    - `docs/tui.md` if the binding has a TUI counterpart.
    - This `CLAUDE.md`'s mode-semantics example list if the chord is a load-bearing illustration (e.g. the `Cmd+B`-in-Insert vs. `Cmd+B`-in-Global rationale below).
 
@@ -169,7 +169,8 @@ Bound in **both** `Normal` and `Visual`, they start a contiguous selection from 
 
 - `Global` mode → no binding (we want bold-in-insert to take priority).
 - `Insert` mode → `WrapBold`.
-- `Normal` mode → no binding either (the desktop frontend used to wire it to "toggle sidebar"; that's `Cmd+Shift+E` now to avoid hijacking markdown's universal bold chord — see `crates/outl-desktop/CLAUDE.md` for the rationale).
+- `Normal` mode → no binding either: the desktop frontend used to wire it to "toggle sidebar", and that's `Cmd+Shift+E` now, to avoid hijacking markdown's universal bold chord.
+  See `docs/shortcuts.md` → "Why the shifted variants for sidebar / backlinks".
 
 If you find yourself wanting two different actions on the same chord across modes, the catalog already supports it — just add two `Binding` rows with different `mode` fields and the `no_duplicate_chord_in_same_mode` test will let them through.
 `Cmd+Shift+X` ships exactly that split today: `WrapStrike` in Insert (textarea focused) and `RunCodeBlock` in Global — inside a textarea the mode-specific row wins, everywhere else the Global one fires.

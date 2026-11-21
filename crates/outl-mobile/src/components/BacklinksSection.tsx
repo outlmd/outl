@@ -1,13 +1,23 @@
-import { For, JSX, Show } from "solid-js";
+import { For, JSX, Show, onCleanup } from "solid-js";
 import type {
   Backlink,
   BacklinksOrder,
   PageKind,
   TodoState,
 } from "@outl/shared/api/types";
+import { backlinkEditTarget } from "@outl/shared/backlink-edit";
 import { CrumbTrail, MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
-import { sameCrumbTrail } from "@outl/shared/outline";
+import { rawTextWithTodo, sameCrumbTrail } from "@outl/shared/outline";
 import { PageGlyph } from "@outl/shared/icons";
+import { createLongPress } from "../lib/long-press";
+import { BacklinkRowEditor } from "./BacklinkRowEditor";
+import { BlockContextMenu } from "./BlockContextMenu";
+import { BlockDeleteConfirm } from "./JournalDeleteDialogs";
+import {
+  type BacklinkCommit,
+  createBacklinkRowOps,
+} from "./BacklinksSection.row-ops";
+import { buildBacklinkContextActions } from "./Journal.context-actions";
 
 interface BacklinksSectionProps {
   backlinks: Backlink[];
@@ -15,7 +25,28 @@ interface BacklinksSectionProps {
   /** Current sort direction (issue #142). */
   order: BacklinksOrder;
   /** Flip newest ⇄ oldest — the host persists it + applies the re-sorted view. */
-  onToggleOrder: () => void;
+  onToggleOrder: () => void | Promise<void>;
+  /**
+   * A mutation through one of these rows landed, on the page the citing
+   * block lives on.
+   *
+   * The section reports the fact and decides nothing about it: whether
+   * the reply may be installed as the open page's view is
+   * `backlinkCommitPlan`'s answer, and the only place holding both page
+   * ids is the host (`Journal.backlinks.ts`). That is also why the
+   * section does not take the open page's id.
+   *
+   * **Resolving late is the contract.** The re-ask is an
+   * O(blocks-in-workspace) scan (invariant 15) and the editor stays
+   * open until this settles, so a committed row never renders the
+   * pre-edit text it still holds.
+   */
+  onEditCommitted: (commit: BacklinkCommit) => void | Promise<void>;
+  /**
+   * A refusal the user has to read. Nothing was written and retrying
+   * the same id cannot succeed, so this is a message, never a Retry.
+   */
+  onError: (message: string) => void;
 }
 
 /**
@@ -24,8 +55,21 @@ interface BacklinksSectionProps {
  * source page, its title as the card header, then one row per
  * referencing block. A row buried in a nested outline shows its
  * ancestor breadcrumb as dimmed context; consecutive rows in the same
- * branch collapse the trail (shown once, then implied). Tapping a row
- * — or the card header — jumps to the source page.
+ * branch collapse the trail (shown once, then implied).
+ *
+ * **A row is a place you can work, not just a destination.** Tapping it
+ * opens the client's own editor over the citing block; a long press
+ * opens the outline's own `<BlockContextMenu>` with the structural ops,
+ * because mobile has no chord surface at all. Either way the mutation
+ * is addressed to that block's **source** page. The card header is what
+ * still opens the page, and the checkbox toggles the task there.
+ *
+ * None of that is decided here. What a gesture targets is
+ * `@outl/shared/backlink-edit`'s, what each op does is
+ * `./BacklinksSection.row-ops`'s (including the one-write-at-a-time
+ * rule), which rows the sheet offers is `buildBacklinkContextActions`'s,
+ * and what a reply may touch is the host's. This file is the chrome:
+ * the grouping, the breadcrumb, the row, and where the sheet hangs.
  *
  * Renders even when the list is empty so newcomers discover the
  * bidirectional-linking feature exists. Without the empty state,
@@ -34,6 +78,14 @@ interface BacklinksSectionProps {
  * other until they happen to land on one that already has refs.
  */
 export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
+  // Every write, every piece of state and the one-write-at-a-time rule
+  // live in the sibling module — see `./BacklinksSection.row-ops`.
+  // Nothing about *which* block on *which* page is decided here.
+  const ops = createBacklinkRowOps({
+    onEditCommitted: (commit) => props.onEditCommitted(commit),
+    onError: (message) => props.onError(message),
+  });
+
   /**
    * Group backlinks by their source page. `null` source (orphan
    * blocks with no enclosing page) collapse under a synthetic key.
@@ -86,7 +138,14 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
         <Show when={props.backlinks.length > 0}>
           <button
             type="button"
-            onClick={() => props.onToggleOrder()}
+            // The card takes one write at a time, and this is a write:
+            // a reorder lands a second `PageBacklinks` into the same
+            // rows a commit's re-ask is about to replace. Guarded here
+            // rather than in the host because the host does not hold
+            // `pending` and this component holds both it and the
+            // handler — recording an exception to a rule this card
+            // states is worse than honouring it.
+            onClick={() => void ops.runReorder(props.onToggleOrder)}
             class="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium active:opacity-60"
           >
             <span aria-hidden="true">
@@ -118,9 +177,11 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
             {(group) => (
               <div class="overflow-hidden rounded-2xl bg-(--color-outl-bg-elev)">
                 {/* Card header: source page. Tapping it jumps to the
-                    page (via the group's first referencing block). */}
+                    page (via the group's first referencing block) —
+                    the one gesture here that still navigates. */}
                 <button
                   type="button"
+                  data-backlink-group={group.key}
                   onClick={() => props.onJump(group.entries[0])}
                   class="flex w-full items-center gap-2 px-4 pt-3 pb-1 text-left active:opacity-60"
                 >
@@ -143,50 +204,124 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                       link.ancestors.length > 0 &&
                       (!prev ||
                         !sameCrumbTrail(prev.ancestors, link.ancestors));
+                    // Touch has no right-click, so the hold is how this
+                    // row reaches the structural ops — mobile has no
+                    // chord surface at all. One recogniser per row, the
+                    // shape `PageSwitcher`'s page rows use.
+                    const press = createLongPress({
+                      onLongPress: () => ops.openMenu(link),
+                      disabled: () => ops.editing() === link.block_id,
+                    });
+                    // Every `page_backlinks` reply hands `<For>` fresh
+                    // objects, so a peer edit landing under a held
+                    // finger disposes this row — and the hold would
+                    // then open a sheet on a `Backlink` that is no
+                    // longer on screen. This is what `cancel` is for.
+                    onCleanup(press.cancel);
+                    const busy = () => ops.pending() === link.block_id;
                     return (
-                      <button
-                        type="button"
-                        onClick={() => props.onJump(link)}
-                        class="block w-full text-left active:opacity-60"
+                      <div
+                        class="px-4 py-3"
+                        // A cross-page write plus an
+                        // O(blocks-in-workspace) re-ask is long enough
+                        // that a row which looks idle reads as a tap
+                        // that did nothing, so the acting row says so.
+                        // `pointer-events-none` closes the three doors
+                        // back into *this* row — a second blur, a
+                        // double tap, typing into a draft about to be
+                        // replaced.
+                        //
+                        // **It is the acting row only.** `ops` refuses
+                        // a gesture on every *other* row for the same
+                        // window and nothing here shows that, so a tap
+                        // elsewhere on the card is silently dropped.
+                        // Recorded rather than claimed fixed.
+                        data-backlink-pending={busy() ? "true" : undefined}
+                        aria-busy={busy() ? "true" : undefined}
                         classList={{
                           "border-t border-(--color-outl-border)/40":
                             idx() > 0,
+                          "pointer-events-none opacity-60": busy(),
                         }}
                       >
-                        <div class="px-4 py-3">
-                          <Show when={showCrumbs}>
-                            <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
-                              <CrumbTrail crumbs={link.ancestors} />
-                            </p>
+                        <Show when={showCrumbs}>
+                          <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
+                            <CrumbTrail crumbs={link.ancestors} />
+                          </p>
+                        </Show>
+                        <div class="flex items-start gap-2">
+                          <Show when={link.todo !== null}>
+                            <BacklinkCheckbox
+                              todo={link.todo}
+                              // No tap while this row is being edited:
+                              // the task prefix is part of the draft
+                              // there, so a toggle would race the
+                              // commit. The marker stays, so entering
+                              // Insert does not shift the line.
+                              onToggle={
+                                ops.editing() === link.block_id ||
+                                !backlinkEditTarget(link)
+                                  ? undefined
+                                  : () => void ops.toggleRowTodo(link)
+                              }
+                            />
                           </Show>
-                          <div class="flex items-start gap-2">
-                            <Show when={link.todo !== null}>
-                              <BacklinkCheckbox todo={link.todo} />
-                            </Show>
-                            <p
-                              class="flex-1 text-[15px] leading-snug"
-                              classList={{
-                                "text-(--color-outl-fg-dimmer) line-through":
-                                  link.todo === "DONE",
-                              }}
-                            >
-                              <Show
-                                when={link.source_block.table}
-                                fallback={
-                                  <MarkdownInline
-                                    tokens={link.source_block.tokens}
-                                    variant="inline"
-                                  />
-                                }
+                          <Show
+                            when={ops.editing() === link.block_id}
+                            fallback={
+                              <button
+                                type="button"
+                                data-backlink-row={link.block_id}
+                                onPointerDown={press.onPointerDown}
+                                onPointerMove={press.onPointerMove}
+                                onPointerUp={press.onPointerUp}
+                                onPointerCancel={press.onPointerUp}
+                                onClick={() => {
+                                  // A completed hold produces a click
+                                  // too; without this every long press
+                                  // would also drop into Insert, under
+                                  // the sheet it just opened.
+                                  if (press.consumedClick()) return;
+                                  ops.openEditor(link);
+                                }}
+                                // `-my-3 py-3` gives the tap the row's
+                                // full height back without moving the
+                                // text the padding positions.
+                                class="-my-3 flex-1 py-3 text-left active:opacity-60"
                               >
-                                <MarkdownTable
-                                  table={link.source_block.table!}
-                                />
-                              </Show>
-                            </p>
-                          </div>
+                                <p
+                                  class="text-[15px] leading-snug"
+                                  classList={{
+                                    "text-(--color-outl-fg-dimmer) line-through":
+                                      link.todo === "DONE",
+                                  }}
+                                >
+                                  <Show
+                                    when={link.source_block.table}
+                                    fallback={
+                                      <MarkdownInline
+                                        tokens={link.source_block.tokens}
+                                        variant="inline"
+                                      />
+                                    }
+                                  >
+                                    <MarkdownTable
+                                      table={link.source_block.table!}
+                                    />
+                                  </Show>
+                                </p>
+                              </button>
+                            }
+                          >
+                            <BacklinkRowEditor
+                              text={rawTextWithTodo(link.source_block)}
+                              onCommit={(text) =>
+                                void ops.commitRow(link, text)
+                              }
+                            />
+                          </Show>
                         </div>
-                      </button>
+                      </div>
                     );
                   }}
                 </For>
@@ -195,17 +330,84 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
           </For>
         </div>
       </Show>
+
+      {/* Mounted only while open, unlike the outline's, so a test (and
+          a screen reader) can tell "no sheet" from "an empty sheet" —
+          which is exactly what an orphan row offers. */}
+      <Show when={ops.menuLink()}>
+        {(link) => (
+          <div data-backlink-menu>
+            <BlockContextMenu
+              open
+              onClose={ops.closeMenu}
+              actions={buildBacklinkContextActions(link(), {
+                toggleTodo: (l) => void ops.toggleRowTodo(l),
+                createBelow: (l) => void ops.createBelow(l),
+                createAbove: (l) => void ops.createAbove(l),
+                indent: (l) => void ops.indent(l),
+                outdent: (l) => void ops.outdent(l),
+                moveUp: (l) => void ops.moveUp(l),
+                moveDown: (l) => void ops.moveDown(l),
+                delete: (l) => void ops.requestDelete(l),
+              })}
+            />
+          </div>
+        )}
+      </Show>
+
+      {/* The same prompt the outline raises, and the same wording — the
+          case for it is stronger here, since the subtree about to go
+          with the block is not on this screen at all. */}
+      <BlockDeleteConfirm
+        pending={ops.deletePrompt()}
+        onCancel={ops.cancelDelete}
+        onConfirm={(id) => {
+          // Resolved against the live rows, not held from when the
+          // prompt opened: the dialog closes itself before confirming,
+          // and a sync may have replaced the rows meanwhile.
+          const link = props.backlinks.find((l) => l.block_id === id);
+          if (link) void ops.deleteRow(link);
+        }}
+      />
     </section>
   );
 }
 
 /**
- * Read-only checkbox marker for a backlink whose source block carries
- * a TODO/DONE state. Mirrors the visual treatment used by
- * `BulletOrCheckbox` in `BlockRow.tsx`, but is presentational only —
- * to toggle the task the user opens the source page.
+ * Checkbox marker for a backlink whose source block carries a
+ * TODO/DONE state. Mirrors the visual treatment used by
+ * `BulletOrCheckbox` in `BlockRow.tsx`, and it **toggles the task on
+ * the source page** — the user no longer has to open that page to tick
+ * a box they are already looking at.
+ *
+ * Without `onToggle` it is the marker alone, which is the honest render
+ * for a row that has no page to address a mutation to (an orphan
+ * backlink) and for the row being edited, where the task prefix is part
+ * of the draft.
  */
-function BacklinkCheckbox(props: { todo: TodoState | null }): JSX.Element {
+function BacklinkCheckbox(props: {
+  todo: TodoState | null;
+  onToggle?: () => void;
+}): JSX.Element {
+  return (
+    <Show when={props.onToggle} fallback={<CheckboxGlyph todo={props.todo} />}>
+      <button
+        type="button"
+        data-backlink-todo="true"
+        aria-label="Toggle task"
+        onClick={() => props.onToggle?.()}
+        // Padding for the finger, pulled back by the margin so the
+        // glyph keeps the baseline it shares with the text beside it.
+        class="-m-2 shrink-0 p-2 active:opacity-60"
+      >
+        <CheckboxGlyph todo={props.todo} />
+      </button>
+    </Show>
+  );
+}
+
+/** The marker itself: three states, no behaviour. */
+function CheckboxGlyph(props: { todo: TodoState | null }): JSX.Element {
   return (
     <span
       aria-hidden="true"

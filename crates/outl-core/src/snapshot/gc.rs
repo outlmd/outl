@@ -181,26 +181,14 @@ pub struct SnapshotEntry {
     dir: PathBuf,
 }
 
-/// Every `snap-*.bin` in one directory, judged, plus the body the boot
-/// selector would adopt.
+/// Every `snap-*.bin` in one directory, judged.
 #[derive(Debug)]
 pub struct Survey {
     /// One entry per `snap-*.bin`, sorted by path.
     pub entries: Vec<SnapshotEntry>,
-    best: Option<SnapshotBody>,
 }
 
 impl Survey {
-    /// The candidate a boot with no own snapshot would adopt, if any.
-    ///
-    /// This is [`crate::snapshot::read_best_from_disk`]'s directory-scan
-    /// half: same ranking, same skips, computed from the same decode
-    /// pass that produced the verdicts. One owner, so the selector and
-    /// the GC cannot develop separate opinions about which file matters.
-    pub fn into_best(self) -> Option<SnapshotBody> {
-        self.best
-    }
-
     /// The entries that may be removed.
     pub fn prunable(&self) -> impl Iterator<Item = &SnapshotEntry> {
         self.entries.iter().filter(|e| e.verdict.is_prunable())
@@ -244,17 +232,18 @@ struct Candidate {
 /// survey, not an error — a device that has never written a snapshot is
 /// a normal state.
 ///
-/// Exactly one decoded body is resident at a time: the running best. A
-/// 2,500-page workspace's snapshot is ~13 MB, and holding every
-/// candidate to compare them afterwards would spike a mobile boot by the
-/// size of the directory.
+/// **No decoded body outlives the candidate it came from.** A
+/// 2,500-page workspace's snapshot is ~13 MB, and the only thing this
+/// pass wants out of one is its `cutoff`, so each body is dropped at the
+/// end of its own iteration. Holding candidates to compare them
+/// afterwards spends that 13 MB for the whole scan, and so did holding
+/// the running best, which this did while it had an accessor to feed.
 pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
     let read = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Survey {
                 entries: Vec::new(),
-                best: None,
             })
         }
         Err(e) => {
@@ -267,7 +256,6 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
 
     let own_name = format!("snap-{own}.bin");
     let mut candidates: Vec<Candidate> = Vec::new();
-    let mut best: Option<(SelectionKey, SnapshotBody)> = None;
     let mut peer_best: Option<SelectionKey> = None;
 
     for entry in read.flatten() {
@@ -294,29 +282,15 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
                 Ok(body) => {
                     c.decoded = true;
                     c.key = selection_key(&body.cutoff, &c.name);
-                    // The device's own snapshot competes like any
-                    // other. It used to be excluded here because the
-                    // selector returned it unconditionally — and that is
-                    // precisely what stranded a freshly paired device: a
-                    // phone writes a snapshot on its first launch whose
-                    // cutoff names one actor (itself), and that tiny body
-                    // then shadowed a peer's covering twenty. Every actor
-                    // the cutoff omits puts its WHOLE history in the
-                    // delta, so the shadow turned a 0-op boot into a
-                    // full replay of the entire log.
+                    // The peer-only winner, which is what the GC reads.
+                    // Peers only is deliberate: a peer body the boot
+                    // selector would never pick *while this device's own
+                    // exists* is still the one it would pick after an
+                    // actor rotation, so collecting it would strand the
+                    // rotated device on a full replay.
                     if let Some(key) = c.key.clone() {
-                        // The peer-only winner, which is what the GC
-                        // reads. Keeping it separate from `best` is
-                        // deliberate: a peer body the selector would
-                        // never pick *while this device's own exists*
-                        // is still the one it would pick after an actor
-                        // rotation, so collecting it would strand the
-                        // rotated device on a full replay.
                         if c.name != own_name && peer_best.as_ref().is_none_or(|b| key > *b) {
-                            peer_best = Some(key.clone());
-                        }
-                        if best.as_ref().is_none_or(|(b, _)| key > *b) {
-                            best = Some((key, body));
+                            peer_best = Some(key);
                         }
                     }
                 }
@@ -365,10 +339,7 @@ pub fn survey(dir: &Path, own: ActorId) -> Result<Survey, SnapshotError> {
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-    Ok(Survey {
-        entries,
-        best: best.map(|(_, body)| body),
-    })
+    Ok(Survey { entries })
 }
 
 /// Delete one surveyed snapshot, after re-checking that the bytes the

@@ -109,7 +109,8 @@ pub fn flat_index_for_block(outline: &[OutlineNode], target: NodeId) -> Option<u
 /// is the cheaper answer when only the block itself is wanted.
 pub fn project_outline_node(workspace: &Workspace, node: NodeId) -> OutlineNode {
     let index = crate::tree::children_index(workspace, node);
-    project_node(workspace, node, &index)
+    let properties = subtree_properties(workspace, node, &index);
+    project_node(workspace, node, &index, &properties)
 }
 use outl_md::parse::OutlineNode as ParsedOutlineNode;
 use outl_md::sidecar::SidecarBlock;
@@ -162,8 +163,16 @@ pub struct OutlineNode {
     /// disagree visually.
     ///
     /// Shape mirrors [`outl_md::parse::OutlineNode::properties`].
-    /// Populated from [`outl_core::tree::Tree::properties_of`] when
-    /// the workspace is in scope, and from the parsed `.md` otherwise.
+    /// Populated from `crate::tree::group_properties_of` — one pass over
+    /// the property map for the whole projection, grouped by node —
+    /// when the workspace is in scope, and from the parsed `.md`
+    /// otherwise.
+    ///
+    /// **Not** from [`outl_core::tree::Tree::properties_of`], which
+    /// filters the whole workspace-wide map on every call: once per
+    /// block is `O(blocks × properties)`, which was 2,588 ms to project
+    /// one page on a real workspace and was paid by every GUI mutation
+    /// (root `CLAUDE.md` invariant 15).
     pub properties: Vec<(String, String)>,
     /// Pre-tokenized inline markdown for `text` (no TODO/DONE prefix).
     ///
@@ -225,6 +234,8 @@ where
 /// [`crate::backlinks_index::build_backlink_index`] both need one.
 pub use crate::tree::ChildrenIndex;
 
+use crate::tree::PropertiesByNode;
+
 /// Walk the workspace tree starting from `parent` and return the
 /// outline below it. `NodeId::root()` is the usual starting point.
 ///
@@ -233,7 +244,24 @@ pub use crate::tree::ChildrenIndex;
 /// visited node — `O(nodes²)`, 7.2 s on a 64k-node workspace.
 pub fn project_outline(workspace: &Workspace, parent: NodeId) -> Vec<OutlineNode> {
     let index = crate::tree::children_index(workspace, parent);
-    project_children(workspace, parent, &index)
+    let properties = subtree_properties(workspace, parent, &index);
+    project_children(workspace, parent, &index, &properties)
+}
+
+/// Every projected node's properties, off **one** pass over the property
+/// map rather than one per block.
+///
+/// [`crate::tree::group_properties_of`] owns the pass and what the
+/// per-node version costs; this is the subtree's id set, which the
+/// children index already holds.
+fn subtree_properties(
+    workspace: &Workspace,
+    parent: NodeId,
+    index: &ChildrenIndex,
+) -> PropertiesByNode {
+    let mut ids = crate::tree::subtree_ids(index, parent);
+    ids.sort_unstable();
+    crate::tree::group_properties_of(workspace, &ids, |v| Some(prop_value_to_string(v)))
 }
 
 /// Project the outline below `parent`, resolving each level through
@@ -248,21 +276,18 @@ fn project_children(
     workspace: &Workspace,
     parent: NodeId,
     index: &ChildrenIndex,
+    properties: &PropertiesByNode,
 ) -> Vec<OutlineNode> {
     index
         .get(&parent)
         .map(|kids| {
             kids.iter()
-                .map(|&child| project_node(workspace, child, index))
+                .map(|&child| project_node(workspace, child, index, properties))
                 .collect()
         })
         .unwrap_or_default()
 }
 
-/// Build one [`OutlineNode`] for `node` — body, todo, properties,
-/// tokens, and its subtree. Shared core behind [`project_outline`],
-/// [`project_outline_node`], and [`project_outline_node_indexed`]; the
-/// only difference between them is how children are resolved (`index`).
 /// Project a single block as a **leaf** — body, todo, properties,
 /// tokens — with an **empty** `children`.
 ///
@@ -273,47 +298,70 @@ fn project_children(
 /// workspace lock, is what froze input on a large workspace. Clients
 /// render a backlink row from the leaf's `tokens`; nothing on the
 /// backlinks path needs the subtree.
-pub(crate) fn project_outline_node_shallow(workspace: &Workspace, node: NodeId) -> OutlineNode {
+///
+/// `properties` is the caller's pre-grouped pass, for the reason
+/// [`crate::tree::group_properties_of`] exists: this runs once per
+/// referencing block across the **whole** workspace, so reading the
+/// property map here would make the index build
+/// `O(refs × properties)`. The caller groups once —
+/// `build_backlink_index` over every node, since its walk is
+/// workspace-wide.
+pub(crate) fn project_outline_node_shallow(
+    workspace: &Workspace,
+    node: NodeId,
+    properties: &PropertiesByNode,
+) -> OutlineNode {
     let raw = workspace.block_text(node).unwrap_or_default();
     let (todo, body) = split_todo(&raw);
-    let mut properties: Vec<(String, String)> = workspace
-        .tree()
-        .properties_of(node)
-        .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
-        .collect();
-    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
         text: body.to_string(),
         todo,
         collapsed: workspace.tree().is_collapsed(node),
-        properties,
+        properties: properties.get(&node).cloned().unwrap_or_default(),
         tokens,
         table,
         children: Vec::new(),
     }
 }
 
-fn project_node(workspace: &Workspace, node: NodeId, index: &ChildrenIndex) -> OutlineNode {
+/// Every node's properties, grouped once, for a walk whose scope **is**
+/// the workspace.
+///
+/// The counterpart of [`subtree_properties`] and an explicit opt-out
+/// rather than a default: a page-scoped pass over all 193k properties to
+/// read the ~80 a page owns was measured 2.7× slower than the per-node
+/// filtering it replaced ([`crate::tree::group_properties_of`] carries
+/// the numbers). This is only right when the caller really does visit
+/// every page, which [`crate::backlinks_index::build_backlink_index`]
+/// does.
+pub(crate) fn workspace_properties(workspace: &Workspace) -> PropertiesByNode {
+    let mut ids: Vec<NodeId> = workspace.tree().iter_nodes().map(|(id, _, _)| id).collect();
+    ids.sort_unstable();
+    crate::tree::group_properties_of(workspace, &ids, |v| Some(prop_value_to_string(v)))
+}
+
+fn project_node(
+    workspace: &Workspace,
+    node: NodeId,
+    index: &ChildrenIndex,
+    properties: &PropertiesByNode,
+) -> OutlineNode {
     let raw = workspace.block_text(node).unwrap_or_default();
     let (todo, body) = split_todo(&raw);
-    let mut properties: Vec<(String, String)> = workspace
-        .tree()
-        .properties_of(node)
-        .map(|(k, v)| (k.to_string(), prop_value_to_string(v)))
-        .collect();
-    crate::tree::sort_in_presentation_order(&mut properties);
     let (tokens, table) = OutlineNode::rendered(body);
     OutlineNode {
         id: node.to_string(),
         text: body.to_string(),
         todo,
         collapsed: workspace.tree().is_collapsed(node),
-        properties,
+        // A lookup, never a scan: `properties` was grouped once for the
+        // whole projection — see `subtree_properties`.
+        properties: properties.get(&node).cloned().unwrap_or_default(),
         tokens,
         table,
-        children: project_children(workspace, node, index),
+        children: project_children(workspace, node, index, properties),
     }
 }
 
@@ -344,17 +392,9 @@ pub fn read_page_outline(root: &Path, meta: &PageMeta) -> Result<PageOutline, Ac
     read_page_outline_inner(root, meta, SidecarAccess::Migrating)
 }
 
-/// Whether reading the sidecar may also migrate a legacy dotted one to
-/// its modern name.
-#[derive(Clone, Copy)]
-enum SidecarAccess {
-    /// `outl_md::resolve_sidecar_path`, which renames a legacy sidecar
-    /// in place. Every ordinary caller: they run inside an open
-    /// workspace, so the guards are held.
-    Migrating,
-    /// `outl_md::readable_sidecar_path`, which never writes.
-    ReadOnly,
-}
+mod sidecar;
+use sidecar::SidecarAccess;
+pub use sidecar::SidecarIdentity;
 
 /// [`read_page_outline`] for a caller that holds no workspace guards.
 ///
@@ -383,14 +423,7 @@ fn read_page_outline_inner(
     // next commit writes that emptiness back. See `read_for_rewrite`.
     let md_text = outl_md::read_for_rewrite(&md_path)?;
     let parsed = outl_md::parse::parse(&md_text);
-    let sidecar = match access {
-        SidecarAccess::Migrating => {
-            outl_md::sidecar::read(&outl_md::resolve_sidecar_path(&md_path)).ok()
-        }
-        SidecarAccess::ReadOnly => {
-            outl_md::readable_sidecar_path(&md_path).and_then(|p| outl_md::sidecar::read(&p).ok())
-        }
-    };
+    let sidecar = self::sidecar::read(&md_path, access);
 
     let mut nodes = Vec::with_capacity(parsed.blocks.len());
     let mut iter = sidecar
@@ -403,6 +436,7 @@ fn read_page_outline_inner(
     Ok(PageOutline {
         nodes,
         warnings: parsed.warnings,
+        sidecar_identity: self::sidecar::identify(&md_path, sidecar.as_ref(), &meta.id),
     })
 }
 
@@ -448,6 +482,10 @@ pub struct PageOutline {
     /// Non-fatal parser recoveries — empty when the `.md` is clean.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<outl_md::parse::ParseWarning>,
+    /// Whether the sidecar these ids came from describes **this** page.
+    /// Reported, never enforced: [`SidecarIdentity`] carries why an
+    /// `Err` on the page-open path is the deleting half of invariant 8.
+    pub sidecar_identity: SidecarIdentity,
 }
 
 /// Walk `nodes` in place, setting `collapsed` from

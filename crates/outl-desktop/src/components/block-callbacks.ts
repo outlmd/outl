@@ -112,3 +112,40 @@ export interface BlockCallbacks {
    *  is the zoom gesture. Optional so contexts without zoom omit it. */
   onFocusBlock?: (id: string) => void;
 }
+
+/**
+ * The subset of {@link BlockCallbacks} that `<BlockEditor />` actually
+ * asks for — the questions a *textarea* has, as against the questions a
+ * rendered row has.
+ *
+ * It exists because `<BlockEditor />` is mounted in two places now: an
+ * outline row, where `<OutlineView />` answers all eighteen, and a
+ * backlink row, where the mutation is addressed to another page and only
+ * these are answerable. Requiring the full interface there would have
+ * meant seven stubs for gestures the editor never invokes — seven
+ * statements about behaviour that are not true.
+ *
+ * `BlockCallbacks` satisfies it, so every existing call site is
+ * unchanged.
+ *
+ * The two paste members are **optional**, and that is the one place a
+ * host can decline. `<BlockEditor />`'s paste handlers `preventDefault`
+ * before they call out, so a stub returning `null` does not leave the
+ * keystroke alone — it swallows the paste. Omitting them instead routes
+ * every paste to the webview's own literal splice, the same early return
+ * a code fence already takes, and the spliced text still commits through
+ * whatever `onCommit` is.
+ */
+export type EditorCallbacks = Pick<
+  BlockCallbacks,
+  | "onCommit"
+  | "onEnter"
+  | "onCreateBefore"
+  | "resolveCaretExit"
+  | "openCaretLanding"
+  | "onIndent"
+  | "onOutdent"
+  | "onDeleteEmpty"
+  | "onRunPluginCommand"
+> &
+  Partial<Pick<BlockCallbacks, "onPasteMarkdown" | "onPastePlain">>;

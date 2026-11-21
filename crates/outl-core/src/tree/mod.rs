@@ -144,11 +144,26 @@ impl Tree {
     /// Every property currently set on `node`, as `(key, value)` pairs
     /// in unspecified order.
     ///
-    /// Used by projection layers (mobile / TUI outline DTO) to
-    /// snapshot the block's properties in one pass without scanning
-    /// the whole property map. Callers that need a stable order
-    /// should sort the result themselves — the underlying `HashMap`
-    /// makes no ordering guarantees.
+    /// **`O(total properties in the workspace)` per call.** It filters
+    /// the same map [`Self::iter_properties`] walks, so the cost tracks
+    /// the workspace rather than how many properties `node` carries.
+    /// Right for one node, read once: the clipboard's
+    /// `text_properties_of`, a page's own properties, a template
+    /// instantiation.
+    ///
+    /// **Wrong inside a walk.** Once per block is
+    /// `O(blocks × properties)`, which on a 175k-node / 193k-property
+    /// workspace was 2,588 ms to project a single 688-block page — paid
+    /// by every GUI mutation, because this doc comment used to claim the
+    /// opposite ("in one pass without scanning the whole property map")
+    /// and both readers were written by someone who had read that
+    /// sentence. A caller walking a subtree or the whole tree wants
+    /// `outl_actions::tree::group_properties_of`, which groups this same
+    /// map once for a set of nodes. Root `CLAUDE.md` invariant 15.
+    ///
+    /// Callers that need a stable order should sort the result
+    /// themselves — the underlying `HashMap` makes no ordering
+    /// guarantees.
     pub fn properties_of(&self, node: NodeId) -> impl Iterator<Item = (&str, &PropValue)> {
         self.properties
             .iter()

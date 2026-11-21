@@ -57,6 +57,7 @@ pub mod backlinks_crumbs;
 pub mod backlinks_index;
 mod backlinks_keys;
 pub mod backlinks_sort;
+pub mod backlinks_write;
 pub mod backup;
 pub mod block;
 pub mod capture;
@@ -114,6 +115,7 @@ pub use backlinks_index::{
     build_backlink_index, build_backlink_index_from_disk, BacklinkIndex, SplitBacklinks,
 };
 pub use backlinks_sort::sort_backlinks;
+pub use backlinks_write::CrossPageWrite;
 pub use block::{
     append_block, append_forest, append_tree, create_after, create_after_or_append, create_before,
     create_before_or_append, create_under, delete, edit_text, indent, mark_done, move_after,
@@ -149,7 +151,7 @@ pub use outline::{
     flat_index_for_block, flatten_subtree_paths, project_outline, project_outline_node,
     project_parsed_subtree, read_page_outline, read_page_outline_readonly,
     read_page_outline_with_workspace, read_page_view, read_page_view_with_workspace, OutlineNode,
-    PageOutline,
+    PageOutline, SidecarIdentity,
 };
 pub use page::{
     delete as delete_page, find_by_slug, is_valid_slug, list_all as list_pages,
@@ -184,6 +186,6 @@ pub use todo::{
     cycle_todo, set_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX,
 };
 pub use tree::{
-    children_of, enclosing_page_id, is_trashed, page_slug_of, position_after,
+    children_of, enclosing_page_id, is_live, is_trashed, page_slug_of, position_after,
     position_for_new_last_child, walk_subtree,
 };

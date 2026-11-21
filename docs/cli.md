@@ -276,7 +276,7 @@ Range is inclusive on both sides and emits one entry per day in the interval —
 
 Drops one line into the workspace's capture inbox (`<root>/.outl/captures/`) **without opening the workspace**.
 It becomes a block at the end of the journal for the day it was captured the next time a client is open — the desktop and phone apps drain on launch and on every return to the foreground, the TUI drains at launch.
-RFC 0363 owns the design; [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app) is the user-facing half.
+RFC 0363 owns the design; [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app) is the user-facing half.
 
 This is the entry point for every scriptable capture gesture: a macOS Service or Shortcut, Raycast, Alfred, a hotkey daemon, a shell alias.
 

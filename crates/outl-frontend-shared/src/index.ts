@@ -10,4 +10,5 @@ export * from "./outline";
 export * from "./palette";
 export * from "./paste";
 export * from "./autocomplete";
+export * from "./backlink-edit";
 export * from "./warnings";

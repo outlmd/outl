@@ -201,6 +201,32 @@ pub extern "C" fn outl_ios_peer_count() -> u32 {
 
 // ── Android exports (JNI, bound by `NativeSync` in Kotlin) ───────────────
 //
+// **DO NOT DELETE EITHER FUNCTION BELOW ON THE EVIDENCE OF A SEARCH.**
+// They are declared in
+// `gen/android/app/src/main/java/app/outl/mobile_app/NativeSync.kt` as
+// `@JvmStatic external fun backgroundSync(): Boolean` and
+// `@JvmStatic external fun peerCount(): Int`, and the JVM binds them by
+// *mangling* the package, class and method name into the symbol the
+// `.so` exports: `app.outl.mobile_app` + `NativeSync` + `backgroundSync`
+// becomes `Java_app_outl_mobile_1app_NativeSync_backgroundSync` (the
+// `_1` is the escaped `_` in `mobile_app`). Neither side spells the
+// other's name in *code*, so the link is invisible to `rg`, to
+// `cargo clippy`, to the Kotlin compiler and to every dead-code tool.
+// What records it is this comment, the matching one in `NativeSync.kt`
+// (which spells both symbols in full so a search from here lands
+// there), and the mapping table in `docs/android-platform.md`.
+//
+// Live consumers: `SyncWorker.kt` calls `NativeSync.backgroundSync()`,
+// and `OutlBackgroundSync.kt` gates both WorkManager schedules on
+// `NativeSync.peerCount() > 0`. Delete, rename or move either function,
+// or change this crate's package or the Kotlin class or method names,
+// and Android background sync dies at runtime with an
+// `UnsatisfiedLinkError` on first use, after a build that is green in
+// every language and a test suite that cannot reach it.
+// `proguard-rules.pro` keeps R8 from doing the same thing to the Kotlin
+// half in release builds. The iOS pair above is spelled out literally
+// in Swift, so only this pair is unsearchable.
+//
 // Same three operations, same bodies. The style follows `android_jni.rs`
 // exactly: `EnvUnowned` + `with_env` (which wraps the body in
 // `catch_unwind`) + [`jni::errors::LogErrorAndDefault`] (which logs, never

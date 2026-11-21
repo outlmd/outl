@@ -280,7 +280,7 @@ Don't add code for these unless explicitly asked:
 - Character cursor inside the selected block in desktop Normal mode.
   TUI-only today.
   The desktop's vim mode has only a selected block id, so the char-level vim ops `x`/`X`/`D`/`C`/`s`/`r`/`f`/`F`/`~`/`e` surface a status-line nudge instead of firing.
-  See `outl-desktop/CLAUDE.md` → "Vim parity".
+  See `docs/desktop-keybindings.md` → "Vim parity".
 
 ## Coding conventions
 

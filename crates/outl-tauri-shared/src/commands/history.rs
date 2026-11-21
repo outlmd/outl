@@ -6,7 +6,7 @@
 //! RFC 0254 phase 1), snapshots are the page's rendered `.md`, and the
 //! restore routes through `outl_actions::restore_page_md` so every
 //! undo / redo is new ops in the log — never a rewrite of it.
-//! `helpers::finish_in_page_with` is the recording side of this pair.
+//! `commit::finish_in_page_with` is the recording side of this pair.
 //!
 //! Moved here from `outl-desktop/src-tauri/src/commands/history.rs`
 //! (RFC 0254 phase 1): the body only ever depended on [`AppHost`], so a

@@ -1,8 +1,11 @@
 //! Inline backlinks section — rendered *below* the outline, separated
 //! by a full-width `─` rule. Each source page contributes a header
-//! followed by its referencing block (with children) as a mini-outline.
+//! followed by **one row per referencing block** — never a subtree.
+//! `Backlink::source_block` carries no children by design (the #179
+//! freeze fix; that field's doc owns why), so there is nothing deeper
+//! to draw and `Focus::Backlink { idx }` names a whole row.
 //!
-//! Selection of a backlink block (`Focus::Backlink { idx, sub_path }`)
+//! Selection of a backlink block (`Focus::Backlink { idx }`)
 //! highlights the bullet the same way the outline does — same theme
 //! `selected_bullet`, same cursor styles. The TUI scrolls so the
 //! selection stays visible (handled by the caller in `view::render_main`).
@@ -15,7 +18,7 @@ use crate::state::{App, EditTarget, Focus, Mode};
 use crate::view::inline::render_markdown_inline;
 use crate::view::outline::{emit_block_lines, RenderMode};
 use crate::view::row_chrome::{push_property_row, FoldMarker};
-use outl_actions::{Backlink, BacklinkCrumb, OutlineNode};
+use outl_actions::{BacklinkCrumb, OutlineNode};
 use ratatui::text::{Line, Span};
 
 /// Do two ancestor trails name the same chain of blocks (by id)?
@@ -174,20 +177,19 @@ pub(crate) fn render_backlinks_inline(
             out.push(render_crumb_trail(&bl.ancestors, app));
         }
 
-        // Sub-path inside the source_block that's currently focused,
-        // if any. The mini-outline highlights it the same way the
-        // main outline highlights `app.selected`.
+        // Which row of this backlink's mini-outline is focused,
+        // highlighted the way the main outline highlights
+        // `app.selected`. `Focus::Backlink` names the citing block and
+        // nothing under it, so that is always the subtree root (`[]`);
+        // the renderer below still walks children because
+        // `source_block` is a generic outline node.
         let focus_path: Option<&[usize]> = match &app.focus {
-            Focus::Backlink {
-                idx: fidx,
-                sub_path,
-            } if *fidx == idx => Some(sub_path.as_slice()),
+            Focus::Backlink { idx: fidx } if *fidx == idx => Some(&[]),
             _ => None,
         };
 
         let mut current_path: Vec<usize> = Vec::new();
         render_backlink_node(
-            bl,
             &bl.source_block,
             0,
             &mut current_path,
@@ -202,14 +204,16 @@ pub(crate) fn render_backlinks_inline(
     (out, selected_line)
 }
 
-/// Recursive helper: emit a backlink's source block (and its children)
-/// as a mini-outline. Tracks `current_path` to know when to flag the
+/// Recursive helper: emit a backlink's source block and any children
+/// it carries. In practice that is one row — `source_block` is always
+/// shallow (see the module doc) — and the recursion stays because the
+/// node type is the generic `OutlineNode` the outline renders.
+/// Tracks `current_path` to know when to flag the
 /// focused row, and consults `app.mode` to render an in-place edit
 /// buffer when the cursor sits on the block currently being edited
 /// (cross-page Insert through `EditTarget::SourcePage`).
 #[allow(clippy::too_many_arguments)]
 fn render_backlink_node(
-    bl: &Backlink,
     node: &OutlineNode,
     indent: u32,
     current_path: &mut Vec<usize>,
@@ -230,25 +234,20 @@ fn render_backlink_node(
         app.theme.bullet
     };
 
-    // Is this exact block the one the user is editing in place?
-    // `Mode::Insert.block_path` lives in the *source page* coordinate
-    // system; reconstruct the equivalent absolute path here and
-    // compare. When it matches, render the live buffer with a caret
-    // (same UX as outline Insert).
+    // Is this exact block the one the user is editing in place? One id
+    // comparison, because `EditTarget::SourcePage` names the block
+    // itself. It used to reconstruct an absolute path out of
+    // `bl.source_block_path` + `current_path` and compare that against
+    // `Mode::Insert.block_path` — a second coordinate system, and one
+    // that answered "yes" for whichever block shared the path.
     let editing_here = is_focused
-        && match &app.mode {
+        && matches!(
+            &app.mode,
             Mode::Insert {
-                target: EditTarget::SourcePage { path, .. },
-                block_path,
+                target: EditTarget::SourcePage { block, .. },
                 ..
-            } if Some(path.as_path()) == bl.source_path.as_deref() => {
-                let prefix = &bl.source_block_path;
-                block_path.len() == prefix.len() + current_path.len()
-                    && block_path.starts_with(prefix)
-                    && &block_path[prefix.len()..] == current_path.as_slice()
-            }
-            _ => false,
-        };
+            } if Some(*block) == crate::actions::node_id(&node.id)
+        );
 
     // Source block carries the body without the TODO/DONE prefix —
     // reattach it so the outline renderer shows the same checkbox
@@ -300,7 +299,6 @@ fn render_backlink_node(
     for (i, child) in node.children.iter().enumerate() {
         current_path.push(i);
         render_backlink_node(
-            bl,
             child,
             indent + 1,
             current_path,
@@ -315,285 +313,7 @@ fn render_backlink_node(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use outl_core::id::ActorId;
-    use outl_core::workspace::Workspace;
-    use tempfile::TempDir;
-    use unicode_width::UnicodeWidthStr;
-
-    fn test_app() -> (App, TempDir) {
-        let dir = TempDir::new().unwrap();
-        let actor = ActorId::new();
-        let ws = Workspace::open_in_memory(actor).unwrap();
-        let app = App::new_for_tests(
-            dir.path().to_path_buf(),
-            ws,
-            actor,
-            crate::theme::default_theme(),
-            false,
-        )
-        .unwrap();
-        (app, dir)
-    }
-
-    fn row_text(line: &Line<'_>) -> String {
-        line.spans.iter().map(|s| s.content.as_ref()).collect()
-    }
-
-    fn node(text: &str, properties: Vec<(String, String)>) -> OutlineNode {
-        OutlineNode {
-            id: "blk-test01".into(),
-            text: text.into(),
-            todo: None,
-            collapsed: false,
-            properties,
-            tokens: Vec::new(),
-            table: None,
-            children: Vec::new(),
-        }
-    }
-
-    fn backlink(source_block: OutlineNode) -> Backlink {
-        Backlink {
-            block_id: source_block.id.clone(),
-            block_text: source_block.text.clone(),
-            todo: None,
-            source_page: None,
-            source_block,
-            source_block_path: Vec::new(),
-            ancestors: Vec::new(),
-            source_path: None,
-        }
-    }
-
-    /// Zooming into a block is a request for that subtree and nothing
-    /// else. The backlinks belong to the **page**, so under a zoom —
-    /// where the header is a block — they are an answer to a question
-    /// nobody asked, about something other than what is on screen.
-    ///
-    /// Driven through the pending-index notice because that is the one
-    /// section state reachable without building an index: it proves the
-    /// renderer asks `page_sections_visible`, which a test of the
-    /// predicate alone cannot.
-    #[test]
-    fn a_zoom_takes_the_pages_backlinks_off_screen() {
-        let (mut app, _dir) = test_app();
-        let (_tx, rx) = std::sync::mpsc::channel();
-        app.backlink_index_rx = Some(rx);
-        assert!(
-            !render_backlinks_inline(&app, 40).0.is_empty(),
-            "the section is on screen on the full page"
-        );
-
-        app.zoom_stack.push(vec![0]);
-
-        assert!(
-            render_backlinks_inline(&app, 40).0.is_empty(),
-            "a zoom hides the page's backlinks"
-        );
-    }
-
-    /// The breadcrumb is the one line on the panel that used to be
-    /// drawn as source: a branch reading `#alinhamento [[buser/…]] …`
-    /// above a citing block that reads as prose. Dimming it was never
-    /// a reason not to parse it.
-    #[test]
-    fn a_crumb_trail_renders_its_markdown_instead_of_the_source() {
-        let (app, _dir) = test_app();
-        let branch = "#alinhamento [[buser/team/vendas]] internet 0800";
-        let crumbs = vec![BacklinkCrumb {
-            id: "blk-anc001".into(),
-            text: branch.into(),
-            tokens: outl_md::tokenize_owned(branch),
-        }];
-
-        let text = row_text(&render_crumb_trail(&crumbs, &app));
-
-        assert!(text.contains("buser/team/vendas"), "{text:?}");
-        assert!(text.contains("#alinhamento"), "{text:?}");
-        assert!(!text.contains("[["), "{text:?}");
-        assert!(!text.contains("]]"), "{text:?}");
-    }
-
-    /// Dim is the **line** style, so prose takes it while a ref keeps
-    /// the hue the tokenizer's render gave it. A per-span dim would
-    /// flatten the trail back to one colour and lose what the tokens
-    /// are; styling nothing would make it as loud as the block below.
-    #[test]
-    fn a_crumb_trail_dims_its_prose_and_keeps_its_ref_colour() {
-        let (app, _dir) = test_app();
-        let text = "ver [[hub]]";
-        let crumbs = vec![BacklinkCrumb {
-            id: "blk-anc001".into(),
-            text: text.into(),
-            tokens: outl_md::tokenize_owned(text),
-        }];
-
-        let line = render_crumb_trail(&crumbs, &app);
-
-        assert_eq!(line.style, app.theme.dim);
-        let hub = line
-            .spans
-            .iter()
-            .find(|s| s.content.as_ref() == "hub")
-            .expect("the ref renders as its name");
-        assert_eq!(hub.style, app.theme.ref_link);
-    }
-
-    /// The separator carries the same `›` every GUI client draws
-    /// (`CRUMB_SEPARATOR` in `@outl/shared/markdown`).
-    #[test]
-    fn a_crumb_trail_joins_its_steps_with_one_separator() {
-        let (app, _dir) = test_app();
-        let crumb = |text: &str| BacklinkCrumb {
-            id: text.into(),
-            text: text.into(),
-            tokens: outl_md::tokenize_owned(text),
-        };
-
-        let text = row_text(&render_crumb_trail(
-            &[crumb("parent"), crumb("child")],
-            &app,
-        ));
-
-        assert_eq!(text, "  parent › child");
-    }
-
-    /// #319, third caller. `render_block` has the same rule and its own
-    /// test; this loop is a separate copy of the geometry, and it is the
-    /// copy that had already drifted (it never drew `property_glyph`).
-    /// A regression here would be invisible to the outline's test.
-    #[test]
-    fn a_backlink_property_row_starts_in_its_blocks_text_column() {
-        let (app, _dir) = test_app();
-        let bl = backlink(node(
-            "cites the page",
-            vec![("priority".into(), "high".into())],
-        ));
-
-        let mut out = Vec::new();
-        render_backlink_node(
-            &bl,
-            &bl.source_block,
-            1,
-            &mut Vec::new(),
-            None,
-            &app,
-            &mut out,
-            &mut None,
-            0,
-        );
-
-        let column_of = |line: &Line<'_>, token: &str| {
-            let text = row_text(line);
-            let at = text
-                .find(token)
-                .unwrap_or_else(|| panic!("no {token:?} in {text:?}"));
-            text[..at].width()
-        };
-        assert_eq!(
-            column_of(&out[1], "priority:: "),
-            column_of(&out[0], "cites the page"),
-            "the backlink property row is not in the block's text column"
-        );
-    }
-
-    /// The outline and this mini-outline are one render now
-    /// (`push_property_row`), so a `remind::` reads the same in both
-    /// panes. It did not before: this loop never drew the glyph, and
-    /// nothing failed when the two disagreed.
-    #[test]
-    fn a_backlink_property_row_draws_the_same_glyph_the_outline_does() {
-        let (app, _dir) = test_app();
-        let bl = backlink(node(
-            "cites the page",
-            vec![("remind".into(), "9am".into())],
-        ));
-
-        let mut out = Vec::new();
-        render_backlink_node(
-            &bl,
-            &bl.source_block,
-            0,
-            &mut Vec::new(),
-            None,
-            &app,
-            &mut out,
-            &mut None,
-            0,
-        );
-
-        let mut expected = Vec::new();
-        push_property_row(0, "remind", "9am", false, &app, &mut expected, 0);
-        assert_eq!(row_text(&out[1]), row_text(&expected[0]));
-        assert!(row_text(&out[1]).contains('⏰'), "{:?}", row_text(&out[1]));
-    }
-
-    /// A property value too wide for the pane wraps instead of being
-    /// clipped at the right edge with nothing to say it was.
-    #[test]
-    fn a_long_property_value_wraps_instead_of_being_cut() {
-        let (app, _dir) = test_app();
-        let bl = backlink(node(
-            "cites the page",
-            vec![(
-                "template".into(),
-                "the quick brown fox jumps over the lazy dog".into(),
-            )],
-        ));
-
-        let mut out = Vec::new();
-        render_backlink_node(
-            &bl,
-            &bl.source_block,
-            0,
-            &mut Vec::new(),
-            None,
-            &app,
-            &mut out,
-            &mut None,
-            24,
-        );
-
-        let rows: Vec<String> = out[1..].iter().map(row_text).collect();
-        assert!(rows.len() > 1, "expected a wrap, got {rows:?}");
-        assert!(
-            rows.concat().contains("lazy dog"),
-            "the tail of the value was dropped: {rows:?}"
-        );
-    }
-}
+mod tests;
 
 #[cfg(test)]
-mod empty_section_tests {
-    use super::empty_section_notice;
-
-    #[test]
-    fn a_page_with_backlinks_gets_no_notice() {
-        assert_eq!(empty_section_notice(true, true, false), None);
-        assert_eq!(empty_section_notice(true, true, true), None);
-    }
-
-    #[test]
-    fn a_page_with_none_and_a_settled_index_gets_no_notice() {
-        // Genuinely zero backlinks: the section stays absent, which is
-        // the pre-existing behaviour and the right one.
-        assert_eq!(empty_section_notice(true, false, false), None);
-    }
-
-    #[test]
-    fn a_still_building_index_says_so_instead_of_nothing() {
-        assert!(
-            empty_section_notice(true, false, true).is_some(),
-            "a pending index must be distinguishable from zero backlinks"
-        );
-    }
-
-    #[test]
-    fn the_toggle_wins_over_everything() {
-        // `B` off means the user asked for no section at all.
-        assert_eq!(empty_section_notice(false, false, true), None);
-        assert_eq!(empty_section_notice(false, true, true), None);
-    }
-}
+mod empty_section_tests;

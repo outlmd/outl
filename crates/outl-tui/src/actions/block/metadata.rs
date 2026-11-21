@@ -1,11 +1,19 @@
 //! Block-level and page-level metadata writes: properties, TODO
 //! prefix cycle, the `pinned::` flag.
 //!
-//! These commit straight to disk through `save()` (or the source-page
-//! variant for backlinks) and bypass Insert mode entirely — they're
-//! invoked from slash commands, chord shortcuts, or the command
-//! palette.
+//! These bypass Insert mode entirely — they're invoked from slash
+//! commands, chord shortcuts, or the command palette. A write to the
+//! page on screen commits straight to disk through `save()`; a write to
+//! a **backlink row** is one op on the citing block's id, through
+//! [`App::commit_backlink_mutation`].
+//!
+//! The two embed-source helpers below are the exception, and still
+//! render the source page's `.md`. That is **scope, not a blocker**:
+//! they are about embeds rather than backlinks, so they were left out
+//! of the move onto the op log. `BlockEntry` does carry the `id` and
+//! the `source_slug` a commit would need.
 
+use super::backlink_gesture::BacklinkGesture;
 use crate::outline_ops::{node_at_path, node_at_path_mut, path_for_index};
 use crate::state::{App, Focus, ToastKind, View};
 
@@ -127,10 +135,9 @@ impl App {
 
     /// Cycle the focused block's task state: none → `TODO ` →
     /// `DOING ` → `DONE ` → none.
-    /// Dispatches by `Focus`: outline blocks edit `app.page`
-    /// directly; backlink blocks route through
-    /// [`Self::toggle_todo_backlink`] which loads the source page off
-    /// disk.
+    /// Dispatches by `Focus`: outline blocks edit `app.page` directly;
+    /// a backlink row is one [`outl_actions::toggle_todo`] on the citing
+    /// block's id, through [`Self::commit_backlink_mutation`].
     ///
     /// A query-result row is a special outline block: its whole text is a
     /// single `!((blk-…))` embed token. Cycling it in place would prefix
@@ -156,8 +163,14 @@ impl App {
                 }
                 self.save();
             }
-            Focus::Backlink { idx, sub_path } => {
-                self.toggle_todo_backlink(idx, &sub_path);
+            Focus::Backlink { .. } => {
+                if let Some(target) = self.focused_backlink_target_or_report() {
+                    self.commit_backlink_mutation(
+                        target,
+                        BacklinkGesture::MarkerFromLoggedText,
+                        outl_actions::toggle_todo,
+                    );
+                }
             }
         }
     }
@@ -166,15 +179,27 @@ impl App {
     /// embed row. The row itself is one `!((blk-…))` token, so we resolve
     /// the handle to its origin page, load that page, flip the referenced
     /// block's prefix, and save through [`Self::save_page_with`] so
-    /// reconcile keeps IDs stable — mirroring [`Self::toggle_todo_backlink`].
+    /// reconcile keeps IDs stable.
+    ///
+    /// **This is the `.md`-first route, still, and that is scope
+    /// rather than a blocker.** The backlink chords moved onto the op
+    /// log and left this one behind deliberately: it is about embeds,
+    /// not backlinks.
+    ///
+    /// Nothing stops it following. `WorkspaceIndex::resolve_block_ref`
+    /// hands back a `BlockEntry`, which carries `id: NodeId` and
+    /// `source_slug` — both keys [`Self::commit_backlink_mutation`]
+    /// needs — and the destructuring below throws `entry.id` away. A
+    /// stale id is already its `NotInTree` arm. What the migration owes
+    /// is this function's *other* half: the auto-run re-run and the
+    /// same-page reload, neither of which the backlink path has.
     ///
     /// After the source page lands we re-run the current page's auto-run
     /// blocks (the query fence) against the freshly-patched index, so the
     /// result list reflects the new state: a `DONE` item drops off a
     /// `status: todo` query on the spot.
     ///
-    /// No undo snapshot — same rationale as the backlink path: undo here
-    /// shouldn't silently flip a TODO in a different file.
+    /// No undo snapshot.
     fn cycle_embed_source_status(&mut self, handle: &str) {
         // The source block may live on the *current* page, whose in-memory
         // AST can hold a coalesced edit not yet on disk. Flush first so the
@@ -233,9 +258,10 @@ impl App {
 
     /// Land the focused block on `DONE` outright, whatever its state was.
     /// Dispatch mirrors [`Self::toggle_todo`] exactly — outline blocks edit
-    /// `app.page` directly, backlink blocks route through
-    /// [`Self::mark_done_backlink`], and an embed-only row resolves to its
-    /// source page rather than prefixing the token in place.
+    /// `app.page` directly, a backlink row is one
+    /// [`outl_actions::mark_done`] on the citing block's id, and an
+    /// embed-only row resolves to its source page rather than prefixing
+    /// the token in place.
     ///
     /// Bound to `g D`. Unlike `Ctrl+T`, this never cycles: pressing it on a
     /// block already `DONE` is a no-op on the content, and pressing it from
@@ -260,8 +286,14 @@ impl App {
                 }
                 self.save();
             }
-            Focus::Backlink { idx, sub_path } => {
-                self.mark_done_backlink(idx, &sub_path);
+            Focus::Backlink { .. } => {
+                if let Some(target) = self.focused_backlink_target_or_report() {
+                    self.commit_backlink_mutation(
+                        target,
+                        BacklinkGesture::MarkerFromLoggedText,
+                        outl_actions::mark_done,
+                    );
+                }
             }
         }
     }
@@ -438,5 +470,116 @@ mod property_edit_tests {
         );
     }
 }
+#[cfg(test)]
+mod backlink_task_tests {
+    //! `Ctrl+T` and `g D` on a backlink row write to a page the user is
+    //! not looking at. They used to do it by rendering that page's whole
+    //! `.md` and letting `reconcile_md` infer the ops; the op log is the
+    //! source of truth, so the op comes first and the `.md` is
+    //! downstream of it.
+    //!
+    //! These drive the real dispatch (`App::toggle_todo` /
+    //! `App::mark_done`) over a real two-page workspace and a real
+    //! backlink index, because the arm under test resolves its target
+    //! through `backlinks_for_current`.
+
+    use crate::actions::block::test_support::workspace_with_a_backlink;
+
+    #[test]
+    fn toggling_a_backlinks_task_lands_as_an_op() {
+        let (mut app, _d, _source) = workspace_with_a_backlink();
+        let target = app
+            .focused_backlink_target()
+            .expect("a healthy backlink row resolves");
+
+        app.toggle_todo();
+
+        assert_eq!(
+            app.workspace.block_text(target.block).as_deref(),
+            Some("TODO mentions [[target]]"),
+            "the cycle never reached the op log on the citing block"
+        );
+    }
+
+    /// The citing block's text lives in the op log, so cycling it does
+    /// not need the source page's projection to be on this disk.
+    ///
+    /// The `.md`-first path could not do it at all: it read the file
+    /// first and reported `cannot read backlink source` when that
+    /// failed. A page a peer has shipped ops for but whose `.md` has
+    /// not arrived is exactly that state.
+    #[test]
+    fn toggling_a_backlinks_task_needs_no_md_on_this_disk() {
+        let (mut app, _d, source) = workspace_with_a_backlink();
+        let target = app
+            .focused_backlink_target()
+            .expect("a healthy backlink row resolves");
+        std::fs::remove_file(&source).expect("drop the source page's projection");
+
+        app.toggle_todo();
+
+        assert_eq!(
+            app.workspace.block_text(target.block).as_deref(),
+            Some("TODO mentions [[target]]"),
+            "the cycle went looking for a `.md` instead of the op log"
+        );
+    }
+
+    /// `mark_done` is **not** `toggle_todo`. The citing block carries no
+    /// marker, so one cycle would arm `TODO` — which starts the task
+    /// instead of closing it.
+    #[test]
+    fn marking_a_backlink_done_lands_on_done_outright() {
+        let (mut app, _d, _source) = workspace_with_a_backlink();
+        let target = app
+            .focused_backlink_target()
+            .expect("a healthy backlink row resolves");
+
+        app.mark_done();
+
+        assert_eq!(
+            app.workspace.block_text(target.block).as_deref(),
+            Some("DONE mentions [[target]]"),
+            "`g D` has to settle the task in one press, from any state"
+        );
+    }
+
+    /// [#431](https://github.com/outlmd/outl/issues/431): a cross-page
+    /// op snapshots the page it changes, under that page's own path, so
+    /// `top_applies_here` only offers it once the user opens that page.
+    ///
+    /// The `.md`-first `g D` recorded nothing at all, on the reasoning
+    /// that "undo here shouldn't silently flip a TODO in a different
+    /// file" — true while a popped snapshot was applied blind, and an
+    /// exemption that outlived its premise once #430 landed.
+    #[test]
+    fn marking_a_backlink_done_leaves_an_undo_entry_for_the_source_page() {
+        let (mut app, _d, source) = workspace_with_a_backlink();
+        app.undo.clear();
+
+        app.mark_done();
+
+        let snap = app
+            .undo
+            .iter()
+            .find(|s| s.view_path == source)
+            .unwrap_or_else(|| {
+                panic!(
+                    "no undo entry for {}; stack holds {:?}",
+                    source.display(),
+                    app.undo.iter().map(|s| &s.view_path).collect::<Vec<_>>()
+                )
+            });
+        assert!(
+            snap.page
+                .blocks
+                .iter()
+                .any(|b| b.text == "mentions [[target]]"),
+            "the snapshot must carry the pre-mark text, got {:?}",
+            snap.page.blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests;

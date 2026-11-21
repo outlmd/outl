@@ -5,7 +5,7 @@
  * **Never move this to `@outl/shared`:** the command, the registration
  * and the `actionPerformed` event are all mobile-only, so a shared
  * wrapper would hand the desktop an IPC call that fails.
- * `crates/outl-mobile/CLAUDE.md` → Reminders → Actionable banners.
+ * `docs/mobile-internals.md` → "Reminders", "Actionable banners".
  */
 
 import { invoke } from "@tauri-apps/api/core";

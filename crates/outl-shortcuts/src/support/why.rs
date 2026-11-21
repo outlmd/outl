@@ -11,7 +11,7 @@
 
 /// The desktop has no character cursor inside a block, so every
 /// vim op that addresses a column has nowhere to land.
-/// See RFC 0070 and `outl-desktop/CLAUDE.md` → "Vim parity".
+/// See RFC 0070 and `docs/desktop-keybindings.md` → "Vim parity".
 pub const NO_CHAR_CURSOR: &str =
     "This vim op needs a character cursor inside the block, which only the TUI has. \
      Edit the block and use the arrow keys, or run it from the TUI.";

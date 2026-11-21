@@ -1,15 +1,17 @@
 //! Enter / commit / abort Insert mode.
 //!
 //! Two entry paths: outline edits land on `app.page` via
-//! `EditTarget::CurrentPage`, backlink edits load the source page
-//! fresh from disk via `EditTarget::SourcePage`. Commit fans back out
-//! into either `save()` (current page) or `save_page_with(.., false)`
-//! (source page). Abort throws away the in-flight buffer.
+//! `EditTarget::CurrentPage`, backlink edits name the citing block by
+//! id via `EditTarget::SourcePage`. Commit fans back out into either
+//! `save()` (current page) or `commit_backlink_mutation` (source page,
+//! one op on the op log). Abort throws away the in-flight buffer.
 
+use super::backlink_gesture::BacklinkGesture;
+use super::backlink_target::BacklinkTarget;
 use crate::edit_buffer::EditBuffer;
 use crate::outline_ops::{node_at_path, node_at_path_mut};
 use crate::state::{App, EditTarget, Focus, Mode};
-use outl_md::parse::{parse, OutlineNode};
+use outl_md::parse::OutlineNode;
 
 /// Where to drop the Insert-mode cursor when entering Insert from
 /// Normal. Mirrors vim's three entry points: `I` (start of line),
@@ -66,49 +68,70 @@ impl App {
         };
     }
 
-    /// Insert path for a backlink block. Loads the source page fresh
-    /// from disk (the indexed copy may lag a beat), resolves the
-    /// absolute path inside that AST, and stashes both in the
-    /// `EditTarget::SourcePage` so `commit_insert` knows where to
-    /// write back.
+    /// Insert path for a backlink block. Resolves the citing block's
+    /// id, seeds the buffer from the **op log** and stashes the pair in
+    /// `EditTarget::SourcePage` so `commit_insert` can key the op on it.
+    ///
+    /// No `.md` is read here. The old version parsed the source page off
+    /// disk and edited that AST, which handed the buffer any bytes
+    /// sitting beside the sidecar — and then wrote them back as the
+    /// user's own text. The op log is the source of truth (invariant 1),
+    /// so it is what the buffer starts from.
     fn enter_insert_backlink(&mut self, pos: InsertCursor) {
-        let (source_path, abs_path) = {
-            let Focus::Backlink { idx, sub_path } = &self.focus else {
-                return;
-            };
-            let backlinks = self.backlinks_for_current();
-            let Some(bl) = backlinks.get(*idx) else {
-                return;
-            };
-            let Some(path) = bl.source_path.clone() else {
-                return;
-            };
-            let mut full = bl.source_block_path.clone();
-            full.extend_from_slice(sub_path);
-            (path, full)
-        };
-
-        // Authoritative read: don't trust the cached `source_block`
-        // — it might be stale relative to a recent disk write (e.g.
-        // `outl serve` reconciled in the background).
-        let Ok(text) = std::fs::read_to_string(&source_path) else {
-            self.status = format!("cannot read backlink source: {}", source_path.display());
+        let Some(target) = self.focused_backlink_target() else {
             return;
         };
-        let source_page = parse(&text);
-        let Some(node) = node_at_path(&source_page.blocks, &abs_path) else {
-            self.status = "backlink source block missing — index may be stale".into();
+        // Whether the block is live is asked here, before the edit
+        // starts — and through `outl_actions::is_live`, the one owner of
+        // that question, so this gate, the write gate in
+        // `commit_backlink_mutation` and the backend's own
+        // `block::ensure_live` cannot ask it differently. This crate
+        // used to spell the pair out inline here and nothing at all over
+        // there, which is how the structural chords ended up acting on
+        // trashed blocks.
+        //
+        // **`block_text` alone is not that question.** It answers from
+        // the content cache or the Yrs doc and neither consults the
+        // tree, so the text survives a delete — the record just moves
+        // under the trash — and a block a peer deleted passed this gate.
+        // The user typed into it and `Esc` then refused the commit with
+        // the keystrokes gone.
+        //
+        // Refusing at the entry is what keeps the two halves of the
+        // refusal catalog honest, too: nothing has been typed yet, so
+        // the `unchanged` sentence is the true one. The "your text could
+        // not be saved" half belongs to a surface with no entry gate.
+        let live_text = self
+            .workspace
+            .block_text(target.block)
+            .filter(|_| outl_actions::is_live(&self.workspace, target.block));
+        let Some(original_text) = live_text else {
+            self.status = outl_actions::refusal::stale_backlink_block_unchanged_refusal(
+                &self.workspace,
+                target.block,
+            )
+            .to_string();
             return;
         };
-        let original_text = node.text.clone();
         let mut buf = EditBuffer::from_text(&original_text);
         buf.cursor = insert_cursor_for(pos, self.cursor_col, buf.chars.len());
         self.mode = Mode::Insert {
             target: EditTarget::SourcePage {
-                path: source_path,
-                page: source_page,
+                page: target.page,
+                block: target.block,
             },
-            block_path: abs_path,
+            // Empty on purpose: the id is the cursor here, and an empty
+            // path matches no block in `App.page` (`path_for_index`
+            // always returns at least one index). `view::outline`'s
+            // "is this row being edited" check reads `block_path`
+            // without consulting the target — it is gated on
+            // `Focus::Outline` instead, which is the stronger guard
+            // while focus and target agree. The empty path is what
+            // holds when they *disagree*, which is reachable: the
+            // self-citing reload used to leave `Focus::Outline` with a
+            // `SourcePage` edit live, and `[0]` would have painted the
+            // outline's first block as the one under the caret.
+            block_path: Vec::new(),
             buffer: buf,
             original_text,
         };
@@ -118,12 +141,19 @@ impl App {
     ///
     /// Routes by `EditTarget`:
     /// - `CurrentPage`: mutate `app.page`, snapshot undo, `save()`.
-    /// - `SourcePage`: mutate the loaded source AST and write it
-    ///   via `save_page_with(.., true)` so the source page's index
-    ///   entry (block refs, page title, icon) stays current. No
-    ///   undo snapshot — cross-page history would be confusing
-    ///   (undo here = revert change to another file you can't
-    ///   currently see).
+    /// - `SourcePage`: one `Op::Edit` on the citing block through
+    ///   [`App::commit_backlink_mutation`], which owns the flush, the
+    ///   undo snapshot under the *source* page's path, the projection
+    ///   and the announce.
+    ///
+    /// **The buffer is consumed on the first line**, which is what
+    /// makes the `SourcePage` arm the one place in the panel where a
+    /// refusal can cost the user something that exists nowhere else. So
+    /// it carries [`BacklinkGesture::TypedText`]: the commit asks the
+    /// source page no ahead-of-log question for it (the buffer was
+    /// seeded from the op log, so the logged text *is* what was
+    /// edited), and any refusal it does reach says the text could not
+    /// be saved instead of describing a file.
     pub(crate) fn commit_insert(&mut self) {
         if let Mode::Insert {
             target,
@@ -160,24 +190,25 @@ impl App {
                         node.text = original_text;
                     }
                 }
-                EditTarget::SourcePage { path, mut page } => {
+                EditTarget::SourcePage { page, block } => {
                     if new_text != original_text {
-                        if let Some(node) = node_at_path_mut(&mut page.blocks, &block_path) {
-                            node.text = new_text;
-                        }
-                        // `rebuild_index = true` runs the cheap
-                        // `WorkspaceIndex::patch_page` on the source
-                        // page (not a full workspace rescan) so
-                        // block-ref resolution (`((blk-XXXXXX))`) on
-                        // the just-edited blocks doesn't lag behind
-                        // the on-disk text. Backlinks themselves are
-                        // computed on-demand from the workspace via
-                        // `backlinks_for_current`, so no extra cache
-                        // touch is needed for those.
-                        self.save_page_with(&path, &page, true);
+                        // One op on the citing block, through the
+                        // shared commit pipeline. Nothing here renders
+                        // the source page's `.md`: `commit_backlink_mutation`
+                        // projects it *from* the op log afterwards, and
+                        // withholds that projection when the file holds
+                        // lines no op produced (invariant 8) — which is
+                        // the right half to withhold. Withholding the
+                        // *op* instead is what dropped `new_text` with
+                        // nothing on screen to say so.
+                        self.commit_backlink_mutation(
+                            BacklinkTarget { page, block },
+                            BacklinkGesture::TypedText,
+                            |ws, hlc, node| outl_actions::edit_text(ws, hlc, node, &new_text),
+                        );
                     }
-                    // No restore needed — `page` was a working copy
-                    // and is dropped here.
+                    // Nothing to restore on a no-op — this route never
+                    // touched `App.page`.
                 }
             }
         }
@@ -201,9 +232,10 @@ impl App {
         else {
             return;
         };
-        // SourcePage: nothing to restore on `app.page` (we never
-        // mutated it). The working copy in `target.page` is just
-        // dropped.
+        // SourcePage: nothing to restore anywhere. That route never
+        // mutated `app.page`, and it carries two ids rather than a
+        // working copy, so dropping the buffer *is* the abort — no op
+        // was emitted for it.
         if let (EditTarget::CurrentPage, Some(node)) =
             (target, node_at_path_mut(&mut self.page.blocks, &block_path))
         {

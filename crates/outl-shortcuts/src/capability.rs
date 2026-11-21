@@ -260,6 +260,75 @@ pub enum Capability {
     /// everywhere, by design — and not about embedding part of a page,
     /// which is what a block embed is for.
     PageEmbed,
+
+    /// Editing a block in place from a backlink row, without leaving
+    /// the page being read.
+    ///
+    /// Covers the **direct** backlink rows, and a verdict here is a
+    /// claim about **nine** operations plus a way to the source page,
+    /// rather than about one surface. The nine: the text edit, task
+    /// state, delete, indent, outdent, move up / down, and creating a
+    /// sibling below / above. Each acts on the referencing block on its
+    /// *own* page, and all three clients perform every one of them,
+    /// which is why `outl-mobile`'s `capability_parity.rs` names every
+    /// command behind this row — creation was the one that went
+    /// unrecorded while mobile shipped a subset and nothing in any
+    /// build could notice.
+    ///
+    /// A one-tap **mark DONE** is deliberately not one of the nine.
+    /// `Action::MarkDone` owns that verdict and declares it `Missing`
+    /// on mobile, whose long-press sheet draws eight rows and no
+    /// mark-done; a capability row claiming it as well would be two
+    /// catalogs disagreeing about one operation, which is the shape
+    /// `outl-shortcuts/CLAUDE.md` forbids.
+    ///
+    /// The namespace-mention rows (`namespace_backlinks`) stay
+    /// read-only: that list is capped, so it is a different surface
+    /// with a different question.
+    ///
+    /// A capability and not an `Action` on purpose. Many chords reach
+    /// it and none of them is *the* chord for it, and
+    /// `Action::ToggleBacklinks` already covers the panel's visibility,
+    /// which is a different fact. Recording this one there would be two
+    /// catalogs disagreeing about one thing.
+    ///
+    /// Indent / outdent / move have no visible result on a row (it is
+    /// one flat block and the effect lands on a page the user is not
+    /// looking at), and that cost is accepted on every client and
+    /// written down in
+    /// `docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`
+    /// rather than declared `Partial`.
+    ///
+    /// The TUI is `Partial` for a different reason, and the only one:
+    /// nothing in its backlinks panel opens the page a row's block
+    /// lives on — not the group header, not a click, not `Enter`. The
+    /// desktop and mobile both have that gesture on the card header,
+    /// so they are `Full`.
+    BacklinkInlineEdit,
+
+    /// Turning the selected block into a blockquote, or back, in one
+    /// gesture — without typing the `"> "` marker.
+    ///
+    /// **Not about rendering one.** Every client draws a quoted block
+    /// with its own chrome (`split_quote` / `stripQuoteFromTokens` are
+    /// shared), so a row about the visual would say nothing. This row
+    /// is only whether the client has something that *writes* the
+    /// marker for you. That is the half `toggle_quote` owns — and the
+    /// half that normalises `"> TODO foo"` into the canonical
+    /// `"TODO > foo"` on the way through, so an externally authored
+    /// block comes back in order.
+    ///
+    /// A capability and not an [`crate::Action`] because the catalog's
+    /// `support()` match and `defaults.rs` both sit at their file-size
+    /// baseline, so no chord can be declared for it yet — and a chord
+    /// is not what any client reaches it by today. The desktop's route
+    /// is the inline `/` menu, which takes rows that are not actions
+    /// (`/upload`, `/date-today`) by the same sentinel it uses here.
+    ///
+    /// The lesser states name the route that exists rather than
+    /// apologising: `> ` at the front of the block is still a quote on
+    /// every client, and it is the same text this writes.
+    BlockquoteToggle,
 }
 
 impl Capability {
@@ -296,6 +365,8 @@ impl Capability {
         Capability::CrashReportingDisclosure,
         Capability::AboutAndSupport,
         Capability::PageEmbed,
+        Capability::BacklinkInlineEdit,
+        Capability::BlockquoteToggle,
     ];
 }
 
@@ -307,7 +378,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_24: usize = 24;
+    const EXPECTED_26: usize = 26;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -335,6 +406,8 @@ mod tests {
             Capability::CrashReportingDisclosure => "CrashReportingDisclosure",
             Capability::AboutAndSupport => "AboutAndSupport",
             Capability::PageEmbed => "PageEmbed",
+            Capability::BacklinkInlineEdit => "BacklinkInlineEdit",
+            Capability::BlockquoteToggle => "BlockquoteToggle",
         }
     }
 
@@ -351,9 +424,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_24,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_24} variants \
-             : add the new variant to Capability::ALL (and bump EXPECTED_24)",
+            EXPECTED_26,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_26} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_26)",
             names.len(),
         );
     }

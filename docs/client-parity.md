@@ -187,6 +187,8 @@ the drift this RFC exists to prevent.
 | `CrashReportingDisclosure` | ❌ Crash reporting is on, and the terminal does not announce it the way the apps do — run `outl telemetry status` to see where it stands, or read the full list of what a report carries at outl.app/privacy. | ✅ | ✅ |
 | `AboutAndSupport` | ❌ The terminal has no About screen. Run `outl --version` for the build you are running, and the project, its issue tracker and its sponsor page are at github.com/outlmd/outl. | ✅ | ❌ The phone app doesn't show its version or link out yet. Check the build in the App Store or TestFlight, and open github.com/outlmd/outl in a browser to report something or support the project. |
 | `PageEmbed` | ✅ | ✅ | ✅ |
+| `BacklinkInlineEdit` | ⚠️ The TUI edits a backlink row in place but can't open the page the block lives on — press Ctrl+P and type the page name from the row's header to jump there. | ✅ | ✅ |
+| `BlockquoteToggle` | ❌ There's no one-gesture blockquote here yet. Type `> ` at the front of a block to quote it, and delete those two characters to unquote it. On a task block it goes after the marker rather than before it, which is what keeps the checkbox. | ✅ | ❌ There's no one-gesture blockquote here yet. Type `> ` at the front of a block to quote it, and delete those two characters to unquote it. On a task block it goes after the marker rather than before it, which is what keeps the checkbox. |
 <!-- END GENERATED: capability-parity -->
 
 ## What this table does not cover

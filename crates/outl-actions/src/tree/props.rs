@@ -11,6 +11,8 @@
 //! front matter, and `page-frontmatter` reached the property panel as an
 //! editable chip whose deletion froze the page (issue #281).
 
+use std::collections::HashMap;
+
 use outl_core::id::NodeId;
 use outl_core::property::PropValue;
 use outl_core::workspace::Workspace;
@@ -120,6 +122,72 @@ pub(crate) fn renderable_prop_value(value: &PropValue) -> Option<String> {
 /// the ratchet that stops a ninth.
 pub fn sort_in_presentation_order(properties: &mut [(String, String)]) {
     properties.sort_by(|a, b| a.0.cmp(&b.0));
+}
+
+/// The properties of one projection, grouped by the node carrying them
+/// and [`sort_in_presentation_order`]ed per node.
+pub(crate) type PropertiesByNode = HashMap<NodeId, Vec<(String, String)>>;
+
+/// Every property carried by one of `ids`, grouped by node, off **one**
+/// pass over the workspace's property map.
+///
+/// The single owner of "the properties of these nodes", and it needs one
+/// because [`outl_core::tree::Tree::properties_of`] filters the whole
+/// workspace-wide map on *every* call — its own doc comment used to claim
+/// the opposite ("without scanning the whole property map"), which is how
+/// two projections of the same subtree ended up on opposite sides of this.
+/// That sentence is gone; the accessor now states its cost and names this
+/// function.
+/// [`crate::render_page_md`] collapsed its per-node filters into a single
+/// pass years ago and measured 13.8 ms → 4.4 ms per page;
+/// [`crate::project_outline`] kept asking per node, so the same page cost
+/// `O(blocks × properties)`. On the real 175k-node / 193k-property
+/// workspace that is **2,590 ms** for one 688-block page — paid by every
+/// GUI mutation, because the reply is built from the tree (root
+/// `CLAUDE.md` invariant 15's first question: who else is asking this).
+///
+/// Two things about the shape, both load-bearing:
+///
+/// - **`ids` must be sorted.** The scan binary-searches it per property,
+///   so an unsorted slice silently drops properties instead of failing.
+/// - **The scope is the subtree, never the workspace.** Grouping all
+///   193k properties to read the ~80 a page owns was measured 2.7×
+///   *slower* than the per-node filtering it replaced. The
+///   whole-workspace map is right for a whole-workspace pass
+///   ([`crate::index::build_properties_index`]) and wrong for one page.
+///
+/// `value` is the caller's mapping from a [`PropValue`] to its string
+/// form, and `None` drops the property. It is a parameter rather than a
+/// fixed rule because the two readers legitimately disagree about
+/// `PropValue::List`: the renderer has no syntax for it
+/// ([`renderable_prop_value`]) while the outline DTO joins it
+/// (`crate::outline::prop_value_to_string`). Folding them together here
+/// would be a behaviour change wearing a refactor's clothes.
+pub(crate) fn group_properties_of<F>(
+    workspace: &Workspace,
+    ids: &[NodeId],
+    value: F,
+) -> PropertiesByNode
+where
+    F: Fn(&PropValue) -> Option<String>,
+{
+    let mut grouped: PropertiesByNode = HashMap::new();
+    for (node, key, raw) in workspace.tree().iter_properties() {
+        if ids.binary_search(&node).is_err() {
+            continue;
+        }
+        let Some(text) = value(raw) else {
+            continue;
+        };
+        grouped
+            .entry(node)
+            .or_default()
+            .push((key.to_string(), text));
+    }
+    for properties in grouped.values_mut() {
+        sort_in_presentation_order(properties);
+    }
+    grouped
 }
 
 /// Textual properties of `node`, minus the page model's book-keeping

@@ -28,6 +28,15 @@
 * [Reminders](reminders.md)
 * [Deep links (`outl://`)](deep-links.md)
 
+## Clients
+
+* [Clients and shared logic](clients.md)
+  * [Authoring gestures, client by client](client-editing.md)
+  * [Backlinks on every client](client-backlinks.md)
+  * [A page over its life: history, deletion, revival, rename](client-page-lifecycle.md)
+  * [What reaches disk and the other devices, and when](client-sync.md)
+  * [When outl is not the app in front of you](client-outside-the-app.md)
+
 ## Integrations
 
 * [CLI](cli.md)
@@ -60,6 +69,9 @@
   * [Markdown pipeline](primitives-markdown.md)
   * [Editing actions and client features](primitives-actions.md)
   * [The `outl-actions` public surface](outl-actions-surface.md)
+* [`@outl/shared`: what the clients render](frontend-shared-views.md)
+* [`@outl/shared`: the wire DTOs and the `invoke()` wrappers](frontend-shared-wire.md)
+* [`@outl/shared`: the pure helpers](frontend-shared-logic.md)
 
 ## Project
 
@@ -70,7 +82,11 @@
 * [CI and release](ci-and-release.md)
 * [Discussions mirror to Discord](discussions-discord.md)
 * [Desktop UX behaviour](desktop-ux.md)
+  * [How the desktop resolves a keystroke](desktop-keybindings.md)
+  * [How the desktop page surface is wired](desktop-page-surface.md)
 * [Mobile UX behaviour](mobile-ux.md)
+  * [Which mobile component owns what](mobile-components.md)
+  * [How each mobile surface is wired](mobile-internals.md)
 * [iOS platform integration](ios-platform.md)
 * [iOS App Store review notes](app-store/review-notes.md)
 * [Android platform integration](android-platform.md)

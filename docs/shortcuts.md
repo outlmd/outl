@@ -128,7 +128,7 @@ The TUI is vim-style by definition.
 | Yank current block to register + OS clipboard (`Y`, alias of `y y`) | `Y` | `Y` | long-press → "Copy text" |
 | Paste OS clipboard **with** formatting (outline structure / multi-paragraph split) | `p` | `Cmd/Ctrl+V` | paste |
 | Paste OS clipboard **without** formatting (raw text, single block) | `P` | `Cmd/Ctrl+Shift+V` | — |
-| Open `[[ref]]` / `#tag` / `((blk-…))` under cursor | `Enter` | `Enter` | tap |
+| Open `[[ref]]` / `#tag` / `((blk-…))` under cursor | `Enter` | `Enter` *(= `i`, no char cursor — follow a ref by clicking the token)* | tap |
 | New block below + Insert | `o` | `o` / `Cmd/Ctrl+Shift+Enter` *(no vim needed)* | toolbar `+` |
 | New block above + Insert (creates a sibling *before* the selected block) | `O` | `O` | long-press → "New block above" |
 | Indent block | `Tab` | `Tab` | drag right |
@@ -188,6 +188,34 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 | Delete to end of block (`D`) / change to end (`C`) | `D` / `C` | — |
 | Replace char under cursor with next typed char | `r{ch}` | — |
 | Toggle case of char under cursor; advance | `~` | — |
+
+### On a backlink row
+
+`j` / `k` cross the separator from the outline's last block into the "Linked from" rows, and a row there is **not read-only**.
+Every chord below acts on the citing block on **its own** page, not on the page you are reading.
+
+The chords are the ones the tables above already carry — this says what each of them *means* here, and nothing more.
+
+| Operation | On a backlink row |
+|---|---|
+| Enter Insert (`i` / `I` / `a` / `Enter`) | edit the cited block in place; `Esc` commits and returns to the row |
+| Cycle task state | flips the cited block's state, on its page |
+| Mark DONE (`g D`) | completes the cited block, on its page |
+| Delete block (`d d`) | deletes it, and its subtree, which the row does not show |
+| Indent / outdent | reparents it among its own page's blocks |
+| Move block up / down | reorders it among its own page's siblings |
+| New block below / above (`o` / `O`) | creates the sibling **on the cited block's page** |
+| Open the source page | nothing in the panel does it — `Ctrl+P`, then the page name from the row's header |
+| Undo (`u`) | nothing here — the entry belongs to the page that changed, so open that page first |
+
+Three of those have no visible result, deliberately: indent, outdent and move act on a row drawn as one flat block, with its siblings and children off screen.
+`o` / `O` does not put the cursor in the new block either, because a brand-new sibling cites nothing and so is a backlink of no page — except when the page cites *itself*, where the block really is in the outline on screen.
+The full reasoning, and why a cross-page edit **refuses** where an ordinary one re-targets: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
+
+On mobile there is no chord surface at all, so these arrive as a tap plus a long-press sheet: [`mobile-ux.md`](mobile-ux.md#backlink-rows--a-place-you-can-work).
+**Mark DONE is the one row that does not cross over**, because `Action::MarkDone` is `Missing` on that client everywhere and not just here — the sheet toggles task state through to DONE instead, which is what its nudge in the catalog says.
+Nothing on the phone reads that matrix yet, so the sentence is written and the user does not see it.
+`Capability::BacklinkInlineEdit` therefore covers the other nine operations and leaves mark done to the action row that owns it; what its own TUI `Partial` records is the missing way to the source page, the row the table above just gained.
 
 ---
 
@@ -356,7 +384,7 @@ See [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) for 
 **This one is for contributors, not for looking up a key.**
 It sits under the table above because it is the next question after it: having found the handler, what does the handler have to do?
 Six decisions behind individual desktop handlers, each a rule rather than a preference, and each with an obvious alternative that is wrong in a way that is quiet.
-The architectural half (the three categories of vim op, why the char-cursor ops have no handler, how Visual mode is reachable without vim) is in [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md) → "Vim parity".
+The architectural half (the three categories of vim op, why the char-cursor ops have no handler, how Visual mode is reachable without vim) is in [`docs/desktop-keybindings.md`](desktop-keybindings.md) → "Vim parity".
 
 **This section is a declared home for desktop handler behaviour contracts, alongside the per-client CLAUDE.md — and that is a widening, not what the catalog crate already said.**
 [`crates/outl-shortcuts/CLAUDE.md`](../crates/outl-shortcuts/CLAUDE.md) → "What this crate does NOT own" sends those contracts to the per-client doc and gives *this* page a different job: "`docs/tui.md` / `docs/shortcuts.md` for user-facing copy".

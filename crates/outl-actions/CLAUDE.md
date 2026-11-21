@@ -106,7 +106,7 @@ Only the mutation can fail the commit. A projection failure arrives after
 the op log already holds the truth, so `project` returns nothing and an
 implementation that needs to surface the failure keeps it on `self` — the
 Tauri clients do exactly that (`TauriCommitHooks` in
-`outl-tauri-shared/src/helpers.rs`). Aborting there would report an error
+`outl-tauri-shared/src/commit.rs`). Aborting there would report an error
 for a change that did happen.
 
 **Why it lives here.** The sequence had one implementation, generic over
@@ -153,6 +153,15 @@ Three decisions in it:
   Root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate)
   invariant 15 is the rule this serves; [`docs/performance.md`](../../docs/performance.md)
   is how to read it.
+
+### A projection reads the property map once, not once per block
+
+`tree::group_properties_of` is the single owner of "the properties of these nodes", because `outl_core::tree::Tree::properties_of` **scans the whole workspace-wide map on every call**.
+Its doc comment promised the opposite; that sentence is gone, and the accessor names this function now.
+`render_page_md` had collapsed its per-node reads into one pass; `project_outline`, the DTO every GUI mutation replies with, had not, which was **2,588 ms to project one page** on the maintainer's workspace against 10.8 ms to render it.
+`ids` must be sorted (the pass binary-searches it), the scope is the walk (`outline::workspace_properties` is the explicit opt-out), and the value mapping is a parameter because the renderer drops a `PropValue::List` the outline DTO joins.
+`tests/outline_property_pass.rs` is the ratchet and found a third instance while being written.
+The incident and what is still unfixed: [`docs/performance.md`](../../docs/performance.md).
 
 ## The `tree → .md` executor
 
@@ -369,6 +378,21 @@ Two rules:
 The two builders reach `tokens` by different routes, so `tests/backlinks_index_disk.rs` pins that they cannot disagree; only the from-disk one is on the path a user sees.
 Client-side: `@outl/shared/markdown::CrumbTrail` for both GUIs, `outl_tui::view::backlinks::render_crumb_trail` for the terminal.
 
+## A cross-page backlink write, and what "live" means
+
+Two questions a gesture on a backlink row has to answer before it writes to a page the user is not looking at.
+Both were answered in the clients, more than once each.
+
+- **`backlinks_write::CrossPageWrite` owns what the write computes its result *from*** — the three-way `Structural` / `MarkerFromLoggedText` / `TypedText` distinction and the `computed_from_the_logged_text` predicate on it, which is the one question the invariant-8 ahead-of-log gate turns on.
+  It was the same method name implemented in two crates, over the TUI's three gestures and the Tauri backend's seven row ops.
+  A drift there means one client refusing an operation the other performs, and the cost is a marker that walks `TODO → DOING → DONE` in the log while the row reads unchanged, until `outl reconcile --ahead-of-log` drops it.
+  The **vocabularies stay per client** (the TUI's typed-text gesture is a separate command on the GUI side, and the seven concrete ops have no TUI counterpart), so each client maps on with an exhaustive `match` and asks.
+  `every_shape_verdict_matches_what_the_action_behind_it_reads` is what keeps the one answer honest: it runs each action twice over two different priors and checks the verdict against whether the write it emits actually depended on the text the log held.
+- **`tree::is_live` owns what "live" means** — a record in the tree, and not under the trash.
+  It is the `bool` half of `block::ensure_live`, which now asks it rather than spelling the pair out, and the two client gates in front of a cross-page write ask it too instead of hand-rolling `contains(..) && !is_trashed(..)` because `ensure_live` is private.
+  `ensure_live`'s own doc already carried the argument from the last time this walk had two copies: *"Two copies of one walk where only one is safe is how the unbounded one ends up on the hottest path."*
+  `block::tests::the_bool_and_the_result_cannot_disagree_about_live` asserts the two shapes together rather than each against its own expectation, because the defect is not a wrong answer but two answers.
+
 ## Merging and renaming pages
 
 Single owners, [RFC 0557](../../docs/rfcs/0557-page-merge-and-rename.md):
@@ -398,7 +422,7 @@ The same translation closed two separate gaps on the way in from a foreign graph
 ## Opening an external file (`open_with`)
 
 `open_with.rs` owns the "Open With → outl" import: an OS gesture hands a client a `.md` / `.txt` that lives outside the workspace, and what lands is an ordinary page.
-User-facing contract: [`docs/clients.md` → Opening a file from the OS](../../docs/clients.md#opening-a-file-from-the-os-open-with--outl).
+User-facing contract: [`docs/client-outside-the-app.md` → Opening a file from the OS](../../docs/client-outside-the-app.md#opening-a-file-from-the-os-open-with--outl).
 
 Four decisions worth not re-litigating:
 
@@ -445,7 +469,7 @@ Page ids are deterministic (`page::page_id_from_slug`), so deleting a page and l
 `find_by_slug` only scans children of `NodeId::root`, so it never sees that root sitting under `TRASH_ROOT`, and `Op::Create` is a no-op for a node already in the tree: routing a reopen through the plain create path left the root trashed forever, with every edit on it rejected as `NotInTree` (issue #473, most visible on the journal, reopened every day).
 `page::open_or_create` now checks `tree::is_trashed` on that deterministic id and, when it is, routes through `page_revive::revive_trashed_page` instead: the root moves back under `NodeId::root` with a fresh `Op::Move`, its pre-delete children are trashed individually (still ordinary, restorable trash entries, just detached from the page), and the slug/kind/title properties are re-applied.
 A reopened journal is treated as a fresh daily: `open_journal`'s template re-stamp runs because `find_by_slug` did not find it before the revive.
-This is deliberately **not** the same operation as `trash::restore`, which still refuses a page (see "Restoring a deleted block" in `docs/clients.md`); that refusal is about putting an arbitrary trashed node back wherever it fits today, not about reopening the one page a slug has always deterministically named.
+This is deliberately **not** the same operation as `trash::restore`, which still refuses a page (see "Restoring a deleted block" in `docs/client-page-lifecycle.md`); that refusal is about putting an arbitrary trashed node back wherever it fits today, not about reopening the one page a slug has always deterministically named.
 
 ## Task state convention
 
@@ -518,8 +542,12 @@ When adding a new operation here:
    If a client crate already has a helper for the same concept, lift it here (and delete the client copy) — even if it's a small refactor.
    The `flatten_backlink_subtree` → `flatten_subtree_paths` move from `outl-md` is the canonical pattern: one owner, every client wraps.
 3. **Generalize the parameter set** when migrating.
-   The Backlink rewrite added `source_block: OutlineNode` + `source_path` so *both* the mobile linear renderer and the TUI subtree renderer could share the same struct.
+   The Backlink rewrite added `source_block: OutlineNode` + `source_path` so *both* the mobile linear renderer and the TUI's then-subtree renderer could share the same struct.
    Capping features at "what mobile needs today" would force the TUI to keep its own copy.
+   **The subtree half of that is now unused**, which is the other edge of the same rule.
+   `source_block` carries no children on either builder (the #179 freeze fix), so every client draws one row per citing block.
+   Generalising is still right at migration time — you cannot know which client needs the wider shape.
+   But a parameter no caller fills is a claim the type keeps making, which is how `Focus::Backlink`'s `sub_path` stayed alive as dead code for months.
 
 The root [`CLAUDE.md`](../../CLAUDE.md#reuse-first) "Reuse-first" section documents the policy at the workspace level, in full at [`docs/contributing.md`](../../docs/contributing.md#reuse-first-no-parallel-implementations).
 

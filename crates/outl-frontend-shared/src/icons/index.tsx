@@ -65,19 +65,6 @@ export const HistoryIcon = (p: IconProps) => (
   </Svg>
 );
 
-export const PinIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M9 3.5h6M10 3.5v5l-3 4h10l-3-4v-5M12 12.5V21" />
-  </Svg>
-);
-
-export const ClockIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M12 7.5V12l3 2" />
-  </Svg>
-);
-
 export const BellIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -102,37 +89,6 @@ export const CheckSquareIcon = (p: IconProps) => (
 export const PlusIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />
-  </Svg>
-);
-
-export const ListIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />
-  </Svg>
-);
-
-export const HashIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18" />
-  </Svg>
-);
-
-export const IndentIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M10 6h10M10 12h10M10 18h10M3.5 8.5 6.5 12l-3 3.5" />
-  </Svg>
-);
-
-export const OutdentIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M10 6h10M10 12h10M10 18h10M6.5 8.5 3.5 12l3 3.5" />
-  </Svg>
-);
-
-export const LinkIcon = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
-    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   </Svg>
 );
 

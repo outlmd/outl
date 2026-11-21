@@ -4,8 +4,18 @@ package app.outl.mobile_app
  * Rust JNI for background sync, implemented in `src-tauri/src/bg_sync.rs`.
  *
  * Separate from Tauri's generated `Rust` object and from `NativeSetup` so the
- * JNI symbol names are stable and greppable from both sides:
- * `Java_app_outl_mobile_1app_NativeSync_<method>`.
+ * JNI symbol names are stable and greppable from both sides. The JVM derives
+ * each one from this package + class + method name, so the two bindings below
+ * resolve to exactly:
+ *
+ * - `Java_app_outl_mobile_1app_NativeSync_backgroundSync`
+ * - `Java_app_outl_mobile_1app_NativeSync_peerCount`
+ *
+ * Spelled out in full on purpose: nothing in the Rust source names this file,
+ * so these two lines are what a search for the Rust symbol finds. Renaming the
+ * package, this object or either method renames the symbol the `.so` must
+ * export, and nothing fails to compile — background sync just stops at
+ * runtime. `proguard-rules.pro` keeps R8 from doing it for us in release.
  *
  * Both calls are safe to make from **any** thread and from a process
  * that never started an Activity. `backgroundSync` blocks for as long as the

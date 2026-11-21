@@ -434,9 +434,15 @@ pub fn read_from_disk(
 /// snapshot whose per-actor cutoff reaches the highest HLC (the most
 /// up-to-date, smallest delta), with the actor id as a tie-break.
 ///
-/// The directory scan is [`gc::survey`], so the ranking the selector
-/// applies and the verdict the GC records come from one decode pass and
-/// one comparison. It **reads only**: opening a workspace is something
+/// The directory scan is [`select::adopt_order`], which ranks each
+/// candidate from its **header**. [`gc::survey`] is a second pass over
+/// the same directory and ranks only the bodies that decode, because
+/// its output is a delete. So the two rank independently, over
+/// different evidence, and what keeps them from developing separate
+/// opinions about which file matters is the one function they both rank
+/// through, `select::selection_key`.
+///
+/// This path **reads only**: opening a workspace is something
 /// `outl doctor` does in its documented read-only mode, so the bulk
 /// sweep belongs to [`gc::sweep`] on the writer's worker thread, not
 /// here. The single deletion on this path is
@@ -446,16 +452,22 @@ pub fn read_best_from_disk(
     snapshots_dir: &Path,
     prefer_actor: ActorId,
 ) -> Result<Option<SnapshotBody>, SnapshotError> {
-    // Read this device's own first — but only to catch an unusable one
-    // and drop it. It no longer short-circuits the choice: `survey` ranks
-    // it against the peers like any other candidate. Returning it
-    // unconditionally is what stranded a freshly paired device, whose own
-    // first-launch snapshot names a single actor and shadowed a peer's
-    // covering every actor in the workspace.
-    // Rank on headers, then decode only what won. `gc::adopt_order`
+    // Rank on headers, then decode only what won. `select::adopt_order`
     // reads a few hundred bytes per candidate instead of the whole body,
     // which is the difference between 124 MB and 16 KB on a real
     // four-snapshot directory — paid at launch, every launch.
+    //
+    // This device's own file is one candidate in that order and gets no
+    // head start. Returning it unconditionally is what stranded a
+    // freshly paired device, whose own first-launch snapshot names a
+    // single actor and shadowed a peer's covering every actor in the
+    // workspace. `own_name` below is only used to decide who may delete
+    // an unusable file, never to decide which file wins.
+    //
+    // `gc::survey` is NOT the ranker here, and does not rank the own
+    // snapshot against peers at all: its winner is `peer_best`,
+    // deliberately peers-only, because its output is a delete. The two
+    // passes share `select::selection_key` and nothing else.
     let own_name = format!("snap-{prefer_actor}.bin");
     let mut last_err: Option<SnapshotError> = None;
 

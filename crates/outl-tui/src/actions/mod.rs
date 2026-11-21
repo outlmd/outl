@@ -21,7 +21,7 @@
 //!   `view::namespace` draws what it returns)
 //!
 //! Anything cross-cutting (constructors, `pub(crate)` free helpers
-//! consumed by `input` / `view`) is re-exported from this file.
+//! consumed by `input` / `view`) is defined or re-exported here.
 
 pub(crate) mod autocomplete;
 pub(crate) mod block;
@@ -46,6 +46,15 @@ pub(crate) mod trash;
 pub(crate) mod visual;
 pub(crate) mod yank;
 pub(crate) mod zoom;
+
+/// Parse a stringified [`outl_core::id::NodeId`] back into one.
+///
+/// The ids this crate reads off a DTO, an outline node or a backlink
+/// are `String`s; `NodeId` has no `FromStr`, so the ULID decode lives
+/// here once rather than inline at each call site.
+pub(crate) fn node_id(s: &str) -> Option<outl_core::id::NodeId> {
+    ulid::Ulid::from_string(s).ok().map(outl_core::id::NodeId)
+}
 
 // Re-exports for crate-internal consumers in *non-test* code paths.
 // `app.rs` tests reach for `cycle_todo_state` / `detect_trigger` /

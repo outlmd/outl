@@ -44,6 +44,7 @@
     "./api/trash": "./src/api/trash.ts",
     "./api/trust": "./src/api/trust.ts",
     "./autocomplete": "./src/autocomplete/index.ts",
+    "./backlink-edit": "./src/backlink-edit/index.ts",
     "./boot": "./src/boot/index.ts",
     "./capture": "./src/capture/index.ts",
     "./caret-nav": "./src/caret-nav/index.ts",

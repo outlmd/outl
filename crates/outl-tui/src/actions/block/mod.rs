@@ -9,19 +9,31 @@
 //!
 //! | Submodule       | What's in it                                                |
 //! |-----------------|-------------------------------------------------------------|
-//! | `insert`        | `enter_insert`, `commit_insert`, `abort_insert`             |
-//! | `structural`    | create / indent / outdent / delete / move block             |
-//! | `backlink_edit` | `apply_to_backlink_source`, `toggle_todo_backlink`          |
-//! | `metadata`      | property writes, `toggle_pinned`, `toggle_todo`, `mark_done` |
-//! | `mod.rs` (here) | TODO-prefix cycle helpers shared with `input::insert`       |
+//! | `insert`          | `enter_insert`, `commit_insert`, `abort_insert`              |
+//! | `structural`      | create / indent / outdent / delete / move block              |
+//! | `backlink_commit` | the one place a cross-page mutation is committed              |
+//! | `backlink_gesture`| which gesture is committing: does its op read the logged text, and were keystrokes consumed |
+//! | `backlink_target` | which page + block a chord in the backlinks panel acts on    |
+//! | `metadata`        | property writes, `toggle_pinned`, `toggle_todo`, `mark_done` |
+//! | `mod.rs` (here)   | TODO-prefix cycle helpers shared with `input::insert`        |
+//!
+//! `backlink_edit` used to sit between the last two: it rendered a
+//! source page's whole `.md` and let `reconcile_md` infer which ops
+//! that implied. Every one of its callers is a `NodeId`-keyed op
+//! through `backlink_commit` now, so no client in this crate writes
+//! another page's `.md` to edit a block in it (root invariant 1).
 
 use crate::edit_buffer::EditBuffer;
 
-mod backlink_edit;
+mod backlink_commit;
+mod backlink_gesture;
+mod backlink_target;
 pub(crate) mod insert;
 mod metadata;
 mod structural;
 mod template;
+#[cfg(test)]
+mod test_support;
 
 pub(crate) use insert::InsertCursor;
 

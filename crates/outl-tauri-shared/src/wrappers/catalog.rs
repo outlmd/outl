@@ -66,6 +66,35 @@ macro_rules! block_commands {
                 -> ::std::result::Result<$crate::state::PageView, String>
                 => $crate::commands::block::edit_block;
 
+            /// Replace the text of a block cited by a backlink row, on
+            /// the page it lives on. Refuses a stale id and a page ahead
+            /// of its log instead of re-targeting — see the shared body
+            /// for why that is a second command and not a flag.
+            fn edit_backlink_block(page_id: String, id: String, text: String)
+                -> ::std::result::Result<$crate::state::PageView, String>
+                => $crate::commands::backlink_edit::edit_backlink_block;
+
+            /// Run a structural or task-state mutation on the block a
+            /// backlink row shows, on its own page. The `block.rs` twins
+            /// of these may re-target a stale id; this one refuses it in
+            /// the catalog's own words, for every gesture at once.
+            fn backlink_row_op(
+                page_id: String,
+                id: String,
+                op: $crate::commands::backlink_edit::BacklinkRowOp,
+            ) -> ::std::result::Result<$crate::state::PageView, String>
+                => $crate::commands::backlink_edit::backlink_row_op;
+
+            /// Create an empty sibling beside a backlink row's block, on
+            /// its own page. Never `create_block`, whose append fallback
+            /// is documented for the open page only.
+            fn create_backlink_sibling(
+                page_id: String,
+                id: String,
+                side: $crate::commands::backlink_edit::BacklinkSide,
+            ) -> ::std::result::Result<$crate::state::CreateBlockReply, String>
+                => $crate::commands::backlink_edit::create_backlink_sibling;
+
             /// Split a block at `char_offset`, returning the new block's id.
             fn split_block(page_id: String, id: String, char_offset: u32)
                 -> ::std::result::Result<$crate::state::CreateBlockReply, String>

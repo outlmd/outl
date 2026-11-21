@@ -9,8 +9,12 @@
  *
  * 1. Selection on an outline block (refs or not) → enter Insert.
  *    Following a ref stays the click on the token (`onRefClick`).
- * 2. Selection on a backlink row (read-only) → open the source page
- *    and land the cursor on the referencing block.
+ * 2. Selection on a backlink row → enter Insert on the **cited** block,
+ *    on the page it lives on. That row used to be the one exception,
+ *    opening the source page instead, and the justification written
+ *    into the handler was that the row is read-only. It is not any
+ *    more, so the exception went with it; opening the page stays on the
+ *    group header.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -95,9 +99,27 @@ describe("OpenRefUnderCursor (Normal-mode Enter)", () => {
   const applyView = vi.fn();
   const setError = vi.fn();
 
+  /** A block on another page citing the open one. */
+  function sourceBacklink(): Backlink {
+    return {
+      block_id: "blk-source",
+      todo: null,
+      source_page: {
+        id: "pg-source",
+        slug: "source",
+        title: "Source",
+        kind: "page",
+      },
+      source_block: block("blk-source", "points at [[today]]"),
+      source_block_path: [0],
+      ancestors: [],
+    };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     setAppState({
+      editingBacklink: null,
       page: { id: "pg-1", slug: "today", title: "Today", kind: "journal" },
       outline: [
         block("blk-plain", "no refs here"),
@@ -142,24 +164,9 @@ describe("OpenRefUnderCursor (Normal-mode Enter)", () => {
     expect(applyView).not.toHaveBeenCalled();
   });
 
-  it("opens the source page when the selection sits on a backlink row", async () => {
-    const view = pageView();
-    vi.mocked(openRef).mockResolvedValue(view);
-    const backlink: Backlink = {
-      block_id: "blk-source",
-      todo: null,
-      source_page: {
-        id: "pg-source",
-        slug: "source",
-        title: "Source",
-        kind: "page",
-      },
-      source_block: block("blk-source", "points at [[today]]"),
-      source_block_path: [0],
-      ancestors: [],
-    };
+  it("edits the cited block when the selection sits on a backlink row", async () => {
     setAppState({
-      backlinks: [backlink],
+      backlinks: [sourceBacklink()],
       selectedBlockId: null,
       selectedBacklinkBlockId: "blk-source",
     });
@@ -167,13 +174,40 @@ describe("OpenRefUnderCursor (Normal-mode Enter)", () => {
     const handlers = buildHandlers({ applyView, setError });
     await handlers.OpenRefUnderCursor?.();
 
-    // Backlink rows are read-only: Enter opens, never edits.
-    expect(openRef).toHaveBeenCalledWith("source");
-    expect(applyView).toHaveBeenCalledWith(view);
+    // `Enter` means edit, in the backlinks section as in the outline.
+    // This used to be the one exception, and its stated justification
+    // was that the row is read-only — which it no longer is, so the
+    // exception went with it. The source page stays reachable from the
+    // group header, which `lib/keyboard-reach.ts` makes a keyboard stop.
+    expect(appState.editingBacklink).toEqual({
+      pageId: "pg-source",
+      blockId: "blk-source",
+    });
+    expect(openRef).not.toHaveBeenCalled();
+    expect(applyView).not.toHaveBeenCalled();
+    // The edit is addressed to another page, so the outline's own
+    // editing id must stay clear — two mounted editors is two drafts.
     expect(appState.editingBlockId).toBeNull();
-    // Cursor lands on the referencing block of the opened page.
-    expect(appState.selectedBacklinkBlockId).toBeNull();
-    expect(appState.selectedBlockId).toBe("blk-source");
+    // The cursor stays on the row the user was on.
+    expect(appState.selectedBacklinkBlockId).toBe("blk-source");
+    expect(appState.selectedBlockId).toBeNull();
+  });
+
+  it("leaves an orphan backlink row read-only", async () => {
+    setAppState({
+      backlinks: [{ ...sourceBacklink(), source_page: null }],
+      selectedBlockId: null,
+      selectedBacklinkBlockId: "blk-source",
+    });
+
+    const handlers = buildHandlers({ applyView, setError });
+    await handlers.OpenRefUnderCursor?.();
+
+    // No page to address: the citing block lives outside any page, and
+    // guessing one writes to the wrong document.
+    expect(appState.editingBacklink).toBeNull();
+    expect(appState.editingBlockId).toBeNull();
+    expect(openRef).not.toHaveBeenCalled();
   });
 });
 

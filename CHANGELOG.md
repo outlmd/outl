@@ -7,6 +7,41 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **A backlink is editable where it is cited, on every client.**
+  A backlink row shows a block that lives on another page, and it used to be a destination: you acted on it by *leaving*, and the page that assembled the references was gone.
+  Click it, tap it, or press `i` / `Enter` on it, and you edit that block in place.
+  Task state, delete, indent, outdent, move up / down and `o` / `O` all work there too, each landing on the citing block on its **own** page.
+  `g D` is the one that does not cross over to the phone: mobile's long-press sheet has no mark-done row, so you tap the checkbox through to DONE instead.
+  Opening the source page stays one gesture away on the desktop and the phone, on the group header rather than on the row.
+  The TUI has no such gesture at all — not the header, not a click, not `Enter` — so getting to the page a row's block lives on is `Ctrl+P` and the page name, which is why its column reads `Partial`.
+
+  The daily shape of the graph is the reason.
+  A journal day accumulates `#fup` lines and `[[person]]` mentions, and the page they point at is where you read them together.
+  Checking one off or fixing a typo cost a navigation away from the one view that assembled them, and a navigation back.
+
+  **The TUI already did all of this, and its mechanism is what changed.**
+  It used to render the source page's whole `.md`, write it, and let `reconcile_md` infer which ops that implied.
+  Under concurrency that is not the same operation: it depends on markdown matching to decide which block your text belongs to, where an op *names* the block.
+  So all three clients now reach one shared mutation path by block id, and `apply_to_backlink_source` plus the seven `Focus::Backlink` branches in `structural.rs` were deleted rather than ported.
+
+  **A cross-page edit refuses rather than putting your text somewhere else.**
+  A backlink's block id comes from the `.md` on disk, so on a page whose sidecar is missing or misaligned it can name no live block — a fresh import, a page a peer shipped without a sidecar, a `vim` edit nothing has swept yet.
+  The ordinary edit recovers from that by appending your text at the end of the page, which keeps it visible on the page you are reading and moves it to a page you are *not* looking at here.
+  The backlink path propagates the error instead, and you are told.
+  A source page that has stopped syncing is refused before anything is written too, and the gate sits in a different place on each side.
+  The TUI asks in `commit_backlink_mutation`, the one place every gesture in the panel commits through, so every one of them refuses.
+  The GUI clients ask inside `edit_backlink_block`, so the text edit refuses and the structural gestures write the op and say nothing — they name a block id instead of applying to text, so a peer still converges through the op log and what stays behind is the local `.md` of a page you are not looking at.
+  That notice gap is recorded in `docs/clients.md`.
+
+  Two limits are deliberate and worth knowing.
+  Indent, outdent and move have **no visible result** on a desktop or mobile row: it draws one flat block, its siblings and children are not on screen, and the effect lands on another page.
+  They ship anyway, so the three clients agree on what a chord does, and this paragraph is where the cost is written down instead of a nudge you would read once.
+  And creating a sibling does not put the cursor in it, because the new block cites nothing and so is a backlink of no page that no row will ever render — unless the page cites *itself*, where the block really is in the outline in front of you.
+
+  Namespace-mention rows stay read-only: that list is capped and answers a different question.
+
+  Per-client reach is `Capability::BacklinkInlineEdit` in `docs/client-parity.md`; the contract is `docs/clients.md` → "Editing a backlink where it is cited".
+
 - **Arrow keys walk between blocks while you are typing, on every client.**
   `←` at the start of a block lands at the end of the one above, `→` at the end lands at the start of the one below, and `↑` / `↓` on a block's first or last line carry your column over.
   The outline reads as one continuous document, so holding `←` walks back through the page without ever leaving Insert.
@@ -36,7 +71,91 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   And the target is resolved **before** anything is awaited, because a `preventDefault` only counts during the synchronous dispatch; a handler that committed first and looked for a neighbour after had already let the browser move the caret.
   `BlockRow.caret-nav.test.tsx` fails when either is removed.
 
+- **A sidecar that describes a different page is now reported instead of being used in silence.**
+  `read_page_outline` carries the verdict on `PageOutline.sidecar_identity` (`Absent`, `MatchesPage`, or `NamesAnotherPage { page_id }`), plus one `tracing::warn!`.
+  A page's block ids come from the `.outl` beside its `.md`, and nothing ever compared the two ids.
+  The read zips the parsed markdown against `sidecar.blocks` **by position**, so a sidecar belonging to another page root hands out ids naming another page's blocks, or a generation of this one the tree no longer holds under its root.
+  On the maintainer's own graph that is 1,775 of 3,390 sidecars, left by a Roam re-import that moved the previous generation of the graph to the trash and re-projected none of the `.md` / `.outl` pairs.
+
+  **It reports and never refuses, and that is the design rather than caution.**
+  This read is on the page-open path of every client, so an `Err` would trade a stale page for no page at all.
+  And `build_backlink_index_from_disk` skips a page whose read fails, so refusing would take 1,775 pages' `[[ref]]`s out of the backlinks panel the mismatch was noticed in.
+  That is invariant 8's mirrored pair, arrived at by fixing the half that was reported.
+  There is also nothing to refuse *for*: opening a page re-projects it, so the condition is already draining and the only thing missing was being able to watch it happen.
+  `tests/sidecar_identity.rs` is the net, and it asserts the no-refusal half on all three shapes a page with nothing on disk takes.
+
+- **`/quote` on the desktop turns the block you are typing in into a blockquote, and back.**
+  Until now no user, on any client, could toggle one: a quote was authored by typing `> ` at the front of the block and nothing else wrote it for you.
+  The backend has been live and tested the whole time (`outl_actions::block::toggle_quote`, the `toggle_quote` command, registered in **both** GUI clients' handler lists), and nothing called it.
+  `toggleQuote` in `@outl/shared` was the only client-side route to it and had no caller either, while `docs/desktop-ux.md` and `docs/mobile-ux.md` both described their client as going through it.
+
+  The row rides the inline `/` menu under a reserved sentinel `plugin_id`, the same escape hatch `/upload` and `/date-today` already use for a core feature with no chord.
+  A chord is what it cannot have: that needs an `Action` in `outl-shortcuts`, and both `support()` and `defaults.rs` sit at their recorded file-size baseline, so declaring one would mean raising a ceiling to carry a gesture nothing has asked for.
+  `outl_actions::quote::toggle_quote` owns both directions and the ordering against a task marker, so nothing on the client side reads or writes the prefix.
+  An externally authored `"> TODO foo"` therefore normalises to the canonical `"TODO > foo"` over two toggles: the first strips the quote and leaves `"TODO foo"`, the second puts the marker back in canonical order.
+
+  **The TUI and the phone still have no gesture, and that is now written down** as `Capability::BlockquoteToggle` in `docs/client-parity.md`.
+  Recording it needed a client rather than just a verdict.
+  `no_capability_is_out_of_reach_on_every_client` rejects a capability nobody reaches, and the `CLI_ONLY` exemption would have been a false reason here, because no `outl` subcommand and no MCP tool toggles a quote either.
+  So the gap had nowhere to be recorded until something reached it, which is how two documents came to describe a route with no caller on it.
+  Both lesser states carry one sentence, naming the two characters that stand in for the gesture.
+
+### Removed
+
+- **A snapshot body stayed decoded in memory for the whole GC scan to feed an accessor nobody called.**
+  `snapshot::gc::Survey::into_best` and the private `best` field behind it are gone.
+  `survey()`'s own doc says "exactly one decoded body is resident at a time: the running best", which is true and was the cost.
+  On a 2,500-page workspace that body is around 13 MB, held across the entire directory scan, and the only reader of the field was an accessor with no caller anywhere.
+  Its doc claimed to be `read_best_from_disk`'s directory-scan half, "one owner, so the selector and the GC cannot develop separate opinions about which file matters".
+  That stopped being true when `read_best_from_disk` moved to `select::adopt_order` with its own header-ranking decode loop, so the two already ranked independently and this was the orphaned remnant of the design the comment described.
+
+- **Three more `pub` items and seven icons with no caller.**
+  `OffsetIndexSet::ts_iter` allocated a `Vec` of every `(actor, ts)` in the log, an `O(total ops)` read whose filtered siblings are what the sync census deliberately uses instead (invariant 15).
+  `sidecar::gc::Survey::reclaimable_bytes` summed what `prunable()` already returns.
+  `EditBuffer::move_word_right` was the unimplemented half of a symmetric pair: no key path in the TUI reaches an `EditBuffer` word motion at all.
+  The doc on `move_word_left` says so now, so restoring the right-hand half for symmetry puts back exactly what came out.
+  `ClockIcon`, `LinkIcon`, `PinIcon`, `ListIcon`, `HashIcon`, `IndentIcon` and `OutdentIcon` leave `@outl/shared/icons`; their neighbours in the same file are all imported by a client, so the module stays.
+
 ### Fixed
+
+- **A ` ```rust ` fence could escape its sandbox on Windows and reach any file the app can.**
+  [RUSTSEC-2026-0587](https://rustsec.org/advisories/RUSTSEC-2026-0587) (GHSA-f2pq-268w-886c, severity high) is a full WASI filesystem sandbox escape.
+  Wasmtime split a guest path into components and handed each to the OS layer on its own.
+  So `./C:foo` parsed as one ordinary component named `C:foo`, and a layer down that was read as the drive-relative path `C:foo`, which goes through ambient APIs instead of the sandboxed directory.
+  A fence with read access could read anything the host process can read, on any drive.
+  With write access it could create, overwrite and delete outside the sandbox too.
+  `wasmtime` and `wasmtime-wasi` 50.0.2 → **50.0.3**, which needed no code change.
+  The workspace policy is to take the latest major a bump compiles cleanly against, and 51.0.0 does not: it requires `libc` 0.2.191, which dropped iOS items that `netdev` 0.46.3 (under iroh) still names, so the mobile iOS build stops compiling.
+
+  **This reached three of the four clients.**
+  `lang-rust` is a default feature of `outl-exec` and expands to `wasm`, and the CLI, the TUI and the desktop all take `default-features = true`.
+  So all three link `wasmtime-wasi` on every platform they ship to, Windows included.
+  Mobile takes an explicit feature list rather than the defaults and never linked it.
+  The exposure matters here for the reason `lang-lisp` is not a default: **a fence body is not always written by the person running it.**
+  A block that arrived over iroh, through `outl import`, or from an agent over MCP is exactly the untrusted input this sandbox exists to contain.
+
+- **A ` ```rust ` fence failed instead of recompiling when its cache slot was not a file.**
+  The runtime decided "the cached `.wasm` is good" from `path.exists()` and a non-zero length, which a *directory* at that path satisfies on macOS and Linux (64 bytes on APFS, 4096 on ext4).
+  So the read below it failed the user's execution where a recompile was the right answer.
+  `outl_exec::wasm::cache::is_fresh` already asked `is_file()` and already owned this question; the runtime had a copy of the check instead of a call to it, and that copy is the half that drifted.
+
+- **Opening a `[[ref]]` whose page could not be written said nothing, on either client.**
+  `open_ref` resolves or creates the page in the op log and then writes `pages/<slug>.md`, and when that write fails the backend emits `ref-projection-failed` so the client can say the link is not visible to peers yet.
+  Nothing listened, on either client, since the event shipped in 0.8.0.
+  So the ref landed in the block, the page existed only in the log, and the failure reached a `tracing` line and stopped there.
+  The desktop routes it to the error toast now, in the backend's own words, beside the async writer's refusal it already reported.
+  Mobile routes it to its error surface in the same change, through `listenForRefProjectionFailed` in `Journal.listeners.ts`.
+  Neither client's listener is covered by `docs/client-parity.md`: `ref-projection-failed` has no `Capability` row, so nothing contradicts a stale claim about who listens.
+
+- **TUI: the editor opened on a deleted block and lost what you typed into it.**
+  Press `i` on a backlink row whose block a peer had deleted, type, press `Esc`, and the commit refused — the text was gone and the only sign was a status line.
+  The entry gate asked `block_text`, which answers from the content cache or the Yrs doc, and **neither consults the trash**: the text survives a delete inside the document, so a trashed block read as an ordinary one.
+  The gate asks `is_trashed` as well now, so the refusal arrives *before* you start typing instead of after, in the same words the commit would have used.
+  Found while writing a test about the wording.
+
+- **Desktop: `o` / `O` on a backlink row added an empty block to the page you were reading.**
+  `NewBlockBelow` / `NewBlockAbove` read the open page's id and had no backlink branch, so a gesture aimed at a block on another page created a block at the end of the page in front of you, under a cursor that was not there.
+  The branch comes before that read now, and the sibling is created on the cited block's own page.
 
 - **TUI: `Home` and `End` moved the whole block, not the line the cursor was on.**
   Identical for an ordinary single-line block, which is why it went unnoticed; inside a block with soft newlines — a fenced code block — `Home` jumped to the top of the fence while its own doc comment already said "line".
@@ -58,7 +177,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Nothing enforced it: ~20 call sites write `selectedBlockId` directly (a row click, `onStartEdit`, a zoom, every `create_block` reply, the picker, the task and reminder panels), each had to remember to clear the other field, and most did not.
   So the hover was one door of several, and the mouse was simply the easiest to walk through by accident.
 
-  **`backlinkCursor()` (`lib/store.ts`) is the mechanism now**, and every reader goes through it, the highlight included — a stale id painting a second accent bar is the visible half of the same bug.
+  **`backlinkCursor()` (`lib/cursor-region.ts`) is the mechanism now**, and every reader goes through it, the highlight included — a stale id painting a second accent bar is the visible half of the same bug.
   The outline wins because releasing it is the deliberate act: the two handlers that cross the separator write `selectedBlockId` to `null` in the same breath, so no other writer has to know the rule exists.
   The `onMouseEnter` is gone; the hover affordance is the row's `hover:bg-…`, which costs no state.
 
@@ -81,8 +200,36 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The desktop takes both, and with the backlinks key it also gains a half it never had: `namespace_children` hangs off `title::`, so a rename under the same slug now refetches.
   The TUI needed no change — it holds `backlink_index` and keeps the old one live until a rebuild lands, which is the same rule in a client with no Solid in it.
 
-  `navigation/page-key.parity.test.ts` reads **both clients' sources** and refuses the shape itself, with a declared exception per file and a reason: `installPageChangeEffect` must re-run on every reply (it repairs a selection whose block left the tree), and two backlinks refetches are not navigation decisions at all.
+  `navigation/page-key.parity.test.ts` reads **both clients' sources** and refuses the shape itself, with a declared exception per file and a reason: `installPageChangeEffect` must re-run on every reply (it repairs a selection whose block left the tree), and the desktop's one fetch owner re-asks for four reasons that are not navigation decisions at all.
   A first version of that guard paired the shape with "but the file imports the key" and passed against a file holding both, which is the regression rather than the fix.
+
+- **Desktop: holding `Alt+↑` or `Tab` on a backlink row fired one full workspace rebuild per key repeat.**
+  Every gesture on a row commits, and every commit drops the cached backlink index, so the next `page_backlinks` reads and parses every `.md` in the workspace.
+  Held down, that was one of those scans per repeat, all in flight at once: the latency per keystroke was a wash either way (30.0 ms against 34.1 ms), and the two were ten whole index rebuilds of CPU apart.
+
+  The refresh policy is not what changed, and that was measured before it was ruled out: `BacklinkRefresh::PatchPage` on the structural gestures would pay 25 ms on the IPC thread — the thread that accepts keystrokes — for every *single* gesture, to fix the burst case.
+  `outl-tauri-shared/tests/backlink_commit_cost.rs` carries both tables.
+
+  `trackBacklinks` now coalesces instead, and it moved to `lib/backlinks-fetch.ts` to own that: a burst is **one scan in flight plus one queued**, whatever the repeat rate.
+  The trailing scan is not droppable — each repeat is a real mutation, so the rows genuinely changed and the last answer has to be fetched.
+
+  **It takes no argument now, and that is the fix as much as the queue is.**
+  It used to be handed the promise (`trackBacklinks(pageBacklinks(slug))`), which puts the IPC call on the wire before the one owner is reached, so there was nothing left to coalesce and nothing could ask for it.
+  Naming no page also closed a stale-rows path that was reachable without a held key: `BacklinkRowEditor` read the slug *before* its `await`, so navigating during a cross-page save asked about the page the user had just left and drew its rows under the new one.
+  A reply is now checked against the open page through `sameBacklinksKey` — the same `@outl/shared` comparison the fetch is keyed on — so a reply for a page that has been navigated away from, or whose `title::` changed under it, is dropped rather than drawn.
+
+  The section itself is untouched throughout: the pending mark is raised once for the whole chain rather than once per scan, because lowering it in between unmounts and remounts the section inside one tick, taking an open row editor's focus and draft with it.
+  `lib/backlinks-fetch.test.ts` pins the queue and the three rules, `lib/backlink-handlers.cost.test.ts` pins the count through the real handler (a signature cannot bound how many times a caller asks), and `InlineBacklinks.test.tsx` pins the section's **node identity** across a burst.
+
+  **Mobile was never affected** and needs no coalescer: its card refuses a second gesture while one is in flight, and that guard spans the mutation *and* the awaited re-ask.
+
+  Two things came out of measuring the rest of that section.
+  `groupedBySource()` is a plain function rather than a memo, which on a 1,556-row page looked like the obvious cost: it is not, so it was left alone — it runs once per render, zero times on a cursor move or a commit reply, and costs 0.035 ms against a 153 ms mount.
+  The row **highlight** was the real one, and it is the same defect class one ingredient deeper than the earlier `backlinkCursor` fix.
+  It is evaluated once per rendered row and asks whether the section is on screen, which includes `zoomView()` — `focusSubtree(outline, focusBlockId)`, a full page walk — whenever `focusBlockId` names a block the outline has lost.
+  That state lasts exactly one render, because the self-heal that clears it is a `createEffect` and runs after the one that paid for it: 851 ms against 166 ms to mount 1,556 rows over a 688-block page, and 724.7 ms against 2.6 ms for a single cursor move, which is a keystroke.
+  The section now reads the cursor through a `createMemo`, the shape `focus()` and `visualSet` already use, so the walk runs once per render and each row subscribes to one signal instead of five.
+  `InlineBacklinks.cursor-cost.test.tsx` counts the walks instead of timing them: 1 at 40 rows and 1 at 400, against 41 and 401 without the memo.
 
 - **A backlink's breadcrumb was drawn as markdown source.**
   The trail above a nested reference read `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/mail?authuser=...)` while the citing block right under it read as prose — so the one line on the panel saying *where* a reference lives was the one line written in markup, with a URL eating a row that truncates to a single line anyway.
@@ -326,7 +473,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   A commit, a peer refresh, a background poll, a capture into today and a timeline restore are **not** navigations and keep the zoom; a failed open changes nothing.
   The TUI never had this one: it clears the zoom on every view **load** rather than on a comparison.
 
-  The per-client owners are in [`docs/clients.md` → Zoom / focus on a block](docs/clients.md#zoom--focus-on-a-block-roamworkflowy).
+  The per-client owners are in [`docs/client-editing.md` → Zoom / focus on a block](docs/client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
 - **The iOS widget was a white card, and the Lock Screen control was a button that did nothing.**
   Two separate faults in the same extension, both silent.

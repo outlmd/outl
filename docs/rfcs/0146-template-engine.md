@@ -28,7 +28,7 @@ This RFC records why the definition is a page property and why there are two mod
 That property is set with the existing `Op::SetProp` — the feature adds **no new `Op` variant**.
 
 Single owner: `outl_actions::template`, split by concern — `list.rs` (discovery), `vars.rs` (`{{date}}` / `{{today}}` / `{{page}}` / `{{time}}` substitution), `instantiate.rs` (structural), `call.rs` + `run.rs` (callable).
-Per-client surfaces are mapped in [`docs/templates.md` → Surface scope](../templates.md#surface-scope) and [`docs/clients.md`](../clients.md#structural-templates).
+Per-client surfaces are mapped in [`docs/templates.md` → Surface scope](../templates.md#surface-scope) and [`docs/client-editing.md`](../client-editing.md#structural-templates).
 
 Two invocation modes, because they return different things:
 

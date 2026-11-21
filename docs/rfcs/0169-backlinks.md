@@ -6,7 +6,7 @@
 | **Issue** | [#169](https://github.com/outlmd/outl/issues/169) (anchor, labelled `RFC`), [#180](https://github.com/outlmd/outl/issues/180), [#142](https://github.com/outlmd/outl/issues/142) |
 | **PR** | — |
 | **Date** | 2026-08-06 |
-| **Reference doc** | [clients.md § Backlinks index](../clients.md#backlinks-index-performance) |
+| **Reference doc** | [client-backlinks.md § Backlinks index](../client-backlinks.md#backlinks-index-performance) |
 | **Invariant** | none in root `CLAUDE.md` — the rule lives in `outl-actions/CLAUDE.md` (`backlinks` / `backlinks_index` / `backlinks_sort` rows) and in `outl-md/CLAUDE.md` ("Does not carry backlinks") |
 | **Guarded by** | `index_matches_the_on_demand_path`, `dedups_block_matched_by_slug_and_title`, `one_index_serves_many_pages`, `empty_workspace_has_empty_index` (`crates/outl-actions/src/backlinks_index.rs`), `from_disk_matches_workspace_build`, `from_disk_build_does_not_materialize_workspace`, `workspace_build_materializes_everything_the_disk_build_avoids`, `reindex_page_reflects_an_edit_incrementally` (`crates/outl-actions/tests/backlinks_index_disk.rs`), `backlinks_include_self_references_inside_the_same_page`, `backlink_carries_shallow_source_block_and_path`, `tag_mentions_match_through_slugify`, `longer_tag_does_not_false_match_a_prefix_target`, `tag_inside_inline_code_is_not_a_mention`, `block_with_ref_and_tag_emits_one_backlink`, `block_with_repeated_reference_only_emits_one_backlink`, `structural_instance_shows_in_template_backlinks`, `callable_site_shows_in_template_backlinks`, `non_template_page_ignores_call_and_provenance`, `person_page_picks_up_at_alias_mentions`, `backlinks_for_a_future_journal_finds_blocks_in_past_journals` (`crates/outl-actions/src/backlinks.rs`), `root_level_reference_has_no_ancestors`, `one_level_deep_carries_the_immediate_parent`, `deeper_reference_carries_the_full_chain_root_first`, `ancestor_todo_prefix_is_stripped_from_the_crumb`, `siblings_share_the_same_ancestor_prefix` (`crates/outl-actions/tests/backlinks_breadcrumb.rs`), `newest_first_puts_newest_page_on_top_dfs_within`, `oldest_first_is_the_group_reverse_dfs_within`, `interleaved_sources_become_contiguous_runs`, `orphan_blocks_cluster_under_the_empty_group` (`crates/outl-actions/src/backlinks_sort.rs`), `the_index_agrees_with_a_naive_scan_on_generated_workspaces`, `a_page_nobody_links_to_has_no_backlinks` (`crates/outl-actions/tests/backlinks_index_property.rs` — the randomised agreement check this RFC proposed and #213 recorded as never written), `simulate_760_backlinks` (`crates/outl-actions/tests/bench_backlinks.rs`, `#[ignore]` — measurement harness, not a CI guard) |
 
@@ -119,7 +119,7 @@ Each source page's blocks stay contiguous and in DFS order; pages sort by their 
 The direction comes from `[display] backlinks_order` and is a pure display preference that never converges between devices — same class as `theme.preset`.
 Every client calls this one function, so the direction cannot drift: the TUI toggles it with `Ctrl+O`, the desktop and mobile panels expose a header button, and all three persist through `outl_config`.
 
-Client wiring lives with the clients: [`docs/clients.md` → Backlinks order](../clients.md), plus `outl-tauri-shared/CLAUDE.md` for the lazy `page_backlinks` command.
+Client wiring lives with the clients: [`docs/client-backlinks.md` → "Backlinks order"](../client-backlinks.md#backlinks-order-issue-142), plus `outl-tauri-shared/CLAUDE.md` for the lazy `page_backlinks` command.
 `PageView.backlinks` always comes back empty, because computing backlinks on the first-paint path was what blocked the first journal render.
 
 ## Why not the alternatives
@@ -210,7 +210,8 @@ A page with 100,000 backlinks renders 100,000 rows.
    The enforcing surface is `outl-actions/CLAUDE.md`, whose `backlinks` / `backlinks_index` / `backlinks_sort` rows carry the single-owner rule, name the deleted `outl_md::index` cache as the reason, and state why entries are shallow leaves.
    Its "Reuse-first" section uses the `outl_md::index::Backlink` → `outl_actions::Backlink` consolidation as its worked example of promote-don't-fork.
    On the other side of the boundary, `outl-md/CLAUDE.md`'s workspace-index row says **"Does not carry backlinks"** so an editor adding a cache there reads the rule before writing it.
-   Client wiring is pinned in `outl-tauri-shared/CLAUDE.md` — lazy `page_backlinks`, plus the explicit note that `compute_backlinks` no longer exists in `helpers.rs` — and in [`docs/clients.md` → Backlinks order](../clients.md).
+   Client wiring is pinned in `outl-tauri-shared/CLAUDE.md` — lazy `page_backlinks`, plus the explicit note that `compute_backlinks` no longer exists in `helpers.rs`.
+   It is pinned again in [`docs/client-backlinks.md` → "Backlinks order"](../client-backlinks.md#backlinks-order-issue-142).
    The config key is [`docs/config.md` → `[display]`](../config.md), and the reuse rows are [`docs/primitives-actions.md`](../primitives-actions.md) §3.
    This RFC is the rationale layer those five point at.
 

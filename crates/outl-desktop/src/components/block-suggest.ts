@@ -33,6 +33,7 @@ import {
 import {
   NATIVE_ACTION_PLUGIN_ID,
   assetSlashCommands,
+  blockSlashCommands,
   rankSlashCommands,
   templateSlashCommands,
   NATIVE_INSERT_PLUGIN_ID,
@@ -159,6 +160,7 @@ export function createBlockSuggest(deps: BlockSuggestDeps): BlockSuggest {
       ]);
       fetchedSlashCommands = [
         ...assetSlashCommands(),
+        ...blockSlashCommands(),
         ...insertSlashCommands(inserts),
         ...templateSlashCommands(templates),
         ...plugins,

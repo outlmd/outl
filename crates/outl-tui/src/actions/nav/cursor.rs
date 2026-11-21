@@ -20,19 +20,15 @@ impl App {
                     .map(|n| n.text.clone())
                     .unwrap_or_default()
             }
-            Focus::Backlink { idx, sub_path } => {
+            Focus::Backlink { idx } => {
                 let backlinks = self.backlinks_for_current();
-                let Some(bl) = backlinks.get(*idx) else {
-                    return String::new();
-                };
-                let mut node = &bl.source_block;
-                for &i in sub_path {
-                    let Some(child) = node.children.get(i) else {
-                        return String::new();
-                    };
-                    node = child;
-                }
-                node.text.clone()
+                // The citing block itself — the cursor names nothing
+                // below it (see `Focus`), and a stale `idx` names
+                // nothing at all.
+                backlinks
+                    .get(*idx)
+                    .map(|bl| bl.source_block.text.clone())
+                    .unwrap_or_default()
             }
         }
     }

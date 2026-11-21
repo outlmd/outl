@@ -58,8 +58,18 @@ pub fn cache_path_for_source(language: &str, source: &str) -> Option<PathBuf> {
     Some(dir)
 }
 
-/// Does the file at `path` exist *and* is non-empty? Used by lazy-gen
-/// runtimes to decide "skip the compile, just read the bytes".
+/// Is there a regular, non-empty file at `path`? Used by lazy-gen
+/// runtimes ([`crate::runtimes::rust`] today) to decide "skip the
+/// compile, just read the bytes".
+///
+/// `is_file()` is the load-bearing half, not boilerplate. A directory
+/// satisfies `exists()`, and on macOS and Linux it also reports a
+/// non-zero `metadata().len()` (64 on APFS, 4096 on ext4; Windows
+/// reports 0, so only the Unix hosts are exposed). A checker that tests
+/// length instead of kind therefore reports a directory as a cache hit,
+/// and the caller's `read` fails the user's execution where a recompile
+/// was the right answer. A missing path needs no `exists()` call of its
+/// own, because `metadata` already errors on one.
 pub fn is_fresh(path: &Path) -> bool {
     std::fs::metadata(path)
         .map(|m| m.is_file() && m.len() > 0)

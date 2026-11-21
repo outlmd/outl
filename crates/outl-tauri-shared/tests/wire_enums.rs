@@ -105,6 +105,40 @@ fn page_kind_matches_its_union() {
     assert_string_enum(&variants, "PageKind");
 }
 
+/// The nine cross-page gestures, minus the two creates, which reply
+/// with a new block's id and so have their own command.
+///
+/// Routed through `block.rs` these printed `ActionError`'s `Display` —
+/// a ULID — while the catalog's sentence for the same event sat unused.
+/// The enum is what makes a tenth gesture declare itself: the `match` in
+/// `backlink_row_op` does not compile without it, and `wire_variants!`
+/// stops *this* file compiling until the TypeScript union lists it too.
+#[test]
+fn backlink_row_op_matches_its_union() {
+    use outl_tauri_shared::commands::backlink_edit::BacklinkRowOp as O;
+    let variants = wire_variants!(O;
+        O::ToggleTodo => O::ToggleTodo,
+        O::MarkDone => O::MarkDone,
+        O::Delete => O::Delete,
+        O::Indent => O::Indent,
+        O::Outdent => O::Outdent,
+        O::MoveUp => O::MoveUp,
+        O::MoveDown => O::MoveDown,
+    );
+    assert_string_enum(&variants, "BacklinkRowOp");
+}
+
+/// Which side a cross-page `o` / `O` lands the new sibling on.
+#[test]
+fn backlink_side_matches_its_union() {
+    use outl_tauri_shared::commands::backlink_edit::BacklinkSide as S;
+    let variants = wire_variants!(S;
+        S::Below => S::Below,
+        S::Above => S::Above,
+    );
+    assert_string_enum(&variants, "BacklinkSide");
+}
+
 #[test]
 fn backlinks_order_matches_its_union() {
     use outl_config::BacklinksOrder as O;

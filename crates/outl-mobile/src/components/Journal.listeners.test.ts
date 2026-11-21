@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
 
 import {
   listenForDeepLink,
   listenForFileDrop,
+  listenForRefProjectionFailed,
   listenForWorkspaceReady,
   type JournalListenerDeps,
 } from "./Journal.listeners";
@@ -361,6 +364,116 @@ describe("projection-write-failed", () => {
 
     expect(calls.setError).toHaveBeenCalledWith("disk full");
     expect(calls.setAheadOfLog).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `open_ref` writes the page into the op log and then projects
+ * `pages/<slug>.md`; when that write fails the backend emits this event.
+ * Mobile registered no listener for it at all, so the ref the user had
+ * just inserted pointed at a page no peer could see and nothing on
+ * screen said so — the shape root `CLAUDE.md` invariant 8 is about.
+ */
+describe("ref-projection-failed", () => {
+  const refusal = {
+    target: "[[weekly review]]",
+    error: "permission denied writing pages/weekly-review.md",
+  };
+
+  it("puts the backend's sentence on the error surface", async () => {
+    const { deps, calls } = harness({ view: () => view() });
+    // Asserted before the install too: `has(...) === false` is also what
+    // a listener nobody registered looks like, which is the bug.
+    expect(bus.handlers.has("ref-projection-failed")).toBe(false);
+
+    createRoot(() => listenForRefProjectionFailed(deps));
+    gate.release();
+    await vi.waitFor(() =>
+      expect(bus.handlers.has("ref-projection-failed")).toBe(true),
+    );
+
+    await emit("ref-projection-failed", refusal);
+
+    expect(calls.setError).toHaveBeenCalledWith(refusal.error);
+    // The op log already holds the page and the next save retries the
+    // write, so a transient refusal must not claim the page stopped
+    // syncing — the backend keeps `ahead_of_log` off this event for the
+    // same reason.
+    expect(calls.setAheadOfLog).not.toHaveBeenCalled();
+  });
+
+  it("is disposed, not leaked", async () => {
+    let dispose!: () => void;
+    createRoot((d) => {
+      dispose = d;
+      listenForRefProjectionFailed(harness().deps);
+    });
+
+    dispose();
+    gate.release();
+    await vi.waitFor(() => expect(bus.handles).toHaveLength(1));
+
+    expect(bus.handles[0].disposed).toBe(true);
+  });
+});
+
+/**
+ * A listener function nothing calls is exactly the defect above, and the
+ * whole reason there is one entry point rather than four call sites in
+ * the component.
+ *
+ * So this covers both halves: `installJournalListeners` is driven for
+ * real (every event it is supposed to subscribe), and the component's
+ * single call to it is read as source — mounting `Journal` needs
+ * haptics, the Tauri bridge and a WKWebView-shaped textarea, so a test
+ * that mocked all three would pin the mocks, the reasoning
+ * `Journal.load-gate.test.ts` gives.
+ */
+describe("installJournalListeners", () => {
+  const source = (file: string) =>
+    readFileSync(join(import.meta.dirname, file), "utf8");
+
+  /**
+   * Read as source, and **not** by choice: driving the installer would
+   * fire four dynamic `import("@tauri-apps/api/event")`s in one tick,
+   * and this `vi.mock` serves the mocked module to the first of a
+   * concurrent set only — the other three get the real module and throw
+   * on `window.__TAURI_INTERNALS__`. Serialised imports are all mocked,
+   * which is why every test above (one listener each, and
+   * `listenForWorkspaceReady`'s two events off one import) works.
+   * So each listener's *behaviour* is driven individually above, and
+   * what is pinned here is the composition.
+   */
+  it("installs every listener in this module", () => {
+    const listeners = source("Journal.listeners.ts");
+    const installer = listeners.slice(
+      listeners.indexOf("export function installJournalListeners"),
+    );
+    const body = installer.slice(0, installer.indexOf("\n}"));
+
+    const exported = [
+      ...listeners.matchAll(/export function (listenFor\w+)\(/g),
+    ].map((m) => m[1]!);
+    expect(exported.length, "every listener this module exports").toBe(4);
+    for (const fn of exported) {
+      expect(
+        body,
+        `${fn} is exported and nothing installs it — a listener nobody ` +
+          `calls is the defect this entry point exists to prevent`,
+      ).toContain(`${fn}(deps)`);
+    }
+  });
+
+  it("is what the journal's mount calls", () => {
+    const journal = source("Journal.tsx");
+
+    expect(
+      [...journal.matchAll(/\binstallJournalListeners\(listenerDeps\)/g)],
+      "the component installs the listeners exactly once",
+    ).toHaveLength(1);
+    // Going back to per-listener calls puts the ordering rule, and the
+    // "did anyone call this one" question, back in the component.
+    expect(journal).not.toMatch(/\blistenFor\w+\(/);
   });
 });
 

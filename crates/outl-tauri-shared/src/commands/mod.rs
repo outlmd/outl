@@ -12,6 +12,10 @@
 //!   move, paste, collapsed, clipboard). `cut_block` (RFC 0254 phase 4)
 //!   renders the block to markdown then moves it to the trash root;
 //!   `copy_block_ref` (issue #18) produces its `((blk-XXXXXX))` handle.
+//! - [`backlink_edit`] — `edit_backlink_block`, the one mutation aimed
+//!   at a page the client is **not** showing. Apart from [`block`]
+//!   because every body there may be tolerant of a stale id (the text
+//!   stays visible on the open page) and this one must refuse instead.
 //! - [`page`] — navigate pages and journals, search, refs,
 //!   `toggle_pin` (RFC 0254 phase 4: flips the `pinned::` page
 //!   property, already op-log-backed), `delete_page`.
@@ -56,6 +60,7 @@
 //!   Read-only; there is no restore command.
 
 pub mod asset;
+pub mod backlink_edit;
 pub mod block;
 pub mod boot;
 pub mod exec;

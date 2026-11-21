@@ -5,7 +5,8 @@
 pub use outl_actions::merges::{detect, record, MergedEditDto, MERGE_LOG_CAP};
 use outl_actions::merges::{list, take};
 
-use crate::helpers::{finish_in_page, parse_node_id};
+use crate::commit::finish_in_page;
+use crate::helpers::parse_node_id;
 use crate::host::AppHost;
 use crate::state::PageView;
 

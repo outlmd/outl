@@ -298,7 +298,18 @@ This file is the *why*, and the two are one fact: change a rule here and change 
     **The net is structural, because a timing test is flaky and a structural one is not**: the no-open tests delete the sidecars and fail if either comes back.
     The pre-existing fast-path test passed throughout, because it only ever reached the early return — **a fast-path test that skips the working branch is how this hid.**
 
-    The incident, the measurements, the rejected cache design and the per-client checklist: [`docs/performance.md`](performance.md).
+    **And the net is run against the defect it refuses, or it is not a net.**
+    The second incident's first ratchet matched the source string `tree().properties_of(`, which rustfmt had already broken across three lines, so it scored zero on the file it existed to refuse while reporting itself verified.
+    Its other assertion — that the file reaches the shared pass — was satisfied by a doc comment naming it.
+    So the pre-fix file is committed verbatim as a fixture and the ratchet is pointed at it, and the ratchet reads idents off a token stream rather than text, because a formatter decides where the lines go and a comment is not a call.
+
+    **A second incident added one more question, and it is about the diagnosis rather than the code.**
+    "Saving a backlink edit is extremely slow" was reported with a four-item cause already attached.
+    All four were real, summed to ~85 ms, and none was the problem: the reply every mutation returns read the whole workspace property map **once per block**, because `Tree::properties_of` does that and its doc comment said it does not.
+    2,588 ms to project one 688-block page; the in-page `edit_block` nobody complained about was equally slow on the same page, which is what should have been measured first.
+    So: **measure the path that is supposedly fine**, and treat an accessor's doc comment as a claim, not a measurement.
+
+    The incidents, the measurements, the rejected cache design and the per-client checklist: [`docs/performance.md`](performance.md).
 
     **The general rule** (9 → 14 above): those ask whether a change is *correct*.
     This one asks **what it costs, how often it runs, and whether anyone reads the result** — because here a correct answer delivered slowly is a wrong answer.

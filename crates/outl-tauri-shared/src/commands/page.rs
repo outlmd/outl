@@ -13,9 +13,9 @@ use outl_md::index::WorkspaceIndex;
 use outl_md::{BlockEntry, BlockIndex};
 
 use crate::commands::page_backlinks::compute_backlinks_offloaded;
+use crate::commit::finish_in_page;
 use crate::helpers::{
-    build_page_view, finish_in_page, parse_date, parse_node_id, reproject_stale_md, with_ws,
-    with_ws_mut,
+    build_page_view, parse_date, parse_node_id, reproject_stale_md, with_ws, with_ws_mut,
 };
 use crate::host::AppHost;
 use crate::offload;

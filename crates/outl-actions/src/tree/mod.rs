@@ -28,7 +28,9 @@ pub(crate) use children::{
 pub use children::{children_of, next_sibling, ChildrenIndex};
 pub(crate) use position::interior_between;
 pub use position::{position_after, position_before, position_for_new_last_child};
+pub(crate) use props::{
+    group_properties_of, renderable_prop_value, text_properties_of, PropertiesByNode,
+};
 pub use props::{is_page_model_key, sort_in_presentation_order};
-pub(crate) use props::{renderable_prop_value, text_properties_of};
 pub(crate) use traverse::is_under;
-pub use traverse::{enclosing_page_id, is_trashed, page_slug_of, walk_subtree};
+pub use traverse::{enclosing_page_id, is_live, is_trashed, page_slug_of, walk_subtree};

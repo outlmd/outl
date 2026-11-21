@@ -105,6 +105,7 @@ function makeCb(): BlockCallbacks {
 function mountEditing(text: string): {
   host: HTMLElement;
   ta: HTMLTextAreaElement;
+  cb: BlockCallbacks;
 } {
   const block: BlockNode = {
     id: "blk-1",
@@ -117,6 +118,7 @@ function mountEditing(text: string): {
   };
   const host = document.createElement("div");
   document.body.appendChild(host);
+  const cb = makeCb();
   dispose = render(
     () => (
       <BlockRow
@@ -124,14 +126,14 @@ function mountEditing(text: string): {
         depth={0}
         editingId={block.id}
         visualSet={null}
-        cb={makeCb()}
+        cb={cb}
       />
     ),
     host,
   );
   const ta = host.querySelector("textarea");
   if (!ta) throw new Error("textarea did not render in edit mode");
-  return { host, ta };
+  return { host, ta, cb };
 }
 
 /** Type `ch` at the caret the way the webview does: `beforeinput` first
@@ -223,6 +225,43 @@ describe("the inline /command menu", () => {
     await settle();
 
     expect(openToday).toHaveBeenCalled();
+  });
+
+  /**
+   * `/quote` is this client's only route to `toggle_quote`, and the
+   * half that cannot be seen from `blockSlashCommands()`' own test:
+   * that the row is actually *merged into the menu's universe*.
+   *
+   * Pinned both ways on purpose. The row has to be listed, and
+   * accepting it has to arrive at `onRunPluginCommand` under the
+   * sentinel `plugin_id` — a row that lists and dispatches nothing is
+   * the shape `/date-today` shipped in, and a row that dispatches
+   * under the wrong id falls through to `pluginRun`, which reports
+   * "no such plugin" over whatever really happened.
+   */
+  it("lists /quote and hands the pick to the block sentinel", async () => {
+    const { host, ta, cb } = mountEditing("");
+    ta.setSelectionRange(0, 0);
+
+    // Before: nothing has been dispatched. Asserting only the call
+    // afterwards would also pass against a row that fired on mount.
+    expect(cb.onRunPluginCommand).not.toHaveBeenCalled();
+
+    for (const ch of "/quote") typeChar(ta, ch);
+    await settle();
+
+    const rows = rowsOf(host);
+    expect(rows.some((r) => r.startsWith("/quote"))).toBe(true);
+
+    const row = Array.from(host.querySelectorAll('[role="option"] button')).find(
+      (b) => b.textContent?.startsWith("/quote"),
+    );
+    row?.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+    await settle();
+
+    expect(cb.onRunPluginCommand).toHaveBeenCalledWith("@outl/block", "quote");
   });
 
   /**

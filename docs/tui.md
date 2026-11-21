@@ -88,7 +88,7 @@ That is the gap recorded on the TUI column of [`client-parity.md`](client-parity
 A file in the inbox that cannot be read is left there and named, with the folder it is sitting in, rather than being dropped silently.
 `outl capture --list` shows everything still waiting.
 
-Full behaviour, and why this is not `outl daily append`: [`clients.md` → Capturing from outside the app](clients.md#capturing-from-outside-the-app) and [`cli.md` → Capture](cli.md#capture).
+Full behaviour, and why this is not `outl daily append`: [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app) and [`cli.md` → Capture](cli.md#capture).
 
 ## Config
 
@@ -478,7 +478,7 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
   Recursion is capped at depth 4 to break embed cycles.
   The cursor-bearing block always keeps the raw `((…))` / `!((…))` literal on its first row so column counting stays exact.
 - **Backlinks (inline)** — rendered below the outline, separated by a full-width `─` rule.
-  Every block in any other page that contains `[[this]]` or `#this` shows up with its children, grouped by source page.
+  Every block that contains `[[this]]` or `#this` shows up, grouped by source page — **one row per block, without its children**, because walking every referencing block's subtree across the workspace is what used to freeze input.
   Pages are ordered by how recently they referenced this page (default: most recent on top); `Ctrl+O` flips the direction, shown in the section header (`↓ newest (^O)` / `↑ oldest (^O)`).
   Within a page, blocks keep document order.
   When a citing block is nested inside an outline (not at page root level), its ancestor chain shows as a dimmed breadcrumb above it, root-first (e.g. `Planejamento Q3 › Objetivos`); a root-level block has no breadcrumb.
@@ -486,8 +486,15 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
   Consecutive references from the same branch collapse the trail — it renders once, then stays implicit for the following reference(s) until the branch changes.
   `j`/`k` navigation crosses the separator transparently: from the last outline block, `j` lands you on the first backlink; `k` from the first backlink walks back into the outline.
   Toggle the section with `B`.
-  Self-references are excluded.
-  Press `i` / `Enter` on a backlink to jump to its source page positioned on the referencing block (in-place editing lands in a follow-up).
+  A page **can** cite itself and the row is listed: you typed the ref expecting to see it in your cross-references.
+  Press `i` / `Enter` on a backlink to edit the referencing block **in place**, without leaving the page you are reading: the edit lands as one op on that block, and the source page's `.md` is written from the op log afterwards.
+  `Ctrl+T`, `g D`, `d d`, `Tab` / `Shift+Tab` and the move chords work the same way, on the same block — see [shortcuts.md → On a backlink row](shortcuts.md#on-a-backlink-row) for what each one means there.
+  A row whose block has been deleted elsewhere refuses before the edit starts and says so (`That block was deleted, so nothing changed.`), rather than taking your typing and dropping it at `Esc`.
+  `Enter` *while editing* a backlink row commits what you typed and leaves Insert instead of splitting the block — see `o` / `O` just below for why there is nowhere for the caret to go.
+  `o` / `O` are the one gesture the panel usually cannot finish.
+  The new sibling is created on the source page, but it does not reference the page you are on, so it has no row here and the caret has nowhere to land.
+  The status line names the page it went to and says so — `not editable from the panel` — instead of starting an edit on a block you did not aim at.
+  The exception is a page that cites **itself**: the new block is in the outline you are already looking at, so the cursor leaves the panel and Insert opens on it, exactly as `o` behaves anywhere else.
 - **Status / hint** — mode badge, contextual key reminder, backlink count, status messages.
 
 ### Pages sidebar
@@ -545,9 +552,10 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
   Go back to the page and the edits are still there.
 - **Toasts show the whole error**: a toast card grows to up to four rows to fit its message, and adds `…` when even that is not enough.
   They used to be one row inside a 50-column card, so a long `reconcile failed: …` lost the path at the border with nothing to indicate it had been cut ([#435](https://github.com/outlmd/outl/issues/435)).
-- **Editing through the backlinks panel is undoable on the page it changed**: a delete, indent, move or TODO flip applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
+- **Editing through the backlinks panel is undoable on the page it changed**: a text edit, delete, indent, move, `Ctrl+T` or `g D` applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
   Press `u` on the referencing page and nothing happens (`no undo for this page`); open the source page and `u` takes it back.
   These ops used to leave no undo entry at all ([#431](https://github.com/outlmd/outl/issues/431)).
+  A move that has nowhere to go — the first sibling up, a top-level block outdented — records nothing and says nothing, so it cannot push a foreign entry onto the history of the page you are reading.
 - **Search is index-backed**: `/search` filters the in-memory block index a background worker builds, so typing does not re-read the workspace.
   It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
   On a cold start there is a short window while that index builds; the header shows a spinner during it.

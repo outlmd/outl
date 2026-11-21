@@ -44,8 +44,9 @@ export interface PageSectionsProps {
  * merely a distracting one. Zooming is a request for one subtree and
  * nothing else (Roam / Workflowy "focus"), which is the same reason
  * `<OutlineView />` hides the page's `key:: value` row there.
- * The matching half is `backlinkBlockIds()` in `lib/cursor-handlers.ts`:
- * `j` must not walk into a section that is not drawn.
+ * The matching half is `backlinkRowIds()` in `lib/cursor-region.ts`, the
+ * one owner of "is this section reachable": neither `j` nor a mutating
+ * chord may reach a section that is not drawn.
  */
 export function PageSections(props: PageSectionsProps) {
   return (

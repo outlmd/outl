@@ -42,6 +42,7 @@ use crate::journal::page_md_path;
 use crate::outline::{project_outline_node_shallow, read_page_outline, ChildrenIndex, OutlineNode};
 use crate::page::{page_meta, PageMeta};
 use crate::todo::split_todo;
+use crate::tree::PropertiesByNode;
 
 /// [`BacklinkIndex::for_page_split`]'s two sets.
 ///
@@ -269,6 +270,12 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
         .filter_map(|&id| page_meta(workspace, id).map(|meta| (id, meta)))
         .collect();
     index.claims = PageClaims::from_metas(metas.iter().map(|(_, m)| m));
+    // One pass over the property map for the whole walk. `walk_page`
+    // projects every referencing block, and reading the map per block
+    // made this `O(refs × properties)` — see
+    // `crate::outline::workspace_properties`, and root `CLAUDE.md`
+    // invariant 15. Workspace-scoped here because the walk is.
+    let properties = crate::outline::workspace_properties(workspace);
     for (page_id, meta) in &metas {
         let page_id = *page_id;
         let source_path = page_md_path(root, meta);
@@ -282,6 +289,7 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
             &mut path,
             &mut ancestors,
             &children,
+            &properties,
             &mut index,
         );
     }
@@ -413,6 +421,7 @@ fn walk_page(
     path: &mut Vec<usize>,
     ancestors: &mut Vec<CrumbFrame<'static>>,
     children: &ChildrenIndex,
+    properties: &PropertiesByNode,
     index: &mut BacklinkIndex,
 ) {
     let Some(kids) = children.get(&parent) else {
@@ -431,7 +440,7 @@ fn walk_page(
             // props per node) across the whole workspace, under the
             // workspace lock, is what froze input. Clients render the row
             // from `source_block.tokens`; the subtree isn't needed.
-            let source_block = project_outline_node_shallow(workspace, child_id);
+            let source_block = project_outline_node_shallow(workspace, child_id, properties);
             index.insert(
                 Backlink {
                     block_id: child_id.to_string(),
@@ -458,6 +467,7 @@ fn walk_page(
             path,
             ancestors,
             children,
+            properties,
             index,
         );
         ancestors.pop();
