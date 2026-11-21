@@ -118,6 +118,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A ` ```rust ` fence could escape its sandbox on Windows and reach any file the app can.**
+  [RUSTSEC-2026-0587](https://rustsec.org/advisories/RUSTSEC-2026-0587) (GHSA-f2pq-268w-886c, severity high) is a full WASI filesystem sandbox escape.
+  Wasmtime split a guest path into components and handed each to the OS layer on its own.
+  So `./C:foo` parsed as one ordinary component named `C:foo`, and a layer down that was read as the drive-relative path `C:foo`, which goes through ambient APIs instead of the sandboxed directory.
+  A fence with read access could read anything the host process can read, on any drive.
+  With write access it could create, overwrite and delete outside the sandbox too.
+  `wasmtime` and `wasmtime-wasi` 50.0.2 → **51.0.0**, which needed no code change.
+  The advisory's 50.x line is fixed at 50.0.3, but the workspace policy is to take the latest major a bump compiles cleanly against.
+
+  **This reached three of the four clients.**
+  `lang-rust` is a default feature of `outl-exec` and expands to `wasm`, and the CLI, the TUI and the desktop all take `default-features = true`.
+  So all three link `wasmtime-wasi` on every platform they ship to, Windows included.
+  Mobile takes an explicit feature list rather than the defaults and never linked it.
+  The exposure matters here for the reason `lang-lisp` is not a default: **a fence body is not always written by the person running it.**
+  A block that arrived over iroh, through `outl import`, or from an agent over MCP is exactly the untrusted input this sandbox exists to contain.
+
 - **A ` ```rust ` fence failed instead of recompiling when its cache slot was not a file.**
   The runtime decided "the cached `.wasm` is good" from `path.exists()` and a non-zero length, which a *directory* at that path satisfies on macOS and Linux (64 bytes on APFS, 4096 on ext4).
   So the read below it failed the user's execution where a recompile was the right answer.
