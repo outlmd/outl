@@ -181,7 +181,20 @@ jobs:
         # don't install on Linux. Mobile is covered by `mobile.yml` on
         # macOS; desktop + the shared crate via the `desktop.yml`
         # matrix.
-        run: cargo test --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared --all-targets
+        # `--lib --bins --tests`, NOT `--all-targets`. The difference is
+        # `--benches`, and `cargo test --benches` *runs* every criterion
+        # benchmark in test mode: all 90 of them, including
+        # `boot/replay_memory/218k`, which replays 218k ops. Measured on a
+        # fully-warm target dir, this job spent 1054s executing, of which the
+        # test binaries themselves accounted for 173s. The other 84% was the
+        # benchmarks, in the job whose name says tests, on every PR.
+        #
+        # Nothing is lost. `bench.yml` owns running them, and `clippy` above
+        # already passes `--all-targets`, so a benchmark that stops compiling
+        # still fails this workflow on the same PR. There are no `examples/`
+        # in the workspace, and all six bench targets are `harness = false`
+        # criterion binaries, so none of them holds a `#[test]`.
+        run: cargo test --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared --lib --bins --tests
 
       # The run above never compiles `scrub_event`, because the `sentry`
       # feature is off by default (RFC 0377 condition 1) and that is the
@@ -260,7 +273,10 @@ jobs:
         with:
           prefix-key: "v0.8-rust"
       - name: cargo test (sync convergence)
-        run: cargo test -p outl-core -p outl-sync-iroh --all-targets
+        # Same reason as the `test` job: `outl-core` carries three criterion
+        # bench targets, so `--all-targets` here was replaying 218k ops before
+        # it got to a single convergence proptest.
+        run: cargo test -p outl-core -p outl-sync-iroh --lib --bins --tests
 
   # Frontend gate for the whole bun workspace, in `ci.yml` rather than
   # in the per-client workflows on purpose.

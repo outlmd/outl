@@ -14,14 +14,15 @@ If anything here is wrong or out of date, that's a bug — open an issue or fix 
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` on every event, plus `test (macos)` on pushes to `main` only (see [Runner sizing](#runner-sizing)). | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings` (`--all-targets`), `cargo test` (`--lib --bins --tests`, deliberately not `--all-targets`: see [Test scope](#test-scope)), `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` on every event, plus `test (macos)` on pushes to `main` only (see [Runner sizing](#runner-sizing)). | **Yes** |
 | [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet), `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`), `scripts/tests/test_check_artifact_stripped.py` (the strip gate's own suite), and `scripts/check-release-assets.py --manifest` plus its suite (the three build matrices, `update_tap`'s loops, the Homebrew formula, the cask and the Scoop manifest all name the platforms `scripts/release_assets.py` names), and `scripts/check-ios-flavor.py` (every `$(OUTL_*)` in the iOS project has a definition in `Outl.xcconfig`, and no preview override reached a committed file). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
-| [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths | Frontend tests, Swift tests, Rust mobile crate, iOS archive + sign on `push` | Mobile changes only |
+| [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths for the guards; **nightly cron at 05:00 UTC** (gated) or manual dispatch for the signed build | A `vite build`, Swift tests and the Rust mobile crate on every push / PR. The signed archive (`ios-release`, which feeds `testflight.yml`) is nightly and gated, never per push: see [Runner cadence](#runner-cadence). The vitest suite is **not** here: `ci.yml::frontend` runs `bun run test` at the repo root, which is `bun --filter '*' test` and already covers this package, so running it here too meant two runners and two red checks for one cause. | Mobile changes only |
 | [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
-| [`bench.yml`](../.github/workflows/bench.yml) | Push / PR touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every PR; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
+| [`bench.yml`](../.github/workflows/bench.yml) | **Push** to `main` touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron. No `pull_request` trigger: see [Runner cadence](#runner-cadence) | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every push; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
 | [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when `main` moved in the last 24h **and** the newest conclusive `ci.yml` run on `main` is green (beta), `v*` tag (GA), manual. Runs no tests of its own: `ci.yml` owns them, and the gate is what keeps ~20 build legs off a red tree | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
 | [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully, or manual dispatch | Skips the upload (green run, `gate` notice) when the Mobile run has no non-expired `outl-ios-release` artifact; manual dispatch bypasses that check. Otherwise downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
 | [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. | No |
+| [`nix-build.yml`](../.github/workflows/nix-build.yml) | PR / push touching `flake.nix`, `flake.lock`, `hm-module.nix`, a lockfile, `rust-toolchain.toml` or the workflow, plus a nightly cron at 04:00 UTC | `nix flake check --no-build`, then builds `.#outl-desktop-node-modules` (the frontend fixed-output derivation, which is how a stale `frontendNodeModulesHash` reports itself), `.#outl`, `.#outl-desktop` and the `home-manager-module` check, on `x86_64-linux` and `aarch64-linux`. **`crates/**` is deliberately not a trigger**, see [Why `nix-build` does not watch `crates/**`](#why-nix-build-does-not-watch-crates). | No |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Called by `release.yml` from `needs: tag` (once per tag created), or manual | Keeps the 2 most recently generated `vX.Y.Z-beta.N` tags repo-wide and deletes every older one, release and tag together. GA tags are never candidates, and neither is a beta a shipped package manifest still points at. Each deletion is confirmed by re-reading the ref from origin, because a 46-tag drain once printed `- [deleted]` 46 times, left 21 refs in place and still exited 0. Not `on: push: tags:`: the tag is pushed with `GITHUB_TOKEN`, which triggers no workflow. | n/a |
 
 [`discussions-discord.yml`](../.github/workflows/discussions-discord.yml) is not a CI check: it mirrors new Discussions and comments into a Discord forum, see [Discussions mirror to Discord](discussions-discord.md).
@@ -65,10 +66,18 @@ What it deliberately leaves alone, because none of it is duplication:
 
 ### Runner sizing
 
-Every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`, with `-arm` appended for ARM64 Linux), never on GitHub-hosted ones.
-The one exception is `release.yml::publish_npm`, which runs on `ubuntu-24.04`: npm trusted publishing (OIDC) does not accept self-hosted runners yet, and Blacksmith registers as self-hosted.
-Moving it back to Blacksmith breaks the npm publish.
-Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted publishing) must stay configured as owner `outlmd`, repository `outl`, workflow `release.yml`, environment `release`, with publishing allowed.
+Almost every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`, with `-arm` appended for ARM64 Linux) rather than on GitHub-hosted ones.
+Two places are not, for unrelated reasons, and both are deliberate:
+
+- **`release.yml::publish_npm`** runs on `ubuntu-24.04` because npm trusted publishing (OIDC) does not accept self-hosted runners yet, and Blacksmith registers as self-hosted.
+  Moving it back to Blacksmith breaks the npm publish.
+  Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted publishing) must stay configured as owner `outlmd`, repository `outl`, workflow `release.yml`, environment `release`, granting `npm publish`.
+  See [npm trusted publishing](#npm-trusted-publishing) for the three fields that are easy to get wrong.
+- **`nix-build.yml`** runs on `ubuntu-24.04` / `ubuntu-24.04-arm`.
+  This repository is public, so GitHub-hosted Linux minutes are free, and the flake has no binary cache: every run is a full from-scratch compile of the workspace plus the Tauri desktop app, measured at 31 and 29 minutes for the two legs.
+  Putting that on Blacksmith converts the single longest job in the repo into the single most expensive one, for a build whose only product is a signal.
+  What it costs instead is wall clock a contributor waits on, which is why the trigger is narrow rather than the runner fast.
+
 Billing is per vCPU-minute, with a platform multiplier on top: ARM 0.625x, x64 Linux 1x, Windows 2x, macOS 6.67x.
 That multiplier is why job placement matters more than job speed: a 29s macOS job costs more than a 5min Linux one.
 
@@ -111,6 +120,39 @@ The CLI matrix on the same image already did, which is why `outl-windows-arm64.z
 Branch protection matches required checks by name, so `test (ubuntu-latest)` becoming `test (blacksmith-8vcpu-ubuntu-2404)` leaves `main` blocked on a check that will never report again.
 Matrix jobs therefore carry a stable `label` (`linux`, `macos`, `macOS arm64`, …) and the SKU lives only in `matrix.os`.
 
+### Test scope
+
+**`cargo test` runs `--lib --bins --tests`, never `--all-targets`, and that is worth 86% of the job.**
+
+The difference between the two is `--benches`, and `cargo test --benches` does not merely compile a benchmark, it *runs* it in test mode.
+This workspace has six criterion bench targets across `outl-core` and `outl-md`, which expand to 90 benchmarks including three tiers of `boot/replay_memory` and `boot/replay_disk` at 218k ops.
+
+Measured on one machine with a fully warm target dir, so the number is execution only:
+
+| Command | Wall clock | Suites | Tests passed |
+|---|---:|---:|---:|
+| `--all-targets` | 17m34s | 202 | 3818 |
+| `--lib --bins --tests` | 2m52s | 200 | 3818 |
+
+Of the 1054s the first one took, the test binaries' own `finished in` lines accounted for 173s.
+The other 84% was benchmarks, running inside the job whose name says tests, on every pull request, with `sync` paying it a second time because `outl-core` is one of the two crates it names.
+The two missing "suites" are the bench binaries, which reported `0 passed` either way.
+
+Nothing is lost, and each piece has an owner that still runs on the same PR:
+
+- **Running** the benchmarks belongs to `bench.yml`.
+- **Compiling** them is covered by `clippy`, which does pass `--all-targets`, so a benchmark that stops compiling still fails this workflow.
+- There are no `examples/` in the workspace, and all six bench targets are `harness = false`, so none of them holds a `#[test]` that would now go unrun.
+
+`cargo-nextest` is the obvious next question, and the measurement argues against reaching for it yet.
+The run above averaged 1.1 of 14 cores, because `cargo test` serialises *between* binaries, but the real work inside them is only 173s.
+Fix the 881s first.
+
+**One number above is now stale, on purpose rather than by neglect.**
+[Runner sizing](#runner-sizing) puts `ci.yml::test (linux)` on 8 vCPU because it measured 71–76% average CPU on 4 vCPU, and that measurement was taken while the job was spending 84% of its time on benchmarks.
+The right move is to re-measure with `blacksmith jobs stats <job_id>` once this has run a few times on `main` and resize from what it reports, which is the rule that section already states.
+Do not resize it from this paragraph.
+
 ### Runner cadence
 
 macOS is 6.67x Linux per vCPU-minute and 6 vCPU is the smallest tier offered, so a macOS job has no cheaper SKU to move to.
@@ -144,15 +186,106 @@ First, did anything land in the last 24h.
 Second, does CI already know the tree is red: `release.yml` runs no tests of its own, `ci.yml` owns them, and without the second question the nightly spends 9 to 34 minutes across ~20 build legs producing a beta from a tree whose tests fail.
 A tag push and a manual dispatch both bypass both gates — **if you need a beta right now, Actions → Release → "Run workflow"**, which is unchanged.
 
+**`mobile.yml::ios-release` builds nightly, not on every push to `main`.**
+It archives, signs and hands an IPA to `testflight.yml`, so `on: push` meant one TestFlight build per merge.
+That was 10 pushes in four days, each spending macOS-rate minutes on an archive nobody requested, and each one a build number a tester scrolls past to find the one they were told about.
+The `gate` job is the same shape as `release.yml`'s and asks the same two questions, with one difference that matters: gate 1 counts commits **against this workflow's path list** rather than against `HEAD`.
+A beta ships the whole repo, so any commit justifies one; an IPA is the mobile app, and a night whose only commits were in `docs/` or `outl-cli` has nothing new to put in front of a tester.
+The fast guards (`rust-check`, `frontend`, `swift-tests`) still run per push and per PR, because those are what answer "did this change break mobile" and they are cheap.
+A nightly and a manual dispatch each get a concurrency group keyed on the run id, so a merge landing at 05:10 UTC cannot cancel the night's build.
+**If you need a TestFlight build now: Actions → Mobile → "Run workflow" with `release_build: true`**, which bypasses both gates.
+
+**`bench.yml` has no `pull_request` trigger, and the reason is signal rather than cost.**
+`bench-quick` compiled, measured and uploaded criterion's HTML, comparing against nothing: no baseline from the merge base in the run, no threshold, no step that could fail.
+A PR paid ~3.4 minutes for a number that only becomes a signal if a human downloads two zips and diffs them by hand.
+Adding a percentage comparison is not the fix, because wall clock on a shared 4 vCPU runner moves by double digits between identical runs, so the gate would fail on noise and be muted inside a sprint.
+The gate that would work is deterministic instead: instruction counts via iai-callgrind plus absolute budgets over `bench-cli-xlarge`'s JSON, tracked as open work in [boot performance](boot-performance.md).
+Until that lands, `main` carries the per-commit series and the cron carries the trend.
+
 **What neither of these covers, and nothing covered before.**
 APFS is case-insensitive and ext4 is not, so a slug collision that only reproduces on macOS is a real failure mode that no test in this workspace exercises.
 The macOS CI leg never protected against it, on a PR or anywhere else, because no such test exists to run.
 If that gap matters, the fix is a test for it on either platform, not restoring 12.8 minutes of macOS per pull request.
 
+### Why `nix-build` does not watch `crates/**`
+
+It did, and it was the largest consumer of runner time in the repo.
+61 minutes per run (31 on `x86_64`, 29 on `aarch64`) across 27 runs in four days, because the flake has no binary cache and each leg compiles the whole Rust workspace plus the Tauri desktop app from nothing.
+
+What that buys is the **packaging**, not the code.
+Take `cargoHash`, `frontendNodeModulesHash`, `buildInputs`, `wrapProgram`, the `.desktop` entry and the home-manager module.
+Every one of those is decided by `flake.nix`, `hm-module.nix`, a lockfile or `rust-toolchain.toml`, which is exactly the trigger list.
+A change under `crates/**` can only break this workflow by failing to compile, and `ci.yml::clippy` reports that in about a minute on the same change, thirty times sooner.
+
+The gap that leaves is narrow and real, so it is covered rather than ignored.
+A change in `crates/**` that needs a **new system library** without touching any lockfile trips nothing in the list.
+The nightly cron at 04:00 UTC catches it within a day, and `workflow_dispatch` catches it on demand, which is what to reach for before tagging a release if the flake matters to you.
+
+### Cache budget
+
+A repository gets **10 GB of Actions cache in total**, shared by every workflow, evicted least-recently-used, and entries expire after 7 days without a read.
+That total is a resource with no owner, and it is possible for one workflow to consume all of it without failing.
+
+That happened.
+`docker.yml` exported `cache-to: type=gha,mode=max` under two scopes (`docker-amd64`, `docker-arm64`), which puts every intermediate layer of a multi-stage Rust build into the shared budget.
+A census found 11.00 GB across 242 entries, **202 of them buildkit blobs**, with zero entries left for anything else.
+The `Swatinem/rust-cache` entries in `ci.yml`, the bun caches, and the cargo caches in `bench.yml` and `release-screenshots.yml` had all been evicted, and the two docker legs were evicting each other.
+
+The fix is `cache-to: type=registry`, pointing at `:buildcache-<arch>` next to the image in GHCR.
+It is billed as package storage instead of cache, so it neither competes with the Rust caches nor expires at 7 days.
+`cache-to` is gated on `github.event_name != 'pull_request'` because a fork's PR holds no write token; `cache-from` needs none against a public package.
+
+Two rules follow:
+
+1. **A workflow may not export `mode=max` to `type=gha`.**
+   Intermediate layers of a compile belong in a registry cache.
+   If you need `type=gha`, `mode=min` is the ceiling.
+2. **Check the census before blaming a cold build.**
+   `gh api --paginate "/repos/outlmd/outl/actions/caches?per_page=100"` lists every entry with its size, and `gh api /repos/outlmd/outl/actions/cache/usage` gives the total.
+   A Rust job that suddenly takes 12 minutes instead of 2 is usually not a code change: it is a restore that found nothing.
+
+Blacksmith redirects `actions/cache` to its own colocated cache, so jobs on `blacksmith-*` runners are not what fills this budget.
+Buildx's `type=gha` talks to the GitHub Actions cache API directly and is not redirected, which is why one workflow could fill the whole thing while every other cache in the repo looked fine in its own YAML.
+
 ### What blocks merge
 
-The `ci.yml` jobs are the merge gate.
-The PR template and the policy in [`docs/contributing.md`](contributing.md) describe everything else reviewers look at on top of CI.
+**Nothing, today.**
+The `main` ruleset (Settings → Rules) carries `deletion` and `non_fast_forward`, and no `required_status_checks` at all.
+So every row in the table above is advisory however red it goes, and the "Blocks merge?" column describes intent rather than enforcement.
+Verify it rather than trusting this paragraph: `gh api /repos/outlmd/outl/rules/branches/main`.
+
+
+**Turning them on is not a settings toggle, and that is why it has not happened.**
+A required status check must report on *every* pull request, or the PR waits on a check that will never arrive and cannot be merged at all.
+Every workflow in the table above is filtered:
+
+- `desktop.yml`, `mobile.yml`, `bench.yml`, `nix-build.yml` and `docker.yml` carry a `paths:` allowlist, so they produce no check at all on a PR outside their paths.
+- `ci.yml` carries `paths-ignore`, which is the same trap in the one case that matters most for it: a docs-only PR runs no `ci.yml` job, so `rustfmt` as a required check would block every documentation change forever.
+- `hygiene.yml` is the only workflow with no filter of any kind, which is exactly why it was written that way, and the only one that could be required as it stands.
+
+Three ways out, and the right one depends on how many people are merging:
+
+1. **A merge queue.**
+   The queue runs the full set against the merge result, so a path filter stops being a hole.
+   It also removes the duplication where every merge re-runs on `main` what the PR just ran green, and it is the only one of the three that lets the `paths:` lists stop being written twice per workflow.
+   It is also the most process for a repo with one main maintainer.
+2. **Sentinel jobs.**
+   A second, unfiltered job per workflow that reports success when the real one was skipped.
+   It works, and it means every filtered workflow grows a job whose only purpose is to lie convincingly to branch protection.
+3. **Leave it advisory and treat that as the design.**
+   Which is the current state, now stated rather than assumed.
+
+Option 3 is the one in force.
+The consequence is a budget rule, not a shrug: **if the gate is a human reading a check, then a job that no human reads is not signal, it is spend.**
+That is the test `bench.yml` failed on pull requests (a measurement compared against nothing), and the one `nix-build.yml` failed on `crates/**` (a 31-minute answer to a question `clippy` answers in one).
+Apply it to the next job somebody wants to add.
+
+Two precautions stay in the workflows regardless, because they cost nothing and they are what makes option 1 or 2 cheap later:
+
+- Matrix legs carry a stable `label` instead of the runner SKU, because required checks match by name and a SKU bump would silently rename one.
+- `ci.yml::sync` exists as its own job so a convergence regression shows up as its own red check rather than buried in a broad matrix job.
+
+The PR template and the policy in [`docs/contributing.md`](contributing.md) describe everything reviewers look at on top of CI.
 
 ### Debugging a red CI
 
@@ -295,6 +428,29 @@ The `update_tap` job in `release.yml` patches version + sha256 anchors for both 
 
 The desktop dmg is **unsigned** today (Apple Developer account pending).
 The cask carries a `caveats` block with the `xattr -dr com.apple.quarantine` workaround.
+
+### npm trusted publishing
+
+`publish_npm` authenticates with OIDC, not a stored token, so there is no `NPM_TOKEN` to rotate and npm attaches provenance on its own.
+The trust lives in an entry on npmjs.com under `@outl/plugin-sdk` → Settings → Trusted publishing, and it has to match the job exactly:
+
+| Field | Value | Why |
+|---|---|---|
+| Publisher | GitHub Actions | |
+| Organization or user | `outlmd` | |
+| Repository | `outl` | |
+| Workflow filename | `release.yml` | The **file name**, not the workflow's `name:` |
+| Environment name | `release` | The job declares `environment: release`, so the OIDC token carries that claim; an empty field here does not match it |
+| Allowed actions | `npm publish` only | The job runs `npm publish --access public --tag latest`. Nothing in the repo runs `npm dist-tag`, and the `--tag` above is an argument to `publish`, not that command |
+
+Every mismatch fails the same way, as `npm error code ENEEDAUTH` in a job that otherwise looks healthy.
+That is also what a missing entry looks like, which is how 13 of 20 nightly releases went red before the entry existed: a 17-second job at the end of a 21-job run, turning the whole release amber every morning until nobody read it any more.
+
+**A new entry starts as `Pending validation` and expires.**
+npm gives a deadline (48 hours, when this was last set up) and discards the entry if no publish has validated it by then.
+The nightly cron is normally what validates it, which means `release.yml`'s `gate` has to pass first: `main` must have moved in the last 24h **and** `ci.yml` must be green on `main`.
+So a red `main` does not merely skip a beta, it can burn the validation window.
+To validate immediately instead, use Actions → Release → "Run workflow" with `dry_run: false`; a dry run does not validate, because `publish_npm` is gated on that input.
 
 ### crates.io (lib crates for embedders)
 

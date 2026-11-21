@@ -3,8 +3,8 @@ name: bench
 # Two cadences:
 #
 #   - bench-quick (small + medium + large, up to ~1200 files)
-#     runs on every PR / push so we catch a perf regression near the
-#     commit that introduced it.
+#     runs on every push to `main` so there is a per-commit series to walk
+#     back through, and on the weekly cron.
 #
 #   - bench-xlarge (10k+ files)
 #     runs on a weekly cron and on manual dispatch. Too slow + too
@@ -30,14 +30,12 @@ on:
       - 'crates/outl-actions/**'
       - 'crates/outl-tauri-shared/**'
       - '.github/workflows/bench.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'crates/outl-core/**'
-      - 'crates/outl-md/**'
-      - 'crates/outl-actions/**'
-      - 'crates/outl-tauri-shared/**'
-      - '.github/workflows/bench.yml'
+  # **No `pull_request` trigger.** `bench-quick` measures and uploads
+  # criterion's HTML, comparing against nothing: no baseline from the merge
+  # base, no threshold, no step that can fail. A percentage gate would not fix
+  # that, because wall clock here moves by double digits between identical runs
+  # (see `bench-quick` below). The gate that would work is deterministic, and
+  # it is open work in docs/boot-performance.md "Hard regression gates".
   schedule:
     # Mondays 09:00 UTC. Catches drift weekly even on quiet repos.
     - cron: '0 9 * * 1'
@@ -56,7 +54,9 @@ concurrency:
 
 jobs:
   bench-quick:
-    # PR + push + manual + schedule all hit this job.
+    # push to `main` + manual + schedule hit this job. Not a PR: see the
+    # `on:` block for why a comparison-free measurement is not worth a PR's
+    # runner minutes.
     name: bench (small + medium + large)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -84,9 +84,8 @@ jobs:
       # must stop depending on vault size"), and until now nothing ran
       # it outside a developer's own machine. `10k` on a shared runner
       # is a trend line, not a gate: criterion's wall-clock on a noisy
-      # 4-vCPU box moves by double digits between identical runs, which
-      # is why the budget checker lives on the xlarge tier's JSON and
-      # not here.
+      # 4-vCPU box moves by double digits between identical runs. There is
+      # no budget checker anywhere yet, on this tier or the xlarge one.
       #
       # The tiers above 10k stay out of the PR path deliberately —
       # `218k` is minutes per boot mode.

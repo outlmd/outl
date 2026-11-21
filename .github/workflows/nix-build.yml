@@ -3,8 +3,21 @@ name: Nix Build
 # Builds the flake packages on every change that can affect them. The flake is
 # self-building (no binary cache), so CI is the prebuilt signal for contributors.
 
+# **`crates/**` is deliberately NOT in these lists.** It was, and at 61 minutes
+# a run (no binary cache, so each leg compiles the workspace plus the Tauri app
+# from nothing) it made this the largest consumer of runner time in the repo,
+# to answer a question `ci.yml::clippy` answers in about a minute. What this
+# workflow actually validates is the *packaging*, and every input to that is a
+# file below. The nightly cron covers the one gap: a crate that needs a new
+# system library without touching a lockfile.
+#
+# Full reasoning: docs/ci-and-release.md "Why nix-build does not watch crates".
 on:
   workflow_dispatch:
+  schedule:
+    # 04:00 UTC. The net under the paths filter: builds `main` as it stands,
+    # whether or not anything in the lists moved.
+    - cron: '0 4 * * *'
   push:
     branches: [main]
     paths:
@@ -15,7 +28,6 @@ on:
       - 'Cargo.lock'
       - 'package.json'
       - 'bun.lock'
-      - 'crates/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/nix-build.yml'
   pull_request:
@@ -28,7 +40,6 @@ on:
       - 'Cargo.lock'
       - 'package.json'
       - 'bun.lock'
-      - 'crates/**'
       - 'rust-toolchain.toml'
       - '.github/workflows/nix-build.yml'
 

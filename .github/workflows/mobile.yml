@@ -4,8 +4,21 @@ name: Mobile
 # shared crates the mobile app depends on. The iOS build is opt-in
 # because it needs macOS and Xcode — push the button on the
 # "Actions" tab when you want a fresh `.app`.
+#
+# **The signed release build is nightly, not per push.** `ios-release` hands an
+# IPA to `testflight.yml`, so `on: push` meant one TestFlight build per merge.
+# The fast guards (`rust-check`, `frontend`, `swift-tests`) still run per push
+# and per PR; only the archive moved. Need one now: Actions -> Mobile -> "Run
+# workflow" with `release_build: true`, which bypasses both gates below.
+#
+# Full reasoning: docs/ci-and-release.md "Runner cadence".
 
 on:
+  schedule:
+    # 05:00 UTC / 02:00 BRT, an hour ahead of `release.yml`'s own cron so a
+    # night's TestFlight build and a night's beta do not contend for the
+    # macOS pool.
+    - cron: "0 5 * * *"
   push:
     branches: [main]
     paths:
@@ -81,18 +94,93 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
-# Cancel any in-flight mobile run as soon as a newer commit lands on
-# the same ref. Pushing two main commits in quick succession otherwise
-# produces two parallel iOS builds, each one happy to upload its own
-# IPA to TestFlight (the downstream `testflight` workflow uses
-# `cancel-in-progress: false` because a half-uploaded archive is hard
-# to roll back). Cancelling the mobile build itself is the cheaper
-# guard — the older commit never reaches the upload stage.
+# Cancel any in-flight mobile run as soon as a newer commit lands on the same
+# ref: two main commits in quick succession otherwise run the guards twice for
+# a result only the newer commit's run reports.
+#
+# **A nightly and a manual dispatch each get a group of their own, keyed on
+# the run id, so neither is ever cancelled.** Those are the runs that archive,
+# sign and hand an IPA to `testflight.yml`, and a merge landing at 05:10 UTC
+# would otherwise throw away the night's build for a push that produces no IPA
+# of its own. `cleanup-tags.yml` is outside `release.yml`'s group for the same
+# reason. The duplicate-upload hazard this group used to guard against is gone
+# with `push` no longer reaching `ios-release`.
 concurrency:
-  group: mobile-${{ github.ref }}
+  group: >-
+    mobile-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    && format('{0}-{1}', github.event_name, github.run_id)
+    || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Does tonight's archive have anything to carry?
+  #
+  # Same two questions as `release.yml::gate` with the same answers, so read
+  # that job's comments for "unknown is not red" and for why the newest
+  # *conclusive* ci.yml run is the one to ask. The difference is gate 1:
+  # `release.yml` ships the whole repo and counts any commit, while an IPA is
+  # the mobile app, so this one counts only what landed in mobile.
+  #
+  # On a push, a PR or a dispatch this job decides nothing: it reports
+  # `proceed=true` and the per-event `if:` downstream is what applies.
+  gate:
+    name: Is there anything to build tonight?
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # No checkout: both questions are answered by `gh run list`, so this job
+    # needs the API and not the tree.
+    permissions:
+      actions: read
+    outputs:
+      proceed: ${{ steps.decide.outputs.proceed }}
+    steps:
+      - id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${GITHUB_EVENT_NAME} run — the gates below apply only to the nightly cron."
+            exit 0
+          fi
+
+          # Ask GitHub instead of re-deriving the path filter here: every push
+          # to main matching this workflow's `paths:` already produced a push
+          # run of it, so counting those runs uses the real filter rather than
+          # a third copy of the list that would drift from the two above.
+          COUNT=$(gh run list --workflow=mobile.yml --branch main --event push \
+            --created ">=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)" \
+            --limit 100 --json databaseId --jq 'length')
+
+          if [[ "${COUNT}" -eq 0 ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No push run of this workflow on main in the last 24h, so nothing mobile landed. No TestFlight build tonight; use Run workflow with release_build: true to force one."
+            exit 0
+          fi
+
+          VERDICT=$(gh run list --workflow=ci.yml --branch main --limit 20 \
+            --json status,conclusion \
+            --jq 'map(select(.status == "completed"
+                   and (.conclusion | IN("success", "failure", "timed_out"))))
+                  | .[0].conclusion // "unknown"')
+
+          case "${VERDICT}" in
+            success)
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::${COUNT} mobile push run(s) in the last 24h and CI on main is green — building tonight's IPA."
+              ;;
+            unknown)
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::${COUNT} mobile push run(s) in the last 24h, but no conclusive ci.yml run on main. Proceeding: unknown is not red."
+              ;;
+            *)
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::CI on main concluded ${VERDICT} — not spending a signed macOS archive on a red tree. Fix main, or use Run workflow."
+              ;;
+          esac
+
   # macOS minutes bill at 6.67x Linux, so this job carries only the
   # work that *needs* macOS: `outl-mobile` itself, which pulls Tauri's
   # iOS surface and can't build on the Linux CI runners.
@@ -109,6 +197,8 @@ jobs:
   rust-check:
     name: rust (clippy + test) — outl-mobile
     runs-on: blacksmith-6vcpu-macos-15
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
@@ -150,11 +240,19 @@ jobs:
           cargo check -p outl-mobile --target aarch64-apple-ios
           --lib --no-default-features
 
-  # 2 vCPU: vitest + a Vite build finish in ~12s and never saturated
+  # Vite build only, on 2 vCPU: the build finishes in ~12s and never saturated
   # 4 vCPU. Half the SKU, half the bill, same wall clock.
+  #
+  # **The vitest suite is not run here.** `ci.yml::frontend` runs `bun run
+  # test` at the repo root, which is `bun --filter '*' test` and already
+  # includes this package. It is also the better owner, having no `paths:`
+  # allowlist: the suite then runs on a change to `@outl/shared` too. What
+  # stays is what `ci.yml` does not do, a `vite build`.
   frontend:
-    name: frontend (vitest + build)
+    name: frontend (vite build)
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     defaults:
       run:
         working-directory: crates/outl-mobile
@@ -173,8 +271,6 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
       - name: bun install
         run: bun install --frozen-lockfile
-      - name: vitest
-        run: bun run test
       - name: bun run build
         run: bun run build
 
@@ -196,6 +292,8 @@ jobs:
   swift-tests:
     name: swift (OutlKit unit tests)
     runs-on: blacksmith-6vcpu-macos-15
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     defaults:
       run:
         working-directory: crates/outl-mobile/swift/OutlKit
@@ -305,9 +403,13 @@ jobs:
   ios-release:
     name: iOS device build (signed IPA artifact)
     runs-on: blacksmith-6vcpu-macos-15
-    needs: [rust-check, frontend, swift-tests]
+    needs: [gate, rust-check, frontend, swift-tests]
+    # Nightly, or forced by hand. `push` is deliberately absent: it used to be
+    # the only trigger here, which made every merge a TestFlight build. See the
+    # header and `gate` above.
     if: |
-      github.event_name == 'push' ||
+      (github.event_name == 'schedule' &&
+       needs.gate.outputs.proceed == 'true') ||
       (github.event_name == 'workflow_dispatch' &&
        github.event.inputs.release_build == 'true')
     environment:

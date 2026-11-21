@@ -136,8 +136,16 @@ jobs:
             ${{ github.event_name != 'pull_request'
                 && 'type=image,push-by-digest=true,name-canonical=true,push=true'
                 || 'type=cacheonly' }}
-          cache-from: type=gha,scope=docker-${{ matrix.slug }}
-          cache-to: type=gha,mode=max,scope=docker-${{ matrix.slug }}
+          # The cache lives in the registry, next to the image, and **not** in
+          # `type=gha`: `mode=max` here once filled all 10 GB of the repo's
+          # shared Actions cache with buildkit blobs and evicted every Rust
+          # cache in the repo to zero. docs/ci-and-release.md "Cache budget"
+          # has the census and the rule.
+          #
+          # `cache-to` only on a push: a fork's pull request holds no write
+          # token, and `cache-from` against a public package needs none.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache-{1},mode=max,image-manifest=true,oci-mediatypes=true', env.IMAGE, matrix.slug) || '' }}
 
       # The digest travels to `merge` as a file named after it: artifact names
       # are immutable per run, so each leg uploads its own and `merge` globs

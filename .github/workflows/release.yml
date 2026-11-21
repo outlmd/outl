@@ -554,7 +554,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+          # Without a restore-key every bump of Cargo.lock is a cold build on
+          # all eleven build legs at once, on three operating systems. The
+          # prefix drops the lock hash, so a dependency bump recompiles what
+          # changed instead of the whole tree.
           key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-release-
 
       - name: Build release binary
         env:
@@ -851,7 +856,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+          # Prefix without the lock hash: see `build`'s cache step above.
           key: ${{ runner.os }}-universal-apple-darwin-desktop-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-universal-apple-darwin-desktop-release-
 
       - name: Build universal dmg
         # `--target universal-apple-darwin` triggers Tauri's universal
@@ -1145,7 +1152,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+          # Prefix without the lock hash: see `build`'s cache step above.
           key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-desktop-release-
 
       - name: Build the Linux desktop binary
         # Compile only. Bundling happens after the symbol upload and the
@@ -1430,7 +1439,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+          # Prefix without the lock hash: see `build`'s cache step above.
           key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-desktop-release-
 
       - name: Build NSIS installer
         working-directory: crates/outl-desktop
@@ -1629,8 +1640,23 @@ jobs:
           echo "NDK_HOME=${NDK}" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=${NDK}" >> "$GITHUB_ENV"
 
+      # `cargo install tauri-cli` compiles the CLI from source on every run,
+      # and it used to sit *above* the cargo cache step, so the cache could not
+      # have covered it even if its path had been listed. `mobile.yml` already
+      # carries this pattern for the two iOS jobs (`ios-build`, `ios-release`):
+      # cache the built binary, keyed on the requested version so a bump
+      # reinstalls, and guard the install with `command -v`.
+      - name: Cache cargo-tauri binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ runner.os }}-cargo-tauri-v2
+
       - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2.0" --locked
+        run: |
+          if ! command -v cargo-tauri >/dev/null; then
+            cargo install tauri-cli --version "^2.0" --locked
+          fi
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -1655,7 +1681,20 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+          # Prefix without the lock hash: see `build`'s cache step above.
           key: ${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-aarch64-linux-android-release-
+
+      # `setup-bun` caches the bun binary, not the packages it downloads. This
+      # is the same path/key the composite action and every other bun job in the
+      # repo use; this job is the one that was missing it, so it re-downloaded
+      # the whole dependency tree on every nightly.
+      - name: Cache bun install cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
