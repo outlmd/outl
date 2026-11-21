@@ -87,7 +87,12 @@ Two racing runs would both read the board and the loser's `--sync` would re-add 
 
 ## Setup: `ROADMAP_PROJECT_TOKEN`
 
-The workflow needs a PAT with `project` and `repo` scope, stored as the repository secret `ROADMAP_PROJECT_TOKEN`.
+The workflow needs a PAT stored as the repository secret `ROADMAP_PROJECT_TOKEN`, with **both** scopes:
+
+| Scope | Needed by | Without it |
+|---|---|---|
+| `project` | `--sync`, and every read | Nothing works: the board cannot be read |
+| `repo` (or `public_repo`) | `--publish` | The board updates and the issue does not |
 
 The default `GITHUB_TOKEN` **cannot** reach a user-owned Projects v2 board at any permission level, so there is no `permissions:` block that avoids this.
 
@@ -97,5 +102,14 @@ The default `GITHUB_TOKEN` **cannot** reach a user-owned Projects v2 board at an
 gh secret set ROADMAP_PROJECT_TOKEN --repo outlmd/outl
 ```
 
-Without the secret every step in the workflow skips and the drift check in `hygiene.yml` is bypassed, rather than failing.
+**Both halves are checked up front**, because the first token set carried `project` without `repo` and the failure was not where it looked.
+`--sync` succeeded, so the board was correct; `--publish` failed on `updateIssue` with a GraphQL scope error two steps later.
+The `check for the project token` step now reads `X-OAuth-Scopes` and names the missing scope before either half runs.
+A fine-grained PAT reports no such header, so an empty value continues rather than failing.
+
+Without the secret every step skips and the drift check in `hygiene.yml` is bypassed, rather than failing.
 That keeps forks and the pre-setup window green instead of red on every issue anyone opens.
+
+Both steps run under `shell: bash` for its `-o pipefail`.
+They pipe into `tee` to reach the run summary, and the default `bash -e` takes the exit status of the last command in a pipe, which is `tee`.
+The scope failure above printed the whole GitHub error and the run was reported green.

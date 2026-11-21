@@ -29,6 +29,12 @@ spec = importlib.util.spec_from_file_location(
 )
 assert spec and spec.loader
 roadmap = importlib.util.module_from_spec(spec)
+# Registered before `exec_module`, not after: on Python 3.12 `@dataclass`
+# resolves a string annotation through `sys.modules[cls.__module__].__dict__`
+# while checking for `KW_ONLY`, and an unregistered module makes that `None`.
+# 3.13 stopped needing it, so skipping this passed locally and failed on the
+# runner's 3.12 with an `AttributeError` inside `dataclasses`.
+sys.modules["roadmap"] = roadmap
 spec.loader.exec_module(roadmap)
 
 

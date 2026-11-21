@@ -65,21 +65,59 @@ jobs:
       # Skip the whole thing when the secret is absent — on a fork, or before
       # it has been created. A missing PAT is a setup gap, not a red build on
       # every issue anyone opens.
+      # Absent secret: skip. Present but under-scoped: fail here, with the
+      # scope that is missing named. `--sync` needs `project` and `--publish`
+      # needs `repo`, and the first token set carried only `project`, so the
+      # board updated and the issue did not. Failing mid-run told the story in
+      # a GraphQL error two steps later; failing here says which scope to add.
+      #
+      # A fine-grained PAT reports no `X-OAuth-Scopes` header at all, so an
+      # empty value is passed through rather than treated as "no scopes".
       - name: check for the project token
         id: token
+        shell: bash
         env:
-          PAT: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
+          GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
         run: |
-          if [ -z "$PAT" ]; then
+          if [ -z "$GH_TOKEN" ]; then
             echo "ROADMAP_PROJECT_TOKEN is not set; skipping." >> "$GITHUB_STEP_SUMMARY"
             echo "present=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+          scopes=$(gh api -i user 2>/dev/null \
+            | tr -d '\r' \
+            | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes:[[:space:]]*//p')
+          if [ -z "$scopes" ]; then
+            echo "Classic-PAT scopes not reported (fine-grained token?); continuing."
+            exit 0
+          fi
+          echo "token scopes: $scopes"
+
+          missing=""
+          case ",${scopes// /}," in
+            *,project,*) ;;
+            *) missing="project" ;;
+          esac
+          case ",${scopes// /}," in
+            *,repo,* | *,public_repo,*) ;;
+            *) missing="$missing repo" ;;
+          esac
+          if [ -n "$missing" ]; then
+            echo "::error::ROADMAP_PROJECT_TOKEN is missing scope(s):$missing (has: $scopes). --sync needs 'project', --publish needs 'repo'. See docs/roadmap.md."
+            exit 1
           fi
 
-      # The board side first: a card has to exist before it can be rendered.
+      # `shell: bash` rather than the default, for the `-o pipefail` it adds.
+      # Both steps pipe into `tee` to get their output onto the run summary,
+      # and the default `bash -e` takes the exit code of the *last* command in
+      # a pipe — which is `tee`, and `tee` succeeds. The first real run of this
+      # workflow failed to write the issue (the PAT was missing `repo` scope),
+      # printed the GitHub error in full, and was reported as a success.
       - name: sync the board
         if: steps.token.outputs.present == 'true'
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
           DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
@@ -87,6 +125,7 @@ jobs:
 
       - name: publish the roadmap issue
         if: steps.token.outputs.present == 'true'
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.ROADMAP_PROJECT_TOKEN }}
           DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
