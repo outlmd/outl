@@ -21,9 +21,9 @@ If anything here is wrong or out of date, that's a bug — open an issue or fix 
 | [`bench.yml`](../.github/workflows/bench.yml) | **Push** to `main` touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron. No `pull_request` trigger: see [Runner cadence](#runner-cadence) | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every push; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
 | [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when `main` moved in the last 24h **and** the newest conclusive `ci.yml` run on `main` is green (beta), `v*` tag (GA), manual. Runs no tests of its own: `ci.yml` owns them, and the gate is what keeps ~20 build legs off a red tree | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
 | [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully, or manual dispatch | Skips the upload (green run, `gate` notice) when the Mobile run has no non-expired `outl-ios-release` artifact; manual dispatch bypasses that check. Otherwise downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
-| [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. | No |
+| [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. `:latest` goes on the newest stable **release**, decided against `gh release list` and not `git tag --list`, because a stray `v1.0.12` left by the Raycast extension's publish outranked every outl version and held `:latest` back from every 0.13.x GA. | No |
 | [`nix-build.yml`](../.github/workflows/nix-build.yml) | PR / push touching `flake.nix`, `flake.lock`, `hm-module.nix`, a lockfile, `rust-toolchain.toml` or the workflow, plus a nightly cron at 04:00 UTC | `nix flake check --no-build`, then builds `.#outl-desktop-node-modules` (the frontend fixed-output derivation, which is how a stale `frontendNodeModulesHash` reports itself), `.#outl`, `.#outl-desktop` and the `home-manager-module` check, on `x86_64-linux` and `aarch64-linux`. **`crates/**` is deliberately not a trigger**, see [Why `nix-build` does not watch `crates/**`](#why-nix-build-does-not-watch-crates). | No |
-| [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Called by `release.yml` from `needs: tag` (once per tag created), or manual | Keeps the 2 most recently generated `vX.Y.Z-beta.N` tags repo-wide and deletes every older one, release and tag together. GA tags are never candidates, and neither is a beta a shipped package manifest still points at. Each deletion is confirmed by re-reading the ref from origin, because a 46-tag drain once printed `- [deleted]` 46 times, left 21 refs in place and still exited 0. Not `on: push: tags:`: the tag is pushed with `GITHUB_TOKEN`, which triggers no workflow. | n/a |
+| [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Called by `release.yml` from `needs: tag` (once per tag created), or manual | Keeps the 2 most recently generated `vX.Y.Z-beta.N` tags repo-wide and deletes every older one, release and tag together. GA tags are never candidates, and neither is a beta a shipped package manifest still points at. Each deletion is confirmed by re-reading the ref from origin, because a 46-tag drain once printed `- [deleted]` 46 times, left 21 refs in place and still exited 0. Not `on: push: tags:`: the tag is pushed with `GITHUB_TOKEN`, which triggers no workflow. A pruned name is never reusable, which is [its own section](#a-pruned-beta-tag-name-never-comes-back). | n/a |
 
 [`discussions-discord.yml`](../.github/workflows/discussions-discord.yml) is not a CI check: it mirrors new Discussions and comments into a Discord forum, see [Discussions mirror to Discord](discussions-discord.md).
 It builds and runs the `tools/discussions-discord` crate, whose tests run in `ci.yml` with the rest of the workspace.
@@ -330,10 +330,75 @@ Refusing on unknown would turn any such gap into a silent release freeze, which 
   `publish_release` appends one sponsor link at the end of the body ("Ask for sponsors in the release notes"), after any missing-assets note.
 - Homebrew tap (`Formula/outl-beta.rb`, `Casks/outl-desktop-beta.rb`) bumped automatically with `[skip ci]` commit.
 
+### A pruned beta tag name never comes back
+
+Immutable releases are on, so every published release carries `immutable: true` and GitHub keeps its tag name reserved for good.
+`cleanup-tags.yml` deletes the release and the tag together, and deleting both frees nothing.
+
+So `git push --tags` fails on any machine still holding a tag the prune already took:
+
+```
+remote: error: GH013: Repository rule violations found for refs/tags/v0.13.0-beta.299.
+remote: - Cannot create ref due to creations being restricted.
+```
+
+The message points at Settings → Rules, and the rules are not what refused it.
+Neither repository ruleset carries a `creation` rule.
+The reserved name is what refuses, and no ruleset edit makes it reusable.
+
+Push the one ref you cut (`git push origin v0.13.6`), and drop the stale locals with `git fetch --tags --prune --prune-tags --force origin`.
+`git push --tags` is the wrong command in this repo, and `-f` on top of it is worse.
+
+CI never trips on this, because `N` in `-beta.N` is `github.run_number` and never repeats.
+A GA tag is the one to watch, and the ruleset below is what watches it.
+Deleting one is refused rather than permitted, because a spent name cannot be recovered and a refusal can be lifted.
+
 ### GA
 
 Bump `workspace.package.version` (e.g. `0.6.0` → `0.7.0`), merge to `main`, then push a `v0.7.0` tag by hand.
 The `tags: ["v*"]` trigger in `release.yml` picks it up.
+
+### A GA tag cannot be deleted or re-pointed
+
+`tag rules` (Settings → Rules, ruleset `27314778`) carries `deletion`, `non_fast_forward` and `update` over `refs/tags/v*`, and excludes `refs/tags/v*-alpha.*`, `refs/tags/v*-beta.*` and `refs/tags/v*-rc.*`.
+A GA tag refuses to be deleted or moved.
+A prerelease tag stays prunable, which is what keeps `cleanup-tags.yml` working with no bypass at all.
+
+`update` is there because `non_fast_forward` does not cover every move.
+It refuses a push only when the old commit is unreachable from the new one, so re-pointing `v0.13.5` at a descendant is an ordinary fast-forward ref update and goes straight through a ruleset carrying only `deletion` and `non_fast_forward`.
+The client's `-f` has nothing to do with it, because the server sees a fast-forward either way.
+`update` refuses the push whatever the reachability, and both rules stay, since the most restrictive one applies.
+
+The exclude covers all three prerelease separators `release.yml` recognises (`-alpha`, `-beta`, `-rc`), even though the prune only globs `v*-beta.*` today.
+A hand-cut `v0.14.0-rc.1` would otherwise be made permanent by a rule written for GA tags.
+The dependency runs the other way too: the exclude and `cleanup_beta_tags.sh`'s `awk` both key on the literal `-beta.`, so changing the beta tag format stops the prune against a rule nobody can bypass.
+
+Both halves of that condition are load-bearing.
+Protecting every tag instead would mean a standing bypass for the Actions token, which is far more than one nightly prune needs.
+`~ALL` would also cover `refs/tags/__raycast_latest_publish_ext/outl__`, which the Raycast publish flow re-points on every publish.
+
+**The Raycast extension tags this repo too, and `refs/tags/v*` covers it.**
+`extensions/raycast/` is published by hand with `bunx @raycast/api publish`, and that tool leaves a `v<extension-version>` tag behind.
+`v1.0.12` is one of them, signed on 2026-09-24, sitting on a tap-bump commit, with no GitHub release behind it.
+It is not an outl release, and nothing separates its name from a future outl `v1.0.12` by pattern, so it gets the same protection rather than an exception that would expire the day outl reaches 1.0.
+Publishing the next extension version creates a new name and is unaffected.
+Re-publishing a version that already has a tag is the one flow that now needs the two calls below.
+
+`bypass_actors` is empty, so the rule applies to the org admin as well.
+That is the point rather than an oversight.
+The account that pushes GA tags by hand is the only account that can lose one, and the reserved name above makes the loss permanent.
+
+**To re-point a GA tag pushed at the wrong commit**, turn the ruleset off and back on around the fix:
+
+```sh
+gh api -X PUT repos/outlmd/outl/rulesets/27314778 -f enforcement=disabled
+# delete and re-push the tag
+gh api -X PUT repos/outlmd/outl/rulesets/27314778 -f enforcement=active
+```
+
+A `PUT` carrying only `enforcement` leaves the conditions, the rules and the empty bypass list exactly as they were, so there is nothing to restore afterwards.
+That was measured by reading the ruleset back between the two calls, not assumed from the verb.
+Read the live state rather than this paragraph: `gh api /repos/outlmd/outl/rulesets/27314778`.
 
 ### What a release publishes
 

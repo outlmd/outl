@@ -376,6 +376,7 @@ The `doc-keeper` agent runs at the end of a feature to catch what slipped throug
 |---|---|
 | `.github/workflows/ci.yml` (jobs, matrix, excluded crates, `RUSTDOCFLAGS`, paths-ignore) | `docs/ci-and-release.md` § 1 (CI walkthrough) |
 | `.github/workflows/release.yml`, `mobile.yml`, `desktop.yml`, `testflight.yml`, `bench.yml`, `cleanup-tags.yml` | `docs/ci-and-release.md` § 1 (CI table) + § 2 (Release process) |
+| A repository ruleset (`main`, `tag rules`), which lives in GitHub settings and in no file here | `docs/ci-and-release.md` § 1 ("What blocks merge") for a branch rule, § 2 ("A GA tag cannot be deleted or re-pointed") for a tag rule. This is the one row with no file on the left, so no diff reminds you |
 | `.github/actions/*/action.yml` (a step shared by more than one workflow) | `docs/ci-and-release.md` § 1 ("Shared build setup") — say what it covers and, as importantly, what it deliberately leaves duplicated |
 | `.claude/settings.json` hooks, `.claude/agents/*.md`, `.claude/commands/*.md` (any slash command behavior) | `docs/development.md` § 4 (Dev loop) — slash command table + hooks list + agents list |
 | `rust-toolchain.toml` version bump | `docs/development.md` § 1 (Quick start) + `CONTRIBUTING.md` (Quick start) |

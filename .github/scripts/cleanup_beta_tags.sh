@@ -21,6 +21,10 @@
 # Scope (intentional):
 # - Touches ONLY `vX.Y.Z-beta.N` tags. GA tags like `v0.5.3`
 #   (no `-beta.` suffix) are never considered for deletion.
+#   The `tag rules` ruleset excludes `refs/tags/v*-beta.*` to match this
+#   filter, so widening the glob to reach a GA tag would fail on the
+#   `deletion` rule with nobody able to bypass it. See
+#   docs/ci-and-release.md "A GA tag cannot be deleted or re-pointed".
 # - Deletes both the GitHub Release (with its built binaries) and
 #   the git tag — `gh release delete --cleanup-tag` does both atomically.
 # - Orphan tags (tag exists but the release is already gone) get

@@ -108,8 +108,12 @@ volumes:
 ```
 
 > **Why `:dev`, and not `:latest`?**
-> Right now `:dev` and `:sha-…` are the only tags that exist — the image started being published after the last release, so no stable tag has been cut yet and `docker compose pull` on `:latest` fails with `manifest unknown`.
-> When the next release lands, `:latest` becomes the tag to use and this is a one-line change.
+> `:latest` is the one tag that is not on the registry.
+> Stable tags are: `:0.13.5`, `:0.13.6` and `:0.13` are all published, and `docker compose pull` works on any of them.
+> `:latest` went missing for a different reason than waiting for a release.
+> The job that decides it compared the tag being released against the highest `v*` tag in the repo, and `v1.0.12`, left behind by the Raycast extension's publish, outranked every outl version.
+> Every 0.13.x GA lost that comparison in silence.
+> It reads the release list now ([`docker.yml`](../.github/workflows/docker.yml)), so `:latest` arrives with the next GA release and switching to it is a one-line change.
 > The full tag list and what each one follows: [The published image](#the-published-image-and-what-its-tags-mean).
 
 There is deliberately no `ports:` section and no `HEALTHCHECK`.
@@ -386,9 +390,10 @@ Pulling a prebuilt image from GHCR is what the quick start does; building from t
 | `:dev` | The tip of `main`. | You want what is being worked on, and accept that it is. |
 | `:sha-a1b2c3d` | One commit, forever. **The only tag that never moves.** | The setup you would rather upgrade on purpose. |
 
-> **Only `:dev` and `:sha-…` exist right now.**
-> The image started being published after the last release, so no stable tag has been cut yet: `docker compose pull` on `:latest` or on a version tag fails with `manifest unknown` until the next release runs.
-> The rows above describe what each tag will follow once it exists — they are the naming scheme, not a list of what is on the registry today.
+> **Every row above is on the registry except `:latest`.**
+> `:dev`, `:sha-…`, `:0.13.5`, `:0.13.6` and `:0.13` are all published, so `docker compose pull` works on each of them.
+> `:latest` was held back by the release gate and not by a missing release, and it arrives with the next GA.
+> [`docker.yml`](../.github/workflows/docker.yml)'s `latest` step is where that decision lives and why it used to get it wrong.
 
 The beta releases that `release.yml` publishes nightly do **not** get their own image — they are tagged by a workflow token, and GitHub does not fire workflows for those, by design. `:dev` is the equivalent, one image per push rather than one per tag.
 

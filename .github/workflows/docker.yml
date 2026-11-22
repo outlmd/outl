@@ -192,11 +192,10 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
+      # No `fetch-depth: 0`. It was here for a `git tag --list` scan the
+      # `latest` decision no longer does, and `metadata-action` works on a
+      # shallow clone, which the `build` job above has proved on every run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history + tags: the `latest` decision below compares this tag
-          # against every other stable tag, and a shallow clone has none.
-          fetch-depth: 0
 
       # `latest` means "the newest stable release", which is NOT the same as
       # "this is a stable tag" — the difference is a hotfix. Tag `v1.1.4` after
@@ -205,6 +204,8 @@ jobs:
       # puller backwards. So the comparison is explicit.
       - name: Decide whether this tag is `latest`
         id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
@@ -220,13 +221,32 @@ jobs:
             echo "${TAG} is a pre-release — no :latest"
             exit 0
           fi
+          # The candidate set is the published releases, not `git tag --list`.
+          # "What tags exist" is a different question, and answering it with
+          # tags cost every 0.13.x GA its `:latest`: `v1.0.12` is the Raycast
+          # extension's publish tag (`extensions/raycast`, `bunx @raycast/api
+          # publish`), stable-shaped, higher than any outl version, attached to
+          # no release. It won `sort -V` every time. Deleting that tag fixes one
+          # release and not the class, because the next extension publish
+          # leaves another one.
+          #
+          # `${TAG}` joins the set because this release is still a draft while
+          # this job runs, which is what makes the comparison timing-independent.
+          #
           # `{ grep || true; }` because `set -o pipefail` turns "no stable
-          # tags matched" into a failed job, and a repo whose tags are all
-          # pre-releases is a legitimate state.
-          HIGHEST="$(git tag --list 'v*' | { grep -v -- '-' || true; } | sort -V | tail -n1)"
+          # releases matched" into a failed job, and a repo whose releases are
+          # all pre-releases is a legitimate state.
+          HIGHEST="$(
+            {
+              gh release list --repo "${GITHUB_REPOSITORY}" --limit 100 \
+                --json tagName,isDraft,isPrerelease \
+                --jq '.[] | select(.isDraft == false and .isPrerelease == false) | .tagName'
+              echo "${TAG}"
+            } | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n1
+          )"
           if [[ "${TAG}" == "${HIGHEST}" ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
-            echo "${TAG} is the highest stable tag — tagging :latest"
+            echo "${TAG} is the newest stable release — tagging :latest"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
             echo "${TAG} trails ${HIGHEST} — no :latest"
