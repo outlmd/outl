@@ -460,7 +460,7 @@ If it deliberately skips a step — a bulk import that announces once at the end
   A broken pipe never stops the command, because a mutating command abandoned half way is worse than output nobody reads; the exit status is the command's own.
   Any other stdout error is still the standard panic.
   `outl_telemetry::print_stdout` owns the decision, and `tests/closed_stdout.rs` runs the real binary against a closed pipe.
-  Printing from another crate (`outl-import`'s `ImportReport::print_human`) is not covered by the shadow.
+  The shadow stops at this crate's edge, so **library crates return text and the CLI prints it** (`ImportReport::human_summary`); a `println!` in a library panics again.
 - `anyhow::Result` on lifecycle commands (`init`, `serve`, `doctor`) is kept — those produce human errors and never JSON.
 
 ## What this crate does NOT do

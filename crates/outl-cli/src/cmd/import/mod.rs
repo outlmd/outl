@@ -253,7 +253,9 @@ fn run_adapter(
     if flags.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        report.print_human();
+        // The summary is text from `outl-import`; printing it here keeps it
+        // behind this crate's closed-stdout guard (`stdout.rs`).
+        print!("{}", report.human_summary());
         if !flags.dry_run {
             println!();
             println!(

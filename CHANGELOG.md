@@ -616,6 +616,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Finishing rather than exiting is deliberate: a mutating command such as `outl doctor --repair` is not abandoned half way because its reader went away.
   Any other stdout error is still a panic and still reported.
 
+- **`outl import … | head` no longer crashes at the final summary.**
+  The import summary was the one print left outside the CLI's closed-stdout guard, because it was written by the `outl-import` crate with the standard `println!`.
+  That crate now returns the summary as text (`ImportReport::human_summary`) and the CLI prints it, so a closed stdout is dropped like everywhere else (OUTL-4).
+  The text is unchanged.
+
 - **TestFlight uploads stopped being refused over export compliance.**
   The app declared `ITSAppUsesNonExemptEncryption = true`, which is not "this app uses encryption" — it is "Apple has approved encryption documentation for this app, and its code is in `ITSEncryptionExportComplianceCode`".
   outl has no approved documentation and therefore no code, so every upload came back as `Invalid Export Compliance Code ... key value []`, where the empty value is the missing **code**, not the missing flag.

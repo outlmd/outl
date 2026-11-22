@@ -15,7 +15,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-/// How many individual warnings [`ImportReport::print_human`] spells
+/// How many individual warnings [`ImportReport::human_summary`] spells
 /// out before summarising the rest. `--json` always carries all of them.
 mod print;
 #[cfg(test)]

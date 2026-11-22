@@ -128,3 +128,19 @@ fn an_unmeasured_landing_never_invents_a_gap() {
     assert_eq!(rec.blocks_not_landed, 0, "no measurement, no accusation");
     assert!(rec.balanced, "{rec:?}");
 }
+
+/// The summary is plain text the caller prints: it opens with an empty
+/// line, names the source and carries the counters.
+#[test]
+fn the_human_summary_is_text_with_header_and_counters() {
+    let mut r = ImportReport::new("obsidian");
+    r.pages = 2;
+    r.journals = 1;
+    r.blocks = 40;
+    let text = r.human_summary();
+    assert!(text.starts_with("\nImport summary (obsidian):\n"), "{text}");
+    assert!(text.contains("  pages:               2\n"), "{text}");
+    assert!(text.contains("  journals:            1\n"), "{text}");
+    assert!(text.contains("  blocks:              40\n"), "{text}");
+    assert!(text.ends_with('\n'), "{text}");
+}

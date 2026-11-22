@@ -79,6 +79,31 @@ fn a_closed_stdout_does_not_panic_and_exits_cleanly() {
     assert_eq!(out.status.code(), Some(0), "stderr:\n{stderr}");
 }
 
+/// The import summary is printed after the adapter ran, so it is the
+/// last write a closed stdout can reach. It used to live in `outl-import`,
+/// outside the shadowed macros.
+#[test]
+fn a_closed_stdout_does_not_panic_on_the_import_summary() {
+    let src = TempDir::new().unwrap();
+    std::fs::write(src.path().join("first.md"), "- one\n- two\n").unwrap();
+    std::fs::write(src.path().join("second.md"), "- three\n").unwrap();
+    let dst = TempDir::new().unwrap();
+
+    let mut cmd = outl();
+    cmd.args(["import", "obsidian"])
+        .arg(src.path())
+        .arg(dst.path().join("graph"))
+        .arg("--dry-run");
+    let out = run_with_closed_stdout(cmd);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("failed printing to stdout") && !stderr.contains("panicked"),
+        "a closed stdout panicked on the import summary:\n{stderr}"
+    );
+    assert_eq!(out.status.code(), Some(0), "stderr:\n{stderr}");
+}
+
 #[test]
 fn an_open_stdout_still_gets_every_byte() {
     let ws = workspace_with_a_big_page();
