@@ -217,6 +217,8 @@ They are the gate.
   Exit 0 is the assertion. A printer panic exits 101; a hook that panics again aborts, and `catch_unwind` hides neither.
   The file has no libtest harness because the harness would capture the pipe the parent is reading.
 - `a_closed_stdout_does_not_panic_and_exits_cleanly` and `an_open_stdout_still_gets_every_byte` (`outl-cli/tests/closed_stdout.rs`) — the real `outl` binary with the read end of stdout closed: no `panicked` on stderr, exit 0, and the open-pipe control proving the swallow is not eating output nobody closed.
+  `a_closed_stdout_does_not_panic_on_the_import_summary` and `an_open_stdout_still_gets_the_import_summary` are the same pair for `outl import`, the one print that used to live in a library crate.
+  **Each closed-pipe case needs its open-pipe twin**, because "no panic, exit 0" is also what a command that printed nothing at all returns: dropping the `print!` in `cmd/import/mod.rs` leaves the closed half green and the command silent.
 - `a_closed_stdout_is_remembered_and_not_a_panic`, `the_os_errors_a_closed_stdout_arrives_as_are_forgiven`, `any_other_stdout_error_is_still_the_standard_panic`, `another_error_does_not_mark_stdout_closed` (`src/stdio.rs`) — the stdout half without a process.
   The last two are the direction that matters: a real stdout failure must still panic, and Windows error 32 (sharing violation) is not a closed pipe.
 - `a_broken_pipe_counts_as_a_finished_write`, `the_os_error_for_epipe_counts_too`, `any_other_write_error_is_returned` — the writer, without a process.

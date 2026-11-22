@@ -17,7 +17,7 @@ use std::fmt::{self, Write};
 
 /// How many individual warnings [`ImportReport::human_summary`] spells
 /// out before summarising the rest. `--json` always carries all of them.
-const WARNINGS_SHOWN: usize = 20;
+pub(super) const WARNINGS_SHOWN: usize = 20;
 
 impl ImportReport {
     /// The report as the text a human reads, starting with an empty
@@ -203,7 +203,7 @@ impl ImportReport {
         self.write_warnings(out)
     }
 
-    /// Print the warning list, capped, and say out loud how much was
+    /// Write the warning list, capped, and say out loud how much was
     /// hidden. A 66k-block import can emit thousands of warnings; a
     /// silent cut at 20 makes the rest look like it doesn't exist.
     fn write_warnings(&self, out: &mut impl Write) -> fmt::Result {
@@ -231,7 +231,7 @@ impl ImportReport {
         Ok(())
     }
 
-    /// Print the input-vs-output reconciliation, loudly when it doesn't
+    /// Write the input-vs-output reconciliation, loudly when it doesn't
     /// close. Silent when the adapter reports no source counts.
     fn write_reconciliation(&self, out: &mut impl Write) -> fmt::Result {
         let Some(r) = &self.reconciliation else {
