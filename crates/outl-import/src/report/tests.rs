@@ -128,3 +128,118 @@ fn an_unmeasured_landing_never_invents_a_gap() {
     assert_eq!(rec.blocks_not_landed, 0, "no measurement, no accusation");
     assert!(rec.balanced, "{rec:?}");
 }
+
+/// The refactor to `human_summary` moved 54 format strings by hand, and
+/// "the text is unchanged" was asserted by nothing. These four pin the
+/// branches a user acts on: the two loud banners, the warning cap, and
+/// the arm that exists so `blocks: 0` never reads as total loss.
+///
+/// A free-markdown source renders text, not blocks, so its own counter
+/// is `0` while the sidecars know the real number. The line has to say
+/// where the number came from, or it reads as a different measurement.
+#[test]
+fn the_free_markdown_block_count_says_where_it_came_from() {
+    let mut r = ImportReport::new("obsidian");
+    r.pages = 2;
+    r.blocks = 0;
+    r.landed_blocks = 37;
+    let text = r.human_summary();
+    assert!(
+        text.contains("  blocks:              37 (counted in the op log"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("  blocks:              0\n"),
+        "the bare zero is the line this arm exists to replace:\n{text}"
+    );
+}
+
+/// Unexplained loss is the one thing the report exists to make
+/// unmissable, so its banner and both numbers are asserted verbatim.
+#[test]
+fn unaccounted_content_is_unmissable_in_the_summary() {
+    let mut r = ImportReport::new("roam");
+    r.count_source(4, 10);
+    r.pages = 2;
+    r.blocks = 7;
+    r.finalize();
+    let text = r.human_summary();
+    assert!(
+        text.contains("  !!  UNACCOUNTED CONTENT — the import does not add up  !!"),
+        "{text}"
+    );
+    assert!(
+        text.contains("      2 page(s) and 3 block(s) from the source are unaccounted for."),
+        "{text}"
+    );
+    assert!(text.contains("this is silent loss."), "{text}");
+}
+
+/// The other loud banner: render added up but the write did not, which
+/// is a different accusation and must not borrow the first one's words.
+#[test]
+fn blocks_that_never_landed_are_named_in_the_summary() {
+    let mut r = ImportReport::new("roam");
+    r.count_source(1, 10);
+    r.pages = 1;
+    r.blocks = 10;
+    r.landing_measured = true;
+    r.landed_blocks = 7;
+    r.finalize();
+    let text = r.human_summary();
+    assert!(
+        text.contains("  !!  CONTENT NEVER REACHED THE OP LOG  !!"),
+        "{text}"
+    );
+    assert!(
+        text.contains("      3 of 10 emitted block(s) are not in the destination's op log."),
+        "{text}"
+    );
+    assert!(
+        !text.contains("UNACCOUNTED CONTENT"),
+        "parse → render was clean; only the landing failed:\n{text}"
+    );
+}
+
+/// A 66k-block import can emit thousands of warnings. The cap is only
+/// honest while the line says how many it is hiding and where to read
+/// the rest.
+#[test]
+fn a_capped_warning_list_says_how_many_are_hidden() {
+    let mut r = ImportReport::new("logseq");
+    for i in 0..print::WARNINGS_SHOWN + 5 {
+        r.warn(&format!("pages/p{i}"), format!("warning {i}"));
+    }
+    let text = r.human_summary();
+    let total = print::WARNINGS_SHOWN + 5;
+    assert!(
+        text.contains(&format!(
+            "  warnings:            {total} ({} shown below)",
+            print::WARNINGS_SHOWN
+        )),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("    [pages/p").count(),
+        print::WARNINGS_SHOWN,
+        "exactly the cap is spelled out:\n{text}"
+    );
+    assert!(text.contains("    … 5 more warning(s) hidden"), "{text}");
+    assert!(text.contains(&format!("read all {total}")), "{text}");
+}
+
+/// The summary is plain text the caller prints: it opens with an empty
+/// line, names the source and carries the counters.
+#[test]
+fn the_human_summary_is_text_with_header_and_counters() {
+    let mut r = ImportReport::new("obsidian");
+    r.pages = 2;
+    r.journals = 1;
+    r.blocks = 40;
+    let text = r.human_summary();
+    assert!(text.starts_with("\nImport summary (obsidian):\n"), "{text}");
+    assert!(text.contains("  pages:               2\n"), "{text}");
+    assert!(text.contains("  journals:            1\n"), "{text}");
+    assert!(text.contains("  blocks:              40\n"), "{text}");
+    assert!(text.ends_with('\n'), "{text}");
+}

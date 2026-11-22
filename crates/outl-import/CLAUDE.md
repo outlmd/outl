@@ -217,6 +217,8 @@ Dialect boundaries worth remembering:
 
 ## Anti-patterns
 
+- ❌ Writing to stdout from this crate.
+  `ImportReport::human_summary` returns the text and `outl-cli` prints it through its closed-pipe guard; a `println!` here is outside that guard and panics on `outl import | head`.
 - ❌ Emitting `((blk-…))` directly from render — handles don't exist yet; that's resolve's job.
 - ❌ Rewriting `.md` files in pass B instead of going through `edit_text`.
   A marker in a **property value** is covered by this too: resolve it with `Op::SetProp`, not through the file-fallback sweep.
