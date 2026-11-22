@@ -234,6 +234,13 @@ So there is one source: `OutlSafeArea.swift` (iOS, a probe view's `safeAreaInset
 Load order is covered both ways: native pushes on change and when the webview appears, the page pulls (iOS `outlSafeArea` message handler, Android `window.OutlSafeArea.get()`).
 Only a device can show the numbers, so check a notched iPhone in both orientations and an Android phone with gesture and three-button navigation before calling it done.
 
+**A correct inset is half of it: the chrome also has to stay where the inset put it.**
+The WKWebView scrolls the *document* on its own, and the journal header is ordinary content above the outline, so a document scroll takes it under the status bar and the header reads as having lost its inset when it has not.
+That scroll is not CSS overflow (measured: `scrollTop` 384 with `scrollHeight === clientHeight === 874`), so `overflow: hidden` does not stop it, and neither does `position: fixed` on `#root`, because iOS moves fixed boxes with the visual viewport.
+`src/lib/document-scroll-lock.ts` is the owner of the rule: with nothing focused for text entry, the document sits at the origin; while a text field holds the scroll it is left alone, because that is what keeps the caret above the keyboard.
+`styles.css`'s `html, body { overflow: hidden }` is the other half, against a box that grows instead.
+**Before blaming the inset for a header in the wrong place, read `document.scrollingElement.scrollTop`.**
+
 ## Per-feature behaviour lives in `docs/mobile-ux.md`
 
 Nine sections moved out: how a ref that does not exist yet is opened, the page switcher's long-press delete, external links, blockquote chrome, zoom / focus, paste from external apps, the keyboard accessory bar, code execution, and template insertion.

@@ -196,6 +196,17 @@ body,
   height: 100%;
 }
 
+/* The app is a shell, not a page: the only scroller is the outline
+   (`<main class="ios-scroll">`). Say so, because the WKWebView will
+   otherwise scroll the *document* and take the header with it, sliding
+   the journal chrome under the clock and the Dynamic Island while the
+   `fixed` bottom bar stays put. The other half of that rule, the scroll
+   WebKit performs itself, is `lib/document-scroll-lock.ts`. */
+html,
+body {
+  overflow: hidden;
+}
+
 /* Barcode scanner (windowed:true) draws the live camera *behind* the webview.
    While scanning, <html> carries `.barcode-scanning` (set by DevicesSheet):
    the app goes fully transparent and #root is hidden so the camera shows

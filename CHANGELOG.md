@@ -118,6 +118,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **The journal header stopped riding up under the status bar on iPhone.**
+  The top chrome drew where it belongs, then sat under the clock and the Dynamic Island, and from there every drag moved the whole page back and forth beneath it.
+  Measured frame by frame on a 7-second screen recording: the column travelled 158 device pixels, about 53 points, which is what `max(var(--safe-area-inset-top), 12px)` loses when the inset goes away.
+  That is what it looks like. It is not what happens.
+
+  **The WKWebView scrolls the document itself, and the header is part of the document.**
+  The inset was right the whole time (62px on an iPhone 17 Pro simulator, applied as the header's `padding-top`, header 121px tall in both states).
+  What moved was the page: with a block focused, `document.scrollingElement.scrollTop` reached 384 while `scrollHeight === clientHeight === 874`.
+  No CSS overflow can produce that, so `overflow: hidden` does not stop it, and neither does `position: fixed` on `#root`, because iOS moves fixed boxes with the visual viewport.
+  WebKit does it to keep the caret above the keyboard, which is the behaviour you want while typing.
+  The leftover is the bug: a scroll that is never put back parks the chrome under the clock for the rest of the session.
+
+  The shell now states both halves.
+  `html, body { overflow: hidden }` says the only scroller is the outline, which is what stops a box that grows from pushing the chrome off on its own.
+  `lib/document-scroll-lock.ts` returns the document to the origin whenever nothing is focused for text entry, and keeps its hands off while a text field owns the scroll.
+
 - **A ` ```rust ` fence could escape its sandbox on Windows and reach any file the app can.**
   [RUSTSEC-2026-0587](https://rustsec.org/advisories/RUSTSEC-2026-0587) (GHSA-f2pq-268w-886c, severity high) is a full WASI filesystem sandbox escape.
   Wasmtime split a guest path into components and handed each to the OS layer on its own.

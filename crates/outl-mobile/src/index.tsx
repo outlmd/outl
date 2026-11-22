@@ -4,6 +4,7 @@ import { attachConsole } from "@tauri-apps/plugin-log";
 import { bootMark } from "@outl/shared/boot";
 import App from "./App";
 import { installSafeArea } from "./lib/safe-area";
+import { installDocumentScrollLock } from "./lib/document-scroll-lock";
 import "./styles.css";
 
 // The earliest point a module can report. Everything before this is the
@@ -15,6 +16,10 @@ bootMark("html_parsed");
 // Before the first render, so the first painted frame already sits below the
 // status bar. The native shell supplies the real insets; see `lib/safe-area.ts`.
 installSafeArea();
+// The shell is not a page: the WKWebView must not be left holding a
+// document scroll, or the journal header sits under the status bar for
+// the rest of the session. See `lib/document-scroll-lock.ts`.
+installDocumentScrollLock();
 
 // Forward Rust logs (the `Webview` target of tauri-plugin-log) into the browser
 // console, so backend `log::` lines show up in Safari Web Inspector alongside
