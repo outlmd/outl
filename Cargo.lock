@@ -1482,9 +1482,9 @@ dependencies = [
 
 [[package]]
 name = "comrak"
-version = "0.59.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3adf553d37681e21753316065ad5a763d9513f81c910e250576c572114a8eb06"
+checksum = "a253d04a12dff46b9ff641890e76bad5f6475afa891faac93d736a04fed5804e"
 dependencies = [
  "caseless",
  "entities",
@@ -2004,7 +2004,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2131,7 +2131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 3.0.10",
 ]
 
 [[package]]
