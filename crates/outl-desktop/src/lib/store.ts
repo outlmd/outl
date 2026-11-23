@@ -26,6 +26,14 @@ import type {
   WorkspaceSummary,
 } from "@outl/shared/api/types";
 
+/**
+ * What `<PageActionDialog />` is being asked for: a new name, or a page
+ * to merge into. Declared here because the request is store state and
+ * two unrelated surfaces write it (the sidebar's hover buttons, and
+ * whatever else grows a page menu); the dialog reads it.
+ */
+export type PageAction = { kind: "rename" | "merge"; page: PageMeta };
+
 export type Mode =
   | "normal"
   | "edit"
@@ -257,6 +265,29 @@ export interface AppStateShape {
    * close so the next manual `Cmd+P` opens blank.
    */
   pickerSeed: string | null;
+  /**
+   * The page-action dialog's request, or `null`.
+   *
+   * Store state rather than a `<Sidebar />` signal, because the dialog
+   * has to be mounted somewhere that exists: `sidebarOpen` starts
+   * `false` on every fresh launch (editor-hero, deliberately), and
+   * while it holds this there were **zero** rename / merge doors in the
+   * window until the user found `Cmd/Ctrl+Shift+E`. `<AppShell />`
+   * renders the dialog now, and the sidebar's hover buttons set this.
+   */
+  pageAction: PageAction | null;
+  /**
+   * Bumped when a page appeared or disappeared, so the sidebar's page
+   * list refetches.
+   *
+   * That list is keyed on the open page (id, slug, title), which covers
+   * a rename and a navigation — but not a merge **into** the page being
+   * viewed: the reply is the same page, the key does not move, and the
+   * page that was just deleted stays in Pinned / Recent until something
+   * else refetches. One counter, bumped where both flows land, is the
+   * answer that cannot miss one of them.
+   */
+  pageListRevision: number;
   /** Settings modal open state. `Cmd/Ctrl+,` toggles. */
   settingsOpen: boolean;
   /**
@@ -375,6 +406,8 @@ const [state, setState] = createStore<AppStateShape>({
   caretIntent: null,
   pickerOpen: false,
   pickerSeed: null,
+  pageAction: null,
+  pageListRevision: 0,
   settingsOpen: false,
   marketplaceOpen: false,
   helpOpen: false,
@@ -412,6 +445,17 @@ export type PanelFlag = Extract<keyof AppStateShape, `${string}Open`>;
  */
 export function togglePanel(flag: PanelFlag): void {
   setState(flag, !state[flag]);
+}
+
+/**
+ * Say that the set of pages changed.
+ *
+ * Called where a rename or a merge lands (`lib/page-actions.ts`), which
+ * is the one place both the title editor and the page-action dialog
+ * pass through — so neither can be the path that forgets.
+ */
+export function bumpPageList(): void {
+  setState("pageListRevision", state.pageListRevision + 1);
 }
 
 /**

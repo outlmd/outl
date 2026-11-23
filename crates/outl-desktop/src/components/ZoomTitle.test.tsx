@@ -128,8 +128,11 @@ describe("ZoomTitle", () => {
  * `BlockRow.recursion.test.ts`.
  */
 describe("the zoom header uses it", () => {
+  // `<PageHeader />` since the title became the rename door: the header
+  // moved out of `<OutlineView />` whole, so the file this reads moved
+  // with it.
   const source = readFileSync(
-    join(import.meta.dirname, "OutlineView.tsx"),
+    join(import.meta.dirname, "PageHeader.tsx"),
     "utf8",
   );
 

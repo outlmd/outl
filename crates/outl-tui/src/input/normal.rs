@@ -86,20 +86,20 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     //
     // `d` arms a one-shot "delete this page?" confirmation; the next
     // keystroke resolves it inside the same intercept — `y` / `Y`
-    // confirms, anything else cancels (and is swallowed, matching
-    // the `pending_input_op` contract).
-    if app.sidebar_focus.is_some() || app.pending_sidebar_delete.is_some() {
-        // Delete confirmation: takes priority over regular sidebar
-        // navigation so the user can't accidentally move the cursor
-        // while the "delete? y/n" prompt is up.
-        if app.pending_sidebar_delete.is_some() {
+    // confirms, anything else cancels (swallowed, matching the
+    // `pending_input_op` contract). `/merge` and a `/rename` onto a
+    // taken name arm the same slot with a different `PageAction`.
+    if app.sidebar_focus.is_some() || app.pending_page_action.is_some() {
+        // It takes priority over sidebar navigation so the user can't
+        // move the cursor while the prompt is up.
+        if app.pending_page_action.is_some() {
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
-                    app.sidebar_confirm_delete()?;
+                    app.confirm_pending_page_action()?;
                     return Ok(false);
                 }
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {
-                    app.pending_sidebar_delete = None;
+                    app.pending_page_action = None;
                     app.status.clear();
                     return Ok(false);
                 }
@@ -107,7 +107,7 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                     // Swallow every other key — the prompt is modal.
                     // (Same posture as `pending_input_op`: cancel on
                     // any non-confirming input rather than routing it.)
-                    app.pending_sidebar_delete = None;
+                    app.pending_page_action = None;
                     app.status.clear();
                     return Ok(false);
                 }

@@ -82,5 +82,40 @@ A `.md` still showing blocks the log holds *in the trash* is re-projected withou
 `outl_actions::rename_page` and `outl_actions::merge_pages` own both operations, including the rewrite of every `[[old]]` and `#old` mention ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
 The desktop and mobile apps reach them through the `rename_page` and `merge_pages` commands, and the caller projects every page in `report.touched_pages` and removes the old projection last, as `outl page rename` does.
 `@outl/shared/pages/rename-merge` owns the flow (rename, confirm a merge when the name is taken, merge) and the wording of the confirmations and summaries, so the two clients do not each invent it.
-Which clients can do it is recorded as `Capability::PageRename` and `Capability::PageMerge`: rename is full on desktop and mobile and missing in the TUI, whose terminal route is `outl page rename`; merge is full on every client (the TUI through `/merge <page>`), and `outl page merge` / `outl page rename --merge` reach it from a terminal.
-Neither has a chord, so there is no `Action`.
+Which clients can do it is recorded as `Capability::PageRename` and `Capability::PageMerge`, and both are full on all three.
+Neither has a chord, so there is no `Action`: every door below is a click, a tap or a typed command.
+
+### Where a rename starts
+
+**The page's own title is the door on both GUI clients**, because that is where a reader is already looking when the name is wrong.
+
+| Client | The door | The name field |
+|---|---|---|
+| Desktop | Click the page title | Edits in place, prefilled and selected. Enter commits, Escape restores, clicking away commits |
+| Desktop | The sidebar row's hover `✎` | `PageActionDialog`, which also owns the merge-target picker behind `⇥` |
+| Mobile | Tap the page title (a pencil glyph marks it) | `PageNameSheet`, a bottom sheet |
+| Mobile | Long-press a page row in the page switcher | The same sheet, from the 3-row action menu |
+| TUI | `/rename <new name>` | The `:` line, prefilled with the command name only |
+
+A **journal is offered none of them**.
+Its slug is its date, `outl_actions::rename_page` refuses it, and reaching a refusal through an affordance is the defect rather than the guard: on the desktop the title is simply not clickable, on mobile the title tap still means "back to today", and the TUI refuses the argument before it writes.
+
+**Mobile's field is a sheet rather than an inline input on purpose.**
+A focused `<input>` living in the page chrome makes WKWebView scroll the document to keep the caret above the keyboard, and what it scrolls away is the header the field is in.
+A `position: fixed` sheet sits outside the document flow and cannot do that.
+
+**A no-op is not a write.**
+Submitting the name a page already has runs no command on any client.
+
+### What the user is told afterwards
+
+Both reports carry counts, never sentences, and `outl_actions::page_summary` owns **what those counts are called** so four surfaces name one fact one way.
+`rewritten_blocks` is counted in **blocks** ("links updated in 3 blocks"), because one block can carry several mentions of the page and "3 links updated" is a different, larger number.
+A mention deliberately left alone is a **nested-page link** (`[[old/child]]` names a page that is not being renamed), the word [the glossary](../UX.md) uses.
+`@outl/shared/pages/rename-merge` keeps a declared mirror of those nouns, pinned from Rust by `the_shared_frontend_copy_counts_the_same_things`.
+
+### Reopening the old name undoes the rename
+
+A page id is derived from the slug it was *created* under and a rename does not change it ([RFC 0557](rfcs/0557-page-merge-and-rename.md) known limit 5).
+So anything that later opens the **old** slug — a stale `[[link]]`, a Recent row, a script — makes `open_or_create` write that slug back onto the renamed page, which flips the name back and leaves every rewritten mention pointing at nothing.
+A client that remembers a page by file name has to repoint or forget what it remembers; the TUI does both for `recent_paths` and its persisted search hits, and only onto a file that is really on disk.

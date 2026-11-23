@@ -41,6 +41,8 @@ import { resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
 import { installProjectionNotices } from "../lib/projection-notices";
 import { BatchToolbar } from "./BatchToolbar";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { PageActionDialog } from "./PageActionDialog";
 import { Sidebar } from "./Sidebar";
 import { OutlineView } from "./OutlineView";
 import { Picker } from "./Picker";
@@ -492,6 +494,19 @@ export function AppShell() {
       <ChromeToggleBar handlers={handlers()} />
       <Picker onPicked={openView} handlers={handlers()} />
       <QuickCapture applyView={applyView} />
+      {/* Rename / merge, and the question any destructive flow asks.
+       *  Both at the shell rather than inside `<Sidebar />`, which is
+       *  closed on every fresh launch — that left the window with no
+       *  rename door at all until the user found `Cmd/Ctrl+Shift+E`. */}
+      <PageActionDialog
+        action={appState.pageAction}
+        onClose={() => setAppState("pageAction", null)}
+        onDone={(view) => {
+          setAppState("pageAction", null);
+          openView(view);
+        }}
+      />
+      <ConfirmDialog />
       <PluginMarketplace />
       <SettingsModal onSwitchWorkspace={switchWorkspaceHere} />
       <HelpOverlay />

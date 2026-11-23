@@ -131,20 +131,21 @@ pub fn print_human(v: &Value) {
     if moved > 0 {
         println!("moved {moved} block(s)");
     }
-    if count("rewritten_refs") > 0 {
-        println!("rewrote {} reference(s)", count("rewritten_refs"));
+    // Both halves of the link rewrite are worded by
+    // `outl_actions::page_summary`, so the terminal, the apps and this
+    // command name one fact one way. One line per part here, because
+    // this output is a line per fact while a toast is one sentence.
+    for part in outl_actions::page_summary::rewrite_parts(
+        count("rewritten_refs"),
+        count("skipped_namespace_refs"),
+    ) {
+        println!("{part}");
     }
     if let Some(aliases) = v.get("aliases_added").and_then(Value::as_array) {
         let names: Vec<&str> = aliases.iter().filter_map(Value::as_str).collect();
         if !names.is_empty() {
             println!("aliases added: {}", names.join(", "));
         }
-    }
-    if count("skipped_namespace_refs") > 0 {
-        println!(
-            "left {} namespace reference(s) alone (they name a sub-page)",
-            count("skipped_namespace_refs")
-        );
     }
     print_conflicts(v);
 }

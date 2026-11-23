@@ -133,6 +133,8 @@ import {
   type PropertyScope,
 } from "./PropertiesSheet";
 import { Toast } from "./Toast";
+import { createJournalToast } from "./Journal.toast";
+import { PageRenameOverlays, createPageRename } from "./Journal.rename";
 import { BottomBar, type BottomTab } from "./BottomBar";
 import { WeekStrip } from "./WeekStrip";
 import { TasksSheet } from "./TasksSheet";
@@ -185,12 +187,10 @@ export function Journal() {
   // page change (see `applyView`).
   const [focusBlockId, setFocusBlockId] = createSignal<string | null>(null);
   const [draft, setDraft] = createSignal("");
-  const [error, setError] = createSignal<string | null>(null);
-  // Optional retry handler tied to the most recent error. When set,
-  // the toast pins (no auto-dismiss) and shows a "Retry" button. We
-  // store it alongside `error` so callers can offer the affordance
-  // without plumbing it through every async helper.
-  const [errorRetry, setErrorRetry] = createSignal<(() => void) | null>(null);
+  // Message, tone and retry for the one `<Toast>`: `./Journal.toast` is
+  // the only place that decides which tone a message gets.
+  const { error, setError, errorRetry, setErrorRetry, toastTone, notify, dismissToast } =
+    createJournalToast();
   const [switcherOpen, setSwitcherOpen] = createSignal(false);
   const [calendarOpen, setCalendarOpen] = createSignal(false);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
@@ -492,13 +492,9 @@ export function Journal() {
     if (!v) return dayNav.today();
     return v.page.kind === "journal" ? v.page.slug : null;
   });
-  const capture = createCapture({
-    view,
-    today: dayNav.today,
-    applyView,
-    withError,
-    notify: (text) => setError(text),
-  });
+  const capture = createCapture({ view, today: dayNav.today, applyView, withError, notify });
+  // Renaming the page on screen, from its own title (`./Journal.rename`).
+  const pageRename = createPageRename({ view, open: handlePickPage, notify, onError: setError });
   const [tasksOpen, setTasksOpen] = createSignal(false);
   const [captureOpen, setCaptureOpen] = createSignal(false);
 
@@ -567,10 +563,7 @@ export function Journal() {
         void loadTransformers();
         // Back in the foreground: pull peers' edits and drain the
         // capture inbox.
-        installForegroundRefresh({
-          pull: () => pullAndReload(),
-          notify: (text) => setError(text),
-        });
+        installForegroundRefresh({ pull: () => pullAndReload(), notify });
         // Last: arm the recurring tickers. Every one of them calls a
         // Tauri command, so they go behind everything the user is waiting
         // for rather than into the render pass.
@@ -1410,6 +1403,7 @@ export function Journal() {
         todaySlug={dayNav.today()}
         toolbarButtons={toolbarButtons()}
         titleLongPress={titleLongPress}
+        onRenameTitle={pageRename.start}
         onJumpToday={() => void dayNav.jumpToday()}
         onPrevDay={() => void dayNav.prevDay()}
         onNextDay={() => void dayNav.nextDay()}
@@ -1604,12 +1598,11 @@ export function Journal() {
 
       <Toast
         message={error()}
+        tone={toastTone()}
         onRetry={errorRetry() ?? undefined}
-        onDismiss={() => {
-          setError(null);
-          setErrorRetry(null);
-        }}
+        onDismiss={dismissToast}
       />
+      <PageRenameOverlays rename={pageRename} />
       <PageSwitcher
         open={switcherOpen()}
         currentSlug={view()?.page.slug ?? null}
@@ -1617,7 +1610,7 @@ export function Journal() {
         onPick={handlePickPage}
         onJumpToBlock={handleJumpToBlock}
         onAction={(a) => paletteHandlers()[a]()}
-        onNotice={(m) => (setErrorRetry(null), setError(m))}
+        onNotice={notify}
       />
 
       <TasksSheet

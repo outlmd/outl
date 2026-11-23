@@ -29,7 +29,6 @@ import type { PageView } from "@outl/shared/api/types";
 
 import { PageAheadOfLogBanner, ParseWarningsBanner } from "@outl/shared/warnings";
 import { isAssetLink } from "@outl/shared/links";
-import { HistoryIcon, PageGlyph, PaperclipIcon } from "@outl/shared/icons";
 import {
   findBlock,
   rawTextWithTodo,
@@ -58,10 +57,8 @@ import { applyPageState } from "../lib/page-view";
 import { createCaretNavOps } from "./outline-caret-nav";
 import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
+import { PageHeader } from "./PageHeader";
 import { PageSections } from "./PageSections";
-import { PageTitle } from "./PageTitle";
-import { ZoomTitle } from "./ZoomTitle";
-import { PropertyEditor } from "./PropertyEditor";
 
 /**
  * Boot placeholder for the outline body.
@@ -556,168 +553,16 @@ export function OutlineView() {
     // Classic Tailwind/flexbox/grid pitfall on both axes; the two
     // unlocks pair.
     <main class="flex h-full min-h-0 min-w-0 flex-col outline-none" data-outl-region="outline" tabIndex={-1}>
-      {/* No rule under the header: a full-width border read as two
-       *  stacked panes, not as a title naming the outline below it.
-       *  `pt-16` clears the chrome capsule, like the sidebar does. */}
-      <header class="px-12 pt-16 pb-3">
-        <div class="mx-auto max-w-3xl">
-          {/*
-           * When zoomed (Roam/Workflowy focus) the header becomes the
-           * focused block's own page-like header: a clickable path back
-           * to the journal/page + ancestors as the eyebrow, and the
-           * block's text as the title. Otherwise the normal page header.
-           */}
-          <Show
-            when={focus()}
-            fallback={
-              <>
-                {/*
-                 * Breadcrumb — mirrors the TUI's
-                 * `📅 Journal · Thursday, 2026-06-04` header. For pages,
-                 * it carries the slug instead.
-                 *
-                 * The eyebrow slot always reserves its row height
-                 * (`min-h-5`), even before the page loads (both inner
-                 * `<Show>`s off). Without the reserved height the row
-                 * collapses to 0 while `appState.page` is null at boot,
-                 * then pops in once the journal arrives and shoves the
-                 * `<h1>` title down — a visible layout shift. A stable
-                 * slot keeps the title pinned from the first frame.
-                 */}
-                <div class="mb-2 flex min-h-5 items-baseline gap-1.5 text-[12.5px] text-(--color-outl-fg-dim)">
-                  <Show when={appState.page}>
-                    <PageGlyph
-                      icon={appState.page?.icon}
-                      kind={appState.page?.kind}
-                      class="self-center"
-                    />
-                    <Show when={appState.page?.kind === "journal"}>
-                      <span>Journal ·</span>
-                    </Show>
-                    <span class="font-mono">{appState.page?.slug}</span>
-                  </Show>
-                  {/* Page chrome that is not the title: attach a file,
-                   *  and page history (issue #241). A labelled `Attach
-                   *  file` button over the first block put UI between
-                   *  the title and the page's own text. */}
-                  <Show when={appState.page}>
-                    <span class="ml-auto flex items-center gap-2.5">
-                      <button
-                        type="button"
-                        class="opacity-50 hover:opacity-100"
-                        title="Attach a file (PDF, image) as a new block"
-                        aria-label="Attach a file"
-                        onClick={attachFile}
-                      >
-                        <PaperclipIcon />
-                      </button>
-                      <button
-                        type="button"
-                        class="opacity-50 hover:opacity-100"
-                        title="Page history"
-                        aria-label="Page history"
-                        onClick={() => setAppState("timelineOpen", true)}
-                      >
-                        <HistoryIcon />
-                      </button>
-                    </span>
-                  </Show>
-                </div>
-
-                <h1 class="text-[24px] font-semibold leading-[1.2] tracking-[-0.011em]">
-                  <Show
-                    when={appState.page}
-                    fallback={<span class="opacity-40">No page open</span>}
-                  >
-                    {(page) => <PageTitle page={page()} />}
-                  </Show>
-                </h1>
-              </>
-            }
-          >
-            {(fv) => (
-              <>
-                {/*
-                 * Zoom path (eyebrow). The leading crumb is the whole
-                 * page — click it to exit the zoom and return to the
-                 * journal/page; each ancestor crumb re-focuses that
-                 * block. The focused block itself is the title below,
-                 * so it isn't a crumb.
-                 */}
-                <nav
-                  aria-label="Zoom path"
-                  class="mb-2 flex flex-wrap items-center gap-1 text-[12.5px] text-(--color-outl-fg-dim)"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setAppState("focusBlockId", null)}
-                    class="flex items-center gap-1.5 opacity-70 hover:opacity-100"
-                    title="Back to page"
-                  >
-                    <PageGlyph icon={appState.page?.icon} kind={appState.page?.kind} />
-                    <span
-                      class={
-                        appState.page?.kind === "journal" ? "font-mono" : ""
-                      }
-                    >
-                      {pageCrumbLabel()}
-                    </span>
-                  </button>
-                  <For each={fv().breadcrumb}>
-                    {(crumb) => (
-                      <>
-                        <span aria-hidden="true" class="opacity-40">
-                          ›
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setAppState("focusBlockId", crumb.id)}
-                          class="max-w-[16rem] truncate opacity-70 hover:opacity-100"
-                          title={crumb.text}
-                        >
-                          {crumb.text || "(empty)"}
-                        </button>
-                      </>
-                    )}
-                  </For>
-                </nav>
-
-                {/* Title = the focused block itself, rendered the way
-                 *  every other surface renders a block — see
-                 *  `<ZoomTitle />` for why it is not `root.text`. */}
-                <h1 class="text-[24px] font-semibold leading-[1.2] tracking-[-0.011em]">
-                  <ZoomTitle
-                    root={fv().root}
-                    onRefClick={handleRefClick}
-                    onTagClick={handleTagClick}
-                    onLinkClick={handleLinkClick}
-                  />
-                </h1>
-              </>
-            )}
-          </Show>
-
-          {/*
-           * The page's own `key:: value` properties (`icon::`,
-           * `type::`, …). Same editor as the block chips, because they
-           * are the same data — the desktop showed them nowhere until
-           * now, so `icon::` was TUI-or-`.md` only (issue #13). Hidden
-           * while zoomed: the header is a *block* then, and page
-           * metadata under a block title reads as the block's.
-           */}
-          <Show when={!focus() && appState.page}>
-            <PropertyEditor
-              properties={appState.pageProperties}
-              noun="page property"
-              addAffordance="always"
-              onCommit={setPagePropertyOnCurrent}
-              onError={(msg) => setAppState("lastError", msg)}
-              chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
-              inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
-            />
-          </Show>
-        </div>
-      </header>
+      <PageHeader
+        focus={focus}
+        pageCrumbLabel={pageCrumbLabel}
+        onAttachFile={() => void attachFile()}
+        onRefClick={(t) => void handleRefClick(t)}
+        onTagClick={handleTagClick}
+        onLinkClick={handleLinkClick}
+        onSetPageProperty={(k, v) => void setPagePropertyOnCurrent(k, v)}
+        onRenamed={applyView}
+      />
 
       <div class="outl-cursor-room min-w-0 flex-1 overflow-y-auto px-12 pt-1 pb-6">
         <div class="outl-reading mx-auto w-full max-w-3xl">

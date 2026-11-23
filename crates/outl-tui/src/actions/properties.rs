@@ -272,7 +272,9 @@ impl App {
             _ => 0,
         };
         // An empty value is the delete path in both writers.
-        self.write_property(&key, "");
+        if let Err(why) = self.write_property(&key, "") {
+            return self.show_property_refusal(why);
+        }
         self.refresh_properties(want);
         if let Some(Overlay::Properties(ref mut p)) = self.overlay {
             p.message = Some(format!("deleted `{key}`"));
@@ -349,7 +351,9 @@ impl App {
             }
             return;
         }
-        self.write_property(&key, &value);
+        if let Err(why) = self.write_property(&key, &value) {
+            return self.show_property_refusal(why);
+        }
         // Land the cursor on what was just written, so a follow-up
         // `Enter` re-opens the property the user is looking at.
         let rows = self.property_rows(match &self.overlay {
@@ -367,18 +371,6 @@ impl App {
             } else {
                 format!("{key} = {value}")
             });
-        }
-    }
-
-    /// Route a write to the scope's owner. Empty `value` deletes in
-    /// both, which is why the overlay's `dd` needs no second writer.
-    fn write_property(&mut self, key: &str, value: &str) {
-        let Some(Overlay::Properties(p)) = &self.overlay else {
-            return;
-        };
-        match p.scope {
-            PropertyScope::Block => self.set_property_on_current_block(key, value),
-            PropertyScope::Page => self.set_property_on_page(key, value),
         }
     }
 

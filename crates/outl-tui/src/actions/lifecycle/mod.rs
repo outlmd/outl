@@ -104,7 +104,7 @@ impl App {
             focus_mode: false,
             sidebar_focus: None,
             sidebar_cursor: 0,
-            pending_sidebar_delete: None,
+            pending_page_action: None,
             recent_paths: Vec::new(),
             toasts: Vec::new(),
             last_reminder_sweep: None,

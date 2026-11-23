@@ -401,6 +401,8 @@ Single owners, [RFC 0557](../../docs/rfcs/0557-page-merge-and-rename.md):
 - `alias_conflicts::PageClaims::shadowed_by` owns "is this alias taken by another live page", for the backlink index and for `alias_conflicts`.
 - `merge_pages` and `rename_page` (`rename_or_merge` for the collision) own the actions, and neither projects.
 
+- `page_summary` owns **what a rename / merge summary calls the things it counts**.
+
 The caller runs `commit_page` over each of `touched_pages`, then removes the stale projection (`MergeReport::source`, `RenameReport::stale_projection`).
 The merge source is trashed, never left as a stub page: its slug and title become aliases of the target.
 A second page-name matcher, in any crate or client, is the thing to refuse in review.

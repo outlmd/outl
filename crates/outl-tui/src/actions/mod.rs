@@ -34,9 +34,15 @@ pub(crate) mod mouse;
 pub(crate) mod namespace;
 pub(crate) mod nav;
 pub(crate) mod overlay;
+pub(crate) mod page_commit;
+pub(crate) mod page_rename;
+/// The shared `App` fixture for the page-level action tests.
+#[cfg(test)]
+pub(crate) mod page_test_support;
 pub(crate) mod paste;
 pub(crate) mod plugins;
 pub(crate) mod properties;
+pub(crate) mod property_write;
 pub(crate) mod reminders;
 pub(crate) mod sidebar;
 pub(crate) mod sync_panel;

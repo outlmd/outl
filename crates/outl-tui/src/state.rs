@@ -10,6 +10,7 @@
 //! reads or writes these types, but nothing outside `outl-tui` should.
 
 use crate::edit_buffer::EditBuffer;
+use crate::pending_page_action::PendingPageAction;
 use crate::theme::Theme;
 use chrono::NaiveDate;
 use outl_core::hlc::HlcGenerator;
@@ -116,20 +117,6 @@ pub(crate) enum SidebarSection {
     Calendar,
     Pinned,
     Recent,
-}
-
-/// A page action awaiting `y` confirmation: delete (sidebar `d`, the
-/// `g d` chord) or, when `merge_into` is set, merge `slug` into that
-/// page (`/merge`).
-///
-/// Arming resolves the slug + title once, so a peer-driven page list
-/// change between arm and confirm cannot act on the wrong page. `y` /
-/// `Y` confirms, any other key cancels.
-#[derive(Debug, Clone)]
-pub(crate) struct PendingSidebarDelete {
-    pub(crate) slug: String,
-    pub(crate) title: String,
-    pub(crate) merge_into: Option<String>,
 }
 
 /// Where the cursor lives — inside the current page's outline (default)
@@ -771,13 +758,16 @@ pub(crate) struct App {
     /// Only meaningful when `sidebar_focus.is_some()`.
     pub(crate) sidebar_cursor: usize,
 
-    /// A pending "delete this page?" confirmation armed by pressing
-    /// `d` on a focused Pinned / Recent sidebar row. The next keystroke
-    /// resolves it: `y` / `Y` confirms and runs `page::delete`; any
-    /// other key cancels (and is swallowed, matching the
-    /// `pending_input_op` contract). The status line renders the
-    /// prompt while this is `Some`.
-    pub(crate) pending_sidebar_delete: Option<PendingSidebarDelete>,
+    /// A page action awaiting its `y`: the page delete (sidebar `d`,
+    /// the `g d` chord), `/merge <page>`, or the name collision
+    /// `/rename <new name>` ran into. The next keystroke resolves it:
+    /// `y` / `Y` confirms, any other key cancels (and is swallowed,
+    /// matching the `pending_input_op` contract). The status line
+    /// renders the prompt while this is `Some`.
+    ///
+    /// One slot for all three on purpose — see
+    /// [`crate::pending_page_action`].
+    pub(crate) pending_page_action: Option<PendingPageAction>,
 
     /// LRU of recently-opened paths. Newest first; bounded to a small
     /// window so the sidebar's `Recent` section stays scannable.

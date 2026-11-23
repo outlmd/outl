@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal } from "solid-js";
 import type { PageMeta } from "@outl/shared/api/types";
 import { deletePage, openRef } from "@outl/shared/api/commands";
+import { createConfirmQueue } from "@outl/shared/confirm";
 import {
   mergeConfirmMessage,
   mergeInto,
@@ -19,11 +20,15 @@ const RENAME_ICON = "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z";
 const MERGE_ICON = "M6 3v6a6 6 0 0 0 6 6h6M15 12l3 3-3 3";
 const DELETE_ICON = "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6";
 
+/**
+ * What this client's alert needs to draw. The queue behind it is
+ * `@outl/shared/confirm` — the bridge from an `await`ed boolean to a
+ * renderable signal is not per client, only the chrome is.
+ */
 interface ConfirmRequest {
   title: string;
   message: string;
   confirmLabel: string;
-  resolve: (ok: boolean) => void;
 }
 
 /** What `PageSwitcher` hands over: its props (read lazily, never destructured) and two list hooks. */
@@ -55,22 +60,17 @@ export function createPageActions(deps: PageActionDeps) {
   const [actionsFor, setActionsFor] = createSignal<PageMeta | null>(null);
   const [renaming, setRenaming] = createSignal<PageMeta | null>(null);
   const [mergeSource, setMergeSource] = createSignal<PageMeta | null>(null);
-  const [confirmReq, setConfirmReq] = createSignal<ConfirmRequest | null>(null);
+  const confirms = createConfirmQueue<ConfirmRequest>();
+  const confirmReq = confirms.pending;
   // The name sheet for a *new* page: `null` closed, a string (often
   // the search box's text) is what it opens prefilled with.
   const [creating, setCreating] = createSignal<string | null>(null);
 
   /** Ask in the app's own confirm dialog; resolves `false` on cancel. */
-  function ask(title: string, message: string, confirmLabel: string): Promise<boolean> {
-    return new Promise((resolve) => setConfirmReq({ title, message, confirmLabel, resolve }));
-  }
+  const ask = (title: string, message: string, confirmLabel: string): Promise<boolean> =>
+    confirms.ask({ title, message, confirmLabel });
 
-  function answerConfirm(ok: boolean) {
-    const req = confirmReq();
-    if (!req) return;
-    setConfirmReq(null);
-    req.resolve(ok);
-  }
+  const answerConfirm = confirms.answer;
 
   // Closing the switcher abandons whatever sub-flow was open in it.
   createEffect(() => {
@@ -157,7 +157,11 @@ export function createPageActions(deps: PageActionDeps) {
     const p = actionsFor();
     if (!p || p.kind === "journal") return [];
     return [
-      { id: "rename", label: "Rename page...", iconPath: RENAME_ICON, onSelect: () => setRenaming(p) },
+      // `armsKeyboard` because this ends in a text field and the menu
+      // defers `onSelect`. It worked without it only by coincidence —
+      // the switcher's search box is `autofocus`, so the keyboard was
+      // already up — and that coincidence is not a mechanism.
+      { id: "rename", label: "Rename page...", iconPath: RENAME_ICON, armsKeyboard: true, onSelect: () => setRenaming(p) },
       {
         id: "merge",
         label: "Merge into...",

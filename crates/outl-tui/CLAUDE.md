@@ -115,7 +115,8 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   A one-shot enum (mutually exclusive with `pending_chord`) consumed by the next `Char(c)` keystroke.
   Any other keystroke cancels.
 - **`*` / `#` reuse the workspace search.** `search_word_under_cursor` extracts the word the cursor sits on (whitespace-bounded), opens the `/` overlay machinery, accepts the first hit, persists the rest into `last_search` so `n` / `N` walk them.
-- **Sidebar intercept.** With the sidebar open (`\` / `Ctrl+E`), `j` / `k` move the row selection, `Tab` cycles the section (Today / Pinned / Recent / Calendar), and `Enter` opens the focused page. `d` on a **regular page** arms a `delete page '<title>'? y/n` confirmation in the status line (`App::pending_sidebar_delete: Option<PendingSidebarDelete>`); `y` / `Y` confirms and runs `outl_actions::delete_page` + `remove_page_projection` + `spawn_index_rebuild`, navigates to today if the deleted page was current, and announces to peers. Any other key cancels (and is swallowed, matching the `pending_input_op` contract). The same prompt carries `/merge` (see "Merge" below). Calendar rows are a no-op, and journals pinned/recent are excluded, so only regular pages can be deleted from the sidebar. The `g d` chord (Normal mode) routes through the same confirmation flow via `App::delete_page_from_chord`: with the sidebar focused it delegates to `sidebar_delete_current`, otherwise it arms the confirmation against the current page (refusing journals).
+- **Sidebar intercept.** With the sidebar open (`\` / `Ctrl+E`), `j` / `k` move the row selection, `Tab` cycles the section (Today / Pinned / Recent / Calendar), and `Enter` opens the focused page. `d` on a **regular page** arms a `delete page '<title>'? y/n` confirmation in the status line (`App::pending_page_action: Option<PendingPageAction>`); `y` / `Y` confirms and runs `outl_actions::delete_page` + `remove_page_projection` + `spawn_index_rebuild`, navigates to today if the deleted page was current, and announces to peers. Any other key cancels (and is swallowed, matching the `pending_input_op` contract). The same prompt carries `/merge` and the name collision `/rename` can hit (see "Merge" and "Rename" below) — `App::confirm_pending_page_action` is the one fork between the three, and `crate::pending_page_action` owns why they share one slot. Calendar rows are a no-op, and journals pinned/recent are excluded, so only regular pages can be deleted from the sidebar. The `g d` chord (Normal mode) routes through the same confirmation flow via `App::delete_page_from_chord`: with the sidebar focused it delegates to `sidebar_delete_current`, otherwise it arms the confirmation against the current page (refusing journals).
+  The tail the merge and the rename share once their ops are in the log — the projection order, the invalidated undo entries, the remembered paths, both summaries — is `actions/page_commit.rs`, not either feature's module.
 - **Visual range capture.**
   Every Visual exit (`Esc`, `y`, `d`) routes through `remember_visual_range` so `g v` can restore the last range.
 - **Visual range reorder (`Alt+↑` / `Alt+↓`).**
@@ -181,7 +182,25 @@ Four contracts, each of which was the alternative:
 - **Projection is the CLI's order.** The mutation runs once, then `commit_page` (an empty mutation, for its guarded projection and announce) on every `touched_pages` slug through `CaptureCommit`, and the source's `.md` is removed only once the target itself projected. A withheld projection is classified like the trash restore's: `AheadOfLog` carries `refusal::ahead_of_log_notice`'s sentence, and a retryable one is said once too, because the source file stays behind in that case.
 - **The undo and redo entries of every touched page are dropped, and that is the point.** A snapshot of the target from before the merge, restored by `u`, would render the merged blocks away and reconcile that as a delete. The status line says `can't be undone here` up front rather than leaving `u` to do something surprising.
 
-There is no rename prompt: this client has no page rename. When one lands, `ActionError::PageExists` is the signal to arm this same confirmation, with `rename_or_merge` behind the `y`.
+The rename shares the prompt: `/rename` onto a taken name arms it with `PageAction::RenameCollision` and `rename_or_merge` behind the `y`, landing back in `App::finish_merge`.
+
+### Rename (`/rename <new name>`)
+
+`actions/page_rename/` renames the open page and respells every mention; the rename itself is `outl_actions::rename_page` (RFC 0557).
+The slug is `slugify(new_name)` and the title is the trimmed input, the same split the Tauri command layer makes — including `slugify`'s `untitled` fallback for a name that folds to nothing, because a TUI-only refusal there would be this client declining what the GUIs accept.
+
+**Only the collision asks.** A rename onto a free name runs on the keystroke (rename it back and you are where you were); `ActionError::PageExists` becomes the shared `y/n`.
+
+Four contracts, and each one is a silent corruption rather than an error:
+
+- **`flush_pending_save()` first, then the view moves.** `persist` renders `self.page` to `self.current_path()`, so a `View::Page` left on the old path recreates `pages/<old>.md` on the next keystroke and reconciles it back into a page — and `current_slug()` is the file stem, so every downstream reader is stale until the view moves. `land_on_page_or_today` never opens the page by slug, for the reason the merge gives.
+- **`recent_paths` and `last_search` are repointed** (`App::repoint_remembered_path`). The sidebar's Recent rows open by path and the persisted hits carry one, and one `Enter` on a stale row is RFC 0557 known limit 5: `open_or_create` writes `page-slug = <old>` onto the renamed page and silently undoes the rename. The merge forgets the source's path through the same helper, which it also needed and did not have.
+- **Undo and redo are dropped over `touched_pages` *plus* the old slug.** A `HistorySnapshot` is keyed by `view_path` and `restore_snapshot` refuses a mismatch, so a stale entry is inert *until the old path comes back* — at which point restoring it writes a pre-rename render to a file that reconciles the rename away.
+- **The summary reports `skipped_namespace_refs`.** `rename_page` leaves `[[old/child]]` alone on purpose; a summary that drops the count leaves the user with mentions they cannot see were not updated.
+
+**`title::` is a rename, not a property.** `App::write_page_property` is the single owner of that fork and both doors onto a page-level property go through it — the `g p` overlay's Page scope and `/prop-page <key> <value>`. Writing `title` into the AST changed the page's name and respelled no `[[mention]]` of it, which is the silent half-rename `page-slug`'s own refusal ("rename the page instead") already points away from. The slug does **not** move: `rename_page` takes the two names separately. Emptying it is refused rather than leaving the page nameless, because `rename_page` has no way to express a blank title.
+
+Recorded as `Capability::PageRename` → `Full` on all three columns. `Full` on this client although there is no chord and no clickable title, because `PageMerge` reaches the same backend by the same mechanism (a slash command plus a `y/n`) and is `Full` — two rows disagreeing about whether a `/` command delivers a capability is the drift the catalog exists to remove.
 
 ### Properties (`g p`)
 
@@ -194,6 +213,7 @@ Three contracts worth knowing before touching it:
   `set_property_on_current_block` / `set_property_on_page` write the AST, and the two only meet at a save boundary — reading the tree would list a value the user cannot see in the outline and would drop the one they just typed.
   This is the same trap `actions/reminders.rs` documents for `g r`.
   `outl_actions::property::page_properties` is therefore **not** the reader here; the structural-key predicate it uses (`outl_actions::tree::is_page_model_key`) is, so `page-slug` / `page-kind` are filtered out of the list and refused on create.
+  **`title` is not one of those keys and must not become one**: it is listed and editable, and the write goes through `App::write_page_property` → the rename, because changing the name without respelling every `[[mention]]` is the half-rename that refusal points away from. See "Rename" above.
 - **Key completion is `outl_actions::known_keys`, snapshotted on open.**
   Frequency-ranked, one owner shared with the GUI clients.
   Snapshotted because the overlay owns the keyboard while it is up, so no key can appear mid-session; `open_properties` calls `flush_pending_save()` first so the catalogue isn't one coalesced edit behind.
@@ -716,6 +736,8 @@ src/
 │   ├── exec.rs          # run code block via outl_exec
 │   ├── plugins.rs       # outl_plugins::PluginHost wiring (load, slash dispatch, op-hook sweep)
 │   ├── properties.rs    # the `g p` property editor (key catalogue completion, `[[` in the value)
+│   ├── page_commit.rs   # the tail `/merge` and `/rename` share: projection order, invalidated history, remembered paths, both summaries
+│   ├── page_rename/     # `/rename <new name>`: the rename, and the merge offered when the name is taken
 │   └── overlay.rs       # quick switcher, search, palette, autocomplete
 ├── input/               # key → action routing (normal/insert/visual/overlay)
 │   ├── chord_adapter.rs # crossterm KeyEvent → outl_shortcuts::Chord
@@ -734,6 +756,7 @@ src/
 │   ├── warnings_banner.rs # yellow banner above the outline when the current page has ParseWarnings
 │   ├── backlinks.rs     # inline backlinks section (below outline, ─ rule); `render_crumb_trail` draws the ancestor breadcrumb as markdown, dim on the Line so prose inherits it and a ref keeps its hue
 │   └── namespace.rs     # nested-pages section (below backlinks, ─ rule); read-only, no cursor
+├── pending_page_action.rs # the page action awaiting its `y`: delete, merge, rename collision
 ├── outline_ops.rs       # one-line re-export shim — helpers moved to outl_md::outline_ops so the mobile client can share them
 ├── edit_buffer.rs       # cursor + chars; isolated, well-tested
 ├── editor.rs            # placeholder for block-level editor widgets (not yet built)

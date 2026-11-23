@@ -150,28 +150,41 @@ describe("wording", () => {
     );
   });
 
-  it("pluralises the rename summary", () => {
-    expect(renameSummary(renameReport({ rewritten_blocks: 0 }))).toBe("Renamed. 0 links updated.");
-    expect(renameSummary(renameReport({ rewritten_blocks: 1 }))).toBe("Renamed. 1 link updated.");
-    expect(renameSummary(renameReport({ rewritten_blocks: 2 }))).toBe("Renamed. 2 links updated.");
+  // The count is of BLOCKS whose text was edited, not of links: one
+  // block can carry several mentions of the page. The terminal says the
+  // same thing, and `outl_actions::page_summary` owns both nouns.
+  it("counts a rewrite in blocks and pluralises them", () => {
+    expect(renameSummary(renameReport({ rewritten_blocks: 0 }))).toBe(
+      "Renamed. Links updated in 0 blocks.",
+    );
+    expect(renameSummary(renameReport({ rewritten_blocks: 1 }))).toBe(
+      "Renamed. Links updated in 1 block.",
+    );
+    expect(renameSummary(renameReport({ rewritten_blocks: 2 }))).toBe(
+      "Renamed. Links updated in 2 blocks.",
+    );
   });
 
-  it("mentions skipped namespace links in a rename only when there are some", () => {
+  it("mentions nested-page links left unchanged only when there are some", () => {
     expect(renameSummary(renameReport({ skipped_namespace_refs: 1 }))).toBe(
-      "Renamed. 0 links updated. 1 namespace link left unchanged.",
+      "Renamed. Links updated in 0 blocks. 1 nested-page link left unchanged.",
     );
-    expect(renameSummary(renameReport({ skipped_namespace_refs: 3 }))).toContain("3 namespace links left unchanged");
-    expect(renameSummary(renameReport())).not.toContain("namespace");
+    expect(renameSummary(renameReport({ skipped_namespace_refs: 3 }))).toContain(
+      "3 nested-page links left unchanged",
+    );
+    expect(renameSummary(renameReport())).not.toContain("nested-page");
+    // The glossary's word, never the field's.
+    expect(renameSummary(renameReport({ skipped_namespace_refs: 1 }))).not.toContain("namespace");
   });
 
   it("summarises a plain merge in two lines", () => {
     expect(mergeSummary(mergeReport({ moved_blocks: 1, rewritten_blocks: 1 }))).toEqual([
       '1 block moved to "B".',
-      "1 link updated.",
+      "Links updated in 1 block.",
     ]);
     expect(mergeSummary(mergeReport({ moved_blocks: 4, rewritten_blocks: 2 }))).toEqual([
       '4 blocks moved to "B".',
-      "2 links updated.",
+      "Links updated in 2 blocks.",
     ]);
   });
 
@@ -190,11 +203,11 @@ describe("wording", () => {
     );
     expect(lines).toEqual([
       '2 blocks moved to "B".',
-      "5 links updated.",
+      "Links updated in 5 blocks.",
       '1 alias added: "A".',
       'Property conflict: kept "open", dropped "done" (status).',
       'Property conflict: kept "Ana", dropped "Rui" (owner).',
-      "2 namespace links left unchanged.",
+      "2 nested-page links left unchanged.",
     ]);
   });
 

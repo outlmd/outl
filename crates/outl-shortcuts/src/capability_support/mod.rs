@@ -78,21 +78,38 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             mobile: Full,
         },
 
-        // Desktop and mobile both call `rename_page` (sidebar row
-        // action and page header on the desktop, the page switcher's
-        // long-press sheet on mobile). The TUI has no rename surface;
-        // the terminal route is `outl page rename`, which is also how
-        // a terminal user renames onto a taken name (`--merge`).
+        // All three clients call `outl_actions::rename_page` and all
+        // three offer the merge when the name is taken: the desktop
+        // from the page title (click to edit it in place) or the
+        // sidebar row's `✎`, mobile from the page title (tap for a
+        // name sheet) or the page switcher's long-press sheet, the TUI
+        // from `/rename <new name>`
+        // (`commands::builtins::RenameCommand`), each turning
+        // `ActionError::PageExists` into its own confirmation.
+        // A journal is offered the door on none of them: its slug is
+        // its date, and reaching a backend refusal through the UI is
+        // the defect rather than the guard.
+        //
+        // `Full` on the TUI column although it has no chord and no
+        // clickable title, because `PageMerge` directly below reaches
+        // the *same* backend through the *same* mechanism — a slash
+        // command plus a `y/n` — and is `Full`. Two rows disagreeing
+        // about one fact (does a `/` command deliver a capability) is
+        // the drift this catalog exists to remove, and the lesser
+        // states say what a client cannot do, not which affordance it
+        // is reached by. The terminal route is also still
+        // `outl page rename --merge`.
         Capability::PageRename => ClientSupport {
-            tui: Missing(why::NO_TUI_PAGE_RENAME),
+            tui: Full,
             desktop: Full,
             mobile: Full,
         },
 
-        // Same two GUI surfaces as `PageRename`, started from the
+        // The same three surfaces as `PageRename`, started from the
         // merge side (a target picker and a mandatory confirm). The
         // TUI's `/merge <page>` (`commands::builtins::MergeCommand`,
-        // confirmed with y/n) runs the same `merge_pages`.
+        // confirmed with y/n) runs the same `merge_pages`, and shares
+        // that confirmation with the rename's collision path.
         Capability::PageMerge => ClientSupport {
             tui: Full,
             desktop: Full,
