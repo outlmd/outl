@@ -41,6 +41,12 @@ Until then, `set_workspace` works for any path the frontend can already reach wi
 ## Page switcher: rename and merge (RFC 0557)
 
 A long-press on a **page** row (never a journal) opens the same menu component the block long-press uses, with three rows: **Rename page...**, **Merge into...**, **Delete page**.
+
+**Rename has a second door, and it is the page title.**
+`Journal.rename.tsx` owns it: a tap on a non-journal title calls `armKeyboard()` inside the gesture window and opens the same `PageNameSheet`, over the same `@outl/shared/pages/rename-merge` flow.
+`JournalHeader.tsx` stays pure render, so the pencil glyph and the tap arrive as props.
+The tap shares the title region's `consumedClick()` guard with the long-press, read **once** per click, because `lib/long-press.ts` clears the flag as it answers.
+Merge keeps only this menu: the header has no list to turn into a target picker.
 `PageSwitcher.tsx` keeps the search list and the wiring; everything one page can be asked to do lives in `PageSwitcher.page-actions.tsx` (`createPageActions`, the long-press recogniser, `<MergeBanner />`, `<PageActionOverlays />`), split out when the switcher would otherwise have crossed the 600-line ratchet.
 
 - **The flow is not written here.** `renameOrMerge` / `mergeInto` and every sentence (`nameTakenMessage`, `mergeConfirmMessage`, `renameSummary`, `mergeSummary`) come from `@outl/shared/pages/rename-merge`, so the desktop runs the same steps and says the same words.

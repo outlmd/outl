@@ -58,7 +58,9 @@ mod tests {
              feature that is right there",
         );
 
-        // Rename and merge are reached from the page switcher's
+        // Rename is reached from the page title (tap for a name sheet)
+        // and from the page switcher's long-press menu; merge from the
+        // page switcher's
         // long-press sheet (RFC 0557). The catalog says `Full` for this
         // client, so both commands the sheet calls must still exist.
         let _ = crate::commands::rename_page;

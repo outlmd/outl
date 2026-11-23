@@ -164,7 +164,8 @@ These are real, they are recorded here so they are not discovered one at a time,
    There is no `--dry-run`, because `merge_pages` applies its ops inside one batch and a preview would be a second implementation of the merge.
    The TUI reaches it through `/merge <page>` (a typed target and a `y/n` prompt).
    The desktop and mobile apps call `rename_page` and `merge_pages` (rename, a merge target picker, and a confirm when a rename lands on a taken name), composing the two themselves rather than calling `rename_or_merge` with `OnExisting::MergeInto`.
-   The TUI has no page rename, so there is no rename-onto-an-existing-name prompt there, and `outl_shortcuts::capability_support` records `PageRename` as missing in the TUI.
+   The TUI reaches the rename through `/rename <new name>`, and a taken name arms the same `y/n` prompt `/merge` uses, with `rename_or_merge` behind the `y`.
+   That landed after this RFC; `outl_shortcuts::capability_support` records `PageRename` as `Full` on all three clients now.
 7. **A title given to a rename that turns into a merge has nowhere to go.**
    The target keeps its own title.
 
@@ -185,8 +186,9 @@ These are real, they are recorded here so they are not discovered one at a time,
 
 ## Scope
 
-**Not covered: a page rename in the TUI.**
-The `outl page merge` command, the `page_merge` batch op, the MCP tool, the TUI's `/merge` and the desktop and mobile rename and merge all exist over `merge_pages` and `MergeReport`, and each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
+**Not covered: a page rename in the TUI.** *(covered since: `/rename <new name>`, with the collision arming the prompt `/merge` already used.)*
+The `outl page merge` command, the `page_merge` batch op, the MCP tool, the TUI's `/merge` and the desktop and mobile rename and merge all exist over `merge_pages` and `MergeReport`.
+Each owns its own refusal wording through the `refusal` catalog ([RFC 0255](0255-operation-vocabulary.md)).
 
 **Not covered: showing a shadowed alias to the user.**
 `alias_conflicts` is the function a client calls.

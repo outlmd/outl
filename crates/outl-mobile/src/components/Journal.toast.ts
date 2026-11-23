@@ -72,5 +72,3 @@ export function createJournalToast() {
     dismissToast,
   };
 }
-
-export type JournalToast = ReturnType<typeof createJournalToast>;

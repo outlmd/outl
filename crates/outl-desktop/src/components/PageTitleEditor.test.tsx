@@ -190,6 +190,36 @@ describe("PageTitleEditor", () => {
     );
   });
 
+  /**
+   * The editor closes on commit, so the button is back under the
+   * pointer while the round trip runs. Opening it again would seed the
+   * draft from `props.page`, which still holds the **old** name until
+   * the reply lands, and committing that sends a second rename against
+   * the slug the first one is retiring: the user gets "page not found"
+   * for the page they are looking at. A workspace-wide link rewrite is
+   * long enough to click twice in.
+   */
+  it("refuses a second rename while the first is still in flight", async () => {
+    let land: (v: PageView | null) => void = () => {};
+    vi.mocked(renamePageFlow).mockReturnValue(
+      new Promise<PageView | null>((resolve) => {
+        land = resolve;
+      }),
+    );
+    mount(meta());
+    affordance()!.click();
+    type("Archive");
+    press("Enter");
+    await vi.waitFor(() => expect(renamePageFlow).toHaveBeenCalledTimes(1));
+
+    affordance()!.click();
+    expect(field()).toBeNull();
+
+    land(view("archive"));
+    await vi.waitFor(() => expect(field()).toBeNull());
+    expect(renamePageFlow).toHaveBeenCalledTimes(1);
+  });
+
   /** A declined merge (or a refusal) produced no page: the caret comes
    *  back to the title the user was editing, not to nowhere. */
   it("returns focus to the title when the flow produced no page", async () => {

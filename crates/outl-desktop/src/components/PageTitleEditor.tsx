@@ -60,7 +60,15 @@ export function PageTitleEditor(props: {
   const restoreFocus = () => queueMicrotask(() => affordance?.focus());
 
   function openEditor() {
-    if (!renameable()) return;
+    // Not while one is in flight. The editor closes on commit, so the
+    // button comes back under the pointer while the round trip runs,
+    // and a second open seeds its draft from `props.page` — which
+    // still holds the *old* name, because the reply has not landed.
+    // Committing that sends a second rename against the slug the first
+    // one is retiring, and the user gets "page not found" for a page
+    // they are looking at. A workspace-wide link rewrite on a heavily
+    // linked page is long enough to click twice in.
+    if (!renameable() || pending()) return;
     setDraft(label());
     setEditing(true);
     queueMicrotask(() => {
