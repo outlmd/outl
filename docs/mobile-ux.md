@@ -261,6 +261,30 @@ A commit, a background poll, a peer reload and a capture into today keep it: non
 
 Convention: [`docs/client-editing.md` → Zoom / focus on a block](client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
+## The bullet opens the menu too
+
+A **hold on the bullet** (or on a task's checkbox) raises the same `<BlockContextMenu>` a hold on the row's text does.
+It did not, for a reason nothing on screen explained: `BlockBody.pressedInteractive` refuses to arm the hold inside any `a` / `button` / `[role=button]` / `code` / `textarea`, and the bullet is a `<button>`.
+So the one place a finger reaches for "act on this block" was the one place the gesture died.
+
+The exemption is that control alone — `[data-block-bullet]`, set in `BlockMarkers.tsx` on both the dot and the checkbox — rather than a looser predicate.
+A ref, a tag, a link, inline `code`, the fold triangle and the textarea each still handle their own touch, and a hold on any of them still opens nothing.
+
+**A tap is unchanged**: the dot zooms (or marks TODO where zoom is not wired), the checkbox cycles task state.
+What the hold needed was a second reader of `consumedClick()`.
+Those two buttons `stopPropagation` unconditionally, so the row's `onClick` never sees their click and cannot swallow the one a completed hold produces.
+Without it, holding the bullet opened the menu *and* zoomed on the way out.
+`BlockBody`'s `bulletTap` is that reader, which keeps it at exactly one per gesture.
+
+## Copy block ref / Copy block embed
+
+Two adjacent rows in the long-press menu, and the difference is what a reader sees after pasting.
+**Copy block ref** writes `((blk-XXXXXX))` — a link to the block.
+**Copy block embed** writes `!((blk-XXXXXX))` — the block expanded in place.
+Both read the handle the workspace index already assigned, and both refuse with "no ref handle yet — save and retry" on a block with no sidecar entry.
+
+The `!` is added by `outl_md::inline::block_embed_token`, never by prefixing the ref's result in a client: the GUI pair is the TUI's `/refer` and `/refer-embed`, and a second owner of the syntax is the one that drifts.
+
 ## Paste from external apps
 
 The textarea in `BlockRow.tsx` intercepts paste (with formatting only — mobile has no `Cmd+Shift+V`).

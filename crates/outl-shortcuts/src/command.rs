@@ -114,6 +114,9 @@ pub fn command_name(action: Action) -> &'static str {
         Action::MarkDone => "mark-done",
         // `refer` is the TUI's `ReferCommand`.
         Action::CopyBlockRef => "refer",
+        // `refer-embed` is the TUI's `ReferEmbedCommand`, which spelled
+        // this literal itself until it had an `Action` to ask.
+        Action::CopyBlockEmbed => "refer-embed",
         Action::DeletePage => "delete-page",
         Action::InsertRemind => "insert-remind",
         Action::InsertRemindNag => "insert-remind-nag",

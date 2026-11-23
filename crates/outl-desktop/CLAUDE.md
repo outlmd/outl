@@ -116,6 +116,11 @@ The one rule here: **nothing about when a reminder fires is computed in the fron
 
 - The saved mark: `savedMarks` in `lib/store.ts`, written when `edit_block` resolves and rendered by `BlockRow` as a fading dot.
   Do not mark before the command resolves — the mark means "the op is on disk".
+- **A `Full` cell in `outl_shortcuts::support` promises the action, not a chord.**
+  `CopyBlockRef` / `CopyBlockEmbed` therefore ship twice: as handlers in `lib/clipboard-handlers.ts`, and as rows of the bullet's right-click menu (`components/BlockContextMenu.tsx`, built by `menuActions()` in `BlockRow.tsx`).
+  Both paths call the same command through the same `copyBlockHandleToClipboard`, so a row and a chord cannot drift — add an option to the array, never a second copy of the round-trip.
+  The menu is the client's own chrome and its labels are not: they are mobile's, because one action with two labels reads as two actions ([`docs/desktop-ux.md`](../../docs/desktop-ux.md#right-click-a-bullet--copy-a-block-ref-or-an-embed)).
+  **Clipboard writes in this client go through `navigator.clipboard`, never `@tauri-apps/plugin-clipboard-manager`** — the capability JSON grants `clipboard-manager:allow-read-text` only, so a plugin write is denied at runtime.
 - Focus mode is **not an `Action` yet**: `support.rs` and `defaults.rs` sit at their file-size baseline, so a chord waits for that split.
 - Motion, focus mode and the first-run tips come from `@outl/shared/polish`: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#motion-focus-mode-first-run-tips).
 

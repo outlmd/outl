@@ -153,7 +153,8 @@ The TUI is vim-style by definition.
 | Search workspace for word / block text — backward | `#` | `#` *(seeds picker)* | page switcher "Blocks" tab *(no hit-stepping)* |
 | Undo last committed block mutation | `u` | `u` / `Cmd/Ctrl+Z` | keyboard toolbar |
 | Redo | `Ctrl+R` | `Ctrl+R` / `Cmd/Ctrl+Shift+Z` | keyboard toolbar |
-| Yank block ref → clipboard (chord) | `y r` | — _(chord is in the catalog, no handler — [#parity](client-parity.md))_ | long-press → "Copy block ref" |
+| Yank block ref → clipboard | `y r` / `/refer` | right-click the bullet → "Copy block ref" | long-press → "Copy block ref" |
+| Yank block **embed** → clipboard | `/refer-embed` _(no chord)_ | right-click the bullet → "Copy block embed" | long-press → "Copy block embed" |
 | Enter Visual | `V` _(the catalog spells this `v`; the TUI binds `V` only — [known divergence](../crates/outl-shortcuts/tests/tui_catalog_divergence.rs))_ | `v` | — |
 | Open command palette | `:` | `:` / `Cmd/Ctrl+K` _(the quick switcher opened on `>`: actions with their chords)_ | — |
 | Open slash menu | `/` _(overlay)_ | — _(the desktop's slash menu is inline, inside a block — see Insert mode below)_ | — _([#parity](client-parity.md): `SlashCommandMenu`)_ |

@@ -158,6 +158,19 @@ pub enum Action {
     MarkDone,
     /// Copy the current block's `((blk-…))` ref handle to clipboard.
     CopyBlockRef,
+    /// Copy the current block's `!((blk-…))` **embed** token to the
+    /// clipboard — the same block, spelled so a reader expands it
+    /// inline instead of linking to it.
+    ///
+    /// The TUI has shipped this as `/refer-embed` since the ref
+    /// command existed, and it was the one built-in whose `name()`
+    /// was a bare string literal instead of [`crate::command_name`].
+    /// So it had no row here, no verdict from any client, and no line
+    /// in the parity doc: a capability nobody had recorded was
+    /// missing, which is the state invariant 12 exists to end. It
+    /// carries no chord — `y r` has the ref, and the embed is reached
+    /// by name and by the GUI clients' block menu.
+    CopyBlockEmbed,
 
     // ── page operations ──────────────────────────────────────────
     //
@@ -372,6 +385,7 @@ impl Action {
         Action::ToggleTodo,
         Action::MarkDone,
         Action::CopyBlockRef,
+        Action::CopyBlockEmbed,
         Action::DeletePage,
         Action::InsertRemind,
         Action::InsertRemindNag,
@@ -473,6 +487,7 @@ mod all_tests {
             Action::ToggleTodo => "ToggleTodo",
             Action::MarkDone => "MarkDone",
             Action::CopyBlockRef => "CopyBlockRef",
+            Action::CopyBlockEmbed => "CopyBlockEmbed",
             Action::DeletePage => "DeletePage",
             Action::InsertRemind => "InsertRemind",
             Action::InsertRemindNag => "InsertRemindNag",
@@ -520,14 +535,14 @@ mod all_tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_85,
-            "Action::ALL has {} entries but the enum has {EXPECTED_85} variants \
-             — add the new variant to Action::ALL (and bump EXPECTED_85)",
+            EXPECTED_86,
+            "Action::ALL has {} entries but the enum has {EXPECTED_86} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_86)",
             names.len(),
         );
     }
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_85: usize = 85;
+    const EXPECTED_86: usize = 86;
 }

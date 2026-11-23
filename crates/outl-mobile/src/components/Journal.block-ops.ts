@@ -23,6 +23,7 @@
 
 import type { PageView } from "@outl/shared/api/types";
 import {
+  copyBlockEmbed,
   copyBlockMarkdown,
   copyBlockRef,
   cutBlock,
@@ -91,6 +92,22 @@ export function createBlockOps(deps: JournalBlockDeps) {
     haptic("light");
     const next = await deps.withError(() => op(pid, id));
     if (next) deps.applyView(next);
+  }
+
+  /**
+   * Resolve one of a block's handle spellings onto the OS clipboard.
+   * The write is best-effort (some webviews refuse
+   * `navigator.clipboard` outside a user-gesture chain); the backend's
+   * refusal still reaches the user through `withError`.
+   */
+  async function copyHandle(resolve: () => Promise<string>): Promise<void> {
+    const token = await deps.withError(resolve);
+    if (token === undefined) return;
+    try {
+      await navigator.clipboard?.writeText(token);
+    } catch {
+      // Best-effort: the handle is lost, the workspace is not.
+    }
   }
 
   /**
@@ -217,18 +234,22 @@ export function createBlockOps(deps: JournalBlockDeps) {
 
     /**
      * "Copy block ref" (long-press menu, issue #18) — resolve `id`'s
-     * `((blk-XXXXXX))` handle and put it on the OS clipboard, same
-     * best-effort posture as "Copy text" above (some webviews refuse
-     * `navigator.clipboard` outside a user-gesture chain).
+     * `((blk-XXXXXX))` handle and put it on the OS clipboard.
      */
     async copyBlockRef(id: string) {
-      const ref = await deps.withError(() => copyBlockRef(id));
-      if (ref === undefined) return;
-      try {
-        await navigator.clipboard?.writeText(ref);
-      } catch {
-        // Best-effort, same as "Copy text" / "Copy block" above.
-      }
+      await copyHandle(() => copyBlockRef(id));
+    },
+
+    /**
+     * "Copy block embed" (long-press menu, issue #18) — the same handle
+     * as `copyBlockRef` above, spelled `!((blk-XXXXXX))` so a reader
+     * expands the block inline instead of linking to it. The `!` is
+     * added in Rust (`outl_md::inline::block_embed_token`), never by
+     * prefixing the ref here: a client that built the embed itself
+     * would be a second owner of the syntax.
+     */
+    async copyBlockEmbed(id: string) {
+      await copyHandle(() => copyBlockEmbed(id));
     },
 
     /**

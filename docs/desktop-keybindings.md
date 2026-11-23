@@ -27,6 +27,8 @@ Three things the split decided on purpose:
   Two passes on purpose: a declaration move is reviewable on sight, a body change is not.
   Same net for both: `shortcuts.support.test.ts` pins the **presence** of all 66 keys in both directions, and nothing about what one does.
   That is why `clipboard-handlers.test.ts` exists for the two it never reached, `YankCurrentBlock` and `YankRange`.
+  `clipboard-handlers.refer.test.ts` is the same gap for `CopyBlockRef` and `CopyBlockEmbed`.
+  Both take one block id and answer one string, so a handler calling the other's command copies something that looks right and silently is not.
   The dedup collapsed eight inline copies of `ctx.runOn`, three copies of one batch loop (`ctx.runEach` owns it now), the `Esc` cascade's second list of panels, and seven toggles written two ways.
   `store.togglePanel` owns that flip now, including the chrome buttons, which were a list of their own.
 - **`exitVisual` still writes `mode: "vim-normal"` and nothing writes it back.**

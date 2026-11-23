@@ -5,6 +5,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import {
   attachAsset,
+  copyBlockEmbed,
+  copyBlockRef,
   createBlock,
   deleteBlock,
   editBlock,
@@ -52,6 +54,7 @@ import {
 } from "../lib/store";
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
 import { installBacklinksEffect } from "../lib/backlinks-effect";
+import { copyBlockHandleToClipboard } from "../lib/clipboard-handlers";
 import { installPageChangeEffect, resetForNavigation } from "../lib/page-change";
 import { applyPageState } from "../lib/page-view";
 import { createCaretNavOps } from "./outline-caret-nav";
@@ -389,6 +392,16 @@ export function OutlineView() {
     onOpenPage: async (slug) => {
       const view = await handleError(openPageBySlug(slug));
       if (view) applyView(view);
+    },
+    // The bullet's right-click menu. Same round-trip the `CopyBlockRef`
+    // / `CopyBlockEmbed` chords take, down to the clipboard write, so a
+    // menu row and a chord cannot drift; only the error sink differs,
+    // and `handleError` is `safeCall` under another name.
+    onCopyBlockRef: (id) => {
+      void copyBlockHandleToClipboard(handleError(copyBlockRef(id)));
+    },
+    onCopyBlockEmbed: (id) => {
+      void copyBlockHandleToClipboard(handleError(copyBlockEmbed(id)));
     },
     onFocusBlock: (id) => {
       // Zoom into the clicked block. Also sync the selection cursor so

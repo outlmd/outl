@@ -305,20 +305,22 @@ pub fn support(action: Action) -> ClientSupport {
                  through to DONE instead."
             )
         ),
-        // RFC 0254 phase 4b closes issue #18 for mobile only — the
-        // long-press menu's "Copy block ref" reads the same
-        // `((blk-XXXXXX))` handle the TUI's `y r` copies (off the
-        // workspace index, never re-derived) and puts it on the OS
-        // clipboard. Desktop stays `Missing`; it wasn't in this
-        // phase's scope.
-        Action::CopyBlockRef => row!(
-            Full,
-            Missing(
-                "Copying a block ref isn't on the desktop yet — open the block's \
-                 properties, or copy the handle from the TUI with `y r`."
-            ),
-            Full
-        ),
+        // Every client reads the same `((blk-XXXXXX))` handle off the
+        // workspace index — never re-derived, because collision
+        // expansion makes the stored handle longer than
+        // `derive_ref_handle` produces and the short form resolves to
+        // a different block. The TUI has `y r` and `/refer`; both GUI
+        // clients reach it from the block's own context menu, which is
+        // what closed the desktop's `Missing` row from RFC 0254 phase
+        // 4b (that phase shipped mobile only).
+        Action::CopyBlockRef => row!(Full, Full, Full),
+        // The embed form of the same handle. The TUI has had it as
+        // `/refer-embed` all along; it had no row here because the
+        // built-in spelled its own name instead of asking
+        // `command_name`, so no client was ever asked what it did
+        // with it. Both GUI clients now offer it beside the ref in the
+        // block menu.
+        Action::CopyBlockEmbed => row!(Full, Full, Full),
 
         // ── page operations ──────────────────────────────────────
         Action::DeletePage => row!(Full, Full, Full),
@@ -543,7 +545,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 85, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 86, "Action::ALL changed size");
     }
 
     #[test]

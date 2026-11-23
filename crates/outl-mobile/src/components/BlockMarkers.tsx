@@ -65,6 +65,12 @@ export function BulletOrCheckbox(props: {
       fallback={
         <button
           type="button"
+          // The one `<button>` in a row that a long press may pass
+          // through — `BlockBody.pressedInteractive` keys on this
+          // attribute, and reaching for the bullet is how a finger says
+          // "act on this block". Both branches carry it: the dot and
+          // the checkbox are the same control wearing two states.
+          data-block-bullet
           aria-label={props.onFocus ? "Zoom into block" : "Mark as TODO"}
           onClick={(e) => {
             e.stopPropagation();
@@ -85,6 +91,7 @@ export function BulletOrCheckbox(props: {
     >
       <button
         type="button"
+        data-block-bullet
         aria-label={
           props.todo === "DONE"
             ? "Clear task state"

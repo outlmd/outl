@@ -9,7 +9,9 @@
  */
 
 import {
+  copyBlockEmbed,
   copyBlockMarkdown,
+  copyBlockRef,
   copyMarkdown,
   moveBlockAfter,
   pasteBlockAfter,
@@ -33,6 +35,27 @@ export async function copySelectionToClipboard(
   void navigator.clipboard?.writeText(md).catch(() => {});
 }
 
+/** Put a block handle — `((blk-x))` or its `!((blk-x))` embed
+ *  spelling — on the OS clipboard.
+ *
+ *  It takes the already-guarded promise rather than the block id so
+ *  the caller keeps its own error sink: the backend rejects with
+ *  "no ref handle yet — save and retry" for a block the sidecar has
+ *  not seen, and that refusal has to reach the user wherever the copy
+ *  was asked for. `undefined` therefore means it was already
+ *  surfaced and there is nothing to write.
+ *
+ *  Only the `((…))` spelling is shared, never built here: `outl-md`
+ *  owns both tokens, so a client that prefixed a `!` would be a second
+ *  owner of the syntax. */
+export async function copyBlockHandleToClipboard(
+  token: Promise<string | undefined>,
+): Promise<void> {
+  const text = await token;
+  if (text == null) return;
+  void navigator.clipboard?.writeText(text).catch(() => {});
+}
+
 export function clipboardHandlers(ctx: HandlerCtx): ActionHandlers {
   // Plain record, not Solid props — see `HandlerCtx`.
   const { deps, safeCall } = ctx;
@@ -48,6 +71,21 @@ export function clipboardHandlers(ctx: HandlerCtx): ActionHandlers {
       if (!block) return;
       setAppState("yankRegister", [block.text]);
       void copySelectionToClipboard(ctx, [id]);
+    },
+    // `y r` / the `refer` and `refer-embed` commands — the block's
+    // ref handle, for pasting a `((blk-x))` somewhere else. It is the
+    // OS clipboard only: a handle is addressed at the *reader*, so it
+    // has nowhere to be in the in-app yank register that `p` / `P`
+    // splices back as text.
+    CopyBlockRef: () => {
+      const id = appState.selectedBlockId;
+      if (!id) return;
+      return copyBlockHandleToClipboard(safeCall(copyBlockRef(id)));
+    },
+    CopyBlockEmbed: () => {
+      const id = appState.selectedBlockId;
+      if (!id) return;
+      return copyBlockHandleToClipboard(safeCall(copyBlockEmbed(id)));
     },
     // ── block clipboard (view-mode Cmd+X / Cmd+C / Cmd+V) ────────
     //

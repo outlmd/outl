@@ -107,6 +107,16 @@ export interface BlockCallbacks {
    *  Optional: contexts that keep links inert simply omit it (the
    *  renderer then draws a plain, non-interactive span). */
   onLinkClick?: (href: string) => void;
+  /** Bullet right-click → copy this block's `((blk-x))` handle, or its
+   *  `!((blk-x))` embed spelling, to the OS clipboard — the GUI's half
+   *  of the TUI's `/refer` and `/refer-embed`.
+   *
+   *  Optional, and the menu draws only the rows it was given: a host
+   *  that cannot address the backend (a backlink row, whose mutations
+   *  belong to another page) offers neither rather than offering a row
+   *  that does nothing. */
+  onCopyBlockRef?: (id: string) => void;
+  onCopyBlockEmbed?: (id: string) => void;
   /** Bullet marker click → zoom into this block (Roam/Workflowy focus).
    *  The fold chevron stays the collapse gesture; the `•`/`▢`/`▣` marker
    *  is the zoom gesture. Optional so contexts without zoom omit it. */

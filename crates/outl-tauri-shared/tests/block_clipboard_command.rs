@@ -23,7 +23,9 @@ use outl_core::hlc::HlcGenerator;
 use outl_core::id::{ActorId, NodeId};
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
-use outl_tauri_shared::commands::block::{copy_block_ref, cut_block, paste_block_after};
+use outl_tauri_shared::commands::block::{
+    copy_block_embed, copy_block_ref, cut_block, paste_block_after,
+};
 use outl_tauri_shared::host::AppHost;
 use parking_lot::Mutex;
 // `copy_block_ref` is `async` because it builds a `WorkspaceIndex` from
@@ -199,4 +201,66 @@ fn copy_block_ref_errors_on_a_block_with_no_sidecar_entry_yet() {
         err.contains("save and retry"),
         "an unresolvable ref must fail loudly instead of returning a dead handle, got {err:?}"
     );
+}
+
+/// The embed is the ref with `!` in front, and this asserts it against
+/// the *other command* rather than against a literal — two commands
+/// spelling the same handle differently is the drift the shared writer
+/// in `outl_md` exists to prevent.
+#[test]
+fn copy_block_embed_is_the_ref_the_other_command_returns_marked_for_expansion() {
+    let (_tmp, host, _page, block) = host_with_block("embed me");
+
+    let r = block_on(copy_block_ref(&host, block.to_string())).expect("copy_block_ref");
+    let e = block_on(copy_block_embed(&host, block.to_string())).expect("copy_block_embed");
+
+    assert_eq!(
+        e,
+        format!("!{r}"),
+        "the embed must be the ref with the expansion marker, got {e:?} against {r:?}"
+    );
+}
+
+/// The handle inside the embed has to resolve, not merely look right:
+/// the index assigns it, and a derived one would disagree with an
+/// expanded handle and silently point at a different block.
+#[test]
+fn the_handle_inside_a_copied_embed_resolves_back_to_the_same_block() {
+    let (_tmp, host, _page, block) = host_with_block("embed me too");
+
+    let token = block_on(copy_block_embed(&host, block.to_string())).expect("copy_block_embed");
+    assert!(
+        token.starts_with("!((") && token.ends_with("))"),
+        "must be the !((blk-XXXXXX)) wire form, got {token:?}"
+    );
+    let handle = &token[3..token.len() - 2];
+
+    let index = outl_md::index::WorkspaceIndex::build(&host.root);
+    let resolved = index
+        .block_index()
+        .resolve(handle)
+        .expect("the handle copy_block_embed produced must resolve through the same index");
+    assert_eq!(resolved.id, block);
+}
+
+/// Same refusal as the ref: an unresolvable embed is worse than none,
+/// because it renders as nothing on every device that reads it.
+#[test]
+fn copy_block_embed_errors_on_a_block_with_no_sidecar_entry_yet() {
+    let tmp = TempDir::new().unwrap();
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = Workspace::open_in_memory(actor).unwrap();
+    let page = open_or_create_page(&mut ws, &hlc, "notes", "Notes", PageKind::Page).unwrap();
+    let block = append_block(&mut ws, &hlc, Some(page), Some("brand new")).unwrap();
+
+    let host = TestHost {
+        workspace: Arc::new(Mutex::new(Some(ws))),
+        hlc,
+        root: tmp.path().to_path_buf(),
+        registry: Arc::new(RuntimeRegistry::new()),
+    };
+
+    let err = block_on(copy_block_embed(&host, block.to_string())).unwrap_err();
+    assert!(err.contains("save and retry"), "got {err:?}");
 }

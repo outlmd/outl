@@ -152,7 +152,7 @@ impl App {
     pub(crate) fn yank_current_ref(&mut self) {
         match self.current_block_ref_handle() {
             Some(h) => {
-                let token = format!("(({h}))");
+                let token = outl_md::inline::block_ref_token(&h);
                 self.last_yanked_ref = Some(token.clone());
                 self.status = clipboard_message("ref", &token, copy_to_os_clipboard(&token));
             }
@@ -170,7 +170,7 @@ impl App {
     pub(crate) fn yank_current_embed(&mut self) {
         match self.current_block_ref_handle() {
             Some(h) => {
-                let token = format!("!(({h}))");
+                let token = outl_md::inline::block_embed_token(&h);
                 self.last_yanked_ref = Some(token.clone());
                 self.status = clipboard_message("embed", &token, copy_to_os_clipboard(&token));
             }

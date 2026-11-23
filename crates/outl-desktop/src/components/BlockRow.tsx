@@ -7,6 +7,7 @@ import { createSettle } from "@outl/shared/polish";
 
 import { appState, savedMarks, setAppState } from "../lib/store";
 import { BlockBody } from "./BlockBody";
+import { BlockContextMenu, type BlockMenuAction } from "./BlockContextMenu";
 import { BlockEditor } from "./BlockEditor";
 import type { BlockCallbacks } from "./block-callbacks";
 
@@ -107,6 +108,41 @@ export function BlockRow(props: {
    *  sees where the dropped file's link will be inserted. */
   const isDropTarget = () => appState.dropTargetBlockId === props.block.id;
   const isInteractive = () => isEditing() || props.block.todo !== null;
+
+  /** The bullet's right-click menu. Closes on Escape, on a click
+   *  elsewhere, and once a row fires. */
+  const [menuOpen, setMenuOpen] = createSignal(false);
+
+  /**
+   * The menu's rows, in the order they are drawn.
+   *
+   * A new option is an entry here and nothing else —
+   * `<BlockContextMenu />` renders whatever list it is handed. Each
+   * one is conditional on its callback, so a host that cannot answer
+   * it has one row fewer rather than a row that does nothing; with
+   * none of them answered no menu opens at all and the webview's own
+   * menu is left alone.
+   */
+  function menuActions(): BlockMenuAction[] {
+    const rows: BlockMenuAction[] = [];
+    const copyRef = props.cb.onCopyBlockRef;
+    if (copyRef) {
+      rows.push({
+        id: "copyBlockRef",
+        label: "Copy block ref",
+        onSelect: () => copyRef(props.block.id),
+      });
+    }
+    const copyEmbed = props.cb.onCopyBlockEmbed;
+    if (copyEmbed) {
+      rows.push({
+        id: "copyBlockEmbed",
+        label: "Copy block embed",
+        onSelect: () => copyEmbed(props.block.id),
+      });
+    }
+    return rows;
+  }
 
   /** Outer row click — select without entering Insert. Lets the
    *  user mouse onto a block and then keyboard-nav from there
@@ -232,6 +268,17 @@ export function BlockRow(props: {
                 if (zoomableBullet) props.cb.onFocusBlock?.(props.block.id);
                 else void props.cb.onToggleTodo(props.block.id);
               }}
+              onContextMenu={(e) => {
+                // No rows, no menu: swallowing the native one to show
+                // nothing is worse than the native one.
+                if (menuActions().length === 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                // The menu is addressed to this block, so the cursor
+                // follows it — the same rule the left click applies.
+                setAppState("selectedBlockId", props.block.id);
+                setMenuOpen(true);
+              }}
               {...(isInteractive() ? { "data-todo": "true" } : {})}
               class={`mt-[5px] mr-2 w-3 shrink-0 cursor-pointer select-none text-center text-[13px] leading-none transition-opacity hover:opacity-70 ${bulletClass()}`}
               title={
@@ -299,6 +346,13 @@ export function BlockRow(props: {
           return (
             <>
               {bullet}
+              {/* Absolute, so it anchors to the `relative` row above
+                * rather than to the flex line it sits on. */}
+              <BlockContextMenu
+                open={menuOpen()}
+                actions={menuActions()}
+                onClose={() => setMenuOpen(false)}
+              />
               <QuoteWrap
                 quoted={isBlockQuoted(props.block.text)}
                 baseClass="flex min-w-0 flex-1"

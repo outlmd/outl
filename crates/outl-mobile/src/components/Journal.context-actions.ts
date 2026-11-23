@@ -104,6 +104,10 @@ export function buildContextActions(
     /** RFC 0254 phase 4b (issue #18) — copy `id`'s `((blk-XXXXXX))`
      *  ref handle to the OS clipboard. */
     copyBlockRef: (id: string) => void;
+    /** The same handle spelled `!((blk-XXXXXX))`, so a reader expands
+     *  the block inline instead of linking to it — the GUI's half of
+     *  the TUI's `/refer-embed`. */
+    copyBlockEmbed: (id: string) => void;
     /** RFC 0254 phase 4b — create a new sibling immediately above
      *  `id` and start editing it. */
     newBlockAbove: (id: string) => void;
@@ -253,6 +257,16 @@ export function buildContextActions(
       iconPath:
         "M9 12a3 3 0 0 0 4.24 0l3-3a3 3 0 0 0-4.24-4.24l-1 1 M15 12a3 3 0 0 0-4.24 0l-3 3a3 3 0 0 0 4.24 4.24l1-1",
       onSelect: () => handlers.copyBlockRef(blockId),
+    },
+    {
+      id: "copyBlockEmbed",
+      label: "Copy block embed",
+      // Arrows pushing out to the corners — "this one expands where you
+      // paste it". The ref row above points at the block; this one
+      // unfolds it, so the two glyphs have to differ as much as the
+      // results do.
+      iconPath: "M15 3h6v6 M9 21H3v-6 M21 3l-7 7 M3 21l7-7",
+      onSelect: () => handlers.copyBlockEmbed(blockId),
     },
     {
       id: "newBlockAbove",

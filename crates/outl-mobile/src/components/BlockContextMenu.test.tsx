@@ -65,3 +65,60 @@ describe("the long-press menu fits the screen", () => {
     expect(scroller.textContent).not.toContain("Cancel");
   });
 });
+
+/**
+ * Two facts the rows are built against, in `Journal.context-actions.ts`.
+ *
+ * The sheet draws them in the order it is handed, which is what makes
+ * "Copy block embed sits under Copy block ref" a property of the list
+ * rather than of this component. And it closes *before* it runs the
+ * action — so a row that read a signal inside `onSelect` would read it
+ * after `onClose` had already cleared it, and act on `null`. Every row
+ * closes over the block id `buildContextActions` was handed instead,
+ * which is only safe while this ordering holds.
+ */
+describe("what a row may assume", () => {
+  function mountActions(actions: BlockContextAction[], onClose = () => {}) {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(
+      () => <BlockContextMenu open actions={actions} onClose={onClose} />,
+      host,
+    );
+    return host;
+  }
+
+  const labels = (host: HTMLElement) =>
+    [...host.querySelectorAll<HTMLElement>(".overflow-y-auto button")].map((b) =>
+      b.textContent?.trim(),
+    );
+
+  it("draws the rows in the order it was handed", () => {
+    const host = mountActions([
+      action("Copy block ref"),
+      action("Copy block embed"),
+      action("New block above"),
+    ]);
+    expect(labels(host)).toEqual([
+      "Copy block ref",
+      "Copy block embed",
+      "New block above",
+    ]);
+  });
+
+  it("closes first and defers onSelect, so a row cannot read live state", async () => {
+    const order: string[] = [];
+    const row: BlockContextAction = {
+      id: "copyBlockEmbed",
+      label: "Copy block embed",
+      iconPath: "M0 0",
+      onSelect: () => order.push("select"),
+    };
+    const host = mountActions([row], () => order.push("close"));
+
+    host.querySelector<HTMLButtonElement>(".overflow-y-auto button")!.click();
+    await Promise.resolve();
+
+    expect(order).toEqual(["close", "select"]);
+  });
+});

@@ -3,9 +3,15 @@
 //!
 //! These are normal-mode commands (palette `:refer` or slash `/refer`
 //! from outside Insert). They do **not** insert into the buffer — they
-//! stash `((handle))` / `!((handle))` in `App::last_yanked_ref` and
-//! surface the token on the status line so the user can copy it via
-//! the terminal's own selection or via a future clipboard binding.
+//! stash `((handle))` / `!((handle))` in `App::last_yanked_ref` **and
+//! write it to the OS clipboard**, reporting on the status line which
+//! of the two landed.
+//!
+//! That last part said "via a future clipboard binding" long after the
+//! binding shipped: both commands have called `copy_to_os_clipboard`
+//! since `yank_current_ref` did. A comment describing an older version
+//! of the code is worse than none, because it is the thing a reader
+//! trusts instead of reading the call.
 //!
 //! Lookup goes through `App::current_block_ref_handle`, which walks
 //! the workspace index for the selected `(slug, dfs_path)`. Identical
@@ -37,7 +43,7 @@ impl SlashCommand for ReferCommand {
 pub struct ReferEmbedCommand;
 impl SlashCommand for ReferEmbedCommand {
     fn name(&self) -> &'static str {
-        "refer-embed"
+        command_name(Action::CopyBlockEmbed)
     }
     fn description(&self) -> &'static str {
         "Capture !((blk-XXXXXX)) embed of the current block (stash + status, no insert)"

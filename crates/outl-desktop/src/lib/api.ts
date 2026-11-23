@@ -285,6 +285,7 @@ export type Action =
   | { kind: "ToggleTodo" }
   | { kind: "MarkDone" }
   | { kind: "CopyBlockRef" }
+  | { kind: "CopyBlockEmbed" }
   | { kind: "CutBlock" }
   | { kind: "CopyBlock" }
   | { kind: "PasteBlock" }

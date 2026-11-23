@@ -101,7 +101,8 @@ It is the string the client shows when the user reaches for the action, so it is
 | `ToggleCollapsed` | ✅ | ✅ | ✅ |
 | `ToggleTodo` | ✅ | ✅ | ✅ |
 | `MarkDone` | ✅ | ✅ | ❌ A one-tap finish isn't wired on mobile yet — tap the checkbox through to DONE instead. |
-| `CopyBlockRef` | ✅ | ❌ Copying a block ref isn't on the desktop yet — open the block's properties, or copy the handle from the TUI with `y r`. | ✅ |
+| `CopyBlockRef` | ✅ | ✅ | ✅ |
+| `CopyBlockEmbed` | ✅ | ✅ | ✅ |
 | `DeletePage` | ✅ | ✅ | ✅ |
 | `InsertRemind` | ✅ | ✅ | ✅ |
 | `InsertRemindNag` | ✅ | ✅ | ❌ The nag preset isn't on mobile — add a reminder, then edit the rule. |
