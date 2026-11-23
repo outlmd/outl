@@ -27,10 +27,10 @@ import {
 import { CalendarIcon, PageGlyph, SearchIcon } from "@outl/shared/icons";
 import { createPageKey } from "@outl/shared/navigation";
 
+import { askConfirm } from "../lib/confirm";
 import { rovingKeydown } from "../lib/keyboard-reach";
 import { isMac } from "../lib/palette-results";
 import { appState, setAppState } from "../lib/store";
-import { PageActionDialog, type PageAction } from "./PageActionDialog";
 
 /**
  * Left pane — mirrors the TUI's `view::sidebar`.
@@ -57,9 +57,12 @@ export function Sidebar(props: {
   onPickPage: (view: PageView) => void;
 }) {
   // Slug and title ride the key: a rename keeps the page id, and the
-  // list must still refetch to show the new name.
+  // list must still refetch to show the new name. `pageListRevision`
+  // covers what the open page cannot say — a merge **into** the page
+  // being viewed returns that same page, so nothing in the key moves
+  // while the merged-away page is still listed here.
   const pageKey = () =>
-    `${appState.page?.id ?? "(none)"}:${appState.page?.slug}:${appState.page?.title}`;
+    `${appState.page?.id ?? "(none)"}:${appState.page?.slug}:${appState.page?.title}:${appState.pageListRevision}`;
   const [pages, { refetch }] = createResource(pageKey, async () => {
     try {
       return await listPages();
@@ -209,10 +212,14 @@ export function Sidebar(props: {
    */
   async function handleDelete(p: PageMeta) {
     const label = p.title || p.slug;
-    const ok = window.confirm(
-      `Delete page "${label}"?\n\nThis removes the page and all its blocks. ` +
+    const ok = await askConfirm({
+      message:
+        `Delete page "${label}"?\n\nThis removes the page and all its blocks. ` +
         `The deletion syncs to paired devices.`,
-    );
+      confirmLabel: "Delete",
+      label: "Delete page",
+      destructive: true,
+    });
     if (!ok) return;
     try {
       const view = await deletePage(p.slug);
@@ -226,16 +233,15 @@ export function Sidebar(props: {
   }
 
   // ── rename / merge ────────────────────────────────────────────
+  //
+  // The dialog lives in `<AppShell />` (`appState.pageAction`), not
+  // here: this column is closed on every fresh launch, and a dialog
+  // mounted inside it was a door that did not exist. The rows below
+  // only post the request. The list refetches off `pageListRevision`,
+  // which `lib/page-actions.ts` bumps where both flows land.
 
-  const [pageAction, setPageAction] = createSignal<PageAction | null>(null);
-
-  function handlePageActionDone(view: PageView) {
-    setPageAction(null);
-    props.onPickPage(view);
-    // A merge can leave the active page unchanged (merging into the
-    // page being viewed), so the key above would not refetch.
-    void refetch();
-  }
+  const openPageAction = (kind: "rename" | "merge", page: PageMeta) =>
+    setAppState("pageAction", { kind, page });
 
   // ── presentation primitives ───────────────────────────────────
 
@@ -507,12 +513,12 @@ export function Sidebar(props: {
                   onRename={
                     p.kind === "journal"
                       ? undefined
-                      : () => setPageAction({ kind: "rename", page: p })
+                      : () => openPageAction("rename", p)
                   }
                   onMerge={
                     p.kind === "journal"
                       ? undefined
-                      : () => setPageAction({ kind: "merge", page: p })
+                      : () => openPageAction("merge", p)
                   }
                 />
               )}
@@ -540,12 +546,12 @@ export function Sidebar(props: {
                   onRename={
                     p.kind === "journal"
                       ? undefined
-                      : () => setPageAction({ kind: "rename", page: p })
+                      : () => openPageAction("rename", p)
                   }
                   onMerge={
                     p.kind === "journal"
                       ? undefined
-                      : () => setPageAction({ kind: "merge", page: p })
+                      : () => openPageAction("merge", p)
                   }
                 />
               )}
@@ -560,12 +566,6 @@ export function Sidebar(props: {
           </div>
         </Show>
       </div>
-
-      <PageActionDialog
-        action={pageAction()}
-        onClose={() => setPageAction(null)}
-        onDone={handlePageActionDone}
-      />
     </aside>
   );
 }

@@ -4,6 +4,9 @@
  * and leave itself open when a confirm is declined.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -63,6 +66,17 @@ const press = (key: string) =>
   field().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 
 describe("PageActionDialog", () => {
+  /** The field is the whole point of the dialog, so it has to be where
+   *  the caret already is — including through the portal the shared
+   *  `<ModalCard />` renders into. */
+  it("puts the caret in the field, selected", async () => {
+    mount("rename");
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(field());
+      expect(field().selectionEnd).toBe("Alpha".length);
+    });
+  });
+
   it("rename prefills the current title and submits the typed name", async () => {
     vi.mocked(renamePageFlow).mockResolvedValue(view("beta"));
     const { onDone } = mount("rename");
@@ -114,5 +128,33 @@ describe("PageActionDialog", () => {
     press("Escape");
     expect(onClose).toHaveBeenCalled();
     expect(mergePageFlow).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Where the door is mounted, read from the source.
+ *
+ * `appState.sidebarOpen` starts `false` on every fresh launch and is
+ * never persisted, so a dialog rendered inside `<Sidebar />` did not
+ * exist for most windows: there was no rename and no merge anywhere
+ * until the user discovered `Cmd/Ctrl+Shift+E`. Read rather than
+ * rendered, because both components need a Tauri bridge to mount and
+ * the defect is in *which* component holds it.
+ */
+describe("the page-action dialog is mounted at the shell", () => {
+  function source(file: string): string {
+    return readFileSync(join(import.meta.dirname, file), "utf8");
+  }
+
+  it("AppShell renders it and drives it from the store", () => {
+    const src = source("AppShell.tsx");
+    expect(src).toContain("<PageActionDialog");
+    expect(src).toContain("appState.pageAction");
+  });
+
+  it("Sidebar only posts the request", () => {
+    const src = source("Sidebar.tsx");
+    expect(src).not.toContain("<PageActionDialog");
+    expect(src).toContain('setAppState("pageAction"');
   });
 });

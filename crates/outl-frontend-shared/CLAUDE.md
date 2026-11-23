@@ -52,6 +52,9 @@ crates/outl-frontend-shared/
     │   └── boot.test.ts
     ├── capture/
     │   └── index.ts        # installForegroundRefresh / drainOnce — the inbox drain both GUIs run
+    ├── confirm/
+    │   ├── index.ts        # createConfirmQueue — "are you sure?" as a promise. The bridge from an awaited boolean to a signal a dialog renders; the dialog itself stays per client (a modal card on the desktop, an iOS alert on the phone). The request payload is a type parameter so each client's chrome fields stay its own
+    │   └── confirm.test.ts
     ├── warnings/
     │   ├── ParseWarningsBanner.tsx
     │   ├── PageAheadOfLogBanner.tsx

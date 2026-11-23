@@ -1,136 +1,202 @@
 /**
- * What rename and merge owe the user: a taken name asks before it
- * merges, a merge always asks, declining writes nothing, and what a
- * merge dropped (property conflicts) is on screen afterwards.
+ * The desktop half of rename / merge: which question gets asked, with
+ * whose words, and what runs after the answer.
+ *
+ * The order of events and every sentence belong to
+ * `@outl/shared/pages/rename-merge`, so those are imported real and
+ * asserted against — a copy here is the drift that module exists to
+ * prevent. Only the bridge is faked.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
-import { mergePages, renamePage } from "@outl/shared/api/page-merge";
-import type { PageMeta, PageView } from "@outl/shared/api/types";
+import { invoke } from "@tauri-apps/api/core";
+import type { PageMeta } from "@outl/shared/api/types";
+import {
+  mergeConfirmMessage,
+  nameTakenMessage,
+} from "@outl/shared/pages/rename-merge";
 
 import { mergePageFlow, renamePageFlow } from "./page-actions";
+import { answerConfirm, pendingConfirm, registerConfirmSurface } from "./confirm";
 import { appState, setAppState } from "./store";
 
-vi.mock("@outl/shared/api/page-merge", () => ({
-  renamePage: vi.fn(),
-  mergePages: vi.fn(),
-}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-const meta = (slug: string, title = slug): PageMeta => ({
-  id: `page-${slug}`,
-  slug,
-  title,
-  kind: "page",
-});
+// `<ConfirmDialog />` is what answers in the app; here the tests answer
+// in its place, so the surface has to be declared or `askConfirm`
+// refuses on the spot (by design — see `lib/confirm.ts`).
+const unregister = registerConfirmSurface();
+afterAll(unregister);
 
-const view = (slug: string): PageView => ({
+const meta = (slug: string, title = slug): PageMeta =>
+  ({ id: `page-${slug}`, slug, title, kind: "page" }) as PageMeta;
+
+const view = (slug: string) => ({
   page: meta(slug),
   outline: [],
   backlinks: [],
   backlinks_order: "newest",
 });
 
-const mergeReport = (over: Record<string, unknown> = {}) => ({
+const renameReport = {
+  old_slug: "a",
+  old_title: "Alpha",
+  rewritten_blocks: 2,
+  skipped_namespace_refs: 0,
+};
+
+const mergeReport = {
   source_slug: "a",
-  source_title: "A",
+  source_title: "Alpha",
   target_slug: "b",
-  target_title: "B",
+  target_title: "Bravo",
   moved_blocks: 3,
   rewritten_blocks: 1,
   skipped_namespace_refs: 0,
   property_conflicts: [],
   aliases_added: [],
   already_merged: false,
-  ...over,
-});
-
-let confirm: ReturnType<typeof vi.fn>;
-
-beforeEach(() => {
-  confirm = vi.fn();
-  vi.stubGlobal("confirm", confirm);
-  setAppState({ lastError: null, notice: null });
-});
+};
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.clearAllMocks();
+  setAppState("notice", null);
+  setAppState("lastError", null);
+  answerConfirm(false);
 });
 
+/** Resolve whichever question is open, once it is. */
+async function answer(ok: boolean) {
+  await vi.waitFor(() => expect(pendingConfirm()).not.toBeNull());
+  const message = pendingConfirm()!.message;
+  answerConfirm(ok);
+  return message;
+}
+
 describe("renamePageFlow", () => {
-  it("renames without asking when the name is free", async () => {
-    vi.mocked(renamePage).mockResolvedValue({
+  it("renames without asking anything when the name is free", async () => {
+    vi.mocked(invoke).mockResolvedValue({
       status: "renamed",
-      view: view("new-name"),
-      report: { old_slug: "a", old_title: "A", rewritten_blocks: 2, skipped_namespace_refs: 0 },
+      view: view("bravo"),
+      report: renameReport,
     });
-    const out = await renamePageFlow(meta("a", "A"), "  New name ");
-    expect(out?.page.slug).toBe("new-name");
-    expect(confirm).not.toHaveBeenCalled();
-    expect(renamePage).toHaveBeenCalledWith("a", "New name");
-    expect(appState.notice?.join(" ")).toMatch(/Renamed/);
+    const result = await renamePageFlow(meta("a", "Alpha"), "  Bravo  ");
+    expect(invoke).toHaveBeenCalledWith("rename_page", { page: "a", newName: "Bravo" });
+    expect(result?.page.slug).toBe("bravo");
+    // Blocks, not links: one block can carry several mentions, and the
+    // noun is `outl_actions::page_summary`'s on every client.
+    expect(appState.notice?.join(" ")).toContain("Links updated in 2 blocks");
+    // Nothing destructive happened, so nothing was asked.
+    expect(pendingConfirm()).toBeNull();
   });
 
-  it("asks before merging when the name is taken, and merges on accept", async () => {
-    vi.mocked(renamePage).mockResolvedValue({ status: "exists", existing: meta("b", "B") });
-    vi.mocked(mergePages).mockResolvedValue({ view: view("b"), report: mergeReport() });
-    confirm.mockReturnValue(true);
-    const out = await renamePageFlow(meta("a", "A"), "B");
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0]).toContain("B");
-    expect(mergePages).toHaveBeenCalledWith("a", "b");
-    expect(out?.page.slug).toBe("b");
+  it("offers a merge in the shared words when the name is taken, and merges on accept", async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === "rename_page") return { status: "exists", existing: meta("b", "Bravo") };
+      return { view: view("b"), report: mergeReport };
+    });
+
+    const run = renamePageFlow(meta("a", "Alpha"), "Bravo");
+    expect(await answer(true)).toBe(nameTakenMessage("Bravo"));
+    const result = await run;
+
+    expect(invoke).toHaveBeenCalledWith("merge_pages", { source: "a", target: "b" });
+    expect(result?.page.slug).toBe("b");
+    expect(appState.notice?.join(" ")).toContain("3 blocks moved");
   });
 
-  it("writes nothing when the user declines the merge", async () => {
-    vi.mocked(renamePage).mockResolvedValue({ status: "exists", existing: meta("b", "B") });
-    confirm.mockReturnValue(false);
-    const out = await renamePageFlow(meta("a", "A"), "B");
-    expect(out).toBeNull();
-    expect(mergePages).not.toHaveBeenCalled();
+  it("writes nothing when the merge offer is declined", async () => {
+    vi.mocked(invoke).mockResolvedValue({ status: "exists", existing: meta("b", "Bravo") });
+
+    const run = renamePageFlow(meta("a", "Alpha"), "Bravo");
+    await answer(false);
+
+    expect(await run).toBeNull();
+    expect(invoke).toHaveBeenCalledTimes(1);
     expect(appState.notice).toBeNull();
   });
 
-  it("surfaces a backend refusal as an error and navigates nowhere", async () => {
-    vi.mocked(renamePage).mockRejectedValue(new Error("cannot rename a journal"));
-    const out = await renamePageFlow(meta("a", "A"), "X");
-    expect(out).toBeNull();
+  it("puts a refusal on the error surface and nothing on the toast", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("cannot rename a journal"));
+    expect(await renamePageFlow(meta("2026-11-23"), "Monday")).toBeNull();
     expect(appState.lastError).toBe("cannot rename a journal");
+    expect(appState.notice).toBeNull();
   });
 });
 
 describe("mergePageFlow", () => {
-  it("always confirms, and a decline calls no write command", async () => {
-    confirm.mockReturnValue(false);
-    const out = await mergePageFlow(meta("a", "A"), meta("b", "B"));
-    expect(out).toBeNull();
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(mergePages).not.toHaveBeenCalled();
+  it("always asks first, in the shared words", async () => {
+    vi.mocked(invoke).mockResolvedValue({ view: view("b"), report: mergeReport });
+
+    const run = mergePageFlow(meta("a", "Alpha"), meta("b", "Bravo"));
+    expect(await answer(true)).toBe(mergeConfirmMessage("Alpha", "Bravo"));
+
+    expect((await run)?.page.slug).toBe("b");
+    expect(invoke).toHaveBeenCalledWith("merge_pages", { source: "a", target: "b" });
   });
 
-  it("merges after the confirm and shows the property conflicts", async () => {
-    confirm.mockReturnValue(true);
-    vi.mocked(mergePages).mockResolvedValue({
+  it("invokes nothing when the question is refused", async () => {
+    const run = mergePageFlow(meta("a", "Alpha"), meta("b", "Bravo"));
+    await answer(false);
+    expect(await run).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  /** What a merge dropped has to be on screen afterwards: the target's
+   *  value won, and the source's is gone from every device. */
+  it("shows the property conflicts a merge resolved", async () => {
+    vi.mocked(invoke).mockResolvedValue({
       view: view("b"),
-      report: mergeReport({
+      report: {
+        ...mergeReport,
         property_conflicts: [{ key: "status", kept: "open", dropped: "done" }],
-      }),
+      },
     });
-    const out = await mergePageFlow(meta("a", "A"), meta("b", "B"));
-    expect(mergePages).toHaveBeenCalledWith("a", "b");
-    expect(out?.page.slug).toBe("b");
+    const run = mergePageFlow(meta("a", "Alpha"), meta("b", "Bravo"));
+    await answer(true);
+    await run;
+
     const shown = appState.notice?.join("\n") ?? "";
     expect(shown).toContain("status");
     expect(shown).toContain("open");
     expect(shown).toContain("done");
   });
 
-  it("surfaces a backend refusal as an error", async () => {
-    confirm.mockReturnValue(true);
-    vi.mocked(mergePages).mockRejectedValue(new Error("cannot merge a page into itself"));
-    const out = await mergePageFlow(meta("a", "A"), meta("b", "B"));
-    expect(out).toBeNull();
+  it("puts a refusal on the error surface", async () => {
+    vi.mocked(invoke).mockRejectedValue(new Error("cannot merge a page into itself"));
+    const run = mergePageFlow(meta("a", "Alpha"), meta("b", "Bravo"));
+    await answer(true);
+
+    expect(await run).toBeNull();
     expect(appState.lastError).toBe("cannot merge a page into itself");
+    expect(appState.notice).toBeNull();
+  });
+});
+
+/**
+ * `window.confirm` is a native dialog: it takes no palette token, no
+ * destructive signal and no focus rule, which is why the most
+ * destructive action in the product cannot be asked through it.
+ */
+describe("the questions never reach the OS", () => {
+  it("does not call window.confirm", async () => {
+    const native = vi.fn(() => true);
+    const original = window.confirm;
+    window.confirm = native as unknown as typeof window.confirm;
+    try {
+      vi.mocked(invoke).mockResolvedValue({ status: "exists", existing: meta("b", "Bravo") });
+      const run = renamePageFlow(meta("a", "Alpha"), "Bravo");
+      await answer(false);
+      await run;
+
+      const merge = mergePageFlow(meta("a", "Alpha"), meta("b", "Bravo"));
+      await answer(false);
+      await merge;
+
+      expect(native).not.toHaveBeenCalled();
+    } finally {
+      window.confirm = original;
+    }
   });
 });

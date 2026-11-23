@@ -13,6 +13,7 @@ import { deletePage, setBlockCollapsed } from "@outl/shared/api/commands";
 import { flattenAll, flattenParents } from "@outl/shared/outline";
 
 import { redoPage, undoPage } from "./api";
+import { askConfirm } from "./confirm";
 import { type HandlerCtx } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
 import { appState } from "./store";
@@ -48,17 +49,21 @@ export function pageHandlers(ctx: HandlerCtx): ActionHandlers {
     // Delete the currently-viewed page. Triggered from the sidebar's
     // hover × button (the handler is reused here for keyboard parity
     // if a future binding maps a chord to `DeletePage`). We confirm
-    // via the OS dialog before calling the backend; the backend does
-    // NOT re-confirm. Returns today's journal so the view navigates
+    // through `<ConfirmDialog />` before calling the backend; the
+    // backend does NOT re-confirm. Returns today's journal so the view navigates
     // away from the deleted page in the same round-trip.
     DeletePage: async () => {
       const slug = appState.page?.slug;
       if (!slug) return;
       const title = appState.page?.title ?? slug;
-      const ok = window.confirm(
-        `Delete page "${title}"?\n\nThis removes the page and all its blocks. ` +
+      const ok = await askConfirm({
+        message:
+          `Delete page "${title}"?\n\nThis removes the page and all its blocks. ` +
           `The deletion syncs to paired devices.`,
-      );
+        confirmLabel: "Delete",
+        label: "Delete page",
+        destructive: true,
+      });
       if (!ok) return;
       await runOn(deletePage(slug));
     },

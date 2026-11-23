@@ -270,7 +270,8 @@ A deleted subtree is one row, and the row says how many blocks come back with it
 A row that cannot be restored says why in place of offering it: a deleted page (its slug is usually taken by now), or a block whose parent went to the trash after it did.
 `Enter` still works on a refused **block** row — "where did my content go" is answerable even when "bring it back" is not.
 
-On a deleted **page** row `Enter` refuses and says so, because opening a page whose `.md` went with the delete is how you *revive* it: the opener reads the missing file as a new page and reconciles a seed, which lifts the page out of the trash and turns one row into one per child.
+On a deleted **page** row `Enter` refuses and says so, because opening a page whose `.md` went with the delete is how you *revive* it.
+The opener reads the missing file as a new page and reconciles a seed, which lifts the page out of the trash and turns one row into one per child.
 Reviving a page deliberately is a real thing and that is the route the refusal names — close the overlay and open the page by name.
 
 The same sentence can also come back from `r` on a row that looked restorable, because another device can trash the landing parent after the list was read.
@@ -345,6 +346,7 @@ Use the commands when you know the key, the overlay when you don't.
 
 | Command | Aliases | Action |
 |---------|---------|--------|
+| `rename <new page name>` | none | Rename the open page and respell every mention of it |
 | `merge <page name>` | none | Merge the open page into another existing page, after a `y/n` |
 
 `/merge Beta` on the page `Alpha` asks `merge 'Alpha' into 'Beta'? can't be undone here. y/n`.
@@ -355,7 +357,21 @@ Where both pages set the same property to different values the target's value is
 The target has to exist (the command never creates a page), a journal cannot be the source, and a page cannot be merged into itself.
 `u` does not take a merge back, and the undo history of every page the merge touched is dropped so an older snapshot cannot undo half of it.
 The merge itself is `outl_actions::merge_pages`, shared with `outl page merge`; see [RFC 0557](rfcs/0557-page-merge-and-rename.md).
-The TUI has no page rename, so there is no rename-onto-an-existing-name prompt yet.
+
+`/rename Beta` on the page `Alpha` renames it and respells every `[[Alpha]]` and `#alpha` in the workspace in the same batch.
+The file moves with it: the slug is `slugify`'d from the name you type and the title is the name itself, so `/rename Café Notes` lands on `pages/cafe-notes.md` titled `Café Notes`.
+A name that only changes capitalisation or punctuation keeps the slug, so the file stays put and only the title and the mentions written by title change.
+The toast says what the rewrite did, for example `renamed 'Alpha' to 'Beta': links updated in 3 blocks`, and names the `[[Beta/child]]` mentions it left alone, because those belong to a sub-page that was not renamed.
+
+**Only a name collision asks first.**
+A rename onto a free name runs on the keystroke, since renaming it back is all it takes to undo.
+When another page already owns the name nothing is written and the status line asks `'Beta' already has that name — merge 'Alpha' into it? can't be undone here. y/n`, the same prompt `/merge` and `g d` use.
+`y` runs the merge with the open page as the source, and any other key cancels and leaves both pages as they were.
+
+A journal cannot be renamed, because its slug is its date.
+`u` does not take a rename back, and the undo history of every page it touched is dropped for the reason the merge gives.
+Editing `title` through the `g p` property editor is this same rename, not a property write, so the mentions follow there too.
+The rename itself is `outl_actions::rename_page`, shared with `outl page rename`.
 
 #### Block references
 
@@ -560,7 +576,8 @@ When you open a `.md` that the outl parser had to recover from (a leading `# hea
   It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
   On a cold start there is a short window while that index builds; the header shows a spinner during it.
 - **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
-- **A brand-new page tells you where to start**: a page whose only block is empty shows `press i to write · ? for keys` under the bullet, and the line goes away as soon as there is anything on the page or you start typing ([#448](https://github.com/outlmd/outl/issues/448)).
+- **A brand-new page tells you where to start**: a page whose only block is empty shows `press i to write · ? for keys` under the bullet.
+  The line goes away as soon as there is anything on the page or you start typing ([#448](https://github.com/outlmd/outl/issues/448)).
 - **The backlinks section says when it is still indexing**: on a cold start the panel reads `Backlinks · indexing…` instead of rendering nothing, so a page that is still loading is distinguishable from one with no backlinks.
 - **Slugified filenames**: `[[Avelino]]` lives in `pages/avelino.md` with `title:: Avelino` set automatically on first open.
 

@@ -5,6 +5,7 @@ import {
   cycleRegion,
   followSelection,
   installRegionKeys,
+  pageHeaderKeydown,
   rovingKeydown,
 } from "./keyboard-reach";
 
@@ -125,6 +126,79 @@ describe("rovingKeydown", () => {
     l.focus();
     l.dispatchEvent(key("ArrowDown"));
     expect(document.activeElement).toBe(rows[0]);
+  });
+});
+
+/**
+ * The page header's own stops. The rename door on the title is chrome,
+ * not a catalog `Action`, so arrows are its reach — and the header also
+ * holds the page's property chips, which must keep their own arrows.
+ */
+describe("pageHeaderKeydown", () => {
+  const header = `<header id="h">
+    <div><span>slug</span>
+      <button data-outl-header-stop id="attach">attach</button>
+      <button data-outl-header-stop id="history">history</button></div>
+    <h1><button data-outl-header-stop id="title">Inbox</button></h1>
+    <div><button id="chip">type: person</button><input id="prop" /></div>
+  </header>`;
+
+  function wire() {
+    html(header);
+    const h = document.getElementById("h")!;
+    h.addEventListener("keydown", (e) => pageHeaderKeydown(e));
+    return h;
+  }
+
+  it("walks the header's stops with arrows and wraps", () => {
+    wire();
+    const attach = document.getElementById("attach")!;
+    attach.focus();
+    attach.dispatchEvent(key("ArrowRight"));
+    expect(document.activeElement?.id).toBe("history");
+    document.activeElement!.dispatchEvent(key("ArrowRight"));
+    expect(document.activeElement?.id).toBe("title");
+    document.activeElement!.dispatchEvent(key("ArrowRight"));
+    expect(document.activeElement?.id).toBe("attach");
+    document.activeElement!.dispatchEvent(key("ArrowLeft"));
+    expect(document.activeElement?.id).toBe("title");
+  });
+
+  /** `(-1 + 1) % len` is `0`, so an unguarded arrow from a property
+   *  chip would jump to the title instead of staying with the chip. */
+  it("leaves the header's other controls their own arrows", () => {
+    wire();
+    const chip = document.getElementById("chip")!;
+    chip.focus();
+    chip.dispatchEvent(key("ArrowRight"));
+    expect(document.activeElement?.id).toBe("chip");
+
+    const prop = document.getElementById("prop")!;
+    prop.focus();
+    prop.dispatchEvent(key("ArrowRight"));
+    expect(document.activeElement?.id).toBe("prop");
+  });
+
+  /** An arrow the header used is not also a request to move the
+   *  outline's cursor, and the dispatcher listens on `window`. */
+  it("keeps a consumed arrow away from the Normal-mode dispatcher", () => {
+    const seen: string[] = [];
+    const onWindow = (e: Event) => seen.push((e as KeyboardEvent).key);
+    window.addEventListener("keydown", onWindow);
+    try {
+      wire();
+      const title = document.getElementById("title")!;
+      title.focus();
+      title.dispatchEvent(key("ArrowLeft"));
+      expect(seen).toEqual([]);
+      // An untouched key still reaches it: Enter on the title opens the
+      // editor through the button, and nothing here may swallow more
+      // than the arrows it used.
+      title.dispatchEvent(key("Enter"));
+      expect(seen).toEqual(["Enter"]);
+    } finally {
+      window.removeEventListener("keydown", onWindow);
+    }
   });
 });
 

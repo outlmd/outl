@@ -24,6 +24,7 @@ import {
   type PaletteSection,
 } from "@outl/shared/palette";
 import { PageGlyph } from "@outl/shared/icons";
+import { armKeyboard } from "../lib/keyboard-keeper";
 import { createSheetDrag } from "../lib/sheet-drag";
 import { MOBILE_ACTIONS, type MobileAction } from "../lib/palette-actions";
 import { useKeyboardInset } from "../lib/viewport";
@@ -509,7 +510,11 @@ export function PageSwitcher(props: PageSwitcherProps) {
             <button
               type="button"
               aria-label="New page"
-              onClick={() => actions.startCreating(query().trim())}
+              // Inside the tap, before the sheet renders: it focuses its
+              // input a frame later, and WKWebView only raises the
+              // keyboard for a focus inside the gesture window. The
+              // search box being `autofocus` is what hid this.
+              onClick={() => (armKeyboard(), actions.startCreating(query().trim()))}
               class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-(--color-outl-accent) active:bg-(--color-outl-border)/40"
             >
               <svg

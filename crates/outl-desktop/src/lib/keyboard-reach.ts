@@ -7,6 +7,9 @@
  * - F6 / Shift+F6 cycle the regions marked `data-outl-region`
  *   (sidebar, outline, chrome), the convention native apps use.
  * - Esc from the sidebar or the chrome puts you back in the outline.
+ * - The page header is a roving group of its own
+ *   ({@link pageHeaderKeydown}), so the title's rename door and the two
+ *   icon buttons beside the slug need no chord to reach.
  *
  * Text fields are skipped on purpose: arrows there move the caret.
  */
@@ -114,6 +117,42 @@ export function rovingKeydown(
   else to = (at + (e.key === next ? 1 : -1) + items.length) % items.length;
   e.preventDefault();
   items[to].focus();
+}
+
+/**
+ * Marks a page-header control as one of the header's arrow stops: the
+ * title's rename affordance, Attach file, Page history.
+ *
+ * A selector and not a component, because the stops do not share a
+ * parent — the title is the `<h1>`, the other two are in the eyebrow
+ * row above it — and "which of my descendants is a stop" is the
+ * container's question to answer ({@link rovingKeydown}'s `items`).
+ */
+export const PAGE_HEADER_STOP = "[data-outl-header-stop]";
+
+/**
+ * Wire as `onKeyDown` on the page header.
+ *
+ * The header's controls are **chrome, not catalog actions**: the title
+ * is a door to renaming, not an `Action` with a chord — minting one
+ * cascades through four exhaustive `match`es, a generated parity doc
+ * and a TS parity test, and binds every client to a verdict. So they
+ * get reach instead, which is this module's job.
+ *
+ * Two guards, both load-bearing:
+ *
+ * - **Only from a stop.** The header also holds the page's property
+ *   chips and their value fields, which `items` correctly excludes from
+ *   the stop list — but an arrow pressed *there* would resolve to index
+ *   `-1`, and `(-1 + 1) % len` is `0`, so it would jump to the title.
+ * - **A consumed arrow stops here.** The Normal-mode dispatcher listens
+ *   on `window` and reads arrows as cursor movement; an arrow the header
+ *   just used is not also a request to move the selection.
+ */
+export function pageHeaderKeydown(e: KeyboardEvent): void {
+  if (!(e.target as HTMLElement | null)?.closest?.(PAGE_HEADER_STOP)) return;
+  rovingKeydown(e, "horizontal", { items: PAGE_HEADER_STOP });
+  if (e.defaultPrevented) e.stopPropagation();
 }
 
 /**

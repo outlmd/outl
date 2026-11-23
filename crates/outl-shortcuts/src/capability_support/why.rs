@@ -52,15 +52,6 @@ pub const TUI_TABLE_NO_SCROLL: &str =
      there, the columns just stop lining up. Widen the terminal, or open the page in the \
      desktop app.";
 
-/// The TUI has no rename surface. `outl page rename` does the same
-/// thing from a terminal (`outl_actions::rename_page`, links
-/// rewritten), and the MCP tool `outl_page_rename` is the same route
-/// for an agent. Onto a name another page owns it refuses unless
-/// given `--merge`.
-pub const NO_TUI_PAGE_RENAME: &str =
-    "Renaming a page isn't in the TUI yet. Run `outl page rename <old> <new>` from a \
-     terminal, or rename it in the desktop or mobile app. Links to the page follow the new name.";
-
 /// The TUI has no marketplace UI at all — installing an
 /// unlisted or registry plugin from inside the terminal client
 /// goes through the CLI, not a browse-and-tap surface.

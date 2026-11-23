@@ -65,9 +65,24 @@ export function nameTakenMessage(existingTitle: string): string {
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-const linksUpdated = (n: number): string => `${plural(n, "link", "links")} updated`;
+/**
+ * A declared mirror of `outl_actions::page_summary`, pinned from the
+ * Rust side by `the_shared_frontend_copy_counts_the_same_things`.
+ *
+ * `rewritten_blocks` counts **blocks whose text was edited**, and one
+ * block can carry several mentions of the page — so it is worded as a
+ * count of blocks. It used to read `3 links updated` here while the
+ * terminal read `links updated in 3 blocks`, which was not a denser
+ * phrasing of the same thing but a different, larger-sounding number.
+ *
+ * A mention left alone names a **nested page** (`[[old/child]]`), the
+ * word `UX.md`'s glossary uses. The field keeps the implementation's
+ * `namespace`; the user reads the glossary's.
+ */
+const linksUpdated = (n: number): string => `Links updated in ${plural(n, "block", "blocks")}`;
 
-const skippedRefs = (n: number): string => `${plural(n, "namespace link", "namespace links")} left unchanged`;
+const skippedRefs = (n: number): string =>
+  `${plural(n, "nested-page link", "nested-page links")} left unchanged`;
 
 /** One sentence for the toast after a rename. */
 export function renameSummary(report: RenamePageReport): string {
@@ -80,7 +95,8 @@ export function renameSummary(report: RenamePageReport): string {
 
 /**
  * The lines shown after a merge: blocks moved, links updated, the alias
- * note, one line per property conflict and the skipped namespace links.
+ * note, one line per property conflict and the nested-page links left
+ * unchanged.
  * The alias and skipped-links lines appear only when there is something
  * to say. A retry that found nothing left to move says so instead of
  * reporting zero blocks.

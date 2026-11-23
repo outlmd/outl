@@ -1,25 +1,31 @@
 import { For, Show, createEffect, createSignal, onMount } from "solid-js";
-import { Portal } from "solid-js/web";
 
 import { searchPages } from "@outl/shared/api/commands";
 import type { PageMeta, PageView } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
 import { mergePageFlow, renamePageFlow } from "../lib/page-actions";
-import { setAppState } from "../lib/store";
+import { setAppState, type PageAction } from "../lib/store";
+import { ModalCard } from "./ModalCard";
 
-export type PageAction = { kind: "rename" | "merge"; page: PageMeta };
+export type { PageAction };
 
 /**
  * One dialog for the two page actions that need input: a name prompt
  * (rename, prefilled with the current title) and a page search (merge,
  * the source page excluded). The webview has no `window.prompt`, so the
  * text field is ours; the questions that follow (name taken, merge
- * confirmation) are `window.confirm`, in `lib/page-actions.ts`.
+ * confirmation) are `<ConfirmDialog />`, driven from
+ * `lib/page-actions.ts`.
  *
  * Declining a confirm leaves the dialog open so the user can pick again;
  * it closes only once the flow produced a page to show. Escape and a
  * click on the backdrop close it without writing anything.
+ *
+ * **Mounted by `<AppShell />`, not by `<Sidebar />`** — the request is
+ * `appState.pageAction`. The sidebar is closed on every fresh launch,
+ * so a dialog living there was a dialog that did not exist for most
+ * windows.
  */
 export function PageActionDialog(props: {
   action: PageAction | null;
@@ -29,9 +35,7 @@ export function PageActionDialog(props: {
   return (
     <Show when={props.action}>
       {(action) => (
-        <Portal>
-          <DialogBody action={action()} onClose={props.onClose} onDone={props.onDone} />
-        </Portal>
+        <DialogBody action={action()} onClose={props.onClose} onDone={props.onDone} />
       )}
     </Show>
   );
@@ -117,17 +121,12 @@ function DialogBody(props: {
   const sourceLabel = () => props.action.page.title || props.action.page.slug;
 
   return (
-    <div
-      class="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) props.onClose();
-      }}
+    <ModalCard
+      open
+      label={isRename ? "Rename page" : "Merge page"}
+      onClose={props.onClose}
     >
-      <div
-        role="dialog"
-        aria-label={isRename ? "Rename page" : "Merge page"}
-        class="mt-24 w-[520px] max-w-[90vw] overflow-hidden rounded-pop border border-(--color-outl-border)/60 bg-(--color-outl-bg-elev) shadow-pop"
-      >
+      <>
         <div class="px-4 pt-3 text-[11px] font-medium text-(--color-outl-fg-dimmer)">
           {isRename ? `Rename "${sourceLabel()}"` : `Merge "${sourceLabel()}" into`}
         </div>
@@ -166,7 +165,7 @@ function DialogBody(props: {
         <div class="border-t border-(--color-outl-fg)/10 px-4 py-1.5 text-[10px] opacity-50">
           {isRename ? "⏎ rename · Esc cancel" : "↑/↓ navigate · ⏎ merge · Esc cancel"}
         </div>
-      </div>
-    </div>
+      </>
+    </ModalCard>
   );
 }

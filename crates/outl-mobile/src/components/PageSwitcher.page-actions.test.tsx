@@ -30,6 +30,14 @@ vi.mock("@outl/shared/api/page-merge", () => ({
   mergePages: (...a: unknown[]) => mergePages(...a),
 }));
 
+/** Was the name sheet already on the page when the keyboard was armed? */
+let sheetWhenArmed: boolean | null = null;
+const armKeyboard = vi.fn(() => {
+  sheetWhenArmed = document.querySelector('input[aria-label="Rename page"], input[aria-label="New page"]') !== null;
+  return true;
+});
+vi.mock("../lib/keyboard-keeper", () => ({ armKeyboard: () => armKeyboard() }));
+
 import { mergeConfirmMessage, nameTakenMessage, renameSummary } from "@outl/shared/pages/rename-merge";
 import { PageSwitcher } from "./PageSwitcher";
 
@@ -102,6 +110,7 @@ async function typeName(value: string) {
 }
 
 beforeEach(() => {
+  sheetWhenArmed = null;
   const pages = [page("inbox", { title: "Inbox" }), page("beta", { title: "Beta" })];
   listPages.mockResolvedValue(pages);
   searchPages.mockResolvedValue(pages);
@@ -167,6 +176,20 @@ describe("PageSwitcher: rename", () => {
     await openRename();
     const input = document.querySelector('input[aria-label="Rename page"]') as HTMLInputElement;
     expect(input.value).toBe("Inbox");
+  });
+
+  /**
+   * `BlockContextMenu` defers `onSelect`, so the row has to declare
+   * `armsKeyboard` or the sheet focuses its input with the gesture
+   * window long gone. This path survived without the flag only because
+   * the switcher's search box is `autofocus` and the keyboard was
+   * already up — a coincidence, not a mechanism.
+   */
+  it("arms the keyboard inside the tap, before the sheet renders", async () => {
+    await openRename();
+
+    expect(armKeyboard).toHaveBeenCalledTimes(1);
+    expect(sheetWhenArmed).toBe(false);
   });
 
   it("will not submit the unchanged or an empty name", async () => {
@@ -393,6 +416,15 @@ describe("PageSwitcher: New page", () => {
 
     expect(openRef).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("arms the keyboard inside the tap, before the sheet renders", async () => {
+    mount();
+    await settle();
+    await tap(newPageButton());
+
+    expect(armKeyboard).toHaveBeenCalledTimes(1);
+    expect(sheetWhenArmed).toBe(false);
   });
 
   /** Picking a merge target is about pages that exist; offering to

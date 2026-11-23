@@ -47,6 +47,12 @@ export function JournalChrome(props: {
   toolbarButtons: PluginToolbarButton[];
   /** Press-and-hold on the title opens page properties. */
   titleLongPress: LongPressHandlers;
+  /**
+   * Tap the title to rename the page. Fired only for a real page: a
+   * journal's tap is already "back to today", and its slug is its date,
+   * so it is not renameable at all.
+   */
+  onRenameTitle?: () => void;
   onJumpToday: () => void;
   onPrevDay: () => void;
   onNextDay: () => void;
@@ -140,22 +146,42 @@ export function JournalChrome(props: {
 
         {/* Center — title region. `min-w-0` is what lets the inner
             truncate work in PageHeader. Press-and-hold anywhere in
-            here opens the page's properties (see `titleLongPress`);
-            the journal arrows below are buttons, so they keep their
-            own taps. */}
+            here opens the page's properties (see `titleLongPress`), and
+            a plain tap on a *page* renames it; the journal arrows below
+            are buttons, so they keep their own taps.
+
+            `py-1 -my-1` grows the hit box to 44pt without growing the
+            header: the negative margin takes the padding back out of
+            the grid row, so the title sits exactly where it did. The
+            horizontal extent is deliberately left alone — this column
+            is `auto`, so padding here comes out of the action capsule's
+            `1fr`, and on a narrow phone that pushes a glyph into its
+            overflow scroll. */}
         <div
-          class="min-w-0"
+          data-outl-title
+          class="min-w-0 -my-1 py-1"
           onPointerDown={props.titleLongPress.onPointerDown}
           onPointerMove={props.titleLongPress.onPointerMove}
           onPointerUp={props.titleLongPress.onPointerUp}
           onPointerCancel={props.titleLongPress.onPointerUp}
           onClick={(e) => {
-            // Swallow the click the completed hold produces, or the
-            // journal header would also step a day.
+            // ONE read of `consumedClick()` per click, and this is it.
+            // It clears the flag as it answers (`lib/long-press.ts`), so
+            // a second reader anywhere in this handler would see `false`
+            // and open the rename sheet on top of the properties sheet
+            // the hold just opened.
             if (props.titleLongPress.consumedClick()) {
+              // Swallow the click the completed hold produces, or the
+              // journal header would also step a day.
               e.preventDefault();
               e.stopPropagation();
+              return;
             }
+            // A journal keeps its own tap (the `<h1>`'s "back to today",
+            // which ran before this), and the boot placeholder has no
+            // page to rename yet.
+            if (props.view?.page.kind !== "page") return;
+            props.onRenameTitle?.();
           }}
         >
           <Show
@@ -167,6 +193,7 @@ export function JournalChrome(props: {
                   props.view?.page.kind ??
                   (props.todaySlug === null ? null : "journal")
                 }
+                renamable={props.view?.page.kind === "page"}
               />
             }
           >

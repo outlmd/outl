@@ -127,12 +127,24 @@ The backend is the shared `outl_tauri_shared::commands::page::delete_page` body,
 
 ## Renaming and merging a page
 
-Two more page actions sit beside the sidebar's delete `×`: **Rename page...** and **Merge into...**.
-Journals are excluded, so only regular pages show them: a journal's slug is its date.
-Both call the shared `outl_actions` functions through the `rename_page` / `merge_pages` Tauri commands, so every link to the page is rewritten in the same batch as the move ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
+**The page title is the rename door.**
+Click it and it becomes an input, prefilled with the current name and selected, so typing replaces it.
+Enter commits, Escape restores, and clicking away commits.
+Submitting the name the page already has runs no command at all.
+A **journal title is not clickable** and shows no affordance: its slug is its date, so the rename is refused, and offering a door only to refuse it is the defect rather than the guard.
+The affordance is also absent while zoomed into a block, where the heading belongs to the block rather than to the page.
 
-- **Rename** opens a text prompt prefilled with the current title.
-  When the new name already belongs to another page, nothing is written yet and a confirm asks "A page named X already exists. Merge this page into X?".
+While the rename is in flight the title stays exactly where it is with a small pulsing dot beside it.
+The outline and the editor are never disabled, unmounted or put in a load state.
+A rename is a workspace-wide link rewrite, and none of that work is the page you are typing in ([`UX.md` → Never block a keystroke](../UX.md#2-never-block-a-keystroke)).
+
+Two more page actions sit beside the sidebar's delete `×`: **Rename page...** and **Merge into...**.
+Journals are excluded there too, so only regular pages show them.
+All of them call the shared `outl_actions` functions through the `rename_page` / `merge_pages` Tauri commands, so every link to the page is rewritten in the same batch as the move ([RFC 0557](rfcs/0557-page-merge-and-rename.md)).
+The dialog behind the sidebar's two icons is mounted at the shell rather than inside the sidebar, so it no longer depends on a panel that opens closed.
+
+- **Rename** from either door offers the merge when the name is taken.
+  Nothing is written yet, and a dialog asks whether to merge this page into the one that holds the name.
   Accepting runs the merge, cancelling leaves both pages as they were.
 - **Merge into...** opens the page picker, which leaves out the page itself.
   It always asks for a confirmation before anything is written, because a merge has no undo.

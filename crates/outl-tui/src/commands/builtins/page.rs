@@ -67,7 +67,12 @@ impl SlashCommand for PropPageCommand {
             app.status = why;
             return Ok(false);
         }
-        app.set_property_on_page(&key, value);
+        // `title::` goes through the rename, not into the AST — see
+        // `App::write_page_property`. The overlay's Page scope is the
+        // other door onto this write and they share the one owner.
+        if let Err(why) = app.write_page_property(&key, value) {
+            app.status = why;
+        }
         Ok(false)
     }
 }
@@ -115,6 +120,27 @@ impl SlashCommand for MergeCommand {
     }
     fn execute(&self, app: &mut App, args: &str) -> Result<bool> {
         app.arm_page_merge(args);
+        Ok(false)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// rename: change what the current page is called
+// ---------------------------------------------------------------------------
+
+pub struct RenameCommand;
+impl SlashCommand for RenameCommand {
+    fn name(&self) -> &'static str {
+        "rename"
+    }
+    fn description(&self) -> &'static str {
+        "Rename this page and respell every link to it: `rename <new name>`"
+    }
+    fn needs_args(&self) -> bool {
+        true
+    }
+    fn execute(&self, app: &mut App, args: &str) -> Result<bool> {
+        app.rename_current_page(args)?;
         Ok(false)
     }
 }

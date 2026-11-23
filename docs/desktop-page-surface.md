@@ -53,9 +53,14 @@ Folding the toggles together would hide one when the user muted the other.
 `g d` routes through `DeletePage`, which runs the same `window.confirm` + `deletePage(slug)` path as the sidebar row's hover `×` ([gesture](desktop-ux.md#sidebar--hover--to-delete-a-page)).
 Journals are refused, and the body is the shared `outl_tauri_shared::commands::page::delete_page` — no desktop logic on either door.
 
-**Rename and merge are the same two doors, and the same flow.**
-The sidebar row's hover `✎` (rename) and `⇥` (merge into) sit beside the `×`; journals get none of the three.
-Both open `PageActionDialog.tsx` (a name field prefilled with the title, or a page search that leaves the source out), because the webview has no `window.prompt`; the questions that follow are `window.confirm`, like delete.
+**Rename has two doors and merge has one, and all of them share the same flow.**
+The page title itself is the rename door: `PageTitleEditor.tsx` turns the `<h1>` into an input on a click, prefilled and selected.
+It carries `PropertyEditor`'s commit contract (Enter / Escape / blur with a 120 ms grace) and `e.stopPropagation()` first, so the Normal-mode dispatcher never reads the keystrokes as chords.
+The sidebar row's hover `✎` (rename) and `⇥` (merge into) sit beside the `×`; journals get none of the four, and the title carries no affordance while zoomed.
+The sidebar's two open `PageActionDialog.tsx` (a name field prefilled with the title, or a page search that leaves the source out), because the webview has no `window.prompt`.
+That dialog is mounted by `AppShell` off `appState.pageAction` rather than by the sidebar, since the sidebar opens closed and those two doors would otherwise not exist on a fresh launch.
+The questions that follow are `ConfirmDialog.tsx` over `lib/confirm.ts`, not `window.confirm`.
+A merge deletes a page with no undo, and a native dialog can carry no `destructive` token, no focus rule and no way to say which of the two buttons is the dangerous one.
 The flow itself is `@outl/shared/pages/rename-merge` (a taken name asks before merging, a merge **always** asks, the wording is owned there), wrapped by `lib/page-actions.ts`, which only adds the confirm, the toast and the error surface.
 Declining a confirm writes nothing and leaves the dialog open; the outcome (blocks moved, links updated, every property conflict) goes to `<NoticeToast />` via `appState.notice`, because a dropped property value the user never saw is the failure the report exists to prevent.
 There is no chord and no menu entry: delete has none in `menu.rs` either, so these did not get one.

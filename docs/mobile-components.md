@@ -18,6 +18,12 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
 
 - **`JournalHeader.tsx`** — `JournalHeader`, `PageHeader`, `ChevronLeft`, `ChevronRight`.
   Pure render: props in, markup out, no state and no commands.
+  `PageHeader`'s rename affordance is held to that: the pencil and the tap are props, and the sheet state and the command live in `Journal.rename.tsx`.
+  A `createSignal` in here would be the first exception, and the props stay read lazily, because a destructured prop freezes at first render in Solid.
+- **`Journal.rename.tsx`** — the page title's rename door: the sheet state, `armKeyboard()` before it renders, and the `@outl/shared/pages/rename-merge` flow behind it.
+  It owns no wording and no order of events; both belong to that shared module, so the phone and the desktop cannot ask the merge question differently.
+- **`Journal.toast.ts`** — which tone a message gets.
+  A rename or merge summary is a success and a failure is destructive, and the toast had one tone (red, with a warning glyph) until it carried both.
 - **`Journal.context-actions.ts`** — `buildContextActions` plus its only helper `locateSiblings`.
   A pure function from (block id, page view, handlers) to the typed row list `<BlockContextMenu>` renders.
   It has no Solid import at all, which is why it is `.ts` and not `.tsx`.

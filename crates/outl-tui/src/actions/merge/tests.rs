@@ -59,12 +59,14 @@ fn merge_arms_the_prompt_and_writes_nothing() {
 
     app.arm_page_merge("Beta");
 
-    let pending = app
-        .pending_sidebar_delete
-        .as_ref()
-        .expect("a prompt is armed");
+    let pending = app.pending_page_action.as_ref().expect("a prompt is armed");
     assert_eq!(pending.slug, "alpha");
-    assert_eq!(pending.merge_into.as_deref(), Some("beta"));
+    assert_eq!(
+        pending.action,
+        PageAction::MergeInto {
+            target: "beta".into()
+        }
+    );
     assert!(
         app.status.contains("merge 'Alpha' into 'Beta'") && app.status.ends_with("y/n"),
         "the prompt names both pages and asks, got {:?}",
@@ -83,11 +85,13 @@ fn the_slash_command_reaches_the_same_prompt() {
     let registry = app.command_registry.clone();
     registry.dispatch(&mut app, "merge Beta").unwrap();
 
-    let pending = app
-        .pending_sidebar_delete
-        .as_ref()
-        .expect("a prompt is armed");
-    assert_eq!(pending.merge_into.as_deref(), Some("beta"));
+    let pending = app.pending_page_action.as_ref().expect("a prompt is armed");
+    assert_eq!(
+        pending.action,
+        PageAction::MergeInto {
+            target: "beta".into()
+        }
+    );
 }
 
 #[test]
@@ -97,7 +101,7 @@ fn an_unknown_target_is_refused_not_created() {
 
     app.arm_page_merge("Nowhere");
 
-    assert!(app.pending_sidebar_delete.is_none());
+    assert!(app.pending_page_action.is_none());
     assert!(
         app.status.contains("no page 'Nowhere'"),
         "got {:?}",
@@ -116,7 +120,7 @@ fn a_page_cannot_be_merged_into_itself() {
 
     app.arm_page_merge("alpha");
 
-    assert!(app.pending_sidebar_delete.is_none());
+    assert!(app.pending_page_action.is_none());
     assert!(app.status.contains("itself"), "got {:?}", app.status);
 }
 
@@ -129,7 +133,7 @@ fn a_journal_is_never_the_source() {
 
     app.arm_page_merge("Beta");
 
-    assert!(app.pending_sidebar_delete.is_none());
+    assert!(app.pending_page_action.is_none());
     assert!(toasted(&app, "can't merge a journal page"));
 }
 
@@ -139,7 +143,7 @@ fn confirming_moves_the_blocks_and_lands_on_the_target() {
     seed(&mut app);
     app.arm_page_merge("Beta");
 
-    app.sidebar_confirm_delete().unwrap();
+    app.confirm_pending_page_action().unwrap();
 
     let alpha = outl_actions::find_by_slug(&app.workspace, "alpha");
     assert!(
@@ -155,7 +159,7 @@ fn confirming_moves_the_blocks_and_lands_on_the_target() {
         "the source's projection is removed once the target projected"
     );
     assert_eq!(app.current_slug(), "beta", "the user lands on the target");
-    assert!(app.pending_sidebar_delete.is_none());
+    assert!(app.pending_page_action.is_none());
     assert!(
         toasted(&app, "merged 'Alpha' into 'Beta': 2 blocks"),
         "got {:?}",
@@ -178,7 +182,7 @@ fn confirming_drops_undo_entries_of_the_pages_it_changed() {
     assert!(!app.undo.is_empty(), "precondition: there is history");
     app.arm_page_merge("Beta");
 
-    app.sidebar_confirm_delete().unwrap();
+    app.confirm_pending_page_action().unwrap();
 
     assert!(
         app.undo.is_empty(),
@@ -212,18 +216,9 @@ fn any_other_key_cancels_and_changes_nothing() {
 
     press(&mut app, 'x');
 
-    assert!(
-        app.pending_sidebar_delete.is_none(),
-        "the prompt is dropped"
-    );
+    assert!(app.pending_page_action.is_none(), "the prompt is dropped");
     let alpha = outl_actions::find_by_slug(&app.workspace, "alpha").unwrap();
     assert!(!outl_actions::is_trashed(&app.workspace, alpha));
     assert!(app.workspace_root.join("pages/alpha.md").exists());
     assert_eq!(app.current_slug(), "alpha");
-}
-
-#[test]
-fn the_summary_says_only_what_happened() {
-    assert_eq!(count(1, "block"), "1 block");
-    assert_eq!(count(3, "property conflict"), "3 property conflicts");
 }

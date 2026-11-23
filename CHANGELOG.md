@@ -7,6 +7,46 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Rename a page from its title, on every client, and fold it into the page that already owns the name.**
+  The rename itself has worked since [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md): two `SetProp`s, every `[[old]]` and `#old` in the workspace respelled in the same batch, and a name another page owns answered as a question rather than a refusal.
+  What was missing was the door.
+  On the desktop it lived behind a hover icon on a sidebar that opens **closed**, so a fresh window had no rename affordance at all until you found `Cmd/Ctrl+Shift+E`; on the phone it was behind a long-press on a row of the page switcher; in the terminal it did not exist.
+
+  Now the page's own title is the door, because that is where you are already looking when the name is wrong.
+  Click the title on the desktop and it becomes an input, prefilled and selected, committing on Enter or on a click away and restoring on Escape.
+  Tap it on the phone and a name sheet comes up, marked with a pencil so the gesture is findable.
+  In the terminal it is `/rename <new name>`, beside the `/merge` it has always had.
+  Submitting the name a page already has runs no command at all.
+
+  **A journal is offered none of them.**
+  Its slug is its date, so the backend refuses the rename, and an affordance that exists only to be refused is the defect rather than the guard.
+  The desktop title is simply not clickable, a journal title on the phone still means "back to today", and the TUI refuses the argument before it writes anything.
+
+  **The phone's field is a sheet rather than an input in the header, and that is the finding that shaped it.**
+  A focused `<input>` in the page chrome makes WKWebView scroll the document to keep the caret above the keyboard, and what it scrolls away is the header the field is in.
+  That is the journal header riding up, fixed four commits earlier; a `position: fixed` sheet sits outside the document flow and cannot reproduce it.
+
+  **The question before a merge is the app's own dialog now, not the operating system's.**
+  A merge deletes a page and the UI offers no undo for it, which makes it the most destructive thing in the product, and it was being asked through `window.confirm` — the one surface that can take no palette, give no destructive weight and say nothing about which of the two buttons is the dangerous one.
+  The dangerous button is a solid `destructive` fill, Cancel takes focus first, Tab stays inside the card, and the caret returns to whatever the question interrupted.
+  The three page- and block-delete confirmations moved onto it too.
+
+  **A rename succeeding no longer looks like an error on the phone.**
+  "Renamed. Links updated in 12 blocks." used to land in the red alert pill with a warning glyph, because the toast had one tone.
+  It has two, and a success carries the accent colour, a checkmark and a success vibration.
+
+  **Four surfaces had three names for one number, and now have one.**
+  A mention left alone because it names a page that is not being renamed was a `sub-page link` in the terminal, a `namespace link` in both apps and a `namespace reference (they name a sub-page)` in `outl page merge`, and none of the three used the word the product's own glossary defines, which is a **nested page**.
+  `rewritten_blocks` was worse than inconsistent: the terminal called it blocks and the apps called it links, and since one block can carry several mentions, "3 links updated" was not a denser phrasing of "links updated in 3 blocks" but a different, larger-sounding number.
+  `outl_actions::page_summary` owns both nouns now, the apps keep a declared mirror, and a Rust test reads the TypeScript to keep the two spellings equal.
+
+  **Editing `title` in the TUI's property editor is this rename, not a property write.**
+  It used to change the page's name and respell no mention of it, which is the silent half-rename that `page-slug`'s own refusal ("rename the page instead") had been pointing away from, at a feature the terminal did not have.
+
+  **One thing to know about renaming, on every client:** a page keeps the node id derived from the slug it was *created* under, so opening the **old** name afterwards writes that name back onto the page and flips the rename over.
+  A stale `[[link]]`, a Recent row or a script is enough.
+  The TUI is where that was one keystroke away, so it repoints what it remembers by file name, and only onto a file that is really on disk.
+
 - **A backlink is editable where it is cited, on every client.**
   A backlink row shows a block that lives on another page, and it used to be a destination: you acted on it by *leaving*, and the page that assembled the references was gone.
   Click it, tap it, or press `i` / `Enter` on it, and you edit that block in place.

@@ -3,6 +3,7 @@ import { Show } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
 import { visualRangeSet } from "@outl/shared/outline";
 
+import { askConfirm } from "../lib/confirm";
 import type { ActionHandlers } from "../lib/shortcuts";
 import { appState } from "../lib/store";
 
@@ -47,12 +48,16 @@ export function BatchToolbar(props: { handlers: ActionHandlers }) {
     void props.handlers[kind]?.();
   };
 
-  function onDelete() {
+  async function onDelete() {
     if (anyHasDescendants()) {
-      const ok = window.confirm(
-        `Delete ${count()} block(s)?\n\n` +
+      const ok = await askConfirm({
+        message:
+          `Delete ${count()} block(s)?\n\n` +
           `Some of them have nested children that will be deleted too.`,
-      );
+        confirmLabel: "Delete",
+        label: "Delete blocks",
+        destructive: true,
+      });
       if (!ok) return;
     }
     void props.handlers.DeleteRange?.();
@@ -73,7 +78,12 @@ export function BatchToolbar(props: { handlers: ActionHandlers }) {
         />
         <BatchButton label="↑" title="Move range up (⌘⇧↑)" onClick={run("MoveVisualRangeUp")} />
         <BatchButton label="↓" title="Move range down (⌘⇧↓)" onClick={run("MoveVisualRangeDown")} />
-        <BatchButton label="Delete" title="Delete range (Delete)" onClick={onDelete} danger />
+        <BatchButton
+          label="Delete"
+          title="Delete range (Delete)"
+          onClick={() => void onDelete()}
+          danger
+        />
         <span class="mx-1 h-5 w-px bg-(--color-outl-border)" />
         <BatchButton label="Done" title="Clear selection (Esc)" onClick={run("ExitInsert")} />
       </div>

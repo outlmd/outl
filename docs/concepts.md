@@ -57,7 +57,8 @@ Every name a page answers to — slug, title, each alias — resolves the same w
 A name that is already another page's slug or title belongs to that page.
 An alias that spells it is inert: `[[Beta]]` opens the page titled `Beta`, and its mentions are listed in that page's backlinks, not in the page that declared the alias.
 Clients can list such aliases through `outl_actions::alias_conflicts`.
-To fold two pages into one, a page merge is the intended way, and it arrives in a later release.
+To fold two pages into one, merge them: the source's blocks move under the target, the source's slug and title stay behind as aliases of it, and every mention is rewritten in the same batch.
+See [renaming and merging pages](client-page-lifecycle.md#renaming-and-merging-pages).
 
 The `type::` property on a page is read by surfaces that filter pages by role.
 The canonical case is `type:: person`: every client opens a person picker on a word-initial `@` keystroke and lists only pages whose `type:: person` is set.
@@ -167,9 +168,12 @@ See [markdown-format.md → Nested tags and page namespaces](markdown-format.md#
 
 ## What's NOT in a workspace
 
-- **Trash isn't a directory.** Deleted blocks are moved to a `TRASH_ROOT` node in the op log, not deleted from any file.
-- **No `archive/` folder.** Archived pages are just pages you stopped referencing — they're still in `pages/`.
-- **No per-workspace config beyond `config.toml`.** Plugins (JavaScript, via the Boa engine) are global, not workspace-scoped.
+- **Trash isn't a directory.**
+  Deleted blocks are moved to a `TRASH_ROOT` node in the op log, not deleted from any file.
+- **No `archive/` folder.**
+  Archived pages are just pages you stopped referencing, still in `pages/`.
+- **No per-workspace config beyond `config.toml`.**
+  Plugins (JavaScript, via the Boa engine) are global, not workspace-scoped.
 
 ## Sharing a workspace
 

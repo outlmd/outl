@@ -1,3 +1,4 @@
+import { Show } from "solid-js";
 import { journalHeading } from "@outl/shared/journal";
 
 /**
@@ -64,15 +65,55 @@ export function JournalHeader(props: {
   );
 }
 
-export function PageHeader(props: { title: string; kind: "page" | "journal" | null }) {
+/** A pencil, 24×24. The same path the page switcher's "Rename page..."
+ *  row draws, so the two doors into the rename look like one door. */
+const PENCIL_PATH = "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z";
+
+export function PageHeader(props: {
+  title: string;
+  kind: "page" | "journal" | null;
+  /**
+   * Draw the pencil beside the title.
+   *
+   * The header advertised neither of its gestures, so tapping the title
+   * to rename would have been undiscoverable: this glyph is the only
+   * thing that says the title is a control. The tap itself belongs to
+   * `JournalChrome`, which owns the whole title region (the long-press
+   * is already there), so this stays decorative.
+   *
+   * Drawn for a page and never for the boot placeholder, which is what
+   * keeps it from appearing under the user's thumb and nudging the
+   * title sideways after the fact.
+   */
+  renamable?: boolean;
+}) {
   return (
     <div class="min-w-0 text-center">
       <p class="text-[11px] font-medium uppercase tracking-wider text-(--color-outl-fg-dimmer)">
         {props.kind === "journal" ? "Journal" : "Page"}
       </p>
-      <h1 class="truncate text-[17px] font-semibold leading-tight tracking-tight">
-        {props.title}
-      </h1>
+      <div class="flex min-w-0 items-center justify-center gap-1">
+        <h1 class="truncate text-[17px] font-semibold leading-tight tracking-tight">
+          {props.title}
+        </h1>
+        <Show when={props.renamable}>
+          <svg
+            data-outl-rename-hint
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="shrink-0 text-(--color-outl-fg-dimmer)"
+            aria-hidden="true"
+          >
+            <path d={PENCIL_PATH} />
+          </svg>
+        </Show>
+      </div>
     </div>
   );
 }

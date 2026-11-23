@@ -155,6 +155,27 @@ A row whose citing block lives outside any page is **inert**: no editor, no shee
 
 Contract, including why a cross-page edit refuses rather than keeping your text somewhere else: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
 
+## Page title - tap to rename
+
+**Tapping the title of a page opens a name sheet**, prefilled with the current name and selected so one keystroke replaces it.
+A small pencil glyph sits beside the title so the gesture is findable; it never appears on a journal or on the launch placeholder, so it cannot shift the title after the fact.
+Submitting the name unchanged, or empty, does nothing: the Rename button stays disabled and no command is sent.
+
+**A journal title still means "back to today".**
+Its slug is its date, so the rename is refused by the backend, and an affordance that exists only to be refused is the defect rather than the guard.
+Press-and-hold on the title still opens page properties on both kinds, unchanged, and a completed hold no longer also opens the rename sheet.
+
+**The field is a sheet, not an input in the header, and that is load-bearing.**
+`document-scroll-lock.ts` stands down for a focused `INPUT`, because there the keyboard owns the scroll.
+That is right for the outline's textareas and wrong for a field in the chrome: WKWebView scrolls the document to keep the caret above the keyboard, and what it scrolls away is the header the field is in.
+That is the journal header riding up.
+`PageNameSheet` is `position: fixed` against `bottom-0` with `keyboardInset()` padding, outside the document flow, so it cannot reproduce it.
+The tap handler also calls `armKeyboard()` **before** the sheet renders, the pattern [the keyboard handoff](#making-a-block-and-typing-in-it-the-keyboard-handoff) records.
+The sheet focuses inside `requestAnimationFrame`, one frame past the gesture window, so from a cold keyboard WKWebView would otherwise raise nothing.
+
+When the name is taken, the app's own alert asks whether to merge this page into the one that holds it, in the same words the page switcher's rename uses.
+Accepting merges the page you were looking at **into** the existing one and opens that page; declining writes nothing and goes nowhere.
+
 ## Page switcher - rename and merge
 
 The long-press sheet that offers delete also offers **Rename page** and **Merge into...**, for regular pages only: journals are excluded, because a journal's slug is its date.
@@ -167,7 +188,8 @@ The commands are the shared `rename_page` / `merge_pages` bodies, so every link 
 - **Afterwards** the app opens the resulting page (renamed, or the merge target) and shows a summary with blocks moved, links updated and any property conflicts (the target's value is kept, the dropped one is named).
 
 There is no undo for either action, and a merge does not come apart: see [RFC 0557 → The opposite direction](rfcs/0557-page-merge-and-rename.md#the-opposite-direction).
-Neither has a keyboard chord, so the long-press sheet is the only trigger on touch devices.
+Neither has a keyboard chord.
+A rename has a second door, the [page title](#page-title---tap-to-rename); a merge picked from the target side is reached only here, because the header has no list to turn into a picker.
 `Capability::PageRename` and `Capability::PageMerge` record the verdicts in [client-parity.md](client-parity.md).
 
 ## Opening an external `[label](url)` link

@@ -1,8 +1,29 @@
 import { JSX, Show, createEffect, onCleanup } from "solid-js";
 
+/**
+ * Which pill this is.
+ *
+ * `error` is the destructive fill with a warning glyph; `success` is the
+ * accent fill with a check, for a confirmation like "Renamed. 12 links
+ * updated.". Both are `Palette` fill *pairs* with a measured contrast
+ * (`destructive`/`destructive_fg`, `accent`/`accent_fg`), so no theme
+ * can make either unreadable — which is why `accent_alt`, the palette's
+ * nominal "success" hue, is not used: it is authored as ink and has no
+ * `_fg` partner.
+ */
+export type ToastTone = "error" | "success";
+
 export interface ToastProps {
   /** Message text. `null` means hidden. */
   message: string | null;
+  /**
+   * Default `error`. Before this existed the pill was unconditionally
+   * destructive, so a rename summary was announced in the colour a
+   * failure wears — one token carrying two meanings (root `CLAUDE.md`
+   * invariant 13). `Journal.toast.ts` is the one place that decides
+   * which tone a message gets.
+   */
+  tone?: ToastTone;
   /** Optional retry handler — shown as a button beside the message. */
   onRetry?: () => void;
   /** Dismiss callback (called on tap-X or after auto-dismiss). */
@@ -32,6 +53,7 @@ export function Toast(props: ToastProps): JSX.Element {
   // A summary with several lines (a merge report) has to show all of them,
   // since a property conflict is the line the user most needs to read.
   const multiline = () => (props.message ?? "").includes("\n");
+  const success = () => props.tone === "success";
 
   createEffect(() => {
     if (timer !== undefined) {
@@ -90,8 +112,15 @@ export function Toast(props: ToastProps): JSX.Element {
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           onTouchCancel={onTouchEnd}
-          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 bg-(--color-outl-destructive)/95 px-4 py-2.5 text-(--color-outl-destructive-fg) shadow-[var(--shadow-capsule)] backdrop-blur-xl"
-          classList={{ "rounded-full": !multiline(), "rounded-3xl": multiline() }}
+          class="pointer-events-auto mx-4 flex max-w-md items-center gap-3 px-4 py-2.5 shadow-[var(--shadow-capsule)] backdrop-blur-xl"
+          classList={{
+            "rounded-full": !multiline(),
+            "rounded-3xl": multiline(),
+            "bg-(--color-outl-destructive)/95": !success(),
+            "text-(--color-outl-destructive-fg)": !success(),
+            "bg-(--color-outl-accent)/95": success(),
+            "text-(--color-outl-accent-fg)": success(),
+          }}
         >
           <svg
             width="18"
@@ -105,8 +134,20 @@ export function Toast(props: ToastProps): JSX.Element {
             class="shrink-0"
             aria-hidden="true"
           >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4M12 16h.01" />
+            {/* Colour is not the only carrier: at a glance the glyph is
+                what says "done" rather than "wrong", and it is the half
+                that survives a colourblind reader. */}
+            <Show
+              when={success()}
+              fallback={
+                <>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 8v4M12 16h.01" />
+                </>
+              }
+            >
+              <path d="M20 6L9 17l-5-5" />
+            </Show>
           </svg>
           <p
             class="flex-1 text-[14px] leading-snug"

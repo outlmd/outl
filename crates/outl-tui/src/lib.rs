@@ -30,6 +30,7 @@ mod icons;
 pub mod input;
 pub mod keymap;
 pub mod outline_ops;
+mod pending_page_action;
 pub mod runtime;
 pub mod state;
 pub mod theme;

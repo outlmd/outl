@@ -18,7 +18,8 @@
 //! nothing. Day-by-day navigation needs its own cursor state (which
 //! date is highlighted) — a follow-up patch.
 
-use crate::state::{App, PendingSidebarDelete, SidebarSection, View};
+use crate::pending_page_action::{PageAction, PendingPageAction};
+use crate::state::{App, SidebarSection, View};
 use anyhow::Result;
 use chrono::NaiveDate;
 use std::path::PathBuf;
@@ -144,7 +145,7 @@ impl App {
 
     /// `d` on a focused Pinned / Recent sidebar row: arm a one-shot
     /// "delete this page?" confirmation. The status line shows the
-    /// prompt; the next `y` / `Y` confirms via [`Self::sidebar_confirm_delete`],
+    /// prompt; the next `y` / `Y` confirms via [`Self::confirm_pending_page_action`],
     /// any other keystroke cancels (handled in `input::normal`).
     ///
     /// Calendar rows are a no-op — deleting a journal by accident from
@@ -222,7 +223,7 @@ impl App {
     }
 
     /// Resolve `slug` to its display title (workspace index, falling
-    /// back to the slug itself), stash a [`PendingSidebarDelete`], and
+    /// back to the slug itself), stash a [`PendingPageAction`], and
     /// surface the `y/n` prompt in the status line. Shared arm path
     /// for the sidebar `d` key and the `gd` chord so the two entry
     /// points never drift on title resolution or prompt wording.
@@ -234,27 +235,39 @@ impl App {
             .filter(|t| !t.trim().is_empty())
             .unwrap_or_else(|| slug.clone());
         self.status = format!("delete page '{title}'? y/n");
-        self.pending_sidebar_delete = Some(PendingSidebarDelete {
+        self.pending_page_action = Some(PendingPageAction {
             slug,
             title,
-            merge_into: None,
+            action: PageAction::Delete,
         });
     }
 
-    /// Resolve an armed `pending_sidebar_delete`: run the CRDT delete
-    /// via `outl_actions::page::delete`, drop the on-disk projection,
-    /// rebuild the index, navigate away if we just deleted the current
-    /// view, and announce the op to peers. Returns `Err` only on a
-    /// workspace / I/O failure the caller can't ignore.
-    pub(crate) fn sidebar_confirm_delete(&mut self) -> Result<()> {
-        let pending = self.pending_sidebar_delete.take();
+    /// Resolve an armed [`PendingPageAction`].
+    ///
+    /// Three gestures share the prompt and its `y/n` keys, so this is
+    /// the one fork between them: `/merge` goes to `confirm_page_merge`,
+    /// a `/rename` collision to `confirm_page_rename`, and the delete
+    /// falls through to the body below — the CRDT delete via
+    /// `outl_actions::page::delete`, the on-disk projection dropped, the
+    /// index rebuilt, the view moved off a page that was current, and
+    /// the op announced to peers.
+    ///
+    /// Returns `Err` only on a workspace / I/O failure the caller can't
+    /// ignore.
+    pub(crate) fn confirm_pending_page_action(&mut self) -> Result<()> {
+        let pending = self.pending_page_action.take();
         let Some(pending) = pending else {
             return Ok(());
         };
-        // `/merge` shares this prompt and its y/n keys; the action is the
-        // only difference (`actions/merge`).
-        if let Some(target) = pending.merge_into.as_deref() {
-            return self.confirm_page_merge(&pending.slug, target);
+        match pending.action {
+            PageAction::MergeInto { target } => {
+                return self.confirm_page_merge(&pending.slug, &target)
+            }
+            PageAction::RenameCollision {
+                new_slug,
+                new_title,
+            } => return self.confirm_page_rename(&pending.slug, &new_slug, &new_title),
+            PageAction::Delete => {}
         }
         let is_current = self.current_slug() == pending.slug;
 
