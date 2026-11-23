@@ -95,6 +95,22 @@ export function createBlockOps(deps: JournalBlockDeps) {
   }
 
   /**
+   * Resolve one of a block's handle spellings onto the OS clipboard.
+   * The write is best-effort (some webviews refuse
+   * `navigator.clipboard` outside a user-gesture chain); the backend's
+   * refusal still reaches the user through `withError`.
+   */
+  async function copyHandle(resolve: () => Promise<string>): Promise<void> {
+    const token = await deps.withError(resolve);
+    if (token === undefined) return;
+    try {
+      await navigator.clipboard?.writeText(token);
+    } catch {
+      // Best-effort: the handle is lost, the workspace is not.
+    }
+  }
+
+  /**
    * A named function rather than a method on the returned literal only
    * because `requestDelete` calls it directly.
    *
@@ -218,18 +234,10 @@ export function createBlockOps(deps: JournalBlockDeps) {
 
     /**
      * "Copy block ref" (long-press menu, issue #18) — resolve `id`'s
-     * `((blk-XXXXXX))` handle and put it on the OS clipboard, same
-     * best-effort posture as "Copy text" above (some webviews refuse
-     * `navigator.clipboard` outside a user-gesture chain).
+     * `((blk-XXXXXX))` handle and put it on the OS clipboard.
      */
     async copyBlockRef(id: string) {
-      const ref = await deps.withError(() => copyBlockRef(id));
-      if (ref === undefined) return;
-      try {
-        await navigator.clipboard?.writeText(ref);
-      } catch {
-        // Best-effort, same as "Copy text" / "Copy block" above.
-      }
+      await copyHandle(() => copyBlockRef(id));
     },
 
     /**
@@ -241,13 +249,7 @@ export function createBlockOps(deps: JournalBlockDeps) {
      * would be a second owner of the syntax.
      */
     async copyBlockEmbed(id: string) {
-      const embed = await deps.withError(() => copyBlockEmbed(id));
-      if (embed === undefined) return;
-      try {
-        await navigator.clipboard?.writeText(embed);
-      } catch {
-        // Best-effort, same as "Copy block ref" above.
-      }
+      await copyHandle(() => copyBlockEmbed(id));
     },
 
     /**
