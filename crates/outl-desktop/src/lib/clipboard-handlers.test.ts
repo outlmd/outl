@@ -23,7 +23,9 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("@outl/shared/api/commands", () => ({
+  copyBlockEmbed: vi.fn(),
   copyBlockMarkdown: vi.fn(),
+  copyBlockRef: vi.fn(),
   copyMarkdown: vi.fn(),
   createBlock: vi.fn(),
   deleteBlock: vi.fn(),

@@ -261,6 +261,7 @@ It is a page **reference**, not an inert token, so `mentions::collect` and `link
 | Intent | Use this | File |
 |---|---|---|
 | The `![[page]]` page embed — the page-level twin of `!((blk-…))`. `try_page_embed` precedes both other `!` openers in `match_one` (most specific wins) and `try_md_link`, or the `!` strands and the `[[name]]` behind it demotes to a plain ref. `inline_to_source` re-emits the literal, `plain_text` keeps the name, `ref_at_cursor` resolves it to `RefTarget::Page` / `Journal` with the caret anywhere in it | `outl_md::InlineTok::PageEmbed { name }` / owned `InlineToken::PageEmbed { value }` (serde `"pageembed"`); matcher `outl_md::reference::try_page_embed` | `crates/outl-md/src/reference.rs`, `crates/outl-md/src/token.rs` |
+| **Write** `((handle))` / `!((handle))`. Inverse of `try_block_ref` / `try_embed`, same file. Refuse a client that spells either with its own `format!` — that is how the `!` became optional in practice. Pass the handle the workspace index assigned, never a freshly derived one (collision expansion lengthens it; the short form resolves to a different block) | `outl_md::inline::block_ref_token`, `outl_md::inline::block_embed_token` | `crates/outl-md/src/reference.rs` |
 
 Frontend shared primitives (`@outl/shared`) — canonical home is the three `docs/frontend-shared-*.md` pages ([views](../../docs/frontend-shared-views.md), [wire](../../docs/frontend-shared-wire.md), [logic](../../docs/frontend-shared-logic.md)); the embed / block-ref pieces the desktop wires for issue #147:
 

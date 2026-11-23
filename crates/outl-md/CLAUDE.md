@@ -342,7 +342,7 @@ src/
 ├── inline.rs       # the scan: tokenize / tokenize_owned, match_one precedence, inline_to_source
 ├── token.rs        # InlineTok (Plain/Bold/.../BlockRef/Embed/Emoji), owned InlineToken, RefTarget
 ├── emphasis.rs     # `**`/`__`/`*`/`_`/`~~`/`==`/backtick matchers + the intra-word `_` rule
-├── reference.rs    # [[name]], ((blk-…)), !((blk-…)), #tag matchers + is_valid_block_handle
+├── reference.rs    # [[name]], ((blk-…)), !((blk-…)), #tag matchers + is_valid_block_handle + the two writers (block_ref_token / block_embed_token)
 ├── link.rs         # [text](url) / ![alt](url) matchers (try_md_link reused by cursor)
 ├── shortcode.rs    # :emoji: matcher — shape gate + emoji-catalog gate
 ├── plain.rs        # plain_text — flatten tokens to the prose a human reads

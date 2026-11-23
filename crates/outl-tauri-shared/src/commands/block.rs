@@ -523,15 +523,58 @@ pub fn copy_markdown<S: AppHost>(state: &S, block_ids: Vec<String>) -> Result<St
 /// and parses every `.md` + sidecar in the workspace, which is not work
 /// the IPC thread may do ([`crate::offload`]).
 pub async fn copy_block_ref<S: AppHost>(state: &S, id: String) -> Result<String, String> {
+    block_pointer(
+        state,
+        id,
+        "copy_block_ref",
+        outl_md::inline::block_ref_token,
+    )
+    .await
+}
+
+/// Produce the `!((blk-XXXXXX))` **embed** string for block `id` — the
+/// GUI counterpart of the TUI's `/refer-embed`.
+///
+/// Same handle and same refusal as [`copy_block_ref`]; the only
+/// difference is which of the two spellings `outl_md` writes, and that
+/// difference is the user's whole reason for picking one row over the
+/// other: a ref links to the block, an embed expands it where it is
+/// pasted.
+///
+/// Async for [`copy_block_ref`]'s reason — the shared index build.
+pub async fn copy_block_embed<S: AppHost>(state: &S, id: String) -> Result<String, String> {
+    block_pointer(
+        state,
+        id,
+        "copy_block_embed",
+        outl_md::inline::block_embed_token,
+    )
+    .await
+}
+
+/// Resolve `id`'s stable ref handle and spell it with `write`.
+///
+/// Both public commands are this function with a different writer, so
+/// the index build, the refusal and the "never derive the handle" rule
+/// have one home. Two copies would be two places for the next person to
+/// reach for `derive_ref_handle` — which produces the deterministic
+/// 6-char form, not the expanded one the index assigned on a collision,
+/// and therefore a token that resolves to a **different block**.
+async fn block_pointer<S: AppHost>(
+    state: &S,
+    id: String,
+    label: &'static str,
+    write: fn(&str) -> String,
+) -> Result<String, String> {
     let node = parse_node_id(&id)?;
     let root = state.storage_root()?;
-    crate::offload::run("copy_block_ref", move || {
+    crate::offload::run(label, move || {
         let index = WorkspaceIndex::build(&root);
         let entry = index
             .block_index()
             .get(node)
             .ok_or_else(|| "no ref handle yet — save and retry".to_string())?;
-        Ok(format!("(({}))", entry.ref_handle))
+        Ok(write(&entry.ref_handle))
     })
     .await
 }

@@ -274,6 +274,22 @@ A commit, a batch op, a quick capture into today, a timeline restore and a peer-
 
 Cross-client contract: [`client-editing.md` → Zoom / focus on a block](client-editing.md#zoom--focus-on-a-block-roamworkflowy).
 
+## Right-click a bullet — copy a block ref or an embed
+
+The bullet's left click is already taken (zoom on a neutral `•`, toggle the task state otherwise), so the menu rides the right button.
+It offers **Copy block ref** (`((blk-x))`, a link to the block) and **Copy block embed** (`!((blk-x))`, which expands the block inline where it is pasted) — the GUI's half of the TUI's `/refer` and `/refer-embed`, reachable without knowing a chord.
+Right-clicking also moves the selection cursor onto that block, because the rows act on it.
+It closes on Escape, on a click away, and once a row fires; the rows are reachable with Tab and the arrow keys, and nothing is focused on open so a menu summoned while another block is being edited does not blur that draft.
+
+Both labels are **mobile's**, not this client's invention.
+The long-press sheet already ships "Copy block ref"; one action with two labels looks like two actions, and the user has no way to tell which one they meant.
+
+**The menu is a list of rows, never a component per item** (`<BlockContextMenu />`, fed by `menuActions()` in `BlockRow.tsx`), so a new option is one entry in that array.
+Each row is conditional on its callback, and with none of them answered no menu opens at all — the webview's own menu is better than ours showing nothing.
+
+The copy itself is the same round-trip the chord takes, down to the clipboard write, so a row and a chord cannot drift.
+A block created this session and not yet projected to disk has no handle yet, and that refusal ("no ref handle yet — save and retry") reaches the status line instead of leaving the clipboard silently unchanged.
+
 ## Arrow keys walk between blocks in Insert mode
 
 The outline reads as one continuous document while a block is open for editing, so the arrows do not stop at the block's boundary:

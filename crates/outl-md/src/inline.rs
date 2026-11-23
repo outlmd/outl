@@ -43,6 +43,9 @@ use crate::shortcode::try_emoji;
 
 pub use crate::plain::plain_text;
 pub use crate::reference::is_valid_block_handle;
+/// The writers for the two block-pointing tokens, beside the validator
+/// that reads them back — one import path for the whole pair.
+pub use crate::reference::{block_embed_token, block_ref_token};
 pub use crate::token::{InlineTok, InlineToken, RefTarget};
 
 // Cursor introspection (`ref_at_cursor`, `link_at_cursor`,

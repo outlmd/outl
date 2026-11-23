@@ -30,6 +30,11 @@ The resolve lands a round-trip after the page is on screen and `setOutline` reco
 `block-suggest.ts` is one module because **only one popup is ever open at a time** is the invariant all of it rests on; detection and span replacement stay in `@outl/shared/autocomplete`.
 `CodeFenceView.tsx`'s `RichFenceFrame` iframe is sandboxed `allow-scripts`, never `allow-same-origin`.
 And `block-callbacks.ts` holds the `BlockCallbacks` interface alone, re-exported from `BlockRow.tsx` so `import { type BlockCallbacks } from "./BlockRow"` keeps resolving.
+`BlockContextMenu.tsx` is the one sibling that is not an extraction: it is the bullet's [right-click menu](desktop-ux.md#right-click-a-bullet--copy-a-block-ref-or-an-embed).
+It takes a **list of typed rows**, so a new option is one entry in `BlockRow.tsx`'s `menuActions()` rather than a change here.
+It is not `SuggestPopups.tsx`'s popup under another name.
+That one is caret-bound, renders inside the editor's wrapper, and is private for exactly that reason.
+What the two share is the floating-surface styling, copied literally so they read as the same material.
 
 Two things the split decided on purpose:
 

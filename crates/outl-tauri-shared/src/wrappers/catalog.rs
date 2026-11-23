@@ -191,6 +191,13 @@ macro_rules! block_commands {
             async fn copy_block_ref(id: String)
                 -> ::std::result::Result<String, String>
                 => $crate::commands::block::copy_block_ref;
+
+            /// The `!((block-embed))` spelling of the same handle —
+            /// the GUI's half of the TUI's `/refer-embed`. Same index
+            /// build, so async for the same reason.
+            async fn copy_block_embed(id: String)
+                -> ::std::result::Result<String, String>
+                => $crate::commands::block::copy_block_embed;
         }
     };
 }

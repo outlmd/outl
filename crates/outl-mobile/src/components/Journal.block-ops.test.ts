@@ -6,6 +6,7 @@ import type { BlockNode, PageView } from "@outl/shared/api/types";
 vi.mock("../lib/haptics", () => ({ haptic: vi.fn() }));
 
 const commands = vi.hoisted(() => ({
+  copyBlockEmbed: vi.fn(),
   copyBlockMarkdown: vi.fn(),
   copyBlockRef: vi.fn(),
   cutBlock: vi.fn(),
@@ -202,6 +203,80 @@ describe("clipboard", () => {
     await ops.cutBlock("blk-1");
 
     expect(state.clipboard).toBeNull();
+  });
+});
+
+/**
+ * `copyBlockRef` and `copyBlockEmbed` are the only two ops here that
+ * touch neither the workspace nor the in-app block clipboard — they
+ * write one handle to the OS clipboard and stop. What is worth pinning
+ * is which command each asks and that a refusal writes nothing: the
+ * backend rejects a block with no sidecar entry yet, and a client that
+ * swallowed that would hand the user a stale paste.
+ */
+describe("ref / embed handles", () => {
+  let written: string[];
+
+  beforeEach(() => {
+    written = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+
+  it("writes the embed handle the backend built, `!` included", async () => {
+    const { ops } = harness();
+    commands.copyBlockEmbed.mockResolvedValue("!((blk-abc123))");
+
+    await ops.copyBlockEmbed("blk-1");
+
+    expect(commands.copyBlockEmbed).toHaveBeenCalledWith("blk-1");
+    // The `!` comes from Rust. A client that prefixed `copyBlockRef`'s
+    // result would be a second owner of the syntax.
+    expect(commands.copyBlockRef).not.toHaveBeenCalled();
+    expect(written).toEqual(["!((blk-abc123))"]);
+  });
+
+  it("asks a different command than the ref row does", async () => {
+    const { ops } = harness();
+    commands.copyBlockRef.mockResolvedValue("((blk-abc123))");
+
+    await ops.copyBlockRef("blk-1");
+
+    expect(written).toEqual(["((blk-abc123))"]);
+    expect(commands.copyBlockEmbed).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the block has no handle yet", async () => {
+    const { ops } = harness();
+    commands.copyBlockEmbed.mockRejectedValue(
+      new Error("no ref handle yet — save and retry"),
+    );
+
+    await ops.copyBlockEmbed("blk-1");
+
+    expect(written).toEqual([]);
+  });
+
+  it("survives a webview that refuses the clipboard outside a gesture", async () => {
+    const { ops } = harness();
+    commands.copyBlockEmbed.mockResolvedValue("!((blk-abc123))");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new Error("NotAllowedError")),
+      },
+    });
+
+    // Best-effort, exactly as "Copy block ref" is: the row must not
+    // throw into the menu's `queueMicrotask`, which has no catch.
+    await expect(ops.copyBlockEmbed("blk-1")).resolves.toBeUndefined();
   });
 });
 

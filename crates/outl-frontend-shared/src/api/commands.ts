@@ -421,6 +421,21 @@ export function copyBlockRef(id: string): Promise<string> {
 }
 
 /**
+ * The same handle as {@link copyBlockRef}, spelled `!((blk-XXXXXX))`
+ * so a reader expands the block inline instead of linking to it — the
+ * GUI's half of the TUI's `/refer-embed`.
+ *
+ * The `!` is added in Rust, by `outl_md::inline::block_embed_token`,
+ * and deliberately not here: a client that built the embed by
+ * prefixing {@link copyBlockRef}'s result would be a second owner of
+ * the syntax, and the one that drifts is the one nobody re-reads.
+ * Same refusal as the ref when the block has no sidecar entry yet.
+ */
+export function copyBlockEmbed(id: string): Promise<string> {
+  return invoke<string>("copy_block_embed", { id });
+}
+
+/**
  * Flip a page's `pinned:: true` property (issue #254's `TogglePin`).
  * Refuses journal pages (`CannotPinJournal`) — a journal auto-rotates
  * daily and would dilute a pinned-pages list with date-shaped junk.

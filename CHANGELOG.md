@@ -7,6 +7,35 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **The block's bullet is a menu now, and "Copy block ref" / "Copy block embed" are its first two rows.**
+  Pointing at a block and asking for its handle had three different answers.
+  The TUI had `y r` and `/refer`, and `/refer-embed` beside it.
+  The phone had one row in the long-press sheet.
+  The desktop had nothing, and said so: "Copying a block ref isn't on the desktop yet — open the block's properties, or copy the handle from the TUI with `y r`."
+
+  Right-click the bullet on the desktop, hold it on the phone, and both rows are there.
+  `((blk-XXXXXX))` links to the block; `!((blk-XXXXXX))` expands it where you paste it.
+  All three clients read the handle off the workspace index and none of them re-derive it, because collision expansion lengthens the stored handle and the short form would resolve to a different block.
+
+  **The menu takes a list of rows, not a component per item.**
+  That is the whole point of putting it on the bullet rather than wiring two buttons: the next option is one entry in the array `<BlockRow />` builds, and nothing in `<BlockContextMenu />` changes.
+  Each row is conditional on its callback, so a host that cannot answer one draws one row fewer rather than a row that does nothing — and with none of them answered the menu does not open at all and the webview's own menu is left alone.
+
+  **`/refer-embed` had no `Action`, and that is why it could not be ported.**
+  It was the one TUI built-in whose `name()` was a bare string literal instead of asking `command_name`, so it had no row in `outl_shortcuts::support`, no verdict from any client, and no line in `docs/client-parity.md`.
+  Invariant 12 names that state exactly: a capability without a per-client verdict is a gap nobody recorded.
+  It has `Action::CopyBlockEmbed` now, which cost nothing in `defaults.rs` — an `Action` without a chord is legal, and `y r` already has the ref.
+
+  **The embed spelling had no owner outside the TUI.**
+  Three call sites wrote `format!("(({h}))")` by hand and nothing outside `outl-tui` had ever written the `!` form.
+  `outl_md::inline::block_ref_token` / `block_embed_token` are the writers now, sitting beside the readers that parse them back, so a client that prefixed its own `!` would be a second owner of the syntax.
+
+  **Holding the bullet on the phone used to do two things.**
+  The bullet and the checkbox `stopPropagation` unconditionally, so the row's click handler — the one that swallows the click a completed long press produces — never saw theirs.
+  Without a second reader of that flag, a hold on the bullet opened the menu and zoomed on the way out.
+
+  A block the sidecar has not seen yet answers "no ref handle yet — save and retry", and the refusal reaches the status line with nothing written to the clipboard.
+
 - **Rename a page from its title, on every client, and fold it into the page that already owns the name.**
   The rename itself has worked since [RFC 0557](docs/rfcs/0557-page-merge-and-rename.md): two `SetProp`s, every `[[old]]` and `#old` in the workspace respelled in the same batch, and a name another page owns answered as a question rather than a refusal.
   What was missing was the door.

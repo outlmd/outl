@@ -151,6 +151,7 @@ mod catalog_name_tests {
         ("pin", Action::TogglePin),
         ("run", Action::RunCodeBlock),
         ("refer", Action::CopyBlockRef),
+        ("refer-embed", Action::CopyBlockEmbed),
     ];
 
     /// A user who learned `/today` here types it on the desktop and

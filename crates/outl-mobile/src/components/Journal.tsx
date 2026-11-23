@@ -1730,6 +1730,7 @@ export function Journal() {
             pasteBlock: (id) => void blockOps.pasteBlock(id),
             cutBlock: (id) => void blockOps.cutBlock(id),
             copyBlockRef: (id) => void blockOps.copyBlockRef(id),
+            copyBlockEmbed: (id) => void blockOps.copyBlockEmbed(id),
             newBlockAbove: (id) => void newBlock.createBefore(id),
             selectBlocks: (id) => void selectionOps.selectBlocks(id),
             reselectSelection: () => selectionOps.reselectLast(),

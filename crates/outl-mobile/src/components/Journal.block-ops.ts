@@ -23,6 +23,7 @@
 
 import type { PageView } from "@outl/shared/api/types";
 import {
+  copyBlockEmbed,
   copyBlockMarkdown,
   copyBlockRef,
   cutBlock,
@@ -228,6 +229,24 @@ export function createBlockOps(deps: JournalBlockDeps) {
         await navigator.clipboard?.writeText(ref);
       } catch {
         // Best-effort, same as "Copy text" / "Copy block" above.
+      }
+    },
+
+    /**
+     * "Copy block embed" (long-press menu, issue #18) — the same handle
+     * as `copyBlockRef` above, spelled `!((blk-XXXXXX))` so a reader
+     * expands the block inline instead of linking to it. The `!` is
+     * added in Rust (`outl_md::inline::block_embed_token`), never by
+     * prefixing the ref here: a client that built the embed itself
+     * would be a second owner of the syntax.
+     */
+    async copyBlockEmbed(id: string) {
+      const embed = await deps.withError(() => copyBlockEmbed(id));
+      if (embed === undefined) return;
+      try {
+        await navigator.clipboard?.writeText(embed);
+      } catch {
+        // Best-effort, same as "Copy block ref" above.
       }
     },
 

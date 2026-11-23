@@ -120,6 +120,13 @@ export function BlockBody(props: {
    */
   function pressedInteractive(e: PointerEvent): boolean {
     const target = e.target as HTMLElement | null;
+    // The bullet is a `<button>`, so the selector below used to bail on
+    // it and a hold that started there armed nothing — the menu was
+    // reachable only from the row's text. Exempting that one control is
+    // narrower than loosening the selector: a ref, a tag, a link,
+    // inline code, the fold triangle and the textarea all still handle
+    // their own touch, and a hold on any of them still opens nothing.
+    if (target?.closest("[data-block-bullet]")) return false;
     return !!target?.closest("a,button,[role='button'],code,textarea,input");
   }
 
@@ -135,6 +142,22 @@ export function BlockBody(props: {
     disabled: () => props.selectionMode ?? false,
   });
   let skipGesture = false;
+
+  /**
+   * Wrap a bullet tap so a completed hold doesn't also fire it.
+   *
+   * The row's `onClick` already swallows the click a long press
+   * produces, but the bullet and the checkbox `stopPropagation`
+   * unconditionally, so that handler never sees theirs. Without this,
+   * holding the bullet opened the menu *and* zoomed (or marked TODO) on
+   * the way out. Reading the flag here is what keeps exactly one reader
+   * per gesture: the row's handler for a press on the text, this one
+   * for a press on the bullet.
+   */
+  const bulletTap = (run: () => void) => () => {
+    if (longPress.consumedClick()) return;
+    run();
+  };
 
   function onPointerDown(e: PointerEvent) {
     skipGesture = props.editing || pressedInteractive(e);
@@ -240,21 +263,28 @@ export function BlockBody(props: {
         const bullet = (
           <BulletOrCheckbox
             todo={props.editing ? null : props.block.todo}
-            onToggle={() => {
+            onToggle={bulletTap(() => {
               if (props.selectionMode) {
                 props.onSelectTap?.();
                 return;
               }
               props.onToggleTodo();
-            }}
+            })}
             // In selection mode the bullet always extends the range —
             // routed through `onFocus` so `<BulletOrCheckbox>` takes
             // that branch regardless of whether zoom (`onFocusBlock`)
-            // is wired for this row.
+            // is wired for this row. The ternary stays a ternary rather
+            // than collapsing into `bulletTap`: whether this prop is
+            // `undefined` is what decides the dot's aria-label and
+            // which branch it takes, so a wrapper handed over an unset
+            // `onFocusBlock` would silently turn "Mark as TODO" into
+            // "Zoom into block".
             onFocus={
               props.selectionMode
                 ? () => props.onSelectTap?.()
                 : props.onFocusBlock
+                  ? bulletTap(() => props.onFocusBlock?.())
+                  : undefined
             }
           />
         );

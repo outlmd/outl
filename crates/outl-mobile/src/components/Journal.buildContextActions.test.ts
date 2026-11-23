@@ -68,6 +68,7 @@ function handlers() {
     pasteBlock: vi.fn(),
     cutBlock: vi.fn(),
     copyBlockRef: vi.fn(),
+    copyBlockEmbed: vi.fn(),
     newBlockAbove: vi.fn(),
     attachFile: vi.fn(),
     selectBlocks: vi.fn(),
@@ -156,6 +157,45 @@ describe("buildContextActions — cut / ref / new-above (RFC 0254 phase 4b)", ()
     ref!.onSelect();
     expect(h.copyBlockRef).toHaveBeenCalledWith(BLOCK_ID);
     expect(h.copy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The embed is the ref's twin, not a variant of it: same handle,
+   * different spelling, different thing on the page it lands on. The
+   * two rows therefore sit together, and the pin that matters is the
+   * adjacency — a third row wandering between them is how a user comes
+   * to tap the wrong one by muscle memory.
+   */
+  it("offers Copy block embed directly after Copy block ref", () => {
+    const rows = ids(buildContextActions(BLOCK_ID, pageView([block()]), handlers()));
+    const ref = rows.indexOf("copyBlockRef");
+    expect(ref).toBeGreaterThanOrEqual(0);
+    expect(rows[ref + 1]).toBe("copyBlockEmbed");
+  });
+
+  it("Copy block embed dispatches to copyBlockEmbed alone", () => {
+    const h = handlers();
+    const actions = buildContextActions(BLOCK_ID, pageView([block()]), h);
+    const embed = actions.find((a) => a.id === "copyBlockEmbed")!;
+    embed.onSelect();
+    expect(h.copyBlockEmbed).toHaveBeenCalledWith(BLOCK_ID);
+    // `!((blk-…))` is not "the ref, plus a character" on this side
+    // either: the row that writes it calls its own command.
+    expect(h.copyBlockRef).not.toHaveBeenCalled();
+    expect(h.copy).not.toHaveBeenCalled();
+  });
+
+  it("draws the embed row with its own glyph, and arms no keyboard", () => {
+    const actions = buildContextActions(BLOCK_ID, pageView([block()]), handlers());
+    const embed = actions.find((a) => a.id === "copyBlockEmbed")!;
+    const ref = actions.find((a) => a.id === "copyBlockRef")!;
+    // Two rows that do different things to the paste cannot look the
+    // same — the sheet shows a glyph and a label, nothing else.
+    expect(embed.iconPath).not.toBe(ref.iconPath);
+    expect(embed.label).toBe("Copy block embed");
+    // Nothing is typed after a clipboard write, so raising the
+    // keyboard would put it over a sheet that is closing.
+    expect(embed.armsKeyboard).toBeUndefined();
   });
 
   it("always offers New block above, dispatching to newBlockAbove", () => {
