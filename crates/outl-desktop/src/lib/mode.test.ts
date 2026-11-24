@@ -81,6 +81,21 @@ describe("isEditing", () => {
     expect(isEditing()).toBe(true);
   });
 
+  it("is true while a descendant row's editor is mounted, and only that copy", () => {
+    const parent = row("blk-a");
+    parent.source_block.children = [block("kid")];
+    setAppState({
+      backlinks: [parent],
+      editingBacklink: { pageId: "pg-source", blockId: "kid", key: "blk-a>kid" },
+    });
+    expect(isEditing()).toBe(true);
+
+    // A refetch that drops the child unmounts its editor, so the guard
+    // lets go: reading `blockId` alone would hold it for the session.
+    setAppState("backlinks", [row("blk-a")]);
+    expect(isEditing()).toBe(false);
+  });
+
   it("is false once the edited row leaves the list", () => {
     setAppState({
       backlinks: [row("blk-b")],

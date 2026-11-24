@@ -177,6 +177,38 @@ Three smaller items were left for reasons that are **not** this one, recorded so
 - **The undo snapshot of a page the user is not looking at** (~22 ms).
   `commit_page` does this for every commit, so invariant 11 applies: the in-page path pays it too and it is not this design's cost.
 
+## A citing block's children, carried by the backlinks index
+
+The "Linked from" panel draws each citing block's subtree (four levels), so the from-disk index now keeps it.
+It is a side table of `Arc<[OutlineNode]>` beside each entry, and a lookup still clones a leaf: the deep copy happens once per direct hit after the locks drop.
+Cost on the maintainer's graph (3,456 pages, release build, a copy of the `.md` and `.outl` files, `crates/outl-actions/tests/bench_backlinks_subtree.rs`):
+
+| | before | after |
+| --- | --- | --- |
+| `build_backlink_index_from_disk` | 1.11 s | 1.15 s |
+| resident memory after the build | +84 MB | +133 MB (+49 MB) |
+| lookup under the workspace lock (`buser`, 853 direct + 3,702 namespaced) | 5.4 ms | 5.4 ms (same code) |
+| fetching the 853 subtree `Arc`s, still under the lock | n/a | 62 µs |
+| deep copy of 615 subtrees (3,572 nodes), after the locks drop | n/a | 1.2 ms |
+| `page_backlinks` payload for `buser` | 753 KB | 2,486 KB |
+
+The build time did not move, because the parse already held the tree and only threw the children away.
+The price is memory (+49 MB, about 58% on top of the index) and a payload 3.3x larger for the busiest page.
+
+**What bounds the payload.**
+`shape_reply` spends `SUBTREE_NODE_BUDGET` (2,000 nodes) per reply, counting each subtree's nodes before the deep copy and in display order, after the sort.
+The first hit whose subtree does not fit closes the budget, so the rows from the top keep their children and every row below ships shallow, exactly as before this feature.
+The measured 2,486 KB is about 0.5 KB per subtree node, so the busiest page lands near 1.7 MB (derived from that rate, not re-measured), and a page whose citing blocks have a handful of children each is unaffected.
+The panel refetches on every peer reload and cross-page commit, which is why the reply, not the first open, is what is bounded.
+What remains: a row past the budget shows no children and no "+N" indicator, because that needs a new wire field (pins in `wire_types.rs`, three clients).
+A first hit larger than the whole budget starves the rows below it.
+Nothing here is measured on a device, only on the desktop build.
+
+**The old index is freed off the commit path.**
+Dropping a `BacklinkIndex` is a free of every small `OutlineNode` and `Arc` allocation in it (the +49 MB above).
+`invalidate_backlink_index` and the page merge/rename tail used to do that while the workspace lock was held.
+They now take the value out of the slot and drop it on a throwaway thread (`commit::discard_slot`), after the slot's guard is released.
+
 ## The checklist
 
 Before merging anything on a hot path — a sync exchange, a boot phase, a command the frontend polls, a render:

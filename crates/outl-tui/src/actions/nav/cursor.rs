@@ -20,14 +20,13 @@ impl App {
                     .map(|n| n.text.clone())
                     .unwrap_or_default()
             }
-            Focus::Backlink { idx } => {
+            Focus::Backlink { idx, node } => {
                 let backlinks = self.backlinks_for_current();
-                // The citing block itself — the cursor names nothing
-                // below it (see `Focus`), and a stale `idx` names
-                // nothing at all.
+                // The citing block, or the descendant `node` names in
+                // its subtree; a stale `idx` names nothing at all.
                 backlinks
                     .get(*idx)
-                    .map(|bl| bl.source_block.text.clone())
+                    .map(|bl| self.backlink_text_of(bl, *node))
                     .unwrap_or_default()
             }
         }

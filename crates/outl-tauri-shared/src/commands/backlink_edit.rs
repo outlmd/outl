@@ -26,8 +26,8 @@ use outl_actions::refusal::{
     ahead_of_log_notice, stale_backlink_block_refusal, stale_backlink_block_unchanged_refusal,
 };
 use outl_actions::{
-    create_after, create_before, delete, edit_text, indent, is_live, mark_done, move_down, move_up,
-    outdent, toggle_todo, ActionError, CrossPageWrite,
+    create_after, create_before, delete, edit_text, enclosing_page_id, indent, is_live, mark_done,
+    move_down, move_up, outdent, toggle_todo, ActionError, CrossPageWrite,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
@@ -101,7 +101,7 @@ pub fn edit_backlink_block<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
-    refuse_a_dead_row(state, node, stale_backlink_block_refusal)?;
+    refuse_a_dead_row(state, page, node, stale_backlink_block_refusal)?;
     let root = state.storage_root()?;
     let outcome = with_ws(state, |ws| {
         Ok(reproject_stale_md(ws, &root, page, "edit_backlink_block"))
@@ -295,7 +295,7 @@ pub fn backlink_row_op<S: AppHost>(
 ) -> Result<PageView, String> {
     let page = parse_node_id(&page_id)?;
     let node = parse_node_id(&id)?;
-    refuse_a_dead_row(state, node, stale_backlink_block_unchanged_refusal)?;
+    refuse_a_dead_row(state, page, node, stale_backlink_block_unchanged_refusal)?;
     if op.shape().computed_from_the_logged_text() {
         let root = state.storage_root()?;
         let outcome = with_ws(state, |ws| {
@@ -314,7 +314,7 @@ pub fn backlink_row_op<S: AppHost>(
     // state the gesture actually landed on.
     let mut refused = None;
     finish_in_page_with_refresh(state, page, BacklinkRefresh::DropAll, |ws| {
-        if let Some(words) = stale_row_block(ws, node) {
+        if let Some(words) = stale_row_block(ws, page, node) {
             refused = Some(words);
             return Err(ActionError::NotInTree(node.to_string()));
         }
@@ -374,7 +374,7 @@ pub fn create_backlink_sibling<S: AppHost>(
         // `"block 01M7… is not in the tree"` — a ULID and an
         // implementation noun, which is the state the eight chords
         // shipped in.
-        if let Some(words) = stale_row_block(ws, node) {
+        if let Some(words) = stale_row_block(ws, page, node) {
             refused = Some(words);
             return Err(ActionError::NotInTree(node.to_string()));
         }
@@ -406,17 +406,32 @@ pub fn create_backlink_sibling<S: AppHost>(
 /// `block::ensure_live`: a node the tree never held, **or** one sitting
 /// under the trash (a peer's delete is an `Op::Move`, so the record
 /// survives and `contains` still answers yes — root `CLAUDE.md`
-/// invariant 6).
+/// invariant 6) — **and** the block must still live under the row's
+/// page, because a child row names a block a peer can move to another
+/// page without deleting it.
 ///
 /// Asked, not re-derived. The pair used to be spelled out inline here,
 /// because `ensure_live` was private to `outl-actions`, and the TUI had
 /// a third copy — so what "live" means could have come apart between
 /// the guard behind the actions and the two gates in front of them.
-fn stale_row_block(workspace: &Workspace, node: NodeId) -> Option<&'static str> {
-    if is_live(workspace, node) {
+fn stale_row_block(workspace: &Workspace, page: NodeId, node: NodeId) -> Option<&'static str> {
+    if row_is_live_on(workspace, page, node) {
         return None;
     }
     Some(stale_backlink_block_unchanged_refusal(workspace, node))
+}
+
+/// Whether `node` is live **and still under `page`**.
+///
+/// A row carries `(page_id, block_id)` from the moment the index was
+/// built. A peer's edit or a cross-page move can put the block on
+/// another page afterwards, and a commit scoped to `page` (undo
+/// snapshot, projection) would then land on the wrong one. The page
+/// walk is [`outl_actions::enclosing_page_id`], an `O(depth)` climb up
+/// parent pointers with no workspace scan; a block moved elsewhere gets
+/// the "could not be found" sentence, because from this row it is.
+fn row_is_live_on(workspace: &Workspace, page: NodeId, node: NodeId) -> bool {
+    is_live(workspace, node) && enclosing_page_id(workspace, node) == Some(page)
 }
 
 /// The same verdict, asked **before** the command touches the disk.
@@ -427,7 +442,8 @@ fn stale_row_block(workspace: &Workspace, node: NodeId) -> Option<&'static str> 
 /// ran [`reproject_stale_md`] *first* and asked about the row's block
 /// only inside the commit closure. That call does not merely read: on a
 /// page whose `.md` is **merely stale** it refreshes it, so a gesture
-/// aimed at a block a peer had already deleted rewrote a file on a page
+/// aimed at a block a peer had already deleted (or moved off the
+/// row's page) rewrote a file on a page
 /// the user was not looking at and then refused. The TUI asks in the
 /// other order and documents why —
 /// *"a chord aimed at a block that is gone should not touch the disk at
@@ -463,11 +479,12 @@ fn stale_row_block(workspace: &Workspace, node: NodeId) -> Option<&'static str> 
 /// a draft behind it. Both sentences are the catalog's either way.
 fn refuse_a_dead_row<S: AppHost>(
     state: &S,
+    page: NodeId,
     node: NodeId,
     wording: fn(&Workspace, NodeId) -> &'static str,
 ) -> Result<(), String> {
     match with_ws(state, |ws| {
-        Ok((!is_live(ws, node)).then(|| wording(ws, node)))
+        Ok((!row_is_live_on(ws, page, node)).then(|| wording(ws, node)))
     })? {
         Some(words) => Err(words.to_string()),
         None => Ok(()),

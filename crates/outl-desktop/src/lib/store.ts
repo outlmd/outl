@@ -150,7 +150,7 @@ export interface AppStateShape {
    * each writer has to remember. `pageId` is the **source** page, never
    * `appState.page`.
    */
-  editingBacklink: { pageId: string; blockId: string } | null;
+  editingBacklink: { pageId: string; blockId: string; key?: string } | null;
   /** Editor mode. `edit` while a block's textarea is mounted. */
   mode: Mode;
   /**

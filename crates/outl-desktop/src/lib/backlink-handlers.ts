@@ -28,7 +28,8 @@
  *   `outl_actions::refusal`'s words. `editBacklinkBlock` is the tenth
  *   and oldest member of that family.
  * - **Which `(page, block)` pair a row addresses** is
- *   `backlinkEditTarget`, shared with mobile.
+ *   `backlinkEditTargetFor`, shared with mobile; the row itself is found
+ *   by `BacklinkRow.key`, never by block id.
  * - **What a cross-page reply may touch** is `backlinkCommitPlan`. The
  *   reply describes the *source* page, so it reaches the screen only when
  *   that page is the one on screen — which a page citing itself makes
@@ -40,10 +41,11 @@
  *   `Alt+↑` or `Tab` is a commit, so the count is `trackBacklinks`'s to
  *   keep (`lib/backlinks-fetch.ts`), not this module's to remember.
  *
- * **Nothing here nudges.** Indent, outdent and move have no visible
- * result on a flat backlink row — its siblings and children are not
- * drawn and the effect lands on a page the user is not looking at — and
- * shipping them anyway is a recorded decision
+ * **Nothing here nudges.** A citing block's own siblings are not drawn,
+ * so indent / outdent / move on one lands on a page the user is not
+ * looking at; on a **descendant** shown under it the refetch redraws the
+ * subtree, so the result is visible. Shipping them for both is a recorded
+ * decision
  * (`docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`),
  * which is why `Capability::BacklinkInlineEdit` reads `Full` here and on
  * mobile. The TUI is `Partial` on that row for a gap this client does
@@ -62,11 +64,21 @@ import {
   backlinkCommitPlan,
   backlinkCreatedElsewhere,
   type BacklinkEditTarget,
-  backlinkEditTarget,
+  backlinkEditTargetFor,
 } from "@outl/shared/backlink-edit";
-import type { Backlink, PageMeta, PageView } from "@outl/shared/api/types";
+import type {
+  Backlink,
+  BlockNode,
+  PageMeta,
+  PageView,
+} from "@outl/shared/api/types";
 
-import { backlinkCursor, startBacklinkEdit } from "./cursor-region";
+import {
+  backlinkCursor,
+  backlinkRowByKey,
+  backlinkRowIds,
+  startBacklinkEdit,
+} from "./cursor-region";
 import { type HandlerCtx } from "./handler-context";
 import { trackBacklinks } from "./backlinks-fetch";
 import { appState, setAppState } from "./store";
@@ -124,7 +136,10 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
   /** Install what the reply is allowed to touch, and re-ask for the rows
    *  the mutation may have changed. Hands the plan back because creating
    *  a sibling needs to know whether the new block is on screen. */
-  function settle(sourcePageId: string, view: PageView): BacklinkCommitPlan {
+  function settle(
+    sourcePageId: string,
+    view: PageView,
+  ): { plan: BacklinkCommitPlan; refetched: Promise<void> } {
     const plan = backlinkCommitPlan({
       sourcePageId,
       openPageId: appState.page?.id,
@@ -140,26 +155,58 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
     // into one scan in flight plus one queued. Naming no page is the
     // other half — by the time this runs, the page the user is on is
     // the only one that can be asked about.
-    if (plan.refetchBacklinks) void trackBacklinks();
-    return plan;
+    const refetched = plan.refetchBacklinks
+      ? trackBacklinks()
+      : Promise.resolve();
+    return { plan, refetched };
   }
 
-  /** Where the cursor goes once `blockId`'s row leaves the list: the row
+  /** Where the cursor goes once the row `key` leaves the list: the row
    *  above, else the one below, else nowhere. Read **before** the
    *  mutation, since the refetch is what drops the row.
    *
-   *  A cursor left on a vanished id answers no keystroke — `SelectionUp`
-   *  / `SelectionDown` look it up by `indexOf` and stay put on `-1`, so
-   *  the section would hold the keyboard with nothing to move. `null`
-   *  releases it instead: with neither cursor set, `j` enters the
-   *  outline at the top. */
-  function neighbourRow(blockId: string): string | null {
-    const ids = appState.backlinks.map((b) => b.block_id);
-    const idx = ids.indexOf(blockId);
-    if (idx < 0) return null;
-    const above = idx > 0 ? ids[idx - 1] : undefined;
-    const below = idx + 1 < ids.length ? ids[idx + 1] : undefined;
+   *  Skips every row the delete takes with it: the block's own subtree,
+   *  and any *other* drawn copy of a block in it (a descendant that also
+   *  cites the page is its own row, so deleting its ancestor drops that
+   *  row too). A key is a path of block ids, so a row is gone when any
+   *  segment names a deleted block.
+   *
+   *  A cursor left on a vanished key answers no keystroke —
+   *  `SelectionUp` / `SelectionDown` look it up by `indexOf` and stay put
+   *  on `-1`, so the section would hold the keyboard with nothing to
+   *  move. `null` releases it instead: with neither cursor set, `j`
+   *  enters the outline at the top. */
+  function neighbourRow(key: string): string | null {
+    const ids = backlinkRowIds();
+    const idx = ids.indexOf(key);
+    const doomed = backlinkRowByKey(key);
+    if (idx < 0 || !doomed) return null;
+    const gone = new Set<string>();
+    const collect = (n: BlockNode) => {
+      gone.add(n.id);
+      n.children.forEach(collect);
+    };
+    collect(doomed.node);
+    const survives = (k: string) => !k.split(">").some((id) => gone.has(id));
+    const above = ids.slice(0, idx).reverse().find(survives);
+    const below = ids.slice(idx + 1).find(survives);
     return above ?? below ?? null;
+  }
+
+  /** A row key is the path of ids down to the block, so an indent or an
+   *  outdent changes the key of the block the cursor is on. Once the
+   *  rows are back, point the cursor at the block again: left on the old
+   *  key it names nothing, which answers no keystroke (see
+   *  `neighbourRow`) and reads as the highlight vanishing.
+   *
+   *  Only when the cursor is still where the chord started: a user who
+   *  moved on while the scan ran keeps where they went. */
+  function followBlock(key: string, blockId: string): void {
+    if (appState.selectedBacklinkBlockId !== key) return;
+    const ids = backlinkRowIds();
+    if (ids.includes(key)) return;
+    const moved = ids.find((k) => backlinkRowByKey(k)?.node.id === blockId);
+    if (moved) setAppState("selectedBacklinkBlockId", moved);
   }
 
   /** Resolve the focused row, surfacing the refusal on the way. **The one
@@ -170,15 +217,24 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
   function resolveRow():
     | { kind: "outline" }
     | { kind: "refused" }
-    | { kind: "row"; link: Backlink; page: PageMeta; target: BacklinkEditTarget } {
-    const blockId = backlinkCursor();
-    if (blockId === null) return { kind: "outline" };
-    const link = appState.backlinks.find((b) => b.block_id === blockId);
-    if (!link) {
+    | {
+        kind: "row";
+        key: string;
+        link: Backlink;
+        node: BlockNode;
+        depth: number;
+        page: PageMeta;
+        target: BacklinkEditTarget;
+      } {
+    const key = backlinkCursor();
+    if (key === null) return { kind: "outline" };
+    const found = backlinkRowByKey(key);
+    if (!found) {
       deps.setError(ROW_GONE);
       return { kind: "refused" };
     }
-    const target = backlinkEditTarget(link);
+    const { link, node, depth } = found;
+    const target = backlinkEditTargetFor(link, node);
     // `target` is the verdict; `page` is the same fact narrowed, so the
     // row can carry a title no caller has to re-check for null. The
     // policy stays `backlinkEditTarget`'s — if it ever stops keying on
@@ -188,13 +244,18 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
       deps.setError(ORPHAN);
       return { kind: "refused" };
     }
-    return { kind: "row", link, page, target };
+    return { kind: "row", key, link, node, depth, page, target };
   }
 
   /** Hand the focused row to `act`, or report that there is no row here
    *  for the caller to fall through on. */
   async function onRow(
-    act: (row: { target: BacklinkEditTarget; page: PageMeta }) => Promise<void>,
+    act: (row: {
+      key: string;
+      depth: number;
+      target: BacklinkEditTarget;
+      page: PageMeta;
+    }) => Promise<void>,
   ): Promise<boolean> {
     const row = resolveRow();
     if (row.kind === "outline") return false;
@@ -206,21 +267,26 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
     enterInsert: () => {
       const row = resolveRow();
       if (row.kind === "outline") return false;
-      if (row.kind === "row") startBacklinkEdit(row.target);
+      if (row.kind === "row") startBacklinkEdit(row.target, row.key);
       return true;
     },
 
     run: (op) =>
-      onRow(async ({ target }) => {
+      onRow(async ({ key, target }) => {
         const view = await safeCall(
           backlinkRowOp(target.pageId, target.blockId, op),
         );
-        if (view) settle(target.pageId, view);
+        if (!view) return;
+        const { refetched } = settle(target.pageId, view);
+        // Not awaited: the chord returns now and the scan keeps its
+        // fire-and-forget contract (`settle`), so a held key is never
+        // queued behind a scan. The cursor follows when the rows land.
+        void refetched.then(() => followBlock(key, target.blockId));
       }),
 
     del: () =>
-      onRow(async ({ target }) => {
-        const next = neighbourRow(target.blockId);
+      onRow(async ({ key, target }) => {
+        const next = neighbourRow(key);
         const view = await safeCall(
           backlinkRowOp(target.pageId, target.blockId, "delete"),
         );
@@ -230,12 +296,13 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
       }),
 
     createSibling: (side) =>
-      onRow(async ({ target, page }) => {
+      onRow(async ({ depth, target, page }) => {
         const reply = await safeCall(
           createBacklinkSibling(target.pageId, target.blockId, side),
         );
         if (!reply) return;
-        if (settle(target.pageId, reply.view).applyView) {
+        const { plan, refetched } = settle(target.pageId, reply.view);
+        if (plan.applyView) {
           // The source page *is* the page on screen, so the new block is
           // in the outline the user is reading: do what `o` does there,
           // and say nothing — `backlinkCreatedElsewhere` is `null` here too.
@@ -246,7 +313,29 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
           });
           return;
         }
-        const notice = backlinkCreatedElsewhere(page, side, appState.page?.id);
+        // A sibling of a **shown descendant** is itself inside the drawn
+        // subtree, so once the refetch lands it has a row: park Insert
+        // there, as `o` does in the outline. One that is not on screen
+        // (a sibling of a citing block, which cites nothing) falls
+        // through to the catalog's sentence, which is `null` for a
+        // descendant row (`depth`) and owns that decision.
+        await refetched;
+        const created = backlinkRowIds()
+          .map((k) => backlinkRowByKey(k))
+          .find((r) => r?.node.id === reply.new_id && r.depth > 0);
+        if (created) {
+          const t = backlinkEditTargetFor(created.link, created.node);
+          if (t) {
+            startBacklinkEdit(t, created.key);
+            return;
+          }
+        }
+        const notice = backlinkCreatedElsewhere(
+          page,
+          side,
+          appState.page?.id,
+          depth,
+        );
         if (notice !== null) setAppState("notice", [notice]);
       }),
   };

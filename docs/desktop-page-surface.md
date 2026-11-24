@@ -112,6 +112,8 @@ Mobile's `BacklinksSection` wraps the same component, which is what stops one cl
 
 **`backlinkCursor()` (`lib/cursor-region.ts`, over that module's `backlinkRowIds()`) is the single owner of "is the cursor in this section", and every reader goes through it — the row's own highlight and `isEditing()` included.**
 `selectedBlockId` and `selectedBacklinkBlockId` are declared mutually exclusive because each reader checks the backlink one *first*.
+The rows come from `flattenBacklinkRows`, memoized once per fetch in that module (`O(rows)`, invariant 15), and every one of them keys on the row's `key`, never on `node.id`: a block that cites the page and sits under another citing block is drawn twice, so its id names two rows.
+`isEditing()`, `resolveRow` and `j` / `k` all follow that.
 With both set, `j` walks someone else's page and `Enter` navigates away instead of editing, while the outline still paints the block the user left the cursor on.
 That exclusion was a sentence: ~20 call sites write `selectedBlockId` directly and each had to clear the other field, and most did not.
 The outline wins because releasing it is the deliberate act — the two handlers that cross the separator null it in the same breath, so no other writer has to know the rule exists.
@@ -160,14 +162,18 @@ Five rules a contributor will trip on:
   Leaving is still possible (a navigation, `Cmd+Shift+B`, a click into another row), and holding `editingBacklink` also keeps `isEditing()` true, so no background refresh remounts the row and re-seeds the draft.
   Same rule mobile ships; the net asserts the **text**, not that an error was reported.
 - **The editing identity carries a page.**
-  `appState.editingBacklink` is `{ pageId, blockId }`, a sibling of `editingBlockId` rather than a widening of it.
+  `appState.editingBacklink` is `{ pageId, blockId, key? }` (`key` names the drawn row), a sibling of `editingBlockId` rather than a widening of it.
   `startBacklinkEdit` (`lib/cursor-region.ts`) is its one writer, and it releases the outline's editing id in the same breath: two mounted editors is two drafts, and the second commit overwrites the first.
 - **The rows are re-asked per commit, never per keystroke — and a held chord is one scan in flight plus one queued.**
   `pageBacklinks` is an `O(blocks-in-workspace)` scan (invariant 15), and it is spent in three places: `settle()`, `BacklinkRowEditor`'s text commit (which has its own `backlinkCommitPlan` and does not call `settle`) and `toggleBacklinkTodo`.
   "Per commit" is not a bound on a **held** `Alt+↑` or `Tab`: every repeat is a commit, so the count is `trackBacklinks`'s to keep and not any of the three's to remember.
   What the reply may touch is `backlinkCommitPlan`'s answer, not this client's: a cross-page reply describes the *source* page, so it reaches the screen only when that page is the one on screen — which a page citing itself makes reachable.
+- **A citing block's children are rows, drawn by `components/BacklinkRow.tsx`.**
+  `j` / `k` walk them like any other row, and editing one goes through the same cross-page family.
+  Inside the textarea `Enter`, `Tab` and `Shift+Tab` only finish the edit, on the citing block and a child alike, and the arrow keys do not leave it.
+  Indent, move and create-sibling work from the focused row: `Esc`, then `Tab` / `o` / `Alt+Up`.
 - **Nothing here nudges.**
-  Indent, outdent and move have no visible result on a flat row, and shipping them anyway is a recorded decision rather than a `Partial`, which is why `Capability::BacklinkInlineEdit` reads `Full` here and on mobile.
+  Indent, outdent and move have no visible result on the citing block's own row (its siblings are not drawn; on a child row they are), and shipping them anyway is a recorded decision rather than a `Partial`, which is why `Capability::BacklinkInlineEdit` reads `Full` here and on mobile.
   The TUI's `Partial` on that row is a different gap: it has no gesture at all that opens a cited block's page, where this client's group header is a `<button>` that does.
   The two messages the module carries are for a row with no block to act on at all: an orphan backlink, and a cursor naming a row the list no longer holds.
 

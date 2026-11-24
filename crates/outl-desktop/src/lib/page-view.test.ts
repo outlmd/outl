@@ -1,12 +1,19 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MdAheadOfLog, PageMeta, PageView } from "@outl/shared/api/types";
 
-import { applyPageState } from "./page-view";
+import { resolveEmbeds } from "@outl/shared/api/commands";
+
+import { applyPageState, resolveBacklinkTransclusions } from "./page-view";
 import { appState, setAppState, setOutline } from "./store";
+
+vi.mock("@outl/shared/api/commands", () => ({
+  resolveEmbeds: vi.fn(() => Promise.resolve({})),
+  resolvePageEmbeds: vi.fn(() => Promise.resolve({})),
+}));
 
 function page(id: string): PageMeta {
   return { id, slug: `slug-${id}`, kind: "page" } as unknown as PageMeta;
@@ -113,4 +120,30 @@ describe("one owner for a page view's state", () => {
       expect(src).not.toMatch(/\bmdAheadOfLog:/);
     },
   );
+});
+
+describe("embed maps", () => {
+  // The merge exists so a page resolve cannot wipe the "Linked from" rows'
+  // handles. It must not turn a deleted source into an immortal entry.
+  it("drops a handle that was asked for and not answered", async () => {
+    const node = {
+      id: "n",
+      text: "",
+      todo: null,
+      tokens: [{ kind: "embed", value: "blk-aaaaaa" }],
+      collapsed: false,
+      properties: [],
+      children: [],
+    } as unknown as import("@outl/shared/api/types").BlockNode;
+
+    setAppState("embeds", {
+      "blk-aaaaaa": { text: "old text" },
+      "blk-keep01": { text: "kept" },
+    } as never);
+    vi.mocked(resolveEmbeds).mockResolvedValueOnce({});
+    resolveBacklinkTransclusions([node]);
+    await vi.waitFor(() => expect(appState.embeds["blk-aaaaaa"]).toBeUndefined());
+
+    expect(appState.embeds["blk-keep01"]).toBeDefined();
+  });
 });

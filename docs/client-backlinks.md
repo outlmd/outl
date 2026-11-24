@@ -11,7 +11,10 @@ A backlink row shows a block that lives on **another** page.
 It used to be a destination: you acted on it by leaving, and the page that assembled the references was gone.
 It is a place you can work now, on every client.
 
-Ten operations reach a row, and each lands on the citing block on **its own** page: the text edit, task state, mark done (`g D`), delete, indent, outdent, move up, move down, and create a sibling below and above.
+A row is the citing block **and its children**: the panel draws the direct children of every citing block, capped at four levels, always expanded and ignoring the fold the source page keeps (the same cap an embed uses).
+Those children are rows too, on all three clients: you move onto them, edit them and act on them exactly as on the citing block.
+
+Ten operations reach a row, and each lands on the block the row draws, on **its own** page: the text edit, task state, mark done (`g D`), delete, indent, outdent, move up, move down, and create a sibling below and above.
 Mobile's long-press sheet has no mark-done row today (`Action::MarkDone` is `Missing` there in [`client-parity.md`](client-parity.md)), so it offers nine.
 `Capability::BacklinkInlineEdit` covers exactly those nine, leaving mark done to the action row that owns it rather than claiming an operation one client has nowhere.
 Opening the source page stays reachable on the desktop and mobile, on the group header rather than on the row; the TUI has no gesture for it at all, which is the whole of why its column reads `Partial`.
@@ -19,9 +22,9 @@ Per-client reach is `Capability::BacklinkInlineEdit` in [`client-parity.md`](cli
 
 | Client | Edit in place | Everything else | Open the source page |
 |---|---|---|---|
-| TUI | `i` / `Enter` on the focused row | the same Normal-mode chords the outline uses | nothing in the panel opens it — `Ctrl+P`, then the page name from the row's header |
-| Desktop | click the row, or `i` / `Enter` on it | the same chords, consulted on the row first | the group header (a `<button>`, so a keyboard stop) |
-| Mobile | tap the row | long-press for the same sheet the outline raises | the card header |
+| TUI | `i` / `Enter` on the focused row; `j` / `k` walk the citing block, then its children, then the next citing block | the same Normal-mode chords the outline uses | nothing in the panel opens it — `Ctrl+P`, then the page name from the row's header |
+| Desktop | click the row, or `i` / `Enter` on it; `j` / `k` walk children like any other row | the same chords, consulted on the row first | the group header (a `<button>`, so a keyboard stop) |
+| Mobile | tap the row; each child is its own tap and long-press target (44 pt minimum), outside the parent's container | long-press for the same sheet the outline raises, per node | the card header |
 
 Four rules hold across all three, and each was the alternative:
 
@@ -54,20 +57,46 @@ Four rules hold across all three, and each was the alternative:
 - **The list is re-asked per commit, never per keystroke.**
   `backlinks_for_page` is an `O(blocks-in-workspace)` scan (invariant 15), and the section keeps its rows across that refetch rather than blanking and coming back.
 
-Two limits are deliberate, and written down rather than discovered:
+Four things about the rows themselves, because a client that gets any of them wrong draws or edits the wrong block:
 
-- **Indent, outdent and move have no visible result on a GUI row.**
-  The row is one flat block, its siblings and children are not drawn, and the effect lands on a page you are not looking at.
+- **A block can be drawn twice, on purpose.**
+  A block that cites the page *and* sits under another citing block has its own row and also appears inside the ancestor's subtree.
+  Collapsing them would change the count (`count_for_page`) and the TUI's `idx` bounds, so both stay one per citing block.
+- **`key` is unique per drawn row, `node.id` is not.**
+  `@outl/shared/backlink-edit::flattenBacklinkRows` returns `{ key, link, node, depth }` in reading order, and selection, the editing guard, `resolveRow` and `j` / `k` all key on `key`.
+  The TUI names a child by its `NodeId` in `Focus::Backlink { idx, node }` and reads its text from `App::backlink_subtree`, never from the cloned list.
+- **A child's target is `backlinkEditTargetFor(link, node)`.**
+  It is the same `(pageId, blockId)` pair `backlinkEditTarget` gives the citing block, for the child's id.
+- **The strict write also checks the block lives under the row's page.**
+  `stale_row_block` / `refuse_a_dead_row` refuse a block that is live but has been moved to another page since the row was drawn, with the same stale-row wording.
+
+Three limits are deliberate, and written down rather than discovered:
+
+- **Indent, outdent and move still have no visible result on the citing block's own row.**
+  Its siblings are not drawn and the effect lands on a page you are not looking at.
   Shipping them anyway is a decision taken against declaring them `Partial`, and it is **not** what the TUI's `Partial` records — that one is the missing way to the source page, and nothing else.
-- **Creating a sibling does not put the cursor in it.**
+  On a child row the result is visible, because the parent and the siblings are drawn.
+- **Creating a sibling of the citing block does not put the cursor in it.**
   The new block cites nothing, so it is a backlink of no page and no row will ever render it, which leaves nothing on screen to aim an editor at — so you are told which page it landed on instead.
   **The two chord clients make one exception, and mobile does not**, because a page can cite itself and the new block is then in the outline in front of you.
   The TUI drops out of the panel and opens Insert on it; the desktop writes it to `editingBlockId`.
   Mobile applies the view and says nothing at all — there is no cursor to place and the keyboard deliberately stays down, since a `.focus()` outside the tap's gesture window raises it over nothing.
   That asymmetry is the right behaviour on each, not a gap: the notice would be a lie on a page you are looking straight at, which is why it is skipped on all three.
+- **A sibling of a child lands inside the drawn subtree**, so there is nothing to announce: `backlinkCreatedElsewhere` returns `null` for `rowDepth > 0`.
+  On the TUI, `o` / `O` on a child opens Insert on the new sibling, while a sibling of the citing block itself still gets the "not editable from the panel" notice.
+  Known limit: a citing block that is *also* inside another citing block gets the "added elsewhere" toast after create-sibling on a GUI, although the sibling lands inside the ancestor's subtree, because `rowDepth` 0 cannot tell the two apart.
 
-**Namespace-mention rows stay read-only.**
-That list is capped and answers a different question, so it is a different surface.
+A mobile delete on a citing block that has children asks first, in the prompt the outline uses.
+Before the children were drawn the count was always zero, so it never asked.
+
+On the desktop, `Enter`, `Tab` and `Shift+Tab` inside the textarea only finish the edit, on the citing block and a child alike, and the arrow keys stay in the textarea.
+Indent, move and create-sibling work from the focused row: `Esc`, then `Tab` / `o` / `Alt+Up`.
+
+**Namespace-mention rows stay shallow and read-only.**
+That list is capped and answers a different question, so it is a different surface, and its hits go through `Backlink::into_shallow`.
+
+**The CLI and MCP stay shallow too.**
+`outl backlinks` and `outl_backlinks` build their index from the `Workspace`, and filling children there is exactly the #179 freeze, so their `source_block.children` is empty by design (pinned by `outl-actions/tests/backlinks_subtree_index.rs`).
 
 ## Backlinks order (issue #142)
 
@@ -155,6 +184,15 @@ The index is a **dirty-flag cache, never a sync surface** — it is dropped (set
 - a peer or workspace reload,
 - a plugin run that applied ops.
 
-The index stores each referencing block as a **shallow leaf** — body, tokens, `ancestors`, no subtree.
-Every client renders a backlink row from `source_block.tokens`, and materializing the subtree of every referencing block across the workspace (under the workspace lock) is exactly what froze input, so the build stops at the leaf.
-One visible consequence: a backlink shows only the citing block, not its child blocks, on every client (the TUI no longer expands a backlink into a mini-outline).
+The index stores each referencing block as a **shallow leaf** — body, tokens, `ancestors`, no subtree — and keeps the block's children **beside** it, in a side table (`IndexedEntry.subtree: Option<Arc<[OutlineNode]>>`, capped at `outl_actions::SUBTREE_MAX_DEPTH`).
+Only the from-disk builder fills it (`capped_subtree`); the workspace builder passes `None`, which is why the CLI and MCP stay shallow.
+
+The split exists because of where each cost lands (invariant 15).
+`for_page` and `for_page_split` clone their hits under the workspace lock, so a hit must stay a leaf for that clone to stay cheap.
+With the subtree in the side table the lookup still clones a leaf, and `BacklinkIndex::subtree(block_id)` is a hash lookup plus a refcount bump, safe to call per hit under the same lock.
+The deep copy happens once per direct hit, **after** the locks drop and before `sort_backlinks`, in `Backlink::with_children`; on the GUI that is `shape_reply` in `outl-tauri-shared`'s `page_backlinks`.
+The TUI reads the `Arc` from its own index and never copies it into the list.
+
+The copy is bounded: `shape_reply` ships at most `SUBTREE_NODE_BUDGET` subtree nodes per reply, spent in display order after the sort.
+Rows past the budget ship shallow, like a namespace mention, and show no "+N" (that would need a wire field).
+Numbers and what remains: [`performance.md`](performance.md#a-citing-blocks-children-carried-by-the-backlinks-index).

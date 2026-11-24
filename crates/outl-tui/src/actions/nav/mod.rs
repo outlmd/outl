@@ -23,6 +23,7 @@
 use crate::state::{App, Mode, View};
 use std::path::PathBuf;
 
+mod backlink_nodes;
 mod backlinks;
 mod cursor;
 mod open;

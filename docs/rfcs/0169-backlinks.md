@@ -99,7 +99,8 @@ Two independent reasons, both load-bearing:
 - **The wire.**
   70–87% of what crossed IPC was dropped by the renderer, which reads only `source_block.tokens`.
 
-`Backlink::into_shallow()` survives as a defensive no-op on the GUI wire path, so a future full projection cannot silently reach the clients.
+`Backlink::into_shallow()` now narrows only the namespace-mention set on the GUI wire path.
+Direct hits keep their children, carried by the index's side table (`BacklinkIndex::subtree`, an `Arc` per hit) and attached once, after the locks drop, by `Backlink::with_children` (see `docs/client-backlinks.md`).
 
 ### Context is the ancestor chain, not the subtree
 

@@ -27,6 +27,7 @@ use outl_actions::{
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
+use parking_lot::Mutex;
 use tracing::warn;
 
 use crate::helpers::{build_page_view, build_page_view_from_tree, with_ws_mut};
@@ -243,10 +244,34 @@ impl<S: AppHost> CommitHooks for TauriCommitHooks<'_, S> {
 /// rebuilds it. Call after any change that can alter backlinks — a local
 /// mutation (via [`finish_in_page_with`]) or a peer reload. No-op when
 /// the host doesn't cache one ([`AppHost::backlink_index`] is `None`).
+///
+/// The old index is not freed here. It is a map of small `OutlineNode` /
+/// `Arc` allocations (about +49 MB on the maintainer's graph once the
+/// citing blocks' children are kept, `docs/performance.md`), and this runs
+/// with the workspace lock held on the commit path, so freeing it inline is
+/// time the window spends not taking keystrokes. See `discard_slot`.
 pub fn invalidate_backlink_index<S: AppHost>(state: &S) {
     if let Some(index) = state.backlink_index() {
-        *index.lock() = None;
+        discard_slot(&index);
     }
+}
+
+/// Empty `slot`, freeing the old value on a throwaway thread instead of
+/// under the caller's locks.
+///
+/// The slot's guard is released before the value is handed off, so the
+/// deallocation holds neither the slot nor (when the caller is a commit)
+/// anything the caller took first. A value that cannot get a thread is
+/// dropped inline: slower, never leaked.
+pub(crate) fn discard_slot<T: Send + 'static>(slot: &Mutex<Option<T>>) {
+    let Some(old) = slot.lock().take() else {
+        return;
+    };
+    // The closure owns `old`; if `spawn` fails the closure is dropped with
+    // the error, which frees it right here.
+    let _ = std::thread::Builder::new()
+        .name("backlink-index-drop".into())
+        .spawn(move || drop(old));
 }
 
 /// Re-index one page's backlinks from its `.md` on disk, in place.
@@ -316,4 +341,56 @@ pub fn announce_after_commit<S: AppHost>(state: &S, ws: &Workspace, page_id: Nod
         return;
     };
     transport.announce_local_ops(&meta.slug, state.hlc().next());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread::ThreadId;
+
+    /// Reports, on drop, which thread freed it and whether the slot it came
+    /// out of was lockable at that moment.
+    struct Probe {
+        slot: Arc<Mutex<Option<Probe>>>,
+        report: mpsc::Sender<(ThreadId, bool)>,
+    }
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let slot_free = self.slot.try_lock().is_some();
+            let _ = self.report.send((std::thread::current().id(), slot_free));
+        }
+    }
+
+    #[test]
+    fn the_old_value_is_freed_off_the_calling_thread_and_off_the_slot() {
+        let (tx, rx) = mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
+        *slot.lock() = Some(Probe {
+            slot: slot.clone(),
+            report: tx,
+        });
+
+        discard_slot(&*slot);
+
+        let (freed_on, slot_free) = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the old value was dropped");
+        assert_ne!(
+            freed_on,
+            std::thread::current().id(),
+            "freed inline: the caller's locks were held for the whole deallocation"
+        );
+        assert!(slot_free, "the slot guard was still held while it dropped");
+        assert!(slot.lock().is_none(), "the slot is left empty");
+    }
+
+    #[test]
+    fn an_empty_slot_is_a_no_op() {
+        let slot: Mutex<Option<u8>> = Mutex::new(None);
+        discard_slot(&slot);
+        assert!(slot.lock().is_none());
+    }
 }

@@ -252,7 +252,8 @@ fn project_and_retire(
         }
     }
     if let Some(index) = &host.backlinks {
-        *index.lock() = None;
+        // The caller holds the workspace lock: free the old index elsewhere.
+        crate::commit::discard_slot(index);
     }
     Projected {
         touched_ids,

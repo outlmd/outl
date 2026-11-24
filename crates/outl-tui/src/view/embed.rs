@@ -39,6 +39,9 @@ use ratatui::text::{Line, Span};
 /// If recursive embed expansion ever lands, add a `visited:
 /// &HashSet<&str>` argument and short-circuit when the current handle
 /// (or page slug) is already in the set.
+///
+/// Mirrors `outl_actions::SUBTREE_MAX_DEPTH`, the Rust owner of this cap,
+/// which also bounds the children a backlink row draws.
 const EMBED_MAX_DEPTH: u32 = 4;
 
 /// Return the handle if `text` is a single `!((blk-XXXXXX))` token

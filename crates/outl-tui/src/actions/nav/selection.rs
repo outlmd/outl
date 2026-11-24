@@ -61,27 +61,13 @@ impl App {
                 // the renderers ask too), so `j` stops at the subtree
                 // edge instead of parking the cursor on an invisible row.
                 if self.page_sections_visible() && self.backlinks_navigable() {
-                    self.focus = Focus::Backlink { idx: 0 };
+                    self.focus = Focus::Backlink { idx: 0, node: None };
                     self.cursor_col = 0;
                     return true;
                 }
                 false
             }
-            Focus::Backlink { idx } => {
-                // One row per backlink: the citing block. The index
-                // builders ship `source_block` shallow, so there was
-                // never a subtree here to step into (see `Focus`).
-                let slug = self.current_slug();
-                // Also the stale-`idx` guard: a cursor past the end of
-                // a list a background rebuild shrank steps nowhere.
-                let len = self.backlinks_count_for_slug(&slug);
-                if idx + 1 >= len {
-                    return false;
-                }
-                self.focus = Focus::Backlink { idx: idx + 1 };
-                self.cursor_col = 0;
-                true
-            }
+            Focus::Backlink { idx, node } => self.backlink_step_forward(idx, node),
         }
     }
 
@@ -110,24 +96,7 @@ impl App {
                 self.cursor_col = 0;
                 true
             }
-            Focus::Backlink { idx } => {
-                let slug = self.current_slug();
-                // A stale `idx` moves nothing, same as before: the row
-                // the cursor claims is not in the list any more, so
-                // neither of the two answers below is about it.
-                if idx >= self.backlinks_count_for_slug(&slug) {
-                    return false;
-                }
-                if idx > 0 {
-                    self.focus = Focus::Backlink { idx: idx - 1 };
-                } else {
-                    // Topping out → fall back into the outline.
-                    self.focus = Focus::Outline;
-                    self.selected = self.flat_len.saturating_sub(1);
-                }
-                self.cursor_col = 0;
-                true
-            }
+            Focus::Backlink { idx, node } => self.backlink_step_backward(idx, node),
         }
     }
 
@@ -203,20 +172,24 @@ mod tests {
         app.selected = app.flat_len - 1;
 
         app.move_selection(1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+        assert_eq!(app.focus, Focus::Backlink { idx: 0, node: None });
         app.move_selection(1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 1 });
+        assert_eq!(app.focus, Focus::Backlink { idx: 1, node: None });
         app.move_selection(1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 1 }, "no row past the end");
+        assert_eq!(
+            app.focus,
+            Focus::Backlink { idx: 1, node: None },
+            "no row past the end"
+        );
     }
 
     #[test]
     fn k_walks_back_up_and_leaves_the_panel_into_the_last_block() {
         let (mut app, _d) = target_cited_twice();
-        app.focus = Focus::Backlink { idx: 1 };
+        app.focus = Focus::Backlink { idx: 1, node: None };
 
         app.move_selection(-1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+        assert_eq!(app.focus, Focus::Backlink { idx: 0, node: None });
         app.move_selection(-1);
         assert_eq!(app.focus, Focus::Outline);
         assert_eq!(app.selected, app.flat_len - 1);
@@ -225,10 +198,10 @@ mod tests {
     #[test]
     fn a_stale_index_past_the_end_moves_nowhere() {
         let (mut app, _d) = target_cited_twice();
-        app.focus = Focus::Backlink { idx: 7 };
+        app.focus = Focus::Backlink { idx: 7, node: None };
         app.move_selection(1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 7 });
+        assert_eq!(app.focus, Focus::Backlink { idx: 7, node: None });
         app.move_selection(-1);
-        assert_eq!(app.focus, Focus::Backlink { idx: 7 });
+        assert_eq!(app.focus, Focus::Backlink { idx: 7, node: None });
     }
 }

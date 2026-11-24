@@ -48,8 +48,8 @@ import type { PageEmbedMap } from "./PageEmbed";
 
 /**
  * Recursion cap. One of three copies — the TUI's `EMBED_MAX_DEPTH` and
- * the backend's `EMBED_SUBTREE_MAX_DEPTH` are the others. Do not add a
- * fourth. It is also the whole cycle guard: a page that embeds itself
+ * `outl_actions::SUBTREE_MAX_DEPTH` (the Rust owner) are the others; the
+ * latter also caps a backlink row's children. Do not add a fourth. It is also the whole cycle guard: a page that embeds itself
  * stops here rather than at a visited-set.
  */
 const MAX_DEPTH = 4;

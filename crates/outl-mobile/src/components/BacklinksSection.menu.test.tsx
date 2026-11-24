@@ -10,6 +10,8 @@ const commands = vi.hoisted(() => ({
   backlinkRowOp: vi.fn(),
   createBacklinkSibling: vi.fn(),
   editBacklinkBlock: vi.fn(),
+  resolveEmbeds: vi.fn(() => Promise.resolve({})),
+  resolvePageEmbeds: vi.fn(() => Promise.resolve({})),
   editBlock: vi.fn(),
   toggleTodo: vi.fn(),
   deleteBlock: vi.fn(),
@@ -437,17 +439,16 @@ describe("the backlink row's long press", () => {
     await tick();
   });
 
-  it("asks before deleting a row whose children are not on screen", async () => {
+  it("asks before deleting a row that has children", async () => {
     commands.backlinkRowOp.mockResolvedValue(sourceView());
     const h = mount([withChildren(2)]);
 
     await longPress(row(h.host));
     await tapMenu("Delete");
 
-    // A backlink row renders one flat block, so the subtree about to
-    // go with it is invisible here — the user has *less* information
-    // than in the outline, where this prompt already exists. The
-    // wording is `JournalDeleteDialogs`'s, not a third copy.
+    // The card draws only to depth 4, so a subtree about to go with the
+    // row can be out of sight here. The wording is
+    // `JournalDeleteDialogs`'s, not a third copy.
     expect(dialog()?.textContent).toContain("2 children");
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();
 

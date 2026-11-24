@@ -103,7 +103,7 @@ impl App {
     {
         self.flush_pending_save();
 
-        if !self.backlink_block_can_take_the_write(target.block, gesture) {
+        if !self.backlink_block_can_take_the_write(target.page, target.block, gesture) {
             return false;
         }
         let Some(meta) = outl_actions::page_meta(&self.workspace, target.page) else {
@@ -211,7 +211,7 @@ impl App {
             // relaunch would have closed it. Every chord in the panel
             // comes through here now, so `Ctrl+T` and `i`+`Esc` on the
             // same row cannot disagree about what is searchable.
-            self.index.patch_page(&path, &projected);
+            self.patch_index_page(&path, &projected);
         }
         if let Some(e) = hooks.projection_failure.take() {
             self.report_backlink_projection_failure(&meta.slug, target.page, e);
@@ -233,6 +233,20 @@ impl App {
             self.reload_open_page_keeping_the_cursor();
         }
         true
+    }
+
+    /// Whether `block` is live **and still under `page`**, the page the
+    /// row was built against.
+    ///
+    /// A peer can move the block to another page while the async index
+    /// rebuild is in flight; the row still reads `(page, block)`, and
+    /// `commit_page` would scope the undo snapshot and the projection
+    /// to the wrong page. Same semantics as
+    /// `outl_tauri_shared`'s `row_is_live_on`, over the same two
+    /// `outl_actions` primitives.
+    pub(crate) fn backlink_row_is_live_on(&self, page: NodeId, block: NodeId) -> bool {
+        outl_actions::is_live(&self.workspace, block)
+            && outl_actions::enclosing_page_id(&self.workspace, block) == Some(page)
     }
 
     /// Whether the block a backlink row names is still **live** —
@@ -302,10 +316,11 @@ impl App {
     /// the keystrokes it had just dropped.
     fn backlink_block_can_take_the_write(
         &mut self,
+        page: NodeId,
         block: NodeId,
         gesture: BacklinkGesture,
     ) -> bool {
-        if outl_actions::is_live(&self.workspace, block) {
+        if self.backlink_row_is_live_on(page, block) {
             return true;
         }
         self.status = gesture
@@ -451,15 +466,24 @@ impl App {
     /// Counted rather than listed: `backlinks_count_for_current` answers
     /// this without cloning a `Backlink` per row, and every cross-page
     /// commit runs through here.
-    fn clamp_backlink_focus(&self, focus: Focus) -> Focus {
-        let Focus::Backlink { idx } = focus else {
+    pub(crate) fn clamp_backlink_focus(&self, focus: Focus) -> Focus {
+        let Focus::Backlink { idx, node } = focus else {
             return focus;
         };
         match self.backlinks_count_for_current() {
             0 => Focus::Outline,
-            rows => Focus::Backlink {
-                idx: idx.min(rows - 1),
-            },
+            rows => {
+                let idx = idx.min(rows - 1);
+                // A descendant the row's subtree no longer holds (it was
+                // deleted, or outdented out of it) falls back to the
+                // citing block rather than naming a stranger.
+                let node = node.filter(|n| {
+                    self.backlinks_for_current()
+                        .get(idx)
+                        .is_some_and(|bl| self.backlink_row_stops(bl).contains(&Some(*n)))
+                });
+                Focus::Backlink { idx, node }
+            }
         }
     }
 

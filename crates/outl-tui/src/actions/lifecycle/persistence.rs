@@ -86,7 +86,7 @@ impl App {
         if rebuild_index {
             // Incremental: just re-index this one page. Full workspace
             // rescans are reserved for cold start and `Ctrl+L`.
-            self.index.patch_page(path, page);
+            self.patch_index_page(path, page);
         }
         // Reconciling the source page may have touched blocks that
         // mention the current view's slug — rebuild the backlink index
@@ -217,6 +217,7 @@ impl App {
         // workspace.
         let t_index = std::time::Instant::now();
         self.index.patch_page(&path, &self.page);
+        self.bump_render_epoch();
         // Only THIS page changed, so patch just its backlink entries from
         // the freshly-projected `.md` — O(one page). Rebuilding the index
         // from EVERY `.md` in the workspace per commit, inline on the

@@ -9,11 +9,12 @@
 //!      workspace* (O(total blocks), no inverted index for page refs).
 //!   2. **transfer** — the resulting `Vec<Backlink>` serialized to JSON.
 //!      This is the payload that crosses the Tauri IPC boundary on
-//!      desktop/mobile. Each `Backlink` carries `source_block` as a full
-//!      `OutlineNode` **subtree** (children + props), but desktop/mobile
-//!      render only `source_block.tokens` — the children are shipped and
-//!      thrown away. The bench quantifies that waste by re-serializing a
-//!      "shallow" copy (children dropped) and diffing the byte size.
+//!      desktop/mobile. This bench builds through the workspace, where
+//!      `source_block` is the full `OutlineNode` **subtree**, so it
+//!      measures the *upper bound* of the payload. The shipped path is
+//!      shallow plus the capped (4-level) subtree of each direct hit; the
+//!      bench quantifies the difference by re-serializing a "shallow"
+//!      copy (children dropped) and diffing the byte size.
 //!   3. **render**   — real DOM/TUI cost lives in the client and can't be
 //!      measured here; proxied by the total node + token counts the
 //!      client has to reconcile.

@@ -93,7 +93,7 @@ pub const TUI_NESTED_PAGES_ARE_READ_ONLY: &str =
 /// The TUI edits every backlink row where it is cited and has **no
 /// gesture anywhere in that panel** that opens the page the row's block
 /// lives on. `Focus` has exactly two variants (`Outline`,
-/// `Backlink { idx }`); the group header is a styled `Line` with no
+/// `Backlink { idx, node }`); the group header is a styled `Line` with no
 /// click region and no `block_starts` entry (`view/backlinks.rs`), and
 /// a click below the outline is refused outright
 /// (`a_click_past_the_last_block_moves_nothing`). `Enter` on a row

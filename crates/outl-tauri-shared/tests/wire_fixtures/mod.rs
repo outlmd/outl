@@ -41,6 +41,20 @@ pub fn namespace_child() -> outl_actions::NamespaceChild {
 }
 
 pub fn outline_node() -> OutlineNode {
+    let mut node = outline_leaf();
+    // One child, so a backlink's `source_block.children` is exercised on the
+    // wire (direct hits carry their subtree). No key changes: a child is the
+    // same struct.
+    let mut child = outline_leaf();
+    child.id = "01JQ0000000000000000000002".into();
+    child.text = "child of the cited block".into();
+    child.todo = None;
+    child.table = None;
+    node.children = vec![child];
+    node
+}
+
+fn outline_leaf() -> OutlineNode {
     OutlineNode {
         id: "01JQ0000000000000000000001".into(),
         text: "restarted the ingest worker".into(),

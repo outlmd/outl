@@ -19,7 +19,7 @@
 //! `pub(crate)` for cross-file reuse inside `view/`.
 
 mod ahead_of_log_banner;
-mod backlinks;
+pub(crate) mod backlinks;
 mod chrome;
 mod embed;
 mod inline;
@@ -34,6 +34,7 @@ mod table;
 mod toasts;
 mod trash;
 mod warnings_banner;
+mod window;
 mod wrap;
 
 use crate::state::{App, Focus, Overlay, View};
@@ -180,17 +181,17 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
     // inline backlinks section. The `─` separator and headers live
     // inside `backlinks::render_backlinks_inline`.
     let inner_width = body_area.width.saturating_sub(2);
-    let (mut all_lines, sel_outline, block_starts) =
+    let (outline_lines, sel_outline, block_starts) =
         outline::render_outline(&app.page, app, inner_width);
-    let outline_len = all_lines.len();
-    let (bl_lines, sel_bl) = backlinks::render_backlinks_inline(app, inner_width);
-    let bl_offset = all_lines.len();
-    all_lines.extend(bl_lines);
+    let outline_len = outline_lines.len();
+    let bl_panel = backlinks::panel(app, inner_width);
+    let sel_bl = bl_panel.selected;
+    let bl_offset = outline_lines.len();
     // Nested pages sit below the backlinks and carry no selection —
     // `j`/`k` stop at the backlinks section (recorded as
     // `Capability::NestedPages` → `Partial` for the TUI), so nothing
     // here shifts `sel_bl`'s offset.
-    all_lines.extend(namespace::render_nested_pages(app, inner_width));
+    let nested_lines = namespace::render_nested_pages(app, inner_width);
 
     let title = match &app.view {
         View::Journal(_) | View::Page(_) => "Outline",
@@ -221,7 +222,7 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
         }
     }
     // Clamp: never scroll past `last_line - viewport_h + 1`.
-    let total = all_lines.len() as u16;
+    let total = (outline_lines.len() + bl_panel.lines.len() + nested_lines.len()) as u16;
     if total > viewport_h {
         let max_scroll = total - viewport_h;
         if app.scroll_y > max_scroll {
@@ -231,19 +232,26 @@ fn render_main(f: &mut ratatui::Frame<'_>, area: Rect, app: &mut App) {
         app.scroll_y = 0;
     }
 
-    let body = Paragraph::new(all_lines)
+    // Only the rows on screen are copied out of the memoised panel: the
+    // whole body is `O(page + panel)` lines and a frame needs `viewport_h`.
+    let visible = window::visible_window(
+        &[&outline_lines, &bl_panel.lines, &nested_lines],
+        app.scroll_y as usize,
+        viewport_h as usize,
+    );
+    let body = Paragraph::new(visible)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(app.theme.border)
                 .title(title.to_string()),
         )
-        .scroll((app.scroll_y, 0));
+        .scroll((0, 0));
     // NB: no ratatui `.wrap(...)`. It expands one logical line into N
     // visual lines *after* layout, whose count depends on width — that
     // would invalidate the `selected_line` index the scroll math above
     // relies on. Instead the outline pre-wraps to `inner_width` itself
-    // (`view::wrap::push_wrapped`), so `all_lines` already holds the
+    // (`view::wrap::push_wrapped`), so the lines already hold the
     // final visual rows and the index stays honest. See issue #99.
     f.render_widget(body, body_area);
 

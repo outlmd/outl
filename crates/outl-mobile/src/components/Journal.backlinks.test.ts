@@ -173,6 +173,7 @@ describe("saying where a created block landed", () => {
     created: {
       page: { id: sourcePageId, title: "Monday" } as PageMeta,
       side: "below" as const,
+      depth: 0,
     },
   });
 
@@ -250,6 +251,7 @@ describe("the notice survives the channel it shares with refusals", () => {
     created: {
       page: { id: "p1", title: "Monday" } as PageMeta,
       side: "below" as const,
+      depth: 0,
     },
   };
 

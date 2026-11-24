@@ -145,7 +145,8 @@ The **card header** is what still opens the source page.
 A **long press** opens the same `<BlockContextMenu>` the outline raises, with task state, indent, outdent, move up / down, create below / above, and delete.
 Seven of those rows take their label and glyph from one shared table, so an action cannot look like two things depending on which sheet you are in.
 Create below / above is the one pair that does **not** raise the keyboard: the new block cites nothing, so no row here will ever render it and there would be no textarea to focus — you are told which page it landed on instead.
-Delete asks when the block has children, in the same prompt the outline uses; the case is stronger here, because the row draws one flat block and the subtree is not on screen at all.
+Delete asks when the block has children, in the same prompt the outline uses; a citing block's children are drawn under it, so the count is real.
+Each child is its own tap and long-press target (44 pt minimum) with its own sheet.
 
 **The card takes one write at a time.**
 The acting row dims and goes `aria-busy` while its write is in flight, and a gesture on another row of the card is dropped in that window.

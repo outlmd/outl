@@ -1,39 +1,29 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createEffect, createMemo } from "solid-js";
 
 import {
   backlinkRowOp,
   openRef,
   setBacklinksOrder,
 } from "@outl/shared/api/commands";
-import {
-  backlinkCommitPlan,
-  backlinkEditTarget,
-} from "@outl/shared/backlink-edit";
-import {
-  CrumbTrail,
-  crumbTrailText,
-  MarkdownInline,
-  MarkdownTable,
-} from "@outl/shared/markdown";
+import { backlinkCommitPlan } from "@outl/shared/backlink-edit";
 import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
-import type { Backlink, PageKind } from "@outl/shared/api/types";
+import type { Backlink, BlockNode, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
-import { backlinkCursor, startBacklinkEdit } from "../lib/cursor-region";
+import { backlinkCursor, backlinkRows } from "../lib/cursor-region";
 import { resetForNavigation } from "../lib/page-change";
-import { applyPageState } from "../lib/page-view";
+import { applyPageState, resolveBacklinkTransclusions } from "../lib/page-view";
 import { trackBacklinks } from "../lib/backlinks-fetch";
 import { appState, setAppState } from "../lib/store";
-import { BacklinkRowEditor } from "./BacklinkRowEditor";
+import { BacklinkRowItem } from "./BacklinkRow";
 
-/** What one click on a backlink's bullet does next. The toggle walks
- *  the cycle a step at a time, so the label names the *next* stop,
- *  not "done" from wherever it is. */
-function backlinkTodoLabel(todo: Backlink["todo"]): string {
-  if (todo === "DONE") return "Mark not done";
-  if (todo === "DOING") return "Mark done";
-  if (todo === "TODO") return "Mark doing";
-  return "Mark as TODO";
+interface Group {
+  key: string;
+  title: string;
+  icon?: string;
+  kind?: PageKind;
+  /** Citing blocks only — what the group header counts. */
+  rootKeys: string[];
 }
 
 /**
@@ -131,7 +121,7 @@ export function InlineBacklinks() {
    * bullet of a row a peer has trashed is the commonest way to reach
    * that refusal, because it needs no keyboard.
    */
-  async function toggleBacklinkTodo(link: Backlink) {
+  async function toggleBacklinkTodo(link: Backlink, node: BlockNode) {
     const sourcePage = link.source_page;
     const currentSlug = appState.page?.slug;
     if (!sourcePage || !currentSlug) return;
@@ -142,7 +132,7 @@ export function InlineBacklinks() {
     try {
       const view = await backlinkRowOp(
         sourcePage.id,
-        link.block_id,
+        node.id,
         "toggle-todo",
       );
       if (plan.applyView) applyPageState(view);
@@ -215,32 +205,65 @@ export function InlineBacklinks() {
   }
 
   /**
-   * Group backlinks by their source page. `null` source (orphan
-   * blocks with no enclosing page) collapse under a synthetic
-   * `(orphan)` header.
+   * The panel's layout, **once per fetch**: citing blocks grouped by
+   * source page (`null` source collapses under a synthetic `(orphan)`
+   * header), each with the keys of its drawn descendants, and which
+   * roots show their breadcrumb.
+   *
+   * Everything the `<For>`s iterate is a **string key**, so a refetch
+   * that replaces every object keeps every row mounted — an open
+   * editor and its draft included. The rows read their data back by key
+   * (`backlinkRowByKey`). Nothing in here runs per row (invariant 15).
    */
-  function groupedBySource(): Array<{
-    key: string;
-    title: string;
-    icon?: string;
-    kind?: PageKind;
-    entries: Backlink[];
-  }> {
-    const groups = new Map<
-      string,
-      { key: string; title: string; icon?: string; kind?: PageKind; entries: Backlink[] }
-    >();
-    for (const b of appState.backlinks) {
-      const key = b.source_page?.slug ?? "__orphan__";
-      const title = b.source_page?.title ?? "(orphan)";
-      const icon = b.source_page?.icon;
-      const kind = b.source_page?.kind;
-      const existing = groups.get(key);
-      if (existing) existing.entries.push(b);
-      else groups.set(key, { key, title, icon, kind, entries: [b] });
+  // The rows draw `((ref))` / `!((embed))` tokens of *other* pages'
+  // blocks, which the outline's own resolve never saw. Roots only: the
+  // collector walks their children.
+  createEffect(() => {
+    const roots = appState.backlinks.map((b) => b.source_block);
+    if (roots.length > 0) resolveBacklinkTransclusions(roots);
+  });
+
+  const layout = createMemo(() => {
+    const groups = new Map<string, Group>();
+    const childKeys = new Map<string, string[]>();
+    const crumbs = new Set<string>();
+    const lastRootOf = new Map<string, Backlink>();
+    let root: string | null = null;
+    for (const row of backlinkRows()) {
+      if (row.depth > 0) {
+        childKeys.get(root!)!.push(row.key);
+        continue;
+      }
+      root = row.key;
+      childKeys.set(row.key, []);
+      const b = row.link;
+      const gkey = b.source_page?.slug ?? "__orphan__";
+      let g = groups.get(gkey);
+      if (!g) {
+        g = {
+          key: gkey,
+          title: b.source_page?.title ?? "(orphan)",
+          icon: b.source_page?.icon,
+          kind: b.source_page?.kind,
+          rootKeys: [],
+        };
+        groups.set(gkey, g);
+      }
+      // Collapsed against the previous entry in the same group:
+      // consecutive references in the same branch show the trail once.
+      const prev = lastRootOf.get(gkey);
+      if (
+        b.ancestors.length > 0 &&
+        (!prev || !sameCrumbTrail(prev.ancestors, b.ancestors))
+      ) {
+        crumbs.add(row.key);
+      }
+      lastRootOf.set(gkey, b);
+      g.rootKeys.push(row.key);
     }
-    return [...groups.values()];
-  }
+    return { groups, childKeys, crumbs };
+  });
+  const groupKeys = createMemo(() => [...layout().groups.keys()]);
 
   return (
     <Show
@@ -305,192 +328,51 @@ export function InlineBacklinks() {
         </header>
 
         <div class="space-y-4">
-          <For each={groupedBySource()}>
-            {(group) => (
-              <div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void jumpTo(
-                      group.key === "__orphan__" ? undefined : group.key,
-                    )
-                  }
-                  class="flex w-full items-baseline gap-2 rounded px-1 py-0.5 text-left text-sm font-semibold hover:bg-(--color-outl-fg)/5"
-                >
-                  <PageGlyph icon={group.icon} kind={group.kind} class="self-center" />
-                  <span>{group.title}</span>
-                  <span class="text-xs opacity-50">{group.entries.length}</span>
-                </button>
+          <For each={groupKeys()}>
+            {(gkey) => {
+              const group = () => layout().groups.get(gkey);
+              return (
+                <Show when={group()}>
+                  {(g) => (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void jumpTo(
+                            gkey === "__orphan__" ? undefined : gkey,
+                          )
+                        }
+                        class="flex w-full items-baseline gap-2 rounded px-1 py-0.5 text-left text-sm font-semibold hover:bg-(--color-outl-fg)/5"
+                      >
+                        <PageGlyph
+                          icon={g().icon}
+                          kind={g().kind}
+                          class="self-center"
+                        />
+                        <span>{g().title}</span>
+                        <span class="text-xs opacity-50">
+                          {g().rootKeys.length}
+                        </span>
+                      </button>
 
-                <ul class="mt-1 space-y-1 pl-6">
-                  <For each={group.entries}>
-                    {(link, index) => {
-                      // Through the `cursor` memo over
-                      // `backlinkCursor`, never the raw field: the
-                      // outline holds the cursor until it releases it,
-                      // so a stale id cannot paint an accent bar on a
-                      // row the keyboard is not on. The memo is why
-                      // this is one comparison per row and not one
-                      // page walk per row — see its doc.
-                      const selected = () => cursor() === link.block_id;
-                      // The `(page, block)` pair an edit of this row is
-                      // addressed to, or `null` for an orphan — one
-                      // owner across both GUI clients, so neither
-                      // decides for itself which rows are editable.
-                      const editTarget = () => backlinkEditTarget(link);
-                      // The same pair, but only while *this* row is the
-                      // one in Insert — the editing identity is global
-                      // (one row at a time) and the row has to match it.
-                      const editing = () =>
-                        appState.editingBacklink?.blockId === link.block_id
-                          ? editTarget()
-                          : null;
-                      // Breadcrumb of ancestor blocks as dimmed context.
-                      // Collapsed against the previous entry in the same
-                      // group: consecutive references in the same branch
-                      // show the trail once, then sit under it silently.
-                      const prev =
-                        index() > 0 ? group.entries[index() - 1] : null;
-                      const showCrumbs =
-                        link.ancestors.length > 0 &&
-                        (!prev ||
-                          !sameCrumbTrail(prev.ancestors, link.ancestors));
-                      /**
-                       * The row in read mode — the cited block's text,
-                       * and the gesture that starts editing it.
-                       *
-                       * A named local rather than an inline `fallback`,
-                       * the shape `<BlockRow />` uses for its own
-                       * bullet and body: the two states are 50 lines
-                       * and 10, and nesting the long one inside the
-                       * short one's prop buries the branch.
-                       */
-                      const rowText = () => (
-                        <button
-                          type="button"
-                          // Editing in place, rather than opening the
-                          // source page: the view that assembled these
-                          // references is the one the user came to act
-                          // in, and acting on a row used to cost it.
-                          // Opening the page stays on the group header.
-                          //
-                          // An orphan backlink has no page to address
-                          // (`source_page` is null when the citing
-                          // block lives outside any page), so its row
-                          // stays read-only.
-                          onClick={() => {
-                            const target = editTarget();
-                            if (target) startBacklinkEdit(target);
-                          }}
-                          // No `onMouseEnter`: a pointer crossing this
-                          // section is not a cursor move. It used to
-                          // write `selectedBacklinkBlockId`, which is
-                          // the keyboard's own cursor, so merely
-                          // passing over a row on the way elsewhere
-                          // took `j` and `Enter` off the block the user
-                          // had left them on. The hover affordance is
-                          // the `hover:bg-…` below, which costs no
-                          // state.
-                          class={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-sm leading-snug opacity-90 hover:bg-(--color-outl-fg)/5 hover:opacity-100 ${
-                            link.todo === "DONE"
-                              ? "line-through opacity-60"
-                              : ""
-                          }`}
-                        >
-                          <Show
-                            when={link.source_block.table}
-                            fallback={
-                              <MarkdownInline
-                                tokens={link.source_block.tokens}
-                                variant="inline"
-                              />
-                            }
-                          >
-                            {/* A citing block that is a table reads as
-                                a grid here too. Inert (no `onEdit`) —
-                                the row's own click is the edit
-                                gesture, and a table has no cell
-                                editor by design (#329). */}
-                            <MarkdownTable
-                              table={link.source_block.table!}
-                              variant="inline"
+                      <ul class="mt-1 space-y-1 pl-6">
+                        <For each={g().rootKeys}>
+                          {(key) => (
+                            <BacklinkRowItem
+                              rowKey={key}
+                              cursor={cursor}
+                              showCrumbs={layout().crumbs.has(key)}
+                              childKeys={layout().childKeys.get(key) ?? []}
+                              onToggle={(l, n) => void toggleBacklinkTodo(l, n)}
                             />
-                          </Show>
-                        </button>
-                      );
-                      return (
-                        <li
-                          // The selected state mirrors the outline's
-                          // BlockRow highlight: 3px accent bar on the
-                          // left + 6% background. Same visual
-                          // language so j/k feels continuous from
-                          // outline into backlinks.
-                          class={
-                            selected()
-                              ? "relative -ml-3 rounded bg-(--color-outl-accent)/6 pl-3 before:absolute before:left-0 before:top-1 before:bottom-1 before:w-[3px] before:rounded-r before:bg-(--color-outl-accent)"
-                              : ""
-                          }
-                        >
-                          <Show when={showCrumbs}>
-                            <div
-                              class="truncate px-1 pt-0.5 text-xs opacity-40"
-                              // The tooltip stays plain text — a
-                              // `title=` cannot hold markup — while the
-                              // row renders. One owner for both forms.
-                              title={crumbTrailText(link.ancestors)}
-                            >
-                              <CrumbTrail crumbs={link.ancestors} />
-                            </div>
-                          </Show>
-                          <div class="flex items-start">
-                            <button
-                              type="button"
-                              data-todo={link.todo ?? "none"}
-                              onClick={() => void toggleBacklinkTodo(link)}
-                              class={`mt-[2px] mr-2 w-3 shrink-0 cursor-pointer text-center text-[13px] leading-none hover:opacity-70 ${
-                                link.todo === "DONE"
-                                  ? "text-(--color-outl-todo-done-fg)"
-                                  : link.todo === "TODO" ||
-                                      link.todo === "DOING"
-                                    ? "text-(--color-outl-todo-open-fg)"
-                                    : "text-(--color-outl-fg-dimmer)"
-                              }`}
-                              title={backlinkTodoLabel(link.todo)}
-                              aria-label={backlinkTodoLabel(link.todo)}
-                            >
-                              {link.todo === "DONE"
-                                ? "▣"
-                                : link.todo === "DOING"
-                                  ? "▨"
-                                  : link.todo === "TODO"
-                                    ? "▢"
-                                    : "•"}
-                            </button>
-                            <Show
-                              when={editing()}
-                              fallback={rowText()}
-                            >
-                              {/* Mounted only while this row is the one
-                                  being edited, which is what seeds its
-                                  draft once per edit session rather than
-                                  once per row — see the editor's doc. */}
-                              {(target) => (
-                                <div class="min-w-0 flex-1 px-1 py-0.5 text-sm leading-snug">
-                                  <BacklinkRowEditor
-                                    link={link}
-                                    target={target()}
-                                  />
-                                </div>
-                              )}
-                            </Show>
-                          </div>
-                        </li>
-                      );
-                    }}
-                  </For>
-                </ul>
-              </div>
-            )}
+                          )}
+                        </For>
+                      </ul>
+                    </div>
+                  )}
+                </Show>
+              );
+            }}
           </For>
         </div>
       </section>

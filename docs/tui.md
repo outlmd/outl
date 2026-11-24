@@ -494,20 +494,25 @@ Hooks are dispatched once per mutation; a hook that itself mutates the workspace
   Recursion is capped at depth 4 to break embed cycles.
   The cursor-bearing block always keeps the raw `((…))` / `!((…))` literal on its first row so column counting stays exact.
 - **Backlinks (inline)** — rendered below the outline, separated by a full-width `─` rule.
-  Every block that contains `[[this]]` or `#this` shows up, grouped by source page — **one row per block, without its children**, because walking every referencing block's subtree across the workspace is what used to freeze input.
+  Every block that contains `[[this]]` or `#this` shows up, grouped by source page — **one row per citing block, followed by its children** (direct children and their descendants, capped at four levels, always expanded, whatever fold the source page keeps).
+  The index keeps those children beside the block rather than inside it, so a lookup never copies a subtree under the workspace lock.
+  A block that cites this page *and* sits under another citing block is drawn twice, once as its own row and once inside the ancestor's children.
+  Namespace mentions (`#os/linux` arriving at `os`) stay one shallow, read-only row each.
   Pages are ordered by how recently they referenced this page (default: most recent on top); `Ctrl+O` flips the direction, shown in the section header (`↓ newest (^O)` / `↑ oldest (^O)`).
   Within a page, blocks keep document order.
   When a citing block is nested inside an outline (not at page root level), its ancestor chain shows as a dimmed breadcrumb above it, root-first (e.g. `Planejamento Q3 › Objetivos`); a root-level block has no breadcrumb.
   The trail renders its markdown — a `[[ref]]` reads as its name, a `#tag` keeps its colour — with the dim applied to the row rather than to each span.
   Consecutive references from the same branch collapse the trail — it renders once, then stays implicit for the following reference(s) until the branch changes.
   `j`/`k` navigation crosses the separator transparently: from the last outline block, `j` lands you on the first backlink; `k` from the first backlink walks back into the outline.
+  Inside the panel `j`/`k` step through each citing block, then its children depth-first, then the next citing block; a child is a row you can edit like any other.
   Toggle the section with `B`.
   A page **can** cite itself and the row is listed: you typed the ref expecting to see it in your cross-references.
-  Press `i` / `Enter` on a backlink to edit the referencing block **in place**, without leaving the page you are reading: the edit lands as one op on that block, and the source page's `.md` is written from the op log afterwards.
+  Press `i` / `Enter` on a backlink (or on one of its children) to edit that block **in place**, without leaving the page you are reading: the edit lands as one op on that block, and the source page's `.md` is written from the op log afterwards.
   `Ctrl+T`, `g D`, `d d`, `Tab` / `Shift+Tab` and the move chords work the same way, on the same block — see [shortcuts.md → On a backlink row](shortcuts.md#on-a-backlink-row) for what each one means there.
   A row whose block has been deleted elsewhere refuses before the edit starts and says so (`That block was deleted, so nothing changed.`), rather than taking your typing and dropping it at `Esc`.
   `Enter` *while editing* a backlink row commits what you typed and leaves Insert instead of splitting the block — see `o` / `O` just below for why there is nowhere for the caret to go.
-  `o` / `O` are the one gesture the panel usually cannot finish.
+  `o` / `O` on a **child** row create the sibling and open Insert on it: it lands inside the children the panel already draws.
+  On the citing block itself they are the one gesture the panel usually cannot finish.
   The new sibling is created on the source page, but it does not reference the page you are on, so it has no row here and the caret has nowhere to land.
   The status line names the page it went to and says so — `not editable from the panel` — instead of starting an edit on a block you did not aim at.
   The exception is a page that cites **itself**: the new block is in the outline you are already looking at, so the cursor leaves the panel and Insert opens on it, exactly as `o` behaves anywhere else.

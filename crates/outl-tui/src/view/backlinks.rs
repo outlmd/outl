@@ -1,11 +1,13 @@
 //! Inline backlinks section — rendered *below* the outline, separated
 //! by a full-width `─` rule. Each source page contributes a header
-//! followed by **one row per referencing block** — never a subtree.
+//! followed by one row per referencing block **and that block's
+//! children**, capped at `outl_actions::SUBTREE_MAX_DEPTH` levels.
 //! `Backlink::source_block` carries no children by design (the #179
-//! freeze fix; that field's doc owns why), so there is nothing deeper
-//! to draw and `Focus::Backlink { idx }` names a whole row.
+//! freeze fix; that field's doc owns why), so the children are read
+//! from the index's side table through `App::backlink_subtree`, an
+//! `Arc` bump per frame and never a deep copy.
 //!
-//! Selection of a backlink block (`Focus::Backlink { idx }`)
+//! Selection of a backlink block (`Focus::Backlink { idx, node }`)
 //! highlights the bullet the same way the outline does — same theme
 //! `selected_bullet`, same cursor styles. The TUI scrolls so the
 //! selection stays visible (handled by the caller in `view::render_main`).
@@ -14,11 +16,16 @@
 //! — the single source for backlinks across the TUI, shared with the
 //! mobile client through `outl_actions::backlinks_for_page`.
 
+mod memo;
+
+pub(crate) use memo::{Panel, PanelMemo};
+
 use crate::state::{App, EditTarget, Focus, Mode};
 use crate::view::inline::render_markdown_inline;
 use crate::view::outline::{emit_block_lines, RenderMode};
 use crate::view::row_chrome::{push_property_row, FoldMarker};
 use outl_actions::{BacklinkCrumb, OutlineNode};
+use outl_core::id::NodeId;
 use ratatui::text::{Line, Span};
 
 /// Do two ancestor trails name the same chain of blocks (by id)?
@@ -86,32 +93,73 @@ fn empty_section_notice(shown: bool, has_rows: bool, index_pending: bool) -> Opt
 ///
 /// Empty result `(vec![], None)` when there are no backlinks for the
 /// current view or the user has toggled the section off via `B`.
+///
+/// An owned copy of [`panel`]'s memoised lines; the frame itself reads
+/// the shared ones.
+#[cfg(test)]
 pub(crate) fn render_backlinks_inline(
     app: &App,
     inner_width: u16,
 ) -> (Vec<Line<'static>>, Option<usize>) {
+    let p = panel(app, inner_width);
+    (p.lines.to_vec(), p.selected)
+}
+
+/// The panel's lines, rebuilt only when something they read changed.
+///
+/// Every keystroke redraws, and a hub page's panel is ~850 citing rows
+/// plus ~3.5k subtree nodes: building it per frame re-tokenised all of
+/// them while the user typed in the outline above (root invariant 15).
+/// See [`memo`] for the key and for what it deliberately does not cover.
+pub(crate) fn panel(app: &App, inner_width: u16) -> Panel {
     if !app.show_backlinks || !app.page_sections_visible() {
-        return (Vec::new(), None);
+        return Panel::empty();
     }
     let backlinks = app.backlinks_for_current();
     if backlinks.is_empty() {
-        // Zero rows has two causes, and they used to render the same.
-        let Some(notice) =
-            empty_section_notice(app.show_backlinks, false, app.has_pending_backlink_index())
-        else {
-            return (Vec::new(), None);
-        };
-        let rule = "─".repeat(inner_width.max(1) as usize);
-        return (
-            vec![
-                Line::from(""),
-                Line::from(Span::styled(rule, app.theme.border)),
-                Line::from(Span::styled(notice, app.theme.dim)),
-            ],
-            None,
-        );
+        return Panel::from_built(build_empty_panel(app, inner_width));
     }
+    memo::cached_or_build(app, inner_width, &backlinks, || {
+        build_panel(app, inner_width, &backlinks)
+    })
+}
 
+/// [`render_backlinks_inline`] without the memo: the old full render,
+/// the reference the memo's equivalence tests compare against.
+#[cfg(test)]
+pub(crate) fn render_backlinks_uncached(
+    app: &App,
+    inner_width: u16,
+) -> (Vec<Line<'static>>, Option<usize>) {
+    build_panel(app, inner_width, &app.backlinks_for_current())
+}
+
+/// The section for zero rows: nothing, or the "indexing…" notice.
+fn build_empty_panel(app: &App, inner_width: u16) -> (Vec<Line<'static>>, Option<usize>) {
+    // Zero rows has two causes, and they used to render the same.
+    let Some(notice) =
+        empty_section_notice(app.show_backlinks, false, app.has_pending_backlink_index())
+    else {
+        return (Vec::new(), None);
+    };
+    let rule = "─".repeat(inner_width.max(1) as usize);
+    (
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(rule, app.theme.border)),
+            Line::from(Span::styled(notice, app.theme.dim)),
+        ],
+        None,
+    )
+}
+
+/// The uncached build: every row, every child. Kept separate so the
+/// memo's equivalence test has the old full render to compare against.
+fn build_panel(
+    app: &App,
+    inner_width: u16,
+    backlinks: &[outl_actions::Backlink],
+) -> (Vec<Line<'static>>, Option<usize>) {
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut selected_line: Option<usize> = None;
 
@@ -177,53 +225,83 @@ pub(crate) fn render_backlinks_inline(
             out.push(render_crumb_trail(&bl.ancestors, app));
         }
 
-        // Which row of this backlink's mini-outline is focused,
-        // highlighted the way the main outline highlights
-        // `app.selected`. `Focus::Backlink` names the citing block and
-        // nothing under it, so that is always the subtree root (`[]`);
-        // the renderer below still walks children because
-        // `source_block` is a generic outline node.
-        let focus_path: Option<&[usize]> = match &app.focus {
-            Focus::Backlink { idx: fidx } if *fidx == idx => Some(&[]),
+        // The block the cursor names, when it is on this row: the
+        // citing block, or the descendant `node` picked out of its
+        // subtree. An id, because the subtree arrives by `Arc` and a
+        // path would go stale on every refetch.
+        let focus_id = match &app.focus {
+            Focus::Backlink { idx: fidx, node } if *fidx == idx => {
+                node.or_else(|| crate::actions::node_id(&bl.block_id))
+            }
             _ => None,
         };
 
-        let mut current_path: Vec<usize> = Vec::new();
         render_backlink_node(
             &bl.source_block,
             0,
-            &mut current_path,
-            focus_path,
+            focus_id,
             app,
             &mut out,
             &mut selected_line,
             inner_width,
         );
+        // The children come off the index's side table, a refcount
+        // bump per row: the cloned `Backlink` above is shallow on
+        // purpose, and a deep copy here would run every frame.
+        if let Some(children) = app.backlink_subtree(&bl.block_id) {
+            render_backlink_children(
+                &children,
+                1,
+                focus_id,
+                app,
+                &mut out,
+                &mut selected_line,
+                inner_width,
+            );
+        }
     }
 
     (out, selected_line)
 }
 
-/// Recursive helper: emit a backlink's source block and any children
-/// it carries. In practice that is one row — `source_block` is always
-/// shallow (see the module doc) — and the recursion stays because the
-/// node type is the generic `OutlineNode` the outline renders.
-/// Tracks `current_path` to know when to flag the
-/// focused row, and consults `app.mode` to render an in-place edit
-/// buffer when the cursor sits on the block currently being edited
-/// (cross-page Insert through `EditTarget::SourcePage`).
-#[allow(clippy::too_many_arguments)]
-fn render_backlink_node(
-    node: &OutlineNode,
+/// Draw `nodes` and everything under them, `indent` levels in.
+fn render_backlink_children(
+    nodes: &[OutlineNode],
     indent: u32,
-    current_path: &mut Vec<usize>,
-    focus_path: Option<&[usize]>,
+    focus_id: Option<NodeId>,
     app: &App,
     out: &mut Vec<Line<'static>>,
     selected_line: &mut Option<usize>,
     text_width: u16,
 ) {
-    let is_focused = focus_path == Some(current_path.as_slice());
+    for node in nodes {
+        render_backlink_node(node, indent, focus_id, app, out, selected_line, text_width);
+        render_backlink_children(
+            &node.children,
+            indent + 1,
+            focus_id,
+            app,
+            out,
+            selected_line,
+            text_width,
+        );
+    }
+}
+
+/// Emit one block of a backlink's mini-outline: highlighted when it is
+/// the block the cursor names, and drawn as an in-place edit buffer
+/// when it is the block being edited (cross-page Insert through
+/// `EditTarget::SourcePage`).
+fn render_backlink_node(
+    node: &OutlineNode,
+    indent: u32,
+    focus_id: Option<NodeId>,
+    app: &App,
+    out: &mut Vec<Line<'static>>,
+    selected_line: &mut Option<usize>,
+    text_width: u16,
+) {
+    let is_focused = focus_id.is_some() && focus_id == crate::actions::node_id(&node.id);
     if is_focused && selected_line.is_none() {
         *selected_line = Some(out.len());
     }
@@ -294,21 +372,6 @@ fn render_backlink_node(
 
     for (k, v) in &node.properties {
         push_property_row(indent, k, v, has_auto_run, app, out, text_width);
-    }
-
-    for (i, child) in node.children.iter().enumerate() {
-        current_path.push(i);
-        render_backlink_node(
-            child,
-            indent + 1,
-            current_path,
-            focus_path,
-            app,
-            out,
-            selected_line,
-            text_width,
-        );
-        current_path.pop();
     }
 }
 

@@ -81,6 +81,10 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   `onEditCommitted({ sourcePageId, view })` is the whole upward surface: this card never learns the open page's id, because `backlinkCommitPlan` needs *both* ids and only `Journal.backlinks.ts` holds them.
   A section taking `openPageId` plus an `onApplySourceView` was one question split four ways, with `PageSections` threading props it never read.
 
+- **Children are rows of their own.**
+  Each child of a citing block is a separate tap / long-press target (44 pt minimum) outside the parent's container, so a tap on a child edits the child, and the long-press sheet is built per node.
+  `@outl/shared/backlink-edit`'s `flattenBacklinkRows` gives the draw order and `backlinkEditTargetFor(link, node)` the target.
+
 - **`BacklinksSection.row-ops.ts`** — `createBacklinkRowOps`: every mutation a row can perform,
   and all of the section's state (editing, pending, the sheet's row, the delete prompt), so the component carries no signals of its own — the arrangement `Journal.remind.ts` and `Journal.embeds.ts` already use.
   **Mobile has no chord surface at all**, so where the desktop binds a key, a long press offers a row in the same `<BlockContextMenu>` the outline uses:
@@ -92,7 +96,7 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
   Three decisions in it, each written down because the honest answer is not the obvious one:
 
   - **Indent / outdent / move ship with no nudge and no `enabled` guard.**
-    They have no visible result on a flat row, which was weighed and accepted — the capability row says `Full` for this client, and the TUI's `Partial` on it is about a missing source-page gesture rather than about these three.
+    On the citing block's row they have no visible result (its siblings are not drawn), which was weighed and accepted; on a child row they do — the capability row says `Full` for this client, and the TUI's `Partial` on it is about a missing source-page gesture rather than about these three.
     The outline's builder hides a move at the ends by resolving a sibling index, and a backlink row has no sibling list on screen, so guessing that position is worse than offering both.
   - **Create below / above ship, and give up only the keyboard.**
     A new sibling cites nothing, so it is a backlink of no page, appears in no row here,
@@ -100,7 +104,7 @@ That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see tha
     The block is created anyway and the user is told where it went, because a declared limit beats a wrong target: the TUI hit the same wall from the other side and its re-entry parked the caret on the *citing* block.
     The sentence is `@outl/shared/backlink-edit`'s `backlinkCreatedElsewhere` and `Journal.backlinks.ts` passes it the open page id, because it returns `null` when the source page *is* the one on screen.
   - **Delete asks when the block has children**, through `<BlockDeleteConfirm />` — the same prompt and wording the outline raises (`JournalDeleteDialogs.tsx` owns both).
-    The case is *stronger* here, because a backlink renders one flat block and the subtree about to be trashed is not on screen at all.
+    The citing block's children are drawn under it now, so the count is real, where it used to be always zero and the prompt never appeared.
 
   **The card takes one write at a time**, and the guard is card-wide rather than per-row because the re-ask replaces every row.
   Every op is a cross-page mutation plus an `O(blocks-in-workspace)` scan, so the window is long enough for a second gesture to land in it —

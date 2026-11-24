@@ -76,6 +76,7 @@ impl SlashCommand for ThemeCommand {
         if let Some(t) = theme::by_name(args) {
             let name = t.name.clone();
             app.theme = t;
+            app.bump_render_epoch();
             app.status = format!("theme: {name}");
         } else {
             app.status = format!("unknown theme: {args}");

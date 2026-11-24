@@ -17,6 +17,8 @@ import { setAppState } from "../lib/store";
 
 vi.mock("@outl/shared/api/commands", () => ({
   openRef: vi.fn(),
+  resolveEmbeds: vi.fn().mockResolvedValue({}),
+  resolvePageEmbeds: vi.fn().mockResolvedValue({}),
   pageBacklinks: vi.fn(),
   setBacklinksOrder: vi.fn(),
   toggleTodo: vi.fn(),

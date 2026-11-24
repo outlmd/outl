@@ -374,7 +374,7 @@ impl App {
                         Ok(path) => {
                             if let Ok(text) = std::fs::read_to_string(&path) {
                                 let parsed = outl_md::parse::parse(&text);
-                                self.index.patch_page(&path, &parsed);
+                                self.patch_index_page(&path, &parsed);
                             }
                         }
                         Err(e) => {

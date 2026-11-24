@@ -11,7 +11,7 @@ That's the spec; don't change it.
 - Quick switcher (`Ctrl+P`) for fuzzy page/journal jumping.
 - Outline panel for current page with inline visible cursor.
 - Inline backlinks rendered below the outline (`B` toggles, `j/k` crosses the separator, `Ctrl+O` flips the sort direction).
-  **One row per citing block, and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
+  **One row per citing block plus its children (capped at `outl_actions::SUBTREE_MAX_DEPTH`, always expanded), and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
   Recorded as `Capability::BacklinkInlineEdit` → `Partial` here and `Full` on the GUI clients, because **nothing in this panel opens the page a row's block lives on**.
   Not the header (a styled `Line` with no `block_starts` entry), not a click (refused below the outline), not `Enter` (it enters Insert), and not a `[[link]]` in the row, which points back at the page being read.
   The route is `Ctrl+P` and the page name, which is what the nudge says; the mechanism for the edits themselves is under "The commit pipeline this crate does not use yet" below.
@@ -599,18 +599,18 @@ One cross-page writer is left on `save_page_with`, and it is about **embeds**, n
 That is **scope, not a blocker** — `WorkspaceIndex::resolve_block_ref` returns a `BlockEntry` carrying `id: NodeId` and `source_slug`, both keys a commit needs, and the current code destructures the path pair and discards `entry.id`.
 What a migration owes is the half the backlink path has no equivalent for: the auto-run re-run and the same-page reload those two do after the write.
 
-**`Focus::Backlink { idx }` is the whole cursor, and the `sub_path` it used to carry was dead code the type made look alive.**
-That field was a DFS path into `Backlink.source_block`'s subtree, and it was **always empty**.
-Both index builders ship `source_block` shallow (`children: Vec::new()`, the fix for the #179 input freeze), so `flatten_subtree_paths` returned exactly one path and the descend branch in `actions::nav::selection` was unreachable.
-`j` never walked into a backlink's subtree; the panel has always drawn one row per citing block.
-**This crate's call to `flatten_subtree_paths` went with the field** — grep finds no caller here now — while the function itself still exists in `outl-actions` (definition, re-export and its own tests) with **no caller left** in the workspace.
-So removing it was inert rather than a behaviour change, which is why `backlink_target.rs` pins the premise **structurally**.
-That pin asserts `source_block.children.is_empty()` over every row, and reads its precondition from the workspace tree rather than from the index it is testing.
-A claim somebody verified once is not a net: revert #179's shallow builders and the pin is what fails.
+**`Focus::Backlink { idx, node: Option<NodeId> }` is the cursor: the row, and which block of it.**
+`node` is `None` on the citing block and `Some(id)` on one of its descendants.
+It is an id, not a DFS path: a path into a subtree goes stale the moment a sibling above it is created or deleted, and the descendants never ride the cloned list at all.
+They come from `App::backlink_subtree` (`actions/nav/backlink_nodes.rs`), which reads the `Arc` the from-disk `BacklinkIndex` holds in its side table, so the `Backlink` the panel clones still has `source_block.children` empty.
+(The old `sub_path` was a DFS path into that same field and was dead code for months: both builders shipped it shallow, so `j` never descended. `backlink_target.rs` still pins that the *list* is shallow, structurally, against the workspace tree rather than the index it tests.)
+`j` / `k` walk the **stops** of a row: the citing block, then its descendants depth-first, then the next row.
+A block that cites the page and sits under another citing block is drawn twice and has two stops; `idx` bounds and `count_for_page` stay one per citing block.
 `idx` is positional, so a stale one reads as "nothing focused" rather than as a different row (`actions/block/backlink_target.rs`).
 
-**`o` / `O` on a backlink row create the block and do not enter Insert, and `Enter` from Insert inherits that.**
-`Focus::Backlink { idx }` names a *backlink row*; a brand-new sibling cites nothing, so it is not a row — `view/backlinks.rs` paints the edit buffer on the row whose `idx` matches, and there is none to paint on.
+**`o` / `O` on the citing block create the block and do not enter Insert, and `Enter` from Insert inherits that.**
+On a **child** the new sibling lands inside the subtree the panel draws, so Insert opens on it.
+`Focus::Backlink { idx, node }` names a *backlink row*; a brand-new sibling cites nothing, so it is not a row — `view/backlinks.rs` paints the edit buffer on the row whose `idx` matches, and there is none to paint on.
 Entering Insert anyway is what the `.md`-first route did, and it put the caret back on the **citing** block, so the next keystroke edited text the user had not aimed at.
 So the block is created on the source page, Insert is not entered, and the status line names the page plus the limit (`not editable from the panel`).
 **A self-citing page is the exception and it does finish**: the commit's reload has already put the new block in `App.page`,
@@ -657,6 +657,19 @@ Net: `backlink_commit/ahead_of_log_tests.rs`, asserting on `ws.log().len()` and 
 `clamp_backlink_focus` pulls an out-of-range `idx` back into the list and drops to `Focus::Outline` when the list is empty, and it has to run on the path with **no** reload:
 a `d d` on the only backlink of an off-screen page empties the panel, and `Focus::Backlink` over zero rows has no keyboard way out (`j` / `k` both decline a stale `idx` by design, and every chord declines it too).
 Net: `a_cross_page_delete_that_empties_the_panel_returns_the_cursor_to_the_outline`, `an_edit_that_drops_the_last_self_citation_returns_the_cursor_to_the_outline`.
+
+**A descendant the subtree lost is refused, never re-aimed.**
+`backlink_block_of` returns `None` for a `node` the row's stops no longer hold, so `d d` / `Tab` / `Ctrl+T` say the catalog's stale-block sentence instead of resolving to the citing block and acting on the parent's whole subtree.
+Falling back to the citing block is `clamp_backlink_focus`'s job, and it now also runs when `poll_backlink_index_updates` swaps an index in.
+Both gates (`enter_insert_backlink` and `backlink_block_can_take_the_write`) ask `backlink_row_is_live_on(page, block)`: live **and** still under the row's page, the same verdict as `outl_tauri_shared`'s `row_is_live_on`, because `commit_page` scopes the undo snapshot and the projection to that page.
+Net: `actions/block/backlink_stale_tests.rs`.
+
+**The panel's lines are memoised** (`view/backlinks/memo.rs`), because every keystroke redraws and a hub page's panel is ~850 rows plus ~3.5k subtree nodes (invariant 15).
+The key is a hash of what the renderer reads from the rows, the focused row's mode (the live buffer only while it is edited in the panel), width, sort direction and `App::bump_render_epoch`.
+**A writer of `App::index` or `App::theme` must bump the epoch** (page patches go through `patch_index_page`); a stale ref chip is what a missed one looks like.
+A key change rebuilds the whole panel, so `j`/`k` and typing inside a row cost what they did; typing in the outline above no longer builds anything.
+`view::window::visible_window` copies only the on-screen rows out of the memo.
+Net: `actions/block/backlink_panel_memo_tests.rs` (equivalence with the full render, `PanelMemo::builds` for "builds nothing", and a miss per key input).
 
 **One `Tab` mid-edit records two undo entries**, where the `.md`-first route recorded one: the in-flight `commit_insert` snapshots, then the reparent commit snapshots again.
 Both belong to the source page and `top_applies_here` still gates them, so this is finer granularity rather than a leak — written down because it is a behaviour change and `u` now takes two presses to get back past a `Tab` typed into.

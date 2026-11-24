@@ -28,11 +28,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use outl_core::fractional::Fractional;
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use tracing::warn;
+
+mod disk;
+
+pub use disk::build_backlink_index_from_disk;
+use disk::walk_parsed;
 
 use crate::alias_conflicts::PageClaims;
 use crate::backlinks::Backlink;
@@ -66,6 +72,16 @@ pub struct SplitBacklinks {
 struct IndexedEntry {
     backlink: Backlink,
     keys: Vec<TargetKey>,
+    /// The citing block's children, capped at [`crate::SUBTREE_MAX_DEPTH`].
+    ///
+    /// **Beside the `Backlink`, never inside it**, so a lookup that clones
+    /// the hit (`collect_by_keys`, which runs under the workspace lock on
+    /// the GUI) copies a leaf and bumps a refcount here instead of
+    /// deep-copying a subtree. Callers fetch it with
+    /// [`BacklinkIndex::subtree`] once the locks are gone. `None` for a
+    /// leaf, and always `None` on the workspace builder (CLI / MCP),
+    /// which must not materialize descendants (#179).
+    subtree: Option<Arc<[OutlineNode]>>,
 }
 
 /// Inverted backlinks index.
@@ -138,6 +154,17 @@ impl BacklinkIndex {
             TargetKey::Ref(target.to_string()),
             TargetKey::Tag(outl_md::slug::slugify(target)),
         ])
+    }
+
+    /// The citing block's children, capped at [`crate::SUBTREE_MAX_DEPTH`] levels:
+    /// one hash lookup and a refcount bump, so it is safe to call per hit
+    /// under a lock. The deep copy into a wire reply belongs **after**
+    /// the locks drop (see `Backlink::with_children`).
+    ///
+    /// `None` for a leaf, for an unknown id, and for every hit of an
+    /// index built from the workspace tree ([`build_backlink_index`]).
+    pub fn subtree(&self, block_id: &str) -> Option<Arc<[OutlineNode]>> {
+        self.by_block.get(block_id)?.subtree.clone()
     }
 
     /// Number of backlinks for `meta`'s page **without cloning** the
@@ -218,7 +245,12 @@ impl BacklinkIndex {
     }
 
     /// Add one referencing block under each of its keys.
-    fn insert(&mut self, backlink: Backlink, keys: Vec<TargetKey>) {
+    fn insert(
+        &mut self,
+        backlink: Backlink,
+        keys: Vec<TargetKey>,
+        subtree: Option<Arc<[OutlineNode]>>,
+    ) {
         let id = backlink.block_id.clone();
         let page_slug = backlink
             .source_page
@@ -232,7 +264,14 @@ impl BacklinkIndex {
             .entry(page_slug)
             .or_default()
             .insert(id.clone());
-        self.by_block.insert(id, IndexedEntry { backlink, keys });
+        self.by_block.insert(
+            id,
+            IndexedEntry {
+                backlink,
+                keys,
+                subtree,
+            },
+        );
     }
 
     /// Remove every referencing block that lives on `page_slug`.
@@ -296,119 +335,6 @@ pub fn build_backlink_index(workspace: &Workspace, root: &Path) -> BacklinkIndex
     index
 }
 
-/// Build the inverted index by reading each page's `.md` from disk,
-/// **without touching the `Workspace`**.
-///
-/// This is the client-facing builder. Reading block text through
-/// `Workspace::block_text` (what [`build_backlink_index`] does) forces
-/// the whole workspace to materialize on a lazy-boot vault (#179) and
-/// holds the workspace lock across the `O(blocks)` walk — together, the
-/// "opening the journal / pressing Esc freezes" bug. The `.md` files are
-/// the projection the user already sees on disk and carry every block's
-/// text + properties + sidecar id, so the index can be built from them
-/// on a background thread with no lock and no Yrs materialization.
-///
-/// `metas` is the page list (cheap to get via `list_pages`, which reads
-/// only page roots, not block text); pass it in so this function needs
-/// no `Workspace` at all and stays `Send` for a worker thread.
-pub fn build_backlink_index_from_disk(metas: &[PageMeta], root: &Path) -> BacklinkIndex {
-    let started = std::time::Instant::now();
-    let mut index = BacklinkIndex {
-        claims: PageClaims::from_metas(metas),
-        ..BacklinkIndex::default()
-    };
-    for meta in metas {
-        let outline = match read_page_outline(root, meta) {
-            Ok(o) => o,
-            Err(e) => {
-                // Skipping a page here means every `[[ref]]` it makes
-                // disappears from the backlinks panel. A missing `.md`
-                // is silent by design (nothing to index); anything else
-                // is an unreadable page and the user deserves to know
-                // why their links went quiet.
-                warn!("backlink index: skipping page `{}`: {e}", meta.slug);
-                continue;
-            }
-        };
-        let source_path = page_md_path(root, meta);
-        let mut path: Vec<usize> = Vec::new();
-        let mut ancestors: Vec<CrumbFrame<'_>> = Vec::new();
-        walk_parsed(
-            &outline.nodes,
-            meta,
-            &source_path,
-            &mut path,
-            &mut ancestors,
-            &mut index,
-        );
-    }
-    tracing::debug!(
-        pages = metas.len(),
-        refs = index.len(),
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
-        "build_backlink_index_from_disk (full workspace rescan)"
-    );
-    index
-}
-
-/// DFS the parsed `.md` outline of one page, adding every mentioning
-/// block to `index`. The from-disk twin of [`walk_page`]: same shape,
-/// but reads the leaf + `from-template::` value off the already-parsed
-/// [`OutlineNode`] instead of the workspace tree.
-fn walk_parsed<'a>(
-    nodes: &'a [OutlineNode],
-    meta: &PageMeta,
-    source_path: &Path,
-    path: &mut Vec<usize>,
-    ancestors: &mut Vec<CrumbFrame<'a>>,
-    index: &mut BacklinkIndex,
-) {
-    for (idx, node) in nodes.iter().enumerate() {
-        path.push(idx);
-        let from_template = node
-            .properties
-            .iter()
-            .find(|(k, _)| k == crate::template::FROM_TEMPLATE_KEY)
-            .map(|(_, v)| v.as_str());
-        let keys = mentions_of(&node.text, from_template);
-        if !keys.is_empty() {
-            index.insert(
-                Backlink {
-                    block_id: node.id.clone(),
-                    block_text: node.text.clone(),
-                    todo: node.todo,
-                    source_page: Some(meta.clone()),
-                    source_block: shallow_parsed(node),
-                    source_block_path: path.clone(),
-                    ancestors: crumbs(ancestors),
-                    source_path: Some(source_path.to_path_buf()),
-                },
-                keys,
-            );
-        }
-        ancestors.push(CrumbFrame::Parsed(node));
-        walk_parsed(&node.children, meta, source_path, path, ancestors, index);
-        ancestors.pop();
-        path.pop();
-    }
-}
-
-/// Copy a parsed outline node as a shallow leaf (no `children`), keeping
-/// the already-parsed tokens/properties. Mirrors
-/// `project_outline_node_shallow` for the from-disk path.
-fn shallow_parsed(node: &OutlineNode) -> OutlineNode {
-    OutlineNode {
-        id: node.id.clone(),
-        text: node.text.clone(),
-        todo: node.todo,
-        collapsed: node.collapsed,
-        properties: node.properties.clone(),
-        tokens: node.tokens.clone(),
-        table: node.table.clone(),
-        children: Vec::new(),
-    }
-}
-
 /// DFS a page's blocks, adding every mentioning block to `index` under
 /// each of its keys. Mirrors the old `walk_inside_page`, but emits by
 /// [`mentions_of`] instead of a single-target matcher.
@@ -453,6 +379,7 @@ fn walk_page(
                     source_path: Some(source_path.to_path_buf()),
                 },
                 keys,
+                None,
             );
         }
         ancestors.push(CrumbFrame::Tree {

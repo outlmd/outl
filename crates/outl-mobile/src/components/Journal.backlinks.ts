@@ -169,6 +169,7 @@ export function createBacklinkCard(deps: BacklinkCardDeps) {
           commit.created.page,
           commit.created.side,
           openPageId,
+          commit.created.depth,
         );
         if (notice !== null) deps.onNotice(notice);
       }

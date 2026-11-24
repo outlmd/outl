@@ -182,6 +182,7 @@ describe("OpenRefUnderCursor (Normal-mode Enter)", () => {
     expect(appState.editingBacklink).toEqual({
       pageId: "pg-source",
       blockId: "blk-source",
+      key: "blk-source",
     });
     expect(openRef).not.toHaveBeenCalled();
     expect(applyView).not.toHaveBeenCalled();

@@ -307,7 +307,10 @@ fn a_tab_mid_edit_never_re_enters_insert_on_another_pages_block() {
         .as_ref()
         .and_then(|page| crate::actions::node_id(&page.id))
         .expect("a ULID");
-    app.focus = Focus::Backlink { idx: at };
+    app.focus = Focus::Backlink {
+        idx: at,
+        node: None,
+    };
     let aimed = app
         .focused_backlink_target()
         .expect("the row under the cursor resolves");

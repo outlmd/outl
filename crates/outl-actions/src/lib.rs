@@ -82,6 +82,7 @@ pub mod merges;
 pub mod namespace;
 pub mod open_with;
 pub mod outline;
+pub mod outline_subtree;
 pub mod page;
 pub mod page_merge;
 pub mod page_rename;
@@ -154,6 +155,7 @@ pub use outline::{
     read_page_outline_with_workspace, read_page_view, read_page_view_with_workspace, OutlineNode,
     PageOutline, SidecarIdentity,
 };
+pub use outline_subtree::{clone_capped, truncate_children_depth, SUBTREE_MAX_DEPTH};
 pub use page::{
     delete as delete_page, find_by_slug, is_valid_slug, list_all as list_pages,
     merge_duplicate_slug_roots, migrate_legacy_into_today, open_journal,

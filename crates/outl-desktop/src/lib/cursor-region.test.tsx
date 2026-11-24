@@ -206,7 +206,7 @@ describe("the cursor lives in one region", () => {
 
   it("a backlink id left behind paints no accent bar on its row", () => {
     const host = mountPage();
-    const row = () => backlinkRow(host).closest("li")!.className;
+    const row = () => backlinkRow(host).closest("[data-backlink-row]")!.className;
 
     // The cursor genuinely crossed into the backlinks, so the row owns
     // the highlight.

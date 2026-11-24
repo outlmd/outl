@@ -129,18 +129,18 @@ pub(crate) enum SidebarSection {
 /// touch ~40 call sites for a feature that's really a different mode
 /// with a different commit target.
 ///
-/// `Focus::Backlink { idx }` indexes `app.backlinks_for_current()`. The
-/// citing block is the whole cursor: both index builders ship
-/// `source_block` shallow (`children: Vec::new()`, the #179 freeze fix),
-/// so the `sub_path` this carried was always empty and `j` never walked
-/// into a backlink's subtree. `idx` is positional, so a stale one reads
-/// as "nothing focused" (`actions::block::backlink_target`).
+/// `Focus::Backlink { idx, node }`: `idx` indexes
+/// `app.backlinks_for_current()`; `node` is a descendant of that row's
+/// citing block (`None` = the block itself), read from
+/// [`App::backlink_subtree`] and held as an id, since paths go stale on
+/// refetch. A stale `idx` or missing `node` falls back, never panics.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum Focus {
     #[default]
     Outline,
     Backlink {
         idx: usize,
+        node: Option<outl_core::id::NodeId>,
     },
 }
 
@@ -667,13 +667,13 @@ pub(crate) struct App {
     /// `&self`; the worker's result is swapped in from
     /// [`App::poll_backlink_index_updates`].
     pub(crate) backlink_index: std::cell::RefCell<Option<outl_actions::BacklinkIndex>>,
-    /// Nested-pages rows, memoised and keyed by slug so navigating
-    /// invalidates it for free; every workspace change drops it via
-    /// `App::invalidate_namespace_children`. Deriving them costs two
-    /// full-workspace scans and the render path runs every frame — see
-    /// `App::namespace_children_for_current` for the cost.
+    /// Nested-pages rows, memoised by slug; every workspace change drops
+    /// them via `App::invalidate_namespace_children`. The derivation is
+    /// two full-workspace scans: see `App::namespace_children_for_current`.
     pub(crate) namespace_children:
         std::cell::RefCell<Option<(String, Vec<outl_actions::NamespaceChild>)>>,
+    /// The backlinks panel's memoised lines; see `view::backlinks::memo`.
+    pub(crate) panel_memo: crate::view::backlinks::PanelMemo,
     /// Receiver for an in-flight background backlink-index build (see
     /// [`App::spawn_backlink_index_rebuild`]). `Some` while a worker is
     /// running; drained by [`App::poll_backlink_index_updates`].

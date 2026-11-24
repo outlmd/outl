@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { Backlink, PageMeta } from "../api/types";
+import type { Backlink, BlockNode, PageMeta } from "../api/types";
 import {
   backlinkCommitPlan,
   backlinkCreatedElsewhere,
   backlinkEditTarget,
+  backlinkEditTargetFor,
+  flattenBacklinkRows,
 } from "./index";
 
 function link(opts: {
@@ -179,5 +181,75 @@ describe("backlinkCreatedElsewhere", () => {
     const text = backlinkCreatedElsewhere(page("Monday"), "below", "other");
 
     expect(text!.split("Monday").length - 1).toBe(2);
+  });
+});
+
+function node(id: string, children: BlockNode[] = []): BlockNode {
+  return { id, children } as unknown as BlockNode;
+}
+
+function withBlock(l: Backlink, source_block: BlockNode): Backlink {
+  return { ...l, source_block } as Backlink;
+}
+
+describe("backlinkEditTargetFor", () => {
+  it("addresses a descendant on the same source page", () => {
+    const l = withBlock(link({ pageId: "p1", blockId: "b1" }), node("b1", [node("c1")]));
+    expect(backlinkEditTargetFor(l, l.source_block.children[0]!)).toEqual({
+      pageId: "p1",
+      blockId: "c1",
+    });
+  });
+
+  it("leaves an orphan read-only, children included", () => {
+    const l = withBlock(link({ pageId: null }), node("b1", [node("c1")]));
+    expect(backlinkEditTargetFor(l, l.source_block.children[0]!)).toBeNull();
+  });
+});
+
+describe("flattenBacklinkRows", () => {
+  it("walks each citing block then its subtree, depth-first", () => {
+    const a = withBlock(
+      link({ pageId: "p1", blockId: "a" }),
+      node("a", [node("a1", [node("a1x")]), node("a2")]),
+    );
+    const b = withBlock(link({ pageId: "p2", blockId: "b" }), node("b"));
+    const rows = flattenBacklinkRows([a, b]);
+    expect(rows.map((r) => [r.node.id, r.depth])).toEqual([
+      ["a", 0],
+      ["a1", 1],
+      ["a1x", 2],
+      ["a2", 1],
+      ["b", 0],
+    ]);
+    expect(rows.every((r) => r.link === (r.node.id === "b" ? b : a))).toBe(true);
+  });
+
+  it("gives a block drawn twice two different keys", () => {
+    // `x` cites the page and sits under `a`, which cites it too: it is a
+    // row of its own and a child of `a`.
+    const a = withBlock(link({ pageId: "p1", blockId: "a" }), node("a", [node("x")]));
+    const x = withBlock(link({ pageId: "p1", blockId: "x" }), node("x"));
+    const rows = flattenBacklinkRows([a, x]);
+    expect(rows.filter((r) => r.node.id === "x")).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+  });
+
+  it("is empty for no links", () => {
+    expect(flattenBacklinkRows([])).toEqual([]);
+  });
+});
+
+describe("backlinkCreatedElsewhere and subtree rows", () => {
+  const page = { id: "p1", title: "Journal" } as PageMeta;
+
+  it("still says where a sibling of the citing block went", () => {
+    expect(backlinkCreatedElsewhere(page, "below", "other")).toContain("Journal");
+    expect(backlinkCreatedElsewhere(page, "below", "other", 0)).toContain("Journal");
+  });
+
+  it("says nothing for a sibling of a child: it lands inside the drawn subtree", () => {
+    expect(backlinkCreatedElsewhere(page, "below", "other", 1)).toBeNull();
+    expect(backlinkCreatedElsewhere(page, "above", "other", 4)).toBeNull();
   });
 });
