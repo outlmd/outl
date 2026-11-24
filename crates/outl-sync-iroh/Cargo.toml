@@ -50,7 +50,7 @@ rand = "0.10"
 # QR ticket rendering) called out in the crate's CLAUDE.md. Kept so the
 # pairing CLI path can land without a manifest change.
 chrono = { version = "0.4", features = ["serde"] }
-qrcode = "0.14"
+qrcode = "0.15"
 # `base64` encodes the pairing ticket (an `EndpointAddr` serialized to JSON);
 # `bytes` is the payload type `GossipSender::broadcast` takes.
 base64 = "0.23"
