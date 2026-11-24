@@ -87,7 +87,7 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > So the catalog and the TUI's arms can disagree without failing to compile.
   > `docs/shortcuts.md` claimed both clients called `lookup` for months.
   >
-  > **They do disagree, on 22 chords, 6 of which mutate content, the op log, or the session.**
+  > **They do disagree, on 20 chords, 6 of which mutate content, the op log, or the session.**
   > `Ctrl+X` is `CutBlock` here and deletes a character there; `Ctrl+Shift+R` is `OpenReminders` here and redoes there; `Ctrl+Z` is `Undo` here and arms the `z` fold chord there, two keystrokes from a silent edit.
   > `tests/tui_catalog_divergence.rs` owns that list.
   > It pins **both** halves — the catalog rows through `lookup`, the TUI's arm patterns by reading `input/normal.rs`.
@@ -96,12 +96,12 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > `reminder_chord_tests` keeps its own pins on chords that agree; those also appear in that test's `AGREED` table.
   >
   >
-  > **And 31 chords go the other way**: bound in `input/normal.rs`, absent from this catalog entirely, so `docs/shortcuts.md`'s generated halves and the desktop help overlay cannot see them.
-  > `h`, `l`, `w`, `b`, `0`, `$`, `G`, `g g`, `y y`, `/`, `n`, `Ctrl+D`, `Ctrl+U`, `Ctrl+B`, `Ctrl+E`, `Ctrl+S`, `Ctrl+L`, `Alt+↑/↓` and the rest.
+  > **And 27 chords go the other way**: bound in `input/normal.rs`, absent from this catalog entirely, so `docs/shortcuts.md`'s generated halves and the desktop help overlay cannot see them.
+  > `h`, `l`, `w`, `b`, `0`, `$`, `G`, `g g`, `y y`, `/`, `n`, `Ctrl+D`, `Ctrl+U`, `Ctrl+B`, `Ctrl+E`, `Ctrl+S`, `Ctrl+L` and the rest.
   > `Ctrl+B` and `Ctrl+E` are the sharp pair: `docs/shortcuts.md` publishes both as TUI chords today.
   > `TUI_ONLY` in `tests/tui_only_chords.rs` declares them, and `every_tui_only_chord_is_absent_from_the_catalog` fails when one lands in `defaults.rs` — so the list cannot outlive the gap it records ([#441](https://github.com/outlmd/outl/issues/441)).
   > It caught a wrong row on its first run: `Home` is in the catalog as `OpenToday` and was already a `KNOWN_DIVERGENCES` entry, even though the TUI shares one arm between `0` and `Home`.
-  > Migrating the 31 into the catalog is [#293](https://github.com/outlmd/outl/issues/293), not this gate: each needs an `Action` variant, and `support()` is exhaustive, so every addition is also three per-client verdicts.
+  > Migrating the 27 into the catalog is [#293](https://github.com/outlmd/outl/issues/293), not this gate: each needs an `Action` variant, and `support()` is exhaustive, so every addition is also three per-client verdicts.
   > The test covers `Normal` / `Global` chords a terminal can deliver (no `META` — crossterm never emits it).
   > For `Insert` / `Visual` / `Overlay`, grep `input/` yourself; the build will not do it for you.
 - ❌ User-level overrides (rebinding `i` to `a`).
@@ -156,14 +156,16 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
 | Mode | Meaning | Subscribed by |
 |---|---|---|
 | `Global` | Always active. Chrome chords (`Cmd+P`, `Cmd+J`, `Cmd+T`, `Cmd+,`). | Every client. |
-| `Normal` | Vim Normal mode — outline navigation (`j`, `k`, `i`, `o`, `dd`). | TUI always; desktop when `vim_mode == true`. |
-| `Insert` | Inside a textarea / EditBuffer. Movement (`Up`, `Down`, `Left`, `Right`), commit (`Esc`), inline-markdown wrappers (`Cmd+B`, `Cmd+I`). | TUI + desktop. |
+| `Normal` | Vim Normal mode — outline navigation (`j`, `k`, `i`, `o`, `dd`). | TUI always; desktop whenever nothing is focused (its dispatcher never reads `vim_mode`). |
+| `Insert` | Inside a textarea / EditBuffer. Movement (`Up`, `Down`, `Left`, `Right`), commit (`Esc`), inline-markdown wrappers (`Cmd+B`, `Cmd+I`), and the three non-letter move chords (`MoveBlock{Up,Down}`). | TUI + desktop. |
 | `Visual` | Range selection (vim Visual). | TUI; desktop via `V` (vim) **or** `Shift+↑/↓` (`SelectRange*`, any mode — issue #23). |
 | `Overlay` | Picker / settings modal / help is open. | TUI + desktop — used to give the overlay its own escape chord without it colliding with `Normal` mode bindings. |
 
 **`SelectRangeDown` / `SelectRangeUp` are the "enter a mode from another mode" example** (issue #23).
 Bound in **both** `Normal` and `Visual`, they start a contiguous selection from Normal — the desktop's non-vim multi-select entry, reached via its DOM "nothing focused" → Normal fallback — and keep extending it once Visual is active.
 `MoveVisualRange{Up,Down}` are Visual-only, mirroring the single-block `MoveBlock{Up,Down}` chords one mode over.
+Every move row lives in `defaults/move_block.rs`: platform chord first (`Cmd+Shift`), then `Ctrl+Shift`, `Alt`, and the vim letter last (`Shift+K` / `Shift+J`, Normal and Visual only, because a letter in `Insert` would eat typing).
+`MoveBlock*` in `Insert` is a declared row the desktop textarea reads through `insertMoveFor`, never a window-level `preventDefault`: the editor owns the move.
 
 **`Cmd+B` is the canonical "context-dependent chord" example:**
 
@@ -193,8 +195,8 @@ Both splits are pinned by tests (`cmd_shift_x_splits_between_insert_and_global`,
 - `Normal` (view) mode → `CutBlock` / `CopyBlock` / `PasteBlock` — act on the whole selected block + subtree.
   These are **`Normal`, not `Global`**: a `Global` binding would shadow the native text cut inside a textarea (the desktop's Insert→Global dispatch fallback).
   Keep them out of `Global`.
-- The desktop reaches `Normal` via its DOM-detected "nothing focused" state, so these fire in view mode **whether or not `vim_mode` is on** — they're view-mode gestures, not vim gestures.
-- Each is **dual-spelled per OS**: `Cmd+X/C/V` (META) and `Ctrl+X/C/V` (CTRL), plus `Cmd/Ctrl+Shift+↑/↓` for the reorder.
+- The desktop reaches `Normal` via its DOM-detected "nothing focused" state, so these fire in view mode **whether or not `vim_mode` is on (the dispatcher never reads it)** — they're view-mode gestures, not vim gestures.
+- Each is **dual-spelled per OS**: `Cmd+X/C/V` (META) and `Ctrl+X/C/V` (CTRL), plus the move chords, which have their own rows in `defaults/move_block.rs`.
   Both spellings are bound in `Normal` because the desktop adapter never rewrites `Cmd`↔`Ctrl`.
   Drop the CTRL row and the chord dead-keys on Linux / Windows, the same two-row pattern `Cmd/Ctrl+Z` uses.
 

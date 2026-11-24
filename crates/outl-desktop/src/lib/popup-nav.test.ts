@@ -111,3 +111,22 @@ describe("handlePopupNav", () => {
     expect(n.setIndex).toHaveBeenCalledWith(0);
   });
 });
+
+describe("handlePopupNav and the block-move chords", () => {
+  it("a modified arrow is not consumed; a bare one still is; Shift+arrow unchanged", () => {
+    for (const k of ["ArrowUp", "ArrowDown"]) {
+      for (const mod of ["metaKey", "ctrlKey", "altKey"] as const) {
+        const n = nav(1);
+        const e = key(k, { [mod]: true });
+        expect(handlePopupNav(e, n)).toBe(false);
+        expect(e.preventDefault).not.toHaveBeenCalled();
+        expect(n.setIndex).not.toHaveBeenCalled();
+      }
+      const bare = nav(1);
+      expect(handlePopupNav(key(k), bare)).toBe(true);
+      const shifted = nav(1);
+      expect(handlePopupNav(key(k, { shiftKey: true }), shifted)).toBe(true);
+      expect(shifted.setIndex).toHaveBeenCalled();
+    }
+  });
+});

@@ -41,6 +41,8 @@ import { embedOnlyHandle, previousVisibleId } from "@outl/shared/outline";
 import { backlinkRowOps } from "./backlink-handlers";
 import { type HandlerCtx, lookupBlock, targetBlockId } from "./handler-context";
 import { cycleTodoInDraft, insertLink, wrapSelection } from "./markdown-wrap";
+import { revealBlock } from "./keyboard-reach";
+import { moveOnce } from "./move-gate";
 import { playPluginViews } from "./plugin-views";
 import { type ActionHandlers } from "./shortcuts";
 import { appState, setAppState } from "./store";
@@ -76,6 +78,25 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
     const id = targetBlockId();
     if (!pageId || !id) return;
     await runOn(cmd(pageId, id));
+  };
+
+  /** `onTarget` for the two move ops. The backlink half is untouched;
+   *  the outline half goes through `moveOnce` (a repeat reads edges the
+   *  previous move has not repainted), refuses the zoom root (zoom is
+   *  view state: the block would move while drawn nowhere) and scrolls
+   *  the moved row back into view. */
+  const onMove = async (
+    op: "move-up" | "move-down",
+    cmd: (pageId: string, id: string) => Promise<PageView>,
+  ) => {
+    if (await onBacklink.run(op)) return;
+    const pageId = appState.page?.id;
+    const id = targetBlockId();
+    if (!pageId || !id || id === appState.focusBlockId) return;
+    await moveOnce(async () => {
+      await runOn(cmd(pageId, id));
+      revealBlock(id);
+    });
   };
 
   /** Park edit mode on the block under the cursor. Three catalog
@@ -205,8 +226,8 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
     // ── block structure ops on the selected block ────────────────
     IndentBlock: () => onTarget("indent", indentBlock),
     OutdentBlock: () => onTarget("outdent", outdentBlock),
-    MoveBlockUp: () => onTarget("move-up", moveBlockUp),
-    MoveBlockDown: () => onTarget("move-down", moveBlockDown),
+    MoveBlockUp: () => onMove("move-up", moveBlockUp),
+    MoveBlockDown: () => onMove("move-down", moveBlockDown),
     DeleteBlock: async () => {
       // Its own branch rather than `onTarget`: the row the cursor is on
       // is the one that disappears, so the cursor moves within the

@@ -78,7 +78,7 @@ export interface CaretExit {
  * means.
  *
  * A modified arrow is a different chord and answers `null`: `Alt+↑` /
- * `Alt+↓` move the block, `Cmd+↑` / `Cmd+↓` are the OS's own
+ * `Alt+↓` move the block (desktop only), `Cmd+↑` / `Cmd+↓` are the OS's own
  * document-edge motion, and `Shift+↑` extends a selection. Takes the
  * four flags structurally rather than a `KeyboardEvent`, so it is
  * testable without a DOM.

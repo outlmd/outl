@@ -116,8 +116,9 @@ export function EditableTextarea(props: {
         // `keydown`: it only ever fires from a hardware keyboard, which
         // does emit reliable key events — the iOS soft keyboard the
         // `beforeinput` rules below exist for has no arrow keys at all.
-        // `caretNavKey` is what reads a modified arrow as a different
-        // chord (`Alt+↑/↓` moves the block), so only the bare key walks.
+        // `caretNavKey` reads a modified arrow as a different chord, so
+        // only the bare key walks. Mobile has no handler for the modified
+        // one (a move is the long-press menu or the range toolbar).
         const navKey = caretNavKey(e);
         if (navKey) {
           if (!props.onCaretExit) return;

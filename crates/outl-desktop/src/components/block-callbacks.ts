@@ -48,6 +48,9 @@ export interface BlockCallbacks {
   onIndent: (id: string) => Promise<void>;
   /** Shift-Tab pressed inside the textarea. */
   onOutdent: (id: string) => Promise<void>;
+  /** Move chord pressed inside the textarea (catalog Insert rows). */
+  onMoveUp: (id: string) => Promise<void>;
+  onMoveDown: (id: string) => Promise<void>;
   /** Backspace on empty text → delete this block, jump cursor to prev. */
   onDeleteEmpty: (id: string) => Promise<void>;
   /** Checkbox click — flip TODO/DONE/none. */
@@ -155,6 +158,8 @@ export type EditorCallbacks = Pick<
   | "openCaretLanding"
   | "onIndent"
   | "onOutdent"
+  | "onMoveUp"
+  | "onMoveDown"
   | "onDeleteEmpty"
   | "onRunPluginCommand"
 > &

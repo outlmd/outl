@@ -9,6 +9,7 @@
 
 use crate::actions::block::insert::InsertCursor;
 use crate::actions::cycle_todo_inline;
+use crate::outline_ops::Direction;
 use crate::state::{App, Mode};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -16,6 +17,19 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::{cross_block_nav_eligible, cross_block_step, cursor_inside_open_fence, is_typed_text};
 
 pub(crate) fn handle_insert_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    // Before the autocomplete intercept, which would eat the arrow as
+    // popup navigation. The move closes the popup: the block it was
+    // completing for is re-entered with a fresh buffer.
+    let dir = match key.code {
+        KeyCode::Up => Some(Direction::Up),
+        KeyCode::Down => Some(Direction::Down),
+        _ => None,
+    };
+    if let Some(dir) = dir.filter(|_| super::is_move_chord(key.modifiers)) {
+        app.autocomplete = None;
+        app.move_block_in_insert(dir);
+        return Ok(());
+    }
     // Autocomplete intercepts navigation/Enter/Esc.
     if app.autocomplete.is_some() {
         match key.code {

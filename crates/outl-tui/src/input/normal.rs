@@ -494,9 +494,9 @@ pub(crate) fn handle_normal_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('*') => app.search_word_under_cursor(true)?,
         KeyCode::Char('#') => app.search_word_under_cursor(false)?,
         // Vertical navigation: blocks. `j`/`k` are vim conventions.
-        // Alt + arrows drag the current block (more discoverable than capital K/J).
-        KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => app.move_block_up(),
-        KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => app.move_block_down(),
+        // Alt / Ctrl+Shift + arrows drag the current block.
+        KeyCode::Up if super::is_move_chord(key.modifiers) => app.move_block_up(),
+        KeyCode::Down if super::is_move_chord(key.modifiers) => app.move_block_down(),
         KeyCode::Down | KeyCode::Char('j') => app.move_selection(1),
         KeyCode::Up | KeyCode::Char('k') => app.move_selection(-1),
         // Page-sized jumps. `viewport_height` is set by the renderer

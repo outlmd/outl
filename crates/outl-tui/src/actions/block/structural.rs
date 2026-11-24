@@ -9,8 +9,8 @@
 //! and the source page's `.md` is projected from it.
 //!
 //! One pair per op: `create_after` / `create_before`, `indent` /
-//! `outdent`, `delete`, `move_up` / `move_down`. Nothing here renders
-//! another page's `.md`.
+//! `outdent`, `delete`. Moving a block lives in `move_block`. Nothing
+//! here renders another page's `.md`.
 //!
 //! **Two things the branches own that the commit helper does not.**
 //! Landing the in-flight Insert buffer, because `commit_backlink_mutation`
@@ -25,7 +25,6 @@ use crate::edit_buffer::EditBuffer;
 use crate::outline_ops::{
     delete_at_path, descendants_count_at_path, flat_count, indent_at_path, index_for_path,
     insert_sibling_after_with_text, insert_sibling_before, outdent_at_path, path_for_index,
-    siblings_mut,
 };
 use crate::state::{App, EditTarget, Focus, Mode};
 use outl_core::id::NodeId;
@@ -63,7 +62,7 @@ fn source_edit_in_flight(app: &App) -> bool {
 /// `Focus::Backlink`, so the in-flight-only case declines on its own —
 /// which is where the `.md`-first helper declined it too, at its own
 /// focus match, before anything ran.
-fn on_a_backlink_or_mid_source_edit(app: &App) -> bool {
+pub(super) fn on_a_backlink_or_mid_source_edit(app: &App) -> bool {
     matches!(app.focus, Focus::Backlink { .. }) || source_edit_in_flight(app)
 }
 
@@ -83,12 +82,12 @@ fn sibling_slot(workspace: &Workspace, node: NodeId) -> Option<(usize, usize)> {
 
 /// `node` has a previous sibling — so `indent` and `move_up` have
 /// somewhere to go.
-fn has_previous_sibling(workspace: &Workspace, node: NodeId) -> bool {
+pub(super) fn has_previous_sibling(workspace: &Workspace, node: NodeId) -> bool {
     sibling_slot(workspace, node).is_some_and(|(at, _)| at > 0)
 }
 
 /// `node` has a next sibling — so `move_down` has somewhere to go.
-fn has_next_sibling(workspace: &Workspace, node: NodeId) -> bool {
+pub(super) fn has_next_sibling(workspace: &Workspace, node: NodeId) -> bool {
     sibling_slot(workspace, node).is_some_and(|(at, count)| at + 1 < count)
 }
 
@@ -115,11 +114,15 @@ enum Side {
     Below,
 }
 
-/// Which way `Tab` / `Shift+Tab` re-parent the citing block.
+/// Which structural chord is acting on the citing block: `Tab` /
+/// `Shift+Tab` re-parent it, the move chords reorder it among its
+/// siblings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reparent {
+pub(super) enum BacklinkMove {
     Indent,
     Outdent,
+    MoveUp,
+    MoveDown,
 }
 
 /// Re-enter Insert on the row that names `block`, caret at `col`.
@@ -261,7 +264,7 @@ impl App {
     /// asked of the tree before the commit, and Insert is re-entered
     /// afterwards **on the block this chord resolved**, not on whatever
     /// row the cursor's index names by then.
-    fn reparent_a_backlink(&mut self, how: Reparent) -> bool {
+    pub(super) fn reparent_a_backlink(&mut self, how: BacklinkMove) -> bool {
         let caret = caret_column(self);
         let Some(target) = self.focused_backlink_target_or_report() else {
             return false;
@@ -272,16 +275,21 @@ impl App {
         let aimed_at = target.block;
         self.commit_in_flight_source_edit();
         let somewhere_to_go = match how {
-            Reparent::Indent => has_previous_sibling(&self.workspace, target.block),
-            Reparent::Outdent => can_outdent(&self.workspace, target.block, target.page),
+            BacklinkMove::Indent | BacklinkMove::MoveUp => {
+                has_previous_sibling(&self.workspace, target.block)
+            }
+            BacklinkMove::Outdent => can_outdent(&self.workspace, target.block, target.page),
+            BacklinkMove::MoveDown => has_next_sibling(&self.workspace, target.block),
         };
         let moved = somewhere_to_go
             && self.commit_backlink_mutation(
                 target,
                 BacklinkGesture::Structural,
                 match how {
-                    Reparent::Indent => outl_actions::indent,
-                    Reparent::Outdent => outl_actions::outdent,
+                    BacklinkMove::Indent => outl_actions::indent,
+                    BacklinkMove::Outdent => outl_actions::outdent,
+                    BacklinkMove::MoveUp => outl_actions::move_up,
+                    BacklinkMove::MoveDown => outl_actions::move_down,
                 },
             );
         // Re-entered whether or not the block moved, which is what the
@@ -365,7 +373,7 @@ impl App {
 
     pub(crate) fn indent_current(&mut self) -> bool {
         if on_a_backlink_or_mid_source_edit(self) {
-            return self.reparent_a_backlink(Reparent::Indent);
+            return self.reparent_a_backlink(BacklinkMove::Indent);
         }
         let path = if let Mode::Insert { block_path, .. } = &self.mode {
             block_path.clone()
@@ -396,7 +404,7 @@ impl App {
 
     pub(crate) fn outdent_current(&mut self) -> bool {
         if on_a_backlink_or_mid_source_edit(self) {
-            return self.reparent_a_backlink(Reparent::Outdent);
+            return self.reparent_a_backlink(BacklinkMove::Outdent);
         }
         let path = if let Mode::Insert { block_path, .. } = &self.mode {
             block_path.clone()
@@ -446,94 +454,6 @@ impl App {
         self.snapshot_for_undo();
         delete_at_path(&mut self.page.blocks, &path);
         self.save(); // also handles refilling an empty page with a single bullet
-    }
-
-    /// Swap the current block with its previous sibling (drags its
-    /// subtree). No-op if already at the top of its parent.
-    pub(crate) fn move_block_up(&mut self) {
-        if matches!(self.focus, Focus::Backlink { .. }) {
-            let Some(target) = self.focused_backlink_target_or_report() else {
-                return;
-            };
-            // `move_up` reports "already the first sibling" as `Ok(())`,
-            // and `commit_backlink_mutation` snapshots unconditionally
-            // on success — so committing a boundary no-op would clear
-            // redo and bury the displayed page's history under a
-            // foreign entry
-            // (`a_boundary_no_op_leaves_both_history_stacks_unchanged`).
-            if !has_previous_sibling(&self.workspace, target.block) {
-                return;
-            }
-            self.commit_backlink_mutation(
-                target,
-                BacklinkGesture::Structural,
-                outl_actions::move_up,
-            );
-            return;
-        }
-        let Some(path) = path_for_index(&self.page.blocks, self.selected) else {
-            return;
-        };
-        let Some(&last_idx) = path.last() else {
-            return;
-        };
-        if last_idx == 0 {
-            return;
-        }
-        let snapshot_idx = self.undo.len();
-        self.snapshot_for_undo();
-        let parent_path = &path[..path.len() - 1];
-        let Some(siblings) = siblings_mut(&mut self.page.blocks, parent_path) else {
-            self.undo.truncate(snapshot_idx);
-            return;
-        };
-        siblings.swap(last_idx - 1, last_idx);
-        let mut new_path = parent_path.to_vec();
-        new_path.push(last_idx - 1);
-        self.selected = index_for_path(&self.page.blocks, &new_path).unwrap_or(self.selected);
-        self.save();
-    }
-
-    /// Swap with the next sibling.
-    pub(crate) fn move_block_down(&mut self) {
-        if matches!(self.focus, Focus::Backlink { .. }) {
-            let Some(target) = self.focused_backlink_target_or_report() else {
-                return;
-            };
-            // Same boundary reasoning as `move_block_up`.
-            if !has_next_sibling(&self.workspace, target.block) {
-                return;
-            }
-            self.commit_backlink_mutation(
-                target,
-                BacklinkGesture::Structural,
-                outl_actions::move_down,
-            );
-            return;
-        }
-        let Some(path) = path_for_index(&self.page.blocks, self.selected) else {
-            return;
-        };
-        let Some(&last_idx) = path.last() else {
-            return;
-        };
-        let parent_path = path[..path.len() - 1].to_vec();
-        let snapshot_idx = self.undo.len();
-        self.snapshot_for_undo();
-        let Some(siblings) = siblings_mut(&mut self.page.blocks, &parent_path) else {
-            self.undo.truncate(snapshot_idx);
-            return;
-        };
-        let sibling_count = siblings.len();
-        if last_idx + 1 >= sibling_count {
-            self.undo.truncate(snapshot_idx);
-            return;
-        }
-        siblings.swap(last_idx, last_idx + 1);
-        let mut new_path = parent_path;
-        new_path.push(last_idx + 1);
-        self.selected = index_for_path(&self.page.blocks, &new_path).unwrap_or(self.selected);
-        self.save();
     }
 }
 

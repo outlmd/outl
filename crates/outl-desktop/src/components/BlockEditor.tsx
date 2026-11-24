@@ -11,6 +11,8 @@ import {
 } from "@outl/shared/paste";
 import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 
+import { moveOnce, setEditorOwnsHold } from "../lib/move-gate";
+import { insertMoveFor } from "../lib/shortcuts";
 import { appState, setAppState } from "../lib/store";
 import type { EditorCallbacks } from "./block-callbacks";
 import { createBlockSuggest } from "./block-suggest";
@@ -180,6 +182,41 @@ export function BlockEditor(props: {
       if (!clip) return;
       const caretChars = utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0);
       applyPaste(await route(props.blockId, caretChars, clip, ta.value));
+      return;
+    }
+    // Move chord (catalog Insert rows). Above `suggest`: an open popup
+    // would otherwise take the arrow, and the chord means "move the
+    // block", not "pick the next item". `commit()` unmounts the popup
+    // with the textarea.
+    //
+    // Only the three calls below run outside `moveOnce`: they decide
+    // the keystroke's fate synchronously. Capturing the caret and
+    // writing `caretIntent` run inside it, or a repeat the gate drops
+    // would leave a stale intent for the next block that mounts.
+    // `stopImmediatePropagation` for the reason the Tab branch gives:
+    // `commit()` unmounts this textarea and the `window` dispatcher
+    // would resolve the chord against Normal and move a second time.
+    const move = insertMoveFor(e);
+    if (move) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!e.repeat) setEditorOwnsHold(true);
+      // Read before the commit: a backlink row's editor unmounts with
+      // it, and `props.blockId` is a `<Show>` accessor that throws once
+      // its owner is gone.
+      const id = props.blockId;
+      await moveOnce(async () => {
+        const ta = textareaRef;
+        if (ta) {
+          setAppState(
+            "caretIntent",
+            utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? ta.value.length),
+          );
+        }
+        await commit();
+        if (move === "up") await props.cb.onMoveUp(id);
+        else await props.cb.onMoveDown(id);
+      });
       return;
     }
     // An open autocomplete popup owns the arrows / Enter / Tab / Esc

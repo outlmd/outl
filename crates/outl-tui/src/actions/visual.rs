@@ -2,10 +2,10 @@
 //! user can act on N blocks at once (delete, indent, outdent).
 
 use crate::outline_ops::{
-    delete_at_path, flat_count, indent_at_path, move_down_at_path, move_up_at_path, node_at_path,
-    outdent_at_path, path_for_index,
+    delete_at_path, flat_count, indent_at_path, index_for_path, outdent_at_path, path_for_index,
+    Direction,
 };
-use crate::state::{App, Mode};
+use crate::state::{App, Focus, Mode};
 
 impl App {
     /// Enter Visual mode anchored at the current selection.
@@ -115,82 +115,89 @@ impl App {
         self.save();
     }
 
-    /// Does the block at `path` have a sibling after it? Used to detect
-    /// a blocked range reorder before paying for a snapshot + save.
-    fn has_next_sibling(&self, path: &[usize]) -> bool {
-        let Some((&last, parent)) = path.split_last() else {
-            return false;
-        };
-        let siblings = if parent.is_empty() {
-            &self.page.blocks
-        } else {
-            match node_at_path(&self.page.blocks, parent) {
-                Some(node) => &node.children,
-                None => return false,
-            }
-        };
-        last + 1 < siblings.len()
-    }
-
     /// Move every block in the Visual range up among its siblings,
-    /// keeping the range selected so the user can repeat. Ascending
-    /// order: the top block slides up past the block above the range,
-    /// then each following block moves into the slot the previous one
-    /// vacated, so the whole range shifts up by one.
+    /// keeping the range selected so the user can repeat.
     pub(crate) fn move_up_visual_range(&mut self) {
-        let Some((lo, hi)) = self.visual_range() else {
-            return;
-        };
-        // Bail before the expensive snapshot + save when the leading
-        // block is already the first sibling: the whole range is blocked,
-        // and `Alt+↑` at the top edge shouldn't churn undo/redo or disk.
-        let Some(lead) = path_for_index(&self.page.blocks, lo) else {
-            return;
-        };
-        if lead.last() == Some(&0) {
-            return;
-        }
-        self.snapshot_for_undo();
-        for idx in lo..=hi {
-            if let Some(path) = path_for_index(&self.page.blocks, idx) {
-                let _ = move_up_at_path(&mut self.page.blocks, &path);
-            }
-        }
-        self.mode = Mode::Visual {
-            anchor: lo.saturating_sub(1),
-        };
-        self.selected = hi.saturating_sub(1);
-        self.save();
+        self.move_visual_range(Direction::Up);
     }
 
     /// Move every block in the Visual range down among its siblings.
-    /// Descending order (mirror of `move_up_visual_range`): the bottom
-    /// block slides down past the block below the range first.
     pub(crate) fn move_down_visual_range(&mut self) {
-        let Some((lo, hi)) = self.visual_range() else {
-            return;
-        };
-        // Same no-op guard as `move_up`, on the trailing edge: if the
-        // bottom block is already the last sibling the range can't move.
-        let Some(trail) = path_for_index(&self.page.blocks, hi) else {
-            return;
-        };
-        if !self.has_next_sibling(&trail) {
+        self.move_visual_range(Direction::Down);
+    }
+
+    /// Rotate the range as one unit through [`App::rotate_run`].
+    ///
+    /// A range holding a parent and its children has one root, the
+    /// parent, so the subtree travels whole. Roots with different parents
+    /// (a range that starts on a child and runs past its parent's end)
+    /// refuse rather than scramble. The anchor and the cursor are found
+    /// again by path, so the same blocks stay selected whichever end the
+    /// cursor was on.
+    fn move_visual_range(&mut self, dir: Direction) {
+        if !matches!(self.focus, Focus::Outline) {
             return;
         }
-        self.snapshot_for_undo();
-        for idx in (lo..=hi).rev() {
-            if let Some(path) = path_for_index(&self.page.blocks, idx) {
-                let _ = move_down_at_path(&mut self.page.blocks, &path);
+        let (Some((lo, hi)), Mode::Visual { anchor }) = (self.visual_range(), &self.mode) else {
+            return;
+        };
+        let anchor = *anchor;
+        let Some(paths) = (lo..=hi)
+            .map(|i| path_for_index(&self.page.blocks, i))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        let Some((parent, first, last)) = range_roots(&paths) else {
+            return;
+        };
+        let (Some(anchor_path), Some(cursor_path)) = (
+            path_for_index(&self.page.blocks, anchor),
+            path_for_index(&self.page.blocks, self.selected),
+        ) else {
+            return;
+        };
+        if !self.rotate_run(&parent, first, last, dir) {
+            return;
+        }
+        let depth = parent.len();
+        let shifted = |mut path: Vec<usize>| {
+            if let Some(at) = path.get_mut(depth) {
+                *at = match dir {
+                    Direction::Up => at.saturating_sub(1),
+                    Direction::Down => *at + 1,
+                };
             }
-        }
-        let max_idx = flat_count(&self.page.blocks).saturating_sub(1);
-        self.mode = Mode::Visual {
-            anchor: (lo + 1).min(max_idx),
+            index_for_path(&self.page.blocks, &path)
         };
-        self.selected = (hi + 1).min(max_idx);
+        let (anchor, cursor) = (shifted(anchor_path), shifted(cursor_path));
+        self.mode = Mode::Visual {
+            anchor: anchor.unwrap_or(lo),
+        };
+        self.selected = cursor.unwrap_or(hi);
         self.save();
     }
+}
+
+/// The sibling run a Visual range moves: `(parent, first, last)`.
+///
+/// Paths under another selected path ride along with it and are dropped.
+/// `None` unless the surviving roots share one parent.
+fn range_roots(paths: &[Vec<usize>]) -> Option<(Vec<usize>, usize, usize)> {
+    let mut roots = paths
+        .iter()
+        .filter(|p| !paths.iter().any(|q| q.len() < p.len() && p.starts_with(q)));
+    let (&first, parent) = roots.next()?.split_last()?;
+    let (mut lo, mut hi) = (first, first);
+    for path in roots {
+        let (&idx, under) = path.split_last()?;
+        if under != parent {
+            return None;
+        }
+        lo = lo.min(idx);
+        hi = hi.max(idx);
+    }
+    Some((parent.to_vec(), lo, hi))
 }
 
 #[cfg(test)]
@@ -271,5 +278,215 @@ mod tests {
         assert_eq!(texts(&app), ["a", "b", "c", "d"]);
         assert_eq!(app.visual_range(), Some((2, 3)));
         assert!(app.undo.is_empty());
+    }
+
+    // ---- range moves as one unit ----
+
+    use crate::input::handle_visual_key;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    const CTRL_SHIFT: KeyModifiers = KeyModifiers::CONTROL.union(KeyModifiers::SHIFT);
+
+    fn node(text: &str, children: Vec<OutlineNode>) -> OutlineNode {
+        OutlineNode {
+            text: text.into(),
+            children,
+            ..Default::default()
+        }
+    }
+
+    /// App over `blocks` with a Visual range `anchor..=selected` (flat).
+    fn app_over(blocks: Vec<OutlineNode>, anchor: usize, selected: usize) -> (App, TempDir) {
+        let (mut app, dir) = app_with_range(anchor, selected);
+        app.flat_len = crate::outline_ops::flat_count(&blocks);
+        app.page.blocks = blocks;
+        (app, dir)
+    }
+
+    fn flat_texts(blocks: &[OutlineNode]) -> Vec<String> {
+        blocks
+            .iter()
+            .flat_map(|b| {
+                let mut v = vec![b.text.clone()];
+                v.extend(flat_texts(&b.children));
+                v
+            })
+            .collect()
+    }
+
+    fn press(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+        handle_visual_key(app, KeyEvent::new(code, mods)).expect("key");
+    }
+
+    /// Run `f`, assert the page, mode, selection, undo and redo are as before.
+    fn assert_untouched(mut app: App, f: impl FnOnce(&mut App)) {
+        let before = (
+            flat_texts(&app.page.blocks),
+            app.visual_range(),
+            app.selected,
+        );
+        let zoom = app.zoom_stack.clone();
+        let (undo, redo) = (app.undo.len(), app.redo.len());
+        f(&mut app);
+        assert_eq!(flat_texts(&app.page.blocks), before.0);
+        assert_eq!((app.visual_range(), app.selected), (before.1, before.2));
+        assert_eq!(app.zoom_stack, zoom);
+        assert_eq!((app.undo.len(), app.redo.len()), (undo, redo));
+    }
+
+    fn tree() -> Vec<OutlineNode> {
+        // flat: a=0 p=1 c1=2 c2=3 d=4
+        vec![
+            leaf("a"),
+            node("p", vec![leaf("c1"), leaf("c2")]),
+            leaf("d"),
+        ]
+    }
+
+    #[test]
+    fn a_parent_and_its_children_move_as_one_unit() {
+        let (mut app, _d) = app_over(tree(), 1, 3);
+        app.move_up_visual_range();
+        assert_eq!(flat_texts(&app.page.blocks), ["p", "c1", "c2", "a", "d"]);
+        assert_eq!(app.visual_range(), Some((0, 2)));
+        app.move_down_visual_range();
+        app.move_down_visual_range();
+        assert_eq!(flat_texts(&app.page.blocks), ["a", "d", "p", "c1", "c2"]);
+        assert_eq!(app.visual_range(), Some((2, 4)));
+    }
+
+    #[test]
+    fn the_range_passes_a_displaced_sibling_with_its_children() {
+        let blocks = vec![node("a", vec![leaf("x"), leaf("y")]), leaf("b")];
+        let (mut app, _d) = app_over(blocks, 3, 3);
+        app.move_up_visual_range();
+        assert_eq!(flat_texts(&app.page.blocks), ["b", "a", "x", "y"]);
+        assert_eq!(app.visual_range(), Some((0, 0)));
+        app.move_down_visual_range();
+        assert_eq!(flat_texts(&app.page.blocks), ["a", "x", "y", "b"]);
+        assert_eq!(app.visual_range(), Some((3, 3)));
+    }
+
+    #[test]
+    fn the_cursor_end_survives_a_move() {
+        // Cursor above the anchor: still above it afterwards.
+        let (mut app, _d) = app_over(tree(), 3, 1);
+        app.move_up_visual_range();
+        assert!(matches!(app.mode, Mode::Visual { anchor: 2 }));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn a_range_at_an_edge_changes_nothing_and_keeps_redo() {
+        for (anchor, sel, up) in [(0, 0, true), (4, 4, false)] {
+            let (mut app, _d) = app_over(tree(), anchor, sel);
+            app.redo.push(crate::state::HistorySnapshot {
+                page: app.page.clone(),
+                selected: 0,
+                cursor_col: 0,
+                view_path: app.current_path(),
+            });
+            assert_untouched(app, |app| {
+                if up {
+                    app.move_up_visual_range();
+                } else {
+                    app.move_down_visual_range();
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn roots_with_different_parents_refuse() {
+        // x (child of a) .. b (top level)
+        let blocks = vec![node("a", vec![leaf("x"), leaf("y")]), leaf("b")];
+        for (anchor, sel) in [(1, 3), (2, 3), (1, 3)] {
+            let (app, _d) = app_over(blocks.clone(), anchor, sel);
+            assert_untouched(app, |app| {
+                app.move_up_visual_range();
+                app.move_down_visual_range();
+            });
+        }
+    }
+
+    #[test]
+    fn a_range_holding_the_zoom_root_refuses() {
+        let blocks = vec![leaf("a"), leaf("b"), leaf("c")];
+        let (mut app, _d) = app_over(blocks, 0, 1);
+        app.zoom_stack = vec![vec![1]];
+        assert_untouched(app, |app| {
+            app.move_up_visual_range();
+            app.move_down_visual_range();
+        });
+    }
+
+    #[test]
+    fn children_of_the_zoom_root_move() {
+        let blocks = vec![leaf("a"), node("z", vec![leaf("x"), leaf("y")])];
+        let (mut app, _d) = app_over(blocks, 3, 3);
+        app.zoom_stack = vec![vec![1]];
+        app.move_up_visual_range();
+        assert_eq!(flat_texts(&app.page.blocks), ["a", "z", "y", "x"]);
+    }
+
+    #[test]
+    fn the_same_blocks_stay_selected_while_repeating() {
+        let (mut app, _d) = app_with_range(2, 3);
+        for _ in 0..2 {
+            press(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+        }
+        assert_eq!(texts(&app), ["c", "d", "a", "b"]);
+        assert_eq!(app.visual_range(), Some((0, 1)));
+        press(&mut app, KeyCode::Char('K'), KeyModifiers::SHIFT);
+        assert_eq!(texts(&app), ["c", "d", "a", "b"], "edge: unchanged");
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('J'), KeyModifiers::SHIFT);
+        }
+        assert_eq!(texts(&app), ["a", "b", "c", "d"]);
+        assert_eq!(app.visual_range(), Some((2, 3)));
+    }
+
+    #[test]
+    fn every_move_chord_drives_the_range_and_plain_arrows_extend() {
+        for mods in [KeyModifiers::ALT, CTRL_SHIFT] {
+            let (mut app, _d) = app_with_range(1, 2);
+            press(&mut app, KeyCode::Up, mods);
+            assert_eq!(texts(&app), ["b", "c", "a", "d"], "{mods:?} up");
+            press(&mut app, KeyCode::Down, mods);
+            assert_eq!(texts(&app), ["a", "b", "c", "d"], "{mods:?} down");
+        }
+        let (mut app, _d) = app_with_range(1, 1);
+        press(&mut app, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(texts(&app), ["a", "b", "c", "d"]);
+        assert_eq!(app.visual_range(), Some((1, 2)));
+        for mods in [KeyModifiers::SHIFT, KeyModifiers::CONTROL] {
+            press(&mut app, KeyCode::Down, mods);
+            assert_eq!(texts(&app), ["a", "b", "c", "d"], "{mods:?} must not move");
+        }
+    }
+
+    #[test]
+    fn nothing_moves_with_the_backlink_panel_focused() {
+        let (mut app, _d) = app_with_range(1, 2);
+        app.focus = Focus::Backlink { idx: 0, node: None };
+        assert_untouched(app, |app| {
+            app.move_up_visual_range();
+            app.move_down_visual_range();
+        });
+    }
+
+    #[test]
+    fn range_roots_drops_descendants_and_needs_one_parent() {
+        let p = |v: &[usize]| v.to_vec();
+        assert_eq!(
+            range_roots(&[p(&[1]), p(&[1, 0]), p(&[1, 1]), p(&[2])]),
+            Some((vec![], 1, 2))
+        );
+        assert_eq!(
+            range_roots(&[p(&[0, 1]), p(&[0, 2])]),
+            Some((p(&[0]), 1, 2))
+        );
+        assert_eq!(range_roots(&[p(&[0, 1]), p(&[1])]), None);
+        assert_eq!(range_roots(&[]), None);
     }
 }

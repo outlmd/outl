@@ -174,19 +174,7 @@ impl App {
         // only the id mapping; a missing or unreadable sidecar
         // leaves both structures empty until the next reconcile
         // populates `.outl`.
-        self.id_by_flat.clear();
-        self.collapsed.clear();
-        let sidecar_path = outl_md::resolve_sidecar_path(&path);
-        if let Ok(sc) = outl_md::sidecar::read(&sidecar_path) {
-            self.id_by_flat.reserve(sc.blocks.len());
-            for b in &sc.blocks {
-                self.id_by_flat.push(b.id);
-                if self.workspace.tree().is_collapsed(b.id) {
-                    self.collapsed.insert(b.id);
-                }
-            }
-        }
-        self.recompute_hidden_by_collapse();
+        self.adopt_flat_ids(self.read_flat_ids().unwrap_or_default());
         // Re-run content transformers for the freshly-parsed AST. Needs
         // `id_by_flat` (built just above) since the cache is keyed by
         // NodeId. No-op when no plugin host / no text transformers.
@@ -199,6 +187,35 @@ impl App {
         // what's on disk at this moment.
         self.last_saved_at = Some(std::time::Instant::now());
         self.touch_recent(&path);
+    }
+
+    /// The open page's block ids in DFS preorder, read from its sidecar.
+    ///
+    /// `None` when the sidecar is missing or unreadable. Sidecar blocks
+    /// are already in preorder, so index `i` lines up with the render
+    /// walk's flat cursor.
+    pub(crate) fn read_flat_ids(&self) -> Option<Vec<outl_core::id::NodeId>> {
+        let sidecar_path = outl_md::resolve_sidecar_path(&self.current_path());
+        let sc = outl_md::sidecar::read(&sidecar_path).ok()?;
+        Some(sc.blocks.iter().map(|b| b.id).collect())
+    }
+
+    /// Make `ids` the flat-index to `NodeId` mapping and re-derive what
+    /// hangs off it: the `collapsed` mirror (from the op log, which is
+    /// the source of truth across devices) and `hidden_by_collapse`.
+    ///
+    /// Opening a page passes an empty vector when it has no sidecar:
+    /// keeping the previous page's ids would let `c` fold a block of a
+    /// page that is no longer on screen.
+    pub(crate) fn adopt_flat_ids(&mut self, ids: Vec<outl_core::id::NodeId>) {
+        self.collapsed.clear();
+        for &id in &ids {
+            if self.workspace.tree().is_collapsed(id) {
+                self.collapsed.insert(id);
+            }
+        }
+        self.id_by_flat = ids;
+        self.recompute_hidden_by_collapse();
     }
 
     /// Re-project the open page's `.md` when the tree has moved past

@@ -10,7 +10,7 @@
 //! `match key.code { … }`, and `outl-tui/src/input/chord_adapter.rs`
 //! exists to match *plugin* chords and nothing else. So the two
 //! halves can disagree about what a key does without anything failing
-//! to compile — and they do, on 22 chords, 6 of which mutate the
+//! to compile — and they do, on 20 chords, 6 of which mutate the
 //! user's content, the op log, or end the session.
 //!
 //! Root `CLAUDE.md` invariant 12 says a capability difference with no
@@ -162,23 +162,6 @@ const KNOWN_DIVERGENCES: &[Divergence] = &[
         note: "Writes a marker into the block text through the op log.",
     },
     Divergence {
-        chord: "Ctrl+Shift+Up",
-        mode: Mode::Normal,
-        catalog: Action::MoveBlockUp,
-        tui_does: "moves the *selection* up one block, not the block — `Up | Char('k')` is \
-              unguarded and catches the modifier",
-        harm: Harm::Different,
-        note: "The TUI reorders with `K` / `Alt+Up`.",
-    },
-    Divergence {
-        chord: "Ctrl+Shift+Down",
-        mode: Mode::Normal,
-        catalog: Action::MoveBlockDown,
-        tui_does: "moves the *selection* down one block, not the block",
-        harm: Harm::Different,
-        note: "The TUI reorders with `J` / `Alt+Down`.",
-    },
-    Divergence {
         chord: "Ctrl+k",
         mode: Mode::Normal,
         catalog: Action::OpenCommandPalette,
@@ -305,6 +288,12 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("Ctrl+c", Mode::Global, Action::Quit),
     ("Ctrl+Enter", Mode::Normal, Action::ToggleTodo),
     ("Ctrl+t", Mode::Normal, Action::ToggleTodo),
+    ("Ctrl+Shift+Up", Mode::Normal, Action::MoveBlockUp),
+    ("Ctrl+Shift+Down", Mode::Normal, Action::MoveBlockDown),
+    ("Alt+Up", Mode::Normal, Action::MoveBlockUp),
+    ("Alt+Down", Mode::Normal, Action::MoveBlockDown),
+    ("Shift+k", Mode::Normal, Action::MoveBlockUp),
+    ("Shift+j", Mode::Normal, Action::MoveBlockDown),
     ("g x", Mode::Normal, Action::RunCodeBlock),
     ("t", Mode::Normal, Action::OpenToday),
     ("[", Mode::Normal, Action::PrevDay),
@@ -408,7 +397,7 @@ fn the_divergence_list_has_not_silently_shrunk() {
     // one is a single keystroke. Pin the shape of the list.
     assert_eq!(
         KNOWN_DIVERGENCES.len(),
-        22,
+        20,
         "the known-divergence list changed size — if a divergence was genuinely \
          resolved, move the chord to AGREED and update this count in the same edit",
     );

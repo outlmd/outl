@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Moving a block has the same keys everywhere it can have them.**
+  `Cmd+Shift+↑/↓` (`Ctrl+Shift` on Linux and Windows), `Alt+↑/↓` and `K` / `J` move the block in Normal, and the same chords plus the letters move a whole range in Visual.
+  The TUI got `Ctrl+Shift+↑/↓` too, so a terminal that never delivers it still has `Alt+↑`.
+  In Insert the three non-letter chords move the block you are typing in.
+  It stays the same block, the caret stays put, and the text you have not saved yet comes along.
+  The letters stay out of Insert, since they would eat typing.
+  All of it is one set of rows in `outl-shortcuts`, so the desktop textarea asks the catalog instead of spelling the chord.
+  The desktop footer, the batch toolbar and the TUI help now name the chord for the platform you are on.
+  The TUI's `Alt+↑/↓`, `K` and `J` left the TUI-only list, which went from 31 to 27, and the known-divergence list from 22 to 20.
+  A held chord moves once per finished move on the desktop and on mobile's range toolbar, never twice from one keypress.
+  Mobile has no chord surface: it keeps the long-press menu and the toolbar.
+
 - **"Linked from" shows the children of every citing block, and you can edit them, on all three clients.**
   A backlink row used to be the citing block alone, so a reference to `[[project]]` under a block with three sub-bullets showed the one line and hid the three that said what it meant.
   The panel now draws the direct children of each citing block and their descendants, capped at four levels (the same cap an embed uses), always expanded and ignoring the fold the source page keeps.
@@ -213,6 +225,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `ClockIcon`, `LinkIcon`, `PinIcon`, `ListIcon`, `HashIcon`, `IndentIcon` and `OutdentIcon` leave `@outl/shared/icons`; their neighbours in the same file are all imported by a client, so the module stays.
 
 ### Fixed
+
+- **A Visual range holding a parent and its children no longer scrambles when you move it.**
+  The range is a flat slice, and moving each block in it dragged the children out of their parent.
+  A move now acts on the roots of the selection, so the subtree travels whole.
+  A range whose roots have different parents, or that already sits at the edge, moves nothing instead of half of itself.
+  The TUI, the desktop and mobile share the rule (`rangeMoveTargets`, over `outl_md::outline_ops::rotate_siblings` on the TUI side).
+- **In the TUI, `c` hit the wrong block after a move.**
+  The flat index to block id map was only rebuilt on load and save, so a move left it pointing at the old neighbour and fold toggled that one.
+  The move rotates the map with the tree now, and a reconcile realigns it.
+- **In the TUI, a move at the bottom edge threw away redo.**
+  The undo snapshot was taken before the move knew it was legal, and taking one clears redo.
+  It is taken once the move is known to land.
+- **Desktop: the moved row scrolls back into view, and a move no longer acts on the zoom root.**
+  Zoom is view state, so moving the root would have shifted a block that is drawn nowhere.
 
 - **The journal header stopped riding up under the status bar on iPhone.**
   The top chrome drew where it belongs, then sat under the clock and the Dynamic Island, and from there every drag moved the whole page back and forth beneath it.

@@ -46,8 +46,8 @@ mode = "auto"
 
 [editor]
 # Vim-style modal bindings (Normal / Insert / Visual). Defaults to
-# `true` — outl is keyboard-first. The desktop honours this; the TUI
-# is vim-style by definition and ignores the flag.
+# `true`. The desktop stores and shows the flag, but its key dispatcher
+# does not read it yet; the TUI is vim-style by definition.
 vim_mode = true
 
 # Outline font size in pixels (desktop only — the TUI uses your
@@ -200,7 +200,7 @@ An existing `config.toml` needs no edit.
 
 | Field | Type | Default | Read by | Effect |
 |---|---|---|---|---|
-| `vim_mode` | bool | `true` | desktop | When `false`, the desktop drops the modal `Normal / Insert / Visual` model and only listens to OS-standard chrome chords (`⌘P`, `⌘B`, …). The TUI is vim-style by definition and ignores this. |
+| `vim_mode` | bool | `true` | desktop (settings only) | Stored and shown in the settings modal. The desktop key dispatcher does not read it, so `Normal`, `Insert` and `Visual` chords are live whatever it says. The TUI is vim-style by definition and ignores it. |
 | `font_size` | integer (pixels) | `15` | desktop | Outline body font size. The TUI uses the user's terminal font; setting this has no effect there. |
 | `diagrams` | `"pele"` \| `"off"` | `"pele"` | desktop, mobile | Mermaid fences. `"pele"` draws them with the built-in renderer. `"off"` leaves the highlighted source. The TUI ignores this and keeps the source. A plugin content transformer for `mermaid` still wins over both. Any other string fails to parse `config.toml`, the same way an unknown value does for the other enum keys. |
 

@@ -4,6 +4,7 @@ import type { BlockNode } from "@outl/shared/api/types";
 import { visualRangeSet } from "@outl/shared/outline";
 
 import { askConfirm } from "../lib/confirm";
+import { isMac } from "../lib/palette-results";
 import type { ActionHandlers } from "../lib/shortcuts";
 import { appState } from "../lib/store";
 
@@ -22,6 +23,12 @@ import { appState } from "../lib/store";
  * a batch delete of collapsed subtrees is the one destructive path a
  * user can trigger without seeing what they're about to lose.
  */
+/** The platform spelling of the move chord: the desktop never rewrites
+ *  `Cmd` to `Ctrl`, so a title that says `⌘⇧` is wrong on Linux. */
+function moveChord(arrow: string): string {
+  return isMac() ? `⌘⇧${arrow}` : `Ctrl+Shift+${arrow}`;
+}
+
 export function BatchToolbar(props: { handlers: ActionHandlers }) {
   const rangeSet = () =>
     visualRangeSet(
@@ -76,8 +83,8 @@ export function BatchToolbar(props: { handlers: ActionHandlers }) {
           title="Outdent range (<)"
           onClick={run("OutdentVisualRange")}
         />
-        <BatchButton label="↑" title="Move range up (⌘⇧↑)" onClick={run("MoveVisualRangeUp")} />
-        <BatchButton label="↓" title="Move range down (⌘⇧↓)" onClick={run("MoveVisualRangeDown")} />
+        <BatchButton label="↑" title={`Move range up (${moveChord("↑")})`} onClick={run("MoveVisualRangeUp")} />
+        <BatchButton label="↓" title={`Move range down (${moveChord("↓")})`} onClick={run("MoveVisualRangeDown")} />
         <BatchButton
           label="Delete"
           title="Delete range (Delete)"

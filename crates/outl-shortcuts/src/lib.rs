@@ -127,6 +127,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn move_chords_resolve_and_letters_never_reach_insert() {
+        let cases = [
+            ("Cmd+Shift+Up", true),
+            ("Ctrl+Shift+Up", true),
+            ("Alt+Up", true),
+            ("Shift+k", true),
+            ("Cmd+Shift+Down", false),
+            ("Ctrl+Shift+Down", false),
+            ("Alt+Down", false),
+            ("Shift+j", false),
+        ];
+        for (chord, up) in cases {
+            let seq = ChordSequence::parse(chord).expect(chord);
+            let (normal, visual) = if up {
+                (Action::MoveBlockUp, Action::MoveVisualRangeUp)
+            } else {
+                (Action::MoveBlockDown, Action::MoveVisualRangeDown)
+            };
+            assert_eq!(lookup(Mode::Normal, &seq), Some(normal), "{chord} Normal");
+            assert_eq!(lookup(Mode::Visual, &seq), Some(visual), "{chord} Visual");
+            let letter = chord.starts_with("Shift+");
+            let insert = if letter { None } else { Some(normal) };
+            assert_eq!(lookup(Mode::Insert, &seq), insert, "{chord} Insert");
+        }
+        let moves = [
+            Action::MoveBlockUp,
+            Action::MoveBlockDown,
+            Action::MoveVisualRangeUp,
+            Action::MoveVisualRangeDown,
+        ];
+        for b in default_bindings() {
+            if moves.contains(&b.action) && matches!(b.mode, Mode::Insert | Mode::Global) {
+                assert!(
+                    b.chord.0.iter().all(|c| !matches!(c.key, Key::Char(_))),
+                    "a letter move chord would eat typing: {:?} in {:?}",
+                    b.chord,
+                    b.mode
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_first_normal_move_row_is_the_platform_chord() {
+        let first = |action| {
+            default_bindings()
+                .into_iter()
+                .find(|b| b.mode == Mode::Normal && b.action == action)
+                .map(|b| b.chord)
+        };
+        let up = ChordSequence::parse("Cmd+Shift+Up").expect("parse");
+        let down = ChordSequence::parse("Cmd+Shift+Down").expect("parse");
+        assert_eq!(first(Action::MoveBlockUp), Some(up));
+        assert_eq!(first(Action::MoveBlockDown), Some(down));
+    }
+
+    #[test]
     fn every_binding_has_a_description() {
         for b in default_bindings() {
             assert!(

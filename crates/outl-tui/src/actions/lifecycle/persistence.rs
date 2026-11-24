@@ -190,6 +190,7 @@ impl App {
         }
         let t_reconcile = std::time::Instant::now();
         let mut ops_applied = 0usize;
+        let mut reconciled = false;
         match reconcile_md(
             &mut self.workspace,
             &self.hlc,
@@ -198,6 +199,7 @@ impl App {
         ) {
             Ok(report) => {
                 ops_applied = report.ops_applied;
+                reconciled = true;
                 self.status.clear();
             }
             Err(e) => self.toast(ToastKind::Error, format!("reconcile failed: {e}")),
@@ -211,6 +213,20 @@ impl App {
             let _ = outl_md::write_atomic(&path, render(&self.page).as_bytes());
         }
         self.selected = self.selected.min(self.flat_len.saturating_sub(1));
+        // Realign the flat-index to `NodeId` map with what reconcile just
+        // wrote. Nothing else does: a move rotates it in place, but undo
+        // restores the AST without touching it. Only when the counts agree,
+        // so a page that raced an external edit keeps the old map rather
+        // than adopting ids for a different shape. Before auto-run, which
+        // reads it.
+        if reconciled {
+            if let Some(ids) = self
+                .read_flat_ids()
+                .filter(|ids| ids.len() == self.flat_len)
+            {
+                self.adopt_flat_ids(ids);
+            }
+        }
         // Incremental re-index: only this page changed, so just
         // refresh its entries (backlinks, title, icon). Cheap and
         // synchronous — no waiting for a worker to rescan the whole

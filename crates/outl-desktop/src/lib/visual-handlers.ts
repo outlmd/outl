@@ -22,12 +22,14 @@ import {
   flattenVisible,
   nextVisibleId,
   previousVisibleId,
+  rangeMoveTargets,
   visibleRangeSlice,
   visualRangeIds,
 } from "@outl/shared/outline";
 
 import { copySelectionToClipboard } from "./clipboard-handlers";
 import { type HandlerCtx, lookupBlock } from "./handler-context";
+import { moveOnce } from "./move-gate";
 import { type ActionHandlers } from "./shortcuts";
 import { appState, setAppState } from "./store";
 
@@ -72,18 +74,12 @@ export function visualHandlers(ctx: HandlerCtx): ActionHandlers {
   const { deps, runEach } = ctx;
 
   /** Walk every block in the current Visual range and fire `op` for
-   *  each. Used by `>` / `<` (indent) and `Cmd/Ctrl+Shift+↑/↓` (move)
-   *  so the multi-block ops share one body. Range stays selected after
-   *  the op (vim convention) so the user can repeat it — the anchor /
-   *  cursor are block ids, stable across the re-render.
-   *
-   *  `reverse` walks bottom-up: a move-**down** has to shift the last
-   *  block past the block below the range first, or an ascending walk
-   *  would drag each block over its own not-yet-moved neighbour. Indent
-   *  / move-up keep the default top-down order. */
+   *  each, top-down. Used by `>` / `<` (indent). Range stays selected
+   *  after the op (vim convention) so the user can repeat it — the
+   *  anchor / cursor are block ids, stable across the re-render.
+   *  Moves have their own walk below. */
   async function applyVisualBlockOp(
     op: (pageId: string, id: string) => Promise<PageView>,
-    reverse = false,
   ) {
     const pageId = appState.page?.id;
     if (!pageId) return;
@@ -93,8 +89,34 @@ export function visualHandlers(ctx: HandlerCtx): ActionHandlers {
       appState.outline,
     );
     if (!slice) return;
-    const targets = reverse ? [...slice].reverse() : slice;
-    await runEach(targets, (id) => op(pageId, id));
+    await runEach(slice, (id) => op(pageId, id));
+  }
+
+  /** Move the Visual range one slot. Unlike indent, it walks the range's
+   *  **roots** (`rangeMoveTargets`): a parent selected with its children
+   *  moves as one unit, and a range that cannot move as a whole (edge,
+   *  mixed parents) moves not at all. Resolving the range and walking it
+   *  both sit inside `moveOnce`: the outline repaints only after the
+   *  walk, so an ungated second press would read stale edges. The zoom
+   *  root stays selected but undrawn, so a range holding it is refused. */
+  async function moveVisualRange(
+    op: (pageId: string, id: string) => Promise<PageView>,
+    dir: "up" | "down",
+  ) {
+    const pageId = appState.page?.id;
+    if (!pageId) return;
+    await moveOnce(async () => {
+      const slice = visibleRangeSlice(
+        appState.visualAnchorId,
+        appState.selectedBlockId,
+        appState.outline,
+      );
+      if (!slice) return;
+      const targets = rangeMoveTargets(slice, appState.outline, dir);
+      const zoomed = appState.focusBlockId;
+      if (targets.length === 0 || (zoomed && targets.includes(zoomed))) return;
+      await runEach(targets, (id) => op(pageId, id));
+    });
   }
 
   return {
@@ -180,10 +202,10 @@ export function visualHandlers(ctx: HandlerCtx): ActionHandlers {
     // Top-down walk: the first block slides up past the block above the
     // range, then each following block moves into the slot it vacated.
     // Selection follows (block ids are stable) so the user can repeat.
-    MoveVisualRangeUp: () => applyVisualBlockOp(moveBlockUp),
+    MoveVisualRangeUp: () => moveVisualRange(moveBlockUp, "up"),
     // `Cmd/Ctrl+Shift+↓` — same, downward. Bottom-up walk so the last
     // block clears the block below the range before its neighbours move.
-    MoveVisualRangeDown: () => applyVisualBlockOp(moveBlockDown, true),
+    MoveVisualRangeDown: () => moveVisualRange(moveBlockDown, "down"),
     // `Shift+↓` / `Shift+↑` — start (from Normal) or extend a contiguous
     // selection. The non-vim multi-select entry; both chords keep
     // extending once the client is in Visual.

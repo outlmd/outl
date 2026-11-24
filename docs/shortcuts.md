@@ -16,7 +16,7 @@ The mobile app doesn't expose a keyboard surface (touch + on-screen keyboard); t
 > The catalog and those match arms can disagree without anything failing to compile.
 > Treat a TUI cell below as documentation of the `match`, not of the catalog.
 >
-> **They do disagree, on 22 chords, 6 of them destructive.**
+> **They do disagree, on 20 chords, 6 of them destructive.**
 > `Ctrl+X` is `CutBlock` in the catalog and deletes a character in the TUI.
 > `Ctrl+Shift+R` is `OpenReminders` in the catalog and redoes in the TUI.
 > `Ctrl+Z` is `Undo` in the catalog and arms the `z` fold chord in the TUI, two keystrokes from a silent content edit.
@@ -24,8 +24,8 @@ The mobile app doesn't expose a keyboard surface (touch + on-screen keyboard); t
 > Which side is right is a product decision nobody has made yet, so the list is pinned rather than resolved — a new divergence, or a change to a listed one, fails the test.
 > The reminder chords keep their own pins in `reminder_chord_tests` (`outl-tui/src/input/normal.rs`); those rows agree.
 >
-> **And 31 TUI chords are missing from the tables below entirely**, because they are bound in `input/normal.rs` and were never added to the catalog these tables are generated from.
-> Among them: `h` / `l` / `w` / `b` / `0` / `$` / `G` / `g g` for cursor and block movement, `y y` to yank, `/` for the slash menu, `n` / `N` to walk search hits, `Ctrl+D` / `Ctrl+U` for half-page scroll, `Alt+↑` / `Alt+↓` to move a block, `Ctrl+S` to force a save and `Ctrl+L` to reload.
+> **And 27 TUI chords are missing from the tables below entirely**, because they are bound in `input/normal.rs` and were never added to the catalog these tables are generated from.
+> Among them: `h` / `l` / `w` / `b` / `0` / `$` / `G` / `g g` for cursor and block movement, `y y` to yank, `/` for the slash menu, `n` / `N` to walk search hits, `Ctrl+D` / `Ctrl+U` for half-page scroll, `Ctrl+S` to force a save and `Ctrl+L` to reload.
 > They work; they are just not listed here.
 > `Ctrl+B` (backlinks) and `Ctrl+E` (sidebar) are the exception that proves the point — this document publishes both by hand further down, while the generated tables cannot see them.
 > `crates/outl-shortcuts/tests/tui_only_chords.rs` is the declared list, and it fails if one of them is added to the catalog without this note being updated.
@@ -40,7 +40,7 @@ If a row below disagrees with what you observe in the app, **the code is right a
 
 - **Chrome / Global** chords fire in every mode.
 - **Normal / Insert / Visual / Overlay** mirror the vim modes.
-  The desktop subscribes to `Normal`/`Visual` only while `editor.vim_mode = true` (see [`docs/config.md`](config.md)); chrome and `Insert` chords are always live.
+  The desktop dispatcher never reads `editor.vim_mode` (see [`docs/config.md`](config.md)), so every mode is live in every case: with no textarea focused it falls into `Normal`.
 - **`Cmd`** is the macOS modifier; **`Ctrl`** is the same chord on Linux / Windows / TUI.
   We list one form per row to keep the table readable.
 - A chord in the form `q q` is a vim-style two-key sequence: press the first, then the second within ~1 s.
@@ -112,10 +112,10 @@ Mirrors the convention every markdown editor on the planet ships.
 
 ## Outline navigation — Normal mode
 
-The desktop honours `Normal`/`Visual` only while `editor.vim_mode = true`.
+The desktop dispatcher does not read `editor.vim_mode`: with nothing focused it falls into `Normal` regardless.
 The TUI is vim-style by definition.
 
-| Action | TUI | Desktop (vim on) | Mobile |
+| Action | TUI | Desktop | Mobile |
 |---|---|---|---|
 | Selection down | `j` / `↓` | `j` / `↓` | tap block |
 | Selection up | `k` / `↑` | `k` / `↑` | tap block |
@@ -129,12 +129,12 @@ The TUI is vim-style by definition.
 | Paste OS clipboard **with** formatting (outline structure / multi-paragraph split) | `p` | `Cmd/Ctrl+V` | paste |
 | Paste OS clipboard **without** formatting (raw text, single block) | `P` | `Cmd/Ctrl+Shift+V` | — |
 | Open `[[ref]]` / `#tag` / `((blk-…))` under cursor | `Enter` | `Enter` *(= `i`, no char cursor — follow a ref by clicking the token)* | tap |
-| New block below + Insert | `o` | `o` / `Cmd/Ctrl+Shift+Enter` *(no vim needed)* | toolbar `+` |
+| New block below + Insert | `o` | `o` / `Cmd/Ctrl+Shift+Enter` | toolbar `+` |
 | New block above + Insert (creates a sibling *before* the selected block) | `O` | `O` | long-press → "New block above" |
 | Indent block | `Tab` | `Tab` | drag right |
 | Outdent block | `Shift+Tab` | `Shift+Tab` | drag left |
-| Move block up among siblings | `K` | `Cmd/Ctrl+Shift+↑` | drag |
-| Move block down among siblings | `J` | `Cmd/Ctrl+Shift+↓` | drag |
+| Move block up among siblings | `K` · `Alt+↑` · `Ctrl+Shift+↑` | `Cmd/Ctrl+Shift+↑` · `Alt+↑` · `Shift+K` | long-press menu |
+| Move block down among siblings | `J` · `Alt+↓` · `Ctrl+Shift+↓` | `Cmd/Ctrl+Shift+↓` · `Alt+↓` · `Shift+J` | long-press menu |
 | Cut block + subtree (move-by-id; paste keeps `((blk-…))` refs) | — | `Cmd/Ctrl+X` | long-press → "Cut block" *(fresh id on paste, see note below)* |
 | Copy block + subtree (paste duplicates with fresh ids) | — | `Cmd/Ctrl+C` | long-press → "Copy block" |
 | Paste block after the selection (cut → move, copy → duplicate) | — | `Cmd/Ctrl+V` | long-press → "Paste block" |
@@ -169,7 +169,7 @@ The TUI is vim-style by definition.
 > Use "Copy block ref" first if something else in the workspace links to the block you're about to cut.
 
 > **`Cmd/Ctrl+Shift+Enter` works without vim mode.**
-> Unlike `o`, the chord is not vim-gated: with no textarea focused the desktop falls into Normal dispatch regardless of the `vim_mode` setting, so every user can append a block from view mode.
+> With no textarea focused the desktop falls into Normal dispatch, and the dispatcher never reads `vim_mode`, so every user can append a block from view mode.
 > Inside a block editor the same chord commits the current edit first (Insert-mode `CommitAndContinue`).
 > Both `Cmd+Shift+Enter` (macOS) and `Ctrl+Shift+Enter` (Windows / Linux) are bound in each mode.
 
@@ -178,7 +178,7 @@ The TUI is vim-style by definition.
 These rely on a **character cursor inside the selected block**.
 The TUI ships it natively; the desktop has only a selected block id, so the char-cursor ops surface a status-line nudge instead of firing.
 
-| Action | TUI | Desktop (vim on) |
+| Action | TUI | Desktop |
 |---|---|---|
 | Char left / right | `h` / `l` (or arrows) | `h` / `l` |
 | Word right / left | `w` / `b` | `w` / `b` |
@@ -231,6 +231,8 @@ Nothing on the phone reads that matrix yet, so the sentence is written and the u
 | Commit + new block, caret-aware (caret at col 0 → *before* the block / vim `O`; past col 0 → *below*) | — | `Cmd/Ctrl+Shift+Enter` | — |
 | Indent (stay in Insert) | `Tab` | `Tab` | drag |
 | Outdent (stay in Insert) | `Shift+Tab` | `Shift+Tab` | drag |
+| Move block up (stay in Insert, same block, caret kept) | `Alt+↑` · `Ctrl+Shift+↑` | `Cmd/Ctrl+Shift+↑` · `Alt+↑` | — |
+| Move block down (stay in Insert, same block, caret kept) | `Alt+↓` · `Ctrl+Shift+↓` | `Cmd/Ctrl+Shift+↓` · `Alt+↓` | — |
 | Delete block on empty | `Backspace` on empty | `Backspace` on empty | — |
 | Caret to start / end of the current line | `Home` / `End` | native | native |
 | Walk into the **previous** block, caret at its end | `←` at offset 0 | `←` at offset 0 | `←` at offset 0 _(hardware keyboard)_ |
@@ -272,8 +274,8 @@ Only the toolbar's **Delete** confirms before erasing a range that contains nest
 | Delete range (toolbar **Delete** confirms if a block has children; the keys don't) | `d` / `x` | `d` / `x` · `Delete` / `Backspace` · toolbar **Delete** |
 | Indent range (vim `>`) | `Tab` / `>` | `>` · toolbar **Indent** |
 | Outdent range (vim `<`) | `Shift+Tab` / `<` | `<` · toolbar **Outdent** |
-| Move range up among siblings | `Alt+↑` | `Cmd/Ctrl+Shift+↑` · toolbar **↑** |
-| Move range down among siblings | `Alt+↓` | `Cmd/Ctrl+Shift+↓` · toolbar **↓** |
+| Move range up among siblings | `K` · `Alt+↑` · `Ctrl+Shift+↑` | `Cmd/Ctrl+Shift+↑` · `Alt+↑` · `Shift+K` · toolbar **↑** |
+| Move range down among siblings | `J` · `Alt+↓` · `Ctrl+Shift+↓` | `Cmd/Ctrl+Shift+↓` · `Alt+↓` · `Shift+J` · toolbar **↓** |
 | Leave Visual (captures range so a follow-up `g v` restores it) | `Esc` | `Esc` · toolbar **Done** |
 
 ---
@@ -396,8 +398,11 @@ The widening stands on its own: the crate CLAUDE.md sits under a 40k context gua
 Written down so the next contributor inherits the decision instead of relitigating it from the same evidence.
 
 - **Range ops walk bottom-up or top-down, and tolerate an id that is already gone.**
-  `applyVisualBlockOp` has four callers.
-  `IndentVisualRange`, `OutdentVisualRange` and `MoveVisualRangeUp` walk `[lo → hi]`; `MoveVisualRangeDown` passes `reverse = true` for `[hi → lo]`, because a descending move has to clear the block below the range first.
+  `applyVisualBlockOp` now has two callers, `IndentVisualRange` and `OutdentVisualRange`, which walk `[lo → hi]` over the raw slice: a child of a selected parent is meant to be re-levelled.
+  The two range moves do not walk the raw slice.
+  They walk `rangeMoveTargets` (`@outl/shared/outline`), the **roots** of the selection, so a parent selected with its children moves as one unit.
+  Top-down for up, bottom-up for down, because a descending move has to clear the block below the range first.
+  A range that is not contiguous siblings of one parent, or already sits at the edge, moves nothing.
   `DeleteRange` is **not** one of them — it owns its own `[...rangeIds].reverse()` loop, bottom-up for a different reason: children before parents, so a parent's move-to-trash cannot pull a still-targeted descendant out from under the walk.
   NodeIds are stable — `deleteBlock` is `Move(node, TRASH)` and moves preserve identity — so the highlight follows the re-render, and `safeCall` swallows a per-id failure instead of aborting the range.
 - **`z R` / `z M` walk `flattenAll` / `flattenParents`, never `flattenVisible`.**

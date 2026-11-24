@@ -173,6 +173,8 @@ export function BacklinkRowEditor(props: {
     // and left behind it would hijack the next block the user clicks.
     onIndent: async () => setAppState("caretIntent", null),
     onOutdent: async () => setAppState("caretIntent", null),
+    onMoveUp: async () => setAppState("caretIntent", null),
+    onMoveDown: async () => setAppState("caretIntent", null),
     // Neighbouring rows are drawn now, but walking an arrow out of here
     // would start editing another block on another page from a keystroke
     // aimed at this one, which is the line the TUI's `cross_block_step`

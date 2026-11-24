@@ -61,6 +61,23 @@ vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
   readText: vi.fn(),
 }));
 
+vi.mock("../lib/api", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../lib/api")>();
+  const alt = (kind: "Up" | "Down") => ({ mods: real.MOD_ALT, key: { kind } });
+  const bindings = [
+    { chord: [alt("Up")], mode: "insert", action: { kind: "MoveBlockUp" } },
+    { chord: [alt("Down")], mode: "insert", action: { kind: "MoveBlockDown" } },
+  ].map((b) => ({ ...b, description: "" })) as Binding[];
+  return {
+    ...real,
+    listShortcutBindings: vi.fn(async () => bindings),
+    listActionSupport: vi.fn(async () => []),
+    pluginKeybindings: vi.fn(async () => []),
+  };
+});
+
+import type { Binding } from "../lib/api";
+import { installShortcuts } from "../lib/shortcuts";
 import { InlineBacklinks } from "./InlineBacklinks";
 import { appState, setAppState, setOutline } from "../lib/store";
 
@@ -415,5 +432,55 @@ describe("editing a backlink where it is cited", () => {
     expect(host.querySelector("textarea")).toBeNull();
     expect(appState.editingBacklink).toBeNull();
     expect(editBacklinkBlock).not.toHaveBeenCalled();
+  });
+});
+
+describe("a move chord inside a backlink editor", () => {
+  it("finishes the edit, clears caretIntent and issues no move on the cited page", async () => {
+    vi.mocked(editBacklinkBlock).mockResolvedValue(sourceView());
+    vi.mocked(pageBacklinks).mockResolvedValue(backlinksReply([backlink()]));
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const backlinkRowOp = vi.fn();
+    const uninstall = await installShortcuts({
+      MoveBlockUp: backlinkRowOp,
+      MoveBlockDown: backlinkRowOp,
+    });
+    try {
+      const host = mount([backlink()]);
+      row(host).click();
+      const ta = editor(host);
+      type(ta, "edited");
+
+      for (const repeat of [false, true, true]) {
+        ta.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowUp",
+            altKey: true,
+            repeat,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+      // The hold's repeats land after the textarea unmounted.
+      await vi.waitFor(() => {
+        expect(appState.editingBacklink).toBeNull();
+      });
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          altKey: true,
+          repeat: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      expect(editBacklinkBlock).toHaveBeenCalledTimes(1);
+      expect(appState.caretIntent).toBeNull();
+      expect(backlinkRowOp).not.toHaveBeenCalled();
+    } finally {
+      uninstall();
+    }
   });
 });

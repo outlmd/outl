@@ -26,7 +26,7 @@ use std::time::{Instant, SystemTime};
 pub(crate) const HELP_HINT_NORMAL: &str =
     "i edit  o new  c fold  Enter open ref  K/J move  C-T TODO  u undo  ? help  q";
 pub(crate) const HELP_HINT_INSERT: &str =
-    "Esc commit  Enter new block  Ctrl+T TODO  Tab indent  Shift-Tab outdent";
+    "Esc commit  Enter new block  Ctrl+T TODO  Tab indent  Shift-Tab outdent  Alt+↑/↓ move";
 pub(crate) const HELP_HINT_VISUAL: &str =
     "j/k extend  d/x delete  y yank  Tab indent  S-Tab outdent  Esc cancel";
 

@@ -213,12 +213,21 @@ export function followSelection(selected: () => string | null): void {
   createEffect(() => {
     const id = selected();
     if (!id) return;
-    // The row may be rendering in this same tick.
-    queueMicrotask(() => {
-      document
-        .querySelector<HTMLElement>(`[data-block-id="${id}"]`)
-        ?.scrollIntoView({ block: "nearest" });
-    });
+    revealBlock(id);
+  });
+}
+
+/**
+ * Scroll a block's row into view if it is not already. Split out of
+ * {@link followSelection} so a move, which changes the order and not the
+ * selection, can ask for the same thing. Deferred a microtask: the row
+ * may be rendering in this same tick.
+ */
+export function revealBlock(id: string): void {
+  queueMicrotask(() => {
+    document
+      .querySelector<HTMLElement>(`[data-block-id="${id}"]`)
+      ?.scrollIntoView({ block: "nearest" });
   });
 }
 

@@ -324,3 +324,134 @@ fn move_down_at_path_is_none_through_a_stale_nested_path() {
     assert!(move_down_at_path(&mut blocks, &[13, 0, 0]).is_none());
     assert_eq!(blocks.len(), 2, "a stale path must not mutate the tree");
 }
+
+fn with_children(text: &str, children: Vec<OutlineNode>) -> OutlineNode {
+    OutlineNode {
+        text: text.into(),
+        children,
+        ..Default::default()
+    }
+}
+
+fn top_texts(blocks: &[OutlineNode]) -> Vec<&str> {
+    blocks.iter().map(|b| b.text.as_str()).collect()
+}
+
+fn abcd() -> Vec<OutlineNode> {
+    vec![block("a"), block("b"), block("c"), block("d")]
+}
+
+#[test]
+fn rotate_moves_a_single_leaf_up_and_down() {
+    let mut blocks = abcd();
+    let r = rotate_siblings(&mut blocks, &[], 2, 2, Direction::Up);
+    assert_eq!(
+        r,
+        Some(Rotated {
+            first: 1,
+            run: 1,
+            displaced: 1
+        })
+    );
+    assert_eq!(top_texts(&blocks), ["a", "c", "b", "d"]);
+
+    let r = rotate_siblings(&mut blocks, &[], 1, 1, Direction::Down);
+    assert_eq!(r.map(|r| r.first), Some(2));
+    assert_eq!(top_texts(&blocks), ["a", "b", "c", "d"]);
+}
+
+#[test]
+fn rotate_reports_flat_sizes_for_a_run_over_a_displaced_subtree() {
+    // a, [b, c], d: the run `b,c` goes down over `d`, which has two
+    // children, so `displaced` is the flat size of that whole subtree.
+    let mut blocks = vec![
+        block("a"),
+        block("b"),
+        block("c"),
+        with_children("d", vec![block("d1"), block("d2")]),
+    ];
+    let r = rotate_siblings(&mut blocks, &[], 1, 2, Direction::Down).expect("legal");
+    assert_eq!(
+        r,
+        Rotated {
+            first: 2,
+            run: 2,
+            displaced: 3
+        }
+    );
+    assert_eq!(top_texts(&blocks), ["a", "d", "b", "c"]);
+    assert_eq!(blocks[1].children.len(), 2, "the subtree travelled whole");
+}
+
+#[test]
+fn rotate_counts_the_subtree_of_the_run_too() {
+    let mut blocks = vec![
+        block("a"),
+        with_children("b", vec![block("b1")]),
+        block("c"),
+    ];
+    let r = rotate_siblings(&mut blocks, &[], 1, 1, Direction::Up).expect("legal");
+    assert_eq!(
+        r,
+        Rotated {
+            first: 0,
+            run: 2,
+            displaced: 1
+        }
+    );
+    assert_eq!(top_texts(&blocks), ["b", "a", "c"]);
+}
+
+#[test]
+fn rotate_at_an_edge_is_none_and_mutates_nothing() {
+    let mut blocks = abcd();
+    let before = blocks.clone();
+    assert!(rotate_siblings(&mut blocks, &[], 0, 0, Direction::Up).is_none());
+    assert!(rotate_siblings(&mut blocks, &[], 0, 1, Direction::Up).is_none());
+    assert!(rotate_siblings(&mut blocks, &[], 3, 3, Direction::Down).is_none());
+    assert!(rotate_siblings(&mut blocks, &[], 2, 3, Direction::Down).is_none());
+    assert_eq!(blocks, before);
+}
+
+#[test]
+fn rotate_refuses_an_inverted_or_out_of_range_run_and_a_stale_parent() {
+    let mut blocks = abcd();
+    let before = blocks.clone();
+    assert!(rotate_siblings(&mut blocks, &[], 2, 1, Direction::Up).is_none());
+    assert!(rotate_siblings(&mut blocks, &[], 1, 9, Direction::Up).is_none());
+    assert!(rotate_siblings(&mut blocks, &[13], 1, 1, Direction::Up).is_none());
+    assert_eq!(blocks, before);
+}
+
+#[test]
+fn rotate_works_under_a_nested_parent() {
+    let mut blocks = vec![
+        block("top"),
+        with_children("p", vec![block("x"), block("y"), block("z")]),
+    ];
+    let r = rotate_siblings(&mut blocks, &[1], 0, 1, Direction::Down).expect("legal");
+    assert_eq!(r.first, 1);
+    assert_eq!(top_texts(&blocks[1].children), ["z", "x", "y"]);
+    assert_eq!(
+        top_texts(&blocks),
+        ["top", "p"],
+        "the parent level is untouched"
+    );
+}
+
+#[test]
+fn can_rotate_agrees_with_rotate_siblings() {
+    let blocks = abcd();
+    for first in 0..5 {
+        for last in 0..5 {
+            for dir in [Direction::Up, Direction::Down] {
+                let mut copy = blocks.clone();
+                assert_eq!(
+                    can_rotate(&blocks, &[], first, last, dir),
+                    rotate_siblings(&mut copy, &[], first, last, dir).is_some(),
+                    "first={first} last={last}"
+                );
+            }
+        }
+    }
+}

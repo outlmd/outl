@@ -135,6 +135,19 @@ Load-bearing notes a contributor needs:
   The Tab handler captures it before `commit()` runs; the fresh `<BlockEditor />` applies it on mount and clears it, the same contract `EnterInsertAtEnd` already had.
   **The handler calls `stopImmediatePropagation`, and removing it moves the block twice** — the editor unmounts itself mid-dispatch, so `window` then resolves the same keystroke as the catalog's Normal row.
   The handler's comment carries the mechanism; `BlockRow.tab-dispatch.test.tsx` is the net, in both directions.
+- **`Cmd/Ctrl+Shift+↑/↓` and `Alt+↑/↓` move the block and keep it in edit mode, on itself.**
+  The catalog has three Insert rows per direction, so the editor asks `insertMoveFor(e)` instead of spelling the chord.
+  The letter chords (`Shift+K` / `Shift+J`) are Normal and Visual only, because in Insert they would eat typing.
+  **The branch sits above `suggest.handleKey`**: an open `[[` popup would otherwise take the arrow as "next item", and the chord means "move the block".
+  The textarea owns the move, not the window dispatcher.
+  The dispatcher returns early for these rows in Insert (and for any other input, such as the title, a property value or search, which keeps the native key), and the textarea calls `stopImmediatePropagation` for the reason the `Tab` bullet gives.
+  The caret goes through `caretIntent` and the move through `moveOnce`, the one gate shared with the Normal and Visual handlers.
+  A held chord repeats faster than a move round-trip, and a move reads edges the previous one has not repainted, so repeats that arrive while one is in flight are dropped.
+  `caretIntent` is written inside the gate, or a dropped repeat would leave a stale intent for the next block that mounts.
+  A backlink row's editor unmounts on the commit, so repeats then reach the dispatcher with nothing focused.
+  `editorOwnsHold` is the flag that makes it swallow them until the next fresh press.
+  There the chord only finishes the edit (`onMoveUp` / `onMoveDown` just clear the intent); the move itself is Normal-mode work on the focused row.
+  `BlockRow.move-dispatch.test.tsx` is the net.
 - `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
   Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
 - Bracket auto-pairing lives in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity), never here.

@@ -227,7 +227,7 @@ A few things that compound:
 - **`u` / `Ctrl+R`** — undo / redo.
   Bounded at 200 steps.
   Cursor position is restored too.
-- **`K` / `J`** (or `Alt+↑/↓`) — move the current block (with its subtree) up or down among its siblings.
+- **`K` / `J`** (or `Alt+↑/↓`, or `Ctrl+Shift+↑/↓`) — move the current block (with its subtree) up or down among its siblings.
 - **`yy`** — yank the current block (and its subtree) to the OS clipboard.
   `p` pastes from the OS clipboard **with formatting** (outline structure / paragraph split preserved).
   `P` pastes **without formatting** (raw text, single block — useful when the clipboard contains identifiers with underscores or brackets).

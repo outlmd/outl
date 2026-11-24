@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 
+import { isMac } from "../lib/palette-results";
 import { detectMode, type ResolvedMode as Mode } from "../lib/mode";
 import { appState, setAppState } from "../lib/store";
 
@@ -29,6 +30,7 @@ function hintsFor(mode: Mode): HintEntry[] {
         { chord: "Enter", label: "newline" },
         { chord: "⌘Enter", label: "new block" },
         { chord: "Tab", label: "indent" },
+        { chord: isMac() ? "⌘⇧↑/↓" : "Ctrl+Shift+↑/↓", label: "move" },
         { chord: "⌘B", label: "bold" },
         { chord: "⌘I", label: "italic" },
         { chord: "⌘T", label: "todo" },

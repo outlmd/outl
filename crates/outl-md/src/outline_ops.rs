@@ -305,34 +305,122 @@ pub fn delete_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) {
     }
 }
 
+/// Which way a sibling run moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// Toward the first sibling.
+    Up,
+    /// Toward the last sibling.
+    Down,
+}
+
+/// What [`rotate_siblings`] did, in the units a caller needs to keep
+/// a parallel flat-indexed vector aligned.
+///
+/// `first` is the run's new sibling index. `run` and `displaced` are
+/// **flat** sizes (every node with its subtree), so a caller can rotate
+/// the matching window of a DFS-preorder vector without re-walking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rotated {
+    /// The run's new sibling index.
+    pub first: usize,
+    /// Flat size of the run that moved.
+    pub run: usize,
+    /// Flat size of the neighbour it passed.
+    pub displaced: usize,
+}
+
+fn siblings_ref<'a>(blocks: &'a [OutlineNode], parent: &[usize]) -> Option<&'a [OutlineNode]> {
+    let mut current = blocks;
+    for &idx in parent {
+        current = &current.get(idx)?.children;
+    }
+    Some(current)
+}
+
+/// Can the sibling run `first..=last` under `parent` move one step in
+/// `dir`? `false` for an inverted or out-of-range run, an unresolved
+/// `parent`, and either edge: a block never crosses its parent.
+pub fn can_rotate(
+    blocks: &[OutlineNode],
+    parent: &[usize],
+    first: usize,
+    last: usize,
+    dir: Direction,
+) -> bool {
+    let Some(siblings) = siblings_ref(blocks, parent) else {
+        return false;
+    };
+    if first > last || last >= siblings.len() {
+        return false;
+    }
+    match dir {
+        Direction::Up => first > 0,
+        Direction::Down => last + 1 < siblings.len(),
+    }
+}
+
+/// Move the sibling run `first..=last` under `parent` one step past its
+/// neighbour, dragging every subtree. `None` (nothing mutated) when
+/// [`can_rotate`] says no.
+///
+/// The one AST move: the single-block helpers below are wrappers over
+/// it, so the legality rule has one owner.
+pub fn rotate_siblings(
+    blocks: &mut Vec<OutlineNode>,
+    parent: &[usize],
+    first: usize,
+    last: usize,
+    dir: Direction,
+) -> Option<Rotated> {
+    if !can_rotate(blocks, parent, first, last, dir) {
+        return None;
+    }
+    let siblings = siblings_mut(blocks, parent)?;
+    let flat = |nodes: &[OutlineNode]| nodes.iter().map(|n| 1 + flat_count(&n.children)).sum();
+    let run = flat(&siblings[first..=last]);
+    match dir {
+        Direction::Up => {
+            let displaced = flat(&siblings[first - 1..first]);
+            siblings[first - 1..=last].rotate_left(1);
+            Some(Rotated {
+                first: first - 1,
+                run,
+                displaced,
+            })
+        }
+        Direction::Down => {
+            let displaced = flat(&siblings[last + 1..=last + 1]);
+            siblings[first..=last + 1].rotate_right(1);
+            Some(Rotated {
+                first: first + 1,
+                run,
+                displaced,
+            })
+        }
+    }
+}
+
+fn move_one(blocks: &mut Vec<OutlineNode>, path: &[usize], dir: Direction) -> Option<Vec<usize>> {
+    let (&idx, parent) = path.split_last()?;
+    let rotated = rotate_siblings(blocks, parent, idx, idx, dir)?;
+    let mut new_path = parent.to_vec();
+    new_path.push(rotated.first);
+    Some(new_path)
+}
+
 /// Swap a node with its previous sibling. Returns the new path of the
 /// moved node, or `None` if there is no previous sibling or `path` no
 /// longer resolves in `blocks`.
 pub fn move_up_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
-    let (last_idx, parent_path) = path.split_last()?;
-    if *last_idx == 0 {
-        return None;
-    }
-    let siblings = siblings_mut(blocks, parent_path)?;
-    siblings.swap(*last_idx, *last_idx - 1);
-    let mut new_path = parent_path.to_vec();
-    new_path.push(*last_idx - 1);
-    Some(new_path)
+    move_one(blocks, path, Direction::Up)
 }
 
 /// Swap a node with its next sibling. Returns the new path of the
 /// moved node, or `None` if there is no next sibling or `path` no
 /// longer resolves in `blocks`.
 pub fn move_down_at_path(blocks: &mut Vec<OutlineNode>, path: &[usize]) -> Option<Vec<usize>> {
-    let (last_idx, parent_path) = path.split_last()?;
-    let siblings = siblings_mut(blocks, parent_path)?;
-    if *last_idx + 1 >= siblings.len() {
-        return None;
-    }
-    siblings.swap(*last_idx, *last_idx + 1);
-    let mut new_path = parent_path.to_vec();
-    new_path.push(*last_idx + 1);
-    Some(new_path)
+    move_one(blocks, path, Direction::Down)
 }
 
 #[cfg(test)]

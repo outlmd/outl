@@ -89,7 +89,7 @@ Three limits are deliberate, and written down rather than discovered:
 A mobile delete on a citing block that has children asks first, in the prompt the outline uses.
 Before the children were drawn the count was always zero, so it never asked.
 
-On the desktop, `Enter`, `Tab` and `Shift+Tab` inside the textarea only finish the edit, on the citing block and a child alike, and the arrow keys stay in the textarea.
+On the desktop, `Enter`, `Tab`, `Shift+Tab` and the move chords (`Cmd/Ctrl+Shift+↑/↓`, `Alt+↑/↓`) inside the textarea only finish the edit, on the citing block and a child alike, and the plain arrow keys stay in the textarea.
 Indent, move and create-sibling work from the focused row: `Esc`, then `Tab` / `o` / `Alt+Up`.
 
 **Namespace-mention rows stay shallow and read-only.**

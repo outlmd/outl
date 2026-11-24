@@ -133,6 +133,7 @@ fn native_normal_chord(key: KeyEvent) -> bool {
     // these exhaustively rather than blanket-claiming every Ctrl/Alt
     // chord, so a plugin can bind e.g. `Ctrl+G` without being shadowed.
     if ctrl {
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         return matches!(
             key.code,
             // Ctrl+T (TODO), Ctrl+D / Ctrl+U (half-page), Ctrl+R (redo),
@@ -140,10 +141,10 @@ fn native_normal_chord(key: KeyEvent) -> bool {
             Char('t' | 'd' | 'u' | 'r' | 'p' | 'b' | 'e' | 'T' | 'D' | 'U' | 'R' | 'P' | 'B' | 'E')
             // Ctrl+Enter (TODO toggle).
             | Enter
-        );
-        // Ctrl+S / Ctrl+L / Ctrl+C are intercepted upstream in
-        // `runtime/event_loop.rs` before Normal handling, so they never reach here;
-        // treating them as free below is harmless.
+        ) || (shift && matches!(key.code, Up | Down)); // Ctrl+Shift+Up/Down drag the block.
+                                                       // Ctrl+S / Ctrl+L / Ctrl+C are intercepted upstream in
+                                                       // `runtime/event_loop.rs` before Normal handling, so they never reach here;
+                                                       // treating them as free below is harmless.
     }
     if alt {
         // Alt+Up / Alt+Down drag the current block.
@@ -189,6 +190,8 @@ fn native_normal_chord(key: KeyEvent) -> bool {
                 | '#'
                 | 'j'
                 | 'k'
+                | 'J'
+                | 'K'
                 | 'G'
                 | 'h'
                 | 'l'
@@ -394,6 +397,29 @@ mod tests {
         press(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
         assert!(app.pending_plugin_chord.is_none(), "stale prefix cleared");
         assert_eq!(log_len(&app), before, "plugin must not have fired");
+    }
+
+    #[test]
+    fn plugin_never_shadows_the_move_chords() {
+        // `Shift+K` and `Ctrl+Shift+Up` drag the block, so a plugin
+        // bound to either must yield instead of stealing the key.
+        for (key, code, mods) in [
+            ("Shift+K", KeyCode::Char('K'), KeyModifiers::SHIFT),
+            (
+                "Ctrl+Shift+Up",
+                KeyCode::Up,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        ] {
+            let dir = TempDir::new().unwrap();
+            write_dev_plugin(dir.path(), key);
+            let mut app = app_with(&dir);
+            app.load_plugins();
+
+            let before = log_len(&app);
+            press(&mut app, code, mods);
+            assert_eq!(log_len(&app), before, "{key} reached the plugin");
+        }
     }
 
     #[test]

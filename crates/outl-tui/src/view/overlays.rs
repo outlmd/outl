@@ -976,7 +976,7 @@ fn help_tab_body(tab: usize, theme: &Theme, icons: &crate::icons::IconSet) -> Ve
             Line::from("  I           edit, cursor at start of block"),
             Line::from("  o / O       new block below / above"),
             Line::from("  Tab / S-Tab indent / outdent"),
-            Line::from("  K / J       move block up / down (Alt+↑/↓ too)"),
+            Line::from("  K / J       move block up / down (Alt/C-S-↑/↓ too)"),
             Line::from("  dd          delete block"),
             Line::from("  yy / p / P  yank · paste after · paste before"),
             Line::from("  Ctrl+T      cycle TODO / DOING / DONE / none"),

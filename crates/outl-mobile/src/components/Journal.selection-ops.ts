@@ -27,7 +27,11 @@ import {
   moveBlockUp,
   outdentBlock,
 } from "@outl/shared/api/commands";
-import { visibleRangeSlice } from "@outl/shared/outline";
+import {
+  createMoveGate,
+  rangeMoveTargets,
+  visibleRangeSlice,
+} from "@outl/shared/outline";
 
 import {
   type BlockSelection,
@@ -73,31 +77,58 @@ export function createSelectionOps(deps: JournalSelectionDeps) {
     return visibleRangeSlice(sel.anchorId, sel.cursorId, cur.outline);
   }
 
-  /** Walk every block in the range and fire `op` for each: the shared
-   *  body behind Indent/Outdent/Move-range.
-   *
-   *  `reverse` walks bottom-up, which a move-**down** needs — it has to
-   *  clear the block below the range before its neighbours slide into
-   *  place, or an ascending walk drags each block over its own
-   *  not-yet-moved neighbour. Pinned by test, not by comment
-   *  (`Journal.selection-ops.test.ts` → "range ops walk order").
-   *
-   *  The range stays selected afterward, vim convention: the user can
-   *  repeat the op. */
-  async function applyRangeOp(
+  /** Fire `op` for each of `ids`, in the order given, and paint only the
+   *  last view that came back. The shared body behind Indent/Outdent and
+   *  the move ops. The range stays selected afterward, vim convention:
+   *  the user can repeat the op. */
+  async function walk(
     op: (pid: string, id: string) => Promise<PageView>,
-    reverse = false,
+    pid: string,
+    ids: readonly string[],
   ): Promise<void> {
-    const pid = deps.pageId();
-    const ids = currentRangeIds();
-    if (!pid || !ids || ids.length === 0) return;
-    const targets = reverse ? [...ids].reverse() : ids;
     let lastView: PageView | undefined;
-    for (const id of targets) {
+    for (const id of ids) {
       const v = await deps.withError(() => op(pid, id));
       if (v) lastView = v;
     }
     if (lastView) deps.applyView(lastView);
+  }
+
+  /** Indent / outdent: every id of the range, top-down. A child of a
+   *  selected parent is meant to be re-levelled too. */
+  async function applyRangeOp(
+    op: (pid: string, id: string) => Promise<PageView>,
+  ): Promise<void> {
+    const pid = deps.pageId();
+    const ids = currentRangeIds();
+    if (!pid || !ids || ids.length === 0) return;
+    await walk(op, pid, ids);
+  }
+
+  /** One range move in flight at a time. The outline is repainted only
+   *  after the walk, so a second press that resolved its range early
+   *  would read stale edges and scramble. The range is resolved *inside*
+   *  the gate for the same reason. */
+  const moveOnce = createMoveGate();
+
+  /** Move the range one slot. Walks the range's roots, not every id: a
+   *  parent selected with its children moves as one unit, and a range
+   *  that cannot move whole (edge, mixed parents) does not move.
+   *  Pinned by test, not by comment (`Journal.selection-ops.test.ts` →
+   *  "range ops walk order"). */
+  async function moveRange(
+    op: (pid: string, id: string) => Promise<PageView>,
+    dir: "up" | "down",
+  ): Promise<void> {
+    await moveOnce(async () => {
+      const pid = deps.pageId();
+      const ids = currentRangeIds();
+      const cur = deps.view();
+      if (!pid || !ids || !cur) return;
+      const targets = rangeMoveTargets(ids, cur.outline, dir);
+      if (targets.length === 0) return;
+      await walk(op, pid, targets);
+    });
   }
 
   /** Bottom-up delete (children before parents) — mirrors the
@@ -188,14 +219,14 @@ export function createSelectionOps(deps: JournalSelectionDeps) {
 
     async moveRangeUp() {
       haptic("light");
-      await applyRangeOp(moveBlockUp);
+      await moveRange(moveBlockUp, "up");
     },
 
-    /** Bottom-up walk (see `applyRangeOp`'s doc) — the last block in the
-     *  range has to clear the block below the range first. */
+    /** Bottom-up walk (`rangeMoveTargets` orders it) — the last block in
+     *  the range has to clear the block below the range first. */
     async moveRangeDown() {
       haptic("light");
-      await applyRangeOp(moveBlockDown, true);
+      await moveRange(moveBlockDown, "down");
     },
 
     /**

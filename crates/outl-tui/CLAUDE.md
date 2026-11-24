@@ -119,9 +119,16 @@ This section captures only the **architectural / TUI-specific behaviour** a cont
   The tail the merge and the rename share once their ops are in the log — the projection order, the invalidated undo entries, the remembered paths, both summaries — is `actions/page_commit.rs`, not either feature's module.
 - **Visual range capture.**
   Every Visual exit (`Esc`, `y`, `d`) routes through `remember_visual_range` so `g v` can restore the last range.
-- **Visual range reorder (`Alt+↑` / `Alt+↓`).**
-  `move_{up,down}_visual_range` drag the whole selection among its siblings — mirror of the single-block `Alt`+arrows in Normal (the plain arrows extend the range, so `Alt` is what separates reorder from grow).
-  They loop `move_{up,down}_at_path` (`lo→hi` for up, `hi→lo` for down) and follow the selection one row; if the leading block can't move (already first/last sibling) the op aborts before the rest of the range scrambles against itself.
+- **Block moves (`K` / `J`, `Alt+↑/↓`, `Ctrl+Shift+↑/↓`).**
+  Normal, Visual and Insert share `is_move_chord` (`Alt` without `Ctrl`, or `Ctrl+Shift`), because a terminal that does not deliver `Ctrl+Shift+↑` still has `Alt+↑`.
+  `actions/block/move_block.rs` owns the single-block move and `App::rotate_run` is the one place the outline half touches the AST, over `outl_md::outline_ops::rotate_siblings`.
+  `rotate_run` owns three things a bare rotate does not: the zoom guard, the undo snapshot taken only once the move is known to be legal (`snapshot_for_undo` clears redo, so a press at the edge must not take one), and rotating `id_by_flat` in step with the AST, which is what keeps `c` folding the block under the cursor.
+  `read_flat_ids` / `adopt_flat_ids` realign that map after a reconcile, since undo restores the AST without touching it.
+  In Insert the move keeps the same `NodeId` and the unsaved text, and closes an open autocomplete popup.
+- **Visual range reorder.**
+  `move_{up,down}_visual_range` rotate the range as one unit through `rotate_run`, so a parent selected with its children moves whole.
+  Roots with different parents, or a range at the edge, refuse instead of scrambling.
+  Anchor and cursor are found again by path, so the same blocks stay selected.
 
 ### Undo / redo (`u` / `Ctrl+R`)
 

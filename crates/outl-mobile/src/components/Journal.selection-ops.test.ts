@@ -233,6 +233,65 @@ describe("range ops walk order", () => {
   });
 });
 
+describe("range move as roots", () => {
+  const NESTED = [
+    block("a"),
+    block("p", [block("p1"), block("p2")]),
+    block("z"),
+  ];
+
+  it("a parent with children issues one command", async () => {
+    const { state, ops } = harness(NESTED);
+    state.selection = { anchorId: "p", cursorId: "p2" };
+    commands.moveBlockUp.mockResolvedValue(pageView(NESTED));
+
+    await ops.moveRangeUp();
+
+    expect(commands.moveBlockUp.mock.calls.map((c) => c[1])).toEqual(["p"]);
+  });
+
+  it("a range at the edge issues none", async () => {
+    const { state, ops } = harness();
+    state.selection = { anchorId: "a", cursorId: "b" };
+    await ops.moveRangeUp();
+    state.selection = { anchorId: "c", cursorId: "d" };
+    await ops.moveRangeDown();
+
+    expect(commands.moveBlockUp).not.toHaveBeenCalled();
+    expect(commands.moveBlockDown).not.toHaveBeenCalled();
+  });
+
+  it("roots with different parents issue none", async () => {
+    const { state, ops } = harness(NESTED);
+    state.selection = { anchorId: "p2", cursorId: "z" };
+
+    await ops.moveRangeUp();
+    await ops.moveRangeDown();
+
+    expect(commands.moveBlockUp).not.toHaveBeenCalled();
+    expect(commands.moveBlockDown).not.toHaveBeenCalled();
+  });
+
+  it("two un-awaited Up calls on a,[b,c] issue exactly b,c", async () => {
+    const { state, ops } = harness();
+    state.selection = { anchorId: "b", cursorId: "c" };
+    const pending: Array<() => void> = [];
+    commands.moveBlockUp.mockImplementation(
+      () => new Promise((r) => pending.push(() => r(pageView(FLAT)))),
+    );
+
+    const first = ops.moveRangeUp();
+    const second = ops.moveRangeUp();
+    await second;
+    pending.shift()?.();
+    await vi.waitFor(() => expect(pending.length).toBe(1));
+    pending.shift()?.();
+    await first;
+
+    expect(commands.moveBlockUp.mock.calls.map((c) => c[1])).toEqual(["b", "c"]);
+  });
+});
+
 describe("range delete", () => {
   it("always confirms rather than deleting, however small the range", () => {
     const { state, ops } = harness();

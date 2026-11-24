@@ -4,8 +4,9 @@
 //! shipping shortcuts) plus the OS-standard chrome bindings the
 //! desktop already relied on (`Cmd/Ctrl+P`, `Cmd/Ctrl+B`, etc.).
 //!
-//! Adding a binding here lights it up on both clients at once: the TUI's
-//! chord adapter and the desktop's `KeyboardEvent` adapter share the lookup.
+//! Adding a binding here lights it up on the desktop, which resolves
+//! through `lookup()`. The TUI still dispatches Normal-mode keys from its
+//! own `match`, and the divergence tests in `tests/` pin where the two differ.
 
 use crate::action::Action;
 use crate::binding::{Binding, Mode};
@@ -16,6 +17,7 @@ mod capture;
 /// `ch` / `pair` lowercase, which has already mis-spelt two chords.
 mod chords;
 mod focus;
+mod move_block;
 mod overlay;
 mod tasks;
 
@@ -598,45 +600,18 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::DeleteBlock,
             "Delete block (chord)",
         ),
-        // ── Block move + clipboard (Normal / view mode) ───────────
+        // ── Block clipboard (Normal / view mode) ──────────────────
         //
-        // Reorder the selected block among its siblings with
-        // `Cmd+Shift+↑/↓` (Notion / Logseq muscle memory), and
-        // cut / copy / paste a whole block + its subtree with the
+        // Cut / copy / paste a whole block + its subtree with the
         // OS-native `Cmd+X/C/V`. These are **Normal-mode** bindings
         // so they never shadow the native text cut / copy / paste
         // inside a block editor (Insert mode, where the chord isn't
         // in the catalog and the keystroke reaches the textarea).
+        // Moving a block has its own rows in `move_block.rs`.
         //
         // Each is dual-spelled per OS: META (`Cmd`) and CTRL, bound
         // twice because the desktop adapter never rewrites
-        // `Cmd`↔`Ctrl` — the same two-row pattern `Cmd/Ctrl+Z` and
-        // `Cmd/Ctrl+Shift+Enter` use. Without the CTRL row these
-        // chords fire on macOS only and dead-key on Linux / Windows.
-        Binding::new(
-            shift_meta_key(Key::Up),
-            Normal,
-            Action::MoveBlockUp,
-            "Move block up (Cmd+Shift+Up)",
-        ),
-        Binding::new(
-            shift_ctrl_key(Key::Up),
-            Normal,
-            Action::MoveBlockUp,
-            "Move block up (Ctrl+Shift+Up)",
-        ),
-        Binding::new(
-            shift_meta_key(Key::Down),
-            Normal,
-            Action::MoveBlockDown,
-            "Move block down (Cmd+Shift+Down)",
-        ),
-        Binding::new(
-            shift_ctrl_key(Key::Down),
-            Normal,
-            Action::MoveBlockDown,
-            "Move block down (Ctrl+Shift+Down)",
-        ),
+        // `Cmd`↔`Ctrl`, the same two-row pattern `Cmd/Ctrl+Z` uses.
         Binding::new(meta('x'), Normal, Action::CutBlock, "Cut block (Cmd+X)"),
         Binding::new(ctrl('x'), Normal, Action::CutBlock, "Cut block (Ctrl+X)"),
         Binding::new(meta('c'), Normal, Action::CopyBlock, "Copy block (Cmd+C)"),
@@ -712,9 +687,10 @@ pub fn default_bindings() -> Vec<Binding> {
         // other in-editor chord (`Tab`/`Shift-Tab` for indent,
         // `Backspace` on an empty block, `[[`/`((` auto-pair,
         // plain `Enter` for a newline) is owned by `<BlockRow />`'s
-        // textarea `onKeyDown`. If we bound them here, the
-        // dispatcher would `preventDefault` first and the textarea
-        // would never see the keystroke.
+        // textarea `onKeyDown`. Binding one here would not hide it
+        // from the textarea (Solid's delegated handler on `document`
+        // runs before the `window` dispatcher), but the dispatcher
+        // would run the catalog action on top of it.
         Binding::new(
             key(Key::Esc),
             Insert,
@@ -770,36 +746,9 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::SelectRangeUp,
             "Extend up (Shift+Up)",
         ),
-        // Reorder the whole range among its siblings. Mirrors the
-        // single-block `Cmd/Ctrl+Shift+↑/↓` (Normal) but acts on every
-        // block in the Visual range; dual-spelled per OS because the
-        // desktop adapter never rewrites `Cmd`↔`Ctrl`.
-        Binding::new(
-            shift_meta_key(Key::Up),
-            Visual,
-            Action::MoveVisualRangeUp,
-            "Move range up (Cmd+Shift+Up)",
-        ),
-        Binding::new(
-            shift_ctrl_key(Key::Up),
-            Visual,
-            Action::MoveVisualRangeUp,
-            "Move range up (Ctrl+Shift+Up)",
-        ),
-        Binding::new(
-            shift_meta_key(Key::Down),
-            Visual,
-            Action::MoveVisualRangeDown,
-            "Move range down (Cmd+Shift+Down)",
-        ),
-        Binding::new(
-            shift_ctrl_key(Key::Down),
-            Visual,
-            Action::MoveVisualRangeDown,
-            "Move range down (Ctrl+Shift+Down)",
-        ),
     ];
     rows.extend(overlay::bindings().into_iter().chain(capture::bindings()));
     rows.extend(focus::bindings().into_iter().chain(tasks::bindings()));
+    rows.extend(move_block::bindings());
     rows
 }

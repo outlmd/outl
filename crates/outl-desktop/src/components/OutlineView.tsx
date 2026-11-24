@@ -343,8 +343,7 @@ export function OutlineView() {
     },
     resolveCaretExit: caretNavOps.resolveCaretExit,
     openCaretLanding: caretNavOps.openCaretLanding,
-    onIndent: structureOps.onIndent,
-    onOutdent: structureOps.onOutdent,
+    ...structureOps,
     onDeleteEmpty: async (id) => {
       const pageId = appState.page?.id;
       if (!pageId) return;

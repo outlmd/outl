@@ -49,6 +49,9 @@ pub(super) fn ctrl_key(k: Key) -> ChordSequence {
 pub(super) fn shift_ctrl_key(k: Key) -> ChordSequence {
     ChordSequence::chord(Chord::new(Modifiers::CTRL | Modifiers::SHIFT, k))
 }
+pub(super) fn alt_key(k: Key) -> ChordSequence {
+    ChordSequence::chord(Chord::new(Modifiers::ALT, k))
+}
 pub(super) fn pair(a: char, b: char) -> ChordSequence {
     ChordSequence::pair(Chord::ch(a), Chord::ch(b))
 }

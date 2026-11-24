@@ -83,8 +83,8 @@ const BARE_ARMS: &[&str] = &[
     r#"KeyCode::Char('e') if key.modifiers.is_empty()"#,
     r#"KeyCode::Char('*')"#,
     r#"KeyCode::Char('#')"#,
-    r#"KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT)"#,
-    r#"KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT)"#,
+    r#"KeyCode::Up if super::is_move_chord(key.modifiers)"#,
+    r#"KeyCode::Down if super::is_move_chord(key.modifiers)"#,
     r#"KeyCode::Down | KeyCode::Char('j')"#,
     r#"KeyCode::Up | KeyCode::Char('k')"#,
     r#"KeyCode::PageDown"#,
@@ -165,7 +165,7 @@ fn the_tui_normal_key_arms_have_not_moved() {
     // Two assertions rather than one so the failure names which half
     // moved; the message is the same either way because the required
     // response is the same.
-    const WHY: &str = "\n\noutl-tui's Normal-mode key arms changed. This file records 22 chords \
+    const WHY: &str = "\n\noutl-tui's Normal-mode key arms changed. This file records 20 chords \
         where the TUI and this catalog already disagree (6 of them destructive), and that list \
         is only true for the arms it was written against. Re-check the chords you touched \
         against KNOWN_DIVERGENCES / AGREED above, then update this snapshot in the same commit. \

@@ -152,7 +152,7 @@ No characters insert themselves — every key is a command.
 | `w` / `b` | Cursor to next / previous word |
 | `0` / `$` | Cursor to start / end of block |
 | `Tab` / `Shift-Tab` | Indent / outdent the current block |
-| `K` / `J` (or `Alt+↑/↓`) | Move block up / down |
+| `K` / `J` (or `Alt+↑/↓`, `Ctrl+Shift+↑/↓`) | Move block up / down. The cursor stays on the moved block, `c` folds it, and `u` undoes the whole move. A terminal that does not deliver `Ctrl+Shift+↑` still has `Alt+↑`. In Visual the same keys move the whole range, and a parent selected with its children moves as one unit |
 | `dd` | Delete the current block (chord) |
 | `c` | Fold / unfold the current block. The bullet row shows `▼ ` (expanded) or `▶ ` (collapsed) when the block has children, two spaces otherwise. Children are hidden from the outline while collapsed and `j` / `k` skip past them, but the underlying tree is untouched. State is persisted as an `Op::SetCollapsed` in the op log — every device replays the same sequence, so the fold layout converges across iCloud / Syncthing peers without relying on file-level last-write-wins (which would lose concurrent flips). No-op on a block whose sidecar entry hasn't been written yet (save first). |
 | `y r` | Yank the current block's ref handle (`((blk-XXXXXX))`) to the OS clipboard + `last_yanked_ref` (chord). On headless / no-clipboard environments it falls back to the status line only. |
@@ -184,6 +184,7 @@ Esc commits (writes back to the `.md`), Enter commits + creates a new block.
 | `Shift+Enter` | Soft newline — only on terminals that speak the kitty keyboard protocol |
 | `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (stays in Insert, caret follows the text; `Ctrl+T` works on terminals that collapse `Ctrl+Enter`) |
 | `Tab` / `Shift-Tab` | Indent / outdent (stays in Insert) |
+| `Alt+↑` / `Alt+↓` (or `Ctrl+Shift+↑/↓`) | Move the block up / down and stay in Insert on the same block, with unsaved text and caret kept. Closes an open autocomplete popup |
 | other `Ctrl`/`Alt` chords | Ignored, never typed as text. `Ctrl+A/E/W/U/K/B/F` used to insert their bare letter into the block ([#429](https://github.com/outlmd/outl/issues/429)); readline editing inside a block is not implemented, so they do nothing today |
 | `Backspace` on empty | Delete block, move to previous |
 | `Left` at column 0 | Spill into the previous block (cursor at end) |

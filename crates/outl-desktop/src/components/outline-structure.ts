@@ -26,7 +26,12 @@
  */
 
 import type { PageView } from "@outl/shared/api/types";
-import { indentBlock, outdentBlock } from "@outl/shared/api/commands";
+import {
+  indentBlock,
+  moveBlockDown,
+  moveBlockUp,
+  outdentBlock,
+} from "@outl/shared/api/commands";
 
 export interface StructureOpsDeps {
   /** The open page's id, or `undefined` before the first view lands. */
@@ -55,5 +60,7 @@ export function createStructureOps(deps: StructureOpsDeps) {
   return {
     onIndent: (id: string) => run(id, indentBlock),
     onOutdent: (id: string) => run(id, outdentBlock),
+    onMoveUp: (id: string) => run(id, moveBlockUp),
+    onMoveDown: (id: string) => run(id, moveBlockDown),
   };
 }

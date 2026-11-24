@@ -34,6 +34,10 @@ const BLOCK_REF_KINDS: ReadonlySet<InlineToken["kind"]> = new Set([
 
 export { collectPageEmbedNames, pageEmbedOnlyName } from "./page-embed";
 
+// One block move in flight at a time, for a held chord.
+export { createMoveGate } from "./move-gate";
+export { rangeMoveTargets } from "./range-move";
+
 /**
  * Reconstruct the wire-format text of a block (TODO/DONE prefix
  * reattached). The API splits the TODO state out of `text` so the

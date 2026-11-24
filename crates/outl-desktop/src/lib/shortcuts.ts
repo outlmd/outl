@@ -34,6 +34,7 @@ import {
 } from "./api";
 
 import { detectMode } from "./mode";
+import { editorOwnsHold, setEditorOwnsHold } from "./move-gate";
 import { paletteActions } from "./palette-results";
 import { playPluginViews } from "./plugin-views";
 import { actionSlashCommands } from "./slash-commands";
@@ -294,6 +295,11 @@ export async function installShortcuts(
   const bindings = await loadBindings();
   const support = await loadSupport();
   publishSlashActions(bindings, handlers);
+  liveInsertMoves = bindings.filter(
+    (b) =>
+      b.mode === "insert" &&
+      (b.action.kind === "MoveBlockUp" || b.action.kind === "MoveBlockDown"),
+  );
 
   // Plugin-contributed chords, folded in as a Global overlay. They are
   // always single-chord and `global` (the backend stamps the mode), so we
@@ -362,6 +368,28 @@ export async function installShortcuts(
     const hit =
       bindings.find((b) => b.mode === mode && seqEq(b.chord, sequence)) ??
       bindings.find((b) => b.mode === "global" && seqEq(b.chord, sequence));
+    if (
+      hit &&
+      (hit.action.kind === "MoveBlockUp" || hit.action.kind === "MoveBlockDown")
+    ) {
+      // A fresh press ends whatever hold a textarea was owning.
+      if (!e.repeat) setEditorOwnsHold(false);
+      // Inside an input the textarea's own handler runs the move
+      // (`insertMoveFor`); any other input (title, property, search)
+      // keeps the native key. Neither may reach `Global` nor
+      // `preventDefault`: `targetBlockId()` falls back to the selection.
+      if (mode === "insert") {
+        resetPending();
+        return;
+      }
+      // The hold started in an editor that has since unmounted (a
+      // backlink row finishes its edit): its repeats are not new moves.
+      if (e.repeat && editorOwnsHold()) {
+        e.preventDefault();
+        resetPending();
+        return;
+      }
+    }
     if (hit) {
       // Only preventDefault when we actually have a handler ready —
       // otherwise we'd swallow legitimate keystrokes (e.g. `Enter`
@@ -428,6 +456,7 @@ export async function installShortcuts(
     window.removeEventListener("keydown", onKey);
     resetPending();
     liveSlashActions = null;
+    liveInsertMoves = null;
   };
 }
 
@@ -477,6 +506,26 @@ function publishSlashActions(bindings: Binding[], handlers: ActionHandlers) {
     run: new Map(named.map((r) => [r.name, r.action])),
     handlers,
   };
+}
+
+/**
+ * The catalog's Insert move rows for the live dispatcher, published and
+ * dropped like {@link liveSlashActions}: the chord belongs to the
+ * catalog, so the textarea asks here instead of spelling it.
+ */
+let liveInsertMoves: Binding[] | null = null;
+
+/**
+ * Which way the catalog says this keydown moves the block being edited,
+ * or `null` when it is not a move chord. Pure: it neither prevents the
+ * default nor moves anything, because the textarea decides when.
+ */
+export function insertMoveFor(e: KeyboardEvent): "up" | "down" | null {
+  const chord = eventToChord(e);
+  if (!chord || !liveInsertMoves) return null;
+  const hit = liveInsertMoves.find((b) => seqEq(b.chord, [chord]));
+  if (!hit) return null;
+  return hit.action.kind === "MoveBlockUp" ? "up" : "down";
 }
 
 /**

@@ -51,6 +51,15 @@ pub(crate) use normal::handle_normal_key;
 pub(crate) use overlay::handle_overlay_key;
 pub(crate) use visual::handle_visual_key;
 
+/// Modifiers that turn an arrow into "move the block": `Alt`, or
+/// `Ctrl+Shift`. Plain `Shift` and plain `Ctrl` are not moves.
+///
+/// Terminals that do not deliver `Ctrl+Shift+arrow` still have `Alt`.
+pub(crate) fn is_move_chord(mods: KeyModifiers) -> bool {
+    (mods.contains(KeyModifiers::ALT) && !mods.contains(KeyModifiers::CONTROL))
+        || mods.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+}
+
 /// Cross-block Up/Down nav only kicks in when:
 ///
 /// - We're in Insert on the current page (not a source-page backlink

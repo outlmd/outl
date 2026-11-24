@@ -100,6 +100,8 @@ crates/outl-frontend-shared/
     │   └── journal.test.ts
     ├── outline/
     │   ├── index.ts        # rawTextWithTodo, findBlock, flattenNodes, countDescendants + id walks (flattenVisible/All/Parents, next/previousVisibleId, visualRange*)
+    │   ├── move-gate.ts    # createMoveGate — one block move in flight at a time; a held chord drops the repeats that arrive while one is pending
+    │   ├── range-move.ts   # rangeMoveTargets — which blocks a Visual range move acts on (the selection's roots, in walk order)
     │   ├── late-section.ts # lateSectionVisible — when a section fed by a post-first-paint reply is on screen (owns the rule; re-exported from index.ts)
     │   ├── page-embed.ts   # pageEmbedOnlyName + collectPageEmbedNames — the `![[page]]` twins of embedOnlyHandle / collectBlockRefHandles (re-exported from index.ts)
     │   └── outline.test.ts

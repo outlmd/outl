@@ -170,7 +170,7 @@ Five rules a contributor will trip on:
   What the reply may touch is `backlinkCommitPlan`'s answer, not this client's: a cross-page reply describes the *source* page, so it reaches the screen only when that page is the one on screen — which a page citing itself makes reachable.
 - **A citing block's children are rows, drawn by `components/BacklinkRow.tsx`.**
   `j` / `k` walk them like any other row, and editing one goes through the same cross-page family.
-  Inside the textarea `Enter`, `Tab` and `Shift+Tab` only finish the edit, on the citing block and a child alike, and the arrow keys do not leave it.
+  Inside the textarea `Enter`, `Tab`, `Shift+Tab` and the move chords only finish the edit, on the citing block and a child alike, and the plain arrow keys do not leave it.
   Indent, move and create-sibling work from the focused row: `Esc`, then `Tab` / `o` / `Alt+Up`.
 - **Nothing here nudges.**
   Indent, outdent and move have no visible result on the citing block's own row (its siblings are not drawn; on a child row they are), and shipping them anyway is a recorded decision rather than a `Partial`, which is why `Capability::BacklinkInlineEdit` reads `Full` here and on mobile.

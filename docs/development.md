@@ -99,6 +99,7 @@ crates/outl-desktop/
 │                             #     block- (ops on the selected block) / page-
 │                             #     (delete, undo/redo, fold-all) / visual- (range) /
 │                             #     clipboard- (registers) / speed- handlers,
+                             #   move-gate.ts (one block move in flight; held chords),
 │                             #   switch-workspace.ts (File → Switch Workspace…)
 └── src-tauri/
     ├── Cargo.toml  build.rs  tauri.conf.json (app.outl.desktop)  capabilities/  icons/

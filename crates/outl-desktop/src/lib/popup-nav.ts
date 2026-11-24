@@ -59,6 +59,12 @@ export function handlePopupNav<T>(e: NavKey, nav: PopupNav<T>): boolean {
     e.stopPropagation();
   };
 
+  // A modified arrow is a different chord (the block-move chords),
+  // not a highlight step. Shift+arrow keeps stepping, as before.
+  const chordArrow = e.metaKey || e.ctrlKey || e.altKey;
+  if (chordArrow && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    return false;
+  }
   if (e.key === "ArrowDown") {
     consume();
     nav.setIndex((index + 1) % len);

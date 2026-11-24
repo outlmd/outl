@@ -10,7 +10,8 @@
 //! | Submodule       | What's in it                                                |
 //! |-----------------|-------------------------------------------------------------|
 //! | `insert`          | `enter_insert`, `commit_insert`, `abort_insert`              |
-//! | `structural`      | create / indent / outdent / delete / move block              |
+//! | `structural`      | create / indent / outdent / delete                           |
+//! | `move_block`      | move a block among its siblings, and the id/fold bookkeeping |
 //! | `backlink_commit` | the one place a cross-page mutation is committed              |
 //! | `backlink_gesture`| which gesture is committing: does its op read the logged text, and were keystrokes consumed |
 //! | `backlink_target` | which page + block a chord in the backlinks panel acts on    |
@@ -36,6 +37,7 @@ mod backlink_stale_tests;
 mod backlink_target;
 pub(crate) mod insert;
 mod metadata;
+mod move_block;
 mod structural;
 mod template;
 #[cfg(test)]

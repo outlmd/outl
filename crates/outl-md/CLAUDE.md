@@ -60,6 +60,8 @@ Treat matching with the same paranoia as the CRDT.
   `parse` validates a `remind::` property line as it reads it, so the warnings carry the exact source line.
   User-facing spec: [`docs/reminders.md`](../../docs/reminders.md).
 - **`outline_ops`** — pure `Vec<OutlineNode>` AST helpers (`flat_count`, `path_for_index`, `insert_sibling_after/before`, `indent_at_path`, `outdent_at_path`, `delete_at_path`, `move_up_at_path`, `move_down_at_path`, …).
+  `rotate_siblings` / `can_rotate` (with `Direction` and `Rotated`) are the one move: a run of siblings steps past its neighbour, dragging every subtree, and `Rotated` reports the flat sizes so a caller can rotate its own parallel list the same way.
+  `move_up_at_path` / `move_down_at_path` wrap it with a single-block run; the TUI's Visual range move and Insert move call it directly.
   `insert_sibling_after_with_text` is the same insert as `insert_sibling_after` but seeds the new block's text — the TUI's in-flight block-split on Enter mid-text (issue #184).
   They operate on an in-flight AST that hasn't been parsed back into a workspace yet, so they sit in `outl-md` (UI-agnostic, no `Workspace`) rather than in `outl-actions`.
   The TUI re-exports them through a one-line shim at `outl-tui/src/outline_ops.rs`; the mobile client consumes them directly.

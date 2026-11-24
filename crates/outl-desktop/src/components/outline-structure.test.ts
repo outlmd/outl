@@ -18,10 +18,17 @@ import type { PageView } from "@outl/shared/api/types";
 
 vi.mock("@outl/shared/api/commands", () => ({
   indentBlock: vi.fn(),
+  moveBlockDown: vi.fn(),
+  moveBlockUp: vi.fn(),
   outdentBlock: vi.fn(),
 }));
 
-import { indentBlock, outdentBlock } from "@outl/shared/api/commands";
+import {
+  indentBlock,
+  moveBlockDown,
+  moveBlockUp,
+  outdentBlock,
+} from "@outl/shared/api/commands";
 import { createStructureOps, type StructureOpsDeps } from "./outline-structure";
 
 function makeView(): PageView {
@@ -109,5 +116,34 @@ describe("createStructureOps (#477)", () => {
 
     expect(deps.setSelectedBlockId).toHaveBeenCalledWith("blk-first");
     expect(deps.setEditingId).toHaveBeenCalledWith("blk-first");
+  });
+});
+
+describe("createStructureOps move (Cmd/Ctrl+Shift+arrows, Alt+arrows)", () => {
+  it("onMoveUp / onMoveDown apply the view and re-edit the moved block", async () => {
+    const view = makeView();
+    vi.mocked(moveBlockUp).mockResolvedValue(view);
+    vi.mocked(moveBlockDown).mockResolvedValue(view);
+    const deps = makeDeps();
+    const ops = createStructureOps(deps);
+
+    await ops.onMoveUp("blk-u");
+    await ops.onMoveDown("blk-d");
+
+    expect(moveBlockUp).toHaveBeenCalledWith("page-1", "blk-u");
+    expect(moveBlockDown).toHaveBeenCalledWith("page-1", "blk-d");
+    expect(deps.setEditingId).toHaveBeenCalledWith("blk-u");
+    expect(deps.setEditingId).toHaveBeenCalledWith("blk-d");
+  });
+
+  it("re-enters edit mode on the block when the move command rejects", async () => {
+    vi.mocked(moveBlockUp).mockRejectedValue(new Error("boom"));
+    const deps = makeDeps();
+
+    await createStructureOps(deps).onMoveUp("blk-x");
+
+    expect(deps.applyView).not.toHaveBeenCalled();
+    expect(deps.setSelectedBlockId).toHaveBeenCalledWith("blk-x");
+    expect(deps.setEditingId).toHaveBeenCalledWith("blk-x");
   });
 });

@@ -99,6 +99,8 @@ function makeCb(): BlockCallbacks {
     openCaretLanding: vi.fn(),
     onIndent: vi.fn().mockResolvedValue(undefined),
     onOutdent: vi.fn().mockResolvedValue(undefined),
+    onMoveUp: vi.fn().mockResolvedValue(undefined),
+    onMoveDown: vi.fn().mockResolvedValue(undefined),
     onDeleteEmpty: vi.fn().mockResolvedValue(undefined),
     onToggleTodo: vi.fn().mockResolvedValue(undefined),
     onToggleCollapsed: vi.fn().mockResolvedValue(undefined),

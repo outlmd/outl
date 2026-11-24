@@ -118,6 +118,7 @@ UI-agnostic; both TUI and mobile consume them.
 | Count descendants under a path / grab a mutable siblings slice | `outline_ops::descendants_count_at_path` / `siblings_mut` | `crates/outl-md/src/outline_ops.rs` |
 | Insert a sibling before / after a path | `outline_ops::insert_sibling_before` / `outline_ops::insert_sibling_after` | `crates/outl-md/src/outline_ops.rs` |
 | Insert a sibling after a path, seeded with text (the TUI's in-flight block-split: tail of the split goes into the new sibling) | `outline_ops::insert_sibling_after_with_text` | `crates/outl-md/src/outline_ops.rs` |
+| Move a run of siblings one step past its neighbour, dragging every subtree. The one AST move: `move_up_at_path` / `move_down_at_path` wrap it, so the legality rule (a block never crosses its parent) has one owner. `Rotated` carries the new index and the flat sizes of the run and the neighbour, so a caller can rotate its parallel DFS vector without re-walking | `outline_ops::rotate_siblings` / `can_rotate`, `Direction`, `Rotated` | `crates/outl-md/src/outline_ops.rs` |
 | Indent / outdent / delete / move up / move down at a path | `outline_ops::indent_at_path` / `outdent_at_path` / `delete_at_path` / `move_up_at_path` / `move_down_at_path` | `crates/outl-md/src/outline_ops.rs` |
 
 ---
