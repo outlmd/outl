@@ -14,13 +14,57 @@
  * different question, and {@link backlinkRowIds} is where it lives.
  */
 
-import type { Backlink } from "@outl/shared/api/types";
+import { createMemo, createRoot } from "solid-js";
+
+import {
+  type BacklinkRow,
+  flattenBacklinkRows,
+} from "@outl/shared/backlink-edit";
 
 import { appState, setAppState, zoomView } from "./store";
 
 /**
+ * Every row the "Linked from" panel draws, citing blocks and their
+ * descendants, in reading order. **One memo per fetch, never per render**
+ * (invariant 15): `flattenBacklinkRows` is `O(rows)`, and the cursor
+ * guards below are asked per keystroke and per row.
+ *
+ * A module-level root because the guards are plain functions called from
+ * handlers, outside any component. Ungated: whether the section is on
+ * screen is {@link backlinkRowIds}'s question, and the renderer asks it
+ * itself through its own `Show`.
+ */
+const allRows = createRoot(() =>
+  createMemo(() => flattenBacklinkRows(appState.backlinks)),
+);
+const rowKeys = createRoot(() =>
+  createMemo(() => allRows().map((r) => r.key)),
+);
+const rowsByKey = createRoot(() =>
+  createMemo(() => new Map(allRows().map((r) => [r.key, r] as const))),
+);
+const NO_IDS: string[] = [];
+
+/** The flattened rows of the panel (see above). Not gated on the section. */
+export function backlinkRows(): readonly BacklinkRow[] {
+  return allRows();
+}
+
+/** The drawn row a key names, or `undefined` once a refetch dropped it. */
+export function backlinkRowByKey(key: string): BacklinkRow | undefined {
+  return rowsByKey().get(key);
+}
+
+/**
  * The backlink rows the keyboard may be on: the section's rows when it is
  * drawn, and none when it is not.
+ *
+ * **The ids are row keys, not block ids**: a root's key is its
+ * `block_id`, a descendant's is its ancestors' path (`flattenBacklinkRows`),
+ * because a block that cites the page and also sits under another citing
+ * block is drawn twice. `selectedBacklinkBlockId` and
+ * `editingBacklink.key` hold these keys, so the cursor, the editor and
+ * `isEditing()` agree about *which* of two drawn copies they mean.
  *
  * **The single owner of "is this section reachable"**, and every question
  * about the region resolves through it — may `j` enter it
@@ -52,8 +96,8 @@ import { appState, setAppState, zoomView } from "./store";
  * `null` and the keystroke did nothing.
  */
 export function backlinkRowIds(): string[] {
-  if (!sectionOnScreen()) return [];
-  return appState.backlinks.map((b: Backlink) => b.block_id);
+  if (!sectionOnScreen()) return NO_IDS;
+  return rowKeys();
 }
 
 /**
@@ -148,15 +192,15 @@ export function backlinkCursor(): string | null {
  * returns to the row the user was on rather than to wherever the
  * outline's cursor last was.
  */
-export function startBacklinkEdit(target: {
-  pageId: string;
-  blockId: string;
-}): void {
+export function startBacklinkEdit(
+  target: { pageId: string; blockId: string },
+  key: string = target.blockId,
+): void {
   setAppState({
     editingBlockId: null,
-    editingBacklink: target,
+    editingBacklink: { ...target, key },
     selectedBlockId: null,
-    selectedBacklinkBlockId: target.blockId,
+    selectedBacklinkBlockId: key,
   });
 }
 

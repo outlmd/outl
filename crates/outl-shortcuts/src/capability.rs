@@ -264,7 +264,9 @@ pub enum Capability {
     /// Editing a block in place from a backlink row, without leaving
     /// the page being read.
     ///
-    /// Covers the **direct** backlink rows, and a verdict here is a
+    /// Covers the **direct** backlink rows **and the children drawn
+    /// under each** (a citing block's subtree, up to four levels, all
+    /// three clients edit and navigate it), and a verdict here is a
     /// claim about **nine** operations plus a way to the source page,
     /// rather than about one surface. The nine: the text edit, task
     /// state, delete, indent, outdent, move up / down, and creating a
@@ -292,11 +294,12 @@ pub enum Capability {
     /// which is a different fact. Recording this one there would be two
     /// catalogs disagreeing about one thing.
     ///
-    /// Indent / outdent / move have no visible result on a row (it is
-    /// one flat block and the effect lands on a page the user is not
-    /// looking at), and that cost is accepted on every client and
-    /// written down in
-    /// `docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`
+    /// Indent / outdent / move on a **citing block** still have no
+    /// visible result (its siblings are not drawn and the effect lands on
+    /// a page the user is not looking at). On a **child** they do: the
+    /// subtree is on screen and the next refetch shows the new shape.
+    /// That cost on the root is accepted on every client and written down
+    /// in `docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`
     /// rather than declared `Partial`.
     ///
     /// The TUI is `Partial` for a different reason, and the only one:

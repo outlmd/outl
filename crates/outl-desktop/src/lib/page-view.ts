@@ -25,7 +25,7 @@
 
 import { resolveEmbeds, resolvePageEmbeds } from "@outl/shared/api/commands";
 
-import type { PageView } from "@outl/shared/api/types";
+import type { BlockNode, PageView } from "@outl/shared/api/types";
 
 import { createTransclusionOps, type TransclusionOps } from "./outline-transclusions";
 import { appState, setAppState, setOutline } from "./store";
@@ -84,10 +84,20 @@ function transclusionOps(): TransclusionOps {
     slug: () => appState.page?.slug,
     resolveEmbeds,
     resolvePageEmbeds,
-    setEmbeds: (map) => setAppState("embeds", map),
-    setPageEmbeds: (map) => setAppState("pageEmbeds", map),
+    // Merge, never replace: the "Linked from" rows resolve their own
+    // handles into the same maps, and a page resolve that replaced them
+    // would drop those until the next backlinks fetch.
+    setEmbeds: (map) => setAppState("embeds", (prev) => ({ ...prev, ...map })),
+    setPageEmbeds: (map) =>
+      setAppState("pageEmbeds", (prev) => ({ ...prev, ...map })),
   });
   return transclusions;
+}
+
+/** Resolve what the "Linked from" rows transclude (they are not part of
+ *  the outline `applyPageState` resolves). */
+export function resolveBacklinkTransclusions(nodes: BlockNode[]): void {
+  transclusionOps().resolve(nodes, "backlinks");
 }
 
 export function applyPageState(view: PageView): void {

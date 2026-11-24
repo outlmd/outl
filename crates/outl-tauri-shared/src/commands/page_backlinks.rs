@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use outl_actions::{
     build_backlink_index_from_disk, find_by_slug, list_pages, namespace_descendants,
-    page_meta as page_meta_action, sort_backlinks, BacklinkIndex, PageMeta,
+    page_meta as page_meta_action, sort_backlinks, BacklinkIndex, OutlineNode, PageMeta,
 };
 use outl_core::workspace::Workspace;
 use parking_lot::Mutex;
@@ -69,12 +69,12 @@ pub(crate) async fn compute_backlinks_offloaded(
             None => {
                 // Host without a cached slot: one-shot from-disk build.
                 let idx = build_backlink_index_from_disk(&metas, &root);
-                let split = {
+                let looked = {
                     let guard = workspace.lock();
                     let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
-                    idx.for_page_split(ws, &meta)
+                    look_up(&idx, ws, &meta)
                 };
-                return Ok(shape_reply(split, &meta, &metas, backlinks_order));
+                return Ok(shape_reply(looked, &meta, &metas, backlinks_order));
             }
         };
         // Phase 2: build the index FROM DISK when stale — reads the `.md`
@@ -85,7 +85,9 @@ pub(crate) async fn compute_backlinks_offloaded(
         //
         // Phase 3: O(refs) lookup under a brief lock (`for_page` reads the
         // page's own `template::` property; no block-text scan). Only the
-        // lookup is under it: a synchronous `#[tauri::command]` runs on the
+        // lookup is under it — and that includes fetching each direct
+        // hit's subtree, which is a refcount bump (`look_up`), never the
+        // deep copy: a synchronous `#[tauri::command]` runs on the
         // IPC thread, so whatever this holds the workspace for is time the
         // window is not taking keystrokes (`UX.md` → Never block a
         // keystroke). Sorting, the shallow projection and the namespace
@@ -115,29 +117,29 @@ pub(crate) async fn compute_backlinks_offloaded(
                     *g = Some(fresh);
                 }
             }
-            let split = {
+            let looked = {
                 let guard = workspace.lock();
                 let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
                 let g = index.lock();
                 match g.as_ref() {
-                    Some(idx) => idx.for_page_split(ws, &meta),
+                    Some(idx) => look_up(idx, ws, &meta),
                     // Invalidated between the build and the lookup: drop
                     // both locks and rebuild.
                     None => continue,
                 }
             };
-            return Ok(shape_reply(split, &meta, &metas, backlinks_order));
+            return Ok(shape_reply(looked, &meta, &metas, backlinks_order));
         }
         // Commits are invalidating faster than the cache refills; serve a
         // one-shot from-disk build directly, same as the host-without-a-slot
         // path above (marginally stale is fine, the next refresh re-caches).
         let idx = build_backlink_index_from_disk(&metas, &root);
-        let split = {
+        let looked = {
             let guard = workspace.lock();
             let ws = guard.as_ref().ok_or_else(|| ERR_LOADING.to_string())?;
-            idx.for_page_split(ws, &meta)
+            look_up(&idx, ws, &meta)
         };
-        Ok(shape_reply(split, &meta, &metas, backlinks_order))
+        Ok(shape_reply(looked, &meta, &metas, backlinks_order))
     })
     .await
 }
@@ -151,23 +153,58 @@ pub(crate) async fn compute_backlinks_offloaded(
 /// payload, carries the scale.
 pub(crate) const NAMESPACE_BACKLINK_CAP: usize = 50;
 
-/// Shape a looked-up [`SplitBacklinks`] into the reply, **holding no
-/// lock**. GUI rows render only `source_block.tokens`, so each hit ships
-/// through `into_shallow` to keep the subtree off the IPC wire.
+/// A lookup's answer: the split, plus each **direct** hit's stored
+/// subtree, in the same order. Everything in it is a leaf clone or a
+/// refcount, so it is safe to build while both locks are held.
+struct Looked {
+    split: outl_actions::SplitBacklinks,
+    /// Parallel to `split.direct`. The deep copy into the reply is
+    /// [`shape_reply`]'s, after the locks drop.
+    subtrees: Vec<Option<Arc<[OutlineNode]>>>,
+}
+
+/// The phase-3 lookup. `for_page_split` returns shallow leaves, and
+/// `BacklinkIndex::subtree` is one hash lookup + `Arc` clone per direct
+/// hit — together `O(refs)` with no subtree copied under the lock.
+fn look_up(idx: &BacklinkIndex, ws: &Workspace, meta: &PageMeta) -> Looked {
+    let split = idx.for_page_split(ws, meta);
+    let subtrees = split
+        .direct
+        .iter()
+        .map(|b| idx.subtree(&b.block_id))
+        .collect();
+    Looked { split, subtrees }
+}
+
+/// Shape a [`Looked`] into the reply, **holding no lock**.
 ///
-/// Takes the split rather than the index + `&Workspace` on purpose: the
+/// A direct hit ships with its children (the capped subtree, copied here,
+/// once per hit, **before** the sort moves the backlinks). The namespace
+/// set ships through `into_shallow`: its rows are capped, collapsed and
+/// text-only, and it can be drawn from thousands of hits.
+///
+/// Takes the lookup rather than the index + `&Workspace` on purpose: the
 /// lookup is the only part that needs the workspace, and every sync
 /// `#[tauri::command]` runs on the IPC thread, so time spent holding that
 /// lock is time the window spends not accepting keystrokes. Sorting, the
-/// `O(hits)` shallow projection and the `O(pages)` namespace walk all run
-/// after the caller's locks drop.
+/// `O(hits)` subtree copy and the `O(pages)` namespace walk all run after
+/// the caller's locks drop.
 fn shape_reply(
-    split: outl_actions::SplitBacklinks,
+    looked: Looked,
     meta: &PageMeta,
     metas: &[PageMeta],
     backlinks_order: outl_config::BacklinksOrder,
 ) -> BacklinksReply {
-    let mut backlinks: Vec<_> = split.direct.into_iter().map(|b| b.into_shallow()).collect();
+    let Looked { split, subtrees } = looked;
+    let mut backlinks: Vec<_> = split
+        .direct
+        .into_iter()
+        .zip(subtrees)
+        .map(|(b, kids)| match kids {
+            Some(kids) => b.with_children(&kids),
+            None => b,
+        })
+        .collect();
     sort_backlinks(&mut backlinks, backlinks_order.newest_first());
 
     // Sort before truncating, or the 50 that ship are whichever the

@@ -385,6 +385,7 @@ describe("acting on a focused backlink row", () => {
     expect(appState.editingBacklink).toEqual({
       pageId: "pg-source",
       blockId: "blk-a",
+      key: "blk-a",
     });
     expect(appState.editingBlockId).toBeNull();
   });

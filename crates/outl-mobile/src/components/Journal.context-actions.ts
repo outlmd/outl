@@ -12,8 +12,8 @@
  * `Journal.buildContextActions.test.ts` could drive it without mounting
  * the whole component; the export is now honest about where it lives.
  */
-import type { Backlink } from "@outl/shared/api/types";
-import { backlinkEditTarget } from "@outl/shared/backlink-edit";
+import type { Backlink, BlockNode } from "@outl/shared/api/types";
+import { backlinkEditTargetFor } from "@outl/shared/backlink-edit";
 import { detectFence } from "@outl/shared/highlight";
 import { findBlock } from "@outl/shared/outline";
 import type { BlockContextAction } from "./BlockContextMenu";
@@ -358,8 +358,9 @@ export function buildContextActions(
  *   document. Not an empty sheet — no sheet.
  * - **Move up / down carry no `enabled` guard.** The outline's builder
  *   resolves a sibling index to hide them at the ends; a backlink row
- *   renders one flat block with no siblings on screen, so that position
- *   does not exist here. Offering both is the honest answer.
+ *   resolves no sibling index for a backlink row (the citing block's
+ *   siblings are not on screen), so that position does not exist here.
+ *   Offering both is the honest answer.
  * - **A create row arms no keyboard**, and that is the only thing the
  *   create rows give up. A new sibling cites nothing, so it is a
  *   backlink of no page, appears in no row on this screen, and has no
@@ -380,22 +381,26 @@ export function buildContextActions(
  */
 export function buildBacklinkContextActions(
   link: Backlink | null,
+  node: BlockNode | null,
   handlers: {
-    toggleTodo: (link: Backlink) => void;
-    createBelow: (link: Backlink) => void;
-    createAbove: (link: Backlink) => void;
-    indent: (link: Backlink) => void;
-    outdent: (link: Backlink) => void;
-    moveUp: (link: Backlink) => void;
-    moveDown: (link: Backlink) => void;
-    delete: (link: Backlink) => void;
+    toggleTodo: (link: Backlink, node: BlockNode) => void;
+    createBelow: (link: Backlink, node: BlockNode) => void;
+    createAbove: (link: Backlink, node: BlockNode) => void;
+    indent: (link: Backlink, node: BlockNode) => void;
+    outdent: (link: Backlink, node: BlockNode) => void;
+    moveUp: (link: Backlink, node: BlockNode) => void;
+    moveDown: (link: Backlink, node: BlockNode) => void;
+    delete: (link: Backlink, node: BlockNode) => void;
   },
 ): BlockContextAction[] {
-  if (!link || !backlinkEditTarget(link)) return [];
-  const row = (id: SharedRowId, run: (l: Backlink) => void) => ({
+  if (!link || !node || !backlinkEditTargetFor(link, node)) return [];
+  const row = (
+    id: SharedRowId,
+    run: (l: Backlink, n: BlockNode) => void,
+  ) => ({
     id,
     ...SHARED_ROWS[id],
-    onSelect: () => run(link),
+    onSelect: () => run(link, node),
   });
   return [
     row("toggleTodo", handlers.toggleTodo),

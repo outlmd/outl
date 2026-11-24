@@ -177,6 +177,26 @@ Three smaller items were left for reasons that are **not** this one, recorded so
 - **The undo snapshot of a page the user is not looking at** (~22 ms).
   `commit_page` does this for every commit, so invariant 11 applies: the in-page path pays it too and it is not this design's cost.
 
+## A citing block's children, carried by the backlinks index
+
+The "Linked from" panel draws each citing block's subtree (four levels), so the from-disk index now keeps it.
+It is a side table of `Arc<[OutlineNode]>` beside each entry, and a lookup still clones a leaf: the deep copy happens once per direct hit after the locks drop.
+Cost on the maintainer's graph (3,456 pages, release build, a copy of the `.md` and `.outl` files, `crates/outl-actions/tests/bench_backlinks_subtree.rs`):
+
+| | before | after |
+| --- | --- | --- |
+| `build_backlink_index_from_disk` | 1.11 s | 1.15 s |
+| resident memory after the build | +84 MB | +133 MB (+49 MB) |
+| lookup under the workspace lock (`buser`, 853 direct + 3,702 namespaced) | 5.4 ms | 5.4 ms (same code) |
+| fetching the 853 subtree `Arc`s, still under the lock | n/a | 62 µs |
+| deep copy of 615 subtrees (3,572 nodes), after the locks drop | n/a | 1.2 ms |
+| `page_backlinks` payload for `buser` | 753 KB | 2,486 KB |
+
+The build time did not move, because the parse already held the tree and only threw the children away.
+The price is memory (+49 MB, about 58% on top of the index) and a payload 3.3x larger for the busiest page.
+That payload is the open question: a breadth cap with a "+N" row is the next step if it shows up on a phone.
+Nothing here is measured on a device, only on the desktop build.
+
 ## The checklist
 
 Before merging anything on a hot path — a sync exchange, a boot phase, a command the frontend polls, a render:

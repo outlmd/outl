@@ -250,16 +250,16 @@ export interface Backlink {
    */
   ancestors: BacklinkCrumb[];
   /**
-   * Source block as a self-contained outline subtree (text, tokens,
-   * children, properties). Mirrors what `read_page_view_with_workspace`
-   * would return for the same block. Clients read
-   * `source_block.tokens` for the inline markdown; the raw text
-   * lives at `source_block.text` if a caller ever needs it.
+   * Source block as an outline subtree (text, tokens, children,
+   * properties). Clients read `source_block.tokens` for the markdown.
    *
-   * Note: the Rust `Backlink` struct also carries `block_text` for
-   * the CLI/MCP JSON envelope. It's intentionally omitted from this
-   * TS interface because no client reads it — Tauri still ships the
-   * field over the wire; JS just ignores it.
+   * **`children` is filled for a direct backlink, empty for a
+   * namespace row**, capped at 4 levels (`SUBTREE_MAX_DEPTH`), always
+   * drawn expanded. A child's id can be transient; the cross-page
+   * commands refuse it. Walk them with `flattenBacklinkRows`.
+   *
+   * The Rust `block_text` (CLI/MCP envelope) is omitted: no client
+   * reads it.
    */
   source_block: BlockNode;
   /**

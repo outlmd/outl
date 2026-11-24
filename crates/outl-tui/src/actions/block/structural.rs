@@ -151,10 +151,10 @@ fn reenter_backlink_insert(app: &mut App, col: usize, block: NodeId) {
     if !matches!(app.focus, Focus::Backlink { .. }) {
         return;
     }
-    let Some(idx) = app.backlink_row_of(block) else {
+    let Some(focus) = app.backlink_focus_of(block) else {
         return;
     };
-    app.focus = Focus::Backlink { idx };
+    app.focus = focus;
     app.cursor_col = col;
     app.enter_insert(InsertCursor::AtCursor);
 }
@@ -190,7 +190,12 @@ impl App {
     /// cites nothing), and that sentence is the only thing that says
     /// where to find it.
     ///
-    /// **The one case that *can* finish is a self-citing page**, where
+    /// **A sibling made inside a shown subtree also finishes**: after the
+    /// refetch the new block is a stop of its row (`backlink_focus_of`),
+    /// so the cursor moves onto it and Insert opens there. Only a
+    /// sibling of the citing block itself has no row.
+    ///
+    /// **The other case that *can* finish is a self-citing page**, where
     /// the commit's reload has already put the new block in `App.page`.
     /// There `o` does what it does anywhere else: the cursor leaves the
     /// panel for the outline and Insert opens on the new block, which is
@@ -222,6 +227,15 @@ impl App {
         if let Some(row) = created.and_then(|block| self.outline_row_of(block)) {
             self.focus = Focus::Outline;
             self.selected = row;
+            self.cursor_col = 0;
+            self.enter_insert(InsertCursor::Start);
+            return;
+        }
+        // A sibling made inside a shown subtree has a row in the panel
+        // after the refetch, so Insert opens on it there. A sibling of
+        // the citing block itself cites nothing and has none.
+        if let Some(focus) = created.and_then(|block| self.backlink_focus_of(block)) {
+            self.focus = focus;
             self.cursor_col = 0;
             self.enter_insert(InsertCursor::Start);
             return;

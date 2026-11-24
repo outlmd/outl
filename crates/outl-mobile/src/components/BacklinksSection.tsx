@@ -1,11 +1,15 @@
-import { For, JSX, Show, onCleanup } from "solid-js";
+import { For, JSX, Show, createMemo, onCleanup } from "solid-js";
 import type {
   Backlink,
   BacklinksOrder,
   PageKind,
   TodoState,
 } from "@outl/shared/api/types";
-import { backlinkEditTarget } from "@outl/shared/backlink-edit";
+import {
+  type BacklinkRow,
+  backlinkEditTargetFor,
+  flattenBacklinkRows,
+} from "@outl/shared/backlink-edit";
 import { CrumbTrail, MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
 import { rawTextWithTodo, sameCrumbTrail } from "@outl/shared/outline";
 import { PageGlyph } from "@outl/shared/icons";
@@ -85,6 +89,16 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
     onEditCommitted: (commit) => props.onEditCommitted(commit),
     onError: (message) => props.onError(message),
   });
+
+  // One flattening per fetch, never per render (invariant 15). `byLink`
+  // hands each card entry its own rows; `allRows` is what the delete
+  // confirmation resolves against, across subtrees.
+  const byLink = createMemo(() => {
+    const m = new Map<Backlink, BacklinkRow[]>();
+    for (const l of props.backlinks) m.set(l, flattenBacklinkRows([l]));
+    return m;
+  });
+  const allRows = () => [...byLink().values()].flat();
 
   /**
    * Group backlinks by their source page. `null` source (orphan
@@ -204,124 +218,20 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                       link.ancestors.length > 0 &&
                       (!prev ||
                         !sameCrumbTrail(prev.ancestors, link.ancestors));
-                    // Touch has no right-click, so the hold is how this
-                    // row reaches the structural ops — mobile has no
-                    // chord surface at all. One recogniser per row, the
-                    // shape `PageSwitcher`'s page rows use.
-                    const press = createLongPress({
-                      onLongPress: () => ops.openMenu(link),
-                      disabled: () => ops.editing() === link.block_id,
-                    });
-                    // Every `page_backlinks` reply hands `<For>` fresh
-                    // objects, so a peer edit landing under a held
-                    // finger disposes this row — and the hold would
-                    // then open a sheet on a `Backlink` that is no
-                    // longer on screen. This is what `cancel` is for.
-                    onCleanup(press.cancel);
-                    const busy = () => ops.pending() === link.block_id;
+                    const rows = () => byLink().get(link) ?? [];
                     return (
-                      <div
-                        class="px-4 py-3"
-                        // A cross-page write plus an
-                        // O(blocks-in-workspace) re-ask is long enough
-                        // that a row which looks idle reads as a tap
-                        // that did nothing, so the acting row says so.
-                        // `pointer-events-none` closes the three doors
-                        // back into *this* row — a second blur, a
-                        // double tap, typing into a draft about to be
-                        // replaced.
-                        //
-                        // **It is the acting row only.** `ops` refuses
-                        // a gesture on every *other* row for the same
-                        // window and nothing here shows that, so a tap
-                        // elsewhere on the card is silently dropped.
-                        // Recorded rather than claimed fixed.
-                        data-backlink-pending={busy() ? "true" : undefined}
-                        aria-busy={busy() ? "true" : undefined}
-                        classList={{
-                          "border-t border-(--color-outl-border)/40":
-                            idx() > 0,
-                          "pointer-events-none opacity-60": busy(),
-                        }}
-                      >
-                        <Show when={showCrumbs}>
-                          <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
-                            <CrumbTrail crumbs={link.ancestors} />
-                          </p>
-                        </Show>
-                        <div class="flex items-start gap-2">
-                          <Show when={link.todo !== null}>
-                            <BacklinkCheckbox
-                              todo={link.todo}
-                              // No tap while this row is being edited:
-                              // the task prefix is part of the draft
-                              // there, so a toggle would race the
-                              // commit. The marker stays, so entering
-                              // Insert does not shift the line.
-                              onToggle={
-                                ops.editing() === link.block_id ||
-                                !backlinkEditTarget(link)
-                                  ? undefined
-                                  : () => void ops.toggleRowTodo(link)
-                              }
+                      <>
+                        <For each={rows()}>
+                          {(row) => (
+                            <BacklinkRowView
+                              row={row}
+                              ops={ops}
+                              bordered={idx() > 0 && row.depth === 0}
+                              crumbs={row.depth === 0 && showCrumbs}
                             />
-                          </Show>
-                          <Show
-                            when={ops.editing() === link.block_id}
-                            fallback={
-                              <button
-                                type="button"
-                                data-backlink-row={link.block_id}
-                                onPointerDown={press.onPointerDown}
-                                onPointerMove={press.onPointerMove}
-                                onPointerUp={press.onPointerUp}
-                                onPointerCancel={press.onPointerUp}
-                                onClick={() => {
-                                  // A completed hold produces a click
-                                  // too; without this every long press
-                                  // would also drop into Insert, under
-                                  // the sheet it just opened.
-                                  if (press.consumedClick()) return;
-                                  ops.openEditor(link);
-                                }}
-                                // `-my-3 py-3` gives the tap the row's
-                                // full height back without moving the
-                                // text the padding positions.
-                                class="-my-3 flex-1 py-3 text-left active:opacity-60"
-                              >
-                                <p
-                                  class="text-[15px] leading-snug"
-                                  classList={{
-                                    "text-(--color-outl-fg-dimmer) line-through":
-                                      link.todo === "DONE",
-                                  }}
-                                >
-                                  <Show
-                                    when={link.source_block.table}
-                                    fallback={
-                                      <MarkdownInline
-                                        tokens={link.source_block.tokens}
-                                        variant="inline"
-                                      />
-                                    }
-                                  >
-                                    <MarkdownTable
-                                      table={link.source_block.table!}
-                                    />
-                                  </Show>
-                                </p>
-                              </button>
-                            }
-                          >
-                            <BacklinkRowEditor
-                              text={rawTextWithTodo(link.source_block)}
-                              onCommit={(text) =>
-                                void ops.commitRow(link, text)
-                              }
-                            />
-                          </Show>
-                        </div>
-                      </div>
+                          )}
+                        </For>
+                      </>
                     );
                   }}
                 </For>
@@ -334,21 +244,21 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
       {/* Mounted only while open, unlike the outline's, so a test (and
           a screen reader) can tell "no sheet" from "an empty sheet" —
           which is exactly what an orphan row offers. */}
-      <Show when={ops.menuLink()}>
-        {(link) => (
+      <Show when={ops.menuRow()} keyed>
+        {(row) => (
           <div data-backlink-menu>
             <BlockContextMenu
               open
               onClose={ops.closeMenu}
-              actions={buildBacklinkContextActions(link(), {
-                toggleTodo: (l) => void ops.toggleRowTodo(l),
-                createBelow: (l) => void ops.createBelow(l),
-                createAbove: (l) => void ops.createAbove(l),
-                indent: (l) => void ops.indent(l),
-                outdent: (l) => void ops.outdent(l),
-                moveUp: (l) => void ops.moveUp(l),
-                moveDown: (l) => void ops.moveDown(l),
-                delete: (l) => void ops.requestDelete(l),
+              actions={buildBacklinkContextActions(row.link, row.node, {
+                toggleTodo: () => void ops.toggleRowTodo(row),
+                createBelow: () => void ops.createBelow(row),
+                createAbove: () => void ops.createAbove(row),
+                indent: () => void ops.indent(row),
+                outdent: () => void ops.outdent(row),
+                moveUp: () => void ops.moveUp(row),
+                moveDown: () => void ops.moveDown(row),
+                delete: () => void ops.requestDelete(row),
               })}
             />
           </div>
@@ -365,11 +275,139 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
           // Resolved against the live rows, not held from when the
           // prompt opened: the dialog closes itself before confirming,
           // and a sync may have replaced the rows meanwhile.
-          const link = props.backlinks.find((l) => l.block_id === id);
-          if (link) void ops.deleteRow(link);
+          const row = allRows().find((r) => r.key === id);
+          if (row) void ops.deleteRow(row);
         }}
       />
     </section>
+  );
+}
+
+type RowOps = ReturnType<typeof createBacklinkRowOps>;
+
+/**
+ * One drawn row: a citing block (depth 0) or a descendant shipped with
+ * it. Every piece of per-row state is keyed on `row.key`, never on the
+ * block id — a block that cites the page and also sits under another
+ * citing block is drawn twice, and two rows must not share an editor.
+ *
+ * A child is its own tap and long-press target, a sibling of the
+ * parent's button rather than inside it, so a hold on a child can never
+ * reach the citing row's recogniser.
+ */
+function BacklinkRowView(props: {
+  row: BacklinkRow;
+  ops: RowOps;
+  bordered: boolean;
+  crumbs: boolean;
+}): JSX.Element {
+  // Touch has no right-click, so the hold is how this row reaches the
+  // structural ops — mobile has no chord surface at all.
+  const press = createLongPress({
+    onLongPress: () => props.ops.openMenu(props.row),
+    disabled: () => props.ops.editing() === props.row.key,
+  });
+  // Every `page_backlinks` reply hands `<For>` fresh objects, so a peer
+  // edit landing under a held finger disposes this row — and the hold
+  // would then open a sheet on a row that is no longer on screen.
+  onCleanup(press.cancel);
+  const busy = () => props.ops.pending() === props.row.key;
+  const editing = () => props.ops.editing() === props.row.key;
+  const todo = () =>
+    props.row.depth === 0 ? props.row.link.todo : props.row.node.todo;
+  const editable = () =>
+    backlinkEditTargetFor(props.row.link, props.row.node) !== null;
+  return (
+    <div
+      class="px-4 py-3"
+      style={
+        props.row.depth > 0
+          ? { "padding-left": `${16 + props.row.depth * 16}px` }
+          : undefined
+      }
+      // A cross-page write plus an O(blocks-in-workspace) re-ask is long
+      // enough that a row which looks idle reads as a tap that did
+      // nothing, so the acting row says so. `pointer-events-none` closes
+      // the doors back into *this* row. It is the acting row only: `ops`
+      // refuses a gesture on every other row for the same window and
+      // nothing here shows that. Recorded rather than claimed fixed.
+      data-backlink-pending={busy() ? "true" : undefined}
+      aria-busy={busy() ? "true" : undefined}
+      data-backlink-depth={props.row.depth > 0 ? props.row.depth : undefined}
+      classList={{
+        "border-t border-(--color-outl-border)/40": props.bordered,
+        "pointer-events-none opacity-60": busy(),
+      }}
+    >
+      <Show when={props.crumbs}>
+        <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
+          <CrumbTrail crumbs={props.row.link.ancestors} />
+        </p>
+      </Show>
+      <div class="flex items-start gap-2">
+        <Show when={todo() !== null}>
+          <BacklinkCheckbox
+            todo={todo()}
+            // No tap while this row is being edited: the task prefix is
+            // part of the draft there, so a toggle would race the commit.
+            onToggle={
+              editing() || !editable()
+                ? undefined
+                : () => void props.ops.toggleRowTodo(props.row)
+            }
+          />
+        </Show>
+        <Show
+          when={editing()}
+          fallback={
+            <button
+              type="button"
+              data-backlink-row={props.row.node.id}
+              data-backlink-key={props.row.key}
+              onPointerDown={press.onPointerDown}
+              onPointerMove={press.onPointerMove}
+              onPointerUp={press.onPointerUp}
+              onPointerCancel={press.onPointerUp}
+              onClick={() => {
+                // A completed hold produces a click too; without this
+                // every long press would also drop into Insert.
+                if (press.consumedClick()) return;
+                props.ops.openEditor(props.row);
+              }}
+              // `-my-3 py-3` gives the tap the row's full height back
+              // without moving the text the padding positions; the
+              // floor keeps a one-line child at 44pt.
+              class="-my-3 min-h-11 flex-1 py-3 text-left active:opacity-60"
+            >
+              <p
+                class="text-[15px] leading-snug"
+                classList={{
+                  "text-(--color-outl-fg-dimmer) line-through":
+                    todo() === "DONE",
+                }}
+              >
+                <Show
+                  when={props.row.node.table}
+                  fallback={
+                    <MarkdownInline
+                      tokens={props.row.node.tokens}
+                      variant="inline"
+                    />
+                  }
+                >
+                  <MarkdownTable table={props.row.node.table!} />
+                </Show>
+              </p>
+            </button>
+          }
+        >
+          <BacklinkRowEditor
+            text={rawTextWithTodo(props.row.node)}
+            onCommit={(text) => void props.ops.commitRow(props.row, text)}
+          />
+        </Show>
+      </div>
+    </div>
   );
 }
 

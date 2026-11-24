@@ -496,3 +496,57 @@ fn a_writer_wired_host_patches_the_index_from_the_md_it_just_wrote() {
         "a queued projection would have left this reading the pre-edit text"
     );
 }
+
+/// A row built while a child lived on `notes` keeps `(notes, child)`
+/// after the child moves to another page. The edit would commit on the
+/// wrong page (undo snapshot and projection are scoped to `page_id`), so
+/// it is refused in the stale wording, with nothing written.
+#[test]
+fn a_block_moved_to_another_page_is_refused_and_a_deep_child_commits() {
+    let tmp = TempDir::new().unwrap();
+    let actor = ActorId::new();
+    let hlc = HlcGenerator::new(actor);
+    let mut ws = Workspace::open_in_memory(actor).unwrap();
+    let notes = open_or_create_page(&mut ws, &hlc, "notes", "Notes", PageKind::Page).unwrap();
+    let elsewhere =
+        open_or_create_page(&mut ws, &hlc, "elsewhere", "Elsewhere", PageKind::Page).unwrap();
+    let citing = append_block(&mut ws, &hlc, Some(notes), Some("cites [[target]]")).unwrap();
+    let child = append_block(&mut ws, &hlc, Some(citing), Some("child")).unwrap();
+    let grand = append_block(&mut ws, &hlc, Some(child), Some("grandchild")).unwrap();
+    let deep = append_block(&mut ws, &hlc, Some(grand), Some("deep")).unwrap();
+    apply_page_md_with_sidecar(&ws, tmp.path(), notes).unwrap();
+    apply_page_md_with_sidecar(&ws, tmp.path(), elsewhere).unwrap();
+    let host = host_for(ws, hlc, &tmp);
+
+    edit_backlink_block(
+        &host,
+        notes.to_string(),
+        deep.to_string(),
+        "edited deep".into(),
+    )
+    .expect("a three-level-deep child of the page commits");
+    let ops_after_deep = op_count(&host);
+
+    {
+        let workspace = host.workspace_arc();
+        let mut guard = workspace.lock();
+        let ws = guard.as_mut().unwrap();
+        outl_actions::move_under(ws, &host.hlc, child, elsewhere).unwrap();
+    }
+    let ops = op_count(&host);
+    assert!(ops > ops_after_deep, "the move itself is an op");
+    let read = |slug: &str| {
+        std::fs::read_to_string(tmp.path().join("pages").join(format!("{slug}.md"))).unwrap()
+    };
+    let (notes_md, elsewhere_md) = (read("notes"), read("elsewhere"));
+
+    let err = edit_backlink_block(&host, notes.to_string(), child.to_string(), "x".into())
+        .expect_err("a block that left the page is not this row's block");
+    assert_eq!(
+        err,
+        "That block could not be found, so your text could not be saved."
+    );
+    assert_eq!(op_count(&host), ops, "nothing may reach the op log");
+    assert_eq!(read("notes"), notes_md);
+    assert_eq!(read("elsewhere"), elsewhere_md);
+}

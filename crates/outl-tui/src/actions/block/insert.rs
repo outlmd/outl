@@ -101,10 +101,12 @@ impl App {
         // refusal catalog honest, too: nothing has been typed yet, so
         // the `unchanged` sentence is the true one. The "your text could
         // not be saved" half belongs to a surface with no entry gate.
-        let live_text = self
-            .workspace
-            .block_text(target.block)
-            .filter(|_| outl_actions::is_live(&self.workspace, target.block));
+        //
+        // A live block with **no text record** is an empty block, not a
+        // missing one: `o` on a child makes exactly that, and the panel
+        // now has a row to put the caret on.
+        let live_text = outl_actions::is_live(&self.workspace, target.block)
+            .then(|| self.workspace.block_text(target.block).unwrap_or_default());
         let Some(original_text) = live_text else {
             self.status = outl_actions::refusal::stale_backlink_block_unchanged_refusal(
                 &self.workspace,

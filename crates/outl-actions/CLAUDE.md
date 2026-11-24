@@ -546,10 +546,11 @@ When adding a new operation here:
 3. **Generalize the parameter set** when migrating.
    The Backlink rewrite added `source_block: OutlineNode` + `source_path` so *both* the mobile linear renderer and the TUI's then-subtree renderer could share the same struct.
    Capping features at "what mobile needs today" would force the TUI to keep its own copy.
-   **The subtree half of that is now unused**, which is the other edge of the same rule.
-   `source_block` carries no children on either builder (the #179 freeze fix), so every client draws one row per citing block.
+   **The subtree half is used by one path only, on purpose.**
+   Index lookups return `source_block` shallow (the #179 freeze fix); the from-disk index keeps the capped children in a side table (`BacklinkIndex::subtree`) and `Backlink::with_children` attaches them after the locks drop, so the "Linked from" panel draws a citing block's children on every client.
+   The workspace builder, and with it the CLI and MCP, never fills it.
    Generalising is still right at migration time — you cannot know which client needs the wider shape.
-   But a parameter no caller fills is a claim the type keeps making, which is how `Focus::Backlink`'s `sub_path` stayed alive as dead code for months.
+   But a parameter no caller fills is a claim the type keeps making, which is how `Focus::Backlink`'s old `sub_path` stayed alive as dead code for months: when the subtree stops being filled, say so at the type.
 
 The root [`CLAUDE.md`](../../CLAUDE.md#reuse-first) "Reuse-first" section documents the policy at the workspace level, in full at [`docs/contributing.md`](../../docs/contributing.md#reuse-first-no-parallel-implementations).
 

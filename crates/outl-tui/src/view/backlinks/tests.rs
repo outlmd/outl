@@ -53,8 +53,7 @@ fn render_focused(app: &App, bl: &Backlink) -> Vec<Line<'static>> {
     render_backlink_node(
         &bl.source_block,
         0,
-        &mut Vec::new(),
-        Some(&[]),
+        crate::actions::node_id(&bl.source_block.id),
         app,
         &mut out,
         &mut None,
@@ -231,16 +230,7 @@ fn a_backlink_property_row_starts_in_its_blocks_text_column() {
     ));
 
     let mut out = Vec::new();
-    render_backlink_node(
-        &bl.source_block,
-        1,
-        &mut Vec::new(),
-        None,
-        &app,
-        &mut out,
-        &mut None,
-        0,
-    );
+    render_backlink_node(&bl.source_block, 1, None, &app, &mut out, &mut None, 0);
 
     let column_of = |line: &Line<'_>, token: &str| {
         let text = row_text(line);
@@ -269,16 +259,7 @@ fn a_backlink_property_row_draws_the_same_glyph_the_outline_does() {
     ));
 
     let mut out = Vec::new();
-    render_backlink_node(
-        &bl.source_block,
-        0,
-        &mut Vec::new(),
-        None,
-        &app,
-        &mut out,
-        &mut None,
-        0,
-    );
+    render_backlink_node(&bl.source_block, 0, None, &app, &mut out, &mut None, 0);
 
     let mut expected = Vec::new();
     push_property_row(0, "remind", "9am", false, &app, &mut expected, 0);
@@ -300,16 +281,7 @@ fn a_long_property_value_wraps_instead_of_being_cut() {
     ));
 
     let mut out = Vec::new();
-    render_backlink_node(
-        &bl.source_block,
-        0,
-        &mut Vec::new(),
-        None,
-        &app,
-        &mut out,
-        &mut None,
-        24,
-    );
+    render_backlink_node(&bl.source_block, 0, None, &app, &mut out, &mut None, 24);
 
     let rows: Vec<String> = out[1..].iter().map(row_text).collect();
     assert!(rows.len() > 1, "expected a wrap, got {rows:?}");

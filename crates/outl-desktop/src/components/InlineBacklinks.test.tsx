@@ -577,7 +577,7 @@ describe("InlineBacklinks breadcrumb", () => {
 
     // The trail's own row, not the header's sort button and not the
     // `title={href}` MarkdownInline puts on the link inside it.
-    expect(host.querySelector("li > [title]")?.getAttribute("title")).toBe(
+    expect(host.querySelector("[data-backlink-row] > [title]")?.getAttribute("title")).toBe(
       ancestors[0].text,
     );
   });

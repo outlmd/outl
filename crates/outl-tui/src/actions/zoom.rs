@@ -217,7 +217,7 @@ mod tests {
         let (mut app, _dir) = fresh_app();
         seed_nested(&mut app);
         app.selected = 3;
-        app.focus = crate::state::Focus::Backlink { idx: 0 };
+        app.focus = crate::state::Focus::Backlink { idx: 0, node: None };
 
         app.zoom_in_on_selected();
 

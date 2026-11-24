@@ -49,7 +49,7 @@
  * flips twice.
  */
 
-import type { Backlink, PageMeta, PageView } from "@outl/shared/api/types";
+import type { PageMeta, PageView } from "@outl/shared/api/types";
 import {
   type BacklinkRowOp,
   backlinkRowOp,
@@ -58,7 +58,8 @@ import {
 } from "@outl/shared/api/commands";
 import {
   type BacklinkEditTarget,
-  backlinkEditTarget,
+  type BacklinkRow,
+  backlinkEditTargetFor,
 } from "@outl/shared/backlink-edit";
 import { countDescendants, rawTextWithTodo } from "@outl/shared/outline";
 import { createSignal } from "solid-js";
@@ -91,7 +92,7 @@ export interface BacklinkCommit {
    * has to refuse an orphan, so the narrowing happens once at the
    * place that has the fact rather than as a fallback in the sentence.
    */
-  created?: { page: PageMeta; side: "below" | "above" };
+  created?: { page: PageMeta; side: "below" | "above"; depth: number };
 }
 
 export interface BacklinkRowOpsDeps {
@@ -109,9 +110,9 @@ export interface BacklinkRowOpsDeps {
 }
 
 export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
-  /** Block id of the row in edit mode, `null` when none is. */
+  /** Row **key** (not block id: a block drawn twice has two rows) in edit mode, `null` when none is. */
   const [editing, setEditing] = createSignal<string | null>(null);
-  /** Block id of the row with a write in flight, `null` when idle. */
+  /** Row key with a write in flight, `null` when idle. */
   const [pending, setPending] = createSignal<string | null>(null);
   /** The direction toggle's re-ask is in flight. It is not a row, so it
    *  has no block id to put in `pending` — and `pending` stays a block id
@@ -125,10 +126,10 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
    */
   const busy = () => pending() !== null || reordering();
   /** Row whose long-press sheet is open, `null` when none is. */
-  const [menuLink, setMenuLink] = createSignal<Backlink | null>(null);
+  const [menuRow, setMenuRow] = createSignal<BacklinkRow | null>(null);
   /** A delete awaiting confirmation, and the row it would take. */
   const [deleting, setDeleting] = createSignal<{
-    link: Backlink;
+    row: BacklinkRow;
     descendants: number;
   } | null>(null);
 
@@ -142,13 +143,13 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
    * ever threw, saying so beats swallowing it.
    */
   async function runOnSource(
-    link: Backlink,
+    row: BacklinkRow,
     run: (target: BacklinkEditTarget) => Promise<PageView>,
     created?: BacklinkCommit["created"],
   ): Promise<boolean> {
-    const target = backlinkEditTarget(link);
+    const target = backlinkEditTargetFor(row.link, row.node);
     if (!target || busy()) return false;
-    setPending(link.block_id);
+    setPending(row.key);
     try {
       const view = await run(target);
       await deps.onEditCommitted({ sourcePageId: target.pageId, view, created });
@@ -186,9 +187,9 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
    *  gesture cannot ship printing a raw `ActionError`. */
   const structural =
     (op: BacklinkRowOp) =>
-    async (link: Backlink): Promise<void> => {
+    async (row: BacklinkRow): Promise<void> => {
       haptic("light");
-      await runOnSource(link, (t) => backlinkRowOp(t.pageId, t.blockId, op));
+      await runOnSource(row, (t) => backlinkRowOp(t.pageId, t.blockId, op));
     };
 
   /**
@@ -215,31 +216,33 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
    * repeat.
    */
   async function createBeside(
-    link: Backlink,
+    row: BacklinkRow,
     side: "below" | "above",
   ): Promise<void> {
     // The orphan refusal `runOnSource` also makes, taken here because
     // this is where the resolved page is needed: the notice names it,
     // and resolving it inside the sentence would mean a fallback that
     // can never fire.
-    const page = link.source_page;
+    const page = row.link.source_page;
     if (!page) return;
     haptic("light");
     await runOnSource(
-      link,
+      row,
       async (t) => {
         const reply = await createBacklinkSibling(t.pageId, t.blockId, side);
         return reply.view;
       },
-      { page, side },
+      // `depth` lets the host stay quiet for a child: its sibling is
+      // born inside the subtree drawn on this card.
+      { page, side, depth: row.depth },
     );
   }
 
-  async function performDelete(link: Backlink): Promise<void> {
+  async function performDelete(row: BacklinkRow): Promise<void> {
     // The block is about to be gone, so a draft pointed at it could
     // only ever commit into a refusal.
-    if (editing() === link.block_id) setEditing(null);
-    await runOnSource(link, (t) =>
+    if (editing() === row.key) setEditing(null);
+    await runOnSource(row, (t) =>
       backlinkRowOp(t.pageId, t.blockId, "delete"),
     );
   }
@@ -249,13 +252,13 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
     pending,
     busy,
     runReorder,
-    menuLink,
+    menuRow,
 
     /** `PendingBlockDelete` is what `<BlockDeleteConfirm />` reads; the
      *  link behind it stays here, since only this module can spend it. */
     deletePrompt(): PendingBlockDelete | null {
       const d = deleting();
-      return d && { id: d.link.block_id, descendants: d.descendants };
+      return d && { id: d.row.key, descendants: d.descendants };
     },
 
     /**
@@ -263,23 +266,23 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
      * to edit it on and none to navigate to either, so it opens
      * nothing rather than pretending to jump.
      */
-    openEditor(link: Backlink) {
-      if (!backlinkEditTarget(link) || busy()) return;
+    openEditor(row: BacklinkRow) {
+      if (!backlinkEditTargetFor(row.link, row.node) || busy()) return;
       haptic("light");
-      setEditing(link.block_id);
+      setEditing(row.key);
     },
 
-    async commitRow(link: Backlink, text: string) {
+    async commitRow(row: BacklinkRow, text: string) {
       // Nothing typed — leave without writing. The draft is rebuilt
       // from the DTO's split `todo` + `text`, so an unconditional
       // commit would rewrite a block written as `[ ] buy milk` to
       // `TODO buy milk` on a tap in and out, and buy an O(blocks)
       // rescan for it. Same guard `commitEdit` carries in `Journal.tsx`.
-      if (text === rawTextWithTodo(link.source_block)) {
+      if (text === rawTextWithTodo(row.node)) {
         setEditing(null);
         return;
       }
-      const written = await runOnSource(link, (t) =>
+      const written = await runOnSource(row, (t) =>
         editBacklinkBlock(t.pageId, t.blockId, text),
       );
       // Closed only once the fresh rows are in. Closing on the write's
@@ -293,9 +296,9 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
       if (written) setEditing(null);
     },
 
-    async toggleRowTodo(link: Backlink) {
+    async toggleRowTodo(row: BacklinkRow) {
       haptic("light");
-      await runOnSource(link, (t) =>
+      await runOnSource(row, (t) =>
         backlinkRowOp(t.pageId, t.blockId, "toggle-todo"),
       );
     },
@@ -303,13 +306,13 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
     /** Long press. Refused on an orphan (nothing to offer) and while a
      *  write is in flight (the same concurrent-write defect through a
      *  different door). */
-    openMenu(link: Backlink) {
-      if (!backlinkEditTarget(link) || busy()) return;
+    openMenu(row: BacklinkRow) {
+      if (!backlinkEditTargetFor(row.link, row.node) || busy()) return;
       haptic("medium");
-      setMenuLink(link);
+      setMenuRow(row);
     },
     closeMenu() {
-      setMenuLink(null);
+      setMenuRow(null);
     },
 
     indent: structural("indent"),
@@ -317,26 +320,25 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
     moveUp: structural("move-up"),
     moveDown: structural("move-down"),
 
-    createBelow: (link: Backlink) => createBeside(link, "below"),
-    createAbove: (link: Backlink) => createBeside(link, "above"),
+    createBelow: (row: BacklinkRow) => createBeside(row, "below"),
+    createAbove: (row: BacklinkRow) => createBeside(row, "above"),
 
     /**
-     * Delete the citing block. **Always asks when it has children**,
-     * and the threshold is the outline's own — but the case for it is
-     * stronger here: a backlink row renders one flat block, so the
-     * subtree about to be trashed is not on screen at all. The user has
-     * less information than in the outline, not more.
+     * Delete a row's block (a citing block or a child of one).
+     * **Always asks when it has children**, counted on the row's own
+     * node, and the threshold is the outline's own. The card shows the
+     * subtree only to depth 4, so a deeper one is still off screen.
      */
-    async requestDelete(link: Backlink) {
-      if (!backlinkEditTarget(link) || busy()) return;
-      const descendants = countDescendants(link.source_block);
+    async requestDelete(row: BacklinkRow) {
+      if (!backlinkEditTargetFor(row.link, row.node) || busy()) return;
+      const descendants = countDescendants(row.node);
       if (descendants > 0) {
         haptic("warning");
-        setDeleting({ link, descendants });
+        setDeleting({ row, descendants });
         return;
       }
       haptic("heavy");
-      await performDelete(link);
+      await performDelete(row);
     },
 
     /**
@@ -349,9 +351,9 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
      * the better answer: a sync that replaced them while the prompt was
      * up leaves this acting on the current row, or on none.
      */
-    async deleteRow(link: Backlink) {
+    async deleteRow(row: BacklinkRow) {
       setDeleting(null);
-      await performDelete(link);
+      await performDelete(row);
     },
     cancelDelete() {
       setDeleting(null);

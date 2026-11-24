@@ -262,12 +262,6 @@ fn auto_run_on_page(host: &ExecHost, page: NodeId, page_id: &str) -> Result<Auto
     })
 }
 
-/// How deep an embed's subtree is projected into the reply. Mirror of
-/// the frontend's `EmbeddedSubtree` `MAX_DEPTH` (and the TUI's
-/// `EMBED_MAX_DEPTH`): the client never renders past this, so shipping
-/// deeper levels is pure IPC weight. Keep the three in step.
-const EMBED_SUBTREE_MAX_DEPTH: usize = 4;
-
 /// Batch-resolve embed handles to their source content.
 ///
 /// Async: it builds a `WorkspaceIndex` from disk, parsing every `.md` +
@@ -287,7 +281,10 @@ pub async fn resolve_embeds<S: AppHost>(
             if let Some(entry) = index.resolve_block_ref(handle) {
                 let (status, text) = split_todo_prefix(&entry.text);
                 let mut children = outl_actions::project_parsed_subtree(&entry.children);
-                truncate_children_depth(&mut children, EMBED_SUBTREE_MAX_DEPTH);
+                outl_actions::truncate_children_depth(
+                    &mut children,
+                    outl_actions::SUBTREE_MAX_DEPTH,
+                );
                 result.insert(
                     handle.clone(),
                     EmbedContent {
@@ -314,7 +311,7 @@ pub struct PageEmbedContent {
     /// The page's display title (its `title::`, or the slug when unset).
     pub title: String,
     /// The page's top-level blocks, projected with inline tokens and
-    /// capped at `EMBED_SUBTREE_MAX_DEPTH` — the same projection and
+    /// capped at `outl_actions::SUBTREE_MAX_DEPTH` — the same projection and
     /// the same cap as [`EmbedContent::children`], so an embed renders
     /// what the source page renders. Ids are transient (see
     /// [`outl_actions::project_parsed_subtree`]): the expansion is a
@@ -419,23 +416,8 @@ fn page_top_level_blocks(md_path: &Path) -> Option<Vec<outl_actions::OutlineNode
     let text = std::fs::read_to_string(md_path).ok()?;
     let parsed = outl_md::parse::parse(&text);
     let mut blocks = outl_actions::project_parsed_subtree(&parsed.blocks);
-    truncate_children_depth(&mut blocks, EMBED_SUBTREE_MAX_DEPTH);
+    outl_actions::truncate_children_depth(&mut blocks, outl_actions::SUBTREE_MAX_DEPTH);
     Some(blocks)
-}
-
-/// Drop subtree levels the client won't render (beyond
-/// [`EMBED_SUBTREE_MAX_DEPTH`]). `nodes` is level 1; once `depth_left`
-/// hits 1, the current level keeps its text but loses its children.
-fn truncate_children_depth(nodes: &mut [outl_actions::OutlineNode], depth_left: usize) {
-    if depth_left <= 1 {
-        for node in nodes {
-            node.children.clear();
-        }
-        return;
-    }
-    for node in nodes {
-        truncate_children_depth(&mut node.children, depth_left - 1);
-    }
 }
 
 /// Split `"TODO body"` / `"DOING body"` / `"DONE body"` into

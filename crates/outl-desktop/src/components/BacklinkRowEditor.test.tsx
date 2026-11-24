@@ -318,6 +318,7 @@ describe("editing a backlink where it is cited", () => {
     expect(appState.editingBacklink).toEqual({
       pageId: SOURCE_PAGE.id,
       blockId: "src-1",
+      key: "src-1",
     });
   });
 

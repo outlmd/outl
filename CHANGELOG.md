@@ -7,6 +7,30 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **"Linked from" shows the children of every citing block, and you can edit them, on all three clients.**
+  A backlink row used to be the citing block alone, so a reference to `[[project]]` under a block with three sub-bullets showed the one line and hid the three that said what it meant.
+  The panel now draws the direct children of each citing block and their descendants, capped at four levels (the same cap an embed uses), always expanded and ignoring the fold the source page keeps.
+  On the TUI and the desktop `j` / `k` walk onto them; on mobile each child is its own tap and long-press target.
+  Every child edits through the cross-page family a citing block already used (`edit_backlink_block`, `backlink_row_op`, `create_backlink_sibling`), so a stale row refuses instead of re-targeting.
+  That refusal now also covers a block that is still live but a peer moved to another page: the check asks that the block lives under the row's page, with the same wording.
+  Mobile's delete on a citing block with children now asks first, which it never did because the count was always zero.
+
+  **The index keeps the children in a side table, not in the hit.**
+  A lookup clones its hits under the workspace lock, and a hit that carried a subtree would deep-copy it there, which is the shape of the #179 freeze.
+  `IndexedEntry.subtree` holds an `Arc<[OutlineNode]>` beside the leaf, `BacklinkIndex::subtree` is a hash lookup and a refcount bump, and the one deep copy per direct hit (`Backlink::with_children`) happens after the locks drop and before the sort.
+  Only the from-disk builder fills it.
+
+  **A block can be drawn twice.**
+  A block that cites the page and also sits under another citing block has its own row and appears again inside the ancestor's children.
+  Collapsing them would change the backlink count and the TUI's row bounds, so the panel does not.
+  Rows are keyed by a per-row `key`, never by block id.
+  Known limit: after create-sibling on such a block a GUI says the new block was "added elsewhere", although it landed inside the ancestor's children.
+
+  **The CLI and MCP stay shallow on purpose.**
+  `outl backlinks` and `outl_backlinks` build their index from the `Workspace`, and filling children there is the #179 freeze, so their `source_block.children` is empty.
+  Namespace mentions (`#os/linux` arriving at `os`) also stay shallow and read-only.
+  `SUBTREE_MAX_DEPTH` moved into `outl-actions` so the embed and the backlink children share one cap.
+
 - **The block's bullet is a menu now, and "Copy block ref" / "Copy block embed" are its first two rows.**
   Pointing at a block and asking for its handle had three different answers.
   The TUI had `y r` and `/refer`, and `/refer-embed` beside it.

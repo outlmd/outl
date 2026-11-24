@@ -50,7 +50,7 @@ export type ResolvedMode = Exclude<ShortcutMode, "global">;
 export function isEditing(): boolean {
   if (appState.editingBlockId !== null) return true;
   const row = appState.editingBacklink;
-  return row !== null && backlinkRowIds().includes(row.blockId);
+  return row !== null && backlinkRowIds().includes(row.key ?? row.blockId);
 }
 
 export function detectMode(): ResolvedMode {

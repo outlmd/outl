@@ -6,7 +6,7 @@ import {
   backlinkCommitPlan,
 } from "@outl/shared/backlink-edit";
 import { rawTextWithTodo } from "@outl/shared/outline";
-import type { Backlink } from "@outl/shared/api/types";
+import type { BlockNode } from "@outl/shared/api/types";
 
 import { stopBacklinkEdit } from "../lib/cursor-region";
 import { applyPageState } from "../lib/page-view";
@@ -39,10 +39,13 @@ import type { EditorCallbacks } from "./block-callbacks";
  * and none can bypass the seeding.
  */
 export function BacklinkRowEditor(props: {
-  link: Backlink;
+  /** The block being edited: the citing block or a descendant shown
+   *  under it. Read through the getter, so a refetch updates what
+   *  `wireText` compares against without touching the draft. */
+  node: BlockNode;
   target: BacklinkEditTarget;
 }) {
-  const wireText = () => rawTextWithTodo(props.link.source_block);
+  const wireText = () => rawTextWithTodo(props.node);
   const [draft, setDraft] = createSignal(wireText());
 
   /**
@@ -131,14 +134,16 @@ export function BacklinkRowEditor(props: {
    * change something:
    *
    * - **Text.** `onCommit` is the whole feature.
-   * - **Structural chords.** A backlink row renders one flat block: its
-   *   siblings and children are not on screen, so indenting or splitting
-   *   from inside the textarea has no visible result here. They are
-   *   reachable from the *focused row* instead, where the catalog's
-   *   `IndentBlock` / `NewBlockBelow` act on the cited block. So each one
-   *   finishes the edit rather than doing nothing — `<BlockEditor />`
-   *   calls `preventDefault` before it calls out, so a no-op would eat
-   *   the keystroke, which is the silence invariant 12 is about.
+   * - **Structural chords.** From inside the textarea they only finish
+   *   the edit. A citing block's own siblings are not drawn, and a
+   *   descendant's are, but the structural ops live on the *focused row*,
+   *   where the catalog's `IndentBlock` / `NewBlockBelow` / `Alt+↑` act
+   *   on the cited block or the descendant under the cursor (the refetch
+   *   after them redraws the subtree). `Esc`, then the chord, is the
+   *   path. Each one finishes the edit rather than doing nothing —
+   *   `<BlockEditor />` calls `preventDefault` before it calls out, so a
+   *   no-op would eat the keystroke, which is the silence invariant 12 is
+   *   about.
    * - **Paste.** Declined, by omission. The two paste commands live in
    *   `commands/block.rs`, where every body may *tolerate* a stale block
    *   id by re-targeting — the exact recovery `edit_backlink_block`
@@ -168,9 +173,10 @@ export function BacklinkRowEditor(props: {
     // and left behind it would hijack the next block the user clicks.
     onIndent: async () => setAppState("caretIntent", null),
     onOutdent: async () => setAppState("caretIntent", null),
-    // One row, no neighbour rendered — and walking an arrow out of here
-    // would start editing a third page from a keystroke aimed at this
-    // one, which is the line the TUI's `cross_block_step` already holds.
+    // Neighbouring rows are drawn now, but walking an arrow out of here
+    // would start editing another block on another page from a keystroke
+    // aimed at this one, which is the line the TUI's `cross_block_step`
+    // already holds. `Esc`, then `j` / `k`, is the way across.
     resolveCaretExit: () => null,
     // Unreachable while `resolveCaretExit` answers `null`; it is the
     // second half of that one decision, not a second decision.

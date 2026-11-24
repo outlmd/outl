@@ -11,7 +11,7 @@ That's the spec; don't change it.
 - Quick switcher (`Ctrl+P`) for fuzzy page/journal jumping.
 - Outline panel for current page with inline visible cursor.
 - Inline backlinks rendered below the outline (`B` toggles, `j/k` crosses the separator, `Ctrl+O` flips the sort direction).
-  **One row per citing block, and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
+  **One row per citing block plus its children (capped at `outl_actions::SUBTREE_MAX_DEPTH`, always expanded), and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
   Recorded as `Capability::BacklinkInlineEdit` → `Partial` here and `Full` on the GUI clients, because **nothing in this panel opens the page a row's block lives on**.
   Not the header (a styled `Line` with no `block_starts` entry), not a click (refused below the outline), not `Enter` (it enters Insert), and not a `[[link]]` in the row, which points back at the page being read.
   The route is `Ctrl+P` and the page name, which is what the nudge says; the mechanism for the edits themselves is under "The commit pipeline this crate does not use yet" below.
@@ -599,18 +599,18 @@ One cross-page writer is left on `save_page_with`, and it is about **embeds**, n
 That is **scope, not a blocker** — `WorkspaceIndex::resolve_block_ref` returns a `BlockEntry` carrying `id: NodeId` and `source_slug`, both keys a commit needs, and the current code destructures the path pair and discards `entry.id`.
 What a migration owes is the half the backlink path has no equivalent for: the auto-run re-run and the same-page reload those two do after the write.
 
-**`Focus::Backlink { idx }` is the whole cursor, and the `sub_path` it used to carry was dead code the type made look alive.**
-That field was a DFS path into `Backlink.source_block`'s subtree, and it was **always empty**.
-Both index builders ship `source_block` shallow (`children: Vec::new()`, the fix for the #179 input freeze), so `flatten_subtree_paths` returned exactly one path and the descend branch in `actions::nav::selection` was unreachable.
-`j` never walked into a backlink's subtree; the panel has always drawn one row per citing block.
-**This crate's call to `flatten_subtree_paths` went with the field** — grep finds no caller here now — while the function itself still exists in `outl-actions` (definition, re-export and its own tests) with **no caller left** in the workspace.
-So removing it was inert rather than a behaviour change, which is why `backlink_target.rs` pins the premise **structurally**.
-That pin asserts `source_block.children.is_empty()` over every row, and reads its precondition from the workspace tree rather than from the index it is testing.
-A claim somebody verified once is not a net: revert #179's shallow builders and the pin is what fails.
+**`Focus::Backlink { idx, node: Option<NodeId> }` is the cursor: the row, and which block of it.**
+`node` is `None` on the citing block and `Some(id)` on one of its descendants.
+It is an id, not a DFS path: a path into a subtree goes stale the moment a sibling above it is created or deleted, and the descendants never ride the cloned list at all.
+They come from `App::backlink_subtree` (`actions/nav/backlink_nodes.rs`), which reads the `Arc` the from-disk `BacklinkIndex` holds in its side table, so the `Backlink` the panel clones still has `source_block.children` empty.
+(The old `sub_path` was a DFS path into that same field and was dead code for months: both builders shipped it shallow, so `j` never descended. `backlink_target.rs` still pins that the *list* is shallow, structurally, against the workspace tree rather than the index it tests.)
+`j` / `k` walk the **stops** of a row: the citing block, then its descendants depth-first, then the next row.
+A block that cites the page and sits under another citing block is drawn twice and has two stops; `idx` bounds and `count_for_page` stay one per citing block.
 `idx` is positional, so a stale one reads as "nothing focused" rather than as a different row (`actions/block/backlink_target.rs`).
 
-**`o` / `O` on a backlink row create the block and do not enter Insert, and `Enter` from Insert inherits that.**
-`Focus::Backlink { idx }` names a *backlink row*; a brand-new sibling cites nothing, so it is not a row — `view/backlinks.rs` paints the edit buffer on the row whose `idx` matches, and there is none to paint on.
+**`o` / `O` on the citing block create the block and do not enter Insert, and `Enter` from Insert inherits that.**
+On a **child** the new sibling lands inside the subtree the panel draws, so Insert opens on it.
+`Focus::Backlink { idx, node }` names a *backlink row*; a brand-new sibling cites nothing, so it is not a row — `view/backlinks.rs` paints the edit buffer on the row whose `idx` matches, and there is none to paint on.
 Entering Insert anyway is what the `.md`-first route did, and it put the caret back on the **citing** block, so the next keystroke edited text the user had not aimed at.
 So the block is created on the source page, Insert is not entered, and the status line names the page plus the limit (`not editable from the panel`).
 **A self-citing page is the exception and it does finish**: the commit's reload has already put the new block in `App.page`,

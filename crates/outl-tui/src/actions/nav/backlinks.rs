@@ -22,6 +22,9 @@ impl App {
     /// doc on [`crate::state::App::backlink_index`]. A local edit patches
     /// the current page in place ([`Self::reindex_backlinks_for_slug`]);
     /// whole-workspace changes re-spawn the background build.
+    ///
+    /// The list is **shallow** on purpose (callers clone it every
+    /// frame); a row's children come from [`Self::backlink_subtree`].
     pub(crate) fn backlinks_for_slug(&self, slug: &str) -> Vec<outl_actions::Backlink> {
         let borrow = self.backlink_index.borrow();
         let Some(index) = borrow.as_ref() else {
@@ -131,8 +134,9 @@ impl App {
     /// `view::chrome`, the navigability probe in
     /// [`Self::backlinks_navigable`]) take this instead of
     /// [`Self::backlinks_for_slug`]. The rich `Backlink` struct
-    /// carries `source_block: OutlineNode` plus its subtree, so the
-    /// clone the full accessor performs is non-trivial. This counts via
+    /// carries `source_block: OutlineNode` (shallow: the subtree is read
+    /// through [`Self::backlink_subtree`]), plus ancestors and a source
+    /// page, so the clone the full accessor performs is non-trivial. This counts via
     /// the index's `count_for_page`, which dedupes the hit positions
     /// without cloning a single `Backlink`.
     pub(crate) fn backlinks_count_for_slug(&self, slug: &str) -> usize {

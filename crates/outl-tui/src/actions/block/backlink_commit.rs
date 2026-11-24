@@ -452,14 +452,23 @@ impl App {
     /// this without cloning a `Backlink` per row, and every cross-page
     /// commit runs through here.
     fn clamp_backlink_focus(&self, focus: Focus) -> Focus {
-        let Focus::Backlink { idx } = focus else {
+        let Focus::Backlink { idx, node } = focus else {
             return focus;
         };
         match self.backlinks_count_for_current() {
             0 => Focus::Outline,
-            rows => Focus::Backlink {
-                idx: idx.min(rows - 1),
-            },
+            rows => {
+                let idx = idx.min(rows - 1);
+                // A descendant the row's subtree no longer holds (it was
+                // deleted, or outdented out of it) falls back to the
+                // citing block rather than naming a stranger.
+                let node = node.filter(|n| {
+                    self.backlinks_for_current()
+                        .get(idx)
+                        .is_some_and(|bl| self.backlink_row_stops(bl).contains(&Some(*n)))
+                });
+                Focus::Backlink { idx, node }
+            }
         }
     }
 

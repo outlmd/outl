@@ -19,7 +19,7 @@
 //! `pub(crate)` for cross-file reuse inside `view/`.
 
 mod ahead_of_log_banner;
-mod backlinks;
+pub(crate) mod backlinks;
 mod chrome;
 mod embed;
 mod inline;

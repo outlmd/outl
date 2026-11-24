@@ -265,7 +265,7 @@ describe("buildBacklinkContextActions", () => {
   it("a backlink row's context actions target the source page", () => {
     const h = backlinkHandlers();
     const l = link();
-    const actions = buildBacklinkContextActions(l, h);
+    const actions = buildBacklinkContextActions(l, l.source_block, h);
 
     // Every row hands the whole `Backlink` back, which is what carries
     // `source_page.id`. An action that took a bare block id would have
@@ -273,16 +273,16 @@ describe("buildBacklinkContextActions", () => {
     // holds in that scope is the one on screen — the wrong one.
     for (const action of actions) action.onSelect();
 
-    expect(h.toggleTodo).toHaveBeenCalledWith(l);
-    expect(h.indent).toHaveBeenCalledWith(l);
-    expect(h.outdent).toHaveBeenCalledWith(l);
-    expect(h.moveUp).toHaveBeenCalledWith(l);
-    expect(h.moveDown).toHaveBeenCalledWith(l);
-    expect(h.delete).toHaveBeenCalledWith(l);
+    expect(h.toggleTodo).toHaveBeenCalledWith(l, l.source_block);
+    expect(h.indent).toHaveBeenCalledWith(l, l.source_block);
+    expect(h.outdent).toHaveBeenCalledWith(l, l.source_block);
+    expect(h.moveUp).toHaveBeenCalledWith(l, l.source_block);
+    expect(h.moveDown).toHaveBeenCalledWith(l, l.source_block);
+    expect(h.delete).toHaveBeenCalledWith(l, l.source_block);
   });
 
   it("offers every operation the row supports, text aside", () => {
-    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+    const actions = buildBacklinkContextActions(link(), link().source_block, backlinkHandlers());
 
     // Parity with the TUI's `Focus::Backlink` chords and the desktop's
     // `BacklinkRowOps` — the text edit is missing because the tap is
@@ -302,6 +302,7 @@ describe("buildBacklinkContextActions", () => {
   it("an orphan backlink offers no structural actions", () => {
     const actions = buildBacklinkContextActions(
       link({ source_page: null }),
+      link().source_block,
       backlinkHandlers(),
     );
 
@@ -309,24 +310,24 @@ describe("buildBacklinkContextActions", () => {
   });
 
   it("returns nothing with no row long-pressed (menu closed)", () => {
-    expect(buildBacklinkContextActions(null, backlinkHandlers())).toEqual([]);
+    expect(buildBacklinkContextActions(null, null, backlinkHandlers())).toEqual([]);
   });
 
   it("creates on the source page, below and above", () => {
     const h = backlinkHandlers();
     const l = link();
-    const actions = buildBacklinkContextActions(l, h);
+    const actions = buildBacklinkContextActions(l, l.source_block, h);
 
     actions.find((a) => a.id === "newBlockBelow")!.onSelect();
-    expect(h.createBelow).toHaveBeenCalledWith(l);
+    expect(h.createBelow).toHaveBeenCalledWith(l, l.source_block);
     expect(h.createAbove).not.toHaveBeenCalled();
 
     actions.find((a) => a.id === "newBlockAbove")!.onSelect();
-    expect(h.createAbove).toHaveBeenCalledWith(l);
+    expect(h.createAbove).toHaveBeenCalledWith(l, l.source_block);
   });
 
   it("no row arms the keyboard, the create rows included", () => {
-    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+    const actions = buildBacklinkContextActions(link(), link().source_block, backlinkHandlers());
 
     // `armsKeyboard` is the outline's contract for an action that ends
     // with a caret in a textarea. A block created here cites nothing,
@@ -339,7 +340,7 @@ describe("buildBacklinkContextActions", () => {
   });
 
   it("keeps both moves offered, since a flat row has no sibling list", () => {
-    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+    const actions = buildBacklinkContextActions(link(), link().source_block, backlinkHandlers());
 
     for (const id of ["moveUp", "moveDown"]) {
       const action = actions.find((a) => a.id === id)!;
@@ -348,7 +349,7 @@ describe("buildBacklinkContextActions", () => {
   });
 
   it("marks only delete destructive, as the outline's menu does", () => {
-    const actions = buildBacklinkContextActions(link(), backlinkHandlers());
+    const actions = buildBacklinkContextActions(link(), link().source_block, backlinkHandlers());
 
     expect(actions.filter((a) => a.destructive).map((a) => a.id)).toEqual([
       "delete",
@@ -357,7 +358,7 @@ describe("buildBacklinkContextActions", () => {
 
   it("draws each action with the glyph the outline's menu uses", () => {
     const outline = buildContextActions(BLOCK_ID, pageView([block()]), handlers());
-    const rows = buildBacklinkContextActions(link(), backlinkHandlers());
+    const rows = buildBacklinkContextActions(link(), link().source_block, backlinkHandlers());
 
     // One action, one glyph, whichever sheet it was reached from — two
     // icon literals for "Indent" is how the same action comes to look

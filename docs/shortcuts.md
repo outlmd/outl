@@ -193,7 +193,7 @@ The TUI ships it natively; the desktop has only a selected block id, so the char
 ### On a backlink row
 
 `j` / `k` cross the separator from the outline's last block into the "Linked from" rows, and a row there is **not read-only**.
-Every chord below acts on the citing block on **its own** page, not on the page you are reading.
+Every chord below acts on the block the focused row draws — the citing block or one of its children, which the panel lists below it — on **its own** page, not on the page you are reading.
 
 The chords are the ones the tables above already carry — this says what each of them *means* here, and nothing more.
 
@@ -202,15 +202,16 @@ The chords are the ones the tables above already carry — this says what each o
 | Enter Insert (`i` / `I` / `a` / `Enter`) | edit the cited block in place; `Esc` commits and returns to the row |
 | Cycle task state | flips the cited block's state, on its page |
 | Mark DONE (`g D`) | completes the cited block, on its page |
-| Delete block (`d d`) | deletes it, and its subtree, which the row does not show |
+| Delete block (`d d`) | deletes it, and its subtree (its children are drawn below the citing block, down to four levels) |
 | Indent / outdent | reparents it among its own page's blocks |
 | Move block up / down | reorders it among its own page's siblings |
 | New block below / above (`o` / `O`) | creates the sibling **on the cited block's page** |
 | Open the source page | nothing in the panel does it — `Ctrl+P`, then the page name from the row's header |
 | Undo (`u`) | nothing here — the entry belongs to the page that changed, so open that page first |
 
-Three of those have no visible result, deliberately: indent, outdent and move act on a row drawn as one flat block, with its siblings and children off screen.
-`o` / `O` does not put the cursor in the new block either, because a brand-new sibling cites nothing and so is a backlink of no page — except when the page cites *itself*, where the block really is in the outline on screen.
+Three of those have no visible result **on the citing block**, deliberately: indent, outdent and move reparent or reorder it among siblings the panel does not draw.
+On a child row they do show, because its parent and siblings are on screen.
+`o` / `O` on the citing block does not put the cursor in the new block either (on a child row it does, since the sibling lands inside the drawn children), because a brand-new sibling cites nothing and so is a backlink of no page — except when the page cites *itself*, where the block really is in the outline on screen.
 The full reasoning, and why a cross-page edit **refuses** where an ordinary one re-targets: [`client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).
 
 On mobile there is no chord surface at all, so these arrive as a tap plus a long-press sheet: [`mobile-ux.md`](mobile-ux.md#backlink-rows--a-place-you-can-work).

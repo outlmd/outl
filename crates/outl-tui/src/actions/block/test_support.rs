@@ -123,7 +123,7 @@ fn open_slugs(pages: &[(&str, &str)], open: &str) -> (App, TempDir) {
         !app.backlinks_for_current().is_empty(),
         "setup: the open page must have a backlink"
     );
-    app.focus = Focus::Backlink { idx: 0 };
+    app.focus = Focus::Backlink { idx: 0, node: None };
     (app, dir)
 }
 

@@ -158,7 +158,7 @@ fn editing_a_backlink_on_the_open_page_keeps_the_cursor_in_the_panel() {
     let (mut app, _d, _open) = workspace_with_a_self_backlink();
     assert_eq!(
         app.focus,
-        Focus::Backlink { idx: 0 },
+        Focus::Backlink { idx: 0, node: None },
         "setup: the cursor starts on the citing row"
     );
     app.zoom_stack.push(vec![0]);
@@ -167,7 +167,7 @@ fn editing_a_backlink_on_the_open_page_keeps_the_cursor_in_the_panel() {
 
     assert_eq!(
         app.focus,
-        Focus::Backlink { idx: 0 },
+        Focus::Backlink { idx: 0, node: None },
         "the reload snapped the cursor back to the outline"
     );
     assert_eq!(
@@ -340,7 +340,7 @@ fn a_backlink_edit_keeps_the_workspace_index_searchable() {
 #[test]
 fn a_cross_page_delete_that_empties_the_panel_returns_the_cursor_to_the_outline() {
     let (mut app, _d, _source) = workspace_with_a_backlink();
-    assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+    assert_eq!(app.focus, Focus::Backlink { idx: 0, node: None });
     assert!(
         !app.page_is_open(
             app.focused_backlink_target()
@@ -374,7 +374,7 @@ fn a_cross_page_delete_that_empties_the_panel_returns_the_cursor_to_the_outline(
 #[test]
 fn an_edit_that_drops_the_last_self_citation_returns_the_cursor_to_the_outline() {
     let (mut app, _d, _open) = workspace_with_a_self_backlink();
-    assert_eq!(app.focus, Focus::Backlink { idx: 0 });
+    assert_eq!(app.focus, Focus::Backlink { idx: 0, node: None });
 
     edit_the_focused_backlink(&mut app, "no longer mentions anything");
 

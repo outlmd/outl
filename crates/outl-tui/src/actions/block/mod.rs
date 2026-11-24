@@ -25,6 +25,8 @@
 
 use crate::edit_buffer::EditBuffer;
 
+#[cfg(test)]
+mod backlink_children_tests;
 mod backlink_commit;
 mod backlink_gesture;
 mod backlink_target;

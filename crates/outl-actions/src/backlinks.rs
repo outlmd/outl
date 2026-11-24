@@ -62,18 +62,12 @@ pub struct Backlink {
     /// the block lives outside any page (legacy / migrated workspaces).
     pub source_page: Option<PageMeta>,
     /// Source block as an outline node — text, tokens, todo state and
-    /// properties, **and no children**.
-    ///
-    /// The type can carry a subtree and neither production builder
-    /// fills one: `backlinks_index.rs`'s from-disk path goes through
-    /// `shallow_parsed` and its from-tree path through
-    /// `project_outline_node_shallow`, both hard-coding
-    /// `children: Vec::new()`. That is the #179 fix — descending every
-    /// referencing block's children across the whole workspace, under
-    /// the workspace lock, is what froze input — so a client renders
-    /// one row per citing block on every surface, including the TUI's
-    /// panel. Light clients can ignore this and use only `block_text`
-    /// + `todo`.
+    /// properties. **Index lookups return it shallow** (the #179 fix:
+    /// descending every referencing block's children under the
+    /// workspace lock froze input); the from-disk index keeps the capped
+    /// subtree beside the leaf (`BacklinkIndex::subtree`) and
+    /// [`Backlink::with_children`] attaches it after the locks drop.
+    /// The CLI / MCP path never has one.
     pub source_block: OutlineNode,
     /// DFS path of the source block inside its `source_page`. Empty
     /// vector means the block is a direct child of the page root.
@@ -103,15 +97,19 @@ pub struct Backlink {
 }
 
 impl Backlink {
+    /// The single owner of "attach a subtree to a backlink". It deep
+    /// copies, so call it after every lock is released and before
+    /// [`crate::sort_backlinks`] moves the backlinks.
+    pub fn with_children(mut self, children: &[OutlineNode]) -> Self {
+        self.source_block.children = children.to_vec();
+        self
+    }
+
     /// Drop the source block's subtree (children), keeping the leaf
     /// itself (text, tokens, todo, properties) plus `ancestors`.
     ///
-    /// **Idempotent against both production builders**, which already
-    /// ship `source_block` shallow (see that field's doc). It stays on
-    /// the GUI `page_backlinks` path as the narrowing the IPC wire
-    /// needs in its own right: every client renders one row per citing
-    /// block, so a subtree that reached a `Backlink` by another route
-    /// would be serialized for nothing.
+    /// Idempotent: index lookups already return `source_block` shallow.
+    /// The GUI keeps it for the namespace set, whose rows are text-only.
     pub fn into_shallow(mut self) -> Self {
         self.source_block.children.clear();
         self

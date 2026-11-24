@@ -19,6 +19,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Backlink, PageView } from "@outl/shared/api/types";
+import {
+  type BacklinkRow,
+  flattenBacklinkRows,
+} from "@outl/shared/backlink-edit";
 
 import {
   type BacklinkCommit,
@@ -66,6 +70,9 @@ function backlink(over: Partial<Backlink> = {}): Backlink {
     ...over,
   } as unknown as Backlink;
 }
+
+/** The root row of a citing block, as the card hands it to the ops. */
+const R = (l: Backlink): BacklinkRow => flattenBacklinkRows([l])[0];
 
 /** A second citing block, on the same card as `backlink()`. */
 function otherRow(): Backlink {
@@ -153,14 +160,14 @@ const OPS: Array<{
   // `trash::restore` is itself a move — so a trashed node is a legal
   // source and these three *land*, re-parenting a block the user can no
   // longer reach inside the trash.
-  { name: "indent", run: (api, l) => api.indent(l), op: "indent", twin: commands.indentBlock },
-  { name: "outdent", run: (api, l) => api.outdent(l), op: "outdent", twin: commands.outdentBlock },
-  { name: "moveUp", run: (api, l) => api.moveUp(l), op: "move-up", twin: commands.moveBlockUp },
-  { name: "moveDown", run: (api, l) => api.moveDown(l), op: "move-down", twin: commands.moveBlockDown },
+  { name: "indent", run: (api, l) => api.indent(R(l)), op: "indent", twin: commands.indentBlock },
+  { name: "outdent", run: (api, l) => api.outdent(R(l)), op: "outdent", twin: commands.outdentBlock },
+  { name: "moveUp", run: (api, l) => api.moveUp(R(l)), op: "move-up", twin: commands.moveBlockUp },
+  { name: "moveDown", run: (api, l) => api.moveDown(R(l)), op: "move-down", twin: commands.moveBlockDown },
   // These two do raise, and their raise is `ActionError`'s `Display` — a
   // ULID and an implementation noun.
-  { name: "toggleTodo", run: (api, l) => api.toggleRowTodo(l), op: "toggle-todo", twin: commands.toggleTodo },
-  { name: "delete", run: (api, l) => api.requestDelete(l), op: "delete", twin: commands.deleteBlock },
+  { name: "toggleTodo", run: (api, l) => api.toggleRowTodo(R(l)), op: "toggle-todo", twin: commands.toggleTodo },
+  { name: "delete", run: (api, l) => api.requestDelete(R(l)), op: "delete", twin: commands.deleteBlock },
 ];
 
 describe("every op is addressed to the citing block's own page", () => {
@@ -204,7 +211,7 @@ describe("every op is addressed to the citing block's own page", () => {
     const o = ops();
     const l = backlink();
 
-    await o.api.createBelow(l);
+    await o.api.createBelow(R(l));
 
     // `createBlock` recovers from a stale anchor by appending at the end
     // of the page it is given, so `o` on a stale row left an empty junk
@@ -222,7 +229,7 @@ describe("every op is addressed to the citing block's own page", () => {
     expect(o.onEditCommitted).toHaveBeenCalledWith({
       sourcePageId: "p1",
       view: expect.anything(),
-      created: { page: l.source_page, side: "below" },
+      created: { page: l.source_page, side: "below", depth: 0 },
     });
   });
 
@@ -233,7 +240,7 @@ describe("every op is addressed to the citing block's own page", () => {
     });
     const o = ops();
 
-    await o.api.createAbove(backlink());
+    await o.api.createAbove(R(backlink()));
 
     expect(commands.createBacklinkSibling).toHaveBeenCalledWith(
       "p1",
@@ -246,8 +253,8 @@ describe("every op is addressed to the citing block's own page", () => {
   it("creates nothing on an orphan backlink", async () => {
     const o = ops();
 
-    await o.api.createBelow(backlink({ source_page: null }));
-    await o.api.createAbove(backlink({ source_page: null }));
+    await o.api.createBelow(R(backlink({ source_page: null })));
+    await o.api.createAbove(R(backlink({ source_page: null })));
 
     expect(commands.createBacklinkSibling).not.toHaveBeenCalled();
     expect(commands.createBlock).not.toHaveBeenCalled();
@@ -257,7 +264,7 @@ describe("every op is addressed to the citing block's own page", () => {
     commands.editBacklinkBlock.mockResolvedValue(sourceView());
     const o = ops();
 
-    await o.api.commitRow(backlink(), "edited text");
+    await o.api.commitRow(R(backlink()), "edited text");
 
     // `editBlock` recovers from a stale id by appending at the end of
     // the page, which moves the user's text to a page they are not
@@ -274,7 +281,7 @@ describe("every op is addressed to the citing block's own page", () => {
     commands.backlinkRowOp.mockRejectedValue("block is not in the tree");
     const o = ops();
 
-    await o.api.indent(backlink());
+    await o.api.indent(R(backlink()));
 
     expect(o.onError).toHaveBeenCalledWith(
       expect.stringContaining("not in the tree"),
@@ -302,7 +309,7 @@ describe("a refused gesture says so, in the catalog's words", () => {
     commands.toggleTodo.mockRejectedValue(RAW_ACTION_ERROR);
     const o = ops();
 
-    await o.api.toggleRowTodo(backlink());
+    await o.api.toggleRowTodo(R(backlink()));
 
     expect(o.onError).toHaveBeenCalledWith(CATALOG_REFUSAL);
     // Root `CLAUDE.md` invariant 12: the nudge wording belongs in the
@@ -320,7 +327,7 @@ describe("a refused gesture says so, in the catalog's words", () => {
     commands.deleteBlock.mockResolvedValue(sourceView());
     const o = ops();
 
-    await o.api.requestDelete(backlink());
+    await o.api.requestDelete(R(backlink()));
 
     expect(o.onEditCommitted).not.toHaveBeenCalled();
     expect(o.onError).toHaveBeenCalledWith(CATALOG_REFUSAL);
@@ -333,7 +340,7 @@ describe("the card takes one write at a time", () => {
     commands.backlinkRowOp.mockResolvedValue(sourceView());
     const o = ops(refresh.fn);
 
-    void o.api.indent(backlink());
+    void o.api.indent(R(backlink()));
     await tick();
     expect(o.api.pending()).toBe("b1");
 
@@ -341,7 +348,7 @@ describe("the card takes one write at a time", () => {
     // replaces every row, so two writes in flight race on the rows
     // they are both about to be judged by. The same row twice would
     // pass under a per-row guard too, which is the decision this pins.
-    await o.api.toggleRowTodo(otherRow());
+    await o.api.toggleRowTodo(R(otherRow()));
     expect(commands.backlinkRowOp).toHaveBeenCalledTimes(1);
     expect(commands.backlinkRowOp).not.toHaveBeenCalledWith(
       "p1",
@@ -359,7 +366,7 @@ describe("the card takes one write at a time", () => {
     commands.backlinkRowOp.mockRejectedValue(new Error("nope"));
     const o = ops();
 
-    await o.api.indent(backlink());
+    await o.api.indent(R(backlink()));
 
     // A guard that outlives its write is a card that never accepts
     // another gesture.
@@ -371,10 +378,10 @@ describe("the card takes one write at a time", () => {
     commands.editBacklinkBlock.mockResolvedValue(sourceView());
     const o = ops(refresh.fn);
 
-    o.api.openEditor(backlink());
+    o.api.openEditor(R(backlink()));
     expect(o.api.editing()).toBe("b1");
 
-    void o.api.commitRow(backlink(), "edited");
+    void o.api.commitRow(R(backlink()), "edited");
     await tick();
 
     // Close it before the scan answers and the row renders the rows it
@@ -391,8 +398,8 @@ describe("the card takes one write at a time", () => {
     commands.editBacklinkBlock.mockRejectedValue("gone");
     const o = ops();
 
-    o.api.openEditor(backlink());
-    await o.api.commitRow(backlink(), "text the user typed");
+    o.api.openEditor(R(backlink()));
+    await o.api.commitRow(R(backlink()), "text the user typed");
 
     // Nothing was written, so closing it would drop text the user can
     // no longer see.
@@ -404,9 +411,9 @@ describe("the card takes one write at a time", () => {
     commands.backlinkRowOp.mockResolvedValue(sourceView());
     const o = ops(refresh.fn);
 
-    void o.api.indent(backlink());
+    void o.api.indent(R(backlink()));
     await tick();
-    o.api.openEditor(backlink());
+    o.api.openEditor(R(backlink()));
 
     expect(o.api.editing()).toBeNull();
     refresh.land();
@@ -432,11 +439,11 @@ describe("the direction toggle's re-ask holds every door, not only the row write
     const o = ops();
     const finish = await reorderInFlight(o);
 
-    o.api.openEditor(backlink());
+    o.api.openEditor(R(backlink()));
     expect(o.api.editing()).toBeNull();
 
     await finish();
-    o.api.openEditor(backlink());
+    o.api.openEditor(R(backlink()));
     expect(o.api.editing()).toBe("b1");
   });
 
@@ -444,12 +451,12 @@ describe("the direction toggle's re-ask holds every door, not only the row write
     const o = ops();
     const finish = await reorderInFlight(o);
 
-    o.api.openMenu(backlink());
-    expect(o.api.menuLink()).toBeNull();
+    o.api.openMenu(R(backlink()));
+    expect(o.api.menuRow()).toBeNull();
 
     await finish();
-    o.api.openMenu(backlink());
-    expect(o.api.menuLink()).not.toBeNull();
+    o.api.openMenu(R(backlink()));
+    expect(o.api.menuRow()).not.toBeNull();
   });
 
   it("neither prompts for nor performs a delete", async () => {
@@ -458,8 +465,8 @@ describe("the direction toggle's re-ask holds every door, not only the row write
 
     // One row with children (the prompt branch) and one without (the
     // direct write): the guard has to sit before both.
-    await o.api.requestDelete(withChildren(2));
-    await o.api.requestDelete(backlink());
+    await o.api.requestDelete(R(withChildren(2)));
+    await o.api.requestDelete(R(backlink()));
     expect(o.api.deletePrompt()).toBeNull();
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();
 
@@ -470,7 +477,7 @@ describe("the direction toggle's re-ask holds every door, not only the row write
     const o = ops();
     const finish = await reorderInFlight(o);
 
-    await o.api.toggleRowTodo(backlink());
+    await o.api.toggleRowTodo(R(backlink()));
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();
 
     await finish();
@@ -480,20 +487,20 @@ describe("the direction toggle's re-ask holds every door, not only the row write
 describe("an orphan backlink is inert", () => {
   it("opens no editor", () => {
     const o = ops();
-    o.api.openEditor(backlink({ source_page: null }));
+    o.api.openEditor(R(backlink({ source_page: null })));
     expect(o.api.editing()).toBeNull();
   });
 
   it("opens no context menu", () => {
     const o = ops();
-    o.api.openMenu(backlink({ source_page: null }));
+    o.api.openMenu(R(backlink({ source_page: null })));
     // Not an empty sheet: no sheet.
-    expect(o.api.menuLink()).toBeNull();
+    expect(o.api.menuRow()).toBeNull();
   });
 
   it("deletes nothing and asks nothing", async () => {
     const o = ops();
-    await o.api.requestDelete(backlink({ source_page: null }));
+    await o.api.requestDelete(R(backlink({ source_page: null })));
     expect(o.api.deletePrompt()).toBeNull();
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();
     expect(commands.deleteBlock).not.toHaveBeenCalled();
@@ -503,12 +510,12 @@ describe("an orphan backlink is inert", () => {
 describe("an unchanged draft writes nothing", () => {
   it("leaves without a command or a re-ask", async () => {
     const o = ops();
-    o.api.openEditor(backlink());
+    o.api.openEditor(R(backlink()));
 
     // `rawTextWithTodo` rebuilds the canonical word form, so an
     // unconditional commit rewrites `[ ] buy milk` to `TODO buy milk`
     // on a tap in and out — and buys an O(blocks) rescan for it.
-    await o.api.commitRow(backlink(), "cites [[project]]");
+    await o.api.commitRow(R(backlink()), "cites [[project]]");
 
     expect(commands.editBacklinkBlock).not.toHaveBeenCalled();
     expect(o.onEditCommitted).not.toHaveBeenCalled();
@@ -521,7 +528,7 @@ describe("deleting a row whose subtree is not on screen", () => {
     commands.backlinkRowOp.mockResolvedValue(sourceView());
     const o = ops();
 
-    await o.api.requestDelete(backlink());
+    await o.api.requestDelete(R(backlink()));
 
     expect(o.api.deletePrompt()).toBeNull();
     expect(commands.backlinkRowOp).toHaveBeenCalledWith("p1", "b1", "delete");
@@ -530,7 +537,7 @@ describe("deleting a row whose subtree is not on screen", () => {
   it("asks first when children would go with it", async () => {
     const o = ops();
 
-    await o.api.requestDelete(withChildren(3));
+    await o.api.requestDelete(R(withChildren(3)));
 
     // Same threshold the outline's own delete uses, and the row here
     // shows *less*: a backlink renders one flat block, so the subtree
@@ -544,11 +551,11 @@ describe("deleting a row whose subtree is not on screen", () => {
     const o = ops();
     const target = withChildren(1);
 
-    await o.api.requestDelete(target);
+    await o.api.requestDelete(R(target));
     // The link arrives from the caller: `<BlockDeleteConfirm />` closes
     // itself before it confirms, so reading it back out of the prompt
     // would read `null` and delete nothing — silently.
-    await o.api.deleteRow(target);
+    await o.api.deleteRow(R(target));
 
     expect(commands.backlinkRowOp).toHaveBeenCalledWith("p1", "b1", "delete");
     expect(o.api.deletePrompt()).toBeNull();
@@ -557,7 +564,7 @@ describe("deleting a row whose subtree is not on screen", () => {
   it("writes nothing on cancel", async () => {
     const o = ops();
 
-    await o.api.requestDelete(withChildren(1));
+    await o.api.requestDelete(R(withChildren(1)));
     o.api.cancelDelete();
 
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();

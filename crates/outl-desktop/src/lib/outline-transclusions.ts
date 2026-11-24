@@ -45,9 +45,9 @@ export interface TransclusionDeps {
   resolvePageEmbeds: (
     names: string[],
   ) => Promise<Record<string, PageEmbedContent>>;
-  /** Store the block-ref map. */
+  /** Store the block-ref map (merged into what is there). */
   setEmbeds: (map: Record<string, ResolvedBlock>) => void;
-  /** Store the page-embed map. */
+  /** Store the page-embed map (merged into what is there). */
   setPageEmbeds: (map: Record<string, PageEmbedContent>) => void;
 }
 
@@ -72,25 +72,37 @@ export interface TransclusionOps {
    * blanking it — the rows on screen are still the best answer anyone
    * has, and clearing them would read as "this page lost its content".
    */
-  resolve: (outline: BlockNode[]) => void;
+  resolve: (outline: BlockNode[], scope?: TransclusionScope) => void;
+}
+
+/** What is being resolved. Each scope keeps its own skip keys, so the
+ *  page outline and the "Linked from" rows cannot skip each other. */
+export type TransclusionScope = "page" | "backlinks";
+
+interface ScopeState {
+  slug: string;
+  refKey: string;
+  pageEmbedKey: string;
 }
 
 export function createTransclusionOps(
   deps: TransclusionDeps,
 ): TransclusionOps {
-  let lastResolvedSlug = "";
-  let lastRefKey = "";
-  let lastPageEmbedKey = "";
+  const scopes: Record<TransclusionScope, ScopeState> = {
+    page: { slug: "", refKey: "", pageEmbedKey: "" },
+    backlinks: { slug: "", refKey: "", pageEmbedKey: "" },
+  };
 
-  function resolve(outline: BlockNode[]) {
+  function resolve(outline: BlockNode[], scope: TransclusionScope = "page") {
+    const last = scopes[scope];
     const slug = deps.slug() ?? "";
-    const navigated = slug !== lastResolvedSlug;
-    lastResolvedSlug = slug;
+    const navigated = slug !== last.slug;
+    last.slug = slug;
 
     const handles = collectBlockRefHandles(outline);
     const refKey = handles.join("\n");
-    if (navigated || refKey !== lastRefKey) {
-      lastRefKey = refKey;
+    if (navigated || refKey !== last.refKey) {
+      last.refKey = refKey;
       if (handles.length > 0) {
         void deps
           .resolveEmbeds(handles)
@@ -101,8 +113,8 @@ export function createTransclusionOps(
 
     const names = collectPageEmbedNames(outline);
     const pageKey = names.join("\n");
-    if (navigated || pageKey !== lastPageEmbedKey) {
-      lastPageEmbedKey = pageKey;
+    if (navigated || pageKey !== last.pageEmbedKey) {
+      last.pageEmbedKey = pageKey;
       if (names.length > 0) {
         void deps
           .resolvePageEmbeds(names)

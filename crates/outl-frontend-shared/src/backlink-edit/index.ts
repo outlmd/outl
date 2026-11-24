@@ -28,7 +28,7 @@
  * to the wrong document, so the row stays read-only.
  */
 
-import type { Backlink, PageMeta } from "../api/types";
+import type { Backlink, BlockNode, PageMeta } from "../api/types";
 
 /** The `(page, block)` pair an edit of a backlink row is addressed to. */
 export interface BacklinkEditTarget {
@@ -49,10 +49,73 @@ export interface BacklinkCommitPlan {
  * Which block does editing this row mutate, and on which page?
  * `null` when the row has no page to address (an orphan), which is the
  * client's cue to leave it read-only.
+ *
+ * The citing block itself, by `link.block_id`. A **child** of it is
+ * addressed by {@link backlinkEditTargetFor}, which differs only in the
+ * block id it reads.
  */
 export function backlinkEditTarget(link: Backlink): BacklinkEditTarget | null {
   if (link.source_page === null) return null;
   return { pageId: link.source_page.id, blockId: link.block_id };
+}
+
+/**
+ * Which block does editing `node` mutate, where `node` is the citing
+ * block of `link` **or any descendant shipped with it**?
+ *
+ * A child lives on the same source page as the block that cites, so
+ * the page id is the link's; only the block id changes. The backend's
+ * cross-page family refuses an id that is not live, which is the right
+ * answer for a child with a transient id (a page whose sidecar is
+ * absent mints one per uncovered block).
+ */
+export function backlinkEditTargetFor(
+  link: Backlink,
+  node: BlockNode,
+): BacklinkEditTarget | null {
+  if (link.source_page === null) return null;
+  return { pageId: link.source_page.id, blockId: node.id };
+}
+
+/** One drawn row of the "Linked from" panel: a citing block or a descendant of one. */
+export interface BacklinkRow {
+  /**
+   * **Unique across the whole panel**, which `node.id` is not: a block
+   * that cites the page *and* sits under another citing block is drawn
+   * twice, once as its own row and once inside its ancestor's subtree.
+   * Key a `<For>`, an editing slot or a selection on this, never on the
+   * block id — two rows with one key would open one editor in two
+   * places.
+   */
+  key: string;
+  link: Backlink;
+  node: BlockNode;
+  /** 0 for the citing block, 1 for its children, and so on. */
+  depth: number;
+}
+
+/**
+ * The panel's rows in the order the user reads and navigates them: each
+ * citing block, then its subtree depth-first, then the next citing
+ * block.
+ *
+ * The single flattening both GUI clients walk for `j`/`k`, for "is this
+ * id one of mine" guards and for rendering, so the three cannot disagree
+ * about which rows exist. `O(rows)`; callers memoize it per fetch rather
+ * than per render (invariant 15).
+ */
+export function flattenBacklinkRows(links: readonly Backlink[]): BacklinkRow[] {
+  const rows: BacklinkRow[] = [];
+  const walk = (link: Backlink, node: BlockNode, depth: number, key: string) => {
+    rows.push({ key, link, node, depth });
+    for (const child of node.children) {
+      walk(link, child, depth + 1, `${key}>${child.id}`);
+    }
+  };
+  for (const link of links) {
+    walk(link, link.source_block, 0, link.block_id);
+  }
+  return rows;
 }
 
 /**
@@ -111,6 +174,14 @@ export function backlinkCommitPlan(args: {
  *   ~220 characters, which overflows a 24rem toast with nothing but
  *   jsdom behind the test — and mobile has less room, not more.
  *
+ * **It is also only true for the citing block itself.** A sibling made
+ * from a *child* (`rowDepth > 0`) is a block under the same citing
+ * block, so it sits inside the subtree the panel draws and the next
+ * refetch shows it. Saying "no row here shows it" there would be the
+ * same lie, so it returns `null` for that too — again decided here, not
+ * by whichever client remembers to skip it. (A sibling of a depth-4 row
+ * is still depth 4, inside the cap.)
+ *
  * Takes a resolved {@link PageMeta} rather than the {@link Backlink},
  * so there is no unreachable `?? "its own page"` branch: every caller
  * reaches this past a `source_page` check it already had to make.
@@ -121,8 +192,10 @@ export function backlinkCreatedElsewhere(
   page: PageMeta,
   side: "below" | "above",
   openPageId: string | undefined,
+  rowDepth = 0,
 ): string | null {
   if (page.id === openPageId) return null;
+  if (rowDepth > 0) return null;
   const where = side === "below" ? "after" : "before";
   return `Added an empty block ${where} this reference, on ${page.title}. It does not reference this page, so no row here shows it — open ${page.title} to type in it.`;
 }

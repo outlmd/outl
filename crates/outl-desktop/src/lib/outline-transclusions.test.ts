@@ -166,4 +166,20 @@ describe("who calls the resolve", () => {
     const src = read("../components/OutlineView.tsx");
     expect(src).not.toContain("() => appState.outline");
   });
+
+  it("keeps the backlinks scope's skip keys apart from the page's", () => {
+    // The "Linked from" rows resolve through the same ops. A shared key
+    // would let one scope's answer skip the other's, so a page whose
+    // outline and backlinks hold the same embed asked once and the
+    // other kept its unresolved fallback.
+    const d = deps();
+    const ops = createTransclusionOps(d);
+    const embed = block("b", [{ kind: "embed", value: "blk-qs4fmz" }] as BlockNode["tokens"]);
+
+    ops.resolve([embed]);
+    ops.resolve([embed], "backlinks");
+    ops.resolve([embed], "backlinks");
+
+    expect(d.resolveEmbeds).toHaveBeenCalledTimes(2);
+  });
 });

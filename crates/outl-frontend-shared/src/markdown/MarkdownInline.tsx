@@ -444,46 +444,58 @@ export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
             // Orphan handles (unresolved) keep the neutral chip so a
             // dangling ref is still visible. Display-only: the issue
             // (#147) is the render layer; no onClick is added here.
-            const resolved = props.embeds?.[tok.value];
-            if (resolved) {
-              const mark = statusMark(resolved.status);
-              return (
-                <Show
-                  when={variant() === "inline"}
-                  fallback={
-                    <span class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent)">
-                      {mark}
-                      {resolved.text}
-                    </span>
-                  }
-                >
-                  <span class="text-(--color-outl-ref-link-fg) underline decoration-(--color-outl-ref-link-fg)/40 underline-offset-2">
-                    {mark}
-                    {resolved.text}
-                  </span>
-                </Show>
-              );
-            }
+            // Read inside `<Show when>`, never as a `const` here: this
+            // callback runs once per token, and the resolve lands a
+            // round-trip after the row is mounted. A const captured the
+            // map as it was at mount and the handle stayed raw.
             return (
-              <span class="rounded bg-(--color-outl-border)/30 px-1 font-mono text-[13px] text-(--color-outl-fg-dim)">
-                {tok.value}
-              </span>
+              <Show
+                when={props.embeds?.[tok.value]}
+                fallback={
+                  <span class="rounded bg-(--color-outl-border)/30 px-1 font-mono text-[13px] text-(--color-outl-fg-dim)">
+                    {tok.value}
+                  </span>
+                }
+              >
+                {(resolved) => {
+                  const mark = () => statusMark(resolved().status);
+                  return (
+                    <Show
+                      when={variant() === "inline"}
+                      fallback={
+                        <span class="rounded-md bg-(--color-outl-accent)/12 px-1.5 py-0.5 text-[15px] font-medium text-(--color-outl-accent)">
+                          {mark()}
+                          {resolved().text}
+                        </span>
+                      }
+                    >
+                      <span class="text-(--color-outl-ref-link-fg) underline decoration-(--color-outl-ref-link-fg)/40 underline-offset-2">
+                        {mark()}
+                        {resolved().text}
+                      </span>
+                    </Show>
+                  );
+                }}
+              </Show>
             );
           }
           case "embed": {
-            const resolved = props.embeds?.[tok.value];
-            if (resolved) {
-              const mark = statusMark(resolved.status);
-              return (
-                <span class="rounded bg-(--color-outl-accent)/8 px-1 py-0.5 text-[13px] text-(--color-outl-fg)">
-                  ↳ {mark}{resolved.text}
-                </span>
-              );
-            }
             return (
-              <span class="rounded bg-(--color-outl-accent)/12 px-1 font-mono text-[13px] text-(--color-outl-accent)">
-                !{tok.value}
-              </span>
+              <Show
+                when={props.embeds?.[tok.value]}
+                fallback={
+                  <span class="rounded bg-(--color-outl-accent)/12 px-1 font-mono text-[13px] text-(--color-outl-accent)">
+                    !{tok.value}
+                  </span>
+                }
+              >
+                {(resolved) => (
+                  <span class="rounded bg-(--color-outl-accent)/8 px-1 py-0.5 text-[13px] text-(--color-outl-fg)">
+                    ↳ {statusMark(resolved().status)}
+                    {resolved().text}
+                  </span>
+                )}
+              </Show>
             );
           }
           case "pageembed":

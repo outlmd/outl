@@ -129,18 +129,18 @@ pub(crate) enum SidebarSection {
 /// touch ~40 call sites for a feature that's really a different mode
 /// with a different commit target.
 ///
-/// `Focus::Backlink { idx }` indexes `app.backlinks_for_current()`. The
-/// citing block is the whole cursor: both index builders ship
-/// `source_block` shallow (`children: Vec::new()`, the #179 freeze fix),
-/// so the `sub_path` this carried was always empty and `j` never walked
-/// into a backlink's subtree. `idx` is positional, so a stale one reads
-/// as "nothing focused" (`actions::block::backlink_target`).
+/// `Focus::Backlink { idx, node }`: `idx` indexes
+/// `app.backlinks_for_current()`; `node` is a descendant of that row's
+/// citing block (`None` = the block itself), read from
+/// [`App::backlink_subtree`] and held as an id, since paths go stale on
+/// refetch. A stale `idx` or missing `node` falls back, never panics.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum Focus {
     #[default]
     Outline,
     Backlink {
         idx: usize,
+        node: Option<outl_core::id::NodeId>,
     },
 }
 

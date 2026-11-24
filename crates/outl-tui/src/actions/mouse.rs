@@ -183,7 +183,7 @@ mod tests {
     fn a_click_brings_the_cursor_back_from_the_backlinks() {
         let (mut app, _dir) = fresh_app();
         seed_clickable(&mut app);
-        app.focus = Focus::Backlink { idx: 0 };
+        app.focus = Focus::Backlink { idx: 0, node: None };
 
         app.handle_mouse(left_click(3, 2));
 
@@ -202,7 +202,7 @@ mod tests {
     fn a_click_past_the_last_block_moves_nothing() {
         let (mut app, _dir) = fresh_app();
         seed_clickable(&mut app);
-        app.focus = Focus::Backlink { idx: 0 };
+        app.focus = Focus::Backlink { idx: 0, node: None };
 
         app.handle_mouse(left_click(3, 6));
 
