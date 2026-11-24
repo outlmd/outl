@@ -182,4 +182,17 @@ describe("who calls the resolve", () => {
 
     expect(d.resolveEmbeds).toHaveBeenCalledTimes(2);
   });
+
+  // A handle that was asked and not answered is dangling now. The store
+  // has to be told which ones were asked, or its merge keeps the text the
+  // source had before it was deleted.
+  it("tells the store which handles a reply answers for", async () => {
+    const d = deps();
+    const embed = block("b", [{ kind: "embed", value: "blk-gone01" }] as BlockNode["tokens"]);
+    createTransclusionOps(d).resolve([embed]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(d.setEmbeds).toHaveBeenCalledWith({}, ["blk-gone01"]);
+  });
 });

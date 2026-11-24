@@ -58,9 +58,35 @@ impl App {
     pub(crate) fn focused_backlink_target_or_report(&mut self) -> Option<BacklinkTarget> {
         let target = self.focused_backlink_target();
         if target.is_none() {
-            self.status = "this backlink names no block to edit".into();
+            self.status = match self.stale_focused_node() {
+                Some(node) => outl_actions::refusal::stale_backlink_block_unchanged_refusal(
+                    &self.workspace,
+                    node,
+                )
+                .to_string(),
+                None => "this backlink names no block to edit".into(),
+            };
         }
         target
+    }
+
+    /// The descendant the cursor names when the row exists but its
+    /// subtree no longer holds it (a peer deleted or moved it and the
+    /// index was rebuilt): the one `None` of
+    /// [`Self::focused_backlink_target`] that has a catalog sentence.
+    fn stale_focused_node(&self) -> Option<NodeId> {
+        let Focus::Backlink {
+            idx,
+            node: Some(node),
+        } = &self.focus
+        else {
+            return None;
+        };
+        let backlinks = self.backlinks_for_current();
+        let bl = backlinks.get(*idx)?;
+        self.backlink_block_of(bl, Some(*node))
+            .is_none()
+            .then_some(*node)
     }
 }
 

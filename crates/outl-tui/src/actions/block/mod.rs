@@ -29,6 +29,10 @@ use crate::edit_buffer::EditBuffer;
 mod backlink_children_tests;
 mod backlink_commit;
 mod backlink_gesture;
+#[cfg(test)]
+mod backlink_panel_memo_tests;
+#[cfg(test)]
+mod backlink_stale_tests;
 mod backlink_target;
 pub(crate) mod insert;
 mod metadata;

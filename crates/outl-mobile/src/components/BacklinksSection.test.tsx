@@ -10,6 +10,8 @@ const commands = vi.hoisted(() => ({
   backlinkRowOp: vi.fn(),
   createBacklinkSibling: vi.fn(),
   editBacklinkBlock: vi.fn(),
+  resolveEmbeds: vi.fn(() => Promise.resolve({})),
+  resolvePageEmbeds: vi.fn(() => Promise.resolve({})),
   editBlock: vi.fn(),
   toggleTodo: vi.fn(),
   deleteBlock: vi.fn(),

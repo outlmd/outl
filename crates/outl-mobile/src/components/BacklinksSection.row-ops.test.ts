@@ -539,9 +539,9 @@ describe("deleting a row whose subtree is not on screen", () => {
 
     await o.api.requestDelete(R(withChildren(3)));
 
-    // Same threshold the outline's own delete uses, and the row here
-    // shows *less*: a backlink renders one flat block, so the subtree
-    // about to be trashed is invisible.
+    // Same threshold the outline's own delete uses. The card draws only
+    // to depth 4, so a deeper subtree about to be trashed can still be
+    // out of sight.
     expect(o.api.deletePrompt()).toEqual({ id: "b1", descendants: 3 });
     expect(commands.backlinkRowOp).not.toHaveBeenCalled();
   });

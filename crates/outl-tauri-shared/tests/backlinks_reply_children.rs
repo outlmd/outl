@@ -21,7 +21,7 @@ use outl_core::hlc::HlcGenerator;
 use outl_core::id::ActorId;
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
-use outl_tauri_shared::commands::page::page_backlinks;
+use outl_tauri_shared::commands::page::{page_backlinks, SUBTREE_NODE_BUDGET};
 use outl_tauri_shared::host::AppHost;
 use outl_tauri_shared::ProjectionWriter;
 use parking_lot::Mutex;
@@ -66,6 +66,15 @@ impl AppHost for TestHost {
 /// `target` is cited by one block that has a chain of six descendants, and
 /// (through its namespace) by another block that also has a child.
 fn host() -> (TempDir, TestHost) {
+    host_with(|_, _, _, _| {})
+}
+
+/// [`host`], plus whatever `extra` writes into the source page before it
+/// is projected. Takes the workspace, the clock, the source page and the
+/// target page's slug-independent handles it needs.
+fn host_with(
+    extra: impl FnOnce(&mut Workspace, &HlcGenerator, outl_core::id::NodeId, outl_core::id::NodeId),
+) -> (TempDir, TestHost) {
     let tmp = TempDir::new().expect("tmp");
     let root = tmp.path().to_path_buf();
     let actor = ActorId::new();
@@ -100,6 +109,7 @@ fn host() -> (TempDir, TestHost) {
     )
     .expect("its child");
 
+    extra(&mut ws, &hlc, source, target);
     apply_page_md_with_sidecar(&ws, &root, target).expect("target projected");
     apply_page_md_with_sidecar(&ws, &root, source).expect("source projected");
     let _ = list_pages(&ws);
@@ -165,6 +175,100 @@ fn the_warm_index_serves_the_same_children_as_a_cold_one() {
 }
 
 // ---------------------------------------------------------------------
+// Bounded: `SUBTREE_NODE_BUDGET` nodes per reply, spent in display order.
+// ---------------------------------------------------------------------
+
+fn nodes(forest: &[outl_actions::OutlineNode]) -> usize {
+    forest.iter().map(|n| 1 + nodes(&n.children)).sum()
+}
+
+/// `hits` extra citing blocks on the source page, each with `kids` flat
+/// children.
+fn cite_with_kids(
+    hits: usize,
+    kids: usize,
+) -> impl FnOnce(&mut Workspace, &HlcGenerator, outl_core::id::NodeId, outl_core::id::NodeId) {
+    move |ws, hlc, source, _target| {
+        for h in 0..hits {
+            let cite = append_block(ws, hlc, Some(source), Some(&format!("cite {h} [[target]]")))
+                .expect("a citing block");
+            for k in 0..kids {
+                append_block(ws, hlc, Some(cite), Some(&format!("kid {h}.{k}"))).expect("a child");
+            }
+        }
+    }
+}
+
+/// What the index holds for each hit, in the reply's order.
+fn indexed_sizes(host: &TestHost, reply: &outl_tauri_shared::state::BacklinksReply) -> Vec<usize> {
+    let guard = host.backlinks.lock();
+    let idx = guard.as_ref().expect("the reply cached the index");
+    reply
+        .backlinks
+        .iter()
+        .map(|b| idx.subtree(&b.block_id).map_or(0, |s| nodes(&s)))
+        .collect()
+}
+
+#[test]
+fn under_the_budget_the_reply_is_exactly_the_uncapped_one() {
+    // Equivalence: 3 hits x 20 children is far below the budget, so every
+    // hit ships what the index holds, node for node.
+    let (_tmp, host) = host_with(cite_with_kids(3, 20));
+    let reply = block_on(page_backlinks(&host, "target".into())).expect("the reply");
+    let sizes = indexed_sizes(&host, &reply);
+
+    assert!(sizes.iter().sum::<usize>() < SUBTREE_NODE_BUDGET);
+    for (hit, want) in reply.backlinks.iter().zip(&sizes) {
+        assert_eq!(nodes(&hit.source_block.children), *want, "{}", hit.block_id);
+    }
+}
+
+#[test]
+fn over_the_budget_the_rows_shown_first_keep_their_children_and_the_rest_ship_shallow() {
+    // Structural: 8 x 400 = 3,200 subtree nodes against a budget of
+    // 2,000. Asserted on the nodes in the reply, not on its size or its
+    // timing.
+    let (_tmp, host) = host_with(cite_with_kids(8, 400));
+    let reply = block_on(page_backlinks(&host, "target".into())).expect("the reply");
+    let sizes = indexed_sizes(&host, &reply);
+    assert!(
+        sizes.iter().sum::<usize>() > SUBTREE_NODE_BUDGET,
+        "the fixture has to overflow the budget or this proves nothing"
+    );
+
+    // The expected shape, worked out independently: the longest prefix of
+    // hits whose subtrees sum to at most the budget.
+    let mut left = SUBTREE_NODE_BUDGET;
+    let mut open = true;
+    let mut shallow_with_a_subtree = 0;
+    for (hit, size) in reply.backlinks.iter().zip(&sizes) {
+        let fits = open && *size <= left;
+        if fits {
+            left -= size;
+        } else {
+            open = false;
+        }
+        let shipped = nodes(&hit.source_block.children);
+        assert_eq!(shipped, if fits { *size } else { 0 }, "{}", hit.block_id);
+        if !fits && *size > 0 {
+            shallow_with_a_subtree += 1;
+        }
+    }
+    assert!(shallow_with_a_subtree > 0, "some hit was turned away");
+
+    let total: usize = reply
+        .backlinks
+        .iter()
+        .map(|b| nodes(&b.source_block.children))
+        .sum();
+    assert!(total <= SUBTREE_NODE_BUDGET, "{total} nodes shipped");
+    // A hit past the budget is still a hit: the count the panel shows
+    // does not move.
+    assert_eq!(reply.backlinks.len(), sizes.len());
+}
+
+// ---------------------------------------------------------------------
 // Cheap once.
 // ---------------------------------------------------------------------
 
@@ -191,19 +295,26 @@ fn count(src: &str, needle: &str) -> usize {
 fn a_subtree_is_copied_once_and_only_after_the_locks_drop() {
     let path = workspace_root().join("crates/outl-tauri-shared/src/commands/page_backlinks.rs");
     let src = std::fs::read_to_string(&path).expect("page_backlinks.rs");
+    // Production code only: the module's own unit tests build budgets too.
+    let src = src.split("#[cfg(test)]").next().expect("a first segment");
 
     assert_eq!(
-        count(&src, ".with_children("),
+        count(src, ".with_children("),
         1,
         "the deep copy into the reply is `shape_reply`'s and nobody else's"
     );
     assert_eq!(
-        count(&src, ".subtree("),
+        count(src, ".subtree("),
         1,
         "the lookup fetches each hit's Arc once, in `look_up`"
     );
     assert_eq!(
-        count(&src, "look_up("),
+        count(src, "SubtreeBudget::new("),
+        1, /* the shape_reply spend, once per reply */
+        "one budget per reply: a second would hand a hit its children twice over"
+    );
+    assert_eq!(
+        count(src, "look_up("),
         1 /* the definition */ + 3, /* the three phase-3 call sites */
         "every phase-3 branch goes through the one lookup"
     );

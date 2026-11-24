@@ -193,6 +193,22 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
     return above ?? below ?? null;
   }
 
+  /** A row key is the path of ids down to the block, so an indent or an
+   *  outdent changes the key of the block the cursor is on. Once the
+   *  rows are back, point the cursor at the block again: left on the old
+   *  key it names nothing, which answers no keystroke (see
+   *  `neighbourRow`) and reads as the highlight vanishing.
+   *
+   *  Only when the cursor is still where the chord started: a user who
+   *  moved on while the scan ran keeps where they went. */
+  function followBlock(key: string, blockId: string): void {
+    if (appState.selectedBacklinkBlockId !== key) return;
+    const ids = backlinkRowIds();
+    if (ids.includes(key)) return;
+    const moved = ids.find((k) => backlinkRowByKey(k)?.node.id === blockId);
+    if (moved) setAppState("selectedBacklinkBlockId", moved);
+  }
+
   /** Resolve the focused row, surfacing the refusal on the way. **The one
    *  place that decides whether this module answers a keystroke at all**,
    *  and it is synchronous because one of its callers must be: parking
@@ -256,11 +272,16 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
     },
 
     run: (op) =>
-      onRow(async ({ target }) => {
+      onRow(async ({ key, target }) => {
         const view = await safeCall(
           backlinkRowOp(target.pageId, target.blockId, op),
         );
-        if (view) settle(target.pageId, view);
+        if (!view) return;
+        const { refetched } = settle(target.pageId, view);
+        // Not awaited: the chord returns now and the scan keeps its
+        // fire-and-forget contract (`settle`), so a held key is never
+        // queued behind a scan. The cursor follows when the rows land.
+        void refetched.then(() => followBlock(key, target.blockId));
       }),
 
     del: () =>

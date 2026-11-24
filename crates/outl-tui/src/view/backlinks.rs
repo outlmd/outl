@@ -16,6 +16,10 @@
 //! — the single source for backlinks across the TUI, shared with the
 //! mobile client through `outl_actions::backlinks_for_page`.
 
+mod memo;
+
+pub(crate) use memo::{Panel, PanelMemo};
+
 use crate::state::{App, EditTarget, Focus, Mode};
 use crate::view::inline::render_markdown_inline;
 use crate::view::outline::{emit_block_lines, RenderMode};
@@ -89,32 +93,73 @@ fn empty_section_notice(shown: bool, has_rows: bool, index_pending: bool) -> Opt
 ///
 /// Empty result `(vec![], None)` when there are no backlinks for the
 /// current view or the user has toggled the section off via `B`.
+///
+/// An owned copy of [`panel`]'s memoised lines; the frame itself reads
+/// the shared ones.
+#[cfg(test)]
 pub(crate) fn render_backlinks_inline(
     app: &App,
     inner_width: u16,
 ) -> (Vec<Line<'static>>, Option<usize>) {
+    let p = panel(app, inner_width);
+    (p.lines.to_vec(), p.selected)
+}
+
+/// The panel's lines, rebuilt only when something they read changed.
+///
+/// Every keystroke redraws, and a hub page's panel is ~850 citing rows
+/// plus ~3.5k subtree nodes: building it per frame re-tokenised all of
+/// them while the user typed in the outline above (root invariant 15).
+/// See [`memo`] for the key and for what it deliberately does not cover.
+pub(crate) fn panel(app: &App, inner_width: u16) -> Panel {
     if !app.show_backlinks || !app.page_sections_visible() {
-        return (Vec::new(), None);
+        return Panel::empty();
     }
     let backlinks = app.backlinks_for_current();
     if backlinks.is_empty() {
-        // Zero rows has two causes, and they used to render the same.
-        let Some(notice) =
-            empty_section_notice(app.show_backlinks, false, app.has_pending_backlink_index())
-        else {
-            return (Vec::new(), None);
-        };
-        let rule = "─".repeat(inner_width.max(1) as usize);
-        return (
-            vec![
-                Line::from(""),
-                Line::from(Span::styled(rule, app.theme.border)),
-                Line::from(Span::styled(notice, app.theme.dim)),
-            ],
-            None,
-        );
+        return Panel::from_built(build_empty_panel(app, inner_width));
     }
+    memo::cached_or_build(app, inner_width, &backlinks, || {
+        build_panel(app, inner_width, &backlinks)
+    })
+}
 
+/// [`render_backlinks_inline`] without the memo: the old full render,
+/// the reference the memo's equivalence tests compare against.
+#[cfg(test)]
+pub(crate) fn render_backlinks_uncached(
+    app: &App,
+    inner_width: u16,
+) -> (Vec<Line<'static>>, Option<usize>) {
+    build_panel(app, inner_width, &app.backlinks_for_current())
+}
+
+/// The section for zero rows: nothing, or the "indexing…" notice.
+fn build_empty_panel(app: &App, inner_width: u16) -> (Vec<Line<'static>>, Option<usize>) {
+    // Zero rows has two causes, and they used to render the same.
+    let Some(notice) =
+        empty_section_notice(app.show_backlinks, false, app.has_pending_backlink_index())
+    else {
+        return (Vec::new(), None);
+    };
+    let rule = "─".repeat(inner_width.max(1) as usize);
+    (
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(rule, app.theme.border)),
+            Line::from(Span::styled(notice, app.theme.dim)),
+        ],
+        None,
+    )
+}
+
+/// The uncached build: every row, every child. Kept separate so the
+/// memo's equivalence test has the old full render to compare against.
+fn build_panel(
+    app: &App,
+    inner_width: u16,
+    backlinks: &[outl_actions::Backlink],
+) -> (Vec<Line<'static>>, Option<usize>) {
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut selected_line: Option<usize> = None;
 

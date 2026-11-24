@@ -192,3 +192,7 @@ The split exists because of where each cost lands (invariant 15).
 With the subtree in the side table the lookup still clones a leaf, and `BacklinkIndex::subtree(block_id)` is a hash lookup plus a refcount bump, safe to call per hit under the same lock.
 The deep copy happens once per direct hit, **after** the locks drop and before `sort_backlinks`, in `Backlink::with_children`; on the GUI that is `shape_reply` in `outl-tauri-shared`'s `page_backlinks`.
 The TUI reads the `Arc` from its own index and never copies it into the list.
+
+The copy is bounded: `shape_reply` ships at most `SUBTREE_NODE_BUDGET` subtree nodes per reply, spent in display order after the sort.
+Rows past the budget ship shallow, like a namespace mention, and show no "+N" (that would need a wire field).
+Numbers and what remains: [`performance.md`](performance.md#a-citing-blocks-children-carried-by-the-backlinks-index).

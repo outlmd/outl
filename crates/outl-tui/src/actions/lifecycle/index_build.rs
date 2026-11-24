@@ -24,6 +24,7 @@ impl App {
     #[allow(dead_code)]
     pub(crate) fn rebuild_index(&mut self) {
         self.index = WorkspaceIndex::build(&self.workspace_root);
+        self.bump_render_epoch();
         // Cancel any pending background build — we just produced a
         // fresher result. The thread keeps running but its send goes
         // to a dropped receiver.
@@ -68,6 +69,7 @@ impl App {
         match rx.try_recv() {
             Ok(idx) => {
                 self.index = idx;
+                self.bump_render_epoch();
                 self.index_rx = None;
                 // A query typed while the build was in flight was
                 // filtered against the old index; re-run it.

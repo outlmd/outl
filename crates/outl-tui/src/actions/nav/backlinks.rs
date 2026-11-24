@@ -85,6 +85,9 @@ impl App {
             Ok(idx) => {
                 *self.backlink_index.borrow_mut() = Some(idx);
                 self.backlink_index_rx = None;
+                // A descendant the rebuilt index dropped must not stay
+                // in the cursor: the clamp moves it to the citing block.
+                self.focus = self.clamp_backlink_focus(self.focus.clone());
                 true
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => false,

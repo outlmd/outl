@@ -74,9 +74,9 @@ pub struct Backlink {
     ///
     /// What reads it is the **ordering**: `BacklinkIndex::collect_*`
     /// sorts a page's hits by this path so they come back in outline
-    /// order. It is not a cursor: the TUI's `Focus::Backlink { idx }`
-    /// names a whole row, since `source_block` has no children to
-    /// descend into.
+    /// order. It is not a cursor: the TUI names a child of a citing
+    /// block with `Focus::Backlink { idx, node }`, by block id, because
+    /// a path goes stale when the rows are refetched.
     pub source_block_path: Vec<usize>,
     /// Ancestor blocks between the page root and the source block,
     /// **root-first**: `ancestors[0]` is the direct child of the page

@@ -79,6 +79,19 @@ function stickyAheadOfLog(view: PageView): PageView["md_ahead_of_log"] {
  */
 let transclusions: TransclusionOps | null = null;
 
+/** The patch a reply makes to an embed map. A Solid store merges an object
+ *  into what is there, so a key that has to go is written as `undefined`
+ *  (which deletes it): what was asked and not answered is dangling now,
+ *  and must not keep the text it had when it last resolved. */
+function answerPatch<T>(
+  answered: Record<string, T>,
+  asked: string[],
+): Record<string, T> {
+  const patch: Record<string, T | undefined> = {};
+  for (const key of asked) patch[key] = undefined;
+  return { ...patch, ...answered } as Record<string, T>;
+}
+
 function transclusionOps(): TransclusionOps {
   transclusions ??= createTransclusionOps({
     slug: () => appState.page?.slug,
@@ -87,9 +100,9 @@ function transclusionOps(): TransclusionOps {
     // Merge, never replace: the "Linked from" rows resolve their own
     // handles into the same maps, and a page resolve that replaced them
     // would drop those until the next backlinks fetch.
-    setEmbeds: (map) => setAppState("embeds", (prev) => ({ ...prev, ...map })),
-    setPageEmbeds: (map) =>
-      setAppState("pageEmbeds", (prev) => ({ ...prev, ...map })),
+    setEmbeds: (map, asked) => setAppState("embeds", answerPatch(map, asked)),
+    setPageEmbeds: (map, asked) =>
+      setAppState("pageEmbeds", answerPatch(map, asked)),
   });
   return transclusions;
 }

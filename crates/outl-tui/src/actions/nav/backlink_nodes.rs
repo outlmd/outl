@@ -54,11 +54,20 @@ impl App {
             .collect()
     }
 
-    /// The block `node` names under `bl`, or the citing block itself
-    /// when `node` is `None` or the subtree no longer holds it.
+    /// The block `node` names under `bl`: the citing block for `None`,
+    /// the descendant for `Some`.
+    ///
+    /// `None` when `node` is a descendant the subtree no longer holds.
+    /// Falling back to the citing block here would aim a delete or an
+    /// indent at the parent and its whole subtree after a peer removed
+    /// the child the user was on; the fall-back belongs to
+    /// `clamp_backlink_focus`, which moves the *cursor*, never to a
+    /// resolver a mutation reads.
     pub(crate) fn backlink_block_of(&self, bl: &Backlink, node: Option<NodeId>) -> Option<NodeId> {
-        let id = node.filter(|n| self.backlink_row_stops(bl).contains(&Some(*n)));
-        id.or_else(|| node_id(&bl.block_id))
+        match node {
+            None => node_id(&bl.block_id),
+            Some(n) => self.backlink_row_stops(bl).contains(&Some(n)).then_some(n),
+        }
     }
 
     /// The text of the block the cursor names inside `bl`.

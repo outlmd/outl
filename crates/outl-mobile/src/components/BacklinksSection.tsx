@@ -1,4 +1,4 @@
-import { For, JSX, Show, createMemo, onCleanup } from "solid-js";
+import { For, JSX, Show, createEffect, createMemo, onCleanup } from "solid-js";
 import type {
   Backlink,
   BacklinksOrder,
@@ -10,13 +10,20 @@ import {
   backlinkEditTargetFor,
   flattenBacklinkRows,
 } from "@outl/shared/backlink-edit";
-import { CrumbTrail, MarkdownInline, MarkdownTable } from "@outl/shared/markdown";
+import {
+  CrumbTrail,
+  type EmbedMap,
+  MarkdownInline,
+  MarkdownTable,
+  type PageEmbedMap,
+} from "@outl/shared/markdown";
 import { rawTextWithTodo, sameCrumbTrail } from "@outl/shared/outline";
 import { PageGlyph } from "@outl/shared/icons";
 import { createLongPress } from "../lib/long-press";
 import { BacklinkRowEditor } from "./BacklinkRowEditor";
 import { BlockContextMenu } from "./BlockContextMenu";
 import { BlockDeleteConfirm } from "./JournalDeleteDialogs";
+import { createEmbedResolver } from "./Journal.embeds";
 import {
   type BacklinkCommit,
   createBacklinkRowOps,
@@ -99,6 +106,19 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
     return m;
   });
   const allRows = () => [...byLink().values()].flat();
+
+  // These rows are other pages' blocks, so the open page's embed map
+  // (`Journal.tsx`) never holds their handles: a child that is only
+  // `!((blk-…))` rendered the raw handle. The panel resolves its own, in
+  // its own resolver, so neither map can replace the other. The "slug"
+  // is the set of rows, which is what changes the question being asked.
+  const embedResolver = createEmbedResolver(() =>
+    props.backlinks.map((l) => l.block_id).join(","),
+  );
+  createEffect(() => {
+    const roots = props.backlinks.map((l) => l.source_block);
+    if (roots.length > 0) embedResolver.resolve(roots);
+  });
 
   /**
    * Group backlinks by their source page. `null` source (orphan
@@ -226,6 +246,8 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                             <BacklinkRowView
                               row={row}
                               ops={ops}
+                              embeds={embedResolver.embeds()}
+                              pageEmbeds={embedResolver.pageEmbeds()}
                               bordered={idx() > 0 && row.depth === 0}
                               crumbs={row.depth === 0 && showCrumbs}
                             />
@@ -298,6 +320,8 @@ type RowOps = ReturnType<typeof createBacklinkRowOps>;
 function BacklinkRowView(props: {
   row: BacklinkRow;
   ops: RowOps;
+  embeds: EmbedMap;
+  pageEmbeds: PageEmbedMap;
   bordered: boolean;
   crumbs: boolean;
 }): JSX.Element {
@@ -392,6 +416,8 @@ function BacklinkRowView(props: {
                     <MarkdownInline
                       tokens={props.row.node.tokens}
                       variant="inline"
+                      embeds={props.embeds}
+                      pageEmbeds={props.pageEmbeds}
                     />
                   }
                 >

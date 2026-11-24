@@ -61,6 +61,7 @@ impl App {
         // didn't change.)
         let cur_path = self.current_path();
         self.index.patch_page(&cur_path, &self.page);
+        self.bump_render_epoch();
         self.toast(crate::state::ToastKind::Info, "reloaded from disk");
         true
     }

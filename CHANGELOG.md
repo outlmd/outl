@@ -13,12 +13,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   On the TUI and the desktop `j` / `k` walk onto them; on mobile each child is its own tap and long-press target.
   Every child edits through the cross-page family a citing block already used (`edit_backlink_block`, `backlink_row_op`, `create_backlink_sibling`), so a stale row refuses instead of re-targeting.
   That refusal now also covers a block that is still live but a peer moved to another page: the check asks that the block lives under the row's page, with the same wording.
-  Mobile's delete on a citing block with children now asks first, which it never did because the count was always zero.
+  Mobile's delete on a citing block with children now reaches its confirmation, which it never did because the descendant count was always zero.
 
   **The index keeps the children in a side table, not in the hit.**
   A lookup clones its hits under the workspace lock, and a hit that carried a subtree would deep-copy it there, which is the shape of the #179 freeze.
   `IndexedEntry.subtree` holds an `Arc<[OutlineNode]>` beside the leaf, `BacklinkIndex::subtree` is a hash lookup and a refcount bump, and the one deep copy per direct hit (`Backlink::with_children`) happens after the locks drop and before the sort.
   Only the from-disk builder fills it.
+  A reply ships at most 2,000 subtree nodes in total, spent on the rows shown first.
+  A row past that shows no children, and no "+N" yet, because that needs a wire field.
+  Dropping the old index on a commit now happens on a separate thread instead of under the workspace lock.
 
   **A block can be drawn twice.**
   A block that cites the page and also sits under another citing block has its own row and appears again inside the ancestor's children.

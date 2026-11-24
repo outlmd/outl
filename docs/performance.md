@@ -194,8 +194,20 @@ Cost on the maintainer's graph (3,456 pages, release build, a copy of the `.md` 
 
 The build time did not move, because the parse already held the tree and only threw the children away.
 The price is memory (+49 MB, about 58% on top of the index) and a payload 3.3x larger for the busiest page.
-That payload is the open question: a breadth cap with a "+N" row is the next step if it shows up on a phone.
+
+**What bounds the payload.**
+`shape_reply` spends `SUBTREE_NODE_BUDGET` (2,000 nodes) per reply, counting each subtree's nodes before the deep copy and in display order, after the sort.
+The first hit whose subtree does not fit closes the budget, so the rows from the top keep their children and every row below ships shallow, exactly as before this feature.
+The measured 2,486 KB is about 0.5 KB per subtree node, so the busiest page lands near 1.7 MB (derived from that rate, not re-measured), and a page whose citing blocks have a handful of children each is unaffected.
+The panel refetches on every peer reload and cross-page commit, which is why the reply, not the first open, is what is bounded.
+What remains: a row past the budget shows no children and no "+N" indicator, because that needs a new wire field (pins in `wire_types.rs`, three clients).
+A first hit larger than the whole budget starves the rows below it.
 Nothing here is measured on a device, only on the desktop build.
+
+**The old index is freed off the commit path.**
+Dropping a `BacklinkIndex` is a free of every small `OutlineNode` and `Arc` allocation in it (the +49 MB above).
+`invalidate_backlink_index` and the page merge/rename tail used to do that while the workspace lock was held.
+They now take the value out of the slot and drop it on a throwaway thread (`commit::discard_slot`), after the slot's guard is released.
 
 ## The checklist
 

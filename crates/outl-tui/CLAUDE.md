@@ -658,6 +658,19 @@ Net: `backlink_commit/ahead_of_log_tests.rs`, asserting on `ws.log().len()` and 
 a `d d` on the only backlink of an off-screen page empties the panel, and `Focus::Backlink` over zero rows has no keyboard way out (`j` / `k` both decline a stale `idx` by design, and every chord declines it too).
 Net: `a_cross_page_delete_that_empties_the_panel_returns_the_cursor_to_the_outline`, `an_edit_that_drops_the_last_self_citation_returns_the_cursor_to_the_outline`.
 
+**A descendant the subtree lost is refused, never re-aimed.**
+`backlink_block_of` returns `None` for a `node` the row's stops no longer hold, so `d d` / `Tab` / `Ctrl+T` say the catalog's stale-block sentence instead of resolving to the citing block and acting on the parent's whole subtree.
+Falling back to the citing block is `clamp_backlink_focus`'s job, and it now also runs when `poll_backlink_index_updates` swaps an index in.
+Both gates (`enter_insert_backlink` and `backlink_block_can_take_the_write`) ask `backlink_row_is_live_on(page, block)`: live **and** still under the row's page, the same verdict as `outl_tauri_shared`'s `row_is_live_on`, because `commit_page` scopes the undo snapshot and the projection to that page.
+Net: `actions/block/backlink_stale_tests.rs`.
+
+**The panel's lines are memoised** (`view/backlinks/memo.rs`), because every keystroke redraws and a hub page's panel is ~850 rows plus ~3.5k subtree nodes (invariant 15).
+The key is a hash of what the renderer reads from the rows, the focused row's mode (the live buffer only while it is edited in the panel), width, sort direction and `App::bump_render_epoch`.
+**A writer of `App::index` or `App::theme` must bump the epoch** (page patches go through `patch_index_page`); a stale ref chip is what a missed one looks like.
+A key change rebuilds the whole panel, so `j`/`k` and typing inside a row cost what they did; typing in the outline above no longer builds anything.
+`view::window::visible_window` copies only the on-screen rows out of the memo.
+Net: `actions/block/backlink_panel_memo_tests.rs` (equivalence with the full render, `PanelMemo::builds` for "builds nothing", and a miss per key input).
+
 **One `Tab` mid-edit records two undo entries**, where the `.md`-first route recorded one: the in-flight `commit_insert` snapshots, then the reparent commit snapshots again.
 Both belong to the source page and `top_applies_here` still gates them, so this is finer granularity rather than a leak — written down because it is a behaviour change and `u` now takes two presses to get back past a `Tab` typed into.
 

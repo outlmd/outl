@@ -16,6 +16,8 @@ const commands = vi.hoisted(() => ({
   backlinkRowOp: vi.fn(),
   createBacklinkSibling: vi.fn(),
   editBacklinkBlock: vi.fn(),
+  resolveEmbeds: vi.fn(() => Promise.resolve({})),
+  resolvePageEmbeds: vi.fn(() => Promise.resolve({})),
 }));
 vi.mock("@outl/shared/api/commands", () => commands);
 vi.mock("../lib/haptics", () => ({ haptic: vi.fn() }));
@@ -180,5 +182,32 @@ describe("backlink subtree rows", () => {
 
     expect(commands.createBacklinkSibling).toHaveBeenCalledWith("p1", "c1", "below");
     expect(h.onEditCommitted.mock.calls[0][0].created.depth).toBe(1);
+  });
+
+  // These rows are other pages' blocks, so the open page's embed map never
+  // held their handles: a child that is only `!((blk-…))` showed the raw
+  // handle until the panel started resolving its own.
+  it("resolves a block embed that sits in a child row", async () => {
+    commands.resolveEmbeds.mockResolvedValueOnce({
+      "blk-qs4fmz": {
+        handle: "blk-qs4fmz",
+        text: "the embedded source",
+        page_slug: "elsewhere",
+        status: null,
+        children: [],
+      },
+    });
+    const embed = {
+      ...node("e"),
+      text: "!((blk-qs4fmz))",
+      tokens: [{ kind: "embed", value: "blk-qs4fmz" }],
+    } as unknown as BlockNode;
+    const h = mount([link("a", [embed])]);
+    expect(h.host.textContent).toContain("!blk-qs4fmz");
+
+    await vi.waitFor(() =>
+      expect(h.host.textContent).toContain("the embedded source"),
+    );
+    expect(h.host.textContent).not.toContain("!blk-qs4fmz");
   });
 });

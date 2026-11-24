@@ -11,6 +11,7 @@
 //! derived from the page list phase 1 already read — see
 //! [`finish_lookup`].
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -153,6 +154,56 @@ pub(crate) async fn compute_backlinks_offloaded(
 /// payload, carries the scale.
 pub(crate) const NAMESPACE_BACKLINK_CAP: usize = 50;
 
+/// How many subtree nodes one `page_backlinks` reply may carry, summed
+/// over every direct hit.
+///
+/// Direct hits have no breadth cap of their own, and a citing block's
+/// children are four levels deep. The busiest page on the maintainer's
+/// graph (853 direct hits, 3,572 subtree nodes behind 615 of them) went
+/// from 753 KB to 2,486 KB per reply, about 0.5 KB per node, and the
+/// panel refetches on every peer reload and every cross-page commit.
+/// 2,000 nodes keeps that page near 1.7 MB (derived from the measured
+/// per-node cost, not re-measured) and leaves an ordinary page, whose
+/// citing blocks have a handful of children each, entirely unaffected.
+/// Numbers in `docs/performance.md`.
+pub const SUBTREE_NODE_BUDGET: usize = 2_000;
+
+/// Spends [`SUBTREE_NODE_BUDGET`] in display order, **as a prefix**: the
+/// first hit whose subtree does not fit closes the budget for it and
+/// every hit after, so what a reader sees is "rows from the top have
+/// their children, rows below do not" and never a gap in the middle.
+struct SubtreeBudget {
+    left: usize,
+    open: bool,
+}
+
+impl SubtreeBudget {
+    fn new(nodes: usize) -> Self {
+        Self {
+            left: nodes,
+            open: true,
+        }
+    }
+
+    /// Take `nodes` out of the budget, or close it. Counting is a read
+    /// of an `Arc` the index already holds: nothing is allocated for a
+    /// hit that is turned away.
+    fn admit(&mut self, nodes: usize) -> bool {
+        if self.open && nodes <= self.left {
+            self.left -= nodes;
+            true
+        } else {
+            self.open = false;
+            false
+        }
+    }
+}
+
+/// Nodes in a forest, the node itself included.
+fn node_count(nodes: &[OutlineNode]) -> usize {
+    nodes.iter().map(|n| 1 + node_count(&n.children)).sum()
+}
+
 /// A lookup's answer: the split, plus each **direct** hit's stored
 /// subtree, in the same order. Everything in it is a leaf clone or a
 /// refcount, so it is safe to build while both locks are held.
@@ -179,7 +230,8 @@ fn look_up(idx: &BacklinkIndex, ws: &Workspace, meta: &PageMeta) -> Looked {
 /// Shape a [`Looked`] into the reply, **holding no lock**.
 ///
 /// A direct hit ships with its children (the capped subtree, copied here,
-/// once per hit, **before** the sort moves the backlinks). The namespace
+/// once per hit, **after** the sort, so [`SUBTREE_NODE_BUDGET`] is spent
+/// on the rows the user sees first; hits past it ship shallow). The namespace
 /// set ships through `into_shallow`: its rows are capped, collapsed and
 /// text-only, and it can be drawn from thousands of hits.
 ///
@@ -196,16 +248,24 @@ fn shape_reply(
     backlinks_order: outl_config::BacklinksOrder,
 ) -> BacklinksReply {
     let Looked { split, subtrees } = looked;
-    let mut backlinks: Vec<_> = split
+    // Keyed by block id because the sort below moves the hits: the budget
+    // is spent in the order the user sees, not the order the index walked.
+    let mut subtrees: HashMap<String, Arc<[OutlineNode]>> = split
         .direct
-        .into_iter()
+        .iter()
         .zip(subtrees)
-        .map(|(b, kids)| match kids {
-            Some(kids) => b.with_children(&kids),
-            None => b,
+        .filter_map(|(b, kids)| Some((b.block_id.clone(), kids?)))
+        .collect();
+    let mut backlinks = split.direct;
+    sort_backlinks(&mut backlinks, backlinks_order.newest_first());
+    let mut budget = SubtreeBudget::new(SUBTREE_NODE_BUDGET);
+    let backlinks: Vec<_> = backlinks
+        .into_iter()
+        .map(|b| match subtrees.remove(&b.block_id) {
+            Some(kids) if budget.admit(node_count(&kids)) => b.with_children(&kids),
+            _ => b,
         })
         .collect();
-    sort_backlinks(&mut backlinks, backlinks_order.newest_first());
 
     // Sort before truncating, or the 50 that ship are whichever the
     // walk happened to reach first rather than the newest.
@@ -228,5 +288,22 @@ fn shape_reply(
         // namespace question is asked of titles. See
         // `outl_actions::namespace`.
         namespace_children: namespace_descendants(metas, &meta.title),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_budget_is_a_prefix_not_a_best_fit() {
+        let mut b = SubtreeBudget::new(10);
+        assert!(b.admit(4));
+        assert!(b.admit(6), "exactly the remainder fits");
+        assert!(!b.admit(1), "spent");
+        let mut b = SubtreeBudget::new(10);
+        assert!(b.admit(4));
+        assert!(!b.admit(7), "does not fit");
+        assert!(!b.admit(1), "and a smaller one behind it is not let past");
     }
 }

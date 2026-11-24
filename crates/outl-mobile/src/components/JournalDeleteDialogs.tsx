@@ -65,8 +65,8 @@ export function JournalDeleteDialogs(props: {
 /**
  * The single-block prompt on its own, because a **second** surface
  * raises it: a long press on a backlink row can delete the citing block
- * on the page it lives on, and the subtree going with it is not on
- * screen there at all (`BacklinksSection.row-ops.ts`).
+ * on the page it lives on, and the subtree going with it may not be on
+ * screen there past the card's depth cap (`BacklinksSection.row-ops.ts`).
  *
  * Exported so that surface reuses the question and the wording instead
  * of writing a third copy of "this block has N children" — the drift

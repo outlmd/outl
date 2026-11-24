@@ -89,6 +89,7 @@ impl App {
             index_rx: None,
             backlink_index: std::cell::RefCell::new(None),
             namespace_children: std::cell::RefCell::new(None),
+            panel_memo: Default::default(),
             backlink_index_rx: None,
             shared_workspace,
             jsonl_rx: None,

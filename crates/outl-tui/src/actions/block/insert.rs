@@ -78,7 +78,7 @@ impl App {
     /// user's own text. The op log is the source of truth (invariant 1),
     /// so it is what the buffer starts from.
     fn enter_insert_backlink(&mut self, pos: InsertCursor) {
-        let Some(target) = self.focused_backlink_target() else {
+        let Some(target) = self.focused_backlink_target_or_report() else {
             return;
         };
         // Whether the block is live is asked here, before the edit
@@ -105,7 +105,8 @@ impl App {
         // A live block with **no text record** is an empty block, not a
         // missing one: `o` on a child makes exactly that, and the panel
         // now has a row to put the caret on.
-        let live_text = outl_actions::is_live(&self.workspace, target.block)
+        let live_text = self
+            .backlink_row_is_live_on(target.page, target.block)
             .then(|| self.workspace.block_text(target.block).unwrap_or_default());
         let Some(original_text) = live_text else {
             self.status = outl_actions::refusal::stale_backlink_block_unchanged_refusal(

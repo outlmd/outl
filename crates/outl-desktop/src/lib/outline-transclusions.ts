@@ -45,10 +45,18 @@ export interface TransclusionDeps {
   resolvePageEmbeds: (
     names: string[],
   ) => Promise<Record<string, PageEmbedContent>>;
-  /** Store the block-ref map (merged into what is there). */
-  setEmbeds: (map: Record<string, ResolvedBlock>) => void;
-  /** Store the page-embed map (merged into what is there). */
-  setPageEmbeds: (map: Record<string, PageEmbedContent>) => void;
+  /**
+   * Store the block-ref map (merged into what is there). `asked` is every
+   * handle this reply answers for: one of them missing from `map` is a
+   * dangling ref, and its old entry has to go rather than keep showing
+   * text the source no longer has.
+   */
+  setEmbeds: (map: Record<string, ResolvedBlock>, asked: string[]) => void;
+  /** Store the page-embed map (merged into what is there); `asked` as above. */
+  setPageEmbeds: (
+    map: Record<string, PageEmbedContent>,
+    asked: string[],
+  ) => void;
 }
 
 export interface TransclusionOps {
@@ -106,7 +114,7 @@ export function createTransclusionOps(
       if (handles.length > 0) {
         void deps
           .resolveEmbeds(handles)
-          .then(deps.setEmbeds)
+          .then((map) => deps.setEmbeds(map, handles))
           .catch(() => {});
       }
     }
@@ -118,7 +126,7 @@ export function createTransclusionOps(
       if (names.length > 0) {
         void deps
           .resolvePageEmbeds(names)
-          .then(deps.setPageEmbeds)
+          .then((map) => deps.setPageEmbeds(map, names))
           .catch(() => {});
       }
     }

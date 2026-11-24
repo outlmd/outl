@@ -266,4 +266,45 @@ describe("acting on a backlink row that is a descendant", () => {
     });
     expect(appState.notice).toBeNull();
   });
+
+  // A key is the path of ids down to the block, so an indent rewrites the
+  // key of the block the cursor is on. Left on the old one the highlight
+  // vanishes and j / k answer nothing.
+  it("indenting a child keeps the cursor on that block under its new parent", async () => {
+    setAppState("selectedBacklinkBlockId", "blk-a>c2");
+    vi.mocked(pageBacklinks).mockResolvedValue(
+      reply([
+        link(block("blk-a", [block("c1", [block("gc1"), block("c2")])])),
+        link(block("blk-b")),
+      ]),
+    );
+
+    await handlers().IndentBlock?.();
+
+    expect(backlinkRowOp).toHaveBeenCalledWith("pg-source", "c2", "indent");
+    await vi.waitFor(() =>
+      expect(appState.selectedBacklinkBlockId).toBe("blk-a>c1>c2"),
+    );
+  });
+
+  it("leaves the cursor alone when the user moved on while the rows were coming back", async () => {
+    setAppState("selectedBacklinkBlockId", "blk-a>c2");
+    let land: (r: PageBacklinks) => void = () => {};
+    vi.mocked(pageBacklinks).mockReturnValue(
+      new Promise<PageBacklinks>((r) => (land = r)),
+    );
+
+    await handlers().IndentBlock?.();
+    await vi.waitFor(() => expect(pageBacklinks).toHaveBeenCalled());
+    setAppState("selectedBacklinkBlockId", "blk-b");
+    land(
+      reply([
+        link(block("blk-a", [block("c1", [block("gc1"), block("c2")])])),
+        link(block("blk-b")),
+      ]),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(appState.selectedBacklinkBlockId).toBe("blk-b");
+  });
 });
