@@ -5,6 +5,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Fixed
+
+- **The TUI footer shows the message that explains a refused key, at any width.**
+  The status line used to paint after a 76-cell hint, so a terminal under ~128 columns cut every message off the edge: `no code block or link under cursor`, `unknown command`, the `r` / `f` prompts, the `y/n` confirmations.
+  A message now replaces the hint (a constant per mode) and is cut with `…` when it still does not fit.
+  ([#428](https://github.com/outlmd/outl/issues/428))
+
 ### Added
 
 - **Moving a block has the same keys everywhere it can have them.**
