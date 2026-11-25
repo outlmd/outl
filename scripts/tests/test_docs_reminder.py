@@ -11,12 +11,15 @@ Run: python3 scripts/tests/test_docs_reminder.py
 
 import importlib.util
 import pathlib
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("docs_reminder", ROOT / "scripts" / "docs_reminder.py")
 assert spec and spec.loader
 dr = importlib.util.module_from_spec(spec)
+# @dataclass looks the module up in sys.modules while it executes.
+sys.modules[spec.name] = dr
 spec.loader.exec_module(dr)
 
 
