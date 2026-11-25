@@ -65,7 +65,10 @@ pub(crate) fn render_footer(f: &mut ratatui::Frame<'_>, area: Rect, app: &App) {
         ])
         .split(inner);
 
-    f.render_widget(Paragraph::new(left_segments(app)), cols[0]);
+    f.render_widget(
+        Paragraph::new(left_segments(app, usize::from(cols[0].width))),
+        cols[0],
+    );
     f.render_widget(
         Paragraph::new(right_segments(app)).alignment(ratatui::layout::Alignment::Right),
         cols[1],
@@ -241,7 +244,7 @@ fn format_age(secs: u64) -> String {
 
 // ─── footer ───────────────────────────────────────────────────────────
 
-fn left_segments(app: &App) -> Line<'static> {
+fn left_segments(app: &App, width: usize) -> Line<'static> {
     let (mode_label, mode_style) = match app.mode {
         Mode::Normal => (" NORMAL ", app.theme.status_normal),
         Mode::Insert { .. } => (" INSERT ", app.theme.status_insert),
@@ -282,21 +285,51 @@ fn left_segments(app: &App) -> Line<'static> {
         spans.push(Span::raw(" "));
     }
 
-    let hint = match app.mode {
-        Mode::Insert { .. } => HELP_HINT_INSERT,
-        Mode::Visual { .. } => HELP_HINT_VISUAL,
-        Mode::Normal => HELP_HINT_NORMAL,
-    };
-    spans.push(Span::styled(hint, app.theme.hint));
-
-    // Transient status message ("saved", "reconcile failed: …"). When
-    // empty, no extra padding.
-    if !app.status.is_empty() {
+    // A status message outranks the hint. The hint is a constant per
+    // mode, so after the first session it carries nothing; the message
+    // is the one thing the user could not have predicted, and it used
+    // to be painted after 76 cells of hint, i.e. off the edge of any
+    // terminal under ~128 columns (#428).
+    if app.status.is_empty() {
+        let hint = match app.mode {
+            Mode::Insert { .. } => HELP_HINT_INSERT,
+            Mode::Visual { .. } => HELP_HINT_VISUAL,
+            Mode::Normal => HELP_HINT_NORMAL,
+        };
+        spans.push(Span::styled(hint, app.theme.hint));
+    } else {
+        let used: usize = spans.iter().map(|s| s.content.width()).sum();
+        let room = width.saturating_sub(used + 2);
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(app.status.clone(), app.theme.status_message));
+        spans.push(Span::styled(
+            elide(&app.status, room),
+            app.theme.status_message,
+        ));
     }
 
     Line::from(spans)
+}
+
+/// Clip `s` to `max` display cells, ending in `…` when anything was
+/// dropped, so a cut message never reads as a complete one.
+fn elide(s: &str, max: usize) -> String {
+    if s.width() <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in s.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w + 1 > max {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    if max > 0 {
+        out.push('\u{2026}');
+    }
+    out
 }
 
 fn right_segments(app: &App) -> Line<'static> {
@@ -329,4 +362,73 @@ fn right_segments_width(app: &App) -> u16 {
         .saturating_add(saved)
         .saturating_add(help)
         .saturating_add(2) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::App;
+    use outl_core::{ActorId, Workspace};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use tempfile::TempDir;
+
+    fn painted(status: &str, w: u16) -> String {
+        let dir = TempDir::new().unwrap();
+        let actor = ActorId::new();
+        let ws = Workspace::open_in_memory(actor).unwrap();
+        let mut app = App::new_for_tests(
+            dir.path().to_path_buf(),
+            ws,
+            actor,
+            crate::theme::default_theme(),
+            false,
+        )
+        .unwrap();
+        app.status = status.to_string();
+        let mut terminal = Terminal::new(TestBackend::new(w, 24)).unwrap();
+        terminal
+            .draw(|f| crate::view::render_app(f, &mut app))
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn a_status_message_reaches_an_80_column_footer() {
+        let screen = painted("no code block or link under cursor", 80);
+        assert!(
+            screen.contains("no code block"),
+            "status never painted: {screen}"
+        );
+    }
+
+    #[test]
+    fn a_status_too_long_for_the_footer_says_it_was_cut() {
+        let screen = painted(&"x".repeat(200), 80);
+        assert!(
+            screen.contains("xxxxxxxx\u{2026}"),
+            "cut without an ellipsis: {screen}"
+        );
+    }
+
+    #[test]
+    fn without_a_status_the_hint_still_paints() {
+        let screen = painted("", 120);
+        assert!(screen.contains("i edit"), "hint gone: {screen}");
+    }
+
+    #[test]
+    fn elide_measures_cells_not_chars() {
+        let cut = super::elide(&"界".repeat(20), 11);
+        assert!(
+            unicode_width::UnicodeWidthStr::width(cut.as_str()) <= 11,
+            "{cut}"
+        );
+        assert!(cut.ends_with('\u{2026}'));
+    }
 }
