@@ -1,10 +1,11 @@
 # iOS platform integration (mobile client)
 
 What the iOS shell of `outl-mobile` needs from outside Rust.
-Three things: the bundle identifiers Apple treats as global, the background-sync wiring across Info.plist / Swift / FFI, and the iCloud catches that only exist when the workspace folder lives in a ubiquity container.
+Three things: the bundle identifiers Apple treats as global, the background-sync wiring across Info.plist / Swift / FFI, and the iCloud catches that only exist when the workspace folder lives in a ubiquity container (no shipping build puts it there today, see [iCloud layout](#icloud-layout-opt-in-destination)).
 Every item here can only be validated with a **device or simulator build** — a host `cargo check` proves nothing about it.
 
 The crate contract (what stays thin, what delegates to `outl-actions`) lives in [`crates/outl-mobile/CLAUDE.md`](../crates/outl-mobile/CLAUDE.md).
+The user-facing guide to the app is [mobile.md](mobile.md), and the home-screen, Lock Screen, Control Center and share-sheet entry points a user can set up are [mobile-capture.md](mobile-capture.md).
 The user-facing background-sync behaviour is [sync.md → Background sync on iOS](sync.md#background-sync-on-ios); the build + release commands are [development.md](development.md#mobile-ios-simulator).
 
 The text App Review needs for a submission (App Review Information > Notes, plus the screen recording script) lives in [App Store review notes](app-store/review-notes.md).
@@ -233,8 +234,11 @@ Sync still works meanwhile: the relay path is untouched.
 
 ## iCloud layout (opt-in destination)
 
-When the user opts into iCloud, the root is `<ubiquity-container>/Documents/` — **one option**, not the default, and one the user reaches through the OS file picker.
-No Rust code resolves it: `workspace_open::icloud_workspace_root()` was removed (see `crates/outl-mobile/CLAUDE.md` → "Change detection: the iroh signal").
+The workspace folder can live in an iCloud container, but **no shipping build offers it**.
+A fresh install opens the app-local folder and the onboarding screen has one storage button, "Keep on this device".
+The folder picker that would let a user choose iCloud is deferred (`workspace_picker.rs` explains the security-scoped bookmark it needs), so everything in this section and the next applies only to a workspace someone placed in a container by hand.
+In that case the root is `<ubiquity-container>/Documents/`.
+No Rust code resolves that container: `workspace_open::icloud_workspace_root()` was removed (see `crates/outl-mobile/CLAUDE.md` → "Change detection: the iroh signal").
 The container is already the `outl` namespace, so no extra `outl/` nesting; the TUI uses `--path "<container>/Documents"`.
 Layout is the standard `journals/` + `pages/` (`.md` + `.outl` sidecar) + `ops/` (one `ops-<actor>.jsonl` per device).
 **iCloud trap:** every path must be undotted — iCloud Documents skips `.`-prefixed paths across devices, so `ops/` (not `.ops/`) and `pages/<slug>.outl`, else the file never leaves its origin.

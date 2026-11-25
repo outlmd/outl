@@ -354,8 +354,16 @@ The non-dotted name pays a "visible directory" cost for guaranteed sync coverage
   Local, never synced.
 - `.outl/orphans.log` — diagnostic from the reconcile pipeline.
   Local.
-- `.outl/peers.toml` — peer registry for P2P sync.
-  Local.
+- `.outl/peers.json` — the devices paired into this graph, written by `outl peer pair`.
+  Not part of the sync surface, but a folder-sync tool that carries dotted paths will copy it.
+- `.outl/workspace-id` — the id every paired device shares.
+  Pairing rewrites it on the joiner; iroh ships it.
+- `.outl/snapshots/` — materialized-state cache for fast boot.
+  Rebuilt when missing.
+- `.outl/state/sync-pending.json`, `.outl/reminders-fired.json` — per-device bookkeeping, never shared.
+- `.outl/repair-backup/`, `.outl/compact-backup/` — copies `outl doctor --repair` and `outl compact --apply` write before they change a file.
+- `.outl/peers.toml` — an empty placeholder older versions created.
+  Nothing reads it; the live registry is `peers.json`.
 
 Anything that doesn't make sense to share between devices stays under `.outl/`.
 The synced surface is `ops/` plus the `.md` / `.outl` (sidecar) projection.

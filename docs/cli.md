@@ -3,8 +3,66 @@
 outl ships one binary — `outl` — that does everything a workspace needs from outside the TUI: scripts, cron jobs, CI, editor integrations, and LLM agents.
 This document is the surface contract.
 
-Looking for how to plug outl into Claude Desktop / Cursor / other MCP hosts? → [docs/mcp.md](mcp.md).
-The two share the same handlers under the hood, so this page stays the source of truth for what each command does.
+**Where to start**
+
+| You are | Read |
+|---|---|
+| Trying the command line for the first time | [Quick start](cli-quickstart.md) |
+| Automating something (cron, hotkeys, CI, publishing) | [CLI recipes](cli-recipes.md) |
+| Looking at an error or an odd result | [Troubleshooting the CLI](cli-troubleshooting.md) |
+| Wiring outl into Claude Desktop, Claude Code or Cursor | [MCP server](mcp.md) |
+| Looking up a flag | this page |
+
+The CLI and the MCP server share the same handlers, so this page stays the source of truth for what each command does.
+
+## Before you run anything
+
+### Which workspace a command uses
+
+First match wins:
+
+1. A path after the subcommand, for commands that take one (`outl doctor ~/notes`, `outl serve ~/notes`).
+2. The global `-w <DIR>` / `--workspace <DIR>`.
+3. `[workspace] last` in `~/.config/outl/config.toml`.
+   The desktop app writes it whenever you open a workspace.
+4. The current directory.
+
+Rule 3 sits above rule 4, so after you have used the desktop app, `cd ~/other && outl page list` reads the app's workspace, not `~/other`.
+A `last` that points at a folder which no longer exists is skipped.
+Pass `-w` in scripts and when it matters, and confirm with `outl -w <DIR> workspace info`, whose first line is the root it resolved.
+Commands that operate on a workspace and find no `.outl/` folder fail with `NO_WORKSPACE`.
+`outl init` is the exception: it never guesses, and refuses to run without an explicit path.
+
+### Global flags
+
+Every subcommand accepts these.
+
+| Flag | What it does |
+|---|---|
+| `-w, --workspace <DIR>` | Workspace to operate on (order above). |
+| `--theme <PRESET>` | Theme preset for the TUI, for this run only. Overrides `[theme] preset`. List them with `outl theme list`. |
+| `-v` / `-vv` | Log at `DEBUG` / `TRACE` on stderr. The default is `INFO`. |
+| `--json` | Per-command, not global: machine output as one [envelope](#json-envelope). |
+| `-V, --version` / `-h, --help` | What they say. `outl <command> --help` is always the exact usage. |
+
+### Environment
+
+| Variable | Effect |
+|---|---|
+| `OUTL_DEVICE_DIR` | Moves this process onto a separate device identity (actor bindings, sync node id, backups). For tests and sandboxes. Setting it prints a warning, because peers paired with your real identity see this process as offline. [Device store](device-store.md). |
+| `XDG_CONFIG_HOME` | Where `~/.config/outl/` lives when `OUTL_DEVICE_DIR` is unset. |
+| `OUTL_CONFIG_MANAGED` | `1` makes every client skip rewriting `config.toml`, as `managed = true` does. [Configuration](config.md). |
+
+The CLI does **not** read `RUST_LOG`.
+Use `-v`.
+Config keys and file locations: [Configuration](config.md).
+
+### Block ids
+
+Block commands take the 26-character id the CLI printed when it created or listed the block (`01M897WPZV1ZMEX2C9XXRC6H60`), written `<id>` in the tables below.
+`outl search`, `block tree` and `trash list` print ids you can copy.
+The six-character handle in `((blk-evy6my))` is what appears in markdown and in `search` output, and only `outl backlinks embed` accepts it as an argument.
+Anything else given a handle fails with `INVALID_BLOCK_ID`.
 
 ## The bet — one binary, one surface
 
@@ -76,14 +134,15 @@ Failure:
 `error.data` then carries `{ path, lines, sample, recovery_command }` so a script or an MCP-driven agent can act on the refusal — name the page, know how many lines are at risk, and run the fix — instead of parsing `error.message`.
 Every other error code omits `data` entirely rather than sending `null`, so the envelope shape existing consumers already parse doesn't change.
 
-Error codes are stable strings, listed alongside each command below when relevant.
+Error codes are stable strings.
+The whole list, with what each one means and what to do next, is in [Troubleshooting the CLI](cli-troubleshooting.md#error-codes).
 Exit codes follow:
 
 | Code | Meaning                                       |
 |------|-----------------------------------------------|
 | 0    | Success                                       |
 | 1    | User error (bad input, not found, conflict)   |
-| 2    | Internal error (bug, broken invariant, panic) |
+| 2    | Internal error (bug, broken invariant, panic), or a command line the parser rejected (unknown flag, missing argument) |
 | 3    | Nothing was done, and that is not a failure    |
 
 Exit 3 exists for `outl sync`, which can legitimately do nothing: another process on this device holds the sync endpoint (or the endpoint lease could not be claimed at all), P2P is off, or no device is paired.
@@ -121,6 +180,10 @@ The MCP tool column is the name Claude Desktop (or any MCP host) sees.
 | `outl page history <slug> [--limit=N] [--json]`                 | —                    |
 
 `page get` returns page meta plus the outline tree.
+`page list --filter` takes `tag:<name>` or `kind:journal` / `kind:page`.
+**`<slug>` is the file name under `pages/`, and the page's identity.**
+Every command that names a page takes the slug, not the title: `outl page list` prints both, side by side.
+`page create "My New Page"` uses that text literally as the slug (`pages/My New Page.md`), so pass `--slugify` when you are typing a name.
 `page render` returns the projected `.md` string (clean, no sidecar fields).
 `page update --title` writes the `title::` page property, the same one `page rename` writes, so the new title shows in the page meta and in the `.md`.
 A blank or whitespace-only title fails with `INVALID_ARG`, and nothing in the call is applied.
@@ -234,17 +297,19 @@ The flag exists so external clients (the Raycast extension's "New Page") can ask
 
 | CLI                                                            | MCP tool                |
 |----------------------------------------------------------------|-------------------------|
-| `outl block get <blk-XXX> [--json]`                            | `outl_block_get`        |
-| `outl block append <page> --text=… [--parent=blk-YYY]`         | `outl_block_append`     |
+| `outl block get <id> [--json]`                                 | `outl_block_get`        |
+| `outl block append --page=<slug> --text=… [--parent=<id>]`     | `outl_block_append`     |
 | `outl block append-tree --page=… --tree=<JSON\|->`              | `outl_block_append_tree`|
-| `outl block insert --after=<blk-XXX> --text=…`                 | `outl_block_insert`     |
-| `outl block update <blk> --text=…`                             | `outl_block_update`     |
-| `outl block move <blk> --parent=<blk-YYY> [--after=<blk-ZZZ>]` | `outl_block_move`       |
-| `outl block delete <blk> [--confirm]`                          | `outl_block_delete`     |
-| `outl block toggle-todo <blk>`                                 | `outl_block_toggle_todo`|
-| `outl block tree <blk> [--json]`                               | `outl_block_tree`       |
-| `outl block history <blk> [--limit=N] [--json]`                | —                       |
+| `outl block insert --after=<id> --text=…`                      | `outl_block_insert`     |
+| `outl block update <id> --text=…`                              | `outl_block_update`     |
+| `outl block move <id> [--parent=<id>] [--after=<id>]`          | `outl_block_move`       |
+| `outl block delete <id> [--confirm]`                           | `outl_block_delete`     |
+| `outl block toggle-todo <id>`                                  | `outl_block_toggle_todo`|
+| `outl block tree <id> [--json]`                                | `outl_block_tree`       |
+| `outl block history <id> [--limit=N] [--json]`                 | —                       |
 
+`block append` needs `--page=<slug>` or `--parent=<id>`, never both.
+`block update` replaces the whole text, so a block that was `TODO ship it` becomes an ordinary block unless the new text starts with `TODO` too.
 `block move` is the one user-visible name for `Op::Move`.
 Cycle detection still applies: a move that would create a cycle returns `{ "code": "CYCLE_REJECTED" }` and the op still goes into the log (see [docs/crdt.md](crdt.md)).
 `block toggle-todo` walks `None → TODO → DOING → DONE → None`, same as `outl_actions::cycle_todo`.
@@ -316,10 +381,12 @@ Only the link enters the op log; the asset's bytes are a plain blob replicated a
 
 | CLI                                                              | MCP tool          |
 |------------------------------------------------------------------|-------------------|
-| `outl search "<query>" [--in=blocks\|pages] [--json]`            | `outl_search`     |
+| `outl search "<query>" [--in=blocks\|pages\|all] [--limit=N] [--json]` | `outl_search`     |
 | `outl query [--tag=foo] [--not-tag=bar]… [--priority=p1] [--not-priority=p2] [--prop=k[=v]]… [--not-prop=k[=v]]… [--since=7d] [--not-since=7d] [--kind=page\|journal] [--not-kind=…] [--json]` | `outl_query` |
 
 `search` is full-text and lives today as the TUI's workspace search.
+`--in` defaults to `all`, and `--limit` (default 50) caps hits **per category**, so `--in all` can return up to 100.
+Each block hit carries its page, its full id and the `blk-` handle, which is what you paste into `((…))` to reference it.
 `query` is the structured filter (tag, property, date range, kind).
 
 **Every filter has a negative**, and each is the exact complement of its positive, so `--tag=x --not-tag=x` returns nothing (pinned by `query_every_filter_and_its_negation_return_nothing`).
@@ -346,7 +413,7 @@ The `--raw='…'` flag is reserved for the not-yet-implemented query DSL and cur
 | CLI                             | MCP tool              |
 |---------------------------------|-----------------------|
 | `outl trash list [--json]`      | `outl_trash_list`     |
-| `outl trash restore <blk-XXX>`  | `outl_trash_restore`  |
+| `outl trash restore <id>`       | `outl_trash_restore`  |
 
 Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invariants-never-violate)), so nothing is ever physically removed.
 These two commands are how you read that back.
@@ -383,8 +450,8 @@ Per-client reach is recorded as `Capability::Trash` in [docs/client-parity.md](c
 | CLI                                | MCP tool              |
 |------------------------------------|-----------------------|
 | `outl backlinks page <slug> [--json]`             | `outl_backlinks`   |
-| `outl backlinks block <blk-XXX> [--json]`         | `outl_block_refs`  |
-| `outl backlinks embed <blk-XXX\|handle> [--json]` | `outl_block_embed` |
+| `outl backlinks block <id> [--json]`              | `outl_block_refs`  |
+| `outl backlinks embed <id\|blk-handle> [--json]`  | `outl_block_embed` |
 
 `block embed` resolves `!((blk-XXX))` recursively, returning the source block plus children — the same expansion the TUI does inline.
 
@@ -413,6 +480,9 @@ A block property is the same `key:: value` line indented under that block.
 `set` rejects a value that contains a newline, a carriage return, or a null byte (`INVALID_ARG`) and leaves the page untouched.
 A `::` inside the value is kept (`url:: https://a::b` reads back as `https://a::b`).
 `list` returns every property on the block, alphabetical by key.
+Keep a **page** property value to one line.
+`page prop set` does not yet reject a newline the way `block prop set` does.
+A multi-line value lands as a stray line inside the page's `key::` header, and the next write to that page is then refused with `PAGE_MARKDOWN_AHEAD_OF_LOG` until `outl reconcile --ahead-of-log` runs.
 
 ### Export
 
@@ -425,6 +495,12 @@ A `::` inside the value is kept (`url:: https://a::b` reads back as `https://a::
 `export hugo` is the pipeline that drives avelino.run: frontmatter from page properties, block refs flattened, code blocks preserved.
 `export md` is the same string `page render` returns.
 `export json` is the full AST plus sidecar — the format an external tool would ingest.
+
+`export hugo` writes `<out>/<slug>.md` and creates `--out` if it is missing.
+The front matter is TOML (`+++`) with `title`, `slug`, `icon` when set, and every other page property as a quoted string, so a `draft:: false` property on the page becomes `draft = "false"` in the post.
+`tags::` is the one exception: it is split on whitespace, loses any leading `#`, and is written as a TOML array (`tags = ["a", "b"]`).
+The `page-slug` and `page-kind` properties are left out.
+The bare `outl export --to hugo` spelling is a legacy placeholder that only prints a pointer to the three subcommands above.
 
 ### Template
 
@@ -468,6 +544,31 @@ Supported `op` names: `page_create`, `page_update`, `page_delete`, `page_rename`
 Each op's `args` mirror the matching standalone tool.
 `page_rename` takes an optional `merge` boolean, and `page_merge` takes `source`, `target` and `confirm: true` (without it the op fails with `CONFIRM_REQUIRED`, like `page_delete`).
 
+Each op's `args`, by name (a `?` is optional):
+
+| `op` | `args` |
+|---|---|
+| `page_create` | `slug`, `title?`, `icon?`, `content?` (a forest, as for `page create --content`) |
+| `page_update` | `slug`, `title?`, `icon?` |
+| `page_delete` | `slug`, `confirm: true` |
+| `page_rename` | `old_slug`, `new_slug`, `merge?` |
+| `page_merge` | `source`, `target`, `confirm: true` |
+| `block_append` | `page` or `parent`, `text` |
+| `block_append_tree` | `page` or `parent`, `tree` |
+| `block_insert` | `after`, `text` |
+| `block_update` | `id`, `text` |
+| `block_move` | `id`, `parent?`, `after?` |
+| `block_delete` | `id`, `confirm: true` |
+| `block_toggle_todo` | `id` |
+| `daily_append` | `text`, `date?` |
+| `page_prop_set` | `page`, `key`, `value` |
+| `page_prop_delete` | `page`, `key` |
+
+A missing required argument fails that op with `INVALID_ARG` (`missing required string \`id\``) and the batch stops there.
+Success returns `{"applied": N, "results": [{"op": "...", "data": {...}}, ...]}`, one result per op in order.
+Block ids made by an earlier op are in its `results[i].data`, so a script can chain on them in a second `batch`.
+Ops in one request cannot refer to each other's output, so to create a page and fill it in one request, put the outline in `page_create`'s `content` or use `block_append_tree`.
+
 **Semantics: stop-on-first-error.** When an op fails, earlier ops stay in the op log (they're already CRDT ops; we don't roll them back) and the response carries `failed_at`, `failed_op`, and `error` so the caller can decide what to do with the suffix that never ran.
 CLI exit code is `1` in that case; MCP returns the payload via the normal envelope.
 
@@ -475,6 +576,7 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 
 | CLI                                          | MCP tool                |
 |----------------------------------------------|-------------------------|
+| `outl` / `outl tui [<path>]`                 | —                       |
 | `outl init <path> [--scope=global\|per-page] [--bare]` | —              |
 | `outl serve [<path>] [--once] [--no-watch] [--no-sync] [--no-mcp]` | —           |
 | `outl doctor [--json] [--repair] [--force]`  | `outl_workspace_doctor` |
@@ -486,6 +588,9 @@ CLI exit code is `1` in that case; MCP returns the payload via the normal envelo
 | `outl plugin init\|search\|list\|install\|run\|config\|secret\|enable\|disable\|remove` | — |
 | `outl sync`                                  | —                       |
 | `outl telemetry status\|on\|off`             | —                       |
+| `outl backup init\|now\|list\|restore\|status` | —                     |
+| `outl theme [list\|show <name>]`             | —                       |
+| `outl migrate-to-per-page-ops [<path>]`      | —                       |
 | `outl workspace info [--json]`               | `outl_workspace_info`   |
 | `outl import roam\|logseq\|logseq-db\|obsidian\|auto <src> <dst> [--dry-run] [--json] [--preserve-timestamps] [--no-assets] [--download-remote-assets] [--keep-source-ids] [--force]` | — |
 
@@ -497,7 +602,7 @@ Importing a graph has its own page: [**Importing a graph**](import.md) — sourc
 
 `outl plugin` manages the workspace's JS plugins (under `<workspace>/.outl/plugins/`), wrapping `outl-plugins`.
 `init <NAME> [--id <ID>] [--dir <PATH>]` scaffolds a buildable starter project (manifest + `package.json` + `tsconfig` + `src/index.ts` + README); run `bun install && bun run build` inside it for an installable bundle.
-`search [QUERY]` lists installable example plugins from the repo (filtered by `QUERY` when given).
+`search [QUERY]` searches the official plugin registry (plugins.outl.app) by name, id, description or keyword; an empty query lists everything.
 `list` loads every installed plugin and prints each one's version, enabled state, and the slash commands it contributes.
 `install <SOURCE>` takes a local directory holding a `plugin.json` plus its bundle (the installed shape), **or** a `github:owner/repo[/subdir][#tag]` source.
 A `github:` source is cloned at an immutable semver tag — the newest published tag when none is pinned, never a mutable branch.
@@ -508,7 +613,6 @@ Pass `--yes` to approve non-interactively (required when stdin is not a TTY).
 `secret set <ID> <KEY> [--value <V>]` / `secret remove <ID> <KEY>` (alias `rm`) manage the plugin's secrets in the **OS keychain** — never in the workspace on disk.
 `secret set` prompts for the value on a hidden line when `--value` is omitted (prefer that: a `--value` on the command line lands in your shell history).
 `enable <ID>` / `disable <ID>` flip the plugin's `enabled` flag in the lockfile without uninstalling it.
-`remove <ID>` (aliases `uninstall`, `rm`) deletes the plugin's directory and its lockfile entry.
 `remove <ID>` (aliases `uninstall`, `rm`) deletes the plugin's directory and its lockfile entry.
 
 `outl peer pair` takes an optional `--name <NAME>` — the label this device advertises to the other (shown in the peer's `outl peer list`).
@@ -642,6 +746,26 @@ Other fields:
 | `trashed` | Nodes currently under the trash root. |
 | `snapshots` / `snapshot_bytes` | Snapshot cache file count and size. |
 | `last_modified` | Wall-clock time of the most recent persisted op. |
+
+### Which command fixes what
+
+Six commands touch workspace health, and they point in different directions.
+Pick by symptom:
+
+| What you see | Run | What it does | Writes? |
+|---|---|---|---|
+| Something feels off after a sync, a crash or a migration | `outl doctor` | Reports. Names each problem and what `--repair` would do. | No |
+| `doctor` lists stale pages, a missing sidecar, a corrupt snapshot | `outl doctor --repair` | Re-projects `.md` from the op log, rebuilds sidecars, drops bad caches. Backs up every file first. | Projections and caches only, never `ops/` |
+| `doctor` says a `.md` holds content no op recorded, or you edited files outside outl | `outl reconcile --ahead-of-log` | Turns that on-disk text into ops, so it exists in the log and syncs. | Yes, new ops |
+| Block text came back shorter than you wrote it | `outl recover`, then `--apply` | Finds the earlier full revision in the op log and writes it back as a new edit. | Only with `--apply` |
+| A page write was refused with `PAGE_MARKDOWN_AHEAD_OF_LOG` | `outl reconcile --ahead-of-log` | Same as above. The refusal names the command. | Yes, new ops |
+| `ops/` is huge and every boot or first sync is slow | `outl compact`, then `--apply` | Drops provably inert ops. | Only with `--apply` |
+| You deleted something and want it back | `outl trash list`, `outl trash restore <id>` | Moves the block back under its old parent. | Yes, one op |
+| You want an older state of the whole folder | `outl backup list`, `outl backup restore <id> --into <dir>` | Extracts a snapshot **next to** your workspace. | Never into the workspace |
+
+Run `doctor` first.
+Run `reconcile --ahead-of-log` before `recover` when both apply.
+Take `outl backup now` before any command that writes.
 
 ### `outl doctor`
 
@@ -808,6 +932,54 @@ Two things the command refuses to do quietly:
 
 There is deliberately no generic `outl config set <key> <value>`: that needs a schema story for every key in `Config`, which is a much larger change than the one boolean this command owns.
 
+### `outl backup`
+
+Local, versioned snapshots of the workspace, kept as git commits **outside** the notes folder (under `~/.config/outl/backups/`).
+
+```
+outl backup init                     # set up (idempotent)
+outl backup now [-m "message"]       # snapshot; says "nothing changed" when there is nothing to save
+outl backup list [--limit=20]        # newest first: id, time, message
+outl backup restore <id> --into <dir>
+outl backup status                   # set up? when was the last one?
+```
+
+`restore` extracts into a directory you name and **never writes into the live workspace**.
+You diff what came back and copy over what you want.
+Needs `git` on your `PATH`.
+Every snapshot checks that each `ops/*.jsonl` made it into the commit before it reports success.
+Automatic snapshots, retention and the restore walkthrough: [Backups and restore](backups.md).
+It takes the global `-w`, not a positional path.
+
+### `outl theme`
+
+Lists and describes the color presets, without opening the TUI.
+
+```
+outl theme                  # same as `outl theme list`
+outl theme list             # one preset per line
+outl theme show nord        # the style each TUI surface uses under that preset
+```
+
+Names are case- and separator-insensitive.
+Use a name from `theme list` with `outl --theme <name>` for one run, or set `[theme] preset` in `config.toml` to keep it.
+A theme file of your own in `~/.config/outl/themes/` appears in the list; one that fails to load is named on stderr instead of vanishing: [Theming](theming.md).
+
+### `outl tui`
+
+`outl` with no subcommand and `outl tui [<path>]` are the same thing: they open the terminal UI on the workspace.
+On a terminal, pointing it at a folder with no `.outl/` asks whether to create a workspace there.
+Keys and overlays: [TUI](tui.md).
+The TUI honors `--theme <preset>` for one run.
+
+### `outl migrate-to-per-page-ops`
+
+Moves a workspace's op log from the default layout (one `ops-<actor>.jsonl` per device) to one file per device and page (`ops/<actor>/<slug>.jsonl`).
+It is opt-in: nothing switches a workspace over automatically, and `outl init --scope=per-page` starts a new one that way.
+It splits **this device's** log only, keeps the original as `ops/ops-<actor>.jsonl.v0.bak`, and fails with `no legacy op log` when there is nothing left to split, so a second run is harmless.
+Layouts and why they exist: [Storage](storage.md).
+`outl compact --apply` does not support the per-page layout yet and refuses it.
+
 ### `outl page history` / `outl block history`
 
 What the op log says happened, newest first.
@@ -847,8 +1019,8 @@ This document stays focused on the surface; how to attach it to a host lives ove
 
 ## What does not map 1:1 (and that's fine)
 
-- **Interactive commands** (`init`, `reconcile`, `recover`, `mcp serve`) stay CLI-only.
-  A wizard inside a tool call is the wrong shape.
+- **Bootstrap and repair commands** (`init`, `reconcile`, `recover`, `compact`, `backup`, `mcp serve`) stay CLI-only.
+  They are one-time, interactive or long-lived, and a tool call is the wrong shape for them.
 - **Long-running watchers** (`serve`) stay CLI-only.
   MCP tools are request/response; the file watcher is a process, not a tool.
 - **Destructive commands** (`page delete`, `page merge`, `block delete`) accept `--confirm` on the CLI and require `confirm: true` in the MCP input.
@@ -856,60 +1028,44 @@ This document stays focused on the surface; how to attach it to a host lives ove
 - **Importers** (`outl import …`) stay CLI-only — they're one-time migrations, not workspace ops.
 - `page history` / `block history` — read-only, and their handlers print rather than returning a `Value`, so they need the ordinary `fn(ctx, …) -> Result<Value, ApiError>` extraction before they can be registered. Tracked with [#241](https://github.com/outlmd/outl/issues/241).
 
-## Layout
+## Source layout
 
-The CLI and shim are siblings inside `outl-cli`.
-Everything below delegates to `outl-actions`.
+For contributors.
+The CLI and the MCP shim are siblings inside `outl-cli`, and both delegate to `outl-actions`.
+No business logic lives in either layer.
 
 ```text
-outl-cli/
-└── src/
-    ├── main.rs              # clap entry, dispatches to commands/
-    ├── output.rs            # JSON envelope, --json flag, exit codes
-    ├── cmd/
-    │   ├── page.rs
-    │   ├── block.rs
-    │   ├── daily.rs
-    │   ├── search.rs
-    │   ├── query.rs
-    │   ├── tag.rs
-    │   ├── export.rs
-    │   ├── workspace.rs
-    │   └── mcp.rs           # `outl mcp serve` shim
-    └── mcp/
-        ├── server.rs        # stdio transport
-        ├── tools/           # registry.rs (schemas) + dispatch.rs (handlers)
-        ├── resources.rs     # outl:// URIs
-        └── prompts.rs       # /outl-* prompts
+crates/outl-cli/src/
+├── main.rs        # dispatch only
+├── cli.rs         # every clap declaration: a flag without a row on this page is a flag nobody finds
+├── output.rs      # JSON envelope, error codes, exit codes
+├── startup.rs     # workspace path resolution, tracing setup
+├── ws.rs          # open a workspace for read / write / resident use
+├── cmd/           # one file per subcommand (page.rs, block.rs, doctor/, serve/, backup.rs, ...)
+└── mcp/
+    ├── mod.rs, protocol.rs   # stdio transport
+    ├── tools/                # registry.rs (schemas) + dispatch.rs (handlers)
+    ├── resources.rs          # outl:// URIs
+    ├── prompts.rs            # /outl-* prompts
+    └── embedded.rs, socket.rs  # the MCP server `outl serve` hosts
 ```
 
-`cmd/*.rs` and `mcp/tools/` both reach into `outl-actions`.
-No business logic lives in either layer — they format input and output, that's it.
+## Command index
 
-## Status
+Everything `outl --help` lists, by what you are trying to do.
 
-Shipping today:
+| Goal | Commands |
+|---|---|
+| Start | `init`, `import`, `tui` (or bare `outl`) |
+| Write | `daily append`, `capture`, `page create\|update\|delete\|rename\|merge`, `block append\|append-tree\|insert\|update\|move\|delete\|toggle-todo`, `asset add`, `template apply\|run`, `batch` |
+| Read | `daily today\|get\|range`, `page get\|list\|render`, `block get\|tree`, `search`, `query`, `tag list\|pages`, `backlinks page\|block\|embed`, `page prop get\|list`, `block prop get\|list`, `template list\|resolve`, `workspace info` |
+| Properties | `page prop set\|get\|list\|delete`, `block prop set\|get\|list\|delete` |
+| Undo and history | `trash list\|restore`, `page history`, `block history` |
+| Publish | `export hugo\|md\|json` |
+| Keep it safe | `backup`, `doctor`, `reconcile`, `recover`, `compact` |
+| Sync | `peer pair\|qr\|list\|remove\|status\|revoke-all`, `sync`, `serve` |
+| Agents | `mcp serve`, `serve` (embedded MCP) |
+| Extend and tune | `plugin`, `theme`, `telemetry` |
+| Storage layout | `migrate-to-per-page-ops` |
 
-- `outl init`, `outl serve`, `outl doctor`, `outl reconcile`, `outl recover`, `outl import logseq|logseq-db|obsidian|roam`, `outl theme`.
-- `outl` (no subcommand) opens the TUI.
-- `outl page get|create|update|delete|list|rename|render` (`create` accepts `--content` to seed the outline in one call)
-- `outl block get|append|append-tree|insert|update|move|delete|toggle-todo|tree`
-- `outl daily today|get|append|range`
-- `outl capture <text>|-|--list` — a line into the capture inbox, no workspace boot (RFC 0363)
-- `outl search "<query>" [--in=blocks|pages|all]`
-- `outl query [--tag] [--not-tag] [--priority] [--not-priority] [--since=Nd] [--not-since] [--kind] [--not-kind] [--prop k[=v]] [--not-prop k[=v]]`
-- `outl backlinks page|block|embed`
-- `outl tag list|pages`
-- `outl page prop set|get|list|delete`
-- `outl block prop set|get|list|delete`
-- `outl export hugo|md|json`
-- `outl template list|apply|resolve|run`
-- `outl batch` — stream `{ops: [...]}` from stdin (or `--ops=…`)
-- `outl workspace info`
-- `outl mcp serve` — full MCP protocol surface (tools, resources, prompts) over stdio.
-
-Still ahead:
-
-- Richer `outl query --raw='…'` DSL (today returns `INVALID_ARG`).
-
-The order of landing matched the order of unlocking real workflows (scripts → LLM agents in Claude Code → Claude Desktop → blog publishing pipeline).
+Still ahead: the `outl query --raw='…'` DSL (it rejects today with `INVALID_ARG`).

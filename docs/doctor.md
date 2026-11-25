@@ -7,6 +7,79 @@ Split out of [cli.md](cli.md) because it is the one subcommand whose *refusals* 
 > Why `--repair` refuses a page whose `.md` holds content the op log lacks: [RFC 0210](rfcs/0210-md-content-outside-op-log.md).
 > Where the device store lives and why it is outside the workspace: [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).
 
+## When to run it
+
+- Before and after an [import](import.md), a big edit session outside outl, or a migration.
+- After a sync that looked wrong: a page missing on one device, a `.md` that does not match what the app shows.
+- When another command failed with `INTERNAL`, `TRASH_PARENT_MISSING` or `PAGE_MARKDOWN_AHEAD_OF_LOG`.
+- From cron or CI, to catch a torn op log early ([recipe](cli-recipes.md#nightly-backup-and-health-check-cron)).
+
+It is safe to run at any time: a plain run writes nothing to your workspace, only to your terminal.
+
+```bash
+outl -w ~/notes doctor            # report
+outl -w ~/notes doctor --json     # same report as one JSON envelope
+outl -w ~/notes doctor --repair   # apply the safe fixes, after backing the files up
+```
+
+## Reading the report
+
+Each line starts with its severity:
+
+| Prefix | Meaning | Your move |
+|---|---|---|
+| `ok:` | A check passed. | Nothing. |
+| `info:` | Worth knowing, nothing is wrong. A missing snapshot, the trash size, lock files. | Nothing. |
+| `warn:` | Something is off and your notes are intact. The workspace still opens. | Read the line, then see the table below. |
+| `err:` | Data is missing or unreadable. A torn op log record, a sync-conflict copy. | Fix before you trust the workspace. |
+
+The last line is the verdict: `integrity OK`, `integrity OK with N warning(s)`, or `N error(s), M warning(s) — see lines above`.
+**The exit code is `1` only when there is at least one `err:`.**
+In `--json` the envelope's `ok` is `true` whenever the check ran, so a script reads `data.error_count`, not `ok`.
+
+A clean first run looks like this (trimmed):
+
+```text
+workspace: /home/you/notes
+actor:     01M897WPV4207ZWNX7JWCRM0Z5
+
+ok:   every op-log line parses — no corrupt records
+ok:   op log has 52 ops
+ok:   trash is empty — nothing has been deleted in this workspace
+ok:   every page in the op log has a matching `.md` projection on disk
+ok:   no parser warnings — every `.md` parses cleanly in the outl dialect
+ok:   no sync-conflict copies (iCloud / Syncthing / Dropbox) in the workspace
+ok:   workspace lock is free (no other outl process attached)
+
+integrity OK
+```
+
+A torn op log, as it reads:
+
+```text
+err:  ops/ops-01M8980VJ2H57S3WMTTQWN80AQ.jsonl: line 34 (byte 8253): invalid JSON: expected ident at line 1 column 2
+err:  1 op-log line(s) carry no usable op — those mutations are lost
+
+2 error(s), 0 warning(s) — see lines above
+```
+
+## What to do about the common findings
+
+| The report says | What it means | Do this |
+|---|---|---|
+| `N page(s) carry an unreconciled external edit` | You (or a tool) changed a `.md` outside outl and no client has read it yet. | `outl serve --once` reads every `.md` into the op log and exits. Opening the workspace in the desktop app or the TUI does the same. Plain `outl reconcile` only **lists**, it does not apply. |
+| `the .md is a stale projection`, `has no .md on disk`, `no sidecar` | The op log is right, the file on disk is behind. Common on a device that just synced. | `outl doctor --repair`. It re-projects the file and backs the old one up. |
+| `.md holds N line(s) that exist in no op` | The `.md` has text the log never recorded. `--repair` refuses to touch it, because overwriting would delete that text. | `outl reconcile --ahead-of-log`, then re-run `doctor`. |
+| `op-log line(s) carry no usable op` | A record in `ops/` is unreadable. | Restore `ops/` from a [backup](backups.md), or let a healthy paired device sync it back. `--repair` will not rewrite the log. |
+| `conflict copy` (`foo 2.md`, `(conflicted copy)`, `.sync-conflict-`) | iCloud, Dropbox or Syncthing forked a file. outl never reads the copy. | Open both files, keep the text you want in the original, delete the copy. |
+| `node id(s) carry ops but were never created here` | The log mentions blocks it never created, usually a peer's ops that have not all arrived. | `outl peer status`, then `outl sync`. Report it if it persists on one device. |
+| `snapshot unusable` | A boot cache failed its checksum. Cost: one slow boot. | `outl doctor --repair` deletes it. `snapshot superseded` is only disk you can reclaim the same way. |
+| `... this device has been minting ephemeral actors` | Eight or more per-actor lock files: this device keeps creating throwaway actors. | See [Many `ops-<ulid>.jsonl` files](cli-troubleshooting.md#many-ops-ulidjsonl-files-keep-appearing). |
+| `alias "x" is claimed by N pages` | Two pages answer to one alias, and `[[x]]` goes to the first match. | Rewrite one page's list without the shared name: `outl page prop set <page> alias="other, names"`. |
+| `config.toml cannot be read` | A preference file has a syntax error and every setting is running on defaults. | Fix the line it names. Nothing was overwritten. |
+
+Anything else on the page below is the full list of what each check does and does not touch.
+
 **Read-only by default** — it reports, it never fixes, unless you pass `--repair`.
 Exit code is `1` when the report carries any error, so it drops straight into a script or CI step.
 

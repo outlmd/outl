@@ -49,7 +49,7 @@ See [`src/index.ts`](https://github.com/outlmd/outl/tree/main/examples/confetti/
 outl -w <workspace> plugin install ./examples/confetti --yes
 ```
 
-Open the workspace in the **desktop** or **mobile** app, mark any block DONE (`Cmd+T`) → 🎉.
+Open the workspace in the **desktop** or **mobile** app, mark any block DONE (`Cmd+T` cycles a block through `TODO`, `DOING`, `DONE`, so press it until it reads DONE) → 🎉.
 
 ## Adapting it
 

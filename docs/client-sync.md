@@ -13,7 +13,7 @@ No client blocks a keystroke or a Tauri command reply on a `.md` render, an fsyn
 
 | Client | Op log write | Projection write |
 |---|---|---|
-| TUI | Synchronous, on commit (`Esc`, `Enter`, structural ops) | Deferred. The commit marks the page dirty and repaints immediately; the render → `.md` write → `reconcile_md` drains the moment the event loop goes idle, or after 600ms mid-burst (`runtime::MAX_SAVE_DEFER`). Always flushed before quit, `Ctrl+S`, navigation, peer reload, or a `call:` re-run — see [`docs/tui.md` → Behavior worth knowing](tui.md#behavior-worth-knowing). |
+| TUI | Synchronous, on commit (`Esc`, `Enter`, structural ops) | Deferred. The commit marks the page dirty and repaints immediately; the render → `.md` write → `reconcile_md` drains the moment the event loop goes idle, or after 600ms mid-burst (`runtime::MAX_SAVE_DEFER`). Always flushed before quit, `Ctrl+S`, navigation, peer reload, or a `call:` re-run — see [`docs/tui.md` → Saving, undo and safety](tui.md#saving-undo-and-safety). |
 | Desktop / Mobile | Synchronous, inside the Tauri command | Queued to a background `ProjectionWriter` thread (`outl_tauri_shared::ProjectionWriter::queue`), which coalesces bursts and writes `.md` + sidecar under the workspace lock. The command's reply is built straight from the in-memory tree (`build_page_view_from_tree`), not from a re-read of the file it just queued. |
 
 A crash between the op-log write and a queued projection leaves the `.md` briefly behind the op log — that's not data loss.
@@ -44,6 +44,7 @@ Plugin `onOp` hooks on desktop/mobile are fire-and-forget (no `await` on the rep
 ## Automatic backups
 
 `outl_actions::backup` is the shared engine: local, versioned git snapshots of a workspace, with `outl backup list|restore` on top.
+User guide with commands and restore steps: [backups.md](backups.md).
 `[backup] enabled` defaults to **on** ([config.md → `[backup]`](config.md#backup)), so the pass that makes that default true has to exist on the client, not just in the CLI.
 
 **One call wires a client up:** `outl_actions::backup::spawn_auto_pass(root, enabled, interval_minutes)`, where `root` is a `BackupRoot`.

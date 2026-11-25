@@ -5,14 +5,29 @@ outl ships a [Scoop](https://scoop.sh) manifest from the same `outlmd/outl` repo
 ```powershell
 scoop bucket add outl https://github.com/outlmd/outl
 scoop install outl/outl-beta
+outl --version
+outl init $HOME\notes
 ```
 
 That puts `outl.exe` on your PATH, unprivileged, under `~\scoop\apps\outl-beta\`.
-`outl --help` lists the commands; `outl init <dir>` scaffolds a workspace, and `outl` with no arguments opens the TUI on today's journal.
+`outl --help` lists the commands, `outl init <dir>` creates a workspace, and `outl` with no arguments opens the TUI.
+Next: the [command line quick start](cli-quickstart.md).
+
+| You want | Command |
+|---|---|
+| Update | `scoop update outl-beta` |
+| Stay on this version | `scoop hold outl-beta` (undo with `scoop unhold outl-beta`) |
+| Uninstall | `scoop uninstall outl-beta` |
+| Check what is installed | `scoop list outl-beta` |
+
+Uninstalling removes the program only.
+Your workspace folder and the device settings stay on disk.
+Scoop installs the CLI, the TUI and the MCP server, which are one `outl.exe`.
+The desktop app is a separate installer: [below](#the-desktop-app-is-not-a-scoop-package).
 
 | Path | What it ships |
 |---|---|
-| [`/bucket/outl-beta.json`](../bucket/outl-beta.json) | Beta CLI / TUI / MCP server, rebuilt nightly when `main` moved. |
+| [`/bucket/outl-beta.json`](../bucket/outl-beta.json) | Beta CLI / TUI / MCP server, cut nightly (06:00 UTC) on the nights `main` moved. |
 
 Both architectures are served from one manifest: `64bit` is the x64 build, `arm64` is a native ARM64 binary rather than an x64 one under emulation.
 Scoop picks the one matching the machine, so the install line is the same either way.
@@ -39,7 +54,7 @@ They install the same `outl.exe`, so run one or the other, not both.
 
 The GUI ships as an NSIS installer (`outl-desktop-windows-x86_64-setup.exe`, `outl-desktop-windows-aarch64-setup.exe`) on each [GitHub release](https://github.com/outlmd/outl/releases), and Scoop's model is a portable app directory rather than an installer that writes to Program Files and the registry.
 Wrapping the installer in a manifest is possible and is not done here: the install would not be portable, which is the property people add a bucket for.
-See [Getting started → Desktop app on Windows](getting-started.md#desktop-app-on-windows).
+See [Getting started → Desktop app on Windows](getting-started.md#windows).
 
 ## winget and Chocolatey
 
@@ -72,6 +87,9 @@ Three rules that the job enforces rather than hopes for:
   The asset-name check that was already here answers "yes" to a templated url, which is how #498 passed it on every run.
 
 ## Troubleshooting
+
+**`outl` is not recognized right after install**: open a new terminal.
+Scoop adds its shims to your `PATH` for new sessions, and the one you installed from does not see them yet.
 
 **`scoop install` fails with a hash mismatch** — the manifest on `main` drifted from the release asset, usually because an asset was re-uploaded.
 Re-run the release via `workflow_dispatch`; the bump re-renders from the current digests.

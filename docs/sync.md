@@ -3,6 +3,9 @@
 This page is the long version.
 The pitch in one sentence: **outl is the only outliner whose sync is provably correct, doesn't need a server, and doesn't pollute your markdown to do it.**
 
+**Just want to sync two devices?**
+Start with [Sync your devices](sync-devices.md).
+
 If you want the algorithm walked through with code, jump to the [Tree CRDT walkthrough](crdt.md).
 This page is about *why* — what breaks in the other tools, what's running in production today, and what's still ahead before we call this "state of the art".
 
@@ -358,8 +361,8 @@ Two iCloud-specific decisions fall out of this transport:
 
 ### Transport 2: `iroh` (P2P)
 
-`transport = "iroh"` swaps iCloud for direct device-to-device sync over [iroh][iroh] QUIC, so the project stops depending on a third-party cloud and starts working across non-Apple devices.
-It is opt-in today and lives in the `outl-sync-iroh` crate as `IrohSyncTransport`, implementing the same `SyncTransport` trait.
+`transport = "iroh"` is direct device-to-device sync over [iroh][iroh] QUIC: no third-party cloud, and it works across non-Apple devices.
+It is the default and lives in the `outl-sync-iroh` crate as `IrohSyncTransport`, implementing the same `SyncTransport` trait.
 
 What it gives you:
 
@@ -554,8 +557,10 @@ Someone who learns your device's address during the pairing window — but never
 
 Treat the code itself as a password for its two-minute life: anyone who photographs or copies it can use it. Generate a new one rather than re-sending an old.
 
-The same three read/probe operations are exposed to the GUI clients as Tauri commands — `outl_peer_list`, `outl_peer_remove`, `outl_peer_status` — so the mobile and desktop apps can show and prune the peer list and surface live status.
-**Pairing stays CLI-only**; there is no `outl_peer_pair` command, because the handshake's interactive ticket exchange has no good GUI surface yet.
+The same read/probe operations are exposed to the GUI clients as Tauri commands — `outl_peer_list`, `outl_peer_remove`, `outl_peer_status` — so the mobile and desktop apps can show and prune the peer list and surface live status.
+Both apps also pair, through the live sync endpoint: the desktop hosts (Settings, Sync, **Pair a new device…** shows a QR and a ticket), the phone hosts or joins (Settings, **Devices and sync**, **Scan QR** or **Show my QR**).
+The desktop app has no join flow, so joining a desktop to another device is `outl peer pair --ticket` in a terminal.
+The pairing handshake itself is not a wrapper in `catalog.rs`: `pair_host`, `pair_join` and `sync_now` need the concrete transport, so each client wires them by hand.
 
 #### Which process holds the endpoint
 
@@ -867,9 +872,8 @@ Here are ours:
   Content is E2E encrypted, but a relay operator can see *that* two devices sync, *when*, and roughly *how much* — never *what*.
   The default is a dedicated relay under outl's `*.iroh.link` namespace (hosted on n0 infra); a fully outl-owned relay fronted by `relay.outl.app` is on the roadmap.
   Full threat model in [relay.md](relay.md).
-- **iroh pairing is CLI-only today.**
-  `outl peer pair` runs the handshake; the mobile and desktop apps can list, remove, and probe peers but don't yet run the interactive ticket exchange.
-  QR pairing on mobile and paste-ticket on desktop are in progress.
+- **Desktop cannot join by ticket.**
+  The desktop app hosts pairing (QR and ticket) and the phone can host or join, but joining a desktop to another desktop or CLI host needs `outl peer pair --ticket` in a terminal.
 
 ---
 

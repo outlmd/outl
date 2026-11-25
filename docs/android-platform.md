@@ -2,6 +2,8 @@
 
 What the Android build needs that no other client does, and what it deliberately does not promise.
 
+The user guide to the app is [mobile.md](mobile.md), and setting up the widget, quick settings tile and share target is [mobile-capture.md](mobile-capture.md#android).
+What to do when the native library does not load, from the user's side, is [mobile-troubleshooting.md](mobile-troubleshooting.md#android-only).
 The user-facing background-sync behaviour is [sync.md → Background sync on Android](sync.md#background-sync-on-android); the iOS counterpart of this document is [ios-platform.md](ios-platform.md).
 
 ---
@@ -310,6 +312,10 @@ That is what keeps them covered by the host test suite, where neither platform's
 ---
 
 ## Gradle and manifest
+
+The app declares `minSdk = 24` (Android 7.0) and `targetSdk = 36` in `gen/android/app/build.gradle.kts`, and the release job builds an arm64 APK only.
+Those two numbers are what [mobile.md](mobile.md#install) tells users.
+Change them there and in the guide together.
 
 `AndroidManifest.xml` needs **no change** for background sync, and this was verified against the merged manifest rather than assumed.
 It does need one for **LAN peer discovery** — see below — and four for capture: the `outl` scheme on `MainActivity`, the share activity, the widget receiver and the tile service.

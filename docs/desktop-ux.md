@@ -1,6 +1,9 @@
 # Desktop UX behaviour
 
-How `outl-desktop` behaves, feature by feature.
+How `outl-desktop` behaves, feature by feature, with the code that owns each behaviour.
+
+**Using the app?** Start at [Using outl on the desktop](desktop.md), which is the task-oriented tour, then [Desktop settings](desktop-settings.md) and [Desktop troubleshooting](desktop-troubleshooting.md).
+This page is the behaviour reference behind them: the rules, the reasons, and the component names a contributor needs.
 
 Moved out of `crates/outl-desktop/CLAUDE.md`, which is loaded into the model's context on every session in that crate and had grown past the point where that is useful.
 These sections are reference: you read one when you touch that feature, not every time you open the crate.
@@ -10,6 +13,12 @@ Its mobile twin is [`docs/mobile-ux.md`](mobile-ux.md), and the cross-client con
 Chords are [`docs/shortcuts.md`](shortcuts.md); which client performs which action is [`docs/client-parity.md`](client-parity.md), generated from `outl_shortcuts::support`.
 Anything visual — colours, tokens, spacing, components — is specified in [`DESIGN.md`](../DESIGN.md).
 The behaviour rules these sections are instances of are in [`UX.md`](../UX.md).
+
+## Window and launch
+
+The main window opens at 1280 by 800 with a 800 by 600 minimum (`tauri.conf.json`).
+`tauri-plugin-single-instance` is the first plugin registered, so a second launch does not open a second window: it focuses the running one, and on Linux and Windows hands it an `outl://` URL or a file path from `argv`.
+What a launch waits for, and what the loading screen shows, is in [`boot-performance.md`](boot-performance.md).
 
 ## First run
 
@@ -87,24 +96,47 @@ Nothing in it touches the workspace.
 Windows and Linux have neither surface, for the same reason they have no menu bar.
 The gap is recorded as `Capability::AboutAndSupport` across the three clients in [`client-parity.md`](client-parity.md).
 
-## Chrome toggle bar and quick capture
+## Chrome capsules, status bar, help and quick capture
 
-`components/ChromeToggleBar.tsx` is a fixed bottom-left cluster, mounted by `AppShell`, carrying two visible mirrors of chords.
-They are the **sidebar toggle** (`◫`, mirrors `Cmd/Ctrl+Shift+E`) and the **shortcuts-help toggle** (`?`, mirrors `?` / `Cmd/Ctrl+/`).
-It floats over the main pane on an elevated surface, with the active toggle inverted to accent, so the sidebar button stays reachable while the left pane is hidden.
+`components/ChromeToggleBar.tsx` mounts two fixed capsules at the top of the window, both with `outl-focus-hide` so focus mode removes them.
+
+- **Top-left, `role="toolbar"` labelled "Window":** the sidebar toggle (mirrors `Cmd/Ctrl+Shift+E`).
+- **Top-right, labelled "Page and app", in this order:** Fold all (`zM`), Unfold all (`zR`), one button per plugin `toolbar-button` contribution, Trash, Reminders (`Cmd/Ctrl+Shift+R`), Plugins, the sync dot ([below](#sync-status-dot)), Focus mode (`Cmd/Ctrl+Shift+F`), Settings (`Cmd/Ctrl+,`).
+
+There is no shortcuts-help button.
+Help opens with `?` in Normal mode (there is no `Cmd/Ctrl+/` chord), and lists every binding of the catalog grouped by mode (Global, Normal, Insert, Visual, Overlay).
+
+A button carries no business logic: it flips the same store signal the dispatcher flips, so button and chord cannot drift.
+The active toggle is inverted to the accent colour.
+`rovingKeydown` makes each capsule one keyboard stop, with arrows moving between its buttons.
+
+The footer is `components/StatusBar.tsx`: a mode badge (NORMAL, INSERT, VISUAL, OVERLAY) coloured from the theme's `status_*` tokens, then hints for that mode.
+The status line and the error toast share it.
 
 Quick capture is a box (`components/QuickCapture.tsx`) over state in `lib/quick-capture.ts`.
-The OS-wide chord is registered in `src-tauri/src/quick_capture.rs`, which emits `quick-capture://open`.
+Three doors open it: the in-app `Cmd/Ctrl+Shift+Space` (`Action::QuickCapture`), the same chord registered with the OS (`src-tauri/src/quick_capture.rs`, which emits `quick-capture://open` and brings the window forward), and an `outl://capture` deep link.
+`Enter` appends the line to the end of today's journal through `create_block`, `Shift+Enter` breaks the line, `Esc` closes.
 A failed write keeps the text in the box.
+If another application owns the OS-wide chord, registration fails, is logged, and the app boots without it: the in-app chord, the palette and the deep link still work.
 
-The `Cmd+P` palette also lists actions that have no chord at all, from `CHORDLESS_ACTIONS` in `lib/palette-results.ts`, and splits task hits (shared `taskState`) out of block hits.
+The palette is `components/Picker.tsx`.
+`Cmd/Ctrl+P` opens it on pages, tasks, blocks and actions, in that order (`@outl/shared/palette`); a query starting with `>` lists actions only, and `Cmd/Ctrl+K` or `:` in Normal mode opens it already on `>`.
+Block results need `BLOCK_QUERY_MIN` characters and arrive after the pages, debounced about 150 ms.
+It also lists actions that have no chord at all, from `CHORDLESS_ACTIONS` in `lib/palette-results.ts` (today only "Export as Markdown"), and splits task hits (shared `taskState`) out of block hits.
+`Enter` on a name that matches no page creates it through `open_ref`.
+
+The sidebar (`components/Sidebar.tsx`) is hidden at launch (`sidebarOpen: false`, not persisted) while the backlinks section is open (`backlinksOpen: true`).
+Top to bottom: Search (opens the palette), Today, a month calendar (a dot per journal that exists, a ring on today, accent on the day on screen), Pinned (pages with `pinned:: true`, alphabetical) and Recent.
+Recent lives in `localStorage` because "recent on this device" is the right scope and is not state that should converge.
+
+The plugin browser (`components/PluginMarketplace.tsx`) searches, installs official plugins, and enables, disables or removes installed ones.
 
 ## Sync status dot
 
 `<SyncIndicator />` sits in the top-right capsule of `<ChromeToggleBar />`, right before Settings, so the mesh state is glanceable without opening Settings.
 
-The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, settings — same icons, same order.
-Reminders is the one exception: mobile moved it to its bottom bar's Reminders tab (#364) and has no header button, so there is no twin to match.
+The capsule mirrors the mobile top bar (`outl-mobile/src/components/JournalChrome.tsx`): fold all, unfold all, plugin toolbar buttons, reminders, plugins, sync dot, focus, settings — same icons, same order.
+Two things are desktop-only: Trash sits between the plugin buttons and Reminders, and Reminders is a header button here where mobile moved it to its bottom bar's Reminders tab (#364).
 The sidebar toggle has no mobile twin either and sits alone top-left.
 The sidebar pads its own top so the capsule never covers search, and the page header (`OutlineView`) pads its top the same way so the eyebrow's attach and history icons clear the right capsule.
 
@@ -119,7 +151,7 @@ It re-probes on a slow interval and immediately on `peer-ops-changed`.
 ## Sidebar — hover `×` to delete a page
 
 `Sidebar.tsx`'s `<Row>` takes an optional `onDelete` callback; when it is provided, a `×` button appears on hover.
-`handleDelete(p)` calls `window.confirm(...)`, then `deletePage(slug)` (from `@outl/shared/api/commands`), applies the returned today's-journal view, and refetches the page list.
+`handleDelete(p)` asks through `askConfirm` (`lib/confirm.ts`, drawn by `<ConfirmDialog />` with a destructive "Delete" button; `window.confirm` was the one dialog that could take no theme token), then calls `deletePage(slug)` (from `@outl/shared/api/commands`), applies the returned today's-journal view, and refetches the page list.
 Journals are excluded, so only regular pages show the affordance.
 
 The `g d` chord ("go delete", Normal mode) routes through the `DeletePage` handler and runs the same flow.
@@ -327,7 +359,7 @@ One shared limit: a *line* is a logical `\n` line, never a soft-wrapped visual o
 | word-initial `/` | slash menu | this client's own actions (`actionSlashCommands`, from the `Cmd+K` palette's list), the text inserters (`insertSlashCommands`, from `outl_actions::insert`), plus `/upload`, the workspace's templates and every plugin command — all in `lib/slash-commands.ts` | a text inserter splices its answer over the `/token` and stays in the block; everything else runs the row: a native one through the dispatcher's handler, `instantiateTemplateAt` for `template: <name>`, the file picker for `upload`, else `pluginRun` |
 
 **`/date-today` writes a date into the block; `/today` opens a journal.**
-The first family is `outl_actions::insert` ([`docs/tui.md`](tui.md#date--time-inserters) owns the table), and accepting one splices its text over the `/token` without leaving the block or committing it.
+The first family is `outl_actions::insert` ([`docs/tui-commands.md`](tui-commands.md#date-and-time-inserters) owns the table), and accepting one splices its text over the `/token` without leaving the block or committing it.
 `/date` is the one entry the desktop leaves out: the `/` trigger closes on the first space, so there is no way to type its argument here.
 
 **A slash command is called the same thing here and in the TUI.**
@@ -375,14 +407,17 @@ What the modal exchanges with the backend is a flat JSON DTO from `src-tauri/src
 
 ```jsonc
 {
+  "managed": false,           // display-only: Nix / home-manager owns config.toml, so Save is disabled
   "last_workspace": "/Users/me/iCloud/outl",
-  "vim_mode": false,
+  "vim_mode": true,           // stored and shown; the desktop dispatcher never reads it
   "theme": "outl-light",
   "theme_dark": "outl",
   "theme_mode": "auto",       // "light" | "dark" | "auto"
   "font_size": 15,
   "sync_transport": "iroh",  // "iroh" (P2P, default) | "file" (iCloud/fs)
   "backlinks_order": "newest",  // "newest" (default) | "oldest" — read-only, see below
+  "reminders_enabled": true,   // OS notifications for remind:: on this device
+  "reminders_quiet_hours": "",  // "22:00-07:00", or "" for none
   "diagrams": "pele"  // "pele" (default) | "off". Mermaid fences. Mobile writes the same key.
 }
 ```
@@ -392,8 +427,9 @@ What the modal exchanges with the backend is a flat JSON DTO from `src-tauri/src
 `theme`, `theme_dark` and `theme_mode` carry the complete RFC 0022 pair and are owned by the modal.
 Live preview goes through the shared `installTheme`, Save installs the persisted reply, and Cancel or a backdrop click reinstalls the configuration captured on open.
 
-The device's actor id sits beside them as `actor`, a plain ULID.
-Switching workspaces does not rotate it.
+The device's actor id is not part of this DTO: `workspace_stats` reports it as `actor`, a plain ULID, and switching workspaces does not rotate it.
+The crash-reporting switch is not part of it either: it saves on its own, through `getTelemetryEnabled` / `setTelemetryEnabled`.
+Field-by-field user documentation: [`desktop-settings.md`](desktop-settings.md).
 
 ## Paired devices
 

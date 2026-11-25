@@ -1,0 +1,91 @@
+name: Docs reminder
+
+# A feature the user cannot find in the docs does not exist for them.
+# `hygiene.yml` holds the guards a script can prove; this one is the nudge for
+# the part that needs a person: did the PR say what the user can do now?
+#
+# Soft by default. It posts ONE sticky comment (found again by a hidden marker,
+# so a push edits it instead of stacking a second) and never fails the job.
+# Set the repo variable DOCS_REMINDER_STRICT=true to make a missing docs
+# update red; a repo that wants a hard gate opts in, nobody gets it by surprise.
+#
+# `pull_request`, not `pull_request_target`: the script comes from the PR's own
+# checkout and the token stays read-only for forks. A fork PR therefore cannot
+# get the comment, and gets the same text in the job summary instead.
+#
+# Which paths count and which page owns them: `scripts/docs_reminder.py`.
+# Skips: `no-docs-needed` label, dependabot, and `chore(deps)` / `ci:` /
+# `test:` / `refactor:` titles unless the PR carries `needs-docs`.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+concurrency:
+  group: docs-reminder-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  docs-reminder:
+    name: docs reminder
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      # Untrusted text goes through env, never `${{ }}` inside `run:`.
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      PR_ACTOR: ${{ github.event.pull_request.user.login }}
+      STRICT: ${{ vars.DOCS_REMINDER_STRICT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: classify
+        id: classify
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' > "$RUNNER_TEMP/files.txt"
+          python3 scripts/docs_reminder.py \
+            --files "$RUNNER_TEMP/files.txt" \
+            --title "$PR_TITLE" \
+            --labels "$PR_LABELS" \
+            --actor "$PR_ACTOR" \
+            --body-out "$RUNNER_TEMP/body.md" | tee -a "$GITHUB_OUTPUT"
+
+      - name: sticky comment
+        if: ${{ steps.classify.outputs.action != 'skip' }}
+        continue-on-error: true
+        env:
+          ACTION: ${{ steps.classify.outputs.action }}
+        run: |
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- outl-docs-reminder -->"))][0].id // empty')
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/body.md" > /dev/null
+          elif [ "$ACTION" = comment ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@"$RUNNER_TEMP/body.md" > /dev/null
+          fi
+
+      # A skip after an earlier nudge (label added, title fixed) retires the
+      # old comment instead of leaving a stale demand on the PR.
+      - name: retire stale comment
+        if: ${{ steps.classify.outputs.action == 'skip' }}
+        continue-on-error: true
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- outl-docs-reminder -->"))][0].id // empty')
+          if [ -n "$id" ]; then
+            printf '<!-- outl-docs-reminder -->\n**Docs:** nothing owed on this PR (%s).\n' "${{ steps.classify.outputs.reason }}" > "$RUNNER_TEMP/retired.md"
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/retired.md" > /dev/null
+          fi
+
+      - name: strict mode
+        if: ${{ env.STRICT == 'true' && steps.classify.outputs.action == 'comment' }}
+        run: |
+          echo "::error::User-facing change without a docs update. Touch docs/, README.md or CHANGELOG.md, or add the no-docs-needed label."
+          exit 1

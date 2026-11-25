@@ -9,22 +9,26 @@ Everything else is a convention on top.
 ~/notes/                            # workspace root
 ├── .outl/
 │   ├── config.toml                 # workspace identity + settings
-│   ├── peers.toml                  # P2P peers
+│   ├── workspace-id
+│   ├── peers.toml                  # empty placeholder (live registry: peers.json)
 │   └── orphans.log                 # blocks that lost their ID during external edits
 ├── ops/
 │   ├── ops-<this-actor>.jsonl      # this device's append-only op log
-│   └── ops-<peer-actor>.jsonl      # mirror of another device, synced via iCloud / Syncthing
+│   └── ops-<peer-actor>.jsonl      # mirror of another device, synced via iroh / iCloud / Syncthing
 ├── pages/
 │   ├── avelino.md                  # clean markdown
 │   ├── avelino.outl                # JSON sidecar with stable IDs
-│   ├── meu-projeto.md
-│   └── meu-projeto.outl
+│   ├── templates-journal.md        # the journal template is a page too
+│   └── templates-journal.outl
 ├── journals/
 │   ├── 2026-05-25.md
 │   └── 2026-05-25.outl
-└── templates/
-    └── journal.md                  # applied to new journals
+├── assets/                         # files you attached: images, PDFs
+└── templates/                      # empty on a new workspace
 ```
+
+That is what `outl init` produces.
+A workspace that opted into per-page op logs (`outl init --scope=per-page`) keeps `ops/<actor>/<slug>.jsonl` instead of one file per actor.
 
 ## The concepts
 
@@ -101,7 +105,8 @@ status:: active          ← page property
   owner:: [[avelino]]    ← block property
 ```
 
-Properties drive queries (the `{{query: ...}}` DSL is planned) and influence display.
+Properties show up as chips on the block, feed [queries](query.md) (`prop: priority: high`), and a few keys change behavior.
+The full list is in [Properties](properties.md).
 
 ### Tag
 

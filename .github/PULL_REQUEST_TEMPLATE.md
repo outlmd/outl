@@ -19,6 +19,9 @@ Closes #...
 Related to #...
 Updated docs: `docs/...`
 
+- [ ] User-facing change: the docs page that owns it is updated, with an example I ran, and `CHANGELOG.md` `[Unreleased]` has an entry.
+- [ ] Not user-facing: nothing here changes what a user can do or see (add the `no-docs-needed` label).
+
 ## Anything reviewers should look at carefully
 
 - Is there a CRDT-correctness implication?

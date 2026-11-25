@@ -396,6 +396,57 @@ The `doc-keeper` agent runs at the end of a feature to catch what slipped throug
 
 When in doubt: **if a contributor's first 30 minutes with the repo would land them on outdated guidance, update the doc.** That's the bar.
 
+### The docs reminder
+
+You will not always remember.
+[`docs-reminder.yml`](../.github/workflows/docs-reminder.yml) remembers for you: when a PR changes a user-visible path (CLI, MCP tools, TUI, desktop, mobile, shortcuts, config, themes, plugins, markdown, sync, import, exec) and touches no `docs/**`, `README.md` or `CHANGELOG.md`, it leaves one sticky comment with four questions.
+What can the user do now, which page owns it, what is the verdict per client, where is the `[Unreleased]` entry.
+
+- It is a nudge. It never fails the job unless the repo variable `DOCS_REMINDER_STRICT=true` is set.
+- Not user-facing? Add the `no-docs-needed` label. `chore(deps)`, `ci:`, `test:` and `refactor:` titles and dependabot are skipped on their own, unless the PR carries `needs-docs`.
+- The path to page map lives in [`scripts/docs_reminder.py`](../scripts/docs_reminder.py) and mirrors the table above. Change a row there, change it here.
+
+## Documentation standard
+
+The bar is simple: another project should be able to copy how we document and be better for it.
+A feature without a page a user can find, follow and trust is not shipped.
+
+### Page anatomy
+
+Every task page, in this order:
+
+1. **Goal.** One or two sentences: what the reader will be able to do at the end. No history, no architecture.
+2. **Before you start.** Only what is not obvious (a version, a paired device, a config key). Skip the section when there is nothing.
+3. **Steps.** Numbered, one action each, written as what the user does ("press `Cmd+K`", "run `outl page new inbox`"), with what they should see after the risky ones.
+4. **Example.** A real one, copy-pasteable, with its output. Not `foo` and `bar` when a journal line will do.
+5. **Per client.** A table with one row per client (CLI, TUI, desktop, mobile, MCP) and a verdict: works, works differently (say how), or not available (say why and link the issue). A silent gap is the bug that [invariant 12](../CLAUDE.md#critical-invariants-never-violate) names.
+6. **Troubleshooting.** The three things that actually go wrong, each as the symptom the user sees, the cause, and the fix. Include the exact error text so search finds it.
+7. **Related.** Links to the neighbouring pages, never a copy of their content ([one owner per fact](#one-owner-per-fact--link-dont-duplicate)).
+
+Reference pages (every key, every flag, every chord) are tables, not prose, and link to the task page that explains when to use each row.
+
+### Voice
+
+- Direct, second person, active. "Press `Esc`", not "the user may wish to press".
+- Lead with the outcome, then the how. Cut intros, hedges and "simply".
+- Say what the user sees, not how we built it. Internals belong in `CLAUDE.md` or an RFC.
+- Name things the way the UI does, with the exact label or chord in code font.
+- Semantic line breaks (one sentence per line), English, no emoji unless the page already uses them.
+
+### Verify the examples
+
+An example nobody ran is a guess with good formatting.
+Before merge, run every command and chord you wrote, in a scratch workspace (`/init-playground`), and paste the output you got, not the output you expect.
+For a UI flow, click through it once on each client the page claims works.
+When a flag or key is renamed, `grep` the docs for the old spelling in the same PR.
+
+### Definition of done for a user-facing change
+
+- The page that owns the feature is updated, in the shape above.
+- The per-client table has a verdict for every client.
+- `CHANGELOG.md` `[Unreleased]` has an entry written for the person updating.
+- The `doc-keeper` agent ran and its open gaps are either fixed or filed.
+
 ### One owner per fact — link, don't duplicate
 
 **Every user-facing fact lives in exactly one `docs/*.md`.

@@ -1,168 +1,251 @@
-# Building MCP-driven skills and commands on top of outl
+# MCP recipes: skills and slash commands on top of outl
 
-Once `outl mcp serve` is wired into a host (see [`docs/mcp.md`](mcp.md)), every workspace tool becomes callable from whatever skill/command/agent mechanism the host exposes — a Claude Code slash command, a Claude Desktop skill, a Cursor custom mode, a Zed assistant, anything that speaks MCP.
+Once `outl mcp serve` is wired into a host (see [MCP](mcp.md)), every workspace tool is callable from whatever skill, command or agent mechanism that host has.
+That covers a Claude Code slash command, a Claude Desktop skill, a Cursor rule, a Zed assistant, anything with an MCP client.
 
-The shape that keeps showing up: **read context from outl, then generate output that depends on it.**
-Examples below use Claude Code syntax because it's the most compact way to show the wiring; the body of the prompt ports unchanged to any other host.
+The shape that keeps working is **read context from outl, then generate something that depends on it**.
+The recipes below use Claude Code syntax because it is the most compact way to show the wiring.
+The prompt body ports to any other host unchanged.
 
-## Setup: register outl with Claude Code
+- [The pattern](#the-pattern)
+- [Tool naming](#tool-naming)
+- [Which tools are safe to allow](#which-tools-are-safe-to-allow)
+- [Recipe: `/standup`](#recipe-standup) (read only)
+- [Recipe: `/capture`](#recipe-capture) (one small write)
+- [Recipe: `/meeting`](#recipe-meeting) (builds a page)
+- [Recipe: `/weekly-review`](#recipe-weekly-review) (read, then one write)
+- [Tips](#tips)
 
-[`docs/mcp.md`](mcp.md) covers Claude Desktop / Cursor / Zed.
-For Claude Code, one line does it — use `--scope user` so the server shows up in every project:
+## Set up Claude Code
 
 ```bash
 claude mcp add outl --scope user -- outl --workspace /Users/you/notes mcp serve
+claude mcp list        # outl: ... ✓ Connected
 ```
 
-The `--` is mandatory; without it `--workspace` is captured by `claude mcp add` and the registration fails.
-Verify with `claude mcp list` — you should see `outl: ... ✓ Connected`.
-
-> Prefer to check it into a repo?
-> Drop the equivalent `mcpServers` block in `.mcp.json` at the repo root; Claude Code picks it up on the next session.
+The `--` is required.
+Without it `claude mcp add` captures `--workspace` and registration fails.
+For a team repo, put the equivalent `mcpServers` block in `.mcp.json` at the repo root.
+The other hosts are in [MCP → Set it up](mcp.md#set-it-up).
 
 ## The pattern
 
-Every useful integration follows three steps:
+1. **Pull context.**
+   Call read tools: `outl_search`, `outl_page_get`, `outl_daily_*`, `outl_backlinks`.
+2. **Structure it.**
+   Bucket the blocks into something the model can reason about (done, in flight, blocked).
+3. **Generate.**
+   Write the artifact: a summary, a draft, a briefing.
 
-1. **Pull context** — call read-only tools (`outl_search`, `outl_page_get`, `outl_daily_*`, `outl_backlinks`).
-2. **Structure** — bucket the raw blocks/pages into something the model can reason on.
-3. **Generate** — write the artefact (summary, draft, briefing).
-
-Writes are rarer; when you do write, prefer composite tools (`outl_block_append_tree`, `outl_batch`) over chains of single ops.
+Writes are rarer than reads.
+When you write, use a composite tool (`outl_block_append_tree`, `outl_page_create` with `content`, `outl_batch`) over a chain of single operations.
 
 ## Tool naming
 
-Tools are named `mcp__<server>__<tool>` — for a direct registration as `"outl"` that's `mcp__outl__daily_today`, `mcp__outl__search`, and so on.
-If your host runs an MCP proxy that fans out to multiple servers, the proxy adds its own prefix (`mcp__<proxy>__outl__daily_today`).
-Copy the name verbatim from your host's tools panel — most hosts don't do fuzzy matching.
+A host names a tool `mcp__<server>__<tool>`.
+outl's tools are already called `outl_<thing>_<verb>`, so registered directly as `outl` the full name **repeats the word**:
 
-## Safe-by-default read set
+```text
+mcp__outl__outl_daily_today
+mcp__outl__outl_search
+```
 
-These never mutate the workspace and never need confirmation:
+If your host runs an MCP proxy that fans out to several servers, the proxy adds its own prefix in front: `mcp__<proxy>__outl__outl_daily_today`.
+Copy the name verbatim from the host's tools panel.
+Most hosts match exactly and fail without a hint on a typo, and a wrong name in `allowed-tools` just means the tool is never allowed.
 
-- `outl_workspace_info` — counts, actor id, path.
-- `outl_search` — full-text over blocks/pages.
-- `outl_page_get` / `outl_page_list` / `outl_page_render` — page reads.
-- `outl_daily_today` / `outl_daily_get` / `outl_daily_range` — journal reads.
-- `outl_backlinks` / `outl_block_refs` — graph reads.
-- `outl_tag_list` / `outl_tag_pages` — tag discovery.
-- `outl_block_get` / `outl_block_tree` — block reads.
-- `outl_trash_list` — what has been deleted, and whether it can be put back.
+## Which tools are safe to allow
 
-Destructive tools (`outl_page_delete`, `outl_page_merge`, `outl_block_delete`) require `confirm: true` and should almost never appear in a drafting command.
+Reads never change the workspace and are fine in any drafting command:
 
-`outl_trash_restore` mutates but does not destroy — it moves a block back where it was deleted from, so the worst case is a block reappearing.
-It takes no `confirm`, and an agent that deleted something should be able to undo it without asking twice.
-It refuses a deleted *page* and a block whose parent is also in the trash; both come back as a stable error code rather than prose ([`docs/cli.md`](cli.md#trash)).
+- `outl_workspace_info`, `outl_workspace_doctor`
+- `outl_search`, `outl_query`
+- `outl_page_get`, `outl_page_list`, `outl_page_render`
+- `outl_daily_range`
+- `outl_backlinks`, `outl_block_refs`, `outl_block_embed`
+- `outl_tag_list`, `outl_tag_pages`
+- `outl_block_get`, `outl_block_tree`
+- `outl_page_prop_get`, `outl_page_prop_list`, `outl_block_prop_get`, `outl_block_prop_list`
+- `outl_template_list`, `outl_template_resolve`
+- `outl_export_md`, `outl_export_json`
+- `outl_trash_list`
 
-## Worked example: a `/standup` slash command
+Two look like reads and are not quite: `outl_daily_today` and `outl_daily_get` **create the journal page** if the day has none yet.
+After the first call of a day they only read.
+Allow them freely; just know that "what did I do on a day I never opened" leaves an empty page behind.
 
-`/standup` reads the last seven journals and drafts the morning standup.
-Pure read-and-summarise — no writes.
+`outl_trash_restore` writes but destroys nothing: it puts a deleted block back.
+It takes no `confirm`, so an agent that deleted something can undo it without asking twice.
 
-Save the block below verbatim as `.claude/commands/standup.md` (or `~/.claude/commands/standup.md` for a global command).
-The `allowed-tools` line restricts this command to *only* the three outl tools it needs — a stray hallucination can't fire `Bash`, `Write`, `mcp__outl__page_delete`, or anything else:
+Keep these out of a drafting command: `outl_page_delete`, `outl_page_merge`, `outl_block_delete` (all need `confirm: true`), plus `outl_page_rename`, `outl_asset_add`, `outl_export_hugo` and `outl_template_run`.
+The reasons are in [MCP → What an agent can and cannot touch](mcp.md#what-an-agent-can-and-cannot-touch).
 
-```markdown
+## Recipe: `/standup`
+
+Reads the last seven journals and drafts the morning standup.
+Pure read and summarise, no writes.
+
+Save as `.claude/commands/standup.md` (or `~/.claude/commands/standup.md` for every project).
+The `allowed-tools` line limits the command to the two tools it needs, so a stray hallucination cannot reach `Bash`, `Write` or `outl_page_delete`:
+
+````markdown
 ---
 description: Draft today's standup from the last week of outl daily notes.
-argument-hint: "[date]"
-allowed-tools: mcp__outl__daily_today, mcp__outl__daily_get, mcp__outl__daily_range
+argument-hint: "[YYYY-MM-DD]"
+allowed-tools: mcp__outl__outl_daily_today, mcp__outl__outl_daily_range
 ---
 
-You are drafting the standup for $1 (defaults to today if empty).
-The source of truth is the user's outl workspace, accessed via MCP.
+You are drafting the standup for $1 (today if empty).
+The source is the user's outl workspace, through MCP.
 
 ## 1. Pull context
 
-Read today's journal (or the date the user passed) and the six days before it.
-Call the MCP tools registered under the `outl` server:
+1. Call `mcp__outl__outl_daily_today`. Its reply has `date`, which is the real today. Use it as the end date when `$1` is empty.
+2. Call `mcp__outl__outl_daily_range` with `{ "from": <end date minus 6 days, ISO>, "to": <end date> }`.
 
-- `mcp__outl__daily_today` — when `$1` is empty.
-- `mcp__outl__daily_get` with `{ "date": "$1" }` — when `$1` is set.
-- `mcp__outl__daily_range` with `{ "from": "$1 - 6d", "to": "$1" }` — always, to pull the prior week.
-
-`outl_daily_range` returns one entry per day in the interval.
-Days with no materialised journal come back as `{ "exists": false }` — skip them silently, don't invent content.
+`outl_daily_range` returns `{ "journals": [...] }`, one entry per day.
+A day with no journal is `{ "date": "...", "exists": false }`. Skip it silently.
+A day with one has `outline`: a tree of blocks `{ id, text, todo?, children }`.
+The task state is the `todo` field (`TODO`, `DOING` or `DONE`), not part of `text`.
 
 ## 2. Structure
 
-Bucket the blocks you read into:
+Walk every `outline` recursively and bucket:
 
-- **Done** — anything starting with `DONE ` in the last six days.
-- **In flight** — `TODO ` items from yesterday that aren't `DONE` today.
-- **Today** — `TODO ` items in today's journal.
-- **Blocked / open questions** — blocks with `#blocked`, `#blocker`, `?` at end, or explicit "stuck on" / "esperando".
+- **Done**: `todo: "DONE"` in the last six days.
+- **In flight**: `todo: "TODO"` or `"DOING"` in an earlier day that is not `DONE` later.
+- **Today**: `todo: "TODO"` or `"DOING"` in the end date's journal.
+- **Blocked / open**: text containing `#blocked` or `#blocker`, ending in `?`, or saying "stuck on".
 
-Ignore meeting notes, link dumps and pure references unless they appear under a TODO.
+Ignore meeting notes, link dumps and bare references unless they sit under a task.
 
 ## 3. Draft
 
-Output four short sections, in pt-BR, in this order:
+Four short sections, in this order:
 
-- `**Ontem**` followed by 1-3 bullets (past tense, concrete verbs).
-- `**Hoje**` followed by 1-3 bullets (what the user is actually going to do).
-- `**Bloqueios**` — only if real; omit the section if empty.
-- `**Notas**` — only if there's a decision/question worth surfacing; omit otherwise.
+- **Yesterday**: 1 to 3 bullets, past tense, concrete verbs.
+- **Today**: 1 to 3 bullets of what the user will actually do.
+- **Blockers**: only if real. Omit the section when empty.
+- **Notes**: only if a decision or question deserves surfacing.
 
-Rules:
+Never invent items. If a day was empty, the standup is short, and that is the right answer.
+Keep the user's wording when it is already clean.
+````
 
-- Never invent items.
-  If a day was empty, the standup is short — that's the right answer.
-- Keep the user's exact wording from the blocks when it's already clean; rewrite only when the block was a half-thought.
-- No filler ("alinhado", "seguindo", "no caminho"). If you'd cut it in your own standup, cut it here.
-```
-
-### Porting to another host
-
-Save the same prompt body (everything after the frontmatter) where your host expects it: a Claude Desktop `SKILL.md`, a Cursor `.cursor/rules/*.md`, a Continue.dev `slashCommand`, or a system message in any custom MCP client.
-The wrapper changes; the body doesn't.
-
-### What gets called at runtime
-
-Two or three MCP calls per invocation:
+What flows at runtime is two calls:
 
 ```jsonc
-// Today's journal (or the passed date)
-{ "tool": "mcp__outl__daily_today", "input": {} }
-// — or —
-{ "tool": "mcp__outl__daily_get", "input": { "date": "2026-06-12" } }
+{ "tool": "mcp__outl__outl_daily_today", "input": {} }
+// → { "date": "2026-11-25", "meta": {...}, "outline": [...], "md": "..." }
 
-// The prior six days
-{ "tool": "mcp__outl__daily_range",
-  "input": { "from": "2026-06-06", "to": "2026-06-12" } }
+{ "tool": "mcp__outl__outl_daily_range",
+  "input": { "from": "2026-11-19", "to": "2026-11-25" } }
+// → { "journals": [
+//      { "date": "2026-11-19", "exists": false },
+//      { "date": "2026-11-20", "exists": true, "meta": {...},
+//        "outline": [ { "id": "01M8…", "text": "ship emoji shortcodes", "todo": "DONE", "children": [] } ] }
+//    ] }
 ```
 
-`outl_daily_range` hands back markdown per day, with explicit gaps:
+The reply is JSON with structure, not markdown, on purpose: a rendered page has no block ids, and a command that later ticks or edits a block needs one.
 
-```jsonc
-{ "ok": true, "data": { "entries": [
-  { "date": "2026-06-06", "exists": false },
-  { "date": "2026-06-07", "exists": true,
-    "markdown": "- DONE ship emoji shortcodes\n- TODO review PR #78\n" },
-  { "date": "2026-06-12", "exists": true,
-    "markdown": "- TODO standup doc\n" }
-]}}
-```
+## Recipe: `/capture`
 
-The model walks `entries[].markdown`, buckets the lines per the prompt, and writes the output.
-No schema, no validation step — markdown is the contract.
+Drops one line into today's journal.
+The smallest useful write, and safe to allow without a prompt because it only appends.
 
-## Same pattern, different goal: `voice-humanize`
+````markdown
+---
+description: Capture a thought into today's outl journal.
+argument-hint: "<text>"
+allowed-tools: mcp__outl__outl_daily_append
+---
 
-The `voice-humanize` skill (in the user's dotfiles) uses the same three steps for a different output: it samples the user's writing style via `outl_search` over blocks and pages, extracts tone markers, and drafts a message that sounds like them.
-The fixed pieces are *what to read, how to bucket it, what to produce* — the tools never change.
+Append `$ARGUMENTS` to today's journal with `mcp__outl__outl_daily_append` and `{ "text": "$ARGUMENTS" }`.
+Prefix it with `TODO ` only if the user's text is clearly a task.
+Do not rephrase. Reply with one line: the date and the text you wrote.
+````
+
+The reply is `{ "block_id", "date", "text" }`.
+Keep `block_id` if a follow-up might edit the block.
+
+## Recipe: `/meeting`
+
+Turns a transcript or rough notes into a page with a real outline.
+One call builds the whole page, so there is no half-written state to clean up.
+
+````markdown
+---
+description: Turn meeting notes into an outl page.
+argument-hint: "<slug> then paste the notes"
+allowed-tools: mcp__outl__outl_page_list, mcp__outl__outl_page_create, mcp__outl__outl_daily_append
+---
+
+1. Pick a slug: kebab-case, no `/` and no `.` (for example `2026-11-25-roadmap-sync`).
+   Call `mcp__outl__outl_page_list` and make sure it is not taken.
+   `outl_page_create` on an existing slug reuses the page and **appends** `content` to it, so a retry or a clash duplicates blocks.
+2. Call `mcp__outl__outl_page_create` with `slug`, a human `title`, and `content`: a forest of `{ "text", "children" }`.
+   Use the groups **Decisions**, **Actions** (each a `TODO ` block), **Open questions**.
+   Date links are ISO: `[[2026-11-25]]`.
+3. Add one line to today's journal with `mcp__outl__outl_daily_append`: `Meeting: [[<slug>]]`.
+4. Reply with the slug and the number of action items.
+````
+
+Rules the dialect enforces, because the server does not rewrite input: ISO date links, 2-space nesting (handled for you by `children`), and a literal `TODO ` / `DONE ` prefix for tasks.
+See [Markdown format](markdown-format.md).
+
+## Recipe: `/weekly-review`
+
+Reads a week, finds what slipped, and writes a review page.
+Shows the read-then-write shape: everything is read first, and the write is a single call.
+
+````markdown
+---
+description: Review last week and write it up as an outl page.
+allowed-tools: mcp__outl__outl_daily_today, mcp__outl__outl_daily_range, mcp__outl__outl_query, mcp__outl__outl_page_create
+---
+
+1. `mcp__outl__outl_daily_today` for the real date. Compute the Monday to Sunday of last week.
+2. `mcp__outl__outl_daily_range` over that week.
+3. `mcp__outl__outl_query` with `{ "tag": "project", "not_tags": ["someday"] }` to list active project pages.
+4. Group the week's `todo: "DONE"` blocks by project page mention (`[[page]]`).
+   List `TODO` blocks that appeared early in the week and never reached `DONE` under **Slipped**.
+5. Write one page with `mcp__outl__outl_page_create`, slug `review-<monday-iso>`, with `content` holding **Done by project**, **Slipped**, **Next week**.
+   Never invent items. An empty section is omitted.
+````
+
+`outl_query` filters **pages** (by tag, property, date, kind, each with a `not_` twin), not blocks.
+To find blocks, use `outl_search`, or a `query` fence on a page ([Queries](query.md)).
+
+## Same pattern, different goal
+
+The `voice-humanize` skill in the author's dotfiles uses the same three steps for text: it samples the user's writing through `outl_search` over blocks and pages, extracts tone, and drafts a message that sounds like them.
+What to read, how to bucket it and what to produce change per skill.
+The tools do not.
 
 ## Tips
 
-- **Markdown dialect.** Writes must follow [`docs/markdown-format.md`](markdown-format.md): ISO date links (`[[2026-04-22]]`), 2-space indent per level, literal `TODO` / `DONE` prefixes. The server doesn't transform input.
-- **Best-effort reads.** If a call fails or returns empty, continue with what the rest of the calls produced — don't block the whole command on one miss.
-- **Output shape.** Success is content-only: compact JSON in `content[].text`, or raw `.md` from `outl_page_render` / `outl_export_md`. Errors set `isError: true` and keep `structuredContent: { ok: false, error }` so `error.data` is readable.
-- **Block ids come from `outline`.** `outl_daily_*` returns JSON, not raw markdown, because a rendered `.md` carries no ids — and you need one to call `outl_block_update` / `_move` / `_delete` / `_toggle_todo`.
-- **Workspace errors.** If `outl mcp serve` was launched without `--workspace` (and `OUTL_WORKSPACE` isn't set), every tool returns "no workspace". Tell the user to fix the host config — the prompt can't recover.
+- **Writes follow the markdown dialect.**
+  ISO date links (`[[2026-04-22]]`), 2 spaces per nesting level if you send raw text, literal `TODO` / `DONE` prefixes.
+  The server does not transform what you send.
+- **Best-effort reads.**
+  If one call fails or comes back empty, continue with the rest.
+  Do not block a whole command on one miss.
+- **Check `failed_at` after `outl_batch`.**
+  A batch that stops halfway still reports success at the protocol level.
+  Details in the [batch section of the tool reference](mcp-tools.md#batch).
+- **Block ids come from `outline`.**
+  `outl_daily_*` and `outl_page_get` return JSON because a rendered `.md` has no ids, and `outl_block_update`, `_move`, `_delete` and `_toggle_todo` need one.
+- **Reply shape.**
+  Success is content only: compact JSON in `content[0].text`, or raw markdown from `outl_page_render` and `outl_export_md`.
+  Errors set `isError: true` and keep `structuredContent: { ok: false, error }`, so `error.data` is readable.
+- **A wrong workspace is the host's problem, not the prompt's.**
+  If every tool replies `NO_WORKSPACE`, tell the user to fix `--workspace` in the host config.
+  The command cannot recover from it.
 
 ## See also
 
-- [`docs/mcp.md`](mcp.md) — wiring `outl mcp serve` into every host.
-- [`docs/cli.md`](cli.md) — full tool surface (each CLI subcommand maps 1:1 to an MCP tool).
-- [`docs/markdown-format.md`](markdown-format.md) — the dialect skills must respect when writing back.
+- [MCP](mcp.md): wiring `outl mcp serve` into every host, safety, troubleshooting.
+- [MCP tool reference](mcp-tools.md): every tool, argument and error code.
+- [CLI](cli.md): each tool has a CLI twin for debugging.
+- [Markdown format](markdown-format.md): the dialect a skill must respect when it writes back.

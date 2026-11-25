@@ -11,6 +11,34 @@ Every design decision here serves that.
 
 > **Why the dialect looks like this, and what it costs to add a token to it:** [RFC 0008](rfcs/0008-markdown-dialect-and-sidecar-tokens.md).
 
+## Syntax at a glance
+
+Everything you can write, with the page that owns the detail.
+All of it is plain markdown a text editor can read.
+
+| You want | Write | Detail |
+|---|---|---|
+| A block | `- text`, two spaces per nesting level | [Outline items](#outline-items) |
+| A page field | `key:: value` as the first lines of the file | [Page properties](#page-properties-top-of-file), [Properties](properties.md) |
+| A block field | `key:: value` right under the bullet | [Block properties](#block-properties) |
+| A task | `TODO `, `DOING `, `DONE ` before the text, or `[ ]`, `[/]`, `[x]` | [Block-level prefixes](#block-level-prefixes-todo--doing--done--quote) |
+| A quote | `> ` before the text | [Block-level prefixes](#block-level-prefixes-todo--doing--done--quote) |
+| A link to a page or a day | `[[Page name]]`, `[[2026-05-24]]` | [Inline syntax](#inline-syntax) |
+| A tag, nested | `#ops`, `#ops/deploy` | [Nested tags](#nested-tags-and-page-namespaces) |
+| A person | `[[@name]]` | [Mentions](#mentions-name) |
+| A link to one block | `((blk-abc123))` | [Block refs and embeds](#block-refs-and-embeds) |
+| A live copy of a block and its children | `!((blk-abc123))` | [Block refs and embeds](#block-refs-and-embeds) |
+| A whole page inline | `![[Page name]]` | [Page embeds](#page-embeds-page) |
+| A file or image | `![alt](assets/<hash>.<ext>)` | [Asset links](#asset-links-nameassetshashext) |
+| Emphasis | `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, `` `code` `` | [Inline syntax](#inline-syntax) |
+| An emoji | `:tada:` | [Emoji shortcodes](#emoji-shortcodes-tada) |
+| A table | pipe table with a delimiter row | [Tables](#tables) |
+| Code you can run | a fenced block with a language | [Running code blocks](exec.md) |
+| A live list of tasks | a ` ```query ` fence | [Query code blocks](query.md) |
+| A reminder | `remind:: 3pm every 1h until DONE` | [Reminders](reminders.md) |
+| A reusable structure | `template:: name` on a page | [Templates](templates.md) |
+| Metadata for another tool | a `---` YAML fence at the top | [YAML frontmatter](markdown-frontmatter.md) |
+
 ---
 
 ## The .md file
@@ -32,7 +60,7 @@ created:: [[2026-05-24]]
 ```
 
 That is the **entire file**.
-No IDs, no UUIDs, no HTML comments, no frontmatter delimiter.
+No IDs, no UUIDs, no HTML comments, and no frontmatter of its own (a `---` fence written by another tool is kept, see [YAML frontmatter](markdown-frontmatter.md)).
 What you see is what's on disk.
 
 ### Page properties (top of file)
@@ -264,6 +292,11 @@ The TUI renders fences as monospace text without syntax colouring today; the pla
 [`@outl/shared/highlight::canonical`]: ../crates/outl-frontend-shared/src/highlight/aliases.ts
 [hljs-common]: https://github.com/highlightjs/highlight.js/blob/main/src/index.js
 
+#### Running a code block
+
+A fence with a runnable language (`js`, `python`, `lua`, `rust`, `query`) can run, and the output is written under the block as a `> **result:**` child.
+Which languages run on which client, the keys, the limits and what the result looks like: [Running code blocks](exec.md).
+
 #### Query code blocks
 
 A ` ```query ` fence runs a declarative DSL against the workspace and renders matching blocks as **live embed references**.
@@ -391,6 +424,7 @@ Full syntax, defaults, quiet hours, and which clients deliver: [Reminders](remin
 |--------|---------|
 | `[[name]]` | Reference to page named "name" |
 | `[[2026-05-24]]` | Reference to journal "2026-05-24" (rendered as date) |
+| `[text](https://example.com)` | Standard markdown link. In the TUI, `g x` opens it (only `http`, `https` and `mailto`) |
 | `[[@name]]` | Mention — reference to the person page `name` (page-level `type:: person`); the `@` is the link affordance, not part of the page identity |
 | `#name` | Tag (page reference with classification semantics) |
 | `#a/b/c`, `[[a/b/c]]` | Nested tag / page — `a/b/c` lives in the `a/b` namespace, which lives in `a`. Any depth. See [Nested tags and page namespaces](#nested-tags-and-page-namespaces) |
@@ -400,7 +434,7 @@ Full syntax, defaults, quiet hours, and which clients deliver: [Reminders](remin
 | `![alt](url)` | Image / embedded asset — renders inline (`<img>` on desktop/mobile, a `🖼`/`📄` placeholder in the TUI); `url` is a workspace-relative `assets/<hash>.<ext>` path or a remote URL. See [Asset links](#asset-links-nameassetshashext) |
 | `:shortcode:` | GitHub gemoji shortcode — renders as the unicode glyph (`:tada:` → 🎉) |
 | `{{query: ...}}` | Inline query token (legacy — parsed as opaque; use ` ```query ` code blocks instead, see [Query code blocks](#query-code-blocks) below) |
-| `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `` `code` `` | Standard CommonMark (underscore emphasis rules apply — see below) |
+| `**bold**` / `__bold__`, `*italic*` / `_italic_`, `~~strike~~`, `` `code` `` | Standard CommonMark (underscore emphasis rules apply — see below) |
 | `==highlight==` | Highlight — renders the inner text marked (the on-disk form of Roam's `^^highlight^^` after import). The inner span may not begin or end with a space, so a spaced comparison (`a == b`) stays plain text |
 
 #### Underscore emphasis and intra-word identifiers
@@ -609,7 +643,9 @@ Each warning carries:
 
 - `line` — 1-based source line number.
 - `raw` — the offending line, verbatim (no trim).
-- `kind` — currently `UnrecognizedBlockMarker` (line didn't start with `- ` and isn't a recognized property).
+- `kind` — what the parser recovered from.
+  `UnrecognizedBlockMarker` is a line that didn't start with `- ` and isn't a recognized property.
+  The five `Remind…` kinds (`remind_missing_anchor`, `remind_invalid_time`, `remind_invalid_interval`, `remind_invalid_stop`, `remind_max_clamped`) are a `remind::` rule that did not parse as written, see [Reminders](reminders.md#when-a-rule-doesnt-parse).
 
 Two consequences worth knowing:
 

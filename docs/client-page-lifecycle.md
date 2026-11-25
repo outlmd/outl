@@ -2,6 +2,12 @@
 
 What every client does with a page that already exists: reading its history, getting a deleted block back, reopening a page that was deleted, and renaming or merging one.
 
+**On the desktop, in short:** the clock icon in the page header is the history, with a **Restore** on edits and deletions.
+The trash button in the top-right capsule lists every deleted block, and **Restore** puts one back.
+Clicking the page title renames it, and **Merge into...** on a sidebar row merges it.
+Nothing is destroyed by a delete, but a merge cannot be undone, and a deleted *page* cannot be restored from the trash: opening it by name gives back an empty page, and the blocks it held are in the trash, one entry each.
+How to do each, step by step: [Using outl on the desktop](desktop.md#organise).
+
 Moved out of [`docs/clients.md`](clients.md), which had grown to the point where no edit to it was cheap.
 That page keeps the cross-client architecture: the stack, who owns which fact, the locks an open takes, and the two conditions every client has to surface.
 
@@ -46,8 +52,8 @@ Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invarian
 |--------|---------|
 | CLI | `outl trash list` and `outl trash restore <id>`. See [`docs/cli.md`](cli.md#trash). |
 | MCP | `outl_trash_list`, `outl_trash_restore` — an agent that can delete a block can undo it. |
-| Desktop | `TrashPanel`, from the `🗑` button in the chrome toggle bar. See [`desktop-ux.md`](desktop-ux.md#trash-panel). |
-| TUI | `/trash` (and `:trash`), `r` to restore, `Enter` to open the page a deleted block came from. See [`tui.md`](tui.md#trash-trash-trash). |
+| Desktop | `TrashPanel`, from the trash button in the top-right capsule. See [`desktop-ux.md`](desktop-ux.md#trash-panel). |
+| TUI | `/trash` (and `:trash`), `r` to restore, `Enter` to open the page a deleted block came from. See [`tui.md`](tui-overlays.md#trash-trash-trash). |
 | Mobile | Not yet — the commands are registered, no sheet calls them. |
 
 Both GUI commands are `list_trash` / `restore_trash_entry` (`outl_tauri_shared::commands::trash`), which neither client may second-guess: `refusal` rides each row, and `restore_trash_entry` re-asks under its own lock.

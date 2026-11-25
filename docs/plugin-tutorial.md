@@ -17,13 +17,22 @@ If you just want to see a plugin run before reading the whole thing, scaffold on
 ```sh
 outl plugin init hello                       # writes ./hello (manifest + build + a `hello` command)
 cd hello
+# the scaffold pins "@outl/plugin-sdk": "^1.0.0", which npm does not have yet (see the note below):
+perl -pi -e 's/"\^1\.0\.0"/"latest"/' package.json
 bun install && bun run build                 # bundles src/index.ts → index.js  (npm works too)
 outl -w ~/notes plugin install . --yes       # install into your workspace
 outl -w ~/notes plugin run com.example.hello hello
 ```
 
 That last line prints the toast the starter command fires; in the TUI / desktop, type `/hello` in a block instead.
+Verified output: `👋 Hello from hello!` then `Applied 0 change(s).`
 `outl plugin init` writes a complete, buildable project — manifest, `package.json`, `tsconfig`, `src/index.ts`, README — so you have a real plugin to grow from.
+
+> **The SDK version pin.**
+> `outl plugin init` writes `"@outl/plugin-sdk": "^1.0.0"`, and the npm registry only has `0.x` releases of the SDK (the `latest` tag points at a `0.13.0` beta).
+> `bun install` fails with `No version matching "^1.0.0" found`.
+> Change the dependency to `"latest"` as above and it resolves.
+> The plugin API is `1.0`, and that is a different number from the SDK package version.
 
 The rest of this page builds a plugin **from an empty folder by hand**, so you touch every field and every host call once and nothing is magic.
 If you'd rather start from the scaffold and read the reference alongside, that's the [Plugin API](plugin-api.md).
@@ -33,7 +42,7 @@ If you'd rather start from the scaffold and read the reference alongside, that's
 We'll build **`tag-counter`** — a small but genuinely useful plugin that exercises both day-zero capabilities you'll reach for most:
 
 - An **op-hook** (`ctx.ops.onOp`) that watches edits as they land and logs whenever a block gains a `#tag`.
-- A **slash command** (`ctx.commands.register`) called `count-tags` that scans the workspace, tallies every `#tag`, and writes a tidy report into a `tags/summary` page.
+- A **slash command** (`ctx.commands.register`) called `count-tags` that scans the workspace, tallies every `#tag`, and writes a tidy report into a `tag-summary` page.
 
 It's a real plugin: it reads blocks, mutates the workspace, reads its own config, logs, and notifies the user.
 That covers most of what you'll do in any plugin.
@@ -119,12 +128,10 @@ Create `tag-counter/plugin.json`:
     ],
     "configSchema": "config.schema.json"
   },
-  "metadata": {
-    "description": "Tallies every #tag in the workspace into a summary page.",
-    "author": "you",
-    "license": "MIT",
-    "category": "productivity"
-  }
+  "description": "Tallies every #tag in the workspace into a summary page.",
+  "author": "you",
+  "license": "MIT",
+  "category": "productivity"
 }
 ```
 
@@ -139,9 +146,11 @@ Field by field:
   Bump it when you publish a new build.
 - **`api`** — the *plugin API* range you target, **not** the binary version.
   `^1.0` means "any host whose plugin API major is 1".
-  A host whose API major doesn't satisfy this refuses to load you — that's the compatibility gate.
+  Write it honestly.
+  The host does not compare it at load time yet (see [Plugin API → Versioning](plugin-api.md#versioning)), but it will.
 - **`engines.outl`** — the minimum outl *binary* version.
   Separate axis from `api`: this tracks the app, `api` tracks the plugin surface.
+  Recorded, not enforced yet.
 - **`main`** — the bundled entry file, relative to the plugin root.
   Always a single `.js` file — no `node_modules`, no runtime module resolution.
 - **`capabilities`** — what you plug into.
@@ -150,19 +159,25 @@ Field by field:
   (`keybinding` is also declarable — see the note at the end of this step.)
 - **`permissions`** — what you're allowed to do.
   The user approves these once on install, and they're frozen in the lockfile.
-  Every host call is checked against this set — deny by default.
-  We ask for: `read-page` + `read-op-log` to read blocks and watch ops, `write-page` + `submit-op` to write our summary.
+  Writes, storage, secrets and network are checked against this set when the plugin runs, deny by default.
+  We ask for `read-page` + `read-op-log` to read blocks and watch ops, and `write-page` + `submit-op` to write our summary.
+  The read-side permissions are listed at install but not checked at run time yet, see [Permissions: what is enforced](plugin-api.md#permissions-what-is-enforced).
+  Declare them anyway: the user reads the list to decide.
 - **`contributes.commands`** — the commands you surface in the slash menu / palette.
   Each `id` here must match the id you pass to `ctx.commands.register(...)` at runtime, and the `title` is the label the user sees.
+  A command is only listed when the plugin also declares the `slash-command` capability.
 - **`contributes.configSchema`** — a path to a JSON Schema file describing your user-editable settings.
   Day-zero accepts a path only, never an inline schema.
-- **`metadata`** — descriptive, non-load-bearing fields for discovery UI.
+- **`description`, `author`, `license`, `category`** — descriptive, non-load-bearing fields for discovery UI.
+  They sit at the top level of `plugin.json`, as in every example in `examples/`.
 
 > **A note on `keybinding`.**
 > You *can* declare `contributes.keybindings` (each entry is `{ "command": "<id>", "key": "Ctrl+Shift+T" }`).
 > Chord dispatch is **live on the TUI** (a chord fires the command from Normal mode, single or two-chord, unless a native binding already claims it) and on the **desktop** (a native binding always wins).
 > Mobile has no keyboard, so it doesn't apply there.
-> We leave keybindings out of this tutorial to keep it focused on the two capabilities you'll reach for first, but you can add one to your manifest and it will fire.
+> Declare the `keybinding` capability too, or the chord never binds.
+> A chord that does not parse, or has more than two parts, is skipped without a message.
+> We leave keybindings out of this tutorial to keep it focused on the two capabilities you'll reach for first.
 
 ## Step 3 — Describe your config (`config.schema.json`)
 
@@ -181,17 +196,20 @@ Create `tag-counter/config.schema.json`:
       "type": "string",
       "title": "Summary page",
       "description": "Slug of the page the tag tally is written to.",
-      "default": "tags/summary"
+      "default": "tag-summary"
     }
   }
 }
 ```
 
+A page slug is kebab-case: no `/`, no `.`.
+(`tags/summary` is rejected with `invalid page slug`, and the write is dropped.)
 You read this config at runtime with `ctx.config.get()`.
 
 > **Where the config value actually comes from.**
 > `ctx.config.get()` reads the `config` field for your plugin from the workspace lockfile (`installed.json`).
 > The user edits it on **every client**: `outl plugin config set <id> <key> <value>` on the CLI, the settings form in the desktop / mobile plugin browser, or the TUI `plugin-settings` overlay.
+> A plugin in `_dev/` has no lockfile entry, so there `ctx.config.get()` returns `null`: our `cfg?.summaryPage` guard handles that.
 > All of them render this JSON Schema as a form and coerce each value to its field type, so the schema you write here *is* the settings UI.
 > A field marked `"x-outl-secret": true` is routed to the OS keychain instead of the lockfile and read with `ctx.secrets.get()` — see [Plugin API → Secrets, the full flow](plugin-api.md#secrets--the-full-flow).
 
@@ -210,7 +228,7 @@ Create `tag-counter/package.json`:
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@outl/plugin-sdk": "workspace:*"
+    "@outl/plugin-sdk": "latest"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
@@ -222,8 +240,8 @@ Create `tag-counter/package.json`:
 Two notes on the dependency line:
 
 - `@outl/plugin-sdk` is **types plus one helper** (`definePlugin`) and nothing else — zero runtime code.
-  Inside this repo, `workspace:*` resolves it from `plugin-sdk/`.
-  If you're building a plugin *outside* the repo, depend on the published package instead: `npm i -D @outl/plugin-sdk` (the `release` workflow publishes it to npm on every release, so `latest` tracks the newest build cut from `main`).
+  Outside the repo, depend on the published package: `"latest"` tracks the newest build cut from `main` (the `release` workflow publishes it on every release).
+  Inside this repo's bun workspace you can use `"workspace:*"` to resolve it from `plugin-sdk/`.
 
 If you're using TypeScript, create `tag-counter/tsconfig.json`:
 
@@ -264,7 +282,7 @@ interface TagCounterConfig {
   summaryPage: string;
 }
 
-const DEFAULT_SUMMARY_PAGE = "tags/summary";
+const DEFAULT_SUMMARY_PAGE = "tag-summary";
 
 /** Pull every #tag out of a block's text. Returns lowercase tag names, no `#`. */
 function extractTags(text: string): string[] {
@@ -292,13 +310,13 @@ export default definePlugin({
     });
 
     // 2) command — fired from the slash menu / palette / `outl plugin run`.
-    ctx.commands.register("count-tags", () => {
+    ctx.commands.register("count-tags", async () => {
       const cfg = ctx.config.get<Partial<TagCounterConfig>>();
       const summaryPage =
         cfg?.summaryPage?.trim() || DEFAULT_SUMMARY_PAGE;
 
       // --- READ PHASE: gather everything from the snapshot, up front. ---
-      const blocks = ctx.blocks.query({}); // empty filter = every block
+      const blocks = await ctx.blocks.query({}); // empty filter = every block
       const counts = new Map<string, number>();
       for (const b of blocks) {
         // Skip the summary page itself so we don't count our own output.
@@ -349,7 +367,9 @@ This needs the `read-op-log` permission and the `op-hook` capability — both of
 
 **`ctx.commands.register(id, handler)`** — wires the `count-tags` handler to the command we declared in `contributes.commands`.
 The id **must** match.
-The handler is `() => void | Promise<void>` — sync is fine here.
+The handler is `() => void | Promise<void>`.
+It is `async` here because the SDK types `ctx.blocks.query` as a `Promise`, and `tsc` rejects iterating it without an `await`.
+At run time the call returns right away from the turn snapshot, and `await` on it costs nothing.
 It fires when the user picks the command from the slash menu, the palette, or runs `outl plugin run`.
 
 **`ctx.config.get()`** — returns your plugin's config object (read from the lockfile, as noted in Step 3).
@@ -357,11 +377,11 @@ We fall back to the default page when it's unset.
 
 **`ctx.blocks.query(filter)`** → `Block[]` — finds blocks.
 The filter is `{ page?, todo?, textContains? }`, all optional and ANDed; an empty `{}` matches every block.
-Each `Block` is `{ id, text, todo?, page }` — note `text` is **clean**, with no `TODO `/`DONE ` prefix.
+Each `Block` is `{ id, text, parent, todo?, page }` — note `text` is **clean**, with no `TODO `/`DONE ` prefix, and `parent` is the parent block id or `null` for a top-level block.
 Needs `read-page`.
 
 **`ctx.page.appendTree(slug, tree)`** — appends a whole `TreeNode[]` (`{ text, children? }`, recursive) under a page, creating the page if it's missing.
-This is the call that lets us seed a brand-new `tags/summary` page in a single run: it creates the page and all the tally blocks in one turn, threading the new block ids through internally.
+This is the call that lets us seed a brand-new `tag-summary` page in a single run: it creates the page and all the tally blocks in one turn, threading the new block ids through internally.
 Needs `write-page`.
 
 **`ctx.ui.notify(msg)`** and **`ctx.log.info(msg)`** — user-facing toast / status line, and a line in the host's plugin log, respectively.
@@ -414,10 +434,10 @@ The host API you have to work with, in full:
 | `ctx.blocks.createAfter(afterId, text)` | new sibling after a block | `write-page` + `submit-op` |
 | `ctx.blocks.appendTree(parentId, tree)` | append a nested `TreeNode[]` under a block, one turn | `write-page` + `submit-op` |
 | `ctx.blocks.move(id, target)` | `{ toPage }` (creates page) or `{ toParent }` | `write-page` + `submit-op` |
-| `ctx.blocks.toggleTodo(id)` | cycle None→TODO→DONE→None | `write-page` + `submit-op` |
-| `ctx.blocks.delete(id)` | move to trash | `write-page` + `submit-op` |
+| `ctx.blocks.toggleTodo(id)` | cycle none, `TODO`, `DOING`, `DONE`, none | `write-page` + `submit-op` |
+| `ctx.blocks.delete(id)` | move to trash (restorable) | `write-page` + `submit-op` |
 | `ctx.page.list()` → `Page[]` | `{ slug, title, kind }` | `read-page` |
-| `ctx.page.create(slug)` | idempotent page create | `write-page` |
+| `ctx.page.create(slug)` | idempotent page create (slug is kebab-case, no `/` or `.`) | `write-page` |
 | `ctx.page.appendTree(slug, tree)` | append a `TreeNode[]`, creating the page if missing | `write-page` |
 | `ctx.config.get()` | your config object | — |
 | `ctx.log.info/warn/error(m)` | host log | — |
@@ -465,8 +485,7 @@ If you don't have one:
 outl init ~/notes-test
 ```
 
-Then install your plugin from its directory.
-`github:` install sources aren't wired yet — you install from a **local directory** for now:
+Then install your plugin from its directory (a `github:owner/repo` source works too, see [Plugins → Install](plugins.md#install)):
 
 ```sh
 outl -w ~/notes-test plugin install ~/path/to/tag-counter --yes
@@ -507,14 +526,22 @@ outl -w ~/notes-test plugin run app.outl.examples.tag-counter count-tags
 ```
 
 `plugin run` executes the command and then **re-renders every `.md`** so the mutation lands on disk (the op log is the source of truth; the `.md` files are a projection of it).
-You'll see the notification text in the output.
+You'll see the notification text and the change count in the output:
+
+```text
+Counted 3 distinct tag(s)
+Applied 1 change(s).
+```
+
+`tag-summary.md` now holds `- #research — 1`, `- #urgent — 1`, `- #work — 1`.
+If you see `Applied 0 change(s).` followed by an `error:` line, the write was refused: read the error.
 
 ### Where the command shows up in the GUI clients
 
 The same plugin, same command, surfaces everywhere a person edits:
 
 - **TUI** — press `/` to open the slash menu; `/count-tags` appears alongside the built-ins.
-- **Desktop** — click the `⧉` button in the bottom corner to open the Plugin palette and pick the command.
+- **Desktop** — click the plugins button (`⧉`, in the top-right capsule) to open the plugin palette and pick the command, or type `/count-tags` at the start of a block.
 - **Mobile** — tap the plugin glyph in the header to open the plugin sheet.
 
 `op-hook` and `slash-command` both work end-to-end on all four clients (TUI, desktop, mobile, CLI), so your `onOp` log line and your `count-tags` command behave identically everywhere.
@@ -535,11 +562,12 @@ A plugin in `_dev/`:
 
 - **Loads without the hash check** — edit `index.js`, reload, no reinstall.
 - **Runs with all permissions implicit** — you're not prompted on every iteration.
-- **Is excluded from sync** — your in-progress hacking doesn't leak to your other devices.
+- **Is never recorded in the lockfile** — no approval, no saved config (`ctx.config.get()` returns `null`).
 
-The clients show a "sandbox relaxed" banner so it's obvious you're running unvetted dev code.
-The loop becomes: edit `src/index.ts` → `bun run build` → copy `index.js` into `_dev/tag-counter/` → reload the client.
+There is no file watcher and no "sandbox relaxed" banner yet.
+The loop becomes: edit `src/index.ts` → `bun run build` → copy `index.js` into `_dev/tag-counter/` → run the CLI command again, or restart the client.
 (You can symlink or script that copy.)
+Remove any installed copy with the same id first, or both load.
 This is for authoring only — ship the real, hash-pinned install when you're done.
 
 ## Step 10 — Debug when it doesn't work
@@ -557,12 +585,17 @@ Common failures and what they mean:
 |---|---|---|
 | Command never appears | Bundle built as ESM (`export` in `index.js`) | Rebuild with `--format=iife` |
 | Command never appears | `contributes.commands[].id` ≠ the id passed to `ctx.commands.register` | Make the two ids identical |
-| "permission denied" / write does nothing | You called a host method whose permission you didn't request | Add the permission to `plugin.json`, reinstall (you'll re-approve) |
+| ``denied `write-page` for intent`` / write does nothing | You wrote without `write-page` approved | Add the permission to `plugin.json`, reinstall (you'll re-approve) |
 | Install rejected: invalid id | `id` doesn't match reverse-DNS (`a.b`, lowercase, ≥2 labels) | Fix the `id` pattern |
-| Install rejected: `github:` source | `github:` isn't wired yet | Install from a local directory |
+| `install failed: io: No such file or directory` | `main` (`index.js`) does not exist: you installed before building | `bun run build`, then install again |
+| `invalid page slug` in the errors, `Applied 0 change(s).` | You wrote to a page slug with `/` or `.` in it | Use kebab-case slugs (`tag-summary`) |
+| `bun install` fails: `No version matching "^1.0.0"` | The scaffold pins an SDK version npm does not have | Set `"@outl/plugin-sdk": "latest"` |
+| `tsc`: `Promise<Block[]>` must have a `[Symbol.iterator]` | The SDK types reads as `Promise` | `async` handler and `await` the read |
 | `ctx.storage` / `ctx.net` call throws "permission denied" | You didn't declare `storage:local` / `network:<domain>` | Add the permission to `plugin.json`, reinstall (you'll re-approve) |
 | Your own write doesn't show in a later `query` | describe→apply: reads are from the start-of-turn snapshot | Read everything first, then write |
-| `onOp` never fires | Missing `read-op-log` permission or `op-hook` capability | Declare both in `plugin.json` |
+| `onOp` never fires | Missing `op-hook` capability (`read-op-log` is listed too, but the capability is what gates it) | Declare both in `plugin.json` |
+| Command never appears (manifest looks right) | Missing the `slash-command` capability | Declare it |
+| A code fence of your language renders as plain source | `contributes.transformers` has no entry for the language, or your function threw or returned `null` | Declare it, and wrap the body in `try` with `ctx.log.error` while debugging |
 
 When in doubt, sprinkle `ctx.log.info(...)` through your handler and watch the plugin log.
 
@@ -585,6 +618,7 @@ Three ways to share a plugin, from least to most public:
 - **A GitHub repo** — `outl plugin install github:user/repo` clones it at the newest semver tag (or `…#v1.2.0` to pin one).
   No registry entry needed.
 - **The official registry** — list it in [`outlmd/registry`](https://github.com/outlmd/registry) so it shows up in the in-app marketplace and `outl plugin search`.
-  See [Plugins → Publishing your plugin](plugins.md#publishing-your-plugin-registering-it) for the four-step flow.
+  See [Plugins → Publish a plugin](plugins.md#publish-a-plugin) for the four-step flow.
 
 Still roadmap: **`.outlpkg`** single-file packages and `outl plugin update`.
+Reinstalling over an installed plugin works but resets its saved config, see [Plugins → Install](plugins.md#install).

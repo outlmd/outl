@@ -1,7 +1,9 @@
 # Plugin API
 
 This is the **authoring** reference: the manifest, the host API your code talks to, and the versioning contract.
-If you just want to install and run plugins, read [Plugins](plugins.md) instead.
+New to plugins?
+Build one first with the [tutorial](plugin-tutorial.md), then keep this page open.
+If you only want to install and run plugins, read [Plugins](plugins.md).
 
 The single biggest predictor of a plugin ecosystem's survival is a stable, versioned API surface.
 So this document leads with a changelog and treats every entry as a promise.
@@ -23,6 +25,7 @@ The day-zero surface.
 - **Host namespaces (live):** `ctx.ops`, `ctx.blocks`, `ctx.page`, `ctx.commands`, `ctx.config`, `ctx.content`, `ctx.storage`, `ctx.secrets`, `ctx.net`, `ctx.sync`, `ctx.log`, `ctx.ui`. (`ctx.sync.register` is live; the client polling that drives it is roadmap.)
   `ctx.blocks.appendTree` / `ctx.page.appendTree` build a nested tree in one turn (the describe→apply escape hatch for seeding fresh content), and `ctx.blocks.query` results carry `parent` for reconstructing hierarchy.
 - **Permissions:** `read-page`, `write-page`, `read-op-log`, `submit-op`, `storage:local`, `secrets`, `network:<domain>`.
+  Which of them the runtime enforces is in [Permissions: what is enforced](#permissions-what-is-enforced).
 - **Entry contract:** `definePlugin({ activate(ctx), deactivate?() })`.
 
 Anything not listed here is **not** part of API 1.0, even if a capability string for it exists in the manifest schema (see [Versioning](#versioning)).
@@ -62,6 +65,7 @@ outl-todo-archiver/
 ```
 
 You build with `esbuild` / `tsup` into **one bundled `index.js`** — no `node_modules`, no runtime resolution.
+The bundle must be an **IIFE** (`--format=iife`): the engine runs it as a script with no module loader, so an `export` statement is a syntax error and the plugin never loads.
 
 ### Installed layout
 
@@ -69,23 +73,25 @@ You build with `esbuild` / `tsup` into **one bundled `index.js`** — no `node_m
 .outl/plugins/com.avelino.todo-archiver/
 ├── plugin.json
 ├── index.js                # bundled, single JS file
-├── index.js.map            # optional, for errors
-├── config.schema.json
-└── README.md
+└── config.schema.json      # only if contributes.configSchema is set
 ```
 
-Only the build output ships.
+`install` copies exactly three things: `plugin.json`, the file named by `main`, and the `configSchema` file.
+A README or a source map in your repo does not travel.
 The rule is hard: a plugin survives deleting `node_modules`.
 
-Dev mode lives in `_dev/<name>/` — hot reload, implicit permissions, a "sandbox relaxed" banner, and excluded from sync.
+Dev mode lives in `_dev/<name>/`: no hash check, every permission the manifest asks for granted, no lockfile entry, so no saved config (`ctx.config.get()` returns `null`).
+See [Plugins → Dev mode](plugins.md#dev-mode).
 
 Scaffolding all of the above is one command:
 
 ```sh
-outl plugin init
+outl plugin init my-plugin [--id com.example.my-plugin] [--dir ./my-plugin]
 ```
 
-It generates the manifest, `tsconfig`, the SDK wiring, an example `src/index.ts`, and the bundler config.
+It writes `plugin.json`, `package.json`, `tsconfig.json`, `README.md`, `.gitignore` and a starter `src/index.ts` with one `slash-command`.
+`--id` defaults to `com.example.<slug>` and `--dir` to `./<slug>`.
+Then `bun install && bun run build` produces `index.js`.
 
 ---
 
@@ -104,10 +110,29 @@ It's validated against [`plugin-v1.json`](schemas/plugin-v1.json) at install and
 | `engines.outl` | — | Minimum binary version (semver range), e.g. `>=0.8.0`. Independent of `api`. |
 | `capabilities[]` | — | What the plugin plugs into (see below). |
 | `permissions[]` | — | What it requests against the host (see below). |
-| `contributes.commands[]` | — | `{ id, title, description? }` — surfaced in the slash menu / palette. |
-| `contributes.keybindings[]` | — | `{ command, key, when? }` — default chord bindings for those commands. |
+| `description` | — | One line, shown in lists and search. |
+| `icon` | — | Path to an icon inside the plugin folder. |
+| `contributes.commands[]` | — | `{ id, title }`: what the slash menu, palette and mobile sheet list. Needs the `slash-command` capability, or the command is not listed. |
+| `contributes.keybindings[]` | — | `{ command, key, when? }`: default chord for a command. `key` is `Ctrl+Shift+A` or a two-chord sequence `Ctrl+G A` (three or more parts are skipped). `when` is `tui`, `desktop` or `mobile`. Needs the `keybinding` capability. |
+| `contributes.toolbar[]` | — | `{ command, icon, title?, when? }`: a chrome button. `icon` is a short glyph or emoji, `title` the tooltip, `when` is `desktop` or `mobile`. Needs the `toolbar-button` capability. |
+| `contributes.transformers[]` | — | `{ lang, kind? }`: a code-fence language the plugin renders, `kind` is `"text"` (default) or `"rich"`. Clients only call plugins that declare the language here, so `ctx.content.register` alone is not enough. Needs `content-transformer:text` or `:rich` to match. |
 | `contributes.configSchema` | — | Path to a JSON Schema file (`config.schema.json`) for the user-editable config form. |
-| `metadata` | — | `author`, `license`, `repo`, `funding`, `locales`, `category`, `description`. Descriptive only. |
+| `author`, `license`, `homepage`, `repository`, `funding`, `locales`, `keywords`, `category` | — | Descriptive, none of it load-bearing. Read from the **top level** of `plugin.json` (`author` is a string like `"Name <mail>"` or `{ name, email?, url? }`). |
+
+Validation at install and on every load, with the error you get:
+
+| Rule | Error starts with |
+|---|---|
+| `id` is lowercase `[a-z0-9-]` labels, at least two, no empty label, no leading or trailing `-` | `invalid manifest: invalid id` |
+| `name` is not blank | `invalid manifest: name must not be empty` |
+| `main` and `configSchema` are relative, with no `..`, no leading `/`, `\` or `~`, and no `:` | `invalid manifest: main must be a relative path inside the plugin` |
+| every keybinding and toolbar `command` names a declared command | `invalid manifest: keybinding references unknown command` |
+| capabilities and permissions are known strings, `network:*` is not allowed | `unknown permission`, `network:* is not allowed` |
+
+> **The shipped schema and the loader disagree about metadata.**
+> [`plugin-v1.json`](schemas/plugin-v1.json) groups `author`, `license` and friends under a `metadata` object, and the loader reads them from the top level.
+> Every example in `examples/` puts them at the top level, so do the same.
+> An object named `metadata` is ignored by the loader.
 
 ### `id` — reverse-DNS
 
@@ -120,7 +145,10 @@ Pattern: lowercase reverse-DNS, e.g. `com.avelino.todo-archiver`.
 The loader intersects what you declare with what the running client implements (see [Plugins → Capabilities per client](plugins.md#capabilities-per-client)).
 A capability the client can't honor lands in a warning, and the plugin still loads for the rest.
 
-Live capabilities: `op-hook`, `slash-command`, `keybinding`, `config-schema` (read), `toolbar-button`, `ui-render`, and `content-transformer:text` / `:rich`.
+Live capabilities: `op-hook`, `slash-command`, `keybinding`, `config-schema`, `toolbar-button`, `ui-render`, and `content-transformer:text` / `:rich`.
+Declare the capability for each thing you contribute.
+A command in `contributes.commands` without `slash-command` is never listed, a keybinding without `keybinding` never binds, and so on.
+`query-provider` parses but nothing uses it.
 `sync-transport` is core-ready (the host serializes/applies ops through a registered transport) but no client polls it yet.
 A plugin that wants to be a query engine registers a `content-transformer` for the `query` fence language (` ```query `).
 Plugins and JS code blocks can also call `outl.query({ status: "todo", … })` to get structured `QueryHit[]` results — see [Query code blocks → Plugin SDK API](query.md#plugin-sdk-api-outlquery).
@@ -136,6 +164,20 @@ Every host call is gated against the approved set, so a permission you didn't re
 
 Network must be scoped to a domain.
 `network:api.openai.com` and `network:*.openai.com` are valid; a bare `network:*` is rejected at parse time.
+
+### Permissions: what is enforced
+
+| Permission | Enforced at run time |
+|---|---|
+| `write-page` | Yes. Every mutating call (`edit`, `create`, `createAfter`, `appendTree`, `move`, `toggleTodo`, `delete`, `page.create`, `template.instantiate`) is checked when the host applies it. A denied write is dropped, an error is recorded (``<id>: denied `write-page` for intent``) and the plugin keeps running. |
+| `storage:local` | Yes. `ctx.storage.*` throws without it. |
+| `secrets` | Yes. `ctx.secrets.get` throws without it. |
+| `network:<domain>` | Yes, per request and per redirect hop. |
+| `read-page` | **No.** `query`, `get`, `page.list` and `template.list` read the snapshot whatever you declared. Declare it anyway: users read the list to decide, and enforcement may arrive. |
+| `read-op-log` | **No.** `onOp` is gated by the `op-hook` capability. Declare both. |
+| `submit-op` | **No.** Writes are checked against `write-page`. Declare both, as the examples do. |
+
+An update that asks for more than the user approved must be re-approved (`PermissionSet::covers`), but there is no `outl plugin update` command yet, so today the path is remove and install again.
 
 ---
 
@@ -158,9 +200,9 @@ export default definePlugin({
     });
 
     // 2) command — fired by the "/" slash menu / palette (CLI: `plugin run`)
-    ctx.commands.register("todo-archive-done", () => {
+    ctx.commands.register("todo-archive-done", async () => {
       const cfg = ctx.config.get<{ archivePage: string }>();
-      const done = ctx.blocks.query({ todo: "DONE" });
+      const done = await ctx.blocks.query({ todo: "DONE" });
       for (const b of done) {
         ctx.blocks.move(b.id, { toPage: cfg.archivePage });
       }
@@ -168,13 +210,18 @@ export default definePlugin({
     });
   },
 
-  // optional: cleanup on disable / update
+  // optional, typed in the SDK, never called by the host today
   deactivate() {},
 });
 ```
 
 `activate(ctx)` runs once when the plugin loads.
-`deactivate()` is optional and runs when the plugin is disabled or updated.
+`deactivate()` is optional and typed in the SDK, but the host never calls it today: disabling or removing a plugin just stops loading it.
+Do not rely on it for cleanup.
+
+The SDK types every read as a `Promise` (`await ctx.blocks.query(...)`), and the runtime answers synchronously, so `await` is free and keeps `tsc` happy.
+Page slugs are kebab-case with no `/` or `.`: `archive`, not `notes/archive`.
+A bad slug is an error on the turn (`invalid page slug`), not an exception in your code.
 
 Mutation never happens in JS.
 `ctx.blocks.move` becomes a host call → `outl-actions::block::*` → `Workspace::apply` → an op log entry stamped `plugin:<id>@<device>`.
@@ -195,9 +242,9 @@ The typed signatures live in `@outl/plugin-sdk`; the runtime ships the subset be
 | Namespace | Functions (what runs today) | Permission |
 |---|---|---|
 | `ctx.ops` | `onOp(cb: (op: LogOp) => void)` | `read-op-log` |
-| `ctx.blocks` | `query(filter) → Block[]`, `get(id) → Block`, `edit(id, text)`, `create(parentId, text)`, `createAfter(afterId, text)`, `appendTree(parentId, tree)`, `move(id, { toPage } \| { toParent })`, `toggleTodo(id)`, `delete(id)` | `read-page` (reads) · `write-page` (writes) |
-| `ctx.page` | `list() → { slug, title, kind }[]`, `create(slug)`, `appendTree(slug, tree)` | `read-page` (`list`) · `write-page` (`create`, `appendTree`) |
-| `ctx.template` | `list() → { name, slug, params? }[]`, `instantiate(name, blockId)` — stamp a structural template under a block (see [Templates](templates.md)) | `read-page` (`list`) · `write-page` (`instantiate`) |
+| `ctx.blocks` | `query({ page?, todo?, textContains? }) → Block[]` (all fields optional and ANDed, `{}` matches every block), `get(id) → Block \| null`, `edit(id, text)`, `create(parentId, text)`, `createAfter(afterId, text)`, `appendTree(parentId, tree)`, `move(id, { toPage } \| { toParent })`, `toggleTodo(id)`, `delete(id)` | `write-page` for the writes (`read-page` is declared for reads but not enforced, see [above](#permissions-what-is-enforced)) |
+| `ctx.page` | `list() → { slug, title, kind }[]` (`kind` is `"page"` or `"journal"`), `create(slug)` (idempotent), `appendTree(slug, tree)` | `write-page` for `create` and `appendTree` |
+| `ctx.template` | `list() → { name, slug, params? }[]`, `instantiate(name, blockId)` — stamp a structural template under a block (see [Templates](templates.md)) | `write-page` for `instantiate` |
 | `ctx.commands` | `register(id, handler)` | — (declared in `contributes.commands`) |
 | `ctx.config` | `get<T>() → T` | — |
 | `ctx.content` | `register(lang, fn)` — `fn(body) → { kind: "text" \| "rich", content } \| null` renders a fenced block of language `lang` (e.g. ` ```query `) | capability `content-transformer:text` / `:rich` |
@@ -214,14 +261,21 @@ Branch on the state you care about and treat the rest as unfinished, rather than
 
 `TreeNode` (what `appendTree` takes) is `{ text, children? }`, recursive.
 `LogOp` (what `onOp` receives) is `{ kind, node, text?, todo? }`, where `kind` is one of `"Create" | "Move" | "Edit" | "SetProp" | "SetCollapsed"`; `text` and `todo` are present only on `"Edit"`.
+The runtime does **not** send an `actor` field, and the SDK's `LogOp` type lists other `kind` strings and extra fields (`parent`, `target`, `actor`).
+Trust this paragraph over the type: branch on `kind === "Edit"`, and do not rely on `op.actor`.
+You do not need an actor check to avoid loops, your own writes never reach your own hook.
 
 A few load-bearing notes:
 
 - **`ctx.ops.onOp`** receives a `LogOp` that has **already been applied** — local edits and ops arriving from sync alike.
   Use it to react, not to gate; you can't veto an op.
   Your own writes never re-fire your hook (the host advances its log mark past them).
-- **`ctx.blocks` splits by permission** — reading (`query`/`get`) needs `read-page`; every mutating call (`edit`/`create`/`createAfter`/`move`/`toggleTodo`/`delete`) needs `write-page`.
+- **`ctx.blocks` writes need `write-page`**, and every mutating call (`edit`/`create`/`createAfter`/`appendTree`/`move`/`toggleTodo`/`delete`) is checked.
   A plugin granted only `read-page` can read but every write is dropped with a recorded error, never a crash.
+  Reads are not checked today (see [Permissions: what is enforced](#permissions-what-is-enforced)).
+- **`toggleTodo(id)` cycles one step**: no state, `TODO`, `DOING`, `DONE`, no state.
+  **`delete(id)` moves the block to the trash**, it is not a physical delete, so the user can restore it.
+  **`edit(id, text)` replaces the whole text**: include the `TODO ` / `DONE ` prefix if the block should keep its state.
 - **Reads are a turn snapshot, writes are deferred.**
   `query`/`get` read the workspace as it was at the start of the turn; a write you emit is *not* visible to a later read in the same handler — it lands on the next turn.
   This is the describe → apply model ([architecture](plugin-architecture.md#execution-model-describe--apply)).
@@ -233,6 +287,8 @@ A few load-bearing notes:
 - **`ctx.commands.register`** wires a handler to a `contributes.commands[].id`, surfaced in the slash menu / palette / mobile sheet, or run headless via `outl plugin run <id> <command>`.
 - **`ctx.content.register(lang, fn)`** registers a transformer for a fenced block language: `fn(body)` returns `{ kind: "text" | "rich", content }` or `null` to decline.
   `text` renders on every read surface (inline in the TUI); `rich` is HTML in a sandboxed iframe inline in the block and runs on the GUI clients only — the TUI/CLI drop a `rich` descriptor.
+  Also list the language under `contributes.transformers` in `plugin.json`: clients ask the manifest which plugin owns a fence before they run any JS.
+  A throw inside `fn` is swallowed and the fence renders as plain source, so log inside your own `try` while you debug.
   A query engine plugs in here by registering for the `query` language.
 - **`ctx.storage.{get,set,delete}`** is per-plugin key/value persisted at `<workspace>/.outl/plugins/<id>/storage.json`.
   It's **local-only and deliberately outside the op log** — it does not converge between devices.
@@ -244,10 +300,12 @@ A few load-bearing notes:
 - **`ctx.net.fetch(url, opts)`** is **blocking** on the plugin thread (on the TUI it blocks the UI for the duration of the request, bounded by `timeoutMs`).
   A domain the manifest didn't grant **returns `{ ok: false, error }`** rather than throwing.
   `network:<domain>` gates it; a bare `network:*` is rejected at parse time (use `domain` or `*.domain`).
-  Four limits apply to the whole exchange, not just the URL you typed, and each one **returns** the refusal instead of throwing:
+  These limits apply to the whole exchange, not just the URL you typed, and each one **returns** the refusal instead of throwing:
   - **`timeoutMs` is capped at 60s** and covers every redirect hop together, not each one.
     Ask for more and you get 60s; ask for nothing and you get 10s.
     The plugin thread is shared by every plugin feature in the app, so an unbounded wait is not a slow fetch — it is the whole plugin surface, until the process restarts.
+  - **The response body is capped at 8 MiB**, measured on the raw bytes.
+    A bigger body returns `{ ok: false, error }`.
   - **Only `http` and `https`.** `ftp://`, `ws://` and friends carry a host your grant may well cover, and are refused anyway.
   - **Every redirect hop is re-checked** against your grants, and an `https → http` downgrade is refused outright.
   - **`encoding: "base64"` is how you read a *binary* body**, and the only way.
@@ -340,10 +398,10 @@ These are typed in `@outl/plugin-sdk` and/or enumerated in the manifest schema s
 | Surface | State today | Notes |
 |---|---|---|
 | `sync-transport` client polling | **Core live, no client driver** | `ctx.sync.register` works and convergence is tested, but no client calls `push`/`pull` on a timer yet. |
-| `ctx.page.open(slug)` / `ctx.page.today()` | **Not present** | Typed in the SDK; the runtime `ctx.page` exposes only `list`/`create`. |
+| `ctx.page.open(slug)` / `ctx.page.today()` | **Throws** | Typed in the SDK. The runtime defines both and they throw `ctx.page.open is not available yet in this outl version (roadmap)`. A plugin cannot read the cursor or the open page either: it addresses blocks by id from `query`. |
 | `{{query}}` inline | **Parser defers it** | A fenced ` ```query ` block works natively (auto-run, embeds). Plugins can call `outl.query({ … })` for structured results. Inline `{{query}}` needs a new parser token the project defers. |
 
-`github:` install and `outl plugin init` ship today (see [Plugins → Installing](plugins.md#installing)).
+`github:` install and `outl plugin init` ship today (see [Plugins → Install](plugins.md#install)).
 The remaining tooling roadmap (`outl plugin update`, `.outlpkg` pack, dev hot-reload, a dev console, and discovery / marketplace / signing in the clients) is tracked in [Plugins](plugins.md). A config-editing surface now ships on every client: `outl plugin config` / `outl plugin secret` on the CLI, and a settings form per installed plugin in the desktop / mobile plugin browser and the TUI `plugin-settings` overlay.
 
 ---
@@ -353,8 +411,12 @@ The remaining tooling roadmap (`outl plugin update`, `.outlpkg` pack, dev hot-re
 There are **two independent semver axes**, and keeping them separate is what lets the plugin API stay stable while the binary moves fast.
 
 - **`api`** — the plugin's required range against the **plugin API surface** (the host API + capabilities described here), e.g. `^1.0`.
-  A plugin asking for `api: "^2.0"` on a host that only implements API 1.x **does not load**, with an error pointing the user at "update outl or use the previous plugin version".
+  The host implements API `1.0.0` (`HOST_API_VERSION`).
+  `api` must parse as a semver range, and the matcher (`is_api_compatible`) is tested.
+  **The loader does not call it yet**: a plugin that asks for `^2.0` still loads on today's host.
+  Pin your range honestly anyway, because the gate is the contract and the day it is wired, plugins that lied stop loading.
 - **`engines.outl`** — the minimum **binary** version, e.g. `>=0.8.0`.
+  It parses and is recorded, and it is not checked at load either.
   This tracks the fast-moving binary; `api` tracks the slow, long-lived contract.
 
 A plugin built against API 1.0 keeps working on every host that still implements API 1.x, regardless of how many binary releases ship in between.

@@ -2,7 +2,7 @@
 
 The outline, the row, and everything drawn around and under the page: the sections below the outline, which region owns the cursor, the property editor, the history panel, the single writer of a `PageView`, the day clock, zoom, and the task panel.
 
-What the user sees is [`docs/desktop-ux.md`](desktop-ux.md).
+What the user sees is [`docs/desktop-ux.md`](desktop-ux.md), and the task-oriented version of that is [Using outl on the desktop](desktop.md).
 This is which module decides it.
 
 Moved out of [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md), which is loaded into the model's context on every session in that crate.

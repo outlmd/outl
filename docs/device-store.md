@@ -5,6 +5,20 @@ Where outl keeps the state that must **differ** per device, and why that is outs
 This is the detail behind `crates/outl-core/CLAUDE.md` → "Actor id is device-local, and the workspace cannot hold it", which carries the rule; this page carries the reasoning, the failure modes, and what the garbage collector refuses.
 Decision record: [RFC 0211](rfcs/0211-state-that-leaves-a-boundary.md).
 
+## In practice
+
+You never manage this directory, but three situations touch it:
+
+| Situation | What happens | What to do |
+|---|---|---|
+| Open a workspace for the first time on a device | The device mints its own actor and `machine-id` | Nothing |
+| Move or rename a workspace folder | The actor follows the folder | Nothing |
+| `cp -R` a workspace folder, or restore a whole-home backup onto a new machine | The second live copy, or the new machine, forks to a fresh actor, so one extra `ops-<actor>.jsonl` appears | Nothing. Both files are read, and no ops are lost. `outl doctor` shows the actor logs |
+| Delete this directory | Every workspace on the device forks once to a new actor. The iroh identity lives elsewhere (`~/.outl/identity.key`), so pairings survive | Nothing, but do not delete it on purpose |
+
+The directory is `~/.config/outl/` (or `$XDG_CONFIG_HOME/outl/`, or `$OUTL_DEVICE_DIR`).
+`outl doctor` reports leftover bindings for workspaces that no longer exist, and `outl doctor --repair` drops them after a backup.
+
 "One `ops-<actor>.jsonl` per device, never shared" is what makes last-write-wins-per-file harmless on every file transport.
 That invariant is only as strong as where the actor id is stored.
 

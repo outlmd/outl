@@ -96,6 +96,13 @@ jobs:
       - name: publish dep pin
         run: python3 scripts/tests/test_pin_workspace_deps.py
 
+      # `docs-reminder.yml` nudges every PR that changes something a user can
+      # see. Its path map runs without review, so a wrong rule either nags on
+      # internals (people stop reading it) or misses a surface. The suite also
+      # fails when a mapped docs page no longer exists.
+      - name: docs reminder
+        run: python3 scripts/tests/test_docs_reminder.py
+
       # `scripts/roadmap.py` generates the roadmap issue from the project
       # board. Its own suite runs here because the cron publishes without a
       # review step: a wrong `headline` or a `THEMES` typo reaches a public

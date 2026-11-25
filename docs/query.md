@@ -47,6 +47,24 @@ Blank lines and `#`-prefixed comments are ignored.
 | `sort` | `sort: page, status` | Sort criteria, applied left-to-right. Keys: `page`, `status`, `text` |
 | `limit` | `limit: 50` | Maximum number of results |
 
+Details the table cannot hold:
+
+- **A task is a block that starts with `TODO `, `DOING ` or `DONE `**, or the checkbox spellings `[ ]`, `[/]`, `[x]` and `[X]`.
+  A `- [ ] buy milk` block answers `status: todo` the same as `- TODO buy milk`.
+  The legacy quote-first spelling `> TODO buy milk` is a task here too, even though the desktop and mobile outline treat it as plain text until the first toggle rewrites it to `TODO > buy milk`.
+- **`since: 7d` means a journal dated in the last 7 days.**
+  `w` is 7 days and `m` is 30 days, not a calendar month.
+  Ordinary pages never match `since:`, so `since:` already implies a journal; `kind: journal` beside it is optional but reads better.
+- **`text:` searches the whole block text, task marker included.**
+  `text: todo` matches every `TODO` block, because the word is in the text.
+  Use `status:` to ask about state.
+- **`tag:` reads tags the way the editor does.**
+  A `#ops` inside a `` `code span` `` is not a tag, and `**#ops**` is.
+- **`sort:` orders `status` as TODO, DOING, DONE** (a block that is not a task sorts with TODO), and `page` and `text` alphabetically.
+  Without `sort:` the order is unspecified, so add `sort: page` for a stable list.
+- **Results are blocks, not pages.**
+  A block under a tagged parent does not inherit the tag; put the tag on the block you want back.
+
 Every **filter** above also exists as `not-<key>`, taking the same values: `not-status`, `not-tag`, `not-prop`, `not-kind`, `not-since`, `not-text`.
 `sort` and `limit` are not filters and have no negative — `not-sort` is rejected as an unknown key.
 
@@ -186,6 +204,24 @@ In the TUI a result row is a block whose whole text is one `!((blk-…))` embed 
 `Ctrl+T` on such a row cycles the **source** block's task state (`none → TODO → DOING → DONE → none`) rather than prefixing the token itself — prefixing it would turn the reference into `TODO !((blk-…))` and destroy it.
 The source page is saved through the normal reconcile path (stable IDs), then the page's auto-run blocks re-run against the freshly-patched index, so the list reflects the change on the spot: a `status: todo` query drops a just-completed item without a reload.
 `Enter` on a result row is unchanged — it opens the source page and lands the cursor on the referenced block.
+
+## When something looks wrong
+
+A fence that does not parse puts the problem in the result child instead of leaving the page unchanged: ``> **result:** `error: line 2: unknown key: 'tags'` ``.
+The line number counts from the first line of the fence body.
+
+| You see | Why | Fix |
+|---|---|---|
+| `unknown key: 'tags'` | The key is `tag`, singular. Keys are literal and lowercase | `tag: ops` |
+| `status must be 'todo', 'doing', 'done', or 'open'` | `status: TODO` is uppercase, or a typo | Lowercase, one of the four |
+| `expected 'key: value'` | A line with no colon | Add `key: value`, or start the line with `#` to comment it out |
+| `tag 'research # parked' contains ' '` | The DSL has no trailing comments, so the tail became part of the name | Put the comment on its own line, starting with `#` |
+| `prop 'status:' has no value` | A colon with nothing after it | Drop the colon to match any value |
+| `unknown key: 'not-sort'` | `sort` and `limit` have no negative | Remove the line |
+| `(0 blocks)` | Nothing matches every line. Lines AND together, so one wrong filter empties the list | Remove lines until results appear, then add them back one at a time |
+
+A query fence re-runs when its page loads, on the TUI, desktop and mobile alike, so no client needs a key press.
+A block you changed on another page shows up in the list the next time this page loads.
 
 ## Architecture
 

@@ -1,5 +1,48 @@
 # Clients and shared logic
 
+outl has four ways in: the **terminal** (`outl`, which is the TUI and the CLI), the **desktop** app, the **iOS and Android** app, and **MCP** for AI assistants.
+All of them read and write the same workspace folder and the same op log, so you can start on one and add the others whenever you like.
+
+The first half of this page is for people choosing a client.
+The second half, from [How the clients share code](#how-the-clients-share-code), is for contributors.
+
+## Which client does what
+
+Pick by where you write, not by feature count.
+The core of outl is identical everywhere: journal-first, `[[links]]`, `#tags`, `((block references))`, backlinks, tasks, code and query blocks, reminders, templates, plugins, and sync.
+
+| | Terminal (TUI + CLI) | Desktop | Phone (iOS, Android) |
+|---|---|---|---|
+| **Platforms** | macOS, Linux, Windows | macOS, Linux, Windows | iOS (TestFlight), Android (APK) |
+| **Install** | Homebrew, Scoop, Nix, source | Homebrew cask, AppImage, `.deb`, `.rpm`, Windows installer | [Getting started](getting-started.md#install-on-ios) |
+| **How you edit** | Vim-style modes (Normal, Insert, Visual) with a character cursor | Click and type, plus a vim-style layer that has no character cursor | Tap and type, long-press for the block menu |
+| **Best at** | Speed, SSH, scripts, cron, `outl serve`, MCP | A window with panels and OS shortcuts | Capture and reading on the move, reminders |
+| **Guide** | [TUI manual](tui.md), [CLI](cli.md) | [Using outl on the desktop](desktop.md) | [outl on your phone](mobile.md) |
+
+Where they differ, in plain terms.
+The full row-by-row table is [Client parity](client-parity.md), which is generated from the code and cannot drift.
+
+| You want to | Terminal | Desktop | Phone |
+|---|---|---|---|
+| Pair a new device | Run `outl peer pair` or `outl peer qr` in the shell | Show a QR to be scanned; to join, use the terminal | Scan a QR, or show one |
+| See what the op log recorded for a page (history) | Not in the TUI; open the page on the desktop | Yes | Yes |
+| Restore a deleted block | Yes (`/trash`, `outl trash`) | Yes | Not yet; use a computer |
+| Capture a thought without opening the workspace | `outl capture "text"`, lands at the next start | Global capture box, and `outl capture` lands while it runs | Capture button, and `outl://capture` links |
+| Task list across the workspace | Write a `query` block | Yes | Yes |
+| Calendar to jump to a day | Month grid shows days; jump with `[`/`]` or `Ctrl+P` | Yes | Yes |
+| Mermaid diagrams | Shown as source | Rendered | Rendered |
+| Browse and install plugins | `outl plugin install <id>` | Marketplace | Marketplace |
+| Inline formatting (bold, italic, link) | Type the markers yourself | Chords | Toolbar buttons (bold, italic, code) |
+| Automatic backups | Yes | Yes | No; a computer that syncs the workspace snapshots it |
+| Reminder banner with Snooze and Done buttons | List with `g n` | List with `Cmd/Ctrl+Shift+R` | Buttons on the notification |
+| Crash-report switch | `outl telemetry off` | Settings → Privacy | Settings → Privacy |
+| Scripts, cron, CI, AI assistants | Yes: [CLI](cli.md), [MCP](mcp.md) | Through the same binary | No `outl` binary on a phone |
+
+When you press a key a client does not handle, it tells you what to do instead.
+The sentence comes from one catalog, so every client says the same thing.
+
+## How the clients share code
+
 outl has multiple clients today (TUI, mobile, desktop) and more coming (plugins).
 They all sit on top of the same workspace and the same op log.
 To keep them honest, we route every workspace operation through one shared crate: **`outl-actions`**.

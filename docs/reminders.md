@@ -68,8 +68,19 @@ Nothing is lost.
 The property stays on disk verbatim, the block is untouched, and the rule simply doesn't schedule — the parse banner shows which line to fix.
 This is the same permissive recovery the rest of the outl dialect uses (see [Markdown dialect](markdown-format.md)).
 
-The warnings you can see: `remind_missing_anchor`, `remind_invalid_time`, `remind_invalid_interval`, `remind_invalid_stop`, `remind_max_clamped`.
+The warnings you can see (the parse banner shows them in this spelling): `remind_missing_anchor`, `remind_invalid_time`, `remind_invalid_interval`, `remind_invalid_stop`, `remind_max_clamped`.
 `outl doctor` lists them per file.
+
+### Troubleshooting
+
+| You see | Why | Fix |
+|---|---|---|
+| Nothing fired | No `remind::` line, only a `[[date]]` | A date alone never schedules. Add `remind:: 10am` |
+| Nothing fired, app was closed | Delivery needs the app running | See [Background delivery](#background-delivery--what-ships-today) |
+| A banner at 07:00, not 03:00 | Quiet hours pushed it to the end of the window | Expected. Change or clear `quiet_hours` |
+| A rule you wrote is gone from the list | The block went `DONE`, or the rule did not parse | Check the block, then `outl doctor` for the parse warning |
+| Fired once on your phone, not again on the laptop | "Already fired" is per device. A snooze converges, a banner does not | Snooze on one device to silence all |
+| `every 30s` rejected | The floor is 1 minute | Write `every 1min` |
 
 ## What fires, and when
 
@@ -126,6 +137,15 @@ The OS asks for notification permission on the first actual fire, not when you f
 | **Desktop** | `Cmd/Ctrl+Shift+R` panel | `Cmd+R`, `g r` / `g R` in Normal | OS notification while the app runs |
 | **Mobile** | Reminders tab in the bottom bar | long-press a block → *Remind me…* (a sheet: time, repeat, until, plus an "edit as text" field) | iOS notification while the app runs |
 
+What each authoring key writes:
+
+| Key | Writes |
+|---|---|
+| `g r` (TUI, desktop Normal) | Writes a starter `remind:: 9am` on the selected block, then points you at the editor. On a block that already has a rule it shows that rule and changes nothing |
+| `g R` (TUI, desktop Normal) | Writes `remind:: now every 1h until DONE`, the "nag me" preset. Overwrites an existing rule. Not on mobile: add a reminder and edit the rule |
+| `Cmd+R` (desktop) | Adds a reminder to the selected block. `Ctrl+R` stays Redo on Linux and Windows |
+| `g s` (TUI, desktop Normal) | Snoozes the selected block's reminder one hour, without opening the list |
+
 Editing a rule after you write it: click (desktop) or tap (mobile) the `⏰` chip under the block, or `:prop remind <rule>` in the TUI.
 An empty value clears the rule, which is how you stop a block nagging without deleting it.
 Every `key:: value` a block carries renders as a chip and edits the same way — `remind::` isn't special-cased.
@@ -146,7 +166,7 @@ Chords are in the shared catalog, so they can't drift — see [Shortcuts](shortc
 **On mobile the banner is actionable.**
 It carries **Snooze 1h** and **Done**, both of which resolve the reminder without opening the app, and tapping the banner itself opens the page scrolled to the block that buzzed.
 The TUI and the desktop deliver the same reminder as a banner you can only read: neither delivery channel carries a callback (OSC 9 is one string to the terminal; `tauri-plugin-notification`'s actions and `actionPerformed` event are `#[cfg(mobile)]`, and its desktop `show()` drops the `notify-rust` handle).
-On those two, the reminders surface (`Ctrl+R` / `Cmd+Ctrl+Shift+R`) is where you snooze or tick off what came due.
+On those two, the reminders surface (`g n` in the TUI, `Cmd/Ctrl+Shift+R` on the desktop) is where you snooze or tick off what came due.
 That split is declared once, for all three clients, in `outl_shortcuts::capability_support` (`Capability::ReminderNotificationActions`) and shows up in [`docs/client-parity.md`](client-parity.md).
 (OSC 9 is honoured by iTerm2, kitty, WezTerm and ghostty; terminals that ignore it still show the toast. Same best-effort contract as the OSC 52 the yank path uses.)
 The GUI clients poll every 30 seconds, the TUI every tick; the backend keeps a device-local "already fired" log (`<root>/.outl/reminders-fired.json`, 7-day TTL) so polling twice never double-buzzes and losing the file costs you at most one duplicate.

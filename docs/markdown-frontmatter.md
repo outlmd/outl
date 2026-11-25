@@ -18,6 +18,17 @@ cssclass: wide
 
 That file survives `outl serve`, `outl block append`, a GUI edit, a peer's sync and `outl doctor --repair` with the fence unchanged.
 
+## What you will notice
+
+- **You will not see it inside outl.**
+  No client draws the fence, so a note whose `aliases:` you cannot find in the TUI is working as designed.
+  Open the `.md` in the tool that wrote it to read or edit it.
+- **`[[Note One]]` does not find a page through a frontmatter `aliases:` list.**
+  outl's aliases are the `alias::` page property.
+  Write `alias:: Note One, note-one` below the fence if you want outl to resolve them.
+- **Search and queries skip it.**
+  A fence is not outline, so `outl search`, `tag:` and `prop:` never see what is inside.
+
 ## Why preservation and not conversion
 
 outl's own page metadata is [`key:: value`](markdown-format.md#page-properties-top-of-file), and the dialect has [no frontmatter delimiter](markdown-format.md#what-is-not-in-the-file).
@@ -79,6 +90,15 @@ The BOM row is the one that used to bite.
 A `.md` written by a Windows editor opens `\u{feff}---`, and for a while the parser skipped those three bytes while the scan that decides *which leading lines are metadata* did not.
 So the fence was metadata to one and four lines of unlogged content to the other: outl refused to write the page, on every boot, and could never clear the state because the write that drops the BOM is the same write being refused.
 Such a page recovers by itself on the next reconcile — no `--ahead-of-log` needed, since the op log always held the fence.
+
+## Troubleshooting
+
+| You see | Why | Fix |
+|---|---|---|
+| The first bullet shows as `---` | The fence has no closing delimiter, so it is not frontmatter | Close it with `---` or `...` |
+| `tags: […]` in the fence is not a tag in outl | The fence is another tool's | Write `#a` tags inline in a block of the outline |
+| A page refuses to write and names the fence | A workspace last reconciled by an older binary | `outl reconcile --ahead-of-log`, see [below](#when-a-page-stops-syncing-over-this) |
+| The blank line after the fence appeared | outl normalizes it to one blank line | Expected. See [What outl normalizes](#what-outl-normalizes) |
 
 ## Importing is a different operation
 

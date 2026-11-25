@@ -2,24 +2,28 @@
 
 outl is a binary first, but the core is a set of plain Rust crates.
 Anything that wants a local-first outliner as its storage layer can open a workspace, mutate it through the op log, and stay a well-behaved peer next to a running TUI or desktop app.
-A memory backend for an AI agent, a notes feature inside another app, a migration script — all the same contract.
+A memory backend for an AI agent, a notes feature inside another app, a migration script all share the same contract.
 
 This page is the contract for doing that safely.
 Read [Architecture](architecture.md) first if you want the why behind the layering.
 
+**Not sure you need a library?**
+If the thing that wants your notes is an AI assistant or a script, skip this page: [MCP](mcp.md) and the [CLI](cli.md) already do it with no Rust.
+Embed when your own program needs to open the workspace in-process.
+
 ## The crates
 
-**What embedding opens is the core and its ops** — the tree, the log, and the actions that mutate them.
+**What embedding opens is the core and its ops**: the tree, the log, and the actions that mutate them.
 Four crates carry that contract, published to [crates.io](https://crates.io) on every release at the same version the binaries report:
 
 | crate | what it gives an embedder |
 |---|---|
-| `outl-ws` | workspace bootstrap: locks, actor resolution, per-page shards, slug repair — the multi-process contract in one call |
+| `outl-ws` | workspace bootstrap: locks, actor resolution, per-page shards, slug repair, the multi-process contract in one call |
 | `outl-actions` | every mutation as a high-level action (`append_block`, `edit_text`, `open_or_create`, …) plus the `.md` projection helpers |
-| `outl-core` | the tree CRDT, op log, `Storage` trait — you rarely call it directly, but the types (`NodeId`, `Workspace`, `HlcGenerator`) come from here |
+| `outl-core` | the tree CRDT, op log, `Storage` trait. You rarely call it directly, but the types (`NodeId`, `Workspace`, `HlcGenerator`) come from here |
 | `outl-md` | markdown parse/render, sidecar, block-ref handles |
 
-A fifth crate, `outl-exec`, is also on crates.io — **not as embedding surface**, but because `outl-actions` references it and cargo won't publish a crate whose dependencies aren't in the registry.
+A fifth crate, `outl-exec`, is also on crates.io, **not as embedding surface**, but because `outl-actions` references it and cargo won't publish a crate whose dependencies aren't in the registry.
 It ships the code-block language runtimes, and the workspace pins it at `default-features = false` (`Cargo.toml`) precisely so those runtimes stay out of everything except the binaries that want them.
 **Don't depend on it directly.**
 Running fences is an app concern, not a storage-layer one; if you think you need it, that's a conversation for an issue.
@@ -28,11 +32,11 @@ Everything else in the workspace (`outl-cli`, `outl-tui`, the Tauri clients) is 
 
 ```toml
 [dependencies]
-outl-ws = "0.11"          # GA releases
-outl-actions = "0.11"
+outl-ws = "0.13"          # GA releases
+outl-actions = "0.13"
 ```
 
-A `"0.11.0-beta"`-style requirement rides the betas cut from `main`.
+A `"0.13.0-beta"`-style requirement rides the betas cut from `main`.
 The whole workspace shares one version, so keep the crates pinned to the same requirement.
 The published crates depend on each other at that exact version (`=0.13.0`), so two of them at different versions will not resolve.
 
@@ -55,7 +59,7 @@ Two contracts hide behind that call, and they are the reason to use `outl-ws` in
 
 **Actor resolution.**
 Each process writes to its own `ops-<actor>.jsonl`.
-If your embedder opens a workspace for writing while the desktop app is running, `resolve_write_actor` hands you an ephemeral actor and a fresh file — nobody ever appends to somebody else's log.
+If your embedder opens a workspace for writing while the desktop app is running, `resolve_write_actor` hands you an ephemeral actor and a fresh file, so nobody ever appends to somebody else's log.
 `ctx.ephemeral_actor` tells you which case you got.
 
 A process that only reads should call `outl_ws::open_read` instead.
@@ -64,9 +68,10 @@ It takes the shared workspace lock, reports the device actor, and mints nothing,
 
 **Snapshot policy.**
 `open()` defaults to the short-lived contract: snapshots are read at boot, never written.
-The original reason was that a write from a transient process races the long-lived app that owns the workspace; that race was fixed in the writer (`snapshot::write_to_disk` composes in a per-write scratch and publishes by `rename`), so it is no longer what the default protects.
+The original reason was that a write from a transient process races the long-lived app that owns the workspace.
+That race was fixed in the writer (`snapshot::write_to_disk` composes in a per-write scratch and publishes by `rename`), so it is no longer what the default protects.
 What it protects now is the **cost**: writing one is a multi-MB encode plus an fsync, and a short-lived process paying it is paying for whoever runs next.
-So opt in when that trade makes sense — a resident embedder (a daemon that stays open), or a process that already writes ops and would otherwise leave a terminal-only machine full-replaying forever (which is what `outl`'s own writing commands now do).
+So opt in when that trade makes sense: a resident embedder (a daemon that stays open), or a process that already writes ops and would otherwise leave a terminal-only machine full-replaying forever (which is what `outl`'s own writing commands now do).
 Without it, boot cost on a large workspace regresses to full log replay:
 
 ```rust
@@ -77,7 +82,16 @@ let opts = outl_ws::OpenOptions {
 let mut ctx = outl_ws::open_with(path, opts)?;
 ```
 
-To create a workspace from scratch, `outl_ws::layout::init(&Paths::at(dir))` scaffolds the directory layout before the first `open`.
+To create a workspace from scratch, scaffold the layout before the first `open`:
+
+```rust
+use outl_ws::layout::{self, Paths};
+
+layout::init(&Paths::at(dir.to_path_buf()))?;
+```
+
+`open` on a folder with no `.outl/` returns `WsError::NoWorkspace` and touches nothing.
+It never creates a workspace for you.
 
 ## Reading
 
@@ -88,9 +102,14 @@ for meta in page::list_all(&ctx.workspace) {
     println!("{} ({:?})", meta.slug, meta.kind);
 }
 
-let id = page::find_by_slug(&ctx.workspace, "ideas");
-let outline = outl_actions::outline::read_page_outline(&ctx.root, &meta)?;
-let links = outl_actions::backlinks_for_page(&ctx.workspace, &ctx.root, &meta);
+for meta in page::list_all(&ctx.workspace) {
+    let outline = outl_actions::outline::read_page_outline(&ctx.root, &meta)?;
+    let links = outl_actions::backlinks_for_page(&ctx.workspace, &ctx.root, &meta);
+    println!("{}: {} top-level blocks, {} backlinks", meta.slug, outline.nodes.len(), links.len());
+}
+
+// One page by slug:
+let id = page::find_by_slug(&ctx.workspace, "ideas");   // Option<NodeId>
 ```
 
 `read_page_outline` reads the projected `.md` + sidecar, which is the same path every client renders from.
@@ -122,25 +141,44 @@ outl_actions::edit_text(&mut ctx.workspace, &ctx.hlc, block, "DONE followed up")
 
 Op-log appends are batched per action (one fsync per logical write), so composite mutations like a forest append cost single-digit milliseconds, not one disk sync per block.
 
-**After mutating, project the page back to disk:**
+**After mutating, commit the page:**
 
 ```rust
-outl_actions::journal::apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page_id)?;
+ctx.commit(page_id)?;
 ```
 
 This is the part embedders get wrong most often, so it gets its own paragraph.
 The `.md` file is a projection of the op log, never the source of truth.
-If you skip the projection, the file on disk goes stale and the next reader sees old content.
-If you instead edit the `.md` directly and skip the ops, you have written state the CRDT knows nothing about.
-A peer will reconcile that edit through the external-edit matching path, which works, but loses the block-identity guarantees a proper op has.
-Mutate through actions, then project.
+`commit` writes that projection (and its `.outl` sidecar) back to disk.
+Skip it and the file goes stale: the next reader, including the app, sees the old content until something else reprojects the page.
+Edit the `.md` directly instead and you have written state the op log knows nothing about.
+A peer reconciles that through the external-edit path, which works but loses the block-identity guarantees a real op carries.
+Mutate through actions, then commit.
+
+`ctx.commit_with(page_id, |ws| { ... })` runs your mutation and the commit as one unit, when you can write the mutation against `&mut Workspace` alone.
+Use plain `commit` when the mutation needs `ctx.hlc` as well, which is the usual case, because the closure cannot borrow `ctx` twice.
+
+`commit` can refuse, and the refusal is not a bug to retry:
+
+- `ActionError::PageMarkdownAheadOfLog`: the page's `.md` holds lines the log never recorded (someone edited it in a text editor, and no client has ingested the edit).
+  Writing the projection would delete them.
+  Surface it to the user and point them at `outl reconcile --ahead-of-log`.
+  See [Clients → Surfacing a page that stopped syncing](clients.md#surfacing-a-page-that-stopped-syncing).
+- A storage error on a context from `open_read`.
+  A read-only open holds no write actor and will not append.
+
+Do not call `outl_actions::apply_page_md_with_sidecar` yourself as a shortcut.
+It is the last of five steps `commit` runs, and taking it alone decides the other four do not apply, and skips the guard against the refusal above.
 
 ## What an embedder must never do
 
 These are the [repo invariants](contributing.md) as seen from the outside:
 
-- Never write `id::`, UUIDs, or any metadata into the `.md` — IDs live in the `.outl` sidecar only.
+- Never write `id::`, UUIDs, or any metadata into the `.md`. IDs live in the `.outl` sidecar only.
 - Never edit a `.md` and its sidecar by hand to "fix" state; the op log is the source of truth.
+- Never open a real user's workspace from a test.
+  Create a temp folder with `layout::init`, and set `OUTL_DEVICE_DIR` to a temp folder too, so the test gets its own device identity and actor binding and cannot touch `~/.config/outl`.
+  A process with `OUTL_DEVICE_DIR` set is a separate device, and deleting that folder rotates its sync identity: keep it only for throwaway runs.
 - Never share an `ops-<actor>.jsonl` between two writers; `outl-ws` already guarantees this, don't work around it.
 - Never bind an iroh endpoint from an embedder; a device binds one, taken by whichever long-lived outl process got there first ([one endpoint per identity](sync.md)).
   Your writes land on disk and reach peers through that process's transport or the next maintenance resync, exactly like the ephemeral CLI behaves.
@@ -152,7 +190,7 @@ Practical consequences:
 
 - Your process may get an ephemeral actor when the app holds this device's actor.
   That is normal, not an error.
-  (The device actor itself comes from the device store outside the workspace, not from `.outl/config.toml` — see [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).)
+  (The device actor itself comes from the device store outside the workspace, not from `.outl/config.toml`, see [storage.md](storage.md#where-the-actor-id-lives--outside-the-workspace).)
 - Ops you write while a long-lived outl process runs (a GUI, the TUI, `outl mcp serve`, `outl serve`) are picked up by its poller and shipped to peers by its transport.
   An agent on the same machine no longer needs its own process: `outl serve` serves MCP over a local socket and `outl mcp serve` bridges to it (see [MCP](mcp.md#running-beside-outl-serve)).
   `outl serve --no-watch` is the headless case: it has a transport and no file watcher, and the transport is the half that ships your ops.
@@ -198,25 +236,43 @@ That's how #207 was found.
 
 ## A complete example
 
+Compiled and run against the `0.13.0` crates.
+
 ```rust
 use std::path::Path;
 use outl_actions::page::{self, PageKind};
+use outl_ws::layout::{self, Paths};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut ctx = outl_ws::open(Path::new("./notes"))?;
+    let dir = Path::new("./notes");
+    layout::init(&Paths::at(dir.to_path_buf()))?;   // once; skip if the workspace exists
 
+    let mut ctx = outl_ws::open(dir)?;
     let page_id = page::open_or_create(
         &mut ctx.workspace, &ctx.hlc,
         "from-my-app", "From My App", PageKind::Page,
     )?;
-    outl_actions::append_block(
+    let block = outl_actions::append_block(
         &mut ctx.workspace, &ctx.hlc,
-        Some(page_id), Some("written by an embedder, synced like any block"),
+        Some(page_id), Some("TODO written by an embedder"),
     )?;
-    outl_actions::journal::apply_page_md_with_sidecar(&ctx.workspace, &ctx.root, page_id)?;
+    outl_actions::edit_text(&mut ctx.workspace, &ctx.hlc, block, "DONE written by an embedder")?;
+    ctx.commit(page_id)?;
 
+    for meta in page::list_all(&ctx.workspace) {
+        println!("{} ({:?})", meta.slug, meta.kind);
+    }
     Ok(())
 }
 ```
 
-Open the same directory with `outl` afterwards and the block is there, ref-handled, sync-ready.
+`pages/from-my-app.md` now reads:
+
+```markdown
+title:: From My App
+
+- DONE written by an embedder
+```
+
+No ids, no comments: the block's identity is in `pages/from-my-app.outl` beside it.
+Open the same directory with `outl` and the block is there, ref-handled and ready to sync.

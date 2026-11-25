@@ -1,5 +1,9 @@
 # Backlinks on every client
 
+**In short:** every page lists the blocks that cite it under "Linked from".
+You can read them, flip the order, and edit a cited block where it sits, on all three clients.
+On the desktop, step by step: [Using outl on the desktop](desktop.md#backlinks).
+
 What the "Linked from" panel is on each client: a place you can work, in what order, with what breadcrumb, plus the nested-pages section that rides the same reply and the index that makes it cheap.
 
 Moved out of [`docs/clients.md`](clients.md), which had grown to the point where no edit to it was cheap.

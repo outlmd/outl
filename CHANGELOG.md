@@ -14,6 +14,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **The docs are now written for the person using outl, client by client.**
+  Every client has a guide, a quick start where it needs one, and a troubleshooting page that starts from the symptom.
+  CLI: [quick start](docs/cli-quickstart.md), [recipes](docs/cli-recipes.md) (capture, cron, publishing, bulk writes) and [exit codes, error codes and symptoms](docs/cli-troubleshooting.md).
+  TUI: [your first 10 minutes](docs/tui-quickstart.md), [commands](docs/tui-commands.md), [overlays](docs/tui-overlays.md) and [troubleshooting](docs/tui-troubleshooting.md).
+  Desktop: [the guide](docs/desktop.md), [settings](docs/desktop-settings.md) and [troubleshooting](docs/desktop-troubleshooting.md).
+  Mobile: [the phone guide](docs/mobile.md), [capture without opening the app](docs/mobile-capture.md) (widget, Control Center, Shortcut, share sheet, Android tile) and [troubleshooting](docs/mobile-troubleshooting.md).
+  MCP: [a reference for all 49 tools](docs/mcp-tools.md), with arguments, returns and error codes.
+  Format: [properties](docs/properties.md) and [running code blocks](docs/exec.md).
+  Guides: [sync your devices](docs/sync-devices.md), [backups and restore](docs/backups.md) and a top-level [troubleshooting](docs/troubleshooting.md) page.
+  All of them are in the [docs index](docs/SUMMARY.md).
+
 - **Moving a block has the same keys everywhere it can have them.**
   `Cmd+Shift+↑/↓` (`Ctrl+Shift` on Linux and Windows), `Alt+↑/↓` and `K` / `J` move the block in Normal, and the same chords plus the letters move a whole range in Visual.
   The TUI got `Ctrl+Shift+↑/↓` too, so a terminal that never delivers it still has `Alt+↑`.
@@ -214,6 +225,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   `no_capability_is_out_of_reach_on_every_client` rejects a capability nobody reaches, and the `CLI_ONLY` exemption would have been a false reason here, because no `outl` subcommand and no MCP tool toggles a quote either.
   So the gap had nowhere to be recorded until something reached it, which is how two documents came to describe a route with no caller on it.
   Both lesser states carry one sentence, naming the two characters that stand in for the gesture.
+
+### Changed
+
+- **Existing pages were re-checked against the code, and the claims that no longer held were corrected.**
+  The CLI, MCP, TUI, desktop, mobile, sync, plugin, theme, shortcut and format pages each went through a pass that ran the command or read the source.
+  Mobile docs no longer describe iCloud as the iOS storage choice.
+  Cross-page links and anchors in `docs/`, `README.md` and `CONTRIBUTING.md` were checked, and the broken ones now point at the new TUI pages.
+  Every page in `docs/` is reachable from the index.
 
 ### Removed
 

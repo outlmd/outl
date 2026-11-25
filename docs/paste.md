@@ -4,10 +4,15 @@ outl has two paste modes, and both do more than drop raw text into a block.
 The goal is that whatever you copied — a Slack message, a Google Doc paragraph, an outline from another app, a chat reply — lands as a tidy outline in outl, not as a wall of unformatted text or a mess of stray characters.
 
 - **Paste with formatting** converts the clipboard into outl markdown: rich formatting is kept, bullet structure becomes a real outline, and plain prose is split into one block per paragraph.
-- **Paste without formatting** splices the raw clipboard text into the current block verbatim — no conversion, no splitting.
+- **Paste without formatting** inserts the raw clipboard text verbatim — no conversion, no splitting.
+  On the desktop it is spliced into the block you are editing.
+  In the TUI it becomes one new block ([details](#in-the-tui)).
 
 The chords are per-client; the full table lives in [Shortcuts](shortcuts.md).
 In short: desktop `Cmd/Ctrl+V` (with) and `Cmd/Ctrl+Shift+V` (without); TUI `p` (with) and `Shift+P` (without); mobile is always with formatting.
+
+The sections below describe the desktop and mobile behaviour, which share one code path.
+The TUI reads the clipboard itself and differs in a few places, so it has its own section: [In the TUI](#in-the-tui).
 
 > **Why copy-out and paste-in are one pair, and why the core speaks exactly one format:** [RFC 0044](rfcs/0044-clipboard-and-paste.md).
 
@@ -36,6 +41,7 @@ It picks one of three routes, in order:
 
 4. **Trivial text.**
    A single word, a URL, one line — spliced into the block in place, no round-trip, so a routine paste stays instant.
+   (The TUI has no caret to splice at in Normal mode, so there a single line becomes a new block.)
 
 The routing decision is one shared function, `choosePasteRoute`, so the desktop and mobile clients can never disagree about what a given clipboard should do.
 
@@ -71,6 +77,9 @@ A cell holding a line break (a spreadsheet allows one) is flattened to a space �
 
 ## Where the caret lands, and what happens to the block you were in
 
+This section is the desktop and mobile behaviour.
+The TUI never merges into the block you were in, see [In the TUI](#in-the-tui).
+
 A paste with the caret inside a block is the one paste that rewrites the block you are **typing in**.
 With formatting, the first pasted bullet joins the text left of the caret and becomes that block's new text; the rest become siblings below it, and whatever was right of the caret becomes one more sibling so nothing you typed is lost.
 Without formatting, the raw text is spliced in and your tail stays where it was — which is why the caret lands between the two, not at the end of the block.
@@ -84,8 +93,9 @@ A plain-text URL was unaffected, because a trivial paste never leaves the browse
 
 ## Paste without formatting
 
-`Cmd/Ctrl+Shift+V` (desktop) and `Shift+P` (TUI) paste the raw clipboard text with **no** conversion:
-the text is spliced into the current block as-is, and outline-looking or multi-paragraph content is **not** split.
+`Cmd/Ctrl+Shift+V` (desktop) and `Shift+P` (TUI) paste the raw clipboard text with **no** conversion.
+On the desktop the text is spliced into the current block as-is, and outline-looking or multi-paragraph content is **not** split.
+In the TUI the raw text becomes one new block after the selected one.
 Use it when you want the literal characters — a code snippet, a block of text whose line breaks matter, markdown you want to keep as source rather than render.
 
 Mobile has no without-formatting chord; every mobile paste is with formatting.
@@ -95,6 +105,51 @@ Mobile has no without-formatting chord; every mobile paste is with formatting.
 When the block you are editing is a fenced code block (a `` ``` `` block), **every** paste is literal — the same as paste-without-formatting — regardless of the chord you use.
 A multi-line or outline-shaped clipboard is spliced in verbatim, with its line breaks intact, instead of being converted into sibling blocks (which would tear the fence apart and strand the closing `` ``` `` on its own line).
 This holds on both GUI clients (desktop and mobile), because the guard lives next to the shared `choosePasteRoute` decision.
+
+## In the TUI
+
+The TUI has no caret inside a block while you are in Normal mode, so a paste there always adds blocks **after the selected block**.
+It never merges into the text of a block.
+
+| You do | Where the text lands |
+|---|---|
+| `p` in Normal | After the selected block, converted: an outline keeps its hierarchy, a markdown table or tab-separated rows become one table block, several lines become one block per non-blank line, a single line becomes one new block |
+| `P` in Normal | After the selected block, as **one** block of raw text, nothing converted or split |
+| Your terminal's paste (`Cmd+V`, `Ctrl+Shift+V`) in Normal | Same as `p` |
+| Your terminal's paste while editing a block (Insert) | Plain text is spliced into the block at the caret, line breaks included. An outline, a table or tab-separated rows are different: the edit is committed first, then they land as new blocks after the current one, like `p` |
+| Dragging a file into the terminal while editing | The file is imported into `assets/` and its link is inserted at the caret, see below |
+
+After a paste the selection moves to the last pasted block, and the footer says `pasted 3 blocks` (or `pasted text` when the clipboard held one plain line).
+`clipboard unavailable` means outl could not read the system clipboard, which is common over SSH.
+Paste from your terminal instead, or copy inside outl and paste in the same session.
+`paste failed: <reason>` leaves the page as it was.
+
+**What is different from the desktop.**
+
+- There is no rich-text conversion, because a terminal clipboard carries plain text only.
+  Copy from a web page or Slack and the formatting is already gone before outl sees it.
+- There is no guard for code blocks.
+  The desktop and mobile paste literally inside a fenced code block.
+  In the TUI a plain-text paste into an open fence is spliced literally, but an outline-shaped one (lines starting with `- `) is still converted into blocks.
+  Press `Esc` and use `P` to put the raw text in its own block, then move the text where you need it.
+- There is no caret merge.
+  The first pasted bullet does not join the text left of the caret, so there is no "tail" to put back.
+
+**Terminals without bracketed paste.**
+outl asks the terminal to wrap pasted text in markers so it can tell a paste from typing.
+A terminal that ignores the request sends the paste as keystrokes, and every line break becomes `Enter`, which commits the block and starts a new one.
+If a multi-line paste in Insert mode splits into blocks you did not expect, use `p` from Normal mode instead, which reads the clipboard itself and does not depend on the terminal.
+
+**Dropping files.**
+Terminals deliver a dragged file as its path pasted as text.
+In Insert mode, when the paste is exactly the path of one existing file, or several lines that are each an existing file, outl imports each into `<workspace>/assets/<hash>.<ext>` and inserts the markdown links separated by spaces.
+Backslash-escaped spaces (`/My\ Files/report.pdf`, the macOS drag convention) are understood.
+One line that is not an existing file, or a list where any line is not, pastes as ordinary text.
+A file over `[assets] max_bytes` is refused with `import failed: …` and nothing is inserted.
+In Normal mode a pasted path is just text.
+Link format: [markdown-format.md → Asset links](markdown-format.md#asset-links-nameassetshashext).
+
+The rest of the TUI's clipboard behaviour (copying out, OSC 52 over SSH) is in the [TUI manual](tui.md#clipboard).
 
 ## Under the hood
 
@@ -111,6 +166,7 @@ The behaviour is shared across clients so it stays identical everywhere:
 
 The TUI reads the OS clipboard directly (`arboard`) and runs the same `outl_actions` pipeline; it has no `text/html` flavour to convert, so rich-clipboard conversion is a GUI-only capability.
 Tab-separated and markdown tables reach it through `text/plain` like everything else, so a spreadsheet paste works there too.
+What the TUI does with the result is in [In the TUI](#in-the-tui).
 On the desktop, paste-without-formatting (`Cmd/Ctrl+Shift+V`) reads the clipboard through the Tauri clipboard-manager plugin (backend `arboard`), not `navigator.clipboard.readText()`.
 The macOS webview gates that web API behind a native "Paste" permission button when it is called outside a real paste gesture, so the plugin read is what makes the chord work.
 See the [Shared primitives catalog](shared-primitives.md) — specifically [Markdown pipeline](primitives-markdown.md) — for where each piece lives.

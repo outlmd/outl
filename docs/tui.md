@@ -1,607 +1,496 @@
-# TUI Manual
+# TUI manual
 
-The `outl` terminal UI is the primary way to interact with an outl workspace.
-It's journal-first, modal (Normal / Insert / Visual), and designed to feel familiar if you've used vim or any keyboard-driven outliner (Roam, Logseq, Obsidian).
+The `outl` terminal UI is a keyboard-driven outliner that lives in your terminal.
+It opens on today's journal, edits markdown you can read with `cat`, and syncs with your other devices while it runs.
+If you have used vim, Roam or Logseq, the keys will feel familiar.
+If you have not, start with [Your first 10 minutes in the TUI](tui-quickstart.md) and come back here when you want a specific answer.
 
-## Running
+| You want | Go to |
+|---|---|
+| A guided first session | [TUI quickstart](tui-quickstart.md) |
+| Something is stuck, blank or not saving | [TUI troubleshooting](tui-troubleshooting.md) |
+| Every chord, side by side with the desktop and phone | [Shortcuts](shortcuts.md) |
+| What each client can and cannot do | [Client parity](client-parity.md) |
+| How copy and paste convert content | [Paste](paste.md) |
+
+This page is the complete TUI reference.
+The cross-client chord catalog is [shortcuts.md](shortcuts.md), but it does not list every TUI chord yet, so the tables below are the full TUI list.
+
+## Start it
 
 ```bash
-outl --workspace ~/notes          # opens the TUI on ~/notes
-outl --workspace ~/notes --theme dracula
-outl tui ~/notes             # explicit subcommand form
-cd ~/notes && outl           # no args: opens TUI in cwd
+outl                              # opens the TUI on the workspace outl resolves (see below)
+outl --workspace ~/notes          # explicit workspace
+outl -w ~/notes --theme dracula   # explicit workspace and theme for this run
+outl tui ~/notes                  # subcommand form, path as an argument
+outl-tui ~/notes                  # the standalone binary: path only, no flags
 ```
 
-The TUI requires a real interactive terminal.
-If stdout isn't a TTY (e.g. CI), it exits with a clear error instead of hanging.
-TUI chrome uses ordinary emoji and symbols by default, so it works without a special font.
-Set `[tui] icons = "nerd-font"` to opt into compact Nerd Font glyphs.
-That set covers every TUI-owned icon — status chips, fold markers, property and command glyphs.
-Task checkboxes (`☐`/`◐`/`☑`), calendar day dots, and scrollbar symbols stay Unicode in both styles: the checkbox mirrors the document's own task state, and the rest are geometry, not icons.
+**Which workspace opens.**
+First hit wins: the path argument of `outl tui`, then `--workspace`, then `[workspace] last` from `~/.config/outl/config.toml`, then the current directory.
+The full chain is in [config.md → Workspace path](config.md#workspace-path).
+`cd ~/notes && outl` opens the current directory only when `last` is unset or no longer exists on disk.
 
-## Copy to clipboard
+**A folder that is not a workspace yet.**
+In an interactive terminal outl asks `Initialize a new workspace here? [y/N]`.
+`y` runs `outl init` for you.
+Anything else aborts and changes nothing.
+With no terminal on stdin or stderr (a script, a pipe) it exits with `no outl workspace at <path> — run outl init <path> first` instead of asking.
 
-Every yank (`yy` / `Y` in Normal, `y` in Visual) writes clean canonical outl markdown to the OS clipboard.
-Two paths are tried in order:
+**A real terminal is required.**
+If stdout is not a TTY (CI, a pipe) the TUI exits with `outl-tui requires an interactive terminal (stdout is not a TTY)`.
 
-1. **`arboard`** — direct X11 / macOS clipboard API, through XWayland on a Wayland session.
-2. **OSC 52** — a terminal escape sequence (`\x1b]52;c;<base64>\x07`) that reaches the clipboard over SSH, inside tmux, and in Chrome OS Crostini where `arboard` has no display server.
+**What you see while it opens.**
+A one-line frame with `Opening <path>` appears first, before the workspace is read.
+On a large workspace that frame can stay up for seconds while the op log replays.
+It is the app working, not a hang.
 
-The status line reads `yanked N block(s) → clipboard` on success and `yanked N block(s) (clipboard unavailable)` when both paths fail.
+**Several outl processes on one workspace is a supported setup.**
+A TUI, the desktop app, `outl serve` and an MCP server can all be open at once.
+Only one process writes under the device's own actor id at a time.
+The others write under a temporary actor, so nothing races on the same op file.
 
-On X11 the TUI itself serves the clipboard, so on a bare session (no desktop environment, no clipboard manager) a yank can be pasted elsewhere only while the TUI is running; quitting drops it.
-With a clipboard manager, a normal quit hands the last yank over.
-A crash, a kill or a closed terminal window skips that handover, so the text then survives only if the manager had already copied it.
-A Wayland session reaches the clipboard through XWayland and behaves the same.
-macOS keeps the text after quit.
+**Where problems are logged.**
+Dependency warnings never print on the screen.
+They go to `<workspace>/.outl/tui.log`.
+Run `RUST_LOG=debug outl` for more detail when you report a bug, then `tail -f` that file.
 
-Pasting the yanked markdown in another app reconstructs the same bullet structure.
-Pasting back into outl uses `p` (with formatting) or `P` (without formatting) — see [Paste from clipboard](#paste-from-clipboard) below.
+### Terminal notes
 
-## Paste from clipboard
+- **`Shift+Enter` and `Ctrl+Enter`** need a terminal that speaks the kitty keyboard protocol (kitty, WezTerm, Alacritty, Ghostty, foot, recent iTerm2).
+  The TUI asks the terminal once, right after the first frame.
+  A terminal that never answers can leave the keyboard dead for about two seconds at launch.
+  Wait it out, the keys come back.
+- **Portable fallbacks that always work:** `Alt+Enter` or `Ctrl+J` for a soft newline, `Ctrl+T` for the task cycle.
+  `Alt+Enter` needs "Option as Meta" on macOS terminals.
+- **Icons.**
+  Chrome uses ordinary emoji and symbols, so it works without a special font.
+  Set `[tui] icons = "nerd-font"` for compact Nerd Font glyphs on status chips, fold markers, property and command glyphs.
+  Task checkboxes (`☐` `◐` `☑`), calendar day dots and scrollbars stay Unicode in both styles.
+- **Theme.**
+  `--theme <preset>` beats the per-workspace and global config.
+  `:theme <preset>` swaps the theme for the current session only.
+  Presets and your own `~/.config/outl/themes/*.toml` are in [theming.md](theming.md), and `outl theme list` names the files it ignored and why.
 
-`p` and `P` both read the OS clipboard via `arboard` (`actions/paste.rs`).
-
-`p` — **with formatting.**
-Routes the clipboard text through `outl_actions::paste_markdown` when it looks like a bullet outline or spans two or more non-blank lines.
-Multi-line plain text is split into one block per non-blank line (blank lines are ignored).
-Single-line plain text falls through to a native splice at the cursor.
-
-`P` — **without formatting.**
-Calls `outl_actions::paste_plain` directly.
-The raw clipboard text is inserted as a single block with no normalisation, outline parsing, or paragraph splitting.
-Use `P` when the clipboard contains identifiers with underscores, brackets, or other characters that `paste_markdown` would misread as markdown syntax.
-
-### Drag-and-drop file import (Insert mode)
-
-Dragging a file into the terminal window (Finder, Files app over SSH, a file manager) delivers its path as pasted text — terminals have no separate "file drop" event.
-In Insert mode, outl checks whether the pasted payload is exactly the path of one or more existing files before falling back to a normal paste.
-When it is, each file is imported into `<root>/assets/<hash>.<ext>` (content-addressed, size-capped by `[assets] max_bytes`) and its markdown link is spliced at the cursor, same as typing it.
-A pasted path that isn't an existing file (or spans more than one line without every line being a file) is left alone and pastes as plain text.
-See [`markdown-format.md` → Asset links](markdown-format.md#asset-links-nameassetshashext) for the link format.
-
-## Mouse capture (opt-in)
-
-By default the TUI does not capture mouse events, preserving the terminal's native text-selection (Shift-drag to copy a URL, etc.).
-Set `[tui] mouse_capture = true` in `~/.config/outl/config.toml` to enable mouse support:
-
-| Gesture | Action |
-|---|---|
-| Scroll wheel | Move the outline selection up / down |
-| Click | Select the block under the pointer |
-| Drag + release | Select a range and copy it as clean outl markdown to the OS clipboard |
-
-The drag-copy uses the same arboard + OSC 52 dual path as the keyboard yank.
-
-## Captures land at launch
-
-`outl capture "your line"` from any terminal drops a line into the workspace's capture inbox without opening the workspace.
-The TUI lands whatever is waiting **when it starts**, and says so: `added 1 capture to your journal`.
-
-Each line becomes a block at the end of the journal for the day it was *captured*, not the day it was drained.
-A capture made at 23:58 and drained at 00:10 belongs to the 23:58 day, so starting outl can create a past day's journal.
-The landing is one undo step: `u` takes it back like any other edit.
-
-Nothing watches the folder, so a capture made while the TUI is already up waits for the next start.
-That is the gap recorded on the TUI column of [`client-parity.md`](client-parity.md) — the desktop and phone apps pick one up while they are running.
-
-A file in the inbox that cannot be read is left there and named, with the folder it is sitting in, rather than being dropped silently.
-`outl capture --list` shows everything still waiting.
-
-Full behaviour, and why this is not `outl daily append`: [`client-outside-the-app.md` → Capturing from outside the app](client-outside-the-app.md#capturing-from-outside-the-app) and [`cli.md` → Capture](cli.md#capture).
-
-## Config
-
-The TUI reads two layers of TOML before launching:
-
-1. **Global** — `~/.config/outl/config.toml` (the [`outl-config`](../crates/outl-config/) crate; XDG-style on every OS).
-   Same file the desktop app's Settings modal writes to, so changing your theme in the desktop reflects on the next TUI launch.
-   ```toml
-   [theme]
-   preset = "dracula"
-
-   [tui]
-   icons = "nerd-font"  # "emoji" (default) or "nerd-font"
-
-   [editor]
-   vim_mode = true
-   font_size = 15
-   ```
-2. **Per-workspace** — `<workspace>/.outl/config.toml`.
-   Carries the legacy `[workspace] actor_id` plus the `actor_claimed_by` marker.
-   The actor this device actually writes under lives outside the workspace, in the device store — see [config.md](config.md#where-the-actor-id-actually-lives).
-   A `[theme] preset` here overrides the global setting for this workspace only.
-
-Theme precedence at startup (first hit wins): `--theme` CLI flag → per-workspace `[theme] preset` → global `[theme] preset` → built-in default (`outl`).
-
-## Modes
-
-### Normal
-
-The default.
-Move between blocks, open references, run commands.
-No characters insert themselves — every key is a command.
-
-| Key | Action |
-|-----|--------|
-| `i` | Edit current block (Insert mode) |
-| `I` | Edit, cursor at start of block |
-| `a` | Edit, cursor one char to the right (vim "append"). Clamps at end of block so `a` at end-of-line behaves like `i`. |
-| `A` | Edit, cursor at end of block (vim "append at end") |
-| `x` | Delete char under cursor (Normal mode) |
-| `X` | Delete char before cursor (Normal-mode Backspace) |
-| `D` | Delete from cursor to end of block (vim `d$`) |
-| `C` | Delete to end of block + enter Insert (vim `c$`) |
-| `S` | Clear block + enter Insert at column 0 (vim "substitute line") |
-| `s` | Delete char under cursor + enter Insert (vim "substitute char") |
-| `r{ch}` | Replace char under cursor with next typed char, stays in Normal (vim `r`) |
-| `f{ch}` / `F{ch}` | Find next / previous occurrence of the next typed char on the current block |
-| `~` | Toggle case of char under cursor; cursor advances one position |
-| `Y` | Yank current block (alias of `y y`) — also writes clean outl markdown to the OS clipboard (arboard + OSC 52 fallback for SSH / tmux). Status line: `yanked N block(s) → clipboard` or `(clipboard unavailable)`. |
-| `e` | Cursor to the end of the current / next word (vim `e`; pairs with `w`) |
-| `*` / `#` | Search workspace for the word under cursor (forward / backward). Walk results with `n` / `N`. |
-| `z R` / `z M` | Unfold all / fold all blocks on the current page (chord). `z M` skips leaf blocks — only blocks that already have children get folded; folding a leaf today is invisible, but would silently surface as "children appear collapsed" once the user added any underneath. |
-| `z z` | Center viewport vertically on the cursor (chord) |
-| `z i` / `z o` | Zoom in on the selected block / zoom out one level (chord). `z i` makes the block the outline root — only its subtree renders, with a breadcrumb of ancestors in the status chrome; `z o` pops one level back toward the full page (no-op at the page root). Pure local view state — never written to the op log, so it's per-device and never syncs. The page's own sections (inline backlinks, nested pages) go off screen while zoomed, and `j` stops at the subtree edge instead of crossing into them; a cursor already parked in the backlinks panel comes back to the outline. |
-| `z f` | Focus mode: hide the header, the warnings banner, the sidebar and the status bar so only the outline is left. Press again to bring them back. Session only. Not `F`, which is find-backward, and not `Ctrl+Shift+F`, which a terminal reports as `Ctrl+F`. |
-| `g v` | Re-enter Visual mode at the last captured range (chord) |
-| `o` / `O` | New block below / above |
-| `Enter` | Open `[[ref]]` / `#tag` / journal / block ref (`((blk-X))` / `!((blk-X))`) under cursor (otherwise edit). On a block ref it opens the source page and lands the cursor on the referenced block; orphan handles surface a status message and stay put. |
-| `j` / `k` / `↑` / `↓` | Move between blocks |
-| `h` / `l` / `←` / `→` | Move cursor inside the current block |
-| `w` / `b` | Cursor to next / previous word |
-| `0` / `$` | Cursor to start / end of block |
-| `Tab` / `Shift-Tab` | Indent / outdent the current block |
-| `K` / `J` (or `Alt+↑/↓`, `Ctrl+Shift+↑/↓`) | Move block up / down. The cursor stays on the moved block, `c` folds it, and `u` undoes the whole move. A terminal that does not deliver `Ctrl+Shift+↑` still has `Alt+↑`. In Visual the same keys move the whole range, and a parent selected with its children moves as one unit |
-| `dd` | Delete the current block (chord) |
-| `c` | Fold / unfold the current block. The bullet row shows `▼ ` (expanded) or `▶ ` (collapsed) when the block has children, two spaces otherwise. Children are hidden from the outline while collapsed and `j` / `k` skip past them, but the underlying tree is untouched. State is persisted as an `Op::SetCollapsed` in the op log — every device replays the same sequence, so the fold layout converges across iCloud / Syncthing peers without relying on file-level last-write-wins (which would lose concurrent flips). No-op on a block whose sidecar entry hasn't been written yet (save first). |
-| `y r` | Yank the current block's ref handle (`((blk-XXXXXX))`) to the OS clipboard + `last_yanked_ref` (chord). On headless / no-clipboard environments it falls back to the status line only. |
-| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (`Ctrl+T` is the portable fallback for tmux / Terminal.app, which collapse `Ctrl+Enter` into plain `Enter`) |
-| `u` / `Ctrl+R` | Undo / redo |
-| `V` | Enter Visual mode (multi-block select) |
-| `t` / `Home` | Today's journal |
-| `[` / `]` | Previous / next journal |
-| `g j` | Jump to today (chord) |
-| `Ctrl+P` | Quick switcher (fuzzy page/journal pick) |
-| `/` | Slash command menu (Notion-style, fuzzy filter) |
-| `:` | Command palette (vim-style) |
-| `B` | Toggle the inline backlinks section below the outline |
-| `Ctrl+O` | Flip the backlinks sort direction (newest ⇄ oldest); persists to `config.toml` |
-| `?` | Toggle this help popup |
-| `q q` / `Ctrl+C` | Quit — `q` alone arms a chord, second `q` confirms |
-| `Z Z` | Quit (vim's "save and quit"). outl already commits Insert on every Normal boundary, so this is equivalent to `q q`; kept distinct so vim muscle memory works. |
-
-### Insert
-
-Text input goes into the buffer.
-Esc commits (writes back to the `.md`), Enter commits + creates a new block.
-
-| Key | Action |
-|-----|--------|
-| `Esc` | Commit and return to Normal |
-| `Enter` | Commit + new block below (soft newline inside open code fence — see below) |
-| `Alt+Enter` / `Ctrl+J` | Soft newline (stays in same block) — portable across terminals |
-| `Shift+Enter` | Soft newline — only on terminals that speak the kitty keyboard protocol |
-| `Ctrl+Enter` / `Ctrl+T` | Cycle the block's task prefix — TODO → DOING → DONE → none (stays in Insert, caret follows the text; `Ctrl+T` works on terminals that collapse `Ctrl+Enter`) |
-| `Tab` / `Shift-Tab` | Indent / outdent (stays in Insert) |
-| `Alt+↑` / `Alt+↓` (or `Ctrl+Shift+↑/↓`) | Move the block up / down and stay in Insert on the same block, with unsaved text and caret kept. Closes an open autocomplete popup |
-| other `Ctrl`/`Alt` chords | Ignored, never typed as text. `Ctrl+A/E/W/U/K/B/F` used to insert their bare letter into the block ([#429](https://github.com/outlmd/outl/issues/429)); readline editing inside a block is not implemented, so they do nothing today |
-| `Backspace` on empty | Delete block, move to previous |
-| `Left` at column 0 | Spill into the previous block (cursor at end) |
-| `Right` at end of block | Spill into the next block (cursor at start) |
-| `(`, `[`, `{` | Auto-pair with closing |
-| `[[` | Page reference autocomplete (titles indexed across workspace) |
-| `#` | Tag autocomplete |
-| `@` | Mention autocomplete — word-initial only (preceded by start-of-line or whitespace, so `a@b.com` doesn't fire). Lists pages where `type:: person` is set, fuzzy-matched against the typed name. Composite names allow spaces (`@Thiago Avelino` is one query, not a tag terminating at the space). When no existing person matches, the typed text is offered as a "create new" candidate; accepting it materialises the page with `type:: person` set. Insert produces `[[@name]]`. |
-| `((` | Block reference autocomplete — fuzzy-match on block text, inserts `((blk-XXXXXX))`. Empty query lists newest-first (NodeId descending = ULID time order) so the popup is deterministic and the same eight rows show on every keystroke. |
-| `:` | Emoji shortcode autocomplete — word-initial only (preceded by start-of-line or whitespace, so `14:00`, `key::value`, and `https://` don't fire). Backed by `outl_md::emoji::search` (GitHub gemoji catalog, ~1800 shortcodes). Popup row shows `glyph  :shortcode:`; accept inserts the canonical `:shortcode:` form into the buffer (the `.md` always stores the shortcode literal, never the codepoint — see `docs/markdown-format.md` § "Emoji shortcodes"). The pretty render translates `:shortcode:` to the unicode glyph; the editing row stays raw so cursor columns match source bytes 1:1. |
-| `↑` / `↓` in popup | Navigate completion |
-| `Enter` / `Tab` in popup | Accept completion |
-| `Esc` in popup | Cancel completion |
-
-### Multi-line blocks and fenced code
-
-A single block can hold multiple lines (`Alt+Enter` / `Ctrl+J` / `Shift+Enter` on kitty terminals).
-Used for paragraphs of prose inside one bullet and — most importantly — for fenced code blocks:
+## The screen
 
 ```
-- ```lisp
-  (+ 1 2)
-  ```
-```
-
-**Auto-fence**: while typing inside an *open* code fence (the opener
-` ``` ` is above the cursor but no closer has been typed yet), plain
-`Enter` is treated as a soft newline.
-This lets you type a fenced block naturally without remembering the soft-newline combo:
-
-```
-- ```lisp        ← typed `- `` ```lisp `, then Enter (+ 1 2)        ← typed body, Enter
-  ```            ← typed closer, Enter
-- next bullet    ← Enter here is a sibling again
-```
-
-The on-disk format is plain CommonMark — see [`docs/markdown-format.md`](markdown-format.md#multi-line-block-text-continuation-lines).
-
-### Visual
-
-A range of blocks is highlighted.
-`j` / `k` extends the range; the common Normal-mode keys for editing aren't available — Visual is for batch operations.
-
-| Key | Action |
-|-----|--------|
-| `Esc` / `v` / `V` | Cancel, back to Normal |
-| `j` / `k` / `↑` / `↓` | Extend the range |
-| `d` / `x` | Delete the selected range |
-| `y` | Yank the selected range to the register and to the OS clipboard as clean outl markdown (arboard + OSC 52 fallback) |
-| `Tab` / `>` | Batch indent the selected range |
-| `Shift-Tab` / `<` | Batch outdent the selected range |
-
-## Overlays
-
-Several modal popups can appear over the main panes.
-They steal the keystream while open; `Esc` always closes them.
-
-### Sync panel (`:sync`)
-
-What each paired device is still waiting for, and the concurrent edits Yrs merged on this device, the same data the desktop Trust section and the mobile Devices sheet show.
-
-| Key | What it does |
-|-----|--------------|
-| `j` / `k` (or `↑` / `↓`) | Move between merged edits |
-| `Enter` | Open the page that holds the merged block |
-| `u` | Undo the merge: put your text from before it back. It is a normal edit, so it syncs |
-| `Esc` / `q` | Close |
-
-Both lists live in `.outl/state/` and survive a restart.
-
-### Trash (`/trash`, `:trash`)
-
-Every block you have deleted in this workspace, and the way back (issue #287).
-A delete here is a move, never a removal, so this reaches a deletion from any device and any day — unlike `u`, which walks this session only.
-
-| Key | What it does |
-|-----|--------------|
-| `j` / `k` (or `↑` / `↓`) | Move between deletions |
-| `r` | Restore: put the block back under the block it was deleted from |
-| `Enter` | On a deleted **block**: open the page it came from, without restoring it |
-| `Esc` / `q` | Close |
-
-A deleted subtree is one row, and the row says how many blocks come back with it.
-A row that cannot be restored says why in place of offering it: a deleted page (its slug is usually taken by now), or a block whose parent went to the trash after it did.
-`Enter` still works on a refused **block** row — "where did my content go" is answerable even when "bring it back" is not.
-
-On a deleted **page** row `Enter` refuses and says so, because opening a page whose `.md` went with the delete is how you *revive* it.
-The opener reads the missing file as a new page and reconciles a seed, which lifts the page out of the trash and turns one row into one per child.
-Reviving a page deliberately is a real thing and that is the route the refusal names — close the overlay and open the page by name.
-
-The same sentence can also come back from `r` on a row that looked restorable, because another device can trash the landing parent after the list was read.
-It lands on the overlay's own status line and the list re-reads itself.
-
-It opens from the command registry rather than a chord, which is why `/` lists it with a description.
-
-### Property editor (`g p`)
-
-Lists the `key:: value` pairs on the selected block, and edits them without your having to remember a single key.
-
-`:prop` is still there and still faster when you already know the key — this overlay is for when you don't.
-
-| Key | What it does |
-|-----|--------------|
-| `j` / `k` (or `↑` / `↓`) | Move between properties |
-| `Enter` | Edit the highlighted property's **value** (the key stays put — renaming is a delete plus an add) |
-| `o` | Add a new property: key first, `Enter` moves to the value, `Enter` again saves |
-| `Tab` (in the key field) | Complete the key from the ones this workspace already uses, most-used first. Press again to cycle |
-| `[[` / `#` (in the value field) | The same page / tag picker Insert mode has — `Tab` or `Enter` accepts, `Esc` dismisses the popup |
-| `d d` | Delete the highlighted property (one `d` only arms the chord) |
-| `p` | Switch between the **block's** properties and the **page's** (`icon::`, `type::`, …) |
-| `Esc` / `q` | Close |
-
-Two keys are refused rather than written: `page-slug` and `page-kind` are the page's identity, not metadata, and editing them would rename the page out from under every ref pointing at it.
-
-Writes go through the same path `:prop` uses, so a property lands in the outline immediately.
-
-> The `pinned::` toggle used to be `g p`. It is **`g P`** now (`/pin` still works), because `pinned::` is itself one of the page properties this overlay edits — and you reach for properties far more often than you pin.
-
-### Quick Switcher (`Ctrl+P`)
-
-Fuzzy search across page titles, slugs, and journal dates.
-Today's date is always present even if the journal file doesn't exist yet.
-
-### Slash menu (`/`) and Command palette (`:`)
-
-Two surfaces over the **same** command registry — pick whichever matches your muscle memory:
-
-- **`/`** (Normal mode) opens a Notion-style filterable list.
-  Each entry shows its name + description.
-  Inside Insert mode, typing `/` triggers inline autocomplete with the same list — pick a command with `Tab`/`Enter` without leaving the buffer.
-- **`:`** is the vim command line.
-  Same registry, same args, same aliases — `/q` and `:q` are interchangeable.
-
-Unknown commands surface in the status line as `unknown command: <name>`.
-
-#### Workspace / navigation
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `open <name>` | `o`, `new`, `n` | Open (or create) page by name |
-| `today` | — | Jump to today's journal |
-| `search` | `s`, `find` | Workspace-wide block search |
-| `quit` | `q`, `exit` | Close the TUI |
-| `write` | `w`, `save` | Force-save current page |
-| `refresh` | `r`, `reload` | Re-read workspace from disk |
-| `theme <preset>` | — | Swap the active theme |
-| `help` | `h` | Toggle help popup |
-
-#### Properties
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `prop-block <key> <value>` | `prop` | Set property on current block (empty value deletes) |
-| `prop-page <key> <value>` | — | Set page-level property (`title::`, `icon::`, …) |
-
-The `g p` overlay above is the same two writers behind a list you can browse.
-Use the commands when you know the key, the overlay when you don't.
-
-#### Pages
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `rename <new page name>` | none | Rename the open page and respell every mention of it |
-| `merge <page name>` | none | Merge the open page into another existing page, after a `y/n` |
-
-`/merge Beta` on the page `Alpha` asks `merge 'Alpha' into 'Beta'? can't be undone here. y/n`.
-`y` confirms and any other key cancels, the same prompt `g d` uses for a page delete.
-The blocks of `Alpha` move under `Beta` (ids and subtrees intact), `Alpha`'s properties and names carry over as aliases, links that named `Alpha` are rewritten to `Beta`, and `Alpha` goes to the trash.
-You land on `Beta`, and a toast says what moved, for example `merged 'Alpha' into 'Beta': 2 blocks, links updated in 1 block`.
-Where both pages set the same property to different values the target's value is kept and the toast says how many clashed.
-The target has to exist (the command never creates a page), a journal cannot be the source, and a page cannot be merged into itself.
-`u` does not take a merge back, and the undo history of every page the merge touched is dropped so an older snapshot cannot undo half of it.
-The merge itself is `outl_actions::merge_pages`, shared with `outl page merge`; see [RFC 0557](rfcs/0557-page-merge-and-rename.md).
-
-`/rename Beta` on the page `Alpha` renames it and respells every `[[Alpha]]` and `#alpha` in the workspace in the same batch.
-The file moves with it: the slug is `slugify`'d from the name you type and the title is the name itself, so `/rename Café Notes` lands on `pages/cafe-notes.md` titled `Café Notes`.
-A name that only changes capitalisation or punctuation keeps the slug, so the file stays put and only the title and the mentions written by title change.
-The toast says what the rewrite did, for example `renamed 'Alpha' to 'Beta': links updated in 3 blocks`, and names the `[[Beta/child]]` mentions it left alone, because those belong to a sub-page that was not renamed.
-
-**Only a name collision asks first.**
-A rename onto a free name runs on the keystroke, since renaming it back is all it takes to undo.
-When another page already owns the name nothing is written and the status line asks `'Beta' already has that name — merge 'Alpha' into it? can't be undone here. y/n`, the same prompt `/merge` and `g d` use.
-`y` runs the merge with the open page as the source, and any other key cancels and leaves both pages as they were.
-
-A journal cannot be renamed, because its slug is its date.
-`u` does not take a rename back, and the undo history of every page it touched is dropped for the reason the merge gives.
-Editing `title` through the `g p` property editor is this same rename, not a property write, so the mentions follow there too.
-The rename itself is `outl_actions::rename_page`, shared with `outl page rename`.
-
-#### Block references
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `refer` | — | Copy `((blk-XXXXXX))` of the current block to the OS clipboard + `last_yanked_ref`. Same as the `y r` chord. |
-| `refer-embed` | — | Copy the embed form `!((blk-XXXXXX))` of the current block to the OS clipboard + `last_yanked_ref`. |
-
-> **Clipboard fallback**: `y r` / `/refer` / `/refer-embed` use [`arboard`](https://crates.io/crates/arboard) to talk to the OS clipboard.
-> The status line reads `copied … to clipboard` on success and `yanked … (clipboard unavailable)` on terminals / SSH sessions without a clipboard backend — the token still lives in `last_yanked_ref` so the in-app paste path keeps working.
-
-#### Files
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `upload` | `attach` | Attach a file: pick it, copy it into `<workspace>/assets/<hash>.<ext>`, and insert its `[name](assets/…)` link at the cursor |
-
-> **File picker**: on macOS / Windows `/upload` opens the native "open file" dialog.
-> On Linux (and any build without the dialog) it takes a typed path — `/upload` hands off to the `:` palette pre-filled `upload `, so `upload /path/to/file.pdf` works everywhere, including over SSH.
-> Dragging a file into the terminal also works: in Insert mode a pasted path to an existing file is imported and linked automatically (see [Drag-and-drop file import](#drag-and-drop-file-import-insert-mode)).
-> outl never renders the file — clicking the link (`g x`) opens it in the OS default app.
-
-#### Code execution
-
-| Command | Aliases | Action |
-|---------|---------|--------|
-| `run` | `x`, `execute` | Run the code block under the cursor |
-
-#### Date & time inserters
-
-These write text **at the cursor** (Insert mode only).
-They skip the auto-commit step the other commands do, so your in-flight edit stays alive while the text lands.
-The names and the strings they produce come from `outl_actions::insert`, shared with the desktop, so `/date-today` writes the same thing in a terminal and in the app.
-
-| Command | Aliases | Inserts |
-|---------|---------|---------|
-| `date-today` | `dt` | `[[YYYY-MM-DD]]` (today) |
-| `date-tomorrow` | `dtm` | `[[YYYY-MM-DD]]` (today + 1) |
-| `date-yesterday` | `dy` | `[[YYYY-MM-DD]]` (today − 1) |
-| `date-next-week` | `dnw` | `[[YYYY-MM-DD]]` (today + 7) |
-| `date-last-week` | `dlw` | `[[YYYY-MM-DD]]` (today − 7) |
-| `date-next-monday` | `dnmon` | next Monday's journal ref |
-| `date-next-tuesday` | `dntue` | next Tuesday's journal ref |
-| `date-next-wednesday` | `dnwed` | next Wednesday's journal ref |
-| `date-next-thursday` | `dnthu` | next Thursday's journal ref |
-| `date-next-friday` | `dnfri` | next Friday's journal ref |
-| `date-next-saturday` | `dnsat` | next Saturday's journal ref |
-| `date-next-sunday` | `dnsun` | next Sunday's journal ref |
-| `date <arg>` | — | flexible — see below |
-| `iso-date-today` | `isod` | `YYYY-MM-DD` (no brackets, for `due::` etc) |
-| `iso-date-tomorrow` | `isodtm` | `YYYY-MM-DD` |
-| `iso-date-yesterday` | `isody` | `YYYY-MM-DD` |
-| `time-now` | `now`, `tn` | `HH:MM` (no brackets, plain time) |
-| `datetime-now` | `dtn`, `stamp` | `[[YYYY-MM-DD]] HH:MM` (journal ref + time) |
-| `week-num` | `wn`, `week` | `#YYYY-Www` (ISO week as a tag) |
-
-##### `/date <arg>`
-
-| Input | Resolves to |
-|-------|-------------|
-| `/date +3d` | today + 3 days |
-| `/date -2w` | today − 2 weeks |
-| `/date +1m` | today + 1 month (Jan 31 + 1m → Feb 28/29 — clamped to last day of month) |
-| `/date 5d` | bare `Nd`/`Nw`/`Nm` is treated as positive |
-| `/date 2026-06-15` | absolute ISO date |
-| `/date April 22nd, 2026` | any absolute spelling the shared date parser accepts (`2026/04/22`, `22/04/2026`, `Sept 3rd, 2025`, `22 April 2026`, …) |
-
-Garbage input (`/date nope`, `/date +3x`, invalid date) shows `usage: date +Nd | -Nw | +Nm | YYYY-MM-DD` on the status line.
-
-> **Weekday math:** `date-next-<weekday>` always jumps to the **next** occurrence of that weekday, strictly in the future.
-> Running it on the same weekday adds 7 days, not 0 — `date-next-monday` on a Monday means "next Monday.
-> **ISO week year:** `week-num` uses `%G-W%V` (ISO 8601), not `%Y-W%V`.
-> The ISO year can differ from the calendar year on a few days around year boundaries — e.g. 2025-12-31 (Wednesday) belongs to ISO week `2026-W01`, not `2025-W01`.
-
-#### Plugin commands
-
-JavaScript plugins installed under `<workspace>/.outl/plugins/` are loaded at startup.
-Each command a plugin contributes (its `contributes.commands`) appears in the **same** `/` slash menu, listed by its title with a `plugin · <plugin-id>` description so you can tell it apart from a built-in.
-Selecting one runs the plugin's handler; any `notify` message or error it produces shows as a toast.
-If the plugin mutates the workspace, the affected `.md` files are re-rendered and the current page reloads so the change is visible immediately.
-
-Plugins are **best-effort**: a plugin that fails to load (bad manifest, tampered bundle, mismatched API version) is skipped with a toast, and the TUI runs normally.
-A workspace with no plugins behaves exactly as before.
-
-Plugins can also register `onOp` hooks that fire after every workspace mutation (your edits, or ops arriving from a peer).
-Hooks are dispatched once per mutation; a hook that itself mutates the workspace never re-triggers itself (loop-safe).
-
-> Keybinding contribution (`contributes.keybindings`) and the install / permission-approval flow are not implemented yet; today the TUI surfaces plugin **slash commands** and runs **op hooks**.
-
-## Panels
-
-```
-┌─outl · ansi ───────────────────────────────────────────────────┐
-│ Page · Avelino                                                         │
+┌─outl · default-dark ───────────────────────────────────────────────────┐
+│ outl ▸ notes ▸ Journal · Wednesday, 2026-11-25         ☑ 1/3  4s ago  │
 ├────────────────────────────────────────────────────────────────────────┤
-│ - I am the author                                                      │
-│ - some other note                                                      │
+│ - ☐ call the dentist                                                   │
+│ - ▼ project x                                                          │
+│   - led by [[Avelino]]                                                 │
 │ ───────────────────────────────────────────────────────────────────────│
-│  Backlinks · 2 ref(s)                                                  │
+│  Backlinks · 2 ref(s)                                  ↓ newest (^O)   │
 │                                                                        │
-│ 📄  Project X                                                          │
-│ - led by [[Avelino]]                                                   │
-│   - milestone A                                                        │
-│   - milestone B                                                        │
-│                                                                        │
-│ 📅  2026-05-24                                                         │
+│ Project X                                                              │
 │ - meeting with [[Avelino]] about Q4                                    │
-├──┌NORMAL─┐ i edit  o new  K/J move …  ⇇ 2 backlinks ───────────────────┤
-│  └───────┘                                                             │
+├────────────────────────────────────────────────────────────────────────┤
+│ NORMAL  notes  2 backlinks  i edit  o new  c fold …    14:02  saved ? help │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Outline** — the current view (journal or named page).
-  Markdown renders inline (bold/italic/code/strike); the selected/editing block is shown raw so cursor columns align with source bytes.
-  Block references (`((blk-XXXXXX))`) resolve to the source block's text plus its page icon; orphaned handles render dimmed.
-  Embeds (`!((blk-XXXXXX))`) — when the block contains a single embed token (whitespace OK) — render the source block **and its children** expanded read-only below the carrying block.
-  Every embed row carries a `↳ ` prefix (root + descendants), so the expansion reads as one cohesive block.
-  Descendants are indented by `2 * (depth + 1)` spaces before their `↳ ` so children align under the source's *text*, not under the parent's `↳ `.
-  Task checkboxes (`☐` TODO, `◐` DOING, `☑` DONE), page refs, and tags render with their normal styling inside the expansion.
-  Recursion is capped at depth 4 to break embed cycles.
-  The cursor-bearing block always keeps the raw `((…))` / `!((…))` literal on its first row so column counting stays exact.
-- **Backlinks (inline)** — rendered below the outline, separated by a full-width `─` rule.
-  Every block that contains `[[this]]` or `#this` shows up, grouped by source page — **one row per citing block, followed by its children** (direct children and their descendants, capped at four levels, always expanded, whatever fold the source page keeps).
-  The index keeps those children beside the block rather than inside it, so a lookup never copies a subtree under the workspace lock.
-  A block that cites this page *and* sits under another citing block is drawn twice, once as its own row and once inside the ancestor's children.
-  Namespace mentions (`#os/linux` arriving at `os`) stay one shallow, read-only row each.
-  Pages are ordered by how recently they referenced this page (default: most recent on top); `Ctrl+O` flips the direction, shown in the section header (`↓ newest (^O)` / `↑ oldest (^O)`).
-  Within a page, blocks keep document order.
-  When a citing block is nested inside an outline (not at page root level), its ancestor chain shows as a dimmed breadcrumb above it, root-first (e.g. `Planejamento Q3 › Objetivos`); a root-level block has no breadcrumb.
-  The trail renders its markdown — a `[[ref]]` reads as its name, a `#tag` keeps its colour — with the dim applied to the row rather than to each span.
-  Consecutive references from the same branch collapse the trail — it renders once, then stays implicit for the following reference(s) until the branch changes.
-  `j`/`k` navigation crosses the separator transparently: from the last outline block, `j` lands you on the first backlink; `k` from the first backlink walks back into the outline.
-  Inside the panel `j`/`k` step through each citing block, then its children depth-first, then the next citing block; a child is a row you can edit like any other.
-  Toggle the section with `B`.
-  A page **can** cite itself and the row is listed: you typed the ref expecting to see it in your cross-references.
-  Press `i` / `Enter` on a backlink (or on one of its children) to edit that block **in place**, without leaving the page you are reading: the edit lands as one op on that block, and the source page's `.md` is written from the op log afterwards.
-  `Ctrl+T`, `g D`, `d d`, `Tab` / `Shift+Tab` and the move chords work the same way, on the same block — see [shortcuts.md → On a backlink row](shortcuts.md#on-a-backlink-row) for what each one means there.
-  A row whose block has been deleted elsewhere refuses before the edit starts and says so (`That block was deleted, so nothing changed.`), rather than taking your typing and dropping it at `Esc`.
-  `Enter` *while editing* a backlink row commits what you typed and leaves Insert instead of splitting the block — see `o` / `O` just below for why there is nowhere for the caret to go.
-  `o` / `O` on a **child** row create the sibling and open Insert on it: it lands inside the children the panel already draws.
-  On the citing block itself they are the one gesture the panel usually cannot finish.
-  The new sibling is created on the source page, but it does not reference the page you are on, so it has no row here and the caret has nowhere to land.
-  The status line names the page it went to and says so — `not editable from the panel` — instead of starting an edit on a block you did not aim at.
-  The exception is a page that cites **itself**: the new block is in the outline you are already looking at, so the cursor leaves the panel and Insert opens on it, exactly as `o` behaves anywhere else.
-- **Status / hint** — mode badge, contextual key reminder, backlink count, status messages.
+**Header.**
+Workspace name, the page (or `Journal · <weekday>, <date>`), and the zoom trail when you have zoomed into a block.
+On the right, chips appear only when they apply: a spinner while the index builds (`indexing`), `done/total` for the tasks on the page, `editing` while you are in Insert, and how long ago the page was saved.
 
-### Pages sidebar
+**Outline.**
+Markdown renders inline: bold, italic, code, strikethrough, `[[page]]` links, `#tags`, task checkboxes, `> ` quotes and tables.
+The block under the cursor (or being edited) is shown as raw source so the caret columns match the bytes in the file.
+Everything else is drawn pretty.
 
-Toggled by `Ctrl+E` (the desktop-standard "toggle sidebar" chord; `\` was dropped to avoid clashing with it).
-Shows Today / pinned / recent pages and a mini-calendar of journals.
-`j` / `k` move the selection.
-`Tab` cycles the section (Today / Pinned / Recent / Calendar).
-`Enter` opens the focused page.
-`d` on a regular page arms a `delete page '<title>'? y/n` confirmation in the status line.
-`y` confirms, any other key cancels (and is swallowed).
-The `g d` chord (Normal mode) routes through the same confirmation flow: with the sidebar focused it deletes the highlighted row, with the outline focused it deletes the current page.
-Journals are refused in both paths (calendar rows are a no-op; pinned/recent journals are silently skipped).
-On confirm, the page root moves to `NodeId::trash()` via `outl_actions::page::delete`, the `.md` + `.outl` projections are removed, the index is rebuilt, and if the deleted page was the current view the TUI lands on today's journal.
-For fuzzy title jumps without the pane, `Ctrl+P` (quick switcher) still works with the sidebar closed.
+**Footer.**
+Left to right: mode badge (`NORMAL`, `INSERT`, `VISUAL`), workspace name, backlink count, then the status message or a key hint for the current mode.
+Right side: clock, a `saved` indicator and `? help`.
+A status message is elided with `…` when the terminal is narrow, and the hint comes back when the message clears.
 
-## Parser-warning banner
+**Toasts.**
+Short confirmations (`saved`, `refreshed`, a due reminder, a failed save) stack bottom right and expire on their own.
+A toast grows to four rows to fit a long error, so a path is not cut off at the border.
 
-When you open a `.md` that the outl parser had to recover from (a leading `# heading`, a free paragraph between bullets, imported markdown that doesn't fit the dialect), the TUI shows a yellow banner above the outline:
+**Help.**
+`?` opens a tabbed help popup: Normal, Insert, Visual, Sidebar, Overlays, Dates.
+`h` / `l` or `Tab` switch tabs, `j` / `k` scroll, `PgUp` / `PgDn` page, `g` / `G` jump to top and end, `?` `Esc` or `q` close.
+Every other key is swallowed while the popup is open, so the outline behind it never moves.
+The help rows are hand-written, so a rare chord can be missing from them.
+This page is the complete list.
 
+### Sections under the outline
+
+Both sections sit below the outline, each behind a full-width `─` rule.
+
+**Backlinks ("Linked from").**
+Every block that contains `[[this page]]` or `#this-page`, grouped by the page it lives on.
+It is on by default in the TUI.
+`Ctrl+B` hides and shows it.
+Each citing block is one row followed by its children (up to four levels, always expanded).
+Pages are ordered by how recently they cited this one, newest first.
+`Ctrl+O` flips the direction and saves the choice to `[display] backlinks_order` in `config.toml`.
+A citing block nested inside an outline shows its ancestors as a dim breadcrumb above it (`Planejamento Q3 › Objetivos`).
+Consecutive references from one branch share a single breadcrumb.
+A page that cites itself lists that row too.
+On a cold start the header reads `Backlinks · indexing…` so a page that is still loading is not mistaken for a page with no backlinks.
+
+`j` / `k` walks across the rule: from the last outline block `j` lands on the first backlink, and `k` from the first backlink goes back up.
+Inside the panel `j` / `k` step through each citing block, then its children, then the next citing block.
+
+**Editing a backlink where it is cited.**
+Press `i` or `Enter` on a backlink row (or one of its children) to edit that block in place, without leaving the page you are reading.
+The edit lands as one op on that block, and the source page's `.md` is rewritten from the op log.
+`Ctrl+T`, `g D`, `d d`, `Tab`, `Shift+Tab` and the move chords act on that same block.
+The per-chord meaning is in [shortcuts.md → On a backlink row](shortcuts.md#on-a-backlink-row).
+A row whose block was deleted on another device refuses before the edit starts: `That block was deleted, so nothing changed.`
+`Enter` while editing a backlink commits and leaves Insert, instead of splitting the block, because there is nowhere on this page for a new sibling's caret to go.
+`o` and `O` on a child row create a sibling and open Insert on it.
+On the citing block itself they create the sibling on the source page, say `not editable from the panel`, and keep you where you were.
+A page that cites itself is the exception, since the new block is in the outline you are already reading.
+
+What the TUI cannot do here is open the page a backlink lives on from the row.
+Use `Ctrl+P` and the page name.
+See [client-backlinks.md](client-backlinks.md) for the rule across clients.
+
+**Nested pages.**
+A page named `os` lists `os/linux` and `os/linux/debian` under a `Nested pages · N` header.
+It is independent of the backlinks toggle.
+The list is read-only: `j` / `k` stop at the backlinks section.
+To open one, press `Ctrl+P` and type its name.
+
+## Modes
+
+outl is modal like vim.
+The footer badge says which one you are in.
+
+| Mode | What keys do | Enter it | Leave it |
+|---|---|---|---|
+| Normal | Every key is a command, nothing types itself | start-up, or `Esc` from the others | (you are in it) |
+| Insert | Keys type into one block | `i` `I` `a` `A` `o` `O` `Enter` `s` `C` `S` | `Esc` |
+| Visual | `j` / `k` grows a range of blocks, one key acts on all of them | `V` | `Esc`, `v` or `V` |
+
+An open overlay (quick switcher, slash menu, search and the rest, below) takes every keystroke until `Esc` closes it.
+`Ctrl+C` quits from anywhere and commits an edit in progress first.
+`Ctrl+S` saves now, `Ctrl+L` re-reads the workspace from disk, in any mode.
+
+### Normal mode
+
+**Start typing.**
+
+| Key | What it does |
+|---|---|
+| `i` | Edit the current block, caret at the cursor |
+| `I` | Edit, caret at the start of the block |
+| `a` | Edit, caret one character right of the cursor (at end of line it behaves like `i`) |
+| `A` | Edit, caret at the end of the block |
+| `o` / `O` | New block below / above, and start typing |
+| `Enter` | If the cursor is on a `[[ref]]`, `#tag`, journal date or `((block ref))`, open it. Otherwise edit the block |
+| `s` | Delete the character under the cursor and start typing |
+| `S` | Clear the block and start typing at column 0 |
+| `C` | Delete from the cursor to the end of the block and start typing |
+
+**Move around.**
+
+| Key | What it does |
+|---|---|
+| `j` / `k` or `↓` / `↑` | Next / previous block |
+| `g g` / `G` | First / last block |
+| `PgDn` / `PgUp` | One screen down / up |
+| `Ctrl+D` / `Ctrl+U` | Half a screen down / up |
+| `h` / `l` or `←` / `→` | Cursor left / right inside the block |
+| `w` / `b` / `e` | Next word / previous word / end of word |
+| `0` / `$` or `Home` / `End` | Start / end of the block |
+| `f{ch}` / `F{ch}` | Jump to the next / previous occurrence of the next character you type |
+| `z z` | Center the screen on the cursor |
+| `t` | Today's journal |
+| `[` / `]` | Previous / next day from the journal you are on |
+| `g [` / `g ]` | Yesterday / tomorrow relative to today, whatever page you are on |
+| `g j` | Today (same as `t`) |
+
+**Change text without leaving Normal.**
+
+| Key | What it does |
+|---|---|
+| `x` / `X` | Delete the character under / before the cursor |
+| `D` | Delete from the cursor to the end of the block |
+| `r{ch}` | Replace the character under the cursor with the next one you type |
+| `~` | Toggle the case of the character under the cursor and move right |
+| `Ctrl+T` or `Ctrl+Enter` | Cycle the task prefix: none, TODO, DOING, DONE, none. `Ctrl+T` is the portable one, because tmux and Terminal.app turn `Ctrl+Enter` into `Enter` |
+| `g D` | Mark the block DONE from any state |
+| `u` / `Ctrl+R` | Undo / redo (see [Saving, undo and safety](#saving-undo-and-safety)) |
+
+`r`, `f` and `F` wait for one character.
+Any other key cancels the wait and clears the prompt from the footer.
+
+**Structure.**
+
+| Key | What it does |
+|---|---|
+| `Tab` / `Shift+Tab` | Indent / outdent the block |
+| `K` / `J` or `Alt+↑` / `Alt+↓` or `Ctrl+Shift+↑` / `Ctrl+Shift+↓` | Move the block up / down among its siblings. The cursor stays on it, and `u` undoes the whole move. A terminal that does not send `Ctrl+Shift+↑` still has `Alt+↑` |
+| `d d` | Delete the block and its children (it goes to the trash, see [TUI overlays → Trash](tui-overlays.md#trash-trash-trash)) |
+| `c` | Fold / unfold the block. `▼` means expanded, `▶` collapsed, blank means no children |
+| `z M` / `z R` | Fold every block that has children / unfold everything on this page |
+| `z i` / `z o` | Zoom into the block / zoom out one level |
+| `z f` | Focus mode: hide header, sidebar, status bar and the warnings banner so only the outline is left. Press again to bring them back |
+| `V` | Start Visual mode |
+| `g v` | Re-select the last Visual range |
+
+Folds are stored in the op log, so a fold you make here shows up on your other devices too.
+`c` does nothing on a block that has not been saved yet.
+Wait for the footer `saved` and press it again.
+
+**Zoom.**
+`z i` makes the selected block the root of the view.
+Only its subtree renders, and the header shows the trail of ancestors.
+The page's backlinks and nested pages go off screen while you are zoomed, and `j` stops at the edge of the subtree.
+`z o` goes back up one level and does nothing at the page root.
+Zoom is a local view setting.
+It is never written to the op log and it is not synced.
+
+**Copy and paste.**
+
+| Key | What it does |
+|---|---|
+| `y y` or `Y` | Copy the block and its children as clean outl markdown to the OS clipboard |
+| `y r` | Copy the block's reference `((blk-XXXXXX))` |
+| `p` | Paste the clipboard after the selected block, converting outlines and paragraphs |
+| `P` | Paste the clipboard after the selected block as one block of raw text |
+
+Details, including SSH and tmux behaviour, are in [Clipboard](#clipboard).
+
+**Pages and panels.**
+
+| Key | What it does |
+|---|---|
+| `Ctrl+P` | Quick switcher: fuzzy-pick a page or journal |
+| `/` | Slash command menu |
+| `:` | Command line |
+| `g p` | Property editor for the block |
+| `g P` | Pin or unpin the page (`pinned::`) |
+| `g d` | Delete the page, after a `y/n` |
+| `g x` | Run the code block under the cursor, or open the link under it |
+| `Ctrl+E` | Show or hide the sidebar |
+| `Ctrl+B` | Show or hide the backlinks section |
+| `Ctrl+O` | Flip the backlinks order |
+| `g r` / `g R` | Add `remind:: 9am` to the block / the "nag me" preset |
+| `g s` | Snooze this block's reminder one hour |
+| `g n` | Open the reminders list |
+| `*` / `#` | Search the workspace for the word under the cursor (forward / backward) |
+| `n` / `N` | Next / previous hit of the last search |
+| `?` | Help popup |
+| `q q` or `Z Z` or `Ctrl+C` | Quit. A single `q` only arms the chord, so a stray key never quits |
+
+`Z Z` is vim's "save and quit".
+outl commits on every move back to Normal, so it does the same thing as `q q`.
+A chord that is half pressed (`d`, `g`, `y`, `z`, `q`) waits for its second key.
+Any key that does not complete it is handled as itself.
+
+### Insert mode
+
+Typing goes into one block.
+`Esc` commits the block back to the page and returns to Normal.
+
+| Key | What it does |
+|---|---|
+| `Esc` | Commit and return to Normal |
+| `Enter` | Commit and start a new block below. Inside an open code fence it adds a line instead |
+| `Alt+Enter` or `Ctrl+J` | New line inside the same block, works in every terminal |
+| `Shift+Enter` | New line inside the same block, kitty-protocol terminals only |
+| `Ctrl+T` or `Ctrl+Enter` | Cycle the task prefix without leaving Insert, caret follows the text |
+| `Tab` / `Shift+Tab` | Indent / outdent and stay in Insert |
+| `Alt+↑` / `Alt+↓` or `Ctrl+Shift+↑` / `Ctrl+Shift+↓` | Move the block and stay in Insert on it. Unsaved text and caret are kept. Closes an open popup |
+| `↑` / `↓` | Move between lines of a multi-line block, then continue into the previous / next block |
+| `←` at column 0 / `→` at the end | Continue into the previous block (caret at its end) / next block (caret at its start) |
+| `Home` / `End` | Start / end of the line |
+| `Delete` | Delete the character after the caret |
+| `Backspace` | Delete before the caret. On an empty block it deletes the block and moves to the previous one. Between an empty `[[]]` or `(())` it removes the pair |
+| `(` `[` `{` | Insert the closing character too. Typing the closing character yourself adds a second one, so leave the one outl added |
+
+Other `Ctrl` and `Alt` chords do nothing in Insert and are never typed as text.
+Readline editing (`Ctrl+A`, `Ctrl+W` and friends) is not implemented.
+`↓` on the last block of the page does not continue into the backlinks section.
+Press `Esc`, move there with `j`, and edit from Normal mode.
+
+**Completion popups.**
+They open as you type, and close when the text stops looking like a trigger.
+`↑` / `↓` choose, `Enter` or `Tab` accept, `Esc` cancels.
+
+| You type | You get | Notes |
+|---|---|---|
+| `[[` | Page names | Searches titles across the workspace. The page is created on first open if it does not exist |
+| `#` | Tags | Word-initial only. Letters, digits, `-`, `_` and `/` |
+| `@` | People | Word-initial only, so `a@b.com` does nothing. Lists pages with `type:: person`. Names may contain spaces (`@Thiago Avelino`). With no match, the typed name is offered as a new person. Inserts `[[@name]]` |
+| `((` | Blocks | Fuzzy-matches block text and inserts `((blk-XXXXXX))`. With an empty query it lists the newest blocks first |
+| `:` | Emoji | Word-initial, needs a lowercase letter first, so `14:00`, `key::value` and `https://` stay quiet. Inserts the `:shortcode:` text, and the screen shows the glyph |
+| `/` | Commands | Word-initial, lowercase name characters only, so URLs and paths stay quiet. Accepting erases the `/query` and runs the command |
+
+**Multi-line blocks and code.**
+A block can hold several lines.
+While you are inside an open fence (` ``` ` typed, no closing fence yet), plain `Enter` adds a line, so you can type a code block without remembering the soft-newline chord:
+
+````
+- ```lisp        type this, then Enter
+  (+ 1 2)        type the body, Enter
+  ```            type the closer, Enter: now Enter starts a sibling block again
+````
+
+The on-disk format is plain CommonMark: [markdown-format.md](markdown-format.md#multi-line-block-text-continuation-lines).
+
+### Visual mode
+
+`V` selects the current block.
+`j` / `k` grow the range in either direction, and then one key acts on every block in it.
+
+| Key | What it does |
+|---|---|
+| `j` / `k` or `↓` / `↑` | Extend the range |
+| `d` or `x` | Delete the range |
+| `y` | Copy the range as markdown to the OS clipboard |
+| `Tab` or `>` | Indent every block in the range |
+| `Shift+Tab` or `<` | Outdent every block in the range |
+| `K` / `J` or `Alt+↑` / `Alt+↓` | Move the whole range up / down among its siblings. A parent selected with its children moves as one unit |
+| `Esc`, `v` or `V` | Leave Visual |
+
+A range whose blocks have different parents, or one that is already at the edge, refuses the move instead of scrambling.
+Copy takes only the top-level blocks of the range, so a parent and a selected child are not duplicated.
+`g v` in Normal brings the last range back.
+Pasting and task cycling are not Visual operations.
+
+## Finding and jumping
+
+**Quick switcher (`Ctrl+P`).**
+Type to fuzzy-match page titles, slugs and journal dates.
+`↑` / `↓` choose, `Enter` opens, `Esc` closes.
+The right side previews the highlighted page.
+Today's date is always in the list, even when today's file does not exist yet.
+Only the arrow keys move the selection here, because `j` and `k` are letters in the query.
+
+**Search (`/` then `search`, or `:search`).**
+Fuzzy-matches the text of every block in the workspace and shows the best 30.
+It reads an in-memory index that builds in the background, so typing never re-reads your files.
+Right after launch there is a short window where the header shows the indexing spinner and results may be partial.
+`Enter` jumps to the block.
+Afterwards `n` and `N` walk the same result list, with `hit 3/12` in the footer, wrapping at both ends.
+`*` and `#` skip the overlay: they search for the word under the cursor, jump to the first hit and leave the rest for `n` / `N`.
+
+**Sidebar (`Ctrl+E`).**
+A 24-column pane with three sections:
+
+| Section | What it holds |
+|---|---|
+| Calendar | The month you are viewing. `◉` today, `●` a day with a journal, `·` an empty day. Starts on Monday, or Sunday with `[calendar] week_start = "sunday"` |
+| Pinned | Pages with `pinned:: true` |
+| Recent | Pages you opened in this session, newest first, capped at 20 |
+
+Opening it moves focus to the first non-empty section (Pinned, then Recent, then Calendar).
+`j` / `k` move, `g` / `G` jump to first and last, `Tab` / `Shift+Tab` cycle sections, `Enter` opens the highlighted page, `Esc` hands the keyboard back to the outline and leaves the sidebar open, `Ctrl+E` closes it.
+`Enter` on a calendar day does nothing yet.
+Step through days with `[` and `]`, or type the date in `Ctrl+P`.
+
+**Deleting a page.**
+`d` on a Pinned or Recent row, or `g d` anywhere, shows `delete page '<title>'? y/n` in the footer.
+`y` confirms, any other key cancels.
+The page goes to the trash and its files are removed from disk.
+If it was the page on screen you land on today's journal.
+Journals cannot be deleted this way.
+
+## Commands
+
+Two doors, one list.
+`/` opens a filterable menu with a description next to every command.
+`:` is the vim-style command line.
+Both run the same registry, so `/quit` and `:q` are the same thing.
+Inside a block, typing `/` at the start of a word opens the same list inline.
+A name that matches nothing says `unknown command: <name>` in the footer.
+
+The most used ones:
+
+| Command | What it does |
+|---|---|
+| `open <name>` | Open a page, creating it when it does not exist |
+| `today` | Jump to today's journal |
+| `search` | Fuzzy search over every block |
+| `rename <name>` and `merge <page>` | Rename the open page and respell every link, or fold it into another page |
+| `prop <key> <value>` | Set a `key:: value` property on the block |
+| `date-today`, `date <arg>`, `time-now` and friends | Insert dates and times while typing |
+| `upload` | Attach a file and insert its link |
+| `template` | Insert or run a template |
+| `trash` and `sync` | Open the trash or the sync panel |
+
+The complete list, with aliases, arguments, date inserters, plugin commands and plugin settings, is in [TUI commands](tui-commands.md).
+
+## Overlays
+
+An overlay takes the keyboard until you close it.
+`Esc` always closes it and `Ctrl+C` still quits.
+Beyond the quick switcher, search and slash menu described above, there are four more:
+
+| Overlay | Open it | What it is for |
+|---|---|---|
+| Property editor | `g p` | Browse and edit the block's `key:: value` pairs, or the page's |
+| Reminders | `g n` | Every `remind::` rule, with snooze |
+| Sync panel | `:sync` | What each paired device is waiting for, and merged edits you can undo |
+| Trash | `:trash` | Everything you deleted, and the way back |
+
+Keys and behaviour of each: [TUI overlays](tui-overlays.md).
+
+## Clipboard
+
+**Copy.**
+`y y`, `Y`, and `y` in Visual write clean outl markdown to the OS clipboard.
+Two routes are tried together:
+
+1. `arboard`, the system clipboard on macOS, Windows and X11 (through XWayland on a Wayland session).
+2. OSC 52, a terminal escape sequence that reaches your clipboard over SSH, inside tmux and in Chrome OS Crostini.
+
+The footer says `yanked 2 blocks → clipboard`, or `yanked 2 blocks (clipboard unavailable)` when both failed.
+The copy stays available to `p` inside the same session either way.
+Pasting the markdown in another app rebuilds the same bullet structure.
+tmux needs `set -g set-clipboard on` for OSC 52 to pass through.
+
+On a bare X11 session (no desktop environment, no clipboard manager) outl itself serves the clipboard, so a copy can be pasted elsewhere only while the TUI runs.
+With a clipboard manager, a normal quit hands the last copy over.
+A crash, a kill or closing the terminal window skips that handover.
+macOS keeps the text after quit.
+
+**Paste.**
+`p` pastes the system clipboard after the selected block.
+Outlines, tables and paragraphs become structure.
+`P` pastes it as one block, as typed.
+Your terminal's own paste (`Cmd+V`, `Ctrl+Shift+V`) reaches outl as a bracketed paste, which behaves like `p` from Normal mode and as described in [paste.md](paste.md#in-the-tui) from Insert mode.
+Conversion rules, tables, and what each client does differently: [paste.md](paste.md).
+
+**Drag a file into the terminal (Insert mode).**
+Terminals deliver a dropped file as its path pasted as text.
+In Insert mode, when the pasted text is exactly the path of one or more existing files, each is imported into `<root>/assets/<hash>.<ext>` and its link is inserted at the caret.
+Several files are inserted separated by spaces.
+A path that is not an existing file pastes as plain text.
+A file over `[assets] max_bytes` is refused with `import failed: …` and nothing is inserted.
+
+## Mouse (opt-in)
+
+Off by default, so your terminal's own text selection keeps working (Shift-drag to copy a URL).
+Turn it on in `~/.config/outl/config.toml`:
+
+```toml
+[tui]
+mouse_capture = true
 ```
-┌─ ⚠ 3 line(s) outside outl dialect — preserved as blocks ─┐
-│ line 1: # 2026-06-08 (+2 more)                           │
-└──────────────────────────────────────────────────────────┘
-```
 
-- Every offending line is preserved as a regular block — nothing is dropped on parse, and the next save normalises the file to the dialect (`- <raw>`).
-- The status line also carries a short `⚠ N line(s) outside outl dialect — preserved` hint for terminals where the banner is not visible.
-- On a clean file the banner collapses to zero height; the layout looks identical to before the feature landed.
-- Source of truth: `ParsedPage.warnings` (`outl_md::ParseWarning`).
-  Mobile + desktop render the same data via `<ParseWarningsBanner>` from `@outl/shared`, and `outl doctor` lists every page with active warnings.
-- The behaviour is intentionally non-blocking: you can keep editing, save, navigate away.
-  Use the warning as a hint to clean the file at your pace — outl never deletes content on your behalf.
+| Gesture | Action |
+|---|---|
+| Scroll wheel | Move the selection one block |
+| Click | Select the block under the pointer |
+| Drag, then release | Select a range, then copy it as clean markdown to the clipboard (the same two routes as `y`) |
 
-## Behavior worth knowing
+Clicks outside the outline (header, sidebar, the backlinks section below it) do nothing.
+While capture is on, the terminal's native selection is off.
+Hold the modifier your terminal documents (often Shift) to select text natively.
+Keyboard copy works with or without it.
 
-- **Autosave, coalesced**: every commit (Esc from Insert, structural ops, history navigation) marks the page dirty and repaints on the same frame — no disk I/O yet.
-  The actual `.md` write + op-log reconcile drains the moment you pause typing, or is forced after 600ms if you keep a burst going.
-  It always flushes before quitting, `Ctrl+S`, cross-page navigation, or a `call:` re-run, so an edit is never lost — it just isn't on disk the instant you press `Esc`.
-  Concurrent `outl serve` is safe — both routes go through `outl_md::reconcile_md`.
-- **An unreadable page is never overwritten.**
-  Causes: a permissions change, a raw I/O error, invalid UTF-8, or an iCloud file whose contents haven't downloaded to this device yet.
-  The TUI shows `cannot read <path> … editing disabled` and **refuses to save that page** until a load succeeds.
-  A failed read parses as an empty document, and without this guard the next commit would render that emptiness back over your page and reconcile it, sending every block to the trash on every device.
-  A page that simply doesn't exist yet is a different case and still opens as a normal empty page.
-- **No IDs on disk**: every block has a stable ULID, but it lives in the `.outl` sidecar file, not in your markdown.
-  `outl serve` / `outl-tui` rebuild that sidecar after every change.
-- **External edits hot-reload**: when another editor writes the currently-open `.md`, the TUI picks it up automatically within about a second.
-  If you're in Insert mode, it refuses to clobber your in-flight edit and writes a warning on the status line — finish typing, press `Esc` to commit, then `Ctrl+L` to reload.
-- **Undo bounded**: 200 most recent snapshots.
-  Older edits drop off the front.
-  Each snapshot remembers selection + cursor so undo lands you where you were.
-- **Undo is per page, and pressing it elsewhere costs nothing**: a snapshot can only be applied to the page it was taken on, so `u` on a different page says `no undo for this page` and leaves the history alone.
-  It used to discard the entry it could not apply, so a few presses after navigating away silently emptied the stack ([#430](https://github.com/outlmd/outl/issues/430)).
-  Go back to the page and the edits are still there.
-- **Toasts show the whole error**: a toast card grows to up to four rows to fit its message, and adds `…` when even that is not enough.
-  They used to be one row inside a 50-column card, so a long `reconcile failed: …` lost the path at the border with nothing to indicate it had been cut ([#435](https://github.com/outlmd/outl/issues/435)).
-- **Editing through the backlinks panel is undoable on the page it changed**: a text edit, delete, indent, move, `Ctrl+T` or `g D` applied to a block in the backlinks list writes to *that* page, so the undo entry lives there.
-  Press `u` on the referencing page and nothing happens (`no undo for this page`); open the source page and `u` takes it back.
-  These ops used to leave no undo entry at all ([#431](https://github.com/outlmd/outl/issues/431)).
-  A move that has nowhere to go — the first sibling up, a top-level block outdented — records nothing and says nothing, so it cannot push a foreign entry onto the history of the page you are reading.
-- **Search is index-backed**: `/search` filters the in-memory block index a background worker builds, so typing does not re-read the workspace.
-  It used to walk and re-parse every `.md` on each keystroke ([#449](https://github.com/outlmd/outl/issues/449)).
-  On a cold start there is a short window while that index builds; the header shows a spinner during it.
-- **Empty pages keep a bullet**: deleting the last block silently re-adds an empty `- ` so your cursor always has somewhere to go.
-- **A brand-new page tells you where to start**: a page whose only block is empty shows `press i to write · ? for keys` under the bullet.
-  The line goes away as soon as there is anything on the page or you start typing ([#448](https://github.com/outlmd/outl/issues/448)).
-- **The backlinks section says when it is still indexing**: on a cold start the panel reads `Backlinks · indexing…` instead of rendering nothing, so a page that is still loading is distinguishable from one with no backlinks.
-- **Slugified filenames**: `[[Avelino]]` lives in `pages/avelino.md` with `title:: Avelino` set automatically on first open.
+## Code blocks and queries
 
-## Code-block execution
-
-Fenced code blocks can be run in place.
-The result lands as a `> **result:**` subblock right below the source, and re-running updates the same subblock idempotently.
-
-| Key | Action |
-|-----|--------|
-| `g x` | Run the code block under the cursor — or, when the block isn't code, open the markdown link `[text](url)` under the cursor (issue #183) |
-| `:run` (also `:x`) | Same, via the command palette |
-
-`g x` prioritizes code: a fenced block always runs.
-Only when the current block is **not** a code block does `g x` look for a markdown link under the cursor and open it — the cursor may sit on the link's text or its URL.
-An asset link (`[name](assets/<hash>.<ext>)`) opens the file in the OS default app; outl never renders it.
-Any other link opens in the system browser, and only `http` / `https` / `mailto` are allowed — anything else is refused.
-Following a `[[page]]` / `#tag` / `((block ref))` is still `Enter`, unchanged.
+A fenced code block runs in place with `g x` or `:run`.
+The result lands as a `> **result:**` child right below, and running again updates that same child.
 
 ```
 - ```lua
@@ -612,36 +501,194 @@ Following a `[[page]]` / `#tag` / `((block ref))` is still `Enter`, unchanged.
   - > **result:** `30`
 ```
 
-Built-in languages (each behind a Cargo feature, so you can strip
-what you don't need):
+| Fence | Engine | Notes |
+|---|---|---|
+| `js` | Boa | ES2015+, `console.log` is captured |
+| `python` | RustPython | Python 3 subset, no native extensions |
+| `lua` | Lua 5.4 | Sandboxed host surface |
+| `lisp` | Steel | Scheme. Off by default: a Lisp fence cannot be sandboxed, so it is as trusted as a shell. Needs a build with the `lang-lisp` feature |
+| `echo` | built in | Returns the source unchanged, for debugging |
+| `query` | built in | Runs on every page load, no `g x` needed. See [query.md](query.md) |
+| `call:<template>` | template | Runs a callable template. See [templates.md](templates.md) |
 
-| Tag | Engine | Notes |
-|-----|--------|-------|
-| ` ```lisp ` | [Steel](https://github.com/mattwparas/steel) | Scheme R5RS-ish. **Opt-in** (`lang-lisp`, off by default): Steel cannot be sandboxed from outside, so a `lisp` fence is as trusted as a shell |
-| ` ```js ` | [Boa](https://boajs.dev) | ES2015+, `console.log` captured |
-| ` ```python ` | [RustPython](https://rustpython.github.io) | Py3 subset, no native ext |
-| ` ```lua ` | [mlua](https://github.com/mlua-rs/mlua) | Lua 5.4 vendored |
-| ` ```echo ` | builtin | Returns source verbatim — debug only |
+`g x` runs a code fence first.
+Only when the block is not code does it look for a markdown link under the cursor (on its text or its URL) and open it.
+An asset link opens in the OS default app.
+Any other link opens in the browser, and only `http`, `https` and `mailto` are allowed.
+Anything else is refused.
+`Enter` still follows `[[page]]`, `#tag` and `((block))` as before.
+`g x` on a `query` block only tells you that query blocks run by themselves.
 
-Adding another language is one file under `crates/outl-exec/src/runtimes/` plus a feature flag.
-See [`docs/exec.md`](exec.md) (forthcoming) for the contract and `outl-exec/src/runtimes/lua.rs` as the canonical template (an allowlisted host surface plus a real cancellation point).
+A query result is a block whose whole text is one `!((blk-…))`.
+`Ctrl+T` on it cycles the task state of the source block and re-runs the query, rather than prefixing the token.
+`g D` on it completes the source block.
 
-## Theming
+A `mermaid` fence stays as source in the terminal.
+Open the page in the desktop or mobile app to see the diagram.
 
-See [`docs/theming.md`](theming.md) for the palette spec, preset list,
-and how to set a theme via config or CLI.
+## What the page looks like
 
-## What's NOT in the TUI yet
+- **Block references** `((blk-XXXXXX))` show the source block's text and its page icon.
+  An orphaned handle (the source is gone) is dimmed.
+  `Enter` on one opens the source page and lands on the block.
+  `ref ((x)) does not resolve` appears when the index cannot find it.
+- **Embeds** `!((blk-XXXXXX))`, on a block that holds only that token, show the source block and all its children read-only underneath, each row prefixed with `↳ `.
+  Nesting stops at four levels, which also breaks any embed loop.
+  `![[page]]` is the page-level version: a chip with the page's icon and title, and the page's top-level blocks expanded below when the block holds only the token.
+  The block under the cursor always shows the raw token.
+- **Tasks** `TODO`, `DOING`, `DONE` render as `☐`, `◐`, `☑`, and the page header counts them.
+- **Tables** render as a column-aligned grid when the cursor is elsewhere, and as raw pipes while you edit them.
+  A table wider than the terminal wraps instead of scrolling, so widen the window.
+- **Quotes**: a leading `> ` renders as a quote.
+- **Empty page**: a page whose only block is empty says `press i to write · ? for keys`.
+  The line goes away as soon as there is content.
+  Deleting the last block keeps an empty `- ` so the cursor always has a home.
+- **File names**: `[[Avelino]]` lives in `pages/avelino.md`, with `title:: Avelino` set on first open.
 
-The core editor and most-used surfaces ship today.
-Some things are explicitly deferred:
+### Banners above the outline
 
-- **`{{query: ...}}`** — inline saved queries; not yet implemented.
-- **Visual mode batch indent / yank / paste** — only delete is wired
-  today.
-- **Graph view** — no client has one yet; the TUI may grow one but
-  not a priority.
-- **P2P sync via iroh** — works today (default transport, single-user
-  multi-device over QUIC); the `file` transport (iCloud Drive) is opt-in.
-- **Live multi-user collaboration** — multiple people editing the same
-  workspace concurrently is still out of scope.
+**Outside the dialect** (yellow).
+Opening a `.md` that has a leading `# heading`, a free paragraph between bullets, or imported markdown that does not fit shows:
+
+```
+┌─ ⚠ 3 line(s) outside outl dialect — preserved as blocks ─┐
+│ line 1: # 2026-06-08 (+2 more)                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+Nothing is dropped.
+Each such line becomes a normal block, and the next save rewrites the file in the dialect (`- <raw>`).
+The footer repeats a short `⚠ N line(s) outside outl dialect — preserved` for terminals where the banner is hidden.
+You can keep editing, save and move on.
+`outl doctor` lists every page with active warnings ([doctor.md](doctor.md)).
+
+**This page isn't syncing** (red, cannot be dismissed).
+The file on disk holds lines outl never recorded, so the page is frozen in both directions until you fix it.
+Edits from your other devices will not appear here, and yours will not leave.
+The banner gives the exact command to run in the workspace folder, `outl reconcile --ahead-of-log`, and a sample of the unrecorded line.
+It stays visible in focus mode on purpose.
+Cause and recovery: [doctor.md](doctor.md).
+
+## Saving, undo and safety
+
+**Autosave, coalesced.**
+Every commit (`Esc` from Insert, a structural change, undo) marks the page dirty and repaints in the same frame, with no disk write yet.
+The `.md` write and op-log reconcile happen the moment you pause typing, and are forced after 600 ms if you keep typing.
+They always flush before quitting, `Ctrl+S`, moving to another page, and a template or `call:` re-run.
+The footer `saved` and the `4s ago` chip in the header tell you it is on disk.
+`Ctrl+S` and `:write` flush at once and show a `saved` toast.
+
+**An unreadable page is never overwritten.**
+A permissions change, an I/O error, invalid UTF-8 or an iCloud file that has not finished downloading shows `cannot read <path> … editing disabled`, and saving that page is refused until a read works.
+Without this guard, a failed read would parse as an empty page and the next save would write that emptiness over your notes and send every block to the trash on every device.
+A page that does not exist yet is different: it opens as a normal empty page.
+
+**Edits from other programs.**
+When another editor saves the open `.md`, the TUI picks it up within about a second.
+If you are in Insert at that moment it refuses to overwrite your edit and warns in the footer.
+Finish, press `Esc`, then `Ctrl+L`.
+Files that appear in the workspace without going through outl (an import, a `vim` save of a new page) are folded in by a background scan.
+
+**Undo.**
+`u` undoes and `Ctrl+R` redoes, over the last 200 snapshots.
+Each snapshot remembers where your cursor was.
+Undo is per page: a snapshot only applies to the page it was taken on, so `u` on a different page says `no undo for this page` and keeps the history.
+Go back to that page and the edits are still there.
+An edit made on a backlink row is undone on the page it changed, not on the page you were reading.
+A move with nowhere to go (the first sibling up) records nothing.
+Merges, renames and page deletes are not undone by `u`.
+Rename back, or restore from the trash.
+
+**Trash.**
+`d d` and a page delete are moves.
+`/trash` brings them back from any day and any device (see [TUI overlays → Trash](tui-overlays.md#trash-trash-trash)).
+
+**Backups.**
+While the TUI is open, a background thread keeps local snapshots of the workspace (`[backup]`, on by default), in a git repository outside your notes folder.
+`outl backup list` and `outl backup restore` use it.
+See [config.md → `[backup]`](config.md#backup).
+
+**Sync.**
+In a workspace that syncs, the TUI also starts the sync transport.
+The footer says `iroh sync enabled`, or `iroh sync off here: <reason>` when another outl process on this device already owns the connection (that is a working state, not a failure).
+When P2P cannot start, a toast says `iroh sync unavailable, using filesystem sync` and file-based sync keeps working.
+Peer changes arrive while you are in Normal mode.
+While you type in Insert, incoming changes wait and are applied the moment you leave Insert, so your text is never swapped out from under you.
+Pairing a device is not done in the TUI: `outl peer pair` or `outl peer qr` ([sync.md](sync.md)).
+
+**Captures.**
+`outl capture "your line"` drops a line into the capture inbox from any terminal, even with the TUI closed.
+The TUI lands what is waiting when it starts and says `added 1 capture to your journal`.
+Each line becomes a block at the end of the journal for the day it was captured, not the day it was landed.
+A capture made at 23:58 and landed at 00:10 belongs to the 23:58 day.
+It is one undo step.
+Nothing watches the folder while the TUI runs, so a capture made meanwhile waits for the next start, which is the difference recorded in [client-parity.md](client-parity.md).
+A file that cannot be read stays in the inbox and is named, with its folder, in the footer.
+`outl capture --list` shows what is waiting.
+More: [client-outside-the-app.md](client-outside-the-app.md#capturing-from-outside-the-app) and [cli.md → Capture](cli.md#capture).
+
+## Configuration
+
+Two layers of TOML are read at launch.
+
+1. **Global**: `~/.config/outl/config.toml`, shared with the desktop app.
+
+   ```toml
+   [theme]
+   preset = "dracula"
+
+   [tui]
+   icons = "nerd-font"     # "emoji" (default) or "nerd-font"
+   mouse_capture = false   # true turns on wheel, click and drag
+
+   [display]
+   backlinks_order = "newest"   # or "oldest", also flipped by Ctrl+O
+
+   [calendar]
+   week_start = "monday"        # or "sunday", for the sidebar calendar
+   ```
+
+2. **Per workspace**: `<workspace>/.outl/config.toml`.
+   A `[theme] preset` here overrides the global one for this workspace only.
+   The actor id this device writes under lives in the device store, not here ([config.md](config.md#where-the-actor-id-actually-lives)).
+
+Theme order: `--theme` flag, workspace `[theme]`, global `[theme]`, then the built-in `outl` default.
+A name that does not exist falls through silently to the next level.
+`[editor] vim_mode` and `font_size` are desktop settings and the TUI ignores them.
+A `config.toml` that fails to parse shows its notice in the footer on the first frame, and every setting falls back to its default until you fix it.
+Every key, with defaults: [config.md](config.md).
+
+## What the TUI does not do
+
+Recorded per feature in [client-parity.md](client-parity.md), which is generated from the code.
+In plain words:
+
+- **No inline formatting chords.**
+  Type the markers: `**bold**`, `_italic_`, `` `code` ``, `~~strike~~`, `[label](url)`.
+- **No block cut or block copy-with-subtree-paste.**
+  Use `d d` then paste, and `y y` for a block with its children.
+- **No page history view.**
+  Open the page in the desktop app.
+- **No one-key quick capture.**
+  `t` to go to today, or `outl capture` from another terminal.
+- **No task list view.**
+  Add a `query` block with `status: open` on any page ([query.md](query.md)).
+- **No calendar navigation, no nested-page navigation, no backlink-source jump.**
+  `Ctrl+P` and the name reach all three.
+- **No plugin marketplace, no peer pairing, no export.**
+  Use `outl plugin install`, `outl peer pair` and the export commands in [cli.md](cli.md).
+- **No diagram rendering and no on-screen settings.**
+  Edit `config.toml`.
+- **No graph view.**
+  No client has one.
+- **No live multi-user editing.**
+  Two people editing the same workspace at the same moment is out of scope.
+  One person on several devices is the supported case.
+- **Reminders fire only while the TUI is open.**
+
+## Related
+
+- [TUI quickstart](tui-quickstart.md) and [TUI troubleshooting](tui-troubleshooting.md)
+- [Shortcuts](shortcuts.md) and [Client parity](client-parity.md)
+- [Paste](paste.md), [Markdown format](markdown-format.md), [Queries](query.md), [Templates](templates.md), [Reminders](reminders.md)
+- [Theming](theming.md), [Config](config.md), [Plugins](plugins.md), [Sync](sync.md)

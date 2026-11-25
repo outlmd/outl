@@ -9,6 +9,7 @@ The contract below is the part users and integrators care about; the wiring sect
 
 External launchers open a client at a specific page or daily note through an `outl://` URL.
 The Raycast extension's "Enter → open in app" is the first consumer; links shared into the mobile app are the second.
+You can also write one yourself, in a shell alias, an Alfred workflow, a calendar event or a note in another app.
 
 The scheme is tiny and identical on every platform:
 
@@ -17,8 +18,53 @@ The scheme is tiny and identical on every platform:
 | `outl://daily/today` | today's journal |
 | `outl://daily/2026-06-25` | the daily for that ISO date |
 | `outl://page/<slug>` | the page (slug may nest: `outl://page/ai-agent/learning`) |
+| `outl://capture` | the quick capture box over today's journal. Nothing is written until you submit a line |
 
-Parsing lives in **one** place: `outl_actions::parse_deep_link` returns a `DeepLinkTarget` (`Today` / `Daily(date)` / `Page(slug)`).
+The `<slug>` is the file name without `.md`, the form [`[[Page Name]]` folds to](concepts.md#slugs): `[[São Paulo]]` is `outl://page/sao-paulo`.
+A trailing slash is ignored.
+Anything else (another scheme, an unknown kind, a date that is not `YYYY-MM-DD`, a slug with `..` in it) is logged and ignored.
+The app does not crash and does not create a stray page.
+
+**An unknown slug creates the page.**
+`outl://page/new-idea` opens an empty `new-idea` page, the same as following a `[[new-idea]]` link to a page that does not exist yet.
+A link in a web page can therefore add an empty page to your graph.
+The link carries no content and no secret, so the worst outcome is clutter.
+
+## Try it
+
+```sh
+open "outl://daily/today"          # macOS
+xdg-open "outl://page/inbox"       # Linux
+start "" "outl://capture"          # Windows (cmd)
+```
+
+| Client | Opens deep links |
+|---|---|
+| **Desktop** | Yes, on macOS, Linux and Windows. A running instance is focused rather than started twice |
+| **Mobile (iOS, Android)** | Yes. A link tapped anywhere on the phone opens the app on the target |
+| **TUI, CLI** | No. A terminal has no URL handler. `outl page get <slug>` and `outl daily today` are the equivalents |
+
+On macOS the scheme is registered by the installed app bundle, so a build you ran from source with `cargo tauri dev` does not answer `open "outl://…"`.
+Install the release app and open it once.
+
+> **Not the same as MCP resource URIs.**
+> `outl mcp serve` also names resources `outl://workspace/info`, `outl://daily/today` and `outl://page/<slug>`.
+> Those are read by an agent over MCP and return a page rendered as markdown.
+> They never go through a client window.
+> See [MCP](mcp.md).
+
+## Troubleshooting
+
+| You see | Why | Fix |
+|---|---|---|
+| Nothing happens on click | The app is not installed, or another app claimed `outl://` and the OS shows a chooser | Pick outl in the chooser, or remove the other app's handler |
+| The wrong page opens | The slug differs from the title: the URL takes the slug | Open the page and read its file name, or use `outl page list` |
+| An empty page appears | The slug did not exist | Expected, see above. Delete the page or fix the link |
+| A date link does nothing | The date is not ISO | Write `outl://daily/2026-06-25`, not `outl://daily/25-06-2026` |
+
+## For integrators
+
+Parsing lives in **one** place: `outl_actions::parse_deep_link` returns a `DeepLinkTarget` (`Today` / `Daily(date)` / `Page(slug)` / `Capture`).
 Each client maps that target onto the same `open_*` command its UI already calls (`open_today_journal` / `open_journal_for` / `open_page_by_slug`) and focuses its window.
 The parser never touches a `Workspace` — it is pure string → enum — so the desktop and mobile handlers cannot drift on the contract the way two hand-rolled URL parsers would.
 

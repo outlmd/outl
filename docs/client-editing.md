@@ -1,5 +1,8 @@
 # Authoring gestures, client by client
 
+**In short:** running code blocks, templates, copy and paste, attaching files, task states, quotes and zoom work the same on every client, and the gesture differs.
+The desktop's versions, with the keys: [Using outl on the desktop](desktop.md#write).
+
 What happens on each client when the user writes: running a code fence, instantiating a template, copying and pasting, attaching a file, marking a task, quoting a block, zooming into one, and the mobile keyboard bar.
 
 Moved out of [`docs/clients.md`](clients.md), which had grown to the point where no edit to it was cheap.
@@ -115,7 +118,7 @@ Where the caret lands, and the rest of the paste contract: [`docs/paste.md`](pas
 ### TUI mouse drag copy (opt-in)
 
 With `[tui] mouse_capture = true` in `~/.config/outl/config.toml`, dragging across blocks in the TUI selects a range and copies it as outl markdown on release.
-See [tui.md → Mouse capture](tui.md#mouse-capture-opt-in) and [config.md → `[tui]`](config.md#tui) for details.
+See [tui.md → Mouse capture](tui.md#mouse-opt-in) and [config.md → `[tui]`](config.md#tui) for details.
 
 ## Attach / drag-and-drop file import
 

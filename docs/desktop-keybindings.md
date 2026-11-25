@@ -5,6 +5,15 @@ This is where each group of chords is decided: the handler assembly, keyboard re
 
 The chord list itself is [`docs/shortcuts.md`](shortcuts.md), which is generated from `outl-shortcuts`.
 Nothing here duplicates it.
+If you want to know what to press rather than how the keystroke is resolved, read [Using outl on the desktop](desktop.md) and the `?` help overlay, which lists every binding for the mode you are in.
+
+**What a user needs from this page, in five lines:**
+
+- Nothing focused means Normal mode, and single keys act on the selected block.
+- A focused block means Insert mode, where keys type, and `Esc` saves.
+- `Enter` splits the block at the caret, `Shift+Enter` breaks the line, `Tab` and `Shift+Tab` indent and outdent, and `Alt+Up/Down` moves the block, all without leaving the block.
+- `Cmd/Ctrl+X`, `C` and `V` mean text inside a block and whole blocks outside one.
+- The `Vim mode` setting changes none of this ([desktop settings](desktop-settings.md#vim-mode)).
 
 Moved out of [`crates/outl-desktop/CLAUDE.md`](../crates/outl-desktop/CLAUDE.md), which is loaded into the model's context on every session in that crate.
 These sections are reference: you read one when you touch that part of the client.
@@ -46,7 +55,7 @@ No Rust resolver sits on this path: `commands/shortcuts.rs` ships every binding 
 So a single-pass match fires `RunCodeBlock` inside a textarea, executing the fence instead of striking the user's selection; `cmd_shift_x_splits_between_insert_and_global` (`outl-shortcuts/src/lib.rs`) pins the split.
 Chord tables are [`docs/shortcuts.md`](shortcuts.md); which client performs which action is `outl_shortcuts::support`, rendered in [`docs/client-parity.md`](client-parity.md).
 
-Two chords also have **visible icon affordances**, and quick capture is its own surface: [`docs/desktop-ux.md`](desktop-ux.md#chrome-toggle-bar-and-quick-capture).
+The chrome buttons mirror chords, and quick capture is its own surface: [`docs/desktop-ux.md`](desktop-ux.md#chrome-capsules-status-bar-help-and-quick-capture).
 An affordance carries no business logic — clicking flips the same store signal the dispatcher flips, so button and keyboard cannot drift.
 
 ### Keyboard reach for the chrome — `lib/keyboard-reach.ts`
@@ -151,7 +160,7 @@ Load-bearing notes a contributor needs:
 - `Cmd/Ctrl+X` (cut) and `Cmd/Ctrl+Z` (undo) deliberately fall through to the webview — no catalog binding matches inside a textarea.
   Native per-keystroke undo is still broken: the controlled `value={draft()}` binding resets the textarea's undo stack on every keystroke (issue #80).
 - Bracket auto-pairing lives in `@outl/shared/autocomplete` (`autoPairBracket` / `autoDeletePair`, TUI parity), never here.
-- The four inline autocomplete popups share one keyboard contract via `handlePopupNav` (`lib/popup-nav.ts`, unit-tested): arrows cycle, `Enter`/`Tab` with no modifiers accept, `Esc` closes.
+- The five inline autocomplete popups share one keyboard contract via `handlePopupNav` (`lib/popup-nav.ts`, unit-tested): arrows cycle, `Enter`/`Tab` with no modifiers accept, `Esc` closes.
   `Shift+Tab` outdents on every popup now (the page-ref one used to accept it).
 - What each popup is triggered by and inserts: [`docs/desktop-ux.md`](desktop-ux.md#inline-autocomplete-popups).
   How a clicked `[label](url)` or `assets/…` link is routed (scheme guard, OS default app, the two import paths): [same page](desktop-ux.md#opening-an-external-labelurl-link).

@@ -22,21 +22,20 @@ The daily journal is itself a template — see
 
 ## Surface scope
 
-Templates are one feature shared across every client through
-`outl-actions`, but the surfaces that expose each mode are still
-filling in:
+Templates are one feature shared across every client through `outl-actions`.
+Only the affordance that triggers it differs:
 
-- **Structural** instantiation is reachable from the TUI slash menu,
-  the CLI (`outl template apply`), MCP (`outl_template_apply`), and any
-  plugin (`ctx.template.instantiate`).
-- **Callable** execution runs wherever a code block can run — the TUI
-  (`gx`), and the desktop / mobile **Run** button.
+| | Structural (stamp the blocks) | Callable (run the code) |
+|---|---|---|
+| **TUI** | `/template <name>` or `/tpl <name>` | `g x` on a `call:<name>` block, or `/template <name> key=value` |
+| **Desktop** | `/` menu, the `template: <name>` rows | **▶ Run** on a `call:<name>` block, and again when you finish editing it |
+| **Mobile** | Long-press a block, **Insert template** | Finish editing a `call:<name>` block. The long-press menu has no Run entry for it |
+| **CLI** | `outl template apply` | `outl template run` |
+| **MCP** | `outl_template_apply` | `outl_template_run` |
+| **Plugins** | `ctx.template.instantiate` | not exposed |
 
-The engine itself (resolution, substitution, `call:` execution) is
-identical everywhere; only the affordance that triggers it varies by
-client.
-If your client doesn't surface a picker yet, a plugin reaches the same
-code path — see [below](#using-templates-from-plugins).
+`outl template list` and `outl_template_list` show every template and flag duplicates; `outl template resolve` and `outl_template_resolve` show what a callable one would run.
+The engine (resolution, substitution, `call:` execution) is identical everywhere.
 
 ## Defining a template
 
@@ -58,10 +57,8 @@ after `/template` in the TUI or pass to `outl template apply`.
 
 ## Type 1: Structural templates
 
-Clone a template's subtree into the current page.
-These surfaces trigger it today: the TUI slash menu, the CLI, MCP, and
-plugins (`ctx.template.instantiate`, see
-[below](#using-templates-from-plugins)).
+Clone a template's subtree under a block of the current page.
+Every client can do it; the [table above](#surface-scope) has each one's gesture.
 
 ### Worked example
 
@@ -103,6 +100,12 @@ never appears inline in the rendered `.md` body.
 Type `/template <name>` (or `/tpl <name>`) in the slash menu.
 The template blocks land as children of the selected block.
 
+### Desktop and mobile
+
+On desktop, type `/` at the start of a block and pick a `template: <name>` row.
+On mobile, long-press the block you want the template under and pick **Insert template**; the sheet lists the workspace's templates.
+Both put the blocks under the block you chose, and both ask the same backend the TUI does, so a template behaves the same on all three.
+
 ### CLI
 
 ```sh
@@ -111,6 +114,14 @@ outl template apply interview --page 2026-07-08
 
 Optional `--block <id>` targets a specific block as parent.
 When omitted, blocks are appended to the end of the page.
+
+List what is available first:
+
+```sh
+outl template list
+```
+
+Each entry carries the template's name, the page it lives on, its `params`, and `duplicate: true` when two pages claim the same name.
 
 ### MCP
 
@@ -184,13 +195,13 @@ runtimes: Python, JS, Lua, Rust).
 The result lands as a `> **result:**` subtree under the call block,
 and re-running replaces it rather than accumulating.
 
-**Running it — the same `call:` block works in every editor:**
+**Running it:**
 
-- **TUI** — press `gx` on the block.
-- **Desktop / mobile** — the **Run** button on the code block.
-- **Everywhere** — finishing an edit on the block re-runs it
-  automatically, so the result always reflects the params you just
-  typed (no manual re-run needed).
+- **TUI**: press `g x` on the block.
+- **Desktop**: the **▶ Run** button on the block.
+- **Desktop and mobile**: finishing an edit on the block re-runs it, so the result reflects the params you just typed.
+  The TUI does not re-run on edit; press `g x`.
+- **CLI / MCP**: `outl template run`, below.
 
 Params are injected as JSON, so a value containing a quote or
 backslash can't break — or inject into — the generated program.
@@ -199,7 +210,7 @@ receive the `params` prelude.
 The `/template <name> key=value` slash command (TUI) runs the same
 path when you don't want a persistent `call:` block.
 
-### Resolve (CLI / MCP)
+### Resolve and run (CLI / MCP)
 
 Check what a callable template contains without executing it:
 
@@ -209,14 +220,27 @@ outl template resolve calc-salary
 
 Returns the language, source code, and declared params.
 
+Run it against an anchor block, from a script or an agent:
+
+```sh
+outl template run calc-salary --page my-page --block <block-id> --params requested=15000 --params offered=18000
+```
+
+`--params` is repeatable and takes `key=value`.
+The output lands under the anchor block as `> **result:**` with one child bullet per output line, and running it again replaces that subtree.
+Over MCP the tool is `outl_template_run`.
+The block must belong to `--page`; one from another page is rejected.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `template <name> not found` | No page has `template:: <name>` (typo, or the page's `template::` value differs from what you typed) | Check the exact value of the `template::` property on the template page — it's the invocation name, not the slug |
 | `template <name> has no code block` | You invoked a callable path (`call:<name>` fence, or `/template <name> key=value`) on a template that has no fenced code block | Add a code fence to the template, or invoke it structurally (`/template <name>` with no params) to deep-copy the subtree instead |
-| `no runtime for <lang>` | The template's code block uses a language this build doesn't link a runtime for | Use a supported language (Python, JS, Lua, Rust), or build with the matching `outl-exec` runtime feature enabled (`lang-lisp` is opt-in) |
+| `no runtime for <lang>` | The template's code block uses a language this build doesn't link a runtime for | Use a language from [Running code blocks](exec.md#languages): Python, JS, Lua, and Rust off mobile. `lang-lisp` is opt-in and off in releases |
 | Two pages resolve to the wrong body | Two template pages share the same `template:: <name>` | Resolution picks the first in tree order and logs a warning; `list_templates` flags the collision (`duplicate`). Rename one of the templates |
+
+Rust templates do not run on mobile, and every template runs under the [limits of a code block](exec.md#limits): 5 seconds, no files, no network.
 
 Callable vs structural is decided by whether the template **has a
 runnable code block**, not by whether it declares `params::`.
@@ -238,11 +262,12 @@ both explicitly when the target page is a template.
 
 ## Journal template
 
-The daily journal is itself a template: a page `templates/journal`
-with `template:: journal`.
+The daily journal is itself a template: a page titled `templates/journal`
+with `template:: journal`, stored as `pages/templates-journal.md`.
 `outl init` creates it (not a `templates/journal.md` file), and
 opening a fresh daily note stamps its outline automatically — the
 built-in variables resolve against that day's date.
+A new workspace's journal template is one empty bullet, so a new day starts blank until you fill the template in.
 
 The auto-stamp is **untraced**: every daily comes from the same
 template, so a `from-template::` marker would be noise on every

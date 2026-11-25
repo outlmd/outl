@@ -1,48 +1,79 @@
-# MCP
+# MCP: let an AI assistant work in your notes
 
-outl ships an [MCP][mcp] (Model Context Protocol) server as a subcommand of the same binary you already have: `outl mcp serve`.
+outl ships an [MCP][mcp] (Model Context Protocol) server inside the `outl` binary you already have.
+Point Claude Desktop, Claude Code, Cursor, Zed or any other MCP host at it, and the assistant can read your journal, search your pages, capture a thought, tick a task or restructure a page, in the same graph you edit by hand.
 
-Claude Desktop, Cursor, Zed, and anything else that speaks MCP can reach the workspace through it — no extra install, no daemon, no parallel codebase.
-Every tool you see in the host's tools panel maps 1:1 to a CLI subcommand.
-The wiring lives in [`docs/cli.md`](cli.md); this page is just about plugging the server into a host.
+```text
+you:     what did I decide about the migration last week?
+claude:  (searches, reads 3 journals) On Tuesday you wrote "keep the old queue until March"...
+
+you:     add that to today's journal as a TODO
+claude:  Done. Added "TODO drop the old queue after March" to 2026-11-25.
+```
+
+No extra install, no daemon to babysit, no second copy of your data.
+The server runs on your machine, reads your workspace folder, and writes through the same op log as every other client, so an edit made by an assistant syncs to your phone like any other edit.
+
+- [Set it up](#set-it-up) takes two minutes.
+- [What an agent can and cannot touch](#what-an-agent-can-and-cannot-touch) is the part to read before you let one write.
+- [Tool reference](mcp-tools.md) lists every tool and its arguments.
+- [MCP recipes](mcp-recipes.md) builds slash commands and skills on top.
 
 [mcp]: https://modelcontextprotocol.io
 
-## Wiring it up
+## Set it up
+
+You need the `outl` binary on your `PATH`.
+`outl --version` should print a version.
+If it does not, install the CLI from the [README](../README.md#install) (`brew install outlmd/outl/outl-beta`, or Scoop on Windows).
+MCP is a feature of the CLI binary: the desktop and mobile apps do not host a server, but anything an assistant writes reaches them through [sync](sync.md).
+
+Every host wants the same three things: a command, its arguments, and an absolute workspace path.
+
+```text
+command: outl
+args:    ["--workspace", "/Users/you/notes", "mcp", "serve"]
+```
 
 ### Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (on Windows, `%APPDATA%\Claude\claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "outl": {
       "command": "outl",
-      "args": ["--workspace", "/Users/avelino/notes", "mcp", "serve"]
+      "args": ["--workspace", "/Users/you/notes", "mcp", "serve"]
     }
   }
 }
 ```
 
-`--workspace` (short `-w`) is the global flag every subcommand honours; `mcp serve` targets whichever workspace it points at.
+Quit and reopen Claude Desktop.
+The outl tools, resources and prompts show up under the server name `outl`.
 
-Restart Claude Desktop.
-The outl tools and resources show up under the server name; calling any tool is exactly equivalent to running the matching CLI command with `--json`.
+### Claude Code
 
-### Cursor / Zed / other MCP hosts
+One line, with `--scope user` so every project sees it:
 
-The shape is the same.
-Any host that lets you register an MCP server with a command + args wants:
-
-```
-command: outl
-args:    ["--workspace", "<absolute path to workspace>", "mcp", "serve"]
+```bash
+claude mcp add outl --scope user -- outl --workspace /Users/you/notes mcp serve
+claude mcp list        # outl: ... ✓ Connected
 ```
 
-Run `outl mcp serve --help` to see all flags.
+The `--` is required.
+Without it `claude mcp add` swallows `--workspace` and the registration fails.
+To share the setup with a team repo, put the same `mcpServers` block in `.mcp.json` at the repo root.
 
-### From a script (smoke test)
+### Cursor, Zed and the rest
+
+Register a stdio server with the command and args above.
+The config file differs per host, the three values do not.
+
+### Check that it works
+
+Without any host, from a terminal:
 
 ```bash
 printf '%s\n%s\n' \
@@ -51,170 +82,240 @@ printf '%s\n%s\n' \
   | outl --workspace ~/notes mcp serve
 ```
 
-If both lines come back with valid JSON-RPC responses, the server is healthy.
+Two JSON lines come back: the first names the server (`"name":"outl"`), the second lists 49 tools.
+Logs go to stderr, never stdout, because stdout is the protocol channel.
 
-## What the host sees
+Then in the host, ask something harmless: "list my pages tagged #project" or "what is in my journal today?".
 
-### Tools
+### Which workspace does it open
 
-Every CLI subcommand documented in [`docs/cli.md`](cli.md#commands-by-domain) is registered as an MCP tool.
-Names are `outl_<command>_<verb>` (e.g.
-`outl_page_get`, `outl_block_append`, `outl_daily_today`, `outl_search`, `outl_query`).
-Input schema mirrors the CLI flags.
-A success response is content-only — the handler's `data` as compact JSON in `content[].text`, with GUI-only outline fields dropped.
-`outl_page_render` and `outl_export_md` send raw `.md` instead, since their payload is `{slug, md}` and you passed the slug in.
-The journal reads do not: `outl_daily_today` / `outl_daily_get` keep their JSON because `outline` is where the block ids are, and you need one to write to a block.
-An error keeps the `{ ok: false, error }` envelope in `structuredContent` for `error.data`.
-Full shape in [`docs/cli.md`](cli.md#commands-by-domain).
+In this order:
 
-Destructive tools (`outl_page_delete`, `outl_page_merge`, `outl_block_delete`) require `confirm: true` in the input.
-Without it they return a recoverable `CONFIRM_REQUIRED` error and the workspace is untouched.
+1. `--workspace <path>` (short `-w`) on the command line.
+2. The last workspace you opened in any outl client (`workspace.last` in `config.toml`), if the folder still exists.
+3. The folder the host launched the server from.
 
-`outl_page_merge` folds `source` into `target`: it moves the source's blocks, merges properties (the target's value wins on a clash and the pair is listed in `property_conflicts`), rewrites `[[source]]` and `#source` mentions, keeps the source's names as aliases of the target and trashes the source.
-Running it again is safe and reports `nothing_changed: true`.
-`outl_page_rename` takes an optional `merge: true` that does the same when `new_slug` is already a page (the existing page keeps its name); without it that case is `SLUG_CONFLICT`.
-There is no dry run.
-See [RFC 0557](rfcs/0557-page-merge-and-rename.md).
+**Always pass `--workspace` in a host config.**
+Leave it out and the server quietly opens whatever you used last, which is rarely what a config file should depend on.
+There is no `OUTL_WORKSPACE` variable.
 
-Block properties are `outl_block_prop_set`, `outl_block_prop_get`, `outl_block_prop_list`, and `outl_block_prop_delete`.
-`id` is the block id.
-`set` with an empty `value`, and `delete`, both remove the property, so the page's `.md` does not keep a bare `key::` line.
-`set` rejects a value that contains a newline, a carriage return, or a null byte (`INVALID_ARG`) and leaves the page untouched.
-`list` returns every property on the block.
-Neither needs `confirm`: the removal is an op, and the previous value is still in the log.
+If the path has spaces, JSON needs them escaped inside two layers of quoting.
+A path without spaces (`~/notes`) saves you the trouble.
 
-For multi-block authoring, prefer the composite tools over a chain of single-op calls:
+## What an agent can do
 
-- `outl_block_append_tree` — append a root block + its recursive children in one shot.
-- `outl_page_create` — accepts an optional `content` forest so a brand-new page lands with its full outline in a single call.
-- `outl_batch` — apply a sequence of `{op, args}` writes in one workspace session.
-  Stops on first error and reports `failed_at` / `applied` so the caller can pick up the suffix that never ran.
-  Supported ops cover every other write tool.
-  See [`docs/cli.md` → Batch](cli.md#batch) for the payload shape.
+49 tools, grouped by what you would ask for.
+Arguments and return shapes are in the [tool reference](mcp-tools.md).
 
-For file uploads, `outl_asset_add` imports a file into `<workspace>/assets/` and appends its markdown link as a new block (today's journal by default, or a `page` slug).
-Because MCP is stdio, it takes the file as a `path` argument — a filesystem path on the machine running the server, not base64 bytes.
-See [`docs/cli.md` → Asset](cli.md#asset).
+| You want to | Tools |
+|---|---|
+| Find things | `outl_search`, `outl_query`, `outl_tag_list`, `outl_tag_pages`, `outl_backlinks`, `outl_block_refs` |
+| Read | `outl_page_get`, `outl_page_render`, `outl_page_list`, `outl_block_get`, `outl_block_tree`, `outl_block_embed`, `outl_daily_today`, `outl_daily_get`, `outl_daily_range` |
+| Capture | `outl_daily_append`, `outl_block_append`, `outl_block_append_tree`, `outl_asset_add` |
+| Edit | `outl_block_update`, `outl_block_insert`, `outl_block_move`, `outl_block_toggle_todo`, `outl_page_update` |
+| Properties | `outl_page_prop_get`, `outl_page_prop_list`, `outl_page_prop_set`, `outl_page_prop_delete`, and the same four for blocks: `outl_block_prop_*` |
+| Build a page in one call | `outl_page_create` (with `content`), `outl_block_append_tree`, `outl_batch` |
+| Clean up | `outl_page_rename`, `outl_page_merge`, `outl_page_delete`, `outl_block_delete`, `outl_trash_list`, `outl_trash_restore` |
+| Templates | `outl_template_list`, `outl_template_apply`, `outl_template_resolve`, `outl_template_run` |
+| Publish | `outl_export_md`, `outl_export_json`, `outl_export_hugo` |
+| Health | `outl_workspace_info`, `outl_workspace_doctor` |
 
-### A page that stopped syncing
+Not every CLI command is a tool.
+`outl capture`, `outl page history`, `outl peer`, `outl plugin` and the rest of the [admin commands](cli.md#workspace--admin) stay in the terminal, where a person is watching.
 
-A write tool (`outl_page_update`, `outl_block_append`, and every other tool that touches a page) can refuse instead of writing.
-Root `CLAUDE.md` invariant 8 forbids overwriting a `.md` that holds content the op log never recorded, because that write would delete it for good.
-This comes back as a distinct `error.code`, `PAGE_MARKDOWN_AHEAD_OF_LOG`, not the generic `INTERNAL`.
-A caller can branch on it instead of just retrying, which is the failure mode invariant 8 exists to end on a surface whose caller is a program, not a person watching the screen.
-`error.data` carries what the caller needs to act: `path`, `lines`, `sample` (one at-risk line, quoted), and `recovery_command` (`outl reconcile --ahead-of-log`, run from a terminal in the workspace folder).
-See [`docs/clients.md` → "Surfacing a page that stopped syncing"](clients.md#surfacing-a-page-that-stopped-syncing) for the full per-surface picture and RFC 0255.
+### Things worth knowing before you build on it
+
+- **Block ids come from `outline`, not from markdown.**
+  A rendered page has no ids, and every block-level write needs one.
+  `outl_page_get` and the `outl_daily_*` reads return `outline`; `outl_page_render` does not.
+- **Reading a journal can create it.**
+  `outl_daily_today` and `outl_daily_get` write the day's page if it does not exist yet.
+  `outl_daily_range` never does, and marks missing days `exists: false`.
+- **A write is durable when the call returns.**
+  The next read, from any session, sees it.
+- **Search reads the op log.**
+  Text sitting in a `.md` that outl has not ingested yet is invisible to `outl_search` and `outl_backlinks`.
+  See [`cli.md`](cli.md#search--query).
+- **Prefer composite writes.**
+  `outl_block_append_tree`, `outl_page_create` with `content` and `outl_batch` do in one call what takes ten, with one disk sync instead of ten.
+
+## What an agent can and cannot touch
+
+The server has no login and no permission list of its own.
+Its trust boundary is the process: whoever can start `outl mcp serve` as you is you.
+That is the right model for a local tool, and it means the safety is in three places you control.
+
+**1. Where it can reach.**
+
+- It opens exactly one workspace folder.
+- It speaks stdio.
+  It opens no network port.
+  (The embedded variant under [`outl serve`](#running-beside-outl-serve) listens on a Unix socket readable only by your user, and nothing else.)
+- Three tools step outside the folder, and are the ones to gate:
+  - `outl_asset_add` reads a file from any `path` you can read, and copies it into `assets/`.
+  - `outl_export_hugo` writes a file into any `out_dir` you can write.
+  - `outl_template_run` executes the code block of a callable template.
+    It is the only tool that runs code.
+
+**2. What a mistake costs.**
+
+- Deleting a block or page is a move to the trash, not erasure.
+  `outl_trash_list` shows what is there and `outl_trash_restore` puts a block back.
+  Restoring a deleted **page** is not offered yet; its content stays in the log and the refusal says how to print it.
+- The three destructive tools, `outl_page_delete`, `outl_page_merge` and `outl_block_delete`, refuse without `confirm: true`.
+  The assistant has to say it on purpose, and a good host shows you the call first.
+- Every write is an op in an append-only log.
+  Nothing an assistant does is unrecorded, and [`outl page history` and `outl block history`](cli.md#outl-page-history--outl-block-history) list what changed and when, including blocks deleted out of a page.
+- `outl_page_merge` and `outl_page_rename` with `merge: true` have **no dry run**.
+  They are the closest thing to an irreversible-looking action, so give them a prompt, not an allowlist entry.
+
+**3. What your host asks you.**
+
+Most hosts ask per tool call, or let you allowlist tools.
+A sensible split:
+
+| Allow without asking | Ask every time |
+|---|---|
+| every read in the table above, `outl_daily_append`, `outl_block_append*`, `outl_trash_restore` | `outl_page_delete`, `outl_page_merge`, `outl_block_delete`, `outl_page_rename`, `outl_asset_add`, `outl_export_hugo`, `outl_template_run` |
+
+In Claude Code the allowlist is `allowed-tools` in a command's frontmatter or `permissions.allow` in settings.
+The tool names carry the host's prefix: see [tool naming](mcp-recipes.md#tool-naming).
+
+**A write can refuse.**
+If a page's `.md` holds lines outl never recorded (typically an edit from a plain text editor that no client has picked up), a write would delete them for good, so outl refuses with `PAGE_MARKDOWN_AHEAD_OF_LOG`.
+The reply names the page, how many lines are at risk, one sample, and the fix: run `outl reconcile --ahead-of-log` in a terminal inside the workspace.
+An assistant should stop and tell you, not retry.
+The same refusal reaches the [other clients](clients.md#surfacing-a-page-that-stopped-syncing) in their own wording.
+
+## Resources and prompts
 
 ### Resources
 
-URIs the host can attach as context without an explicit tool call.
-Almost all of these are read-only; the one exception (`outl://daily/today`) lazily materialises today's journal on first access, the same way `outl daily today` does in the CLI.
+Context a host can attach to a conversation without a tool call.
 
-| URI                       | Type               | Body                                          |
-|---------------------------|--------------------|-----------------------------------------------|
-| `outl://workspace/info`   | `application/json` | path, actor id, counts, ops                   |
-| `outl://daily/today`      | `text/markdown`    | today's journal projection (creates on first read) |
-| `outl://page/{slug}`      | `text/markdown`    | page projection (template URI)                |
+| URI | Type | Body |
+|---|---|---|
+| `outl://workspace/info` | `application/json` | path, actor id, page / block / op counts |
+| `outl://daily/today` | `text/markdown` | today's journal. **Creates it on first read** |
+| `outl://page/{slug}` | `text/markdown` | the page's clean markdown (a template URI: fill in the slug) |
 
-Useful pattern: tell Claude Desktop "you are the assistant for my second brain" and attach `outl://daily/today` so it sees the day's context without having to call a tool.
-
-> Looking to build a skill, slash command, or custom agent that pulls workspace context from outl?
-> See [MCP recipes](mcp-recipes.md) — pattern, tool-naming rules (direct vs. proxy), porting matrix across hosts (Claude Code / Claude Desktop / Cursor / Zed / Continue.dev / anything with an MCP client), and a worked `/standup` example.
+A good opener in Claude Desktop is to attach `outl://daily/today` and say "you are the assistant for my second brain".
+The day's context is already there.
 
 ### Prompts
 
-Slash-style shortcuts the host renders in the prompt picker:
+Two ready-made prompts show up in the host's prompt picker.
 
-| Prompt                       | Arguments        | What it does                          |
-|------------------------------|------------------|---------------------------------------|
-| `outl-summarize-day`         | `date?` (ISO)    | pulls daily, asks for a summary       |
-| `outl-blog-from-block`       | `block_id`       | expands a block into a blog draft     |
+| Prompt | Arguments | What you get |
+|---|---|---|
+| `outl-summarize-day` | `date?` (ISO, default today) | the day's journal, with a request for decisions, open questions and next actions |
+| `outl-blog-from-block` | `block_id` (required) | the block's subtree as JSON, with a request to expand it into a blog draft. The request is fixed to a direct, informal pt-BR voice, so for another voice use a plain message and the tools |
 
-Prompts are nice-to-have.
-Same surface works through tools (`outl_daily_today`
-+ a free-form prompt) — they're just keyboard shortcuts.
+Prompts are shortcuts.
+Anything they do, a plain message plus the tools does too.
 
 ## Running beside `outl serve`
 
-On a machine that already runs `outl serve` as its daemon, you do not need a second process to own the workspace.
-`outl serve` serves MCP itself by default (`--no-mcp` turns it off; `--once` never does), and `outl mcp serve` becomes a thin bridge to it.
+On a machine that runs [`outl serve`](cli.md#workspace--admin) as its daemon, let it own the workspace.
+`outl serve` answers MCP itself (`--no-mcp` turns that off, `--once` never serves it), and `outl mcp serve` becomes a thin bridge to it.
+Your host config does not change.
 
-- **Socket.**
-  The embedded server listens on a Unix domain socket, and only there: no TCP, no network listener.
-  It lives at `<device dir>/run/mcp-<hash>.sock`, where `<device dir>` is the same per-device directory that holds `identity.key` (`~/.config/outl` by default, `$OUTL_DEVICE_DIR` or `$XDG_CONFIG_HOME/outl` when set) and `<hash>` identifies the canonical workspace root.
-  The `run/` directory is mode 0700 and the socket 0600, so only your user can connect.
-  Where Unix sockets do not exist (Windows) the embedded server is unavailable and `outl serve` carries on without it.
-- **Sessions.**
-  Each connection is one MCP session (the same newline-delimited JSON-RPC as stdio), served on its own thread.
-  All sessions share the daemon's single open workspace, so they are serialized, replay the op log once (warmed in the background at startup), and write under **one** actor: the device actor.
-  No session ever mints an ephemeral actor, so there is no `ops-<ulid>.jsonl` or lock file left per session.
-  With the watcher, the daemon already holds the device actor and every session shares it.
-  With `--no-watch` the server holds **no** write lock while idle: warm-up and read tools use a read open, and a mutating tool takes the device actor (and only it) first.
-  The lock is released when the last connected session closes, so a GUI started later keeps the device actor.
-  If another process (for example a GUI) holds it, the mutating tool returns an error saying so, reads keep working, and no ephemeral actor is minted.
-- **Bridge.**
-  `outl mcp serve` first looks for a live socket for the workspace.
-  If one answers, it pipes stdin/stdout to it and opens nothing: no workspace load, no lock, no actor.
-  Otherwise it behaves as before and owns the workspace itself.
-  Which mode it picked is logged to stderr.
-  Pass `--standalone` to force the old behaviour even when a daemon is running.
-  The host config does not change: keep `outl --workspace … mcp serve`.
-- **Failure is never fatal to serve.**
-  A path that is too long, a directory that cannot be made private, or another `outl serve` already serving the workspace is logged as a warning and `outl serve` keeps running without MCP.
-  A stale socket from a killed daemon is replaced on the next start; a clean shutdown removes it.
-  The embedded server never reads stdin, so backgrounded and supervised daemons are unaffected.
-- **Sync.**
-  The embedded server does not bind its own iroh endpoint; the daemon's sync supervisor owns it, and peer ops it receives are served to sessions on their next call.
+- **One workspace, one writer.**
+  Every connection is a session on the daemon's single open workspace, so sessions are serialized, the op log is replayed once, and all writes land under the device actor.
+  No session leaves an `ops-<ulid>.jsonl` or a lock file behind.
+- **Local only.**
+  The socket is `<device dir>/run/mcp-<hash>.sock`, mode 0600 inside a 0700 directory.
+  `<device dir>` is `~/.config/outl` unless `$OUTL_DEVICE_DIR` or `$XDG_CONFIG_HOME` says otherwise.
+  Windows has no Unix sockets here, so `outl serve` runs without it and `outl mcp serve` owns the workspace itself.
+- **How the bridge picks.**
+  `outl mcp serve` looks for a live socket for the workspace.
+  If one answers it pipes stdin and stdout to it and opens nothing.
+  Otherwise it owns the workspace as usual.
+  Which one it chose is logged to stderr.
+  `--standalone` forces the second behaviour.
+- **With `--no-watch`** the daemon holds no write lock while idle.
+  A mutating tool takes the device actor on demand and releases it when the last session closes, so a desktop app opened later keeps the actor.
+  If another process holds it, the tool says so, reads keep working, and no throwaway actor is minted.
+- **A broken socket never stops the daemon.**
+  A path too long, a directory that cannot be made private, or a second `outl serve` on the same workspace is a logged warning, and `outl serve` keeps running without MCP.
+  A stale socket from a killed daemon is replaced on the next start.
 
-## Architecture in one paragraph
+## Sync: edits through MCP reach your other devices
 
-`outl mcp serve` is a 200-line stdio loop on top of the same Rust handlers the CLI subcommands call.
-There is no `outl-mcp` crate, no parallel logic, no JSON-RPC framework dependency (we speak the protocol directly).
-Every new feature lands once, as a function in `outl-actions`, and is exposed in both surfaces — see [`crates/outl-cli/CLAUDE.md`](../crates/outl-cli/CLAUDE.md) for the exact "add a new tool" walkthrough.
+A standalone `outl mcp serve` is long-lived, so it can act as this device's sync peer even with no app open.
+When the device has paired peers ([`outl peer pair`](sync.md)), the server brings the transport up on first use and, after each write, tells connected peers to pull.
+An edit made through an assistant lands on your phone the way a desktop edit does.
+With no paired peers nothing touches the network.
 
-Read tools (`outl_search`, `outl_backlinks`, …) answer from a workspace index derived from the **op log**, cached for the session and dropped whenever a mutating tool runs or a peer pushes ops.
-So a tool call reflects what the log holds, which is not always what a `.md` on disk holds — see the note under [Search / Query in `cli.md`](cli.md#search--query).
+One process per device holds the network endpoint.
+If the desktop app is already running, it keeps it, and the MCP server writes its ops to the shared `ops/` folder for the app to ship.
+Whoever started first wins, and nothing is lost either way.
+A headless machine that runs only `outl mcp serve` (or `outl serve`) is its own peer.
 
-## Sync: edits made through MCP reach your other devices
-
-`outl mcp serve` is **long-lived**, so it can be this device's peer — no GUI needs to be open.
-When the device has paired peers (`outl peer pair`), the server brings the iroh transport up on first use and, after every mutating tool, wakes connected peers so they pull the change in real time.
-So an edit you make through Claude lands on your laptop/phone the same way an edit in the desktop app would.
-With no paired peers it stays fully local (nothing to sync) and never touches the network.
-
-**One process per device holds the endpoint.**
-iroh routes one endpoint per device identity, so if a GUI is already running here it keeps the endpoint and the MCP server writes its ops to the shared `ops/` dir instead — the GUI pushes them out on its own pass, and everything still converges.
-Whichever process started first wins; nothing is lost either way.
-This is what a headless setup (a machine running only `outl mcp serve`) depends on: with no GUI to defer to, the MCP server *is* the peer.
-
-A short-lived `outl <subcommand>` CLI call can never take the endpoint (it exits before a connection is even established); for scripts that must flush, run `outl sync` after the mutations.
-See [`crates/outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) → "One endpoint per identity, elected not assigned".
+A one-off `outl <command>` call exits too fast to hold the endpoint.
+For scripts that must flush before they stop, run [`outl sync`](cli.md#workspace--admin) after the writes.
 
 ## Troubleshooting
 
-**The server starts but the host shows zero tools.** Check stderr (`outl mcp serve --workspace … 2> /tmp/outl-mcp.log` and tail it).
-Almost always it's a permission error reading the workspace path.
+**The host shows zero tools, or the server does not start.**
+Run the smoke test above and read stderr.
+Nearly always it is a wrong path in the config, or a binary that is not on the `PATH` the host sees.
+GUI hosts do not read your shell profile: use the absolute path to `outl` (`which outl`) as `command`.
 
-**`workspace at … is locked by another outl process`.** As of 0.5.1 the workspace lock (`.outl/.lock`) is shared, so this error is no longer raised on simple co-tenancy: TUI + MCP server + a subprocess CLI all coexist.
-The remaining contention point is the per-actor write lock at `ops/.lock-<actor>`.
-The opener tries this device's actor first and, if taken, mints an `ActorId::new()` ephemeral and locks that one instead — so the second standalone `outl mcp serve` of the day usually just writes to a fresh `ops-<ephemeral>.jsonl` without telling you.
-Run `outl serve` and let `outl mcp serve` [bridge to it](#running-beside-outl-serve) to avoid that entirely.
-You only see a hard error when both the device actor AND the ephemeral path can't be acquired (e.g. a stale `.lock-<actor>` left by a killed process, or a filesystem that doesn't support `flock`).
-Recovery: delete the dangling `ops/.lock-*` files for processes that are no longer running, or move the workspace off the unsupported filesystem.
+**Every tool replies `NO_WORKSPACE: no outl workspace at …`.**
+The server started, but the path is not a workspace: a workspace has a `.outl/` folder inside it.
+Fix the `--workspace` path in the host config, or create the workspace with `outl init <path>`.
+The server never prompts to initialize one, because stdin is the protocol.
+The same code also covers a `config.toml` that fails to parse: run `outl doctor` in the folder.
 
-**Tool calls return `INTERNAL` errors.** Run the same command on the CLI (`outl <command> --json`) — same code path, same error, easier to read.
-If CLI works and MCP doesn't, file a bug.
+**A tool returns `INTERNAL`.**
+Run the same action on the CLI with `--json` (`outl page get notes --json`).
+Same code path, same error, easier to read.
+If the CLI works and the tool does not, file a bug with both outputs.
 
-**Path quoting on macOS.** If the workspace path has spaces, the JSON in `claude_desktop_config.json` must escape them.
-Use a path without spaces (`~/notes`, `~/Documents/outl`) — easier than fighting JSON escaping in two layers.
+**`PAGE_MARKDOWN_AHEAD_OF_LOG`.**
+See [A write can refuse](#what-an-agent-can-and-cannot-touch).
+Run `outl reconcile --ahead-of-log`.
 
-## What's NOT exposed over MCP
+**An edit I made in the app is missing from a tool's answer.**
+Peer edits are picked up on the next call, not mid-call.
+Ask again.
+If it is still missing, the two devices have not synced yet: check `outl peer status`.
 
-By design:
+**The assistant edited the wrong block.**
+Block ids are ULIDs and must come from `outline`.
+A model that guesses an id gets `BLOCK_NOT_FOUND`; one that reuses an id from earlier in a long chat can hit a block that has since moved.
+Have it re-read the page before a block edit.
 
-- `outl init`, `outl serve`, `outl reconcile` — interactive or long-running, wrong shape for a tool call.
-- `outl import logseq|logseq-db|obsidian|roam` — one-time migration, not a workspace op.
-- `outl mcp serve` itself — the host already booted you.
+**`workspace … is locked by another outl process`.**
+Rare.
+The workspace lock is shared, so the TUI, a GUI, the MCP server and CLI calls coexist.
+What can collide is the per-actor write lock at `ops/.lock-<actor>`.
+A second standalone `outl mcp serve` takes a throwaway actor and writes to its own `ops-<ulid>.jsonl`, which is harmless but untidy.
+Running `outl serve` and letting `outl mcp serve` [bridge to it](#running-beside-outl-serve) avoids it.
+You only get a hard error when neither actor can be locked: delete a `.lock-*` left by a killed process, or move the workspace off a filesystem without `flock`.
 
-These stay CLI-only.
-Run them from a terminal when you need them.
+## What is not exposed
+
+By design, these stay in the terminal:
+
+- `outl init`, `outl serve`, `outl reconcile`, `outl recover`, `outl compact`: interactive, long-running or repairing, the wrong shape for a tool call.
+- `outl import …`: a one-time migration, not a workspace operation.
+- `outl peer …`, `outl plugin …`, `outl telemetry …`: they change what the device trusts or sends, so a person does them.
+- `outl mcp serve` itself.
+
+## How it fits together
+
+`outl mcp serve` is a JSON-RPC 2.0 loop over stdio, newline-delimited, speaking MCP protocol version `2024-11-05`.
+Each tool calls the same handler as its CLI twin, so there is one implementation and one set of bugs.
+There is no separate `outl-mcp` crate and no JSON-RPC framework.
+A session opens the workspace once and keeps it, so a tool call costs the call, not a replay of the op log.
+Read tools answer from an index derived from the op log, cached for the session and dropped after any write or any peer push.
+
+A success reply is content only: the handler's payload as compact JSON in `content[0].text`, with fields only a GUI draws removed.
+`outl_page_render` and `outl_export_md` send raw markdown instead.
+An error sets `isError: true` and keeps `structuredContent: { ok: false, error }` so `error.data` survives.
+No tool declares an `outputSchema`.
+The reasoning is in [RFC 0276](rfcs/0276-mcp-content-only-replies.md).
+
+To add a tool, see the walkthrough in [`crates/outl-cli/CLAUDE.md`](../crates/outl-cli/CLAUDE.md).

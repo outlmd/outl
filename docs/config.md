@@ -280,6 +280,7 @@ This one is your consent, which belongs to you rather than to the hardware — s
 Backups default **on** for the same reason reminders do.
 The failures they catch — a bad projection, an `outl import` aimed at a workspace that already had pages, a page deleted with the app then closed — are ones you discover *after* the moment when you could have enabled a safety net.
 
+Task-oriented guide with restore steps: [backups.md](backups.md).
 Which clients run the automatic pass today, and the rules a client that wires it up must keep, live in [client-sync.md → Automatic backups](client-sync.md#automatic-backups).
 
 They are **device-local**, and the repository lives **outside the workspace** — under `~/.config/outl/backups/<name>-<hash>.git`, with the workspace as git's `--work-tree`.
@@ -299,8 +300,45 @@ What is excluded: caches the next boot rebuilds — `.outl/snapshots/`, `*.idx`,
 Work-tree ignore rules beat the backup repo's own exclusions, so a `*.jsonl` line used to drop the op log out of every snapshot while the CLI still printed commit ids.
 Those paths are now staged with `git add --force`, and every snapshot **verifies that each `ops/*.jsonl` on disk is in the commit** before reporting success — a history missing the source of truth is reported as an error, not a backup.
 
-> The iroh transport also reads `~/.outl/identity.key` (this device's ed25519 keypair, per-machine) and `<workspace>/.outl/peers.json` (the paired-device list, per-graph).
+> The iroh transport also reads `~/.outl/identity.key` (this device's ed25519 keypair, per-machine; under `$OUTL_DEVICE_DIR/iroh/` when that variable is set) and `<workspace>/.outl/peers.json` (the paired-device list, per-graph).
 > Those are managed by `outl peer …`, not by this config file — see [sync.md → iroh transport](sync.md#transport-2-iroh-p2p).
+
+---
+
+## Environment variables
+
+None of these is required.
+They exist for tests, containers, managed machines and one-off runs.
+
+| Variable | Effect | Details |
+|---|---|---|
+| `XDG_CONFIG_HOME` | Moves the config directory to `$XDG_CONFIG_HOME/outl/` (default `~/.config/outl/`), on every OS including macOS | [Layers](#configuration) |
+| `OUTL_CONFIG_MANAGED` | `1`, `true`, `yes` or `on` makes every client refuse to rewrite `config.toml`, the same as `managed = true` | [Managed config](#managed-config) |
+| `OUTL_DEVICE_DIR` | Redirects the [device store](device-store.md), the iroh identity (`<dir>/iroh/identity.key`) and backups to that directory. This process becomes a different device with its own node id | [sync-devices.md](sync-devices.md#troubleshooting) |
+| `OUTL_TELEMETRY` | `0` sends no crash report from this one run. Any other value changes nothing | [privacy.md](privacy.md) |
+| `CI`, `GITHUB_ACTIONS` | Any non-empty value stops crash reporting | [`[telemetry]`](#telemetry) |
+| `RUST_LOG` | Log filter, for example `RUST_LOG=outl_sync_iroh=debug` | [development.md](development.md) |
+
+## Recipes
+
+| I want to | Put this in `~/.config/outl/config.toml` |
+|---|---|
+| Sync through iCloud Drive or Syncthing instead of P2P | `[sync]` `transport = "file"` |
+| Use my own relay | `[sync]` `relay_url = "https://relay.example.com"` ([relay.md](relay.md)) |
+| Send no crash reports | `outl telemetry off`, or `[telemetry]` `enabled = false` |
+| Snapshot more or less often | `[backup]` `interval_minutes = 120`, or `enabled = false` ([backups.md](backups.md)) |
+| Silence reminders at night | `[reminders]` `quiet_hours = "22:00-07:00"` |
+| Fix a wrong journal date (container, Crostini) | `[calendar]` `timezone = "Europe/London"` |
+| Weeks that start on Sunday everywhere | `[calendar]` `week_start = "sunday"` |
+| Always dark, or always light | `[theme]` `mode = "dark"` or `"light"` |
+| Mouse in the terminal UI | `[tui]` `mouse_capture = true` |
+| Allow bigger attachments | `[assets]` `max_bytes = 524288000`, or `0` for no limit |
+| Keep a Nix-managed config from being overwritten | `managed = true` |
+
+`outl telemetry on` and `outl telemetry off` rewrite the whole file with every key that has a value written out, defaults included.
+Keys you left unset (such as `[calendar] timezone`) stay unset.
+Comments you added by hand are lost, and a file that does not parse is left alone with an error.
+If you manage the file by hand, edit `[telemetry] enabled` yourself.
 
 ---
 
@@ -332,8 +370,8 @@ actor_claimed_by = "01HKZXA1M4N7QF0V6T2WSD9YB3"
 storage = "jsonl"
 
 [theme]
-# Workspace-only override. When set, takes precedence over the
-# global `[theme] preset` while you're inside this workspace.
+# Workspace-only override, read by the TUI only. When set, takes
+# precedence over the global `[theme]` while the TUI has this workspace open.
 preset = "monokai"
 ```
 
@@ -361,6 +399,21 @@ Copying the whole workspace *directory* on one machine is safe too: the binding 
 The store is not beyond reach of a *whole-`$HOME`* clone (Migration Assistant, a Time Machine restore, a VM image, chezmoi, NFS), so `machine-id` is bound to a hash of an OS identifier of the physical machine and reminted when that changes.
 On iOS no such identifier is reachable, so a restored device backup is a known gap.
 Details in [storage.md → Where the actor id lives](storage.md#where-the-actor-id-lives--outside-the-workspace).
+
+### Other files in `.outl/`
+
+| File | What it is | Synced |
+|---|---|---|
+| `config.toml` | This file | Only by a folder-sync tool that carries dotted paths (not iCloud) |
+| `workspace-id` | The id every paired device shares. Pairing rewrites it on the joiner | Yes, by iroh |
+| `peers.json` | Devices paired into this graph. Edit through `outl peer`, not by hand | Only by a folder-sync tool that carries dotted paths |
+| `peers.toml` | An empty placeholder from older versions. Ignore it | No |
+| `state/sync-pending.json`, `reminders-fired.json` | Per-device bookkeeping | No |
+| `snapshots/` | Boot cache, rebuilt when missing | No |
+| `repair-backup/`, `compact-backup/` | Copies written before `outl doctor --repair` and `outl compact --apply` change files | No |
+
+`created_at` in `[workspace]` is the time `outl init` ran.
+Nothing reads it for behavior.
 
 ### `[workspace] storage` and peer sync
 
@@ -390,12 +443,16 @@ A path from `config.toml` that no longer exists on disk is skipped silently and 
 
 ### Theme
 
-When the TUI / desktop decides which palette to render:
+When the **TUI** decides which palette to render:
 
-1. `--theme <preset>` CLI flag (TUI only).
+1. `--theme <preset>` CLI flag.
 2. Per-workspace `[theme] preset` from `<workspace>/.outl/config.toml`.
-3. Global `[theme] preset` from `~/.config/outl/config.toml`.
+3. The global `[theme]` pair from `~/.config/outl/config.toml`, resolved through `mode`.
 4. Built-in default — `outl`.
+
+The **desktop and mobile apps** have no flag and do not read the per-workspace file: they resolve the global `[theme]` pair only (`get_theme_config` calls `outl_config::load()`).
+A `[theme] preset` in `<workspace>/.outl/config.toml` changes the TUI and nothing else.
+The workspace override also reads `preset` alone, so `preset_dark` and `mode` there are ignored.
 
 Unknown preset names fall through to the next step rather than erroring.
 

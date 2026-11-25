@@ -136,7 +136,7 @@ pub const NO_TUI_PAIRING: &str = "Pairing a new device isn't in the TUI — run 
 /// one more keystroke, so the nudge names it rather than
 /// apologising.
 pub const NO_BANNER_ACTIONS: &str =
-    "Reminder banners can't carry buttons here — open the reminders list (Ctrl+R in the \
+    "Reminder banners can't carry buttons here — open the reminders list (g n in the \
      TUI, Cmd/Ctrl+Shift+R on desktop) to snooze or tick off what came due.";
 
 /// `outl capture` is a terminal command, so the TUI user already

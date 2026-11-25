@@ -2,6 +2,7 @@
 
 * [Welcome](README.md)
 * [Getting started](getting-started.md)
+* [Troubleshooting](troubleshooting.md)
 * [Homebrew tap](homebrew.md)
 * [Scoop bucket (Windows)](scoop.md)
 * [Your first week with outl](tutorial.md)
@@ -9,6 +10,8 @@
 
 ## Sync — done right
 
+* [Sync your devices](sync-devices.md)
+* [Backups and restore](backups.md)
 * [The problem with how the others do it](sync.md)
 * [Self-hosting an always-on peer](self-hosting.md)
 * [Relay & NAT traversal](relay.md)
@@ -17,7 +20,11 @@
 
 ## Editor
 
+* [Your first 10 minutes in the TUI](tui-quickstart.md)
 * [TUI manual](tui.md)
+  * [TUI commands](tui-commands.md)
+  * [TUI overlays](tui-overlays.md)
+  * [TUI troubleshooting](tui-troubleshooting.md)
 * [Paste](paste.md)
 * [Design specification (UI)](../DESIGN.md)
 * [UX specification](../UX.md)
@@ -30,6 +37,12 @@
 
 ## Clients
 
+* [Using outl on the desktop](desktop.md)
+  * [Desktop settings](desktop-settings.md)
+  * [Desktop troubleshooting](desktop-troubleshooting.md)
+* [outl on your phone](mobile.md)
+  * [Capture without opening outl](mobile-capture.md)
+  * [When something does not work on mobile](mobile-troubleshooting.md)
 * [Clients and shared logic](clients.md)
   * [Authoring gestures, client by client](client-editing.md)
   * [Backlinks on every client](client-backlinks.md)
@@ -39,11 +52,15 @@
 
 ## Integrations
 
+* [Command line quick start](cli-quickstart.md)
 * [CLI](cli.md)
+  * [CLI recipes](cli-recipes.md)
+  * [Troubleshooting the CLI](cli-troubleshooting.md)
 * [Importing a graph](import.md)
 * [outl doctor](doctor.md)
 * [Embedding outl as a Rust library](embedding.md)
 * [MCP](mcp.md)
+  * [MCP tool reference](mcp-tools.md)
 * [MCP recipes (skills & commands)](mcp-recipes.md)
 * [Plugins](plugins.md)
 * [Build your first plugin](plugin-tutorial.md)
@@ -55,6 +72,8 @@
 
 * [Markdown dialect](markdown-format.md)
 * [YAML frontmatter](markdown-frontmatter.md)
+* [Properties](properties.md)
+* [Running code blocks](exec.md)
 * [Query code blocks](query.md)
 * [Templates](templates.md)
 * [Workspace layout](concepts.md)
@@ -63,6 +82,7 @@
 
 * [Architecture](architecture.md)
 * [Storage trait](storage.md)
+* [Nix flake and home-manager module](nix.md)
 * [The device store](device-store.md)
 * [Shared primitives catalog](shared-primitives.md)
   * [Core state, sync, and durability](primitives-core.md)
@@ -90,6 +110,8 @@
   * [How each mobile surface is wired](mobile-internals.md)
 * [iOS platform integration](ios-platform.md)
 * [iOS App Store review notes](app-store/review-notes.md)
+* [App Store listing copy](app-store-description.md)
+* [Privacy policy](privacy.md)
 * [Android platform integration](android-platform.md)
 * [Contributing & code review](contributing.md)
 

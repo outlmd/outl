@@ -1,5 +1,91 @@
 # Importing a graph
 
+Bring your notes from Roam Research, Logseq or Obsidian into an outl workspace.
+Your source is only read, never changed.
+The import keeps pages, journals, nesting, tasks, properties, links, block references and attachments, and it tells you what it could not carry over.
+
+## The five-minute path
+
+```bash
+# 1. Measure first. Writes nothing, always safe.
+outl import logseq ~/Logseq/work ~/notes --dry-run
+
+# 2. Read the report. Then take a checkpoint if ~/notes already exists.
+outl -w ~/notes backup now -m "before import"
+
+# 3. Import for real.
+outl import logseq ~/Logseq/work ~/notes
+
+# 4. Confirm.
+outl -w ~/notes doctor
+```
+
+Pick the format and give the source as the second argument:
+
+| You have | Command | `<src>` is |
+|---|---|---|
+| A Roam backup | `outl import roam <file> <dst>` | the `.json` from Roam's **Export all, JSON** |
+| A Logseq file graph | `outl import logseq <dir> <dst>` | the graph folder (it holds `pages/` and `journals/`) |
+| A Logseq DB graph (2.x) | `outl import logseq-db <file> <dst>` | the `.edn` from **Export graph, Export EDN file** ([steps](#logseq-db-graphs-logseq-db)) |
+| An Obsidian vault | `outl import obsidian <dir> <dst>` | the vault folder |
+| Not sure | `outl import auto <src> <dst>` | any of the above; outl detects it from the shape |
+
+`<dst>` is the new workspace.
+It is created if it does not exist, so `outl init` first is optional.
+A real run ends with `Next: run outl --workspace <dst> to open the imported workspace.`
+
+This is a real dry run on a three-page Logseq graph:
+
+```console
+$ outl import logseq lg imp --dry-run
+Import summary (logseq):
+  pages:               2
+  journals:            1
+  blocks:              5
+  block refs:          0 resolved, 0 page-fallback, 0 unresolved
+  embeds:              0 block, 0 page
+  tasks:               LATER: 1, TODO: 1
+  properties:          0 page-level, 2 block-level
+  org dates:           1 became [[date]] links
+  reconciliation:
+    pages:             3/3 emitted (0 merged, 0 skipped)
+    blocks:            5/5 emitted (0 lifted to page props, 0 in skipped pages)
+    in the op log:     not measured — a dry-run writes nothing, so every count above stops at render
+```
+
+**How to read the report.**
+`reconciliation` is the line that matters.
+`3/3 emitted` means every page the source held is in the output, and `5/5` that every block is.
+When the numbers do not add up the output says `UNACCOUNTED CONTENT`, and the same numbers are in `--json`.
+On a real run, the last line (`in the op log`) confirms the blocks reached the op log, not just the files.
+
+## Flags you will actually use
+
+| Flag | Use it when |
+|---|---|
+| `--dry-run` | Always first. Parses and reports, writes nothing. |
+| `--json` | You want the full report (every warning with its location) in a file. The human output shows the first 20 warnings. |
+| `--preserve-timestamps` | You want source create and edit times kept as `created::` and `edited::` properties. Dropped and counted otherwise. |
+| `--no-assets` | You want links left exactly as written and no files copied into `assets/`. |
+| `--download-remote-assets` | You want remote images (Roam's uploads) stored locally. Off by default: the URL stays. |
+| `--keep-source-ids` | Roam only. Each block keeps its Roam uid as a `roam-uid::` property, for a future sync back. |
+| `--force` | The destination already holds notes and you want the import to replace the pages it writes. Read "Importing twice is destructive" below first. |
+
+## When something goes wrong
+
+| You see | It means | Do |
+|---|---|---|
+| `Error: <dst> already holds N page(s), starting with ...` | The destination has content, and importing again overwrites with no undo. | Import into a fresh folder. Or, if replacing is what you want, back up and add `--force`. |
+| `the import stopped partway and <dst> is left half-populated` | A crash or a bad file mid-run. | Re-run the same command: it resumes without `--force`. To start over, delete `<dst>`. |
+| `roam backup JSON: invalid type: map, expected a sequence` | The file is not a Roam "Export all, JSON" backup. | Export again from Roam and pick JSON. |
+| `unknown import source: foo (expected: roam, logseq, logseq-db, obsidian, auto)` | Typo in the format. | Use one of the five names. |
+| `UNACCOUNTED CONTENT` | Blocks or pages are missing from the output, and nothing explains it. | Keep the source, re-run with `--json`, and open an issue with the report. |
+| `CONTENT NEVER REACHED THE OP LOG` | Files were written but some blocks are not in the log. | Same: do not delete the source. |
+| A `(graph)` warning about files it could not read | Missing or unreadable attachments. They keep their original links. | Add `-v` to log every path: `outl -v import ...`. |
+| Logseq says "DB graph" | Logseq 2.x keeps notes in SQLite and has no markdown to read. | Use `logseq-db` with the EDN export. |
+
+Everything below is what the importers translate, refuse and count.
+
 `outl import roam|logseq|logseq-db|obsidian|auto <src> <dst>` runs the adapter-based pipeline in the `outl-import` crate.
 
 Split out of [`cli.md`](cli.md), which is the command reference: the dialect translations, the reconciliation contract and the resumability rules are their own subject and had grown to a third of that document.
@@ -41,7 +127,7 @@ A remote image (`![alt](https://…)`, such as Roam's firebase uploads) keeps th
 `--download-remote-assets` downloads remote images into `assets/` too and points the link at the local copy, keeping the alt text as written; the URL is not kept, since a link holds one target.
 An encrypted upload (`….enc`, from an encrypted Roam graph) is never downloaded: its bytes are ciphertext, so its link always stays as written.
 A file that can't be pulled (missing, download failed, over `[assets] max_bytes`) keeps its original link and is counted in `assets missing`, never fatal.
-Local files that can't be read are named in one `(graph)` warning (the first five paths, with `RUST_LOG=debug` logging every one), not one line per file.
+Local files that can't be read are named in one `(graph)` warning (the first five paths, and `outl -v import ...` logs every one), not one line per file.
 `--no-assets` skips all of that, keeping every original relative/remote link verbatim.
 A real (non-dry) import paints a live progress line on stderr — phase, page counter, percentage, current page, elapsed — TTY-only, so piped output stays clean.
 `--dry-run` parses and reports without writing a byte — run it against a real backup to measure fidelity before migrating.
@@ -176,5 +262,5 @@ The human output prints the first 20 and states how many it hid.
 A Roam task marker right after a list or quote prefix at the head of a block (`- {{[[TODO]]}} x`, `1. {{[[TODO]]}} x`, `> {{[[DONE]]}} x`) is the block's task, as Roam draws it: the block becomes `TODO - x`, `TODO 1. x` or `DONE > x`, with the prefix kept as written.
 
 One counted loss worth knowing about on Roam graphs: a `{{[[TODO]]}}` / `{{[[DONE]]}}` marker in the *middle* of a block keeps its literal `TODO`/`DONE` word but not its task state.
-outl models one task per block, driven by the marker at the block's head, so such a block won't answer `outl query --kind=task`.
+outl models one task per block, driven by the marker at the block's head, so such a block is not a task.
 It's reported as `mid-block tasks` plus a single aggregate warning — one per import, not one per marker.

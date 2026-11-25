@@ -1,13 +1,44 @@
 # Homebrew tap
 
-outl ships pre-built binaries through the same `outlmd/outl` repo — no separate `homebrew-outl` repo.
-Two surfaces live on `main`:
+Install and update outl on macOS and Linux with Homebrew.
+The tap is the `outlmd/outl` repo itself, with no separate `homebrew-outl` repo.
+
+## In short
+
+```bash
+brew tap outlmd/outl https://github.com/outlmd/outl
+brew trust outlmd/outl                       # one-time, Homebrew requires it for third-party taps
+brew install outl-beta                       # the CLI, TUI and MCP server: one `outl` binary
+brew install --cask outl-desktop-beta        # macOS only: the desktop app
+outl --version                               # check it worked
+outl init ~/notes                            # then follow the quick start
+```
+
+| You want | Command |
+|---|---|
+| Update | `brew update && brew upgrade outl-beta` (and `--cask outl-desktop-beta` for the app) |
+| See if an update exists | `brew outdated` |
+| Uninstall the CLI | `brew uninstall outl-beta` |
+| Uninstall the app | `brew uninstall --cask outl-desktop-beta` |
+| Forget the tap | `brew untap outlmd/outl` |
+
+**Uninstalling never touches your notes.**
+Your workspace folder, and the device settings under `~/.config/outl/`, stay where they are, so a reinstall picks up exactly where you left off.
+Delete those folders yourself if you want them gone.
+
+New to the command line client? [Quick start](cli-quickstart.md).
+Something failed during install? [Troubleshooting](#troubleshooting) at the bottom of this page.
+
+## What the tap offers
 
 | Path | What it ships |
 |---|---|
-| [`/Formula/outl.rb`](../Formula/outl.rb) | GA CLI / TUI, semver tag `vX.Y.Z`. |
-| [`/Formula/outl-beta.rb`](../Formula/outl-beta.rb) | Beta CLI / TUI, rebuilt nightly when `main` moved. |
-| [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) | Beta **desktop app** (.dmg), rebuilt nightly when `main` moved. |
+| [`/Formula/outl-beta.rb`](../Formula/outl-beta.rb) | Beta CLI / TUI, cut nightly (06:00 UTC) on the nights `main` moved. |
+| [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) | Beta **desktop app** (.dmg), cut on the same schedule. |
+| `/Formula/outl.rb` | The stable CLI / TUI. **Does not exist yet**: it lands with the first stable release (a `vX.Y.Z` tag with no `-beta`). Until then `brew install outl` fails. |
+
+Need a build right now instead of waiting for the night?
+The release workflow can be started by hand from the repo's Actions tab, and the new beta shows up in the tap when it finishes.
 
 ## Install the CLI / TUI
 
@@ -60,10 +91,10 @@ That drops `outl.app` into `/Applications` via the **universal** dmg the release
 Both Apple Silicon and Intel Macs install the same dmg.
 
 > **Linux desktop:** Homebrew has no GUI cask on Linux, so the app ships as AppImage / `.deb` / `.rpm` assets on each [GitHub release](https://github.com/outlmd/outl/releases).
-> See [Getting started → Desktop app on Linux](getting-started.md#desktop-app-on-linux).
+> See [Getting started → Desktop app on Linux](getting-started.md#linux).
 The cask sits in [`/Casks/outl-desktop-beta.rb`](../Casks/outl-desktop-beta.rb) and is bumped automatically alongside the CLI formula on every nightly beta.
 
-The CLI formula (`outl-beta`) and the desktop cask coexist without conflicts — the formula installs `/usr/local/bin/outl`, the cask installs `/Applications/outl.app`.
+The CLI formula (`outl-beta`) and the desktop cask coexist without conflicts — the formula puts `outl` on your `PATH` (under Homebrew's prefix, `/opt/homebrew/bin` on Apple Silicon and `/usr/local/bin` on Intel Macs), the cask installs `/Applications/outl.app`.
 Both point at the same workspace on disk if you configure the same path; the op log (`ops/ops-<actor>.jsonl`) reconciles edits made from either surface.
 
 ### First-launch Gatekeeper warning
@@ -125,9 +156,8 @@ It does five things:
 The version comes from the `prepare` job, which reads `workspace.package.version` out of `Cargo.toml` and appends `-beta.<run_number>`.
 So the only source of truth for the base version is `Cargo.toml`; nothing is hardcoded in the formula.
 
-`Formula/outl-beta.rb` and `Casks/outl-desktop-beta.rb` are both **committed with bootstrap placeholders** (`version "0.0.0"`, zeroed SHAs).
-The first beta release after each lands bumps it to real values.
-Until then, `brew install outl-beta` and `brew install --cask outl-desktop-beta` both 404 on the download URL.
+`Formula/outl-beta.rb` and `Casks/outl-desktop-beta.rb` were first **committed with bootstrap placeholders** (`version "0.0.0"`, zeroed SHAs), and the first beta release after each replaced them with real values.
+A fork that copies the tap starts from placeholders again, and its `brew install` 404s on the download URL until its own first release runs.
 
 `Formula/outl.rb` and `Casks/outl-desktop.rb` (the GA channels) don't exist yet.
 When the first non-prerelease tag (`vX.Y.Z` with no `-beta`) ships, bump them by hand the first time; after that we can add a GA-flavored `update_tap` job if it's worth automating.
@@ -138,6 +168,20 @@ The job uses the default `GITHUB_TOKEN` (with `contents: write` permission scope
 No PAT, no extra secret to manage.
 
 ## Troubleshooting
+
+### Install problems
+
+| You see | Cause | Do |
+|---|---|---|
+| `Refusing to load formula outlmd/outl/outl-beta from untrusted tap` | Homebrew 4.x wants a one-time trust for taps outside core. | `brew trust outlmd/outl` |
+| `No available formula with the name "outl"` | The stable formula does not exist yet. | `brew install outl-beta` |
+| `outl: command not found` after install | Homebrew's `bin` is not on your `PATH`. | Run `brew --prefix`, and add `<prefix>/bin` to your `PATH`. |
+| `brew install` pulls an old version | Homebrew caches tap state. | `brew update`, then install or upgrade again. |
+| `SHA256 mismatch` | The formula on `main` and the release asset disagree, usually after an asset was re-uploaded. | Wait for the next nightly, or tell us in an [issue](https://github.com/outlmd/outl/issues). The maintainer fix is below. |
+| macOS says `"outl.app" Not Opened` | The desktop dmg is unsigned for now. | [First-launch Gatekeeper warning](#first-launch-gatekeeper-warning). |
+| You tapped `avelino/outl` before | The repo moved to the `outlmd` org and a tap name is not a redirect. | `brew untap avelino/outl`, then the tap commands at the top. Installed formulae keep working. |
+
+### Maintainers
 
 **A release published but the formula never moved** — check whether `update_tap` ran at all, not whether it failed.
 A job's implicit `success()` reads the whole ancestor tree rather than its direct `needs`, so any failed job upstream of `publish_release` skipped this one, even with `publish_release` green.

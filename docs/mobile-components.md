@@ -8,6 +8,37 @@ These sections are reference: you read one when you touch that component.
 The rules that hold whatever you are editing stayed in `CLAUDE.md`.
 
 What the user experiences, feature by feature, is [`docs/mobile-ux.md`](mobile-ux.md).
+The user guide is [`docs/mobile.md`](mobile.md).
+
+## Surface index: what a user touches, and where it lives
+
+A lookup from the thing on screen to the file that owns it and the page that explains it.
+User-facing behaviour lives in [`mobile.md`](mobile.md); the rules a contributor must keep live in the pages in the last column.
+
+| What the user sees | Component or module (`crates/outl-mobile/src/`) | Contributor page |
+|---|---|---|
+| Header, title, sync dot, gear | `components/JournalChrome.tsx`, `JournalHeader.tsx` | [mobile-internals.md → Sync dot](mobile-internals.md#sync-dot--refresh-iroh-driven) |
+| Week strip, calendar | `WeekStrip.tsx`, `Calendar.tsx`, `lib/day-swipe.ts`, `lib/week.ts` | this page |
+| Bottom bar | `BottomBar.tsx` | [mobile-ux.md → Bottom bar](mobile-ux.md#bottom-bar) |
+| Search, new page, rename, merge | `PageSwitcher.tsx`, `PageSwitcher.page-actions.tsx`, `PageNameSheet.tsx` | [mobile-ux.md](mobile-ux.md#search-sheet--what-one-box-lists-and-when-it-asks-the-backend) |
+| `+` quick capture sheet | `CaptureSheet.tsx`, `Journal.capture.ts` | [mobile-ux.md → Capturing](mobile-ux.md#capturing-without-opening-the-app) |
+| Tasks list | `TasksSheet.tsx` | this page |
+| Reminders list and authoring | `RemindersSheet.tsx`, `RemindSheet.tsx`, `lib/remind-fields.ts`, `lib/quiet-hours.ts`, `lib/reminder-actions.ts` | [mobile-internals.md → Reminders](mobile-internals.md#reminders-remind) |
+| Block row, bullet, checkbox, swipe-to-delete | `BlockRow.tsx`, `BlockBody.tsx`, `BlockMarkers.tsx`, `SwipeRow.tsx`, `lib/long-press.ts` | below |
+| Long-press menu | `BlockContextMenu.tsx`, `Journal.context-actions.ts` | this page |
+| Range selection and its bar | `SelectionToolbar.tsx`, `lib/block-selection.ts`, `Journal.selection-ops.ts` | this page |
+| Keyboard toolbar | iOS: `swift/OutlKit/Toolbar`; Android: `KeyboardAccessory.tsx`, `KeyboardToolbar.tsx`; catalog in `@outl/shared/toolbar` | [mobile-ux.md → Keyboard accessory bar](mobile-ux.md#keyboard-accessory-bar-android-web-bar--ios-native-bar) |
+| Properties and page history | `PropertiesSheet.tsx`, `HistorySheet.tsx` | [mobile-internals.md](mobile-internals.md#properties-key-value--the-sheet-issue-13) |
+| Pairing, devices, export | `DevicesSheet.tsx`, `commands/peers.rs` | [mobile-internals.md → Peer / device management](mobile-internals.md#peer--device-management-outl_peer_list--outl_peer_remove) |
+| Settings | `SettingsSheet.tsx` | [mobile-internals.md → Settings](mobile-internals.md#settings-settingssheettsx--the-first-preferences-surface) |
+| First run | `Onboarding.tsx`, `GuideSheet.tsx`, `lib/chrome-tour.ts` | [mobile-internals.md → First-run onboarding](mobile-internals.md#first-run-onboarding) |
+| Plugins | `PluginSheet.tsx`, `PluginViewOverlay.tsx`, `PluginFence.tsx` | [mobile-internals.md → Plugins](mobile-internals.md#plugins) |
+| Templates | `TemplateSheet.tsx` | [mobile-ux.md → Insert template](mobile-ux.md#insert-template-structural-templates) |
+| Pull to refresh | `PullToRefresh.tsx` | [mobile-internals.md → Sync dot](mobile-internals.md#sync-dot--refresh-iroh-driven) |
+| Widget, Control Center control, share extension, App Intent | `src-tauri/gen/apple/OutlWidget`, `OutlShare`, `Sources/outl-mobile/OutlAddToTodayIntent.swift` | [`IOS-EXTENSIONS.md`](../crates/outl-mobile/IOS-EXTENSIONS.md), [ios-platform.md](ios-platform.md) |
+| Android widget, quick settings tile, share target | `src-tauri/gen/android/.../OutlCaptureWidget.kt`, `OutlCaptureTile.kt`, `OutlShareActivity.kt` | [android-platform.md → Capture](android-platform.md#capture-from-outside-the-app) |
+
+A new user-visible surface needs a row here and a section in [`mobile.md`](mobile.md).
 
 ## `Journal.tsx` and what has been split out of it
 

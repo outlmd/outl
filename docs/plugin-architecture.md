@@ -61,7 +61,7 @@ The JS engine **never holds `&mut Workspace`.**
 A "turn" is one unit of plugin work — running a command, or dispatching one applied op to an `onOp` hook — and it has three phases:
 
 1. **Describe.**
-   Before invoking the plugin, the host computes a read-only `ReadModel`: every block (`{id, text, todo?, page}`) and every page (`{slug, title, kind}`) in the workspace, plus the plugin's config.
+   Before invoking the plugin, the host computes a read-only `ReadModel`: every block (`{id, text, parent, todo?, page}`), every page (`{slug, title, kind}`) and every template in the workspace, plus the plugin's config.
    It hands that snapshot to the engine.
 2. **Run.**
    The plugin's handler runs in JS-land.
@@ -142,11 +142,12 @@ The architectural summary of what each one *means* and its implementation status
 |---|---|---|
 | `op-hook` | `ctx.ops.onOp(cb)` fires for every applied op (local or from sync). | **Works** — TUI, desktop, mobile, CLI. |
 | `slash-command` | `ctx.commands.register(id, handler)`; the host lists it via `commands()` for the client's palette / slash menu. | **Works** — TUI slash menu, desktop palette, mobile sheet, CLI `plugin run`. |
-| `config-schema` | The plugin reads its config via `ctx.config.get()`; the value comes from the lockfile's `config` field. | **Partial** — reading config works; a config-editing form UI does not exist yet. |
+| `config-schema` | The plugin reads its config via `ctx.config.get()`; the value comes from the lockfile's `config` field. Secret fields (`x-outl-secret`) live in the OS keychain. | **Works** — every client edits it (`outl plugin config` / `secret`, the TUI `/plugin-settings` overlay, the desktop and mobile settings form). One owner: `outl_plugins::settings`. |
 | `keybinding` | Declarable in the manifest (`contributes.keybindings`), validated against contributed commands, parsed into an `outl_shortcuts::ChordSequence`. | **Works** — TUI (chord from Normal mode, single + two-chord, never overriding a native binding) and desktop (a native binding always wins). Mobile has no keyboard. |
 | `toolbar-button` | Contribute a button for the plugin's command. | **Works** — desktop and mobile render a chrome button; the TUI surfaces the command in its slash menu (no chrome bar in a terminal). Not applicable to the CLI. |
 | `content-transformer:text` | Render a fenced block as text / markdown (`ctx.content.register`). | **Works** — TUI (inline), desktop, mobile. The CLI has no read surface. |
 | `content-transformer:rich` | Render a fenced block as HTML in a sandboxed iframe inline in the block. | **Works on the GUIs** — desktop and mobile. The TUI/CLI drop a `rich` descriptor. |
+| `ui-render` | `ctx.ui.render(html)` hands author-written HTML to the client, which plays it in a sandboxed iframe overlay. | **Works on the GUIs** (desktop, mobile). The TUI and CLI drop it. |
 | `sync-transport` | Provide a sync transport via `ctx.sync.register({ push, pull })`. | **Core ready** — the host serializes/applies ops through the transport and convergence is tested; **no client polls it on a timer yet** (roadmap). |
 
 A query engine is **not** a separate capability: a plugin that wants to answer query blocks registers a `content-transformer` for the `query` fence language.
@@ -174,6 +175,10 @@ Permissions are the security boundary; capabilities are the feature boundary.
 A plugin declares the permissions it needs in its manifest, the user approves them on install, and the approved set is **frozen in the lockfile**.
 
 Every host call that mutates is gated: `apply_intents` calls `permission.check(intent.required_permission())` before applying each intent.
+Every intent requires `write-page` (`HostIntent::required_permission`).
+Reads are **not** gated: `build_read_model` hands every plugin the whole snapshot, so `read-page` and `read-op-log` are approved and displayed but not enforced, and `onOp` dispatch is selected by the `op-hook` capability.
+`storage:local`, `secrets` and `network:<domain>` are enforced inside the engine natives.
+The user-facing statement of this is [Plugin API → Permissions: what is enforced](plugin-api.md#permissions-what-is-enforced).
 A denied permission is **not a crash** — the intent is dropped and an error string is recorded on the `PluginRun`, which the client surfaces.
 The plugin keeps running.
 
@@ -197,12 +202,13 @@ The gating-specific rules:
 
 ### Install
 
-`outl plugin install <local-dir>` (the `github:` source is roadmap; clone and pass the path):
+`outl plugin install <local-dir | github:owner/repo[/subdir][#tag]>` (a `github:` source is cloned at an immutable semver tag into a temp dir, then installed like a local one):
 
 1. Parse and validate `plugin.json` (id shape, semver ranges, keybindings reference real commands).
-2. Copy the **installed shape** — `plugin.json`, the bundle, and the config schema if present — into `<workspace>/.outl/plugins/<id>/` (no `node_modules`, no source tree).
+2. Copy the **installed shape** — `plugin.json`, the file named by `main`, and the config schema if present, nothing else — into `<workspace>/.outl/plugins/<id>/` (no `node_modules`, no source tree).
 3. Compute the bundle hash (`sha256:<hex>` of `index.js`).
 4. Show the requested permissions, get approval, and write an `installed.json` entry: version, source ref, `bundleHash`, `permissionsApproved`, `enabled`, `config`.
+   The entry is inserted over any existing one, so a reinstall resets `config` to `null` and `enabled` to `true`.
 
 ### Load (on boot)
 
@@ -213,9 +219,12 @@ The gating-specific rules:
 2. **Intersect** — match the manifest's capabilities against this client's `ClientCapabilities`; missing ones become warnings.
 3. **Load + activate** — evaluate the bundle in a fresh Boa engine and run `activate(ctx)`, which registers the plugin's commands and hooks.
 
+Two checks a reader might assume are **not** in this path today: `api` is not compared with `HOST_API_VERSION` (`is_api_compatible` exists and is only called from tests), and `engines.outl` is parsed and ignored.
+Capability gating is what ties a manifest `contributes` entry to a client: `commands()` lists only plugins holding `slash-command`, `keybindings()` needs `keybinding`, `toolbar_buttons()` needs `toolbar-button`, `transformers()` needs the matching `content-transformer:*`.
+
 It's **best-effort**: a plugin with an invalid manifest, a hash mismatch, or a JS error lands in `LoadReport::failed` and is skipped — one broken plugin never takes down the others.
 
-`_dev/<name>/` plugins load on a separate path: **no hash check** and **every declared permission implicitly granted** (dev mode), never recorded in the lockfile and excluded from sync.
+`_dev/<name>/` plugins load on a separate path: **no hash check**, **every declared permission implicitly granted** (dev mode), **config `null`** (no lockfile entry), and never recorded in the lockfile.
 
 ### Run
 
@@ -226,8 +235,10 @@ It's **best-effort**: a plugin with an invalid manifest, a hash mismatch, or a J
 
 ## Distribution
 
-- **`registry.json`** (in `registry/`) is the day-zero "store": a static, versioned JSON index the clients read (over raw GitHub in production) to list and search installable plugins, with no server and no API.
-- **`.outlpkg`** — the installed shape packed as tar+gzip for one-file distribution — is **roadmap**; today, install is from a local directory.
+- **`registry.json`** (repo `outlmd/registry`, served at `https://plugins.outl.app/registry.json`) is the "store": a static, versioned JSON index the clients read to list and search installable plugins, with no server and no API.
+  `registry.rs` owns the fetch, the search and the `MarketplaceItem` rows both GUI clients render.
+- **`github:` sources** are cloned at an immutable semver tag (`outl-cli/src/cmd/plugin_source.rs`).
+- **`.outlpkg`** — the installed shape packed as tar+gzip for one-file distribution — is **roadmap**.
 
 ---
 
@@ -272,6 +283,6 @@ The full crate context, invariants, and current status live in `crates/outl-plug
 
 - [Plugins](plugins.md) — install, permissions, distribution, the lockfile (user guide).
 - [Plugin API](plugin-api.md) — the manifest and host-API reference (the canonical API table lives there).
-- [Plugin tutorial](plugin-tutorial.md) — build the TODO-archiver from scratch.
+- [Plugin tutorial](plugin-tutorial.md) — build a tag-counter plugin from scratch.
 - [Architecture](architecture.md) — the workspace, op log, and CRDT this all sits on.
 - [`plugin-v1.json`](schemas/plugin-v1.json) — the manifest JSON Schema.

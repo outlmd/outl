@@ -38,6 +38,17 @@ In order of impact:
     Keep in sync.
 10. **Other `docs/*.md`** (sync, storage, theming, crdt, concepts, getting-started, tutorial, why-outl, cli, mcp, clients, homebrew, config, shortcuts) — update when relevant.
 
+## The bar: user-first
+
+Write for the person using outl, not the person building it.
+Every user-facing feature needs a page (or a section of the page that owns it) with the anatomy from [`docs/contributing.md` → Documentation standard](../../docs/contributing.md#documentation-standard): goal, steps, a real example you ran, a per-client table, troubleshooting with exact error text.
+Never leave a client verdict blank: works, works differently, or not available and why.
+Run every command and chord you document in a scratch workspace; unverified examples do not ship.
+
+A CI nudge backs you up: `.github/workflows/docs-reminder.yml` comments on any PR that changes a user-visible path without touching `docs/`, `README.md` or `CHANGELOG.md`.
+Its path map is `scripts/docs_reminder.py`; when you add a new user-visible crate or a new owning page, update the map and `scripts/tests/test_docs_reminder.py`.
+Also check `CHANGELOG.md` `[Unreleased]` has an entry.
+
 ## What you do NOT document
 
 - Implementation detail (which HashMap, which pass ordering) — lives in code + Rust doc comments.

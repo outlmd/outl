@@ -1,178 +1,322 @@
 # Plugins
 
-outl ships a JavaScript plugin system so the ceiling of what you can do isn't pinned to what the maintainers ship.
-That's the lesson from Roam and Logseq: the moment a tool can't be extended, every unmet need becomes a fork request that never lands.
+A plugin is a small piece of JavaScript that adds a command, a keyboard chord, a toolbar button, a code-block renderer or a reaction to your edits.
+You install it into a workspace, approve what it may touch, and it works the same on the TUI, the desktop app, the mobile app and the CLI.
 
-The bet is simple: **a plugin is written once and runs on every client that renders or edits** — TUI, desktop, mobile, and the CLI.
-Plugins are plain JavaScript, the largest ecosystem and the lowest barrier to entry.
+This page is for **using** plugins.
+Writing one starts at the [Plugin tutorial](plugin-tutorial.md).
 
-> **Why JavaScript, and why iOS is what decided the engine:** [RFC 0025](rfcs/0025-plugin-system.md).
+> **Why JavaScript, and why iOS decided the engine:** [RFC 0025](rfcs/0025-plugin-system.md).
 
-## Pick your path
-
-By what you're here to do:
-
-- **Use plugins** — you're on the right page; keep reading ([install](#installing), [permissions](#permissions), [where they live](#where-plugins-live)).
-- **Write one** — start with the hands-on [Plugin tutorial](plugin-tutorial.md), keep the [Plugin API](plugin-api.md) open while you work.
-- **Copy a working starting point** — grab one of the [example plugins](plugin-examples.md), one per capability.
-- **Understand the internals** — read the [Plugin architecture](plugin-architecture.md) (the Boa engine, the describe→apply model, the safety model).
-
-## How it works, in one paragraph
-
-A plugin never touches your `.md` files or the CRDT directly.
-Every mutation it performs flows `JS → host API → outl-actions → Workspace::apply → op log`, and every op a plugin produces is stamped with `actor = "plugin:<id>@<device>"`.
-The op log stays the source of truth, your markdown stays 100% clean, and the log doubles as an audit trail of exactly what each plugin did.
-
-## Installing
-
-Plugins install per workspace from a **local directory** or a **`github:` source**:
+## In one minute
 
 ```sh
-outl plugin install ./outl-todo-archiver               # local dir
-outl plugin install github:outlmd/outl/examples/todo-archiver   # github
-outl plugin install github:user/repo#v1.2.0            # pin a tag
+outl -w ~/notes plugin install ./examples/workspace-stats --yes
+outl -w ~/notes plugin list
+outl -w ~/notes plugin run app.outl.examples.workspace-stats stats
 ```
 
-A `github:owner/repo[/subdir][#tag]` source is cloned at an **immutable semver tag** — the newest published tag when none is pinned, never a mutable branch like `main`.
-Either way, install validates `plugin.json`, copies the installed shape into the workspace, computes the bundle hash, shows you the permissions the plugin requests, and asks for approval before anything is written.
-The resolved version, source, approved permissions, and bundle hash are recorded in the lockfile (see [Where plugins live](#where-plugins-live)).
-
-> **Scaffolding a new plugin:** `outl plugin init <name>` writes a buildable starter project (manifest + `package.json` + `tsconfig` + `src/index.ts`); run `bun install && bun run build` inside it for an installable bundle.
-> Today's CLI surface is `init`, `search`, `list`, `install`, `run`, `config`, `secret`, `enable`, `disable`, `remove` — see [CLI → plugin](cli.md#workspace--admin) for every flag.
-> `outl plugin update` and `.outlpkg` packaging are still roadmap.
-
-### Running a command
-
-A plugin command runs headless through the CLI:
-
-```sh
-outl plugin run <id> <command>
+```text
+Installing Workspace Stats (app.outl.examples.workspace-stats) v1.0.0
+Requests these permissions:
+  - read-page
+Installed app.outl.examples.workspace-stats v1.0.0.
+app.outl.examples.workspace-stats  1.0.0  (enabled)
+    /stats  Workspace statistics
+📊 0 blocks · 0 TODO · 0 DONE · 2 pages
+Applied 0 change(s).
 ```
 
-In the interactive clients the same command shows up on each client's command surface — see below.
+Run from a checkout of the repo, `./examples/workspace-stats` ships with its bundle, so there is no build step.
+In the TUI or the desktop app, the same command is `/stats`.
+Drop `--yes` to see the permission prompt and answer it by hand.
 
-### Command discovery per client
+## What a plugin can never do
 
-A `slash-command` plugin contributes a command that the user can run; where it surfaces depends on the client:
+- **Edit your `.md` files or the CRDT directly.**
+  Every change a plugin makes becomes an op in the workspace log, stamped `plugin:<id>@<device>`, then your markdown is re-rendered from the log.
+  You can tell which plugin wrote what, and undo it like any other edit.
+- **Run code you did not install.**
+  The bundle is hashed at install and re-checked on every load.
+  If the file changes underneath (Finder, iCloud, a half-synced copy), the plugin refuses to load.
+- **Reach the network without a grant.**
+  Network access is per domain, approved by you, and re-checked on every redirect.
+- **Read another plugin's secrets.**
+  Secrets live in your OS keychain, namespaced by plugin id.
+- **Hang the app.**
+  A loop or recursion that runs away is stopped by the engine and shows up as an error.
 
-| Client | How you run a plugin command |
+Plugins are still code written by someone else.
+Read the permission list before you approve it.
+If a plugin asks for `network:` access and `secrets`, it can send a token you stored to the domain you approved, and nowhere else.
+
+## Find a plugin
+
+| Where | How |
 |---|---|
-| TUI | Press `/` (Normal mode) → the slash menu lists built-ins **and** plugin commands, keyed by the command **id** (`/stats`); type to filter, `Enter` to run. |
-| Desktop | Two ways: the plugins button (top bar) opens the plugin palette, **and** typing `/` at the start of a block opens an inline slash menu (Notion-style) — `/stats` ranks the `stats` command on top, `Enter` runs it. |
-| Mobile | The plugin sheet (header) lists the commands; tap to run. |
-| CLI | `outl plugin run <id> <command>` (headless). |
+| Registry, from a terminal | `outl plugin search [query]` matches name, id, description and keywords, and prints the `install:` line for each hit. |
+| Marketplace, desktop and mobile | Open the plugin browser and search. One tap installs. |
+| Repo examples | [One plugin per capability](plugin-examples.md), each a working starting point. |
+| Anywhere on GitHub | `outl plugin install github:owner/repo`. |
 
-The command **id** is the canonical name across every surface (the CLI's `outl plugin run … stats`, the TUI/desktop `/stats`), so a plugin author picks one id and it reads the same everywhere.
-The inline desktop `/` menu only triggers **block-initial** (a mid-text slash is a path or URL, never a command).
+The TUI has no marketplace screen (the [client parity table](client-parity.md) lists it as unsupported).
+Install from a terminal instead: `outl plugin install <source>`.
 
-### Enabling, disabling, listing, removing
+The marketplace only lists plugins a maintainer reviewed in a pull request against the registry.
+A plugin that is not listed (a private one, a fork, one you are still writing) installs with the CLI.
+
+## Install
 
 ```sh
-outl plugin list
-outl plugin enable <id>
-outl plugin disable <id>
-outl plugin remove <id>     # aliases: uninstall, rm
+outl plugin install ./my-plugin                          # a local directory
+outl plugin install github:owner/repo                    # newest semver tag
+outl plugin install github:owner/repo#v1.2.0             # pinned tag
+outl plugin install github:owner/repo/sub/dir#v1.2.0     # plugin in a subdirectory
 ```
 
-Enabled/disabled state is the `enabled` flag in the lockfile (`installed.json`).
-Disabling keeps the plugin installed but stops it from loading.
-`remove` is the opposite of `install`: it deletes the plugin's directory under `.outl/plugins/<id>/` and drops its lockfile entry.
+A `github:` source is cloned at an immutable semver tag.
+With no `#tag`, outl picks the newest published tag.
+It never follows a branch like `main`, so installing the same source twice gives you the same code.
+
+Install does five things, in this order:
+
+1. Validates `plugin.json` (id shape, paths stay inside the plugin folder, every keybinding and toolbar button points at a declared command).
+2. Prints the permissions the plugin asks for and waits for a yes.
+   `--yes` answers for you, and is required when stdin is not a terminal.
+3. Copies `plugin.json`, the bundle named by `main` and the `configSchema` file into `<workspace>/.outl/plugins/<id>/`.
+   A README, a source map or anything else in the source folder is not copied.
+4. Computes the sha256 of the bundle.
+5. Writes the entry to `installed.json` (the [lockfile](#the-lockfile)): version, source, hash, approved permissions, `enabled: true`.
+
+**Installing over an existing plugin resets it.**
+The new entry replaces the old one, so your saved config goes back to empty and a disabled plugin turns back on.
+Keys you stored in the keychain and `storage.json` are untouched.
+Run `outl plugin config show <id>` first and write down your settings.
+There is no `outl plugin update` yet.
+
+> Install needs a workspace.
+> In a folder that is not one, it prints the permission list and then fails with `NO_WORKSPACE: no outl workspace at <dir> — run `outl init <dir>` first`.
+
+## Run a plugin's commands
+
+A plugin contributes commands.
+Each command has an **id** (`stats`) and a **title** (`Workspace statistics`).
+The id is the same on every client.
+
+| Client | How to run a command |
+|---|---|
+| CLI | `outl plugin run <plugin-id> <command-id>`. Prints notifications and `Applied N change(s).`, then re-renders every page's `.md`. |
+| TUI | `/` in Normal mode opens the slash menu. Plugin commands sit next to the built-ins, described as `plugin · <plugin-id>`. Type to filter, `Enter` to run. |
+| Desktop | Type `/` at the **start** of a block for the inline slash menu, or click the plugins button (`⧉`) for the plugin palette. A `/` in the middle of text is a path, never a command. |
+| Mobile | Tap the plugin glyph in the header (aria label "Plugin commands") to open the plugin sheet, then tap a command. |
+
+Three more ways a command can be reached, if the plugin declares them:
+
+- **A chord.**
+  `Ctrl+Shift+R` or a two-chord sequence like `Ctrl+G A`.
+  On the TUI it fires from Normal mode only, never in the middle of an edit.
+  On the desktop it fires anywhere, unless a built-in shortcut owns that chord.
+  A plugin can never take over `Cmd+B`, `dd`, `Ctrl+P` and friends.
+  Mobile has no keyboard, so chords do not apply there.
+  A terminal usually cannot tell `Ctrl+Shift+R` from `Ctrl+R`, so on the TUI a two-chord sequence such as `Ctrl+G A` is the reliable spelling.
+- **A toolbar button.**
+  Desktop and mobile draw it in the chrome.
+  The TUI has no toolbar, so that command shows up in the slash menu.
+- **A reaction to your edits.**
+  An `op-hook` plugin runs after each change, whether you typed it or a peer synced it.
+  The TUI defers hooks while you are in Insert mode and runs them when you leave it.
+
+A command that needs the plugin's output visible (a toast, an HTML overlay) shows it on the client's status line or as a toast.
+HTML overlays and rich code blocks are drawn only by the desktop and mobile apps.
+
+## Configure a plugin
+
+Some plugins have settings (a page name, a number of days) and some need a secret (an API token).
+Both are described by the plugin's `config.schema.json`, so every client shows the same fields.
+
+Plain settings live in `installed.json`.
+Secrets live in your OS keychain and never touch the workspace, so they do not sync and do not end up in a git backup of your notes.
+
+```sh
+outl plugin config show app.outl.examples.greeter
+```
+
+```text
+Settings for app.outl.examples.greeter:
+  name  [string]  (default "friend")
+      Name the greeting addresses you by.
+
+Edit: outl plugin config set app.outl.examples.greeter <key> <value>
+      outl plugin secret set app.outl.examples.greeter <key>
+```
+
+```sh
+outl plugin config set app.outl.examples.greeter name Ana     # Set app.outl.examples.greeter/name.
+outl plugin secret set run.avelino.ouraring token             # hidden prompt
+outl plugin secret set run.avelino.ouraring token --value ... # non-interactive; lands in shell history
+outl plugin secret remove run.avelino.ouraring token          # alias: rm
+```
+
+The value is coerced to the field's schema type (`14` becomes an integer for an `integer` field, `true` a boolean).
+A key the schema does not list is refused (`has no config field`), and a secret field is refused by `config set` (use `secret set`).
+`secret set` needs a terminal for the hidden prompt, otherwise pass `--value`.
+
+| Client | Where the settings form is |
+|---|---|
+| CLI | `outl plugin config` and `outl plugin secret`, above. |
+| TUI | `/plugin-settings` (alias `/plugins`). `Up` / `Down` pick a field, `Enter` edits it (a boolean flips), `Enter` again saves, `Esc` cancels or closes. Shows "No configurable plugins installed" when no plugin has a schema. |
+| Desktop | The settings form of each installed plugin in the plugin browser. |
+| Mobile | The settings form of each installed plugin in the plugin browser. |
+
+A secret field never shows its value on any client, only whether it is set.
+
+## Turn off, turn on, remove
+
+```sh
+outl plugin list                  # every plugin, version, enabled or disabled, and its commands
+outl plugin disable <id>          # keeps it installed, stops it from loading
+outl plugin enable <id>
+outl plugin remove <id>           # aliases: uninstall, rm
+```
+
+`remove` deletes `<workspace>/.outl/plugins/<id>/` and the lockfile entry (your saved config goes with it).
+It does not delete the plugin's keychain secrets, so run `outl plugin secret remove <id> <key>` for each one you want gone.
+Removing a plugin that is not installed prints `Plugin `<id>` is not installed.` and exits cleanly.
+
+Everything a plugin wrote stays in your notes.
+Removing the plugin does not undo its edits.
+Its ops carry the `plugin:<id>@<device>` actor if you need to find them.
 
 ## Permissions
 
-A plugin declares the permissions it needs in its manifest.
-You approve them **once, on install**, and the approved set is frozen in the lockfile.
-Every host call is gated against that set — a plugin that didn't get `write-page` cannot write, no matter what its code tries.
+A plugin lists what it needs in `plugin.json`.
+You approve the list once, at install, and the approved set is frozen in the lockfile.
 
-| Permission | Grants |
-|---|---|
-| `read-page` | Read page and block content. |
-| `write-page` | Create or edit page and block content. |
-| `read-op-log` | Observe ops as they're applied (the `onOp` hook). |
-| `submit-op` | Submit mutations to the op log. |
-| `storage:local` | Per-plugin local key/value storage (this device only — does **not** sync). |
-| `secrets` | Read the plugin's own secret from the OS keychain (`ctx.secrets.get`); the value is set out-of-band and never touches the workspace on disk. |
-| `network:<domain>` | Network access scoped to one domain. |
+| Permission | What it lets the plugin do | Enforced when the plugin runs |
+|---|---|---|
+| `read-page` | Read blocks and pages. | Shown at install. Not checked on reads today (see below). |
+| `write-page` | Create, edit, move, delete blocks and pages. | **Yes.** A write without it is dropped and reported as an error. |
+| `read-op-log` | Observe each applied op (`onOp`). | Shown at install. The hook runs when the plugin declares the `op-hook` capability. |
+| `submit-op` | Companion to `write-page` for mutations. | Shown at install. The check is on `write-page`. |
+| `storage:local` | A key/value store for this plugin on this device. It does not sync. | **Yes.** Without it `ctx.storage` throws. |
+| `secrets` | Read the plugin's own keychain secrets. | **Yes.** Without it `ctx.secrets.get` throws. |
+| `network:<domain>` | HTTP(S) to one domain. | **Yes.** |
 
-Network is always scoped to a domain.
-`network:api.openai.com` (exact) and `network:*.openai.com` (leading-label wildcard) are valid; a bare `network:*` is **rejected** — a plugin can never request the whole internet.
+Network grants are always scoped.
+`network:api.openai.com` matches that host only.
+`network:*.openai.com` matches any subdomain (`api.openai.com`) but not `openai.com` itself and not `evil-openai.com`.
+A bare `network:*` is rejected when the manifest is parsed.
 
-> **storage:local does not converge.**
-> Per-plugin KV storage is local to the device on the day-zero release, to keep the op log from inflating.
-> If a plugin needs state that syncs across your devices, that state has to be modeled as an op (not supported yet) — it won't silently appear on your other machines.
+What the network gate does for you:
+
+- Only `http` and `https`.
+- A redirect to a host you did not approve is refused, and the refusal is logged with the plugin id (the plugin can hide the error from itself, not from the log).
+- An `https` to `http` downgrade is refused.
+- Custom headers, such as a token in `X-Api-Key`, are dropped when a redirect changes host, port or scheme.
+- A request stops after 60 seconds at most, redirects included.
+- A response body over the size cap is refused.
+
+What it does not do: it matches host **names**.
+A plugin author who controls DNS for an approved domain can point it at `127.0.0.1`.
+Approve `network:` grants only for authors you would trust with a local service.
+
+> **Read the read-side honestly.**
+> Today `read-page` and `read-op-log` are listed and approved but not enforced at run time: a plugin without `read-page` can still query blocks, and `onOp` is gated by the `op-hook` capability, not by `read-op-log`.
+> Treat a plugin as able to read your whole workspace if it asks for any read or write permission, and decide on that basis.
+> The enforced writes, storage, secrets and network checks are the ones that stop it from changing or sending anything.
 
 ## Where plugins live
 
-Installed plugins sit inside the workspace, next to your notes:
-
 ```
-<workspace>/.outl/plugins/<id>/
-├── plugin.json
-├── index.js            # the single bundled file
-├── index.js.map        # optional, for better errors
-├── config.schema.json
-└── README.md
+<workspace>/.outl/plugins/
+├── installed.json          # the lockfile
+├── <plugin-id>/
+│   ├── plugin.json
+│   ├── index.js            # the bundle named by `main`
+│   ├── config.schema.json  # only if the plugin has settings
+│   └── storage.json        # only if the plugin used ctx.storage
+└── _dev/<name>/            # plugins under development, see below
 ```
 
-Only the **build output** lands here — no `node_modules`, no source tree.
-The rule is hard: a plugin survives deleting `node_modules`.
+Only build output lives here.
+No `node_modules`, no source tree.
+A plugin survives deleting `node_modules` in its repo.
 
 ### The lockfile
 
-Each workspace keeps an `installed.json` lockfile recording, per plugin:
+`installed.json` records, per plugin:
 
-- `version` and `source` (the install source ref — a local path today, an immutable `github:…#vX.Y.Z` tag once that source lands)
-- `bundleHash` — sha256 of `index.js`, **revalidated on every load**
-- `permissionsApproved` — the frozen approved set
-- `installedBy` — the device that installed it
-- `config` — your settings, stored outside the bundle so they survive a reinstall
-- `enabled`
+- `version` and `source` (`local:./path` or the `github:` ref).
+- `bundleHash`: the sha256 of the bundle, checked on **every** load.
+- `permissionsApproved`: the frozen set from install.
+- `installedBy`: the actor of the device that installed it.
+- `config`: your plaintext settings, `null` until you set one.
+- `enabled`.
 
-The `bundleHash` is the integrity check.
-If `index.js` ever differs from the recorded hash — an out-of-band edit through iCloud or Finder, a half-finished sync — the load is **blocked** rather than silently running modified code.
-The installed version never changes underneath you.
+If the bundle on disk no longer matches `bundleHash`, that plugin is blocked and the others load normally:
 
-`installedBy` records the device that installed the plugin, so a synced workspace can tell "approved here" from "approved on another device".
-(The cross-device re-confirm prompt that uses it is roadmap; today the hash check is the active gate.)
+```text
+warning: plugin `app.outl.examples.workspace-stats` failed to load: bundle integrity check failed for app.outl.examples.workspace-stats: expected sha256:9b4c…, got sha256:6cf8…
+```
+
+To recover, `outl plugin remove <id>` and install it again from the source you trust.
+Do not edit `bundleHash` by hand to silence the warning, that is the check doing its job.
+
+## Troubleshooting
+
+| What you see | Cause | Fix |
+|---|---|---|
+| `bundle integrity check failed for <id>` | `index.js` differs from the installed hash: an edit, a sync that did not finish, a disk problem. | Remove and install again. |
+| `running <id>/<cmd>: invalid manifest: no such plugin `<id>`` | The id is wrong, **or** the plugin failed to load (look for the warning line above it), or it is disabled. | `outl plugin list`, fix the id, `outl plugin enable <id>`. |
+| `Applied 0 change(s).` and nothing else | The command id does not exist (a typo is not an error), or the command only reads and shows nothing. | Compare against `outl plugin list`, which prints each `/command-id`. |
+| The command is missing from `outl plugin list` and the slash menu | The plugin did not declare the `slash-command` capability, or the id in `contributes.commands` is not the one it registers. | A plugin author fix. Ask the author, or see the [tutorial](plugin-tutorial.md#step-10--debug-when-it-doesnt-work). |
+| `permission denied` / a write does nothing | The plugin never asked for `write-page`, or you approved a smaller set earlier. | Remove and install again; the new prompt shows the full list. |
+| `invalid manifest: invalid id` | The id is not lowercase reverse-DNS with at least two labels. | Author fix. |
+| `invalid manifest: main must be a relative path inside the plugin` | A `main` or `configSchema` path with `..`, a leading `/` or `~`, or a `:`. | Author fix. |
+| Install: `reading plugin.json from <source>` | The folder has no `plugin.json`, usually because you pointed at the repo root of a plugin whose output is in a subfolder. | Use `github:owner/repo/subdir`. |
+| `not a TTY — pass --value` | `plugin secret set` without a terminal. | Pass `--value`, mind your shell history. |
+| A chord does nothing | Another binding owns it (built-ins always win), the plugin is missing the `keybinding` capability, the chord is longer than two parts, or it does not parse. A bad chord is skipped without a message. | Pick a free chord such as `Ctrl+G A`. |
+| A code fence shows raw source | No plugin claims that language on this client. The TUI never draws `rich` output. Your cursor is on the block (the TUI shows source while you edit it). | Move off the block, or use the desktop or mobile app. |
+| The toolbar button is missing on the TUI | A terminal has no toolbar. | Use `/` and the command id. |
+
+The plugin's `ctx.log` lines and any `console.log` go to the host log of each client.
+Output a command wants you to see arrives as a toast or status line.
 
 ## Dev mode
 
-While building a plugin, drop it in `.outl/plugins/_dev/<name>/` inside the workspace instead of installing it:
+A plugin folder dropped in `<workspace>/.outl/plugins/_dev/<name>/` loads straight from disk:
 
-- **No bundle-hash check** — it loads straight from the directory, so you can rebuild and reload without reinstalling.
-- **Permissions are implicit** — every permission the manifest declares is granted, no approval prompt.
-- **Never recorded in the lockfile** and excluded from sync, so dev iterations don't leak to your other devices.
+- No hash check, so rebuild and relaunch without reinstalling.
+- Every permission the manifest asks for is granted, with no prompt.
+- Not in the lockfile, so it has no saved config: `ctx.config.get()` returns `null` there.
+  Write `cfg?.field ?? default` in the plugin.
+- `outl plugin list` only prints plugins that have a lockfile entry, but a `_dev` plugin loads and its commands run (`outl plugin run <id> <command>` works, and its commands show under a lockfile entry with the same id).
+  Disable and remove do not apply to it, delete the folder instead.
+- If a lockfile entry with the same id exists, both load, so `plugin run` can hit the dev copy.
+  Remove the installed one while you develop.
 
-This is for authoring only — a `_dev` plugin runs with a relaxed sandbox.
-A hot-reload-on-save watcher and an in-client "sandbox relaxed" banner are roadmap niceties; the load behavior above is what ships today.
-See [Plugin API → Anatomy](plugin-api.md#anatomy-of-a-plugin) for the full dev layout.
+There is no file watcher and no "sandbox relaxed" banner yet.
+After a rebuild, restart the client (or run the CLI command again).
+Do not leave a `_dev` copy in a workspace you sync to other devices unless you want that code on them.
 
-## Distribution
+## Distribution (for authors)
 
 ### The registry
 
-Discovery is a static index — `registry.json` — versioned in the [`outlmd/registry`](https://github.com/outlmd/registry) repo and served at **`https://plugins.outl.app/registry.json`** (Netlify, static, with CORS so any client can fetch it).
-No server, no infrastructure.
-It lists each plugin's id, name, `github:` repo, published versions, capabilities, permissions, and description — what powers the discovery list and search.
-In-client discovery (`outl plugin search` + a browse/install screen in the desktop & mobile apps) reads this index.
-A hosted registry (`registry.outl.app`) with full-text search and install counts is deferred until volume justifies it.
+Discovery is a static index, `registry.json`, kept in [`outlmd/registry`](https://github.com/outlmd/registry) and served at `https://plugins.outl.app/registry.json`.
+It lists each plugin's id, name, repo, versions, capabilities, permissions and description.
+`outl plugin search` and the marketplace screens read it.
 
-### Publishing your plugin (registering it)
-
-Listing your plugin in the registry is what makes it show up in the in-app marketplace (the desktop/mobile browse-and-install screen) and in `outl plugin search`.
-The registry stores **only metadata** — your code stays in your repo; the bundle host (`plugins.outl.app`) re-downloads it from there at build time.
-
-Four steps:
+### Publish a plugin
 
 1. **Host the built plugin in a public GitHub repo.**
-   The repo's default branch must contain the **installed shape** at the path you'll point the registry at: `plugin.json`, the bundled `index.js` (run `bun run build`), and `config.schema.json` if you have one.
-   Either at the repo root, or in a subdirectory (a monorepo of plugins works — point at `owner/repo/path/to/plugin`).
-
-2. **Open a PR against [`outlmd/registry`](https://github.com/outlmd/registry)** adding one entry to `registry.json`:
+   The default branch must contain the installed shape at the path you register: `plugin.json`, the bundled `index.js` and `config.schema.json` if you have one.
+   A subdirectory works, so one repo can hold several plugins.
+2. **Open a pull request** against `outlmd/registry` adding one entry:
 
    ```jsonc
    {
-     "id": "dev.you.my-plugin",            // MUST equal your plugin.json `id`
+     "id": "dev.you.my-plugin",            // must equal plugin.json `id`
      "name": "My Plugin",
      "description": "One sentence on what it does.",
      "author": "your-handle",
@@ -180,80 +324,67 @@ Four steps:
      "category": "productivity",
      "keywords": ["..."],
      "capabilities": ["slash-command"],     // mirror plugin.json
-     "permissions": ["read-page"],          // mirror plugin.json — users see the ask
+     "permissions": ["read-page"],          // mirror plugin.json, users see this ask
      "latest": "1.0.0",
      "versions": ["1.0.0"]
    }
    ```
 
-   The `id`, `capabilities`, and `permissions` **must** match your `plugin.json` (CI validates the entry against the schema; the install re-validates the manifest anyway).
+   `id`, `capabilities` and `permissions` must match your manifest.
+   CI validates the entry, and install re-validates the manifest anyway.
+3. **Merge.** The registry build fetches your bundle and serves it at `https://plugins.outl.app/p/<id>/`.
+4. Your plugin appears in `outl plugin search` and the in-app marketplace.
 
-3. **Merge → the Netlify build re-fetches your bundle** from the repo and serves it at `https://plugins.outl.app/p/<id>/`.
-
-4. Your plugin now appears in **`outl plugin search`** and the **in-app marketplace**, installable with one tap.
-
-> **Official vs. unofficial.**
-> The in-app marketplace only installs plugins **listed in the registry** (so a tap-to-install is always something a human reviewed in the PR).
-> A plugin that isn't listed yet — yours mid-development, a private one, a fork — installs via the CLI instead: `outl plugin install github:you/repo` or `outl plugin install ./dir`.
-> Full reference for publishing (the schema, the build, pinning a tag) lives in the registry repo's [README](https://github.com/outlmd/registry#adding-a-plugin).
+The full schema and how to pin a tag live in the registry repo's [README](https://github.com/outlmd/registry#adding-a-plugin).
 
 ### `.outlpkg` (roadmap)
 
-A `.outlpkg` will be the installed shape of a plugin — manifest, bundle, and assets, **no source** — packed as tar+gzip, named `<id>-<version>.outlpkg`, with its own extension (not `.zip`) so the OS can associate it with outl.
-It is **not implemented yet**: today, install is from a local directory (and, once wired, a `github:` source).
+A single-file `<id>-<version>.outlpkg` (tar and gzip, no source) is planned and not implemented.
+Today you distribute a directory or a `github:` source.
 
 ## Capabilities per client
 
-A capability is something a plugin plugs into; each client implements a subset.
-The loader **intersects** the two — a capability your current client can't honor loads partially with a warning, never a crash.
-The plugin still runs for everything else.
+A **capability** is a thing a plugin plugs into.
+Each client implements some of them.
+The loader keeps the intersection: a capability your client cannot honor loads partially with a warning, and the rest of the plugin still runs.
 
 | Capability | TUI | Desktop | Mobile | CLI |
 |---|:---:|:---:|:---:|:---:|
-| `op-hook` | ✅ | ✅ | ✅ | ✅ |
-| `slash-command` | ✅ | ✅ | ✅ | ✅ |
-| `config-schema` (read) | ◑ | ◑ | ◑ | ◑ |
-| `keybinding` | ✅ | ✅ | — | — |
-| `toolbar-button` | ✅ (slash menu) | ✅ | ✅ | — |
-| `content-transformer:text` | ✅ | ✅ | ✅ | — |
-| `content-transformer:rich` | — | ✅ | ✅ | — |
-| `sync-transport` | core only — client polling is roadmap | | | |
+| `slash-command` | yes | yes | yes | yes (`plugin run`) |
+| `op-hook` | yes | yes | yes | yes |
+| `config-schema` | yes (`/plugin-settings`) | yes | yes | yes (`plugin config`) |
+| `keybinding` | yes, Normal mode | yes | not applicable | not applicable |
+| `toolbar-button` | in the slash menu | button in the chrome | button in the header | not applicable |
+| `content-transformer:text` | yes, inline | yes | yes | not applicable |
+| `content-transformer:rich` | not drawn | yes, sandboxed iframe | yes, sandboxed iframe | not applicable |
+| `ui-render` | not drawn | yes, overlay | yes, overlay | not applicable |
+| `sync-transport` | core only | core only | core only | core only |
 
-✅ implemented · ◑ partial · 🔜 planned (post day-zero) · — not applicable to this client.
+`sync-transport` works in the host (`ctx.sync.register` is live and convergence is tested), but no client calls it on a timer yet.
+Treat it as roadmap when you pick a plugin.
+`query-provider` appears in the manifest schema and is not wired to anything.
 
-`op-hook` and `slash-command` run identically on every client (the CLI exposes commands through `outl plugin run`).
-**`config-schema` is live**: a plugin reads its config with `ctx.config.get()` (from the lockfile) and its secrets with `ctx.secrets.get()` (from the OS keychain, for fields marked `x-outl-secret`). Every client edits both — `outl plugin config` / `outl plugin secret` on the CLI, a settings form in the desktop / mobile plugin browser, and the TUI `plugin-settings` overlay — with values coerced to the field's schema type. The schema type is coerced but not otherwise validated on the stored value.
-**`keybinding` is live on the TUI and the desktop.**
-A `contributes.keybindings` chord fires the bound command — on the TUI from Normal mode (single- and two-chord sequences), on the desktop wherever a native binding doesn't claim it first.
-Use a free chord like `Ctrl+G` or a two-chord sequence such as `Ctrl+G A`.
-Mobile has no keyboard, so it doesn't apply there.
-**`toolbar-button` is live**: desktop and mobile render a button in the chrome for the plugin's command, and the TUI surfaces that command in its slash menu (a terminal has no chrome bar).
-**`content-transformer` is live** today: `ctx.content.register(lang, fn)` renders a fenced block — `:text` on every read surface (inline in the TUI), `:rich` as HTML in a sandboxed iframe on the GUIs (the TUI drops it).
-A plugin that wants to be a query engine registers a transformer for the `query` fence; plugins can also call `outl.query({ … })` from JS code blocks to get structured results (see [Query code blocks → Plugin SDK API](query.md#plugin-sdk-api-outlquery)).
-**`sync-transport` is core-ready**: `ctx.sync.register({ push, pull })` works and convergence is tested, but no client polls the transport on a timer yet — that wiring is roadmap.
-The CLI is headless, so anything visual or chord-driven (`keybinding`, `toolbar-button`, `content-transformer:*`) doesn't apply to it.
+A query engine is not its own capability.
+A plugin claims the ` ```query ` fence with a `content-transformer`, and can call `outl.query({ … })` for structured results (see [Query code blocks → Plugin SDK API](query.md#plugin-sdk-api-outlquery)).
 
-## Permissions reference
-
-| Wire string | Permission |
-|---|---|
-| `read-page` | Read page/block content |
-| `write-page` | Create/edit page/block content |
-| `read-op-log` | Observe applied ops |
-| `submit-op` | Submit ops to the log |
-| `storage:local` | Per-plugin local KV (no sync) |
-| `secrets` | Read the plugin's own keychain secret (`ctx.secrets.get`) |
-| `network:<domain>` | Network to one domain (`network:*` rejected) |
+Fence rendering order on the GUI clients: a plugin transformer for the language, then the built-in Pele diagram (only for `mermaid`, only when `[editor] diagrams` is `"pele"`), then highlighted source.
+A plugin that claims `mermaid` replaces Pele for that language.
 
 ## See also
 
-- [Plugin tutorial](plugin-tutorial.md) — build a plugin step by step.
-- [Plugin API](plugin-api.md) — the authoring reference: manifest, host API, `definePlugin`, versioning.
-- [Plugin architecture](plugin-architecture.md) — how the runtime works under the hood.
-- [`plugin-v1.json`](schemas/plugin-v1.json) — JSON Schema for `plugin.json`.
-- [CLI](cli.md) — the `outl plugin` subcommands.
+- [Plugin tutorial](plugin-tutorial.md): build one step by step.
+- [Plugin API](plugin-api.md): manifest, host API, versioning.
+- [Plugin examples](plugin-examples.md): one working plugin per capability.
+- [Plugin architecture](plugin-architecture.md): how the runtime works.
+- [CLI → plugin](cli.md#workspace--admin): every `outl plugin` subcommand.
+- [`plugin-v1.json`](schemas/plugin-v1.json): the manifest JSON Schema.
 
 ---
+
+## Contributor reference: client plugin surfaces
+
+The next two sections are for people working on the clients, not for plugin users.
+The headings below are linked from other docs, so they stay as they are.
 
 ## Desktop plugin surface
 

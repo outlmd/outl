@@ -1,7 +1,8 @@
 # Plugin examples
 
-A gallery of small, self-contained example plugins — **one per capability** — so you can copy a working starting point instead of building from scratch.
-Each lives in [`examples/`](https://github.com/outlmd/outl/tree/main/examples) and has its own page below with the code, the manifest, and how to run it.
+A gallery of small, self-contained example plugins, **one per capability**, so you can copy a working starting point instead of building from scratch.
+Each lives in [`examples/`](https://github.com/outlmd/outl/tree/main/examples) and has its own page below with the code, the manifest and how to run it.
+All twelve folders in `examples/` install cleanly with the CLI, and the ones with a plain command (`stats`, `greet`, `pick`, `pulse`, `todo-archive-done`) were run end to end.
 
 New to plugins?
 Read the [tutorial](plugin-tutorial.md) first, then the [API reference](plugin-api.md).
@@ -12,7 +13,7 @@ Read the [tutorial](plugin-tutorial.md) first, then the [API reference](plugin-a
 |---|---|---|
 | `op-hook` | [Word Count](plugin-examples/word-count.md) | Notifies word-count milestones as you type |
 | `slash-command` | [Workspace Stats](plugin-examples/workspace-stats.md) | Counts blocks / TODO / DONE / pages |
-| `slash-command` | [Template Stamper](plugin-examples/template-stamper.md) | Stamps a structural template under the cursor |
+| `slash-command` | [Template Stamper](plugin-examples/template-stamper.md) | Stamps a structural template under the first block of a configured page (page only, no `examples/` folder) |
 | `config-schema` | [Greeter](plugin-examples/greeter.md) | Greets you using a configurable name |
 | `keybinding` | [Random Task](plugin-examples/random-task.md) | A chord that picks a random TODO to focus on |
 | `toolbar-button` | [Page Pulse](plugin-examples/page-pulse.md) | A chrome button that shows page stats |
@@ -35,6 +36,22 @@ A production plugin lives in **its own repo** and depends on the published `@out
 
 Building your own integration?
 Start from that repo, and see [Plugin API → Secrets, the full flow](plugin-api.md#secrets--the-full-flow) for the token contract.
+
+## Which one do I need
+
+| I want to… | Start from |
+|---|---|
+| Add a command that reads the workspace | [Workspace Stats](plugin-examples/workspace-stats.md) |
+| Add a command that writes (move, create, edit) | [TODO Archiver](plugin-examples/todo-archiver.md) |
+| Add a setting the user can change | [Greeter](plugin-examples/greeter.md) |
+| Add a keyboard chord | [Random Task](plugin-examples/random-task.md) |
+| Add a button to the toolbar | [Page Pulse](plugin-examples/page-pulse.md) |
+| React to every edit | [Word Count](plugin-examples/word-count.md) |
+| Draw something when something happens | [Confetti](plugin-examples/confetti.md) |
+| Render a code fence as text (works in the TUI) | [Box](plugin-examples/box.md) |
+| Render a code fence as HTML (desktop and mobile) | [Bars](plugin-examples/bars.md) |
+| Call a web API | [Inspire](plugin-examples/inspire.md), then [Excalidraw](plugin-examples/excalidraw.md) for secrets and a cache |
+| Build a sync backend | [Echo Sync](plugin-examples/echo-sync.md) (no client drives it yet) |
 
 ## The shape of an example
 
@@ -59,3 +76,20 @@ outl -w <workspace> plugin list
 
 The bundle ships in the repo, so you can install an example without a build step.
 To change one, edit `src/index.ts` and rebuild (`bun run build` inside the example, after `bun install` at the repo root).
+
+A run of the TODO Archiver against a page holding `DONE ship it` and `TODO later`:
+
+```sh
+outl -w <workspace> plugin run app.outl.examples.todo-archiver todo-archive-done
+```
+
+```text
+Archived 1 block(s) to "archive"
+Applied 2 change(s).
+```
+
+`Applied 2` is the page create and the move.
+`DONE ship it` is now the only block in `archive`.
+
+Every example's id is `app.outl.examples.<folder name>`.
+Run `outl plugin list` to see the command ids it contributes.

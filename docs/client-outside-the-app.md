@@ -2,6 +2,18 @@
 
 Three things that happen while the app is closed, in the background, or in another app's hands: a capture gesture, a file another app hands over, and a reminder that has to fire.
 
+**On the desktop, in short:**
+
+- Press `Cmd/Ctrl+Shift+Space` from any app and a one-line box adds a block to the end of today's journal.
+  outl has to be running, but its window does not have to be in front.
+- Run `outl capture "text"` from a terminal or a script.
+  The line waits in an inbox and lands the next time the app opens or returns to the foreground.
+- Choose outl in a file's **Open With** list to import a `.md` or `.txt` file as a page.
+  It is never the default app, and the original file is not changed.
+- Leave a `remind::` line on a block and the desktop shows a system notification while the app runs.
+
+Every other section here is the contract behind those four.
+
 Moved out of [`docs/clients.md`](clients.md), which had grown to the point where no edit to it was cheap.
 That page keeps the cross-client architecture: the stack, who owns which fact, the locks an open takes, and the two conditions every client has to surface.
 
@@ -14,7 +26,7 @@ So every client has a way to add a line to today's journal **without outl being 
 |---|---|
 | iOS | Home Screen and Lock Screen widget, the "Add to today" Shortcut (Siri and the Action button use the same one), the share sheet |
 | Android | the share sheet, a home screen widget, a quick settings tile |
-| Desktop | `outl capture "your line"`, and whatever you wire it to — a macOS Service or Shortcut, Raycast, Alfred, a hotkey daemon |
+| Desktop | `Cmd/Ctrl+Shift+Space` from any app while outl is running (an OS-wide shortcut that opens the capture box and writes the line as an op immediately), `outl capture "your line"` with no app running, and whatever you wire that to — a macOS Service or Shortcut, Raycast, Alfred, a hotkey daemon |
 | TUI | `outl capture` from any terminal; it lands the next time you start outl here |
 
 **What the words mean.** A widget or a Shortcut says *"Saved, opens in outl"*, never "added".

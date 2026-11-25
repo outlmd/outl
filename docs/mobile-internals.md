@@ -7,6 +7,8 @@ These sections are reference: you read one when you touch that component.
 The rules that hold whatever you are editing stayed in `CLAUDE.md`.
 
 What the user experiences, feature by feature, is [`docs/mobile-ux.md`](mobile-ux.md).
+The task-oriented user guide is [`docs/mobile.md`](mobile.md), with [capture](mobile-capture.md) and [troubleshooting](mobile-troubleshooting.md) beside it.
+When a section here changes what a user sees or presses, update the guide in the same change.
 
 ## First-run onboarding
 
@@ -16,10 +18,9 @@ Mobile has no "is a workspace chosen?" backend gate (a fresh install always reso
 
 Two honest steps, no filler:
 
-1. **Storage** — "Keep on this device" (the local default, recommended; just advances, no `setWorkspace` call) vs "Store in iCloud" (`setWorkspace(pickInICloud())`).
-   The iCloud option is **hidden** when `pickInICloud()` returns `null` (device not signed in) — never a dead button.
-   Because `set_workspace` is boot-read, choosing iCloud shows a one-line "active after you restart" note instead of pretending the swap is instant.
-   Arbitrary-folder picking stays deferred (native picker), so these two are the only choices today.
+1. **Storage** — one button, "Keep on this device".
+   It only advances; no `setWorkspace` call, because the workspace already opened against the app-local default.
+   There is no iCloud option and no folder picker today: `Onboarding.tsx` offers the local root and nothing else, and an earlier version of this section described a "Store in iCloud" button that does not exist in the code.
 2. **Sync (optional)** — the shared `SYNC_STEP` copy (`@outl/shared/onboarding`) + a button that opens the existing `<DevicesSheet />` (set its `open` prop — internals untouched).
    Fully skippable.
 
@@ -316,7 +317,10 @@ See [`outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) for what th
 ## Trust surfaces
 
 - **Page history**: `components/HistorySheet.tsx`, opened from the page properties sheet (long-press the title, then "Page history"). Same `restorePlan` and `DiffText` as the desktop `TimelinePanel`; restores are new ops.
-- **Devices sheet** shows per-device op counts (`device_activity`) and the Markdown export (`export_markdown`), which lands next to the workspace, so in iCloud Drive it shows up in Files.
+- **Devices sheet** shows per-device op counts (`device_activity`), the session's merged edits with an undo, and the Markdown export (`export_markdown`).
+  The export lands in the **parent of the workspace folder**, which on the default local root is inside the app's own storage.
+  `Info.plist` sets neither `UIFileSharingEnabled` nor `LSSupportsOpeningDocumentsInPlace`, so the Files app does not list it.
+  The old line here said it shows up in Files through iCloud Drive; that only held when the workspace lived in an iCloud container, which no build offers now.
 - **Saved mark**: `lib/saved.ts`; `Journal`'s commit marks a block only after `edit_block` resolves, `BlockRow` renders the dot.
 
 ## Polish: motion, focus mode, first-run tips
