@@ -165,7 +165,34 @@ interface MarkdownInlineProps {
   pageEmbeds?: PageEmbedMap;
 }
 
+/**
+ * Declared mirror of `outl_md::view::is_thematic_break`: three or more of
+ * one of `-` `*` `_`, optionally spaced, nothing else. Rust owns the rule;
+ * the pin is `MarkdownInline.test.tsx`.
+ */
+export function isThematicBreak(line: string): boolean {
+  const t = line.replace(/[ \t]/g, "");
+  return /^(-{3,}|\*{3,}|_{3,})$/.test(t);
+}
+
+/** A block whose whole text is one thematic break draws a rule. */
+function ruleOnly(tokens: InlineToken[]): boolean {
+  return (
+    tokens.length === 1 &&
+    tokens[0].kind === "plain" &&
+    isThematicBreak(tokens[0].value)
+  );
+}
+
 export function MarkdownInline(props: MarkdownInlineProps): JSX.Element {
+  return (
+    <Show when={!ruleOnly(props.tokens)} fallback={<hr class="my-2 border-t border-(--color-outl-border)" />}>
+      <MarkdownTokens {...props} />
+    </Show>
+  );
+}
+
+function MarkdownTokens(props: MarkdownInlineProps): JSX.Element {
   const variant = (): Variant => props.variant ?? "pill";
   const allowBlockAssets = (): boolean =>
     props.blockAssets ?? (variant() !== "inline");

@@ -399,6 +399,13 @@ pub(crate) fn emit_block_lines(
                 BlockRowKind::CodeFenceBody if pretty => {
                     content.push(Span::styled(row.text.to_string(), app.theme.code));
                 }
+                BlockRowKind::Bullet | BlockRowKind::Continuation
+                    if pretty && outl_md::view::is_thematic_break(row.text) =>
+                {
+                    content.push(crate::view::table::thematic_rule(
+                        row.indent, text_width, &app.theme,
+                    ));
+                }
                 BlockRowKind::TableRule if pretty => {
                     content.extend(crate::view::table::render_rule(row.text, &app.theme));
                 }

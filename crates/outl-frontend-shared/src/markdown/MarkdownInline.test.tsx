@@ -2,7 +2,7 @@ import { render } from "solid-js/web";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InlineToken } from "../api/types";
-import { MarkdownInline, type EmbedMap } from "./MarkdownInline";
+import { isThematicBreak, MarkdownInline, type EmbedMap } from "./MarkdownInline";
 
 // The `image` render branch resolves a local `assets/…` asset to a
 // `data:` URL through this command. Mock the wrapper so the test never
@@ -302,5 +302,28 @@ describe("MarkdownInline — block-ref rendering (issue #147)", () => {
     const m = mount(refTok);
     expect(m.host.textContent).toBe(handle);
     m.dispose();
+  });
+});
+
+describe("thematic break", () => {
+  // Mirror of `outl_md::view::thematic_break_shapes`: same inputs, same verdicts.
+  it("agrees with the Rust predicate", () => {
+    for (const yes of ["---", "***", "___", "-----", "- - -", "  ---  ", "* * *"])
+      expect(isThematicBreak(yes), yes).toBe(true);
+    for (const no of ["", "--", "- -", "-*-", "--- a", "a ---", "- a", "***bold***"])
+      expect(isThematicBreak(no), no).toBe(false);
+  });
+
+  it("draws a rule for a block that is only a break", async () => {
+    const { host } = mount([{ kind: "plain", value: "---" }]);
+    await tick();
+    expect(host.querySelector("hr")).not.toBeNull();
+    expect(host.textContent).toBe("");
+  });
+
+  it("leaves prose containing dashes alone", async () => {
+    const { host } = mount([{ kind: "plain", value: "a --- b" }]);
+    await tick();
+    expect(host.querySelector("hr")).toBeNull();
   });
 });

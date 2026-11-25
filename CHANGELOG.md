@@ -7,6 +7,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A block that is only `---` (or `***`, `___`) draws a horizontal rule.**
+  It rendered as the literal dashes in every client.
+  The TUI fills the text column with `─`, and desktop and mobile draw an `<hr>`.
+  Only a whole block (or, in the TUI, a whole line) counts, so `a --- b` stays prose, and the `.md` on disk is untouched.
+
 - **The TUI footer shows the message that explains a refused key, at any width.**
   The status line used to paint after a 76-cell hint, so a terminal under ~128 columns cut every message off the edge: `no code block or link under cursor`, `unknown command`, the `r` / `f` prompts, the `y/n` confirmations.
   A message now replaces the hint (a constant per mode) and is cut with `…` when it still does not fit.

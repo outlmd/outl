@@ -143,6 +143,32 @@ pub fn line_col_to_char(s: &str, target_line: usize, target_col: usize) -> usize
     total
 }
 
+/// Is this line a CommonMark thematic break (`---`, `***`, `___`)?
+///
+/// Three or more of the same marker, optionally spaced (`- - -`), with
+/// nothing else on the line. **The single owner**: the TUI asks it per
+/// row, and the GUI clients' `isThematicBreak` in `@outl/shared` is a
+/// declared mirror of it.
+///
+/// A line is judged alone, so a `---` that closes a YAML fence never gets
+/// here (the parser splits frontmatter off before blocks exist), and the
+/// callers skip fenced code rows before asking.
+pub fn is_thematic_break(line: &str) -> bool {
+    let mut marker = None;
+    let mut count = 0usize;
+    for c in line.trim().chars() {
+        match c {
+            ' ' | '\t' => {}
+            '-' | '*' | '_' if marker.is_none() || marker == Some(c) => {
+                marker = Some(c);
+                count += 1;
+            }
+            _ => return false,
+        }
+    }
+    count >= 3
+}
+
 /// Decompose a block's `text` into visual rows.
 ///
 /// `cursor_char`, when present, is a char index into `text` (counting
@@ -222,6 +248,26 @@ pub fn block_to_rows<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thematic_break_shapes() {
+        for yes in ["---", "***", "___", "-----", "- - -", "  ---  ", "* * *"] {
+            assert!(is_thematic_break(yes), "{yes:?}");
+        }
+        for no in [
+            "",
+            "--",
+            "- -",
+            "-*-",
+            "--- a",
+            "a ---",
+            "- a",
+            "***bold***",
+            "—-—",
+        ] {
+            assert!(!is_thematic_break(no), "{no:?}");
+        }
+    }
 
     #[test]
     fn empty_text_yields_one_bullet_row() {

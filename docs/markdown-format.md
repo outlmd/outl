@@ -304,6 +304,12 @@ Query blocks auto-run on every page load — no `gx` or `auto-run::` needed.
 
 Full syntax reference, examples, and architecture: [Query code blocks](query.md).
 
+### Horizontal rules
+
+A block whose whole text is `---`, `***` or `___` (three or more, spaces allowed) is drawn as a horizontal rule.
+The text stays as typed; only the rendering changes.
+`outl_md::view::is_thematic_break` owns the rule, and `isThematicBreak` in `@outl/shared` mirrors it.
+
 ### Tables
 
 A pipe-delimited table is **one block**, whose text carries the rows.

@@ -137,6 +137,22 @@ pub(crate) fn render_rule(line: &str, theme: &Theme) -> Vec<Span<'static>> {
     vec![Span::styled(drawn, theme.dim)]
 }
 
+/// The span a `---` block draws: `─` across the text column. `0` is the
+/// headless "don't wrap" width, so it gets a fixed stub.
+pub(crate) fn thematic_rule(
+    indent: u32,
+    text_width: u16,
+    theme: &crate::theme::Theme,
+) -> ratatui::text::Span<'static> {
+    let used = u16::try_from(indent).unwrap_or(0).saturating_mul(2) + 4;
+    let width = if text_width == 0 {
+        3
+    } else {
+        usize::from(text_width.saturating_sub(used).max(3))
+    };
+    ratatui::text::Span::styled("─".repeat(width), theme.dim)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

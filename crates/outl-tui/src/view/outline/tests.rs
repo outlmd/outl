@@ -320,3 +320,28 @@ fn a_property_row_starts_in_its_blocks_text_column() {
         );
     }
 }
+
+#[test]
+fn a_block_that_is_only_dashes_draws_a_rule() {
+    let (app, _dir) = test_app();
+    let mode = RenderMode::Pretty { text: "---".into() };
+    let text: String = render_block_lines(&app, mode, 40)
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(text.contains("────────"), "no rule drawn: {text}");
+    assert!(!text.contains("---"), "the literal dashes leaked: {text}");
+}
+
+#[test]
+fn dashes_inside_prose_are_left_alone() {
+    let (app, _dir) = test_app();
+    let mode = RenderMode::Pretty {
+        text: "a --- b".into(),
+    };
+    let text: String = render_block_lines(&app, mode, 40)
+        .iter()
+        .map(line_text)
+        .collect();
+    assert!(text.contains("a --- b"), "prose was rewritten: {text}");
+}
