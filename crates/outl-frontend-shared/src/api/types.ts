@@ -223,9 +223,9 @@ export interface PageMeta {
 /**
  * One ancestor step in a backlink's breadcrumb. Dimmed context, and
  * *dimmed* is a styling rule rather than a parsing one: the trail is
- * rendered from `tokens` like any other block (`<CrumbTrail />`) and
- * stays inert — nothing in it opens a page. `text` already has the
- * `TODO `/`DONE ` prefix stripped and is what a `title=` tooltip reads.
+ * rendered from `tokens` (`<CrumbTrail />`). Clients open the source
+ * page at `ancestors.at(-1).id`, the parent. `text` has the `TODO `/
+ * `DONE ` prefix stripped and is what a `title=` tooltip reads.
  * Mirrors `outl_actions::BacklinkCrumb`. (`FocusCrumb` in
  * `@outl/shared/outline` is a near-twin but a distinct concept — zoom
  * vs. backlink — and carries no tokens.)

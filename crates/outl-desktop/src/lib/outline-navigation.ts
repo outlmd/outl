@@ -72,8 +72,9 @@ export function handleLinkClick(href: string): void {
   void opening.catch(reportError);
 }
 
-/** A `call:<name>` fence's template page, by exact slug. Unlike
- *  {@link handleRefClick} this never creates a page on a miss. */
+/** A `call:<name>` fence's template page, by exact slug. Despite the
+ *  name this **does** create a plain page on a miss
+ *  (`open_or_create_by_name`), the same as {@link handleRefClick}. */
 export async function handleOpenPage(slug: string): Promise<void> {
   try {
     applyView(await openPageBySlug(slug));

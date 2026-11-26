@@ -32,4 +32,6 @@ pub use position::{position_after, position_before, position_for_new_last_child}
 pub(crate) use props::{group_properties_of, renderable_prop_value, PropertiesByNode};
 pub use props::{is_page_model_key, sort_in_presentation_order};
 pub(crate) use traverse::is_under;
-pub use traverse::{enclosing_page_id, is_live, is_trashed, page_slug_of, walk_subtree};
+pub use traverse::{
+    ancestors_below_page, enclosing_page_id, is_live, is_trashed, page_slug_of, walk_subtree,
+};

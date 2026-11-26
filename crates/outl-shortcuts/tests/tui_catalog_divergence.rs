@@ -302,6 +302,9 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("g [", Mode::Normal, Action::OpenYesterday),
     ("g ]", Mode::Normal, Action::OpenTomorrow),
     ("g d", Mode::Normal, Action::DeletePage),
+    // Agreed by construction: the TUI's `g o` arm lands with the catalog row
+    // (`input/normal.rs`, `Focus::Backlink` only).
+    ("g o", Mode::Normal, Action::OpenBacklinkContext),
     ("g r", Mode::Normal, Action::InsertRemind),
     ("g Shift+r", Mode::Normal, Action::InsertRemindNag),
     ("g n", Mode::Normal, Action::OpenReminders),

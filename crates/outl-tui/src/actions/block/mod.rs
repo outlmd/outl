@@ -41,7 +41,7 @@ mod move_block;
 mod structural;
 mod template;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 pub(crate) use insert::InsertCursor;
 

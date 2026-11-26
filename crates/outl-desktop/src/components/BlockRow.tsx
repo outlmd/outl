@@ -5,7 +5,7 @@ import { QuoteWrap, isBlockQuoted } from "@outl/shared/markdown";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { createSettle } from "@outl/shared/polish";
 
-import { appState, savedMarks, setAppState } from "../lib/store";
+import { appState, landedMarks, savedMarks, setAppState } from "../lib/store";
 import { BlockBody } from "./BlockBody";
 import { BlockContextMenu, type BlockMenuAction } from "./BlockContextMenu";
 import { BlockEditor } from "./BlockEditor";
@@ -188,6 +188,14 @@ export function BlockRow(props: {
             class="absolute top-[4px] bottom-[4px] -left-[2px] w-[3px] rounded-full bg-(--color-outl-accent)"
           />
         </Show>
+        {/* Landing flash: a backlink breadcrumb jump selected this block.
+         * Only the opacity moves (1200 ms hold from `landedMarks`, then
+         * the fade), and `motion-reduce` makes it a static tint. */}
+        <span
+          aria-hidden="true"
+          data-landed={landedMarks.isSaved(props.block.id) ? "true" : "false"}
+          class="pointer-events-none absolute inset-0 rounded-sm bg-(--color-outl-accent)/[0.14] opacity-0 transition-opacity duration-[400ms] data-[landed=true]:opacity-100 motion-reduce:transition-none"
+        />
         {/* Saved-to-disk: fades in when this block's commit lands, then
          * out on its own. Reassurance, not chrome. */}
         <span

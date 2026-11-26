@@ -67,3 +67,8 @@ pub const MOBILE_PASTE_AT_CARET: &str =
 /// `export_markdown` is wired to the GUI clients only.
 pub const TUI_NO_EXPORT: &str =
     "Export isn't in the terminal yet; the workspace `.md` files are already plain Markdown.";
+
+/// Mobile has no chords, so opening a backlink's page at its context is
+/// the tap on the breadcrumb line above the row, not a key.
+pub const TAP_BREADCRUMB: &str =
+    "Tap the breadcrumb above the backlink row to open its page at that block.";

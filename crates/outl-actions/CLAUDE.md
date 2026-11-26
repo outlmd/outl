@@ -375,13 +375,20 @@ Two rules:
 - **A crumb carries inline `tokens`, not just text.**
   It shipped as plain text behind the sentence *"dimmed context, not an interactive surface"*, which conflated a styling rule with a parsing one: no client holds a tokenizer, so "no tokens" could only mean the trail was drawn as markdown source.
   A branch reading `#alinhamento [[buser/team/vendas]] … [mail](https://…)` sat above a citing block that read as prose.
-  Dimming and inertness are still the rule — nothing in a trail opens a page — and both are the client's to apply.
+  Dimming is the client's to apply, and so is what a press on the line does: every client opens the source page at the last crumb's block (`id` is on the wire for that), and `CrumbTrail` stays inert unless the client opts in.
 - **A frame is materialized only for an ancestor of a block that hosts a mention.**
   The walk visits every block in the workspace and almost none of them ever becomes a crumb, so `CrumbFrame` borrows (from-disk: the parse already holds the tokens) or defers the tokenize (from-tree), and `crumbs()` spends it at the one point a `Backlink` is built.
   Tokenizing at push time is `O(all blocks)` thrown away on the pop — root [`CLAUDE.md`](../../CLAUDE.md#critical-invariants-never-violate) invariant 15's second question.
 
 The two builders reach `tokens` by different routes, so `tests/backlinks_index_disk.rs` pins that they cannot disagree; only the from-disk one is on the path a user sees.
 Client-side: `@outl/shared/markdown::CrumbTrail` for both GUIs, `outl_tui::view::backlinks::render_crumb_trail` for the terminal.
+
+**Arriving at a crumb writes, and `unfold_ancestors` owns how.**
+`collapsed::unfold_ancestors(ws, hlc, node)` writes `SetCollapsed(false)` in one batch for only the folded blocks between `node` and its page (`tree::ancestors_below_page`, nearest first), never the page root and never `node`'s own flag, and writes no op when nothing is folded.
+A client calls it with the **citing** block so the parent and everything above it open and the reference stays visible below the parent; the parent is the fallback when the citing block is gone.
+A client does not loop over `set_block_collapsed` for this: that always appends an op, so it would fold-write every ancestor, open or not.
+Fold is op log state (root invariant 7), so the arrival syncs.
+Contract and the per-client sequence: [`docs/client-backlinks.md`](../../docs/client-backlinks.md#the-breadcrumb-opens-the-page-at-its-parent).
 
 ## A cross-page backlink write, and what "live" means
 

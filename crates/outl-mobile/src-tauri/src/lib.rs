@@ -84,7 +84,7 @@ use crate::commands::{
     reload_workspace, rename_page, resolve_page_labels, resolve_ref, search_blocks, search_pages,
     search_persons, set_backlinks_order, set_block_collapsed, set_editor_diagrams,
     set_telemetry_enabled, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
-    undo_page, wait_workspace_ready, workspace_stats,
+    undo_page, unfold_ancestors, wait_workspace_ready, workspace_stats,
 };
 // Registered on mobile for the first time by the shared command catalog
 // (`outl_tauri_shared::wrappers`): the bodies always existed, only the
@@ -526,6 +526,7 @@ pub fn run() {
             move_block_down,
             move_block_after,
             set_block_collapsed,
+            unfold_ancestors,
             paste_markdown_at,
             paste_block_after,
             paste_plain_at,

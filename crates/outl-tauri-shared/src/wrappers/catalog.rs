@@ -168,6 +168,12 @@ macro_rules! block_commands {
                 -> ::std::result::Result<$crate::state::PageView, String>
                 => $crate::commands::block::set_block_collapsed;
 
+            /// Open every folded ancestor between a block and its page
+            /// (a write only for the blocks actually folded).
+            fn unfold_ancestors(page_id: String, id: String)
+                -> ::std::result::Result<$crate::state::PageView, String>
+                => $crate::commands::block::unfold_ancestors;
+
             /// Paste markdown into a block at `caret`, splitting as needed.
             fn paste_markdown_at(
                 page_id: String,

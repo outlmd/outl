@@ -188,6 +188,19 @@ pub enum Action {
     /// `outl_actions::page::delete`.
     DeletePage,
 
+    /// From a backlink row, open the page the citing block lives on, with
+    /// the selection on the row's parent block (the block named by the
+    /// breadcrumb above it) and any fold in the way opened.
+    ///
+    /// Chord `g o` ("go origin") on the desktop and the TUI, acting on
+    /// the backlink row under the cursor even when its breadcrumb is
+    /// hidden by `sameCrumbTrail`. Mobile has no chords; the tap on the
+    /// breadcrumb is its way in, so this row is `Missing` there with
+    /// that sentence. The fold is opened by
+    /// `outl_actions::unfold_ancestors`, the one owner, which writes
+    /// `SetCollapsed` only for blocks that are actually folded.
+    OpenBacklinkContext,
+
     // ── reminders (`remind::`) ───────────────────────────────────
     //
     // Authoring the rule and inspecting the schedule are chorded on
@@ -392,6 +405,7 @@ impl Action {
         Action::CopyBlockRef,
         Action::CopyBlockEmbed,
         Action::DeletePage,
+        Action::OpenBacklinkContext,
         Action::InsertRemind,
         Action::InsertRemindNag,
         Action::OpenReminders,
@@ -495,6 +509,7 @@ mod all_tests {
             Action::CopyBlockRef => "CopyBlockRef",
             Action::CopyBlockEmbed => "CopyBlockEmbed",
             Action::DeletePage => "DeletePage",
+            Action::OpenBacklinkContext => "OpenBacklinkContext",
             Action::InsertRemind => "InsertRemind",
             Action::InsertRemindNag => "InsertRemindNag",
             Action::OpenReminders => "OpenReminders",
@@ -551,5 +566,5 @@ mod all_tests {
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_VARIANTS: usize = 87;
+    const EXPECTED_VARIANTS: usize = 88;
 }

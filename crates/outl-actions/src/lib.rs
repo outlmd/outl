@@ -125,7 +125,7 @@ pub use block::{
     BlockTreeOutcome, BlockTreeSpec,
 };
 pub use clipboard::{copy_markdown, copy_markdown_nodes};
-pub use collapsed::{set_block_collapsed, toggle_block_collapsed};
+pub use collapsed::{set_block_collapsed, toggle_block_collapsed, unfold_ancestors};
 pub use commit::{commit_page, CommitHooks};
 pub use dates::{
     date_from_slug, days_until_next_weekday, journal_ref, journal_slug, journal_title,
@@ -189,6 +189,6 @@ pub use todo::{
     cycle_todo, set_todo, split_todo, TodoState, DOING_PREFIX, DONE_PREFIX, TODO_PREFIX,
 };
 pub use tree::{
-    children_of, enclosing_page_id, is_live, is_trashed, page_slug_of, position_after,
-    position_for_new_last_child, walk_subtree,
+    ancestors_below_page, children_of, enclosing_page_id, is_live, is_trashed, page_slug_of,
+    position_after, position_for_new_last_child, walk_subtree,
 };

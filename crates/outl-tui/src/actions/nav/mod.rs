@@ -18,11 +18,13 @@
 //! | `selection`     | Moving the selection block to block, across the backlink zone   |
 //! | `cursor`        | Moving the caret inside the selected block's text               |
 //! | `backlinks`     | The backlink index: accessors, background build, sort order     |
+//! | `backlink_context` | `g o`: open a backlink's page at the block above it    |
 //! | `search`        | `*` / `#` — search the word under the cursor                    |
 
 use crate::state::{App, Mode, View};
 use std::path::PathBuf;
 
+mod backlink_context;
 mod backlink_nodes;
 mod backlinks;
 mod cursor;

@@ -22,8 +22,13 @@ import {
   previousVisibleId,
 } from "@outl/shared/outline";
 
+import { openBacklinkContext } from "./backlink-jump";
 import { backlinkRowOps } from "./backlink-handlers";
-import { backlinkCursor, backlinkRowIds } from "./cursor-region";
+import {
+  backlinkCursor,
+  backlinkRowByKey,
+  backlinkRowIds,
+} from "./cursor-region";
 import { type HandlerCtx } from "./handler-context";
 import { type ActionHandlers } from "./shortcuts";
 import { appState, setAppState, visibleRoots, zoomView } from "./store";
@@ -194,6 +199,21 @@ export function cursorHandlers(ctx: HandlerCtx): ActionHandlers {
     // so zooming out exits to the full page. A stale focus (block gone)
     // also exits.
     ZoomOut: zoomOut,
+
+    // `g o` on a backlink row: open its page at the block its breadcrumb
+    // names. Acts on the cursor's row even when `sameCrumbTrail` hides
+    // that row's breadcrumb, which is the case the click cannot reach.
+    OpenBacklinkContext: async () => {
+      const key = backlinkCursor();
+      const row = key ? backlinkRowByKey(key) : undefined;
+      if (!row) {
+        ctx.deps.setError(
+          "g o opens a backlink's page at its block: move the cursor onto a backlink row first",
+        );
+        return;
+      }
+      await openBacklinkContext(row.link);
+    },
 
     // ── Viewport (zz) ────────────────────────────────────────────
     CenterViewport: () => {

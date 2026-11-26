@@ -478,6 +478,7 @@ export {
   editBacklinkBlock,
   pageBacklinks,
   setBacklinksOrder,
+  unfoldAncestors,
 } from "./backlinks";
 export type { BacklinkRowOp, BacklinkSide } from "./backlinks";
 

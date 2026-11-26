@@ -39,7 +39,7 @@ crates/outl-frontend-shared/
     │   ├── paste.ts        # PasteReply + pasteMarkdown / pastePlain / pasteBlockAfter (DTO beside its wrappers)
     │   ├── embeds.ts       # ResolvedBlock + PageEmbedContent + resolveEmbeds / resolvePageEmbeds (same arrangement)
     │   ├── page-merge.ts   # rename / merge DTOs + renamePage / mergePages (own file: commands.ts and types.ts are at the ratchet)
-    │   └── backlinks.ts    # pageBacklinks / setBacklinksOrder + the cross-page mutation family (editBacklinkBlock / backlinkRowOp / createBacklinkSibling) — the panel's commands, same move for the same reason. In ts_parser::MIRROR_FILES since it gained BacklinkRowOp / BacklinkSide
+    │   └── backlinks.ts    # pageBacklinks / setBacklinksOrder + the cross-page mutation family (editBacklinkBlock / backlinkRowOp / createBacklinkSibling) + `unfoldAncestors` (the breadcrumb arrival's fold opener) — the panel's commands, same move for the same reason. In ts_parser::MIRROR_FILES since it gained BacklinkRowOp / BacklinkSide
     ├── backlink-edit/
     │   ├── index.ts        # backlinkEditTarget / backlinkCommitPlan / backlinkCreatedElsewhere — what a gesture on a backlink row targets, what its reply may touch, and what to say when a create lands elsewhere
     │   └── backlink-edit.test.ts
@@ -67,7 +67,7 @@ crates/outl-frontend-shared/
     │   ├── page-key.test.ts
     │   └── page-key.parity.test.ts  # source-read over BOTH clients; declared exceptions only
     ├── markdown/
-    │   ├── CrumbTrail.tsx      # a backlink's ancestor breadcrumb, rendered + inert
+    │   ├── CrumbTrail.tsx      # a backlink's ancestor breadcrumb, rendered; inert unless the client passes onRefClick/onTagClick
     │   ├── MarkdownInline.tsx
     │   ├── MarkdownTable.tsx   # a block's `table` as an HTML <table>
     │   ├── PageEmbed.tsx       # PageEmbedMap + the `![[page]]` title/literal line (its geometry rule is in the file)
@@ -102,6 +102,7 @@ crates/outl-frontend-shared/
     │   ├── index.ts        # rawTextWithTodo, findBlock, flattenNodes, countDescendants + id walks (flattenVisible/All/Parents, next/previousVisibleId, visualRange*)
     │   ├── move-gate.ts    # createMoveGate — one block move in flight at a time; a held chord drops the repeats that arrive while one is pending
     │   ├── range-move.ts   # rangeMoveTargets — which blocks a Visual range move acts on (the selection's roots, in walk order)
+    │   ├── reveal.ts       # landingTarget + needsUnfold — where an arrival from a backlink crumb lands and whether a fold is in the way (re-exported from index.ts)
     │   ├── late-section.ts # lateSectionVisible — when a section fed by a post-first-paint reply is on screen (owns the rule; re-exported from index.ts)
     │   ├── page-embed.ts   # pageEmbedOnlyName + collectPageEmbedNames — the `![[page]]` twins of embedOnlyHandle / collectBlockRefHandles (re-exported from index.ts)
     │   └── outline.test.ts

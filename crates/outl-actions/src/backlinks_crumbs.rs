@@ -23,14 +23,14 @@ use crate::outline::OutlineNode;
 /// over reads as prose with a tag and a link — the branch a reference
 /// sits in was the one thing on the panel written in markup.
 ///
-/// *Dimmed context* is a styling rule, never a parsing one: a crumb
-/// stays inert on every client (nothing clickable, nothing that opens
-/// a page), which is what distinguishes it from the citing block.
+/// *Dimmed context* is a styling rule, never a parsing one. The crumb
+/// carries no behaviour of its own: a client decides what a press on
+/// the line does. Desktop, mobile and the TUI (`g o`) open the source
+/// page at the **last** crumb's block, which is why `id` is on the wire.
 ///
 /// `text` already has the `TODO `/`DONE ` prefix stripped, mirroring
 /// [`crate::Backlink::block_text`], and `tokens` is that same body
-/// through the inline tokenizer. `id` lets a client make a crumb
-/// tappable (jump to that ancestor) later without a shape change.
+/// through the inline tokenizer.
 #[derive(Debug, Clone, Serialize)]
 pub struct BacklinkCrumb {
     /// Node id of the ancestor block.

@@ -12,9 +12,13 @@ That's the spec; don't change it.
 - Outline panel for current page with inline visible cursor.
 - Inline backlinks rendered below the outline (`B` toggles, `j/k` crosses the separator, `Ctrl+O` flips the sort direction).
   **One row per citing block plus its children (capped at `outl_actions::SUBTREE_MAX_DEPTH`, always expanded), and every row is editable where it is cited** — `i` / `Enter` edits the text, and task state, `g D`, delete, indent, outdent, both moves and `o` / `O` all act on that block on its own page.
-  Recorded as `Capability::BacklinkInlineEdit` → `Partial` here and `Full` on the GUI clients, because **nothing in this panel opens the page a row's block lives on**.
-  Not the header (a styled `Line` with no `block_starts` entry), not a click (refused below the outline), not `Enter` (it enters Insert), and not a `[[link]]` in the row, which points back at the page being read.
-  The route is `Ctrl+P` and the page name, which is what the nudge says; the mechanism for the edits themselves is under "The commit pipeline this crate does not use yet" below.
+  Recorded as `Capability::BacklinkInlineEdit` → `Full` on every client.
+  `g o` on a row opens the page its block lives on, at the block above it (`actions/nav/backlink_context.rs`, `Capability::BacklinkOpenContext`).
+  It flushes the pending save, writes `outl_actions::unfold_ancestors` from the citing block (its parent if that is gone), opens the source page **without creating it**, and only then selects the parent by id, because `index_for_path` ignores folds and a path taken before the unfold lands on a hidden row.
+  A top-level citing block opens the page alone; a vanished one says the catalog's `refusal::stale_backlink_block_unchanged_refusal` sentence and still opens the page.
+  Outside the panel the chord only explains itself in the status line.
+  Neither the header (a styled `Line` with no `block_starts` entry), nor a click (refused below the outline), nor `Enter` (it enters Insert) opens the page; `g o` is the door.
+  The mechanism for the edits themselves is under "The commit pipeline this crate does not use yet" below.
 - Nested pages listed below the backlinks (`os` shows `os/linux`, `os/linux/debian`) — **read-only**: `j`/`k` stop at the backlinks section, so opening one goes through the picker (`Ctrl+P`).
   Recorded as `Capability::NestedPages` → `Partial` in `outl_shortcuts::capability_support`, and the section header says so rather than leaving the user guessing.
 - Block references and embeds: `((blk-XXXXXX))` resolves to the source block's text + page icon.

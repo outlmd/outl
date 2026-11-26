@@ -243,6 +243,16 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::DeletePage,
             "Delete page (chord)",
         ),
+        // `g o` = "go origin": from a backlink row, open the page the
+        // citing block lives on, selected on the row's parent block.
+        // Same `g<action>` family; only meaningful with a backlink row
+        // under the cursor (the client says so otherwise).
+        Binding::new(
+            pair('g', 'o'),
+            Normal,
+            Action::OpenBacklinkContext,
+            "Open the backlink's page at its context (chord)",
+        ),
         // ── Reminders ──────────────────────────────────────────
         //
         // `g r` / `g R` follow the `g<action>` family (`g j`, `g x`,

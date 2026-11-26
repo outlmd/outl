@@ -105,7 +105,7 @@ A **refetch** keeps its rows — blanking them reads as "this page lost its refe
 Net: "the backlinks section never appears and then disappears" (`InlineBacklinks.test.tsx`).
 
 **The ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`.**
-A crumb carries inline tokens, so the trail renders like any other block and stays inert; the plain join survives only as the `title=` tooltip, through `crumbTrailText`.
+A crumb carries inline tokens, so the trail renders like any other block, and the line is a link to the source page (`BacklinkRow.tsx`, `g o`); the plain join survives only as the `title=` tooltip, through `crumbTrailText`.
 Mobile's `BacklinksSection` wraps the same component, which is what stops one client showing markdown source while the other renders it.
 
 ### The cursor lives in one region

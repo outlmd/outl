@@ -90,7 +90,7 @@ fn open_pages(target_md: &str, source_md: &str) -> (App, TempDir) {
 /// order, the from-disk index and the parked cursor are the parts a
 /// test must not fake, and a fixture that drifts on any of them stops
 /// exercising the path under test.
-fn open_slugs(pages: &[(&str, &str)], open: &str) -> (App, TempDir) {
+pub(crate) fn open_slugs(pages: &[(&str, &str)], open: &str) -> (App, TempDir) {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("pages")).unwrap();
     let path_for = |slug: &str| dir.path().join("pages").join(format!("{slug}.md"));

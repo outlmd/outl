@@ -210,7 +210,7 @@ The chords are the ones the tables above already carry, this says what each of t
 | Indent / outdent | reparents it among its own page's blocks |
 | Move block up / down | reorders it among its own page's siblings |
 | New block below / above (`o` / `O`) | creates the sibling **on the cited block's page** |
-| Open the source page | nothing in the panel does it, `Ctrl+P`, then the page name from the row's header |
+| Open the source page at its context (`g o`) | opens the page the citing block lives on, with the block above it selected and its folds opened (`Action::OpenBacklinkContext`; desktop and TUI, and on mobile you tap the breadcrumb) |
 | Undo (`u`) | nothing here, the entry belongs to the page that changed, so open that page first |
 
 Three of those have no visible result **on the citing block**, deliberately: indent, outdent and move reparent or reorder it among siblings the panel does not draw.
@@ -221,7 +221,8 @@ The full reasoning, and why a cross-page edit **refuses** where an ordinary one 
 On mobile there is no chord surface at all, so these arrive as a tap plus a long-press sheet: [`mobile-ux.md`](mobile-ux.md#backlink-rows--a-place-you-can-work).
 **Mark DONE is the one row that does not cross over**, because `Action::MarkDone` is `Missing` on that client everywhere and not just here, the sheet toggles task state through to DONE instead, which is what its nudge in the catalog says.
 Nothing on the phone reads that matrix yet, so the sentence is written and the user does not see it.
-`Capability::BacklinkInlineEdit` therefore covers the other nine operations and leaves mark done to the action row that owns it; what its own TUI `Partial` records is the missing way to the source page, the row the table above just gained.
+`Capability::BacklinkInlineEdit` therefore covers the other nine operations and leaves mark done to the action row that owns it, and is `Full` on every client.
+Reaching the source page is its own capability, `Capability::BacklinkOpenContext`, also `Full` everywhere: the chord above, or the breadcrumb tap on mobile.
 
 ---
 

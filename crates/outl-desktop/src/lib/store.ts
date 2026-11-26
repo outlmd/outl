@@ -510,3 +510,11 @@ export function visibleRoots(): BlockNode[] {
  * `.md` is rewritten); `BlockRow` renders the fading dot.
  */
 export const savedMarks = createSavedMarks();
+
+/**
+ * The transient "you landed here" highlight a backlink breadcrumb jump
+ * puts on the block it selected. Same fading-mark shape as
+ * {@link savedMarks}; `BlockRow` reads it through `data-landed`. The
+ * hold is the visible part (1200 ms); the CSS transition is the fade.
+ */
+export const landedMarks = createSavedMarks(1200);

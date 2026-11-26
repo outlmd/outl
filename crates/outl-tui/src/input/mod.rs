@@ -44,6 +44,8 @@ mod insert;
 mod normal;
 mod overlay;
 mod plugin_chord;
+#[cfg(test)]
+mod reminder_chord_tests;
 mod visual;
 
 pub(crate) use insert::handle_insert_key;

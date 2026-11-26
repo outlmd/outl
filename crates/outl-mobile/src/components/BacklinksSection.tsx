@@ -69,6 +69,11 @@ interface BacklinksSectionProps {
   onRefClick?: (target: string) => void;
   onTagClick?: (tag: string) => void;
   onLinkClick?: (href: string) => void;
+  /**
+   * A tap on the breadcrumb above a row: open the source page at the
+   * crumb's block. Omit it and the trail stays inert.
+   */
+  onJumpToCrumb?: (link: Backlink) => void;
 }
 
 /**
@@ -264,6 +269,7 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                               onRefClick={props.onRefClick}
                               onTagClick={props.onTagClick}
                               onLinkClick={props.onLinkClick}
+                              onJumpToCrumb={props.onJumpToCrumb}
                             />
                           )}
                         </For>
@@ -341,6 +347,7 @@ function BacklinkRowView(props: {
   onRefClick?: (target: string) => void;
   onTagClick?: (tag: string) => void;
   onLinkClick?: (href: string) => void;
+  onJumpToCrumb?: (link: Backlink) => void;
 }): JSX.Element {
   // Touch has no right-click, so the hold is how this row reaches the
   // structural ops — mobile has no chord surface at all.
@@ -358,6 +365,9 @@ function BacklinkRowView(props: {
     props.row.depth === 0 ? props.row.link.todo : props.row.node.todo;
   const editable = () =>
     backlinkEditTargetFor(props.row.link, props.row.node) !== null;
+  // An orphan row has no page to open.
+  const canJump = () =>
+    props.onJumpToCrumb !== undefined && props.row.link.source_page !== null;
   let rowEl: HTMLDivElement | undefined;
   return (
     <div
@@ -382,8 +392,26 @@ function BacklinkRowView(props: {
       }}
     >
       <Show when={props.crumbs}>
-        <p class="mb-1 truncate text-[12px] text-(--color-outl-fg-dimmer)">
-          <CrumbTrail crumbs={props.row.link.ancestors} />
+        {/* Text stays 12px; the 44pt target is the box (`min-h-11`), which
+            borrows the row's own top padding (`-mt-3` cancels the row's
+            `py-3`: change one, change the other). */}
+        <p
+          class="truncate text-[12px] text-(--color-outl-fg-dimmer)"
+          classList={{
+            "-mt-3 flex min-h-11 items-center active:opacity-60": canJump(),
+            "mb-1": !canJump(),
+          }}
+          role={canJump() ? "link" : undefined}
+          tabindex={canJump() ? 0 : undefined}
+          data-backlink-crumb={canJump() ? "" : undefined}
+          onClick={() => props.onJumpToCrumb?.(props.row.link)}
+          onKeyDown={(e) => e.key === "Enter" && props.onJumpToCrumb?.(props.row.link)}
+        >
+          <CrumbTrail
+            crumbs={props.row.link.ancestors}
+            onRefClick={props.onRefClick}
+            onTagClick={props.onTagClick}
+          />
         </p>
       </Show>
       <div class="flex items-start gap-2">

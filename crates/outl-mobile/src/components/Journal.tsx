@@ -38,6 +38,7 @@ import {
   setBlockCollapsed,
   splitBlock,
   undoPage,
+  unfoldAncestors,
 } from "@outl/shared/api/commands";
 import { utf16OffsetToCharOffset } from "@outl/shared/paste";
 import { isAssetLink } from "@outl/shared/links";
@@ -87,6 +88,7 @@ import { RemindersSheet } from "./RemindersSheet";
 import { RemindSheet } from "./RemindSheet";
 import { createRemindAuthoring } from "./Journal.remind";
 import { backlinkToast, createBacklinkCard } from "./Journal.backlinks";
+import { createBacklinkLanding } from "./Journal.landing";
 import { GuideSheet } from "./GuideSheet";
 import { SettingsSheet } from "./SettingsSheet";
 import { JournalDeleteDialogs } from "./JournalDeleteDialogs";
@@ -492,6 +494,7 @@ export function Journal() {
     if (!v) return dayNav.today();
     return v.page.kind === "journal" ? v.page.slug : null;
   });
+  const backlinkLanding = createBacklinkLanding({ withError, unfold: unfoldAncestors, openView, notify, currentPageId: () => view()?.page.id });
   const capture = createCapture({ view, today: dayNav.today, applyView, withError, notify });
   // Renaming the page on screen, from its own title (`./Journal.rename`).
   const pageRename = createPageRename({ view, open: handlePickPage, notify, onError: setError });
@@ -1564,14 +1567,11 @@ export function Journal() {
           onToggleOrder={backlinkCard.toggleOrder}
           onEditCommitted={backlinkCard.committed}
           onError={backlinkCard.refused}
-          onOpenPage={async (slug, kind) => {
-            haptic("light");
-            const next =
-              kind === "journal"
-                ? await withError(() => openJournalFor(slug))
-                : await withError(() => openPageBySlug(slug));
-            if (next) openView(next);
-          }}
+          onOpenPage={handlePickPage}
+          onRefClick={handleRefClick}
+          onTagClick={handleTagClick}
+          onLinkClick={handleLinkClick}
+          onJumpToCrumb={backlinkLanding.jump}
         />
 
         </div>

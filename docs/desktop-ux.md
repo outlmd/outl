@@ -229,6 +229,13 @@ Contract, including why a cross-page edit **refuses** where an ordinary one re-t
 It used to: `onMouseEnter` wrote the keyboard's own cursor, which took `j` and `Enter` off the block the user had left them on, from a gesture they never aimed.
 The highlight is CSS now, and which row owns the cursor is `backlinkCursor()`'s answer alone ([`desktop-page-surface.md`](desktop-page-surface.md#the-cursor-lives-in-one-region)).
 
+**The breadcrumb above a row is a link.**
+It has `role="link"`, `tabindex="0"` and a pointer cursor with a hover tint, and a click (or `Enter` / `Space`, which stop at the row so Normal mode does not start an edit) opens the source page with the immediate parent selected and centered, unfolding whatever hides it.
+`g o` does the same from the cursor row, including when `sameCrumbTrail` has hidden the crumb.
+A `[[ref]]` or `#tag` inside the line navigates to itself and does not trigger the jump; an external link in it stays inert; an orphan row's line stays plain text.
+The block flashes on arrival (`data-landed` on `BlockRow.tsx`, accent at 14% for 1200ms then a 400ms fade, static under reduced motion; the exception is recorded in [`DESIGN.md` Motion](../DESIGN.md#motion)).
+The sequence is `openBacklinkContext` in `lib/backlink-jump.ts`, and the unfold writes ops: [`client-backlinks.md` → The breadcrumb opens the page at its parent](client-backlinks.md#the-breadcrumb-opens-the-page-at-its-parent).
+
 ## Properties (`key:: value`) chip row
 
 `components/PropertyEditor.tsx` renders the chip row and owns three verbs:

@@ -305,6 +305,19 @@ export function createMockBackend(ws = new MockWorkspace(), today = new Date()) 
       if (at) at[0].splice(at[1], 1);
       return ws.view(p);
     },
+    unfold_ancestors: (a) => {
+      const p = page(a);
+      // Open the folded blocks above `id`, never `id`'s own fold.
+      const open = (nodes: typeof p.blocks): boolean =>
+        nodes.some((n) => {
+          if (n.id === String(a.id)) return true;
+          const below = open(n.children);
+          if (below) n.collapsed = false;
+          return below;
+        });
+      open(p.blocks);
+      return ws.view(p);
+    },
     set_block_collapsed: (a) => {
       const p = page(a);
       const at = ws.locate(p, String(a.id));

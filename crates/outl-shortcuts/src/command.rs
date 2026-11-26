@@ -118,6 +118,7 @@ pub fn command_name(action: Action) -> &'static str {
         // this literal itself until it had an `Action` to ask.
         Action::CopyBlockEmbed => "refer-embed",
         Action::DeletePage => "delete-page",
+        Action::OpenBacklinkContext => "open-backlink-context",
         Action::InsertRemind => "insert-remind",
         Action::InsertRemindNag => "insert-remind-nag",
         Action::OpenReminders => "open-reminders",

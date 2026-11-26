@@ -67,6 +67,10 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   Handed accessors, never values: `Journal` passes `pageId` / `view` / `editingId` as functions, because a destructured prop (or dep) freezes at first render in Solid.
   **No handler reads `this`**, which is what lets `Journal` hand every one of them to `<BlockRow />` as a prop: they are always called detached from the object, and a `this.` would break there silently. Most are method shorthand on the returned literal, which is fine for exactly that reason; `performDelete` is a named function because `requestDelete` calls it internally. `Journal.block-ops.test.ts` pins the detached case rather than the spelling.
 
+- **`Journal.landing.ts`** — `createBacklinkLanding(deps).jump(link)`, what a tap on a backlink's breadcrumb does: open the source page through `onOpenPage`'s route (`openJournalFor` for a journal), pick the target with `landingTarget`, call `unfoldAncestors` only when `needsUnfold` says a fold is in the way, paint the view **once**, then scroll to centre and mark the block landed (`lib/landed.ts`).
+  A sibling module because `Journal.tsx` sits at its size baseline; `Journal.tsx` holds a single instance.
+  It drops the jump when a newer one started or the page changed during an await, and an unfold that rejects still lands, with the error on the status line.
+  Contract: [`client-backlinks.md` → The breadcrumb opens the page at its parent](client-backlinks.md#the-breadcrumb-opens-the-page-at-its-parent).
 - **`Journal.selection-ops.ts`** — `createSelectionOps(deps)`, the touch-native range selection (RFC 0254 phase 3) and every op over N blocks.
   Extends `JournalBlockDeps` because a range op is N single-block commands plus a range.
   Split from `Journal.block-ops.ts` on the **question** ("what is selected, and what happens to N blocks" vs "what happens to one"), not the line count — the standard `backlinks_index.rs` → `backlinks_keys.rs` set.
@@ -93,7 +97,7 @@ Ten pieces are now siblings, and new code of any of those shapes belongs there r
   Both facts live in `Journal.tsx`'s JSX, so `PageSections.test.tsx` pins them by reading the source, the way the `backlinks` prop's own contract already is.
   The twin of the desktop's `PageSections.tsx`, and the reason the two sections live in one component rather than one inside the other: they look alike and answer different questions — backlinks point *at* this page, nested pages live *under* its namespace.
   `Journal` keeps the navigation, passing a single `onOpenPage(slug, kind)` that both sections route through, so the journal-vs-page opener choice has one owner instead of one per section.
-  **A backlink's ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`** — a crumb carries inline tokens, so the trail renders like any other block and stays inert.
+  **A backlink's ancestor breadcrumb is `<CrumbTrail />` (`@outl/shared/markdown`), never a `join` of `crumb.text`** — a crumb carries inline tokens, so the trail renders like any other block. A tap on the line opens the source page (`Journal.landing.ts`); a tap on a ref or tag inside it navigates instead.
   The desktop's `InlineBacklinks` wraps the same component, which is what stops one client drawing markdown source while the other renders it; `BacklinksSection.test.tsx` is this side of that net.
 That opener is `openView` (`Journal.navigation.ts`), not `applyView` — see that module's entry above.
   **Nothing here draws until the scan answers for the page on screen** (`lateSectionVisible`, `@outl/shared/outline`).

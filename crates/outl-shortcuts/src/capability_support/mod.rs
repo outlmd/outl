@@ -430,11 +430,11 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md
         // rather than declared `Partial`.
         //
-        // The TUI is `Partial` for the half it does not have at all:
-        // nothing in its backlinks panel opens the page a row's block
-        // lives on — not the header, not a click, not `Enter`. See
-        // `why::TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE`, which is
-        // `NestedPages`' shape one section further down the same pane.
+        // The TUI used to be `Partial` for the half it did not have:
+        // nothing in its backlinks panel opened the page a row's block
+        // lives on. `g o` (`Action::OpenBacklinkContext`) is that
+        // gesture now, tracked as `Capability::BacklinkOpenContext`
+        // below, so the row is `Full` on all three.
         //
         // This row is the warning at the top of this file, lived
         // through: it read `Full` on all three for a stretch while no
@@ -448,7 +448,19 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // `capability_parity.rs` of its own — no capability does, which
         // is its own gap and not this row's.
         Capability::BacklinkInlineEdit => ClientSupport {
-            tui: Partial(why::TUI_BACKLINK_CANNOT_OPEN_ITS_SOURCE),
+            tui: Full,
+            desktop: Full,
+            mobile: Full,
+        },
+
+        // Opening the page a backlink row's block lives on, selected on
+        // the row's parent with the folds above it opened. The gesture
+        // differs per client (TUI `g o`, desktop click / `Enter` / `g o`
+        // on the breadcrumb, mobile tap on it) and the outcome does
+        // not, so `Full` on all three. `Action::OpenBacklinkContext` is
+        // the chord half and says `Missing` on mobile, which has none.
+        Capability::BacklinkOpenContext => ClientSupport {
+            tui: Full,
             desktop: Full,
             mobile: Full,
         },

@@ -281,6 +281,7 @@ export type Action =
   | { kind: "MoveBlockDown" }
   | { kind: "DeleteBlock" }
   | { kind: "DeletePage" }
+  | { kind: "OpenBacklinkContext" }
   | { kind: "ToggleCollapsed" }
   | { kind: "ToggleTodo" }
   | { kind: "MarkDone" }

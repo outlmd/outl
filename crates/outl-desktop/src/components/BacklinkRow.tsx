@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { createMemo, For, Show } from "solid-js";
 
 import { backlinkEditTargetFor } from "@outl/shared/backlink-edit";
 import {
@@ -43,6 +43,10 @@ interface RowProps {
    *  a ref. Built per citing link, because a Run is addressed to the
    *  page the block lives on, not to the page on screen. */
   bodyCallbacks: (link: Backlink) => BodyCallbacks;
+  /** The breadcrumb line was activated: open the citing block's page at
+   *  its context (`openBacklinkContext`). Only offered when the row has a
+   *  `source_page`; an orphan has no page to open. */
+  onCrumbClick: (link: Backlink) => void;
 }
 
 /**
@@ -62,6 +66,9 @@ function RowBody(props: RowProps) {
     <Show when={row()}>
       {(r) => {
         const link = () => r().link;
+        // One callbacks object per row, shared by the crumb's ref and tag
+        // handlers: the factory allocates a closure set per call.
+        const crumbCallbacks = createMemo(() => props.bodyCallbacks(link()));
         const node = () => r().node;
         const todo = () => (r().depth === 0 ? link().todo : node().todo);
         const selected = () => props.cursor() === props.rowKey;
@@ -131,12 +138,45 @@ function RowBody(props: RowProps) {
             }
           >
             <Show when={props.showCrumbs}>
-              <div
-                class="truncate px-1 pt-0.5 text-xs opacity-40"
-                title={crumbTrailText(link().ancestors)}
+              {/* A link to the page this block lives on, at the block the
+                  trail names. Orphans (no `source_page`) stay inert text.
+                  Enter stops at the row: left to bubble, it would reach
+                  the Normal-mode dispatcher and start an edit. Space is
+                  not bound, as on a native link (it is the scroll key).
+                  The `[[ref]]` / `#tag` inside navigate on their own and
+                  do not reach this handler. */}
+              <Show
+                when={link().source_page}
+                fallback={
+                  <div
+                    class="truncate px-1 pt-0.5 text-xs opacity-40"
+                    title={crumbTrailText(link().ancestors)}
+                  >
+                    <CrumbTrail crumbs={link().ancestors} />
+                  </div>
+                }
               >
-                <CrumbTrail crumbs={link().ancestors} />
-              </div>
+                <div
+                  role="link"
+                  tabindex="0"
+                  data-backlink-crumb
+                  class="cursor-pointer truncate rounded px-1 pt-0.5 text-xs opacity-40 hover:bg-(--color-outl-fg)/5 hover:opacity-70 focus-visible:opacity-70"
+                  title={crumbTrailText(link().ancestors)}
+                  onClick={() => props.onCrumbClick(link())}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    props.onCrumbClick(link());
+                  }}
+                >
+                  <CrumbTrail
+                    crumbs={link().ancestors}
+                    onRefClick={crumbCallbacks().onRefClick}
+                    onTagClick={crumbCallbacks().onTagClick}
+                  />
+                </div>
+              </Show>
             </Show>
             {/* `group/blrow` scopes the chevron's reveal to this row. */}
             <div class="group/blrow flex items-start">
@@ -226,6 +266,7 @@ export function BacklinkRowItem(
                 onToggle={props.onToggle}
                 onFold={props.onFold}
                 bodyCallbacks={props.bodyCallbacks}
+                onCrumbClick={props.onCrumbClick}
               />
             </div>
           );

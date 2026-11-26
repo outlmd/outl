@@ -5,6 +5,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ## [Unreleased]
 
+### Added
+
+- **Click a backlink's breadcrumb to open its page at the parent block.**
+  The dim line above a "Linked from" row used to do nothing.
+  On desktop and mobile it is now a link: it opens the source page with the parent block selected, centered and flashed for a moment.
+  On the TUI and the desktop, `g o` on a row does the same.
+  If the parent or something above it is folded, it unfolds, and that is a real change that syncs, same as pressing the chevron.
+  A `[[ref]]` or `#tag` inside the line goes to its own page instead ([Backlinks](docs/client-backlinks.md#the-breadcrumb-opens-the-page-at-its-parent)).
+
 ### Fixed
 
 - **Backlink rows draw the block the way its page does, and Run and fold work from them.**
@@ -13,6 +22,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Run on a code block in a row executes on the source page and the result children show up under the row.
   The chevron on a row folds the cited block on its own page, so the fold syncs ([Backlinks](docs/client-backlinks.md#a-row-is-drawn-by-the-outlines-renderer)).
   Property chips stay read-only in a row, and the TUI panel still has no Run or fold.
+
+- **Refs and tags in a mobile backlink row open their page.**
+  The section never got the handlers, so a tap on a `[[ref]]` or `#tag` there did nothing.
 
 - **Nightly TestFlight builds ship again.**
   From Nov 21 every 05:00 UTC Mobile run failed in its `gate` before building anything (`failed to determine base repo`: the job has no checkout, and `gh` needed `GH_REPO` to find the repo).

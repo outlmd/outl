@@ -47,11 +47,9 @@
  * subtree, so the result is visible. Shipping them for both is a recorded
  * decision
  * (`docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`),
- * which is why `Capability::BacklinkInlineEdit` reads `Full` here and on
- * mobile. The TUI is `Partial` on that row for a gap this client does
- * not have: nothing in its panel opens a cited block's page, where the
- * group header here is a `<button>` that does. The two messages below
- * are for the cases where there is no block to act on at all.
+ * which is why `Capability::BacklinkInlineEdit` reads `Full` on every
+ * client. The two messages below are for the cases where there is no
+ * block to act on at all.
  */
 
 import {

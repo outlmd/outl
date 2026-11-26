@@ -1,5 +1,5 @@
 import { render } from "solid-js/web";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InlineToken } from "../api/types";
 import { CrumbTrail, crumbTrailText, type TrailCrumb } from "./CrumbTrail";
@@ -12,11 +12,37 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function mount(crumbs: TrailCrumb[]): HTMLElement {
+function mount(
+  crumbs: TrailCrumb[],
+  handlers: {
+    onRefClick?: (target: string) => void;
+    onTagClick?: (tag: string) => void;
+  } = {},
+  /** A Solid `onClick` on the parent, the way a row wires it: Solid
+   *  delegates, so a native listener on the host would see the event
+   *  before `stopPropagation` runs and prove nothing. */
+  onParentClick?: () => void,
+): HTMLElement {
   const host = document.createElement("div");
   document.body.appendChild(host);
-  dispose = render(() => <CrumbTrail crumbs={crumbs} />, host);
+  dispose = render(
+    () => (
+      <div onClick={() => onParentClick?.()}>
+        <CrumbTrail crumbs={crumbs} {...handlers} />
+      </div>
+    ),
+    host,
+  );
   return host;
+}
+
+/** The element `MarkdownInline` drew for a ref or tag with this text. */
+function chip(host: HTMLElement, text: string): HTMLElement {
+  const el = Array.from(host.querySelectorAll<HTMLElement>("*")).find(
+    (e) => e.children.length === 0 && e.textContent?.includes(text),
+  );
+  if (!el) throw new Error(`no element showing ${text}`);
+  return el;
 }
 
 /** The shape the backend ships: a crumb carries its own tokens, since
@@ -79,7 +105,7 @@ describe("CrumbTrail", () => {
     expect(host.textContent).toBe("parent › child");
   });
 
-  it("is inert — clicking a crumb's link does nothing", () => {
+  it("is inert by default — a crumb's link does nothing", () => {
     // The row already has one destination (the citing block), so the
     // trail wires no handler. `MarkdownInline` renders a handler-less
     // link as a plain span rather than a dead button; a ref and a tag
@@ -90,6 +116,47 @@ describe("CrumbTrail", () => {
         { kind: "link", value: "email", href: "https://example.com" },
       ]),
     ]);
+
+    expect(host.querySelectorAll("[tabindex]")).toHaveLength(0);
+    expect(host.querySelectorAll('[role="button"]')).toHaveLength(0);
+  });
+
+  it("with a handler, a ref and a tag navigate and do not reach the parent", () => {
+    const onRef = vi.fn();
+    const onTag = vi.fn();
+    const parent = vi.fn();
+    const host = mount(
+      [ALINHAMENTO],
+      { onRefClick: onRef, onTagClick: onTag },
+      parent,
+    );
+
+    chip(host, "buser/team/vendas").click();
+    chip(host, "#alinhamento").click();
+
+    expect(onRef).toHaveBeenCalledWith("buser/team/vendas");
+    expect(onTag).toHaveBeenCalledWith("#alinhamento");
+    expect(parent).not.toHaveBeenCalled();
+  });
+
+  it("without a handler, a click on a ref reaches the parent", () => {
+    const parent = vi.fn();
+    const host = mount([ALINHAMENTO], {}, parent);
+
+    chip(host, "buser/team/vendas").click();
+
+    expect(parent).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a link unwired even when ref and tag handlers are passed", () => {
+    const host = mount(
+      [
+        crumb("[email](https://example.com)", [
+          { kind: "link", value: "email", href: "https://example.com" },
+        ]),
+      ],
+      { onRefClick: vi.fn(), onTagClick: vi.fn() },
+    );
 
     expect(host.querySelectorAll("[tabindex]")).toHaveLength(0);
     expect(host.querySelectorAll('[role="button"]')).toHaveLength(0);

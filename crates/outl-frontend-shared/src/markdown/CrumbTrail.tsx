@@ -51,14 +51,21 @@ export function crumbTrailText(crumbs: readonly TrailCrumb[]): string {
  * token), and it composes with the token colours underneath — the
  * trail stays quieter than the block below it without being unparsed.
  *
- * ## Why it is inert
+ * ## Inert by default, the client opts in
  *
- * No `onRefClick`, no `onTagClick`, no `onLinkClick`: a crumb is
- * context for the row, and the row already has one destination (the
- * citing block, via its own handler). Wiring the trail would put two
- * targets in one tap area, and on a phone they would overlap.
- * `MarkdownInline` renders a link with no handler as an inert span
- * rather than a dead button, which is exactly what is wanted here.
+ * With no handler the trail is context only: a link renders as an inert
+ * span (`MarkdownInline`'s rule for a handler-less link), and a ref or a
+ * tag keeps its look but goes nowhere. A client that makes the whole
+ * line a target (a backlink row's "open the page at this block") passes
+ * `onRefClick` / `onTagClick` as well, and the reason is a click, not
+ * styling: `MarkdownInline` returns early for a ref or tag with no
+ * handler and does **not** stop the propagation, so a `[[ref]]` that
+ * looks pressable would fall through to the container's handler and open
+ * the wrong thing. With a handler it navigates and stops there.
+ *
+ * `onLinkClick` stays unwired on purpose: an external URL inside a
+ * breadcrumb is a footnote, and opening a browser from the line that
+ * means "go to the block" would be a surprise.
  *
  * `variant="inline"` also means `blockAssets` defaults to `false`, so
  * an image in an ancestor is a chip rather than a picture opening
@@ -66,13 +73,23 @@ export function crumbTrailText(crumbs: readonly TrailCrumb[]): string {
  */
 export function CrumbTrail(props: {
   crumbs: readonly TrailCrumb[];
+  /** Opt-in: a `[[ref]]` in the trail navigates instead of falling
+   *  through to the container. */
+  onRefClick?: (target: string) => void;
+  /** Opt-in: the `#tag` twin of {@link onRefClick}. */
+  onTagClick?: (tag: string) => void;
 }): JSX.Element {
   return (
     <For each={props.crumbs}>
       {(crumb, index) => (
         <>
           {index() > 0 ? CRUMB_SEPARATOR : null}
-          <MarkdownInline tokens={crumb.tokens} variant="inline" />
+          <MarkdownInline
+            tokens={crumb.tokens}
+            variant="inline"
+            onRefClick={props.onRefClick}
+            onTagClick={props.onTagClick}
+          />
         </>
       )}
     </For>

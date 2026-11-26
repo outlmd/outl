@@ -141,6 +141,35 @@ pub(crate) fn is_under(workspace: &Workspace, node: NodeId, ancestor: NodeId) ->
 /// human writes — a corrupt log must not hang a keystroke.
 const MAX_ANCESTOR_WALK: usize = 1024;
 
+/// The blocks between `node` and its page, **nearest first**: the parent,
+/// then the grandparent, up to the last block under the page root.
+///
+/// Excludes `node` itself and the page root (a page has no fold to open).
+/// Empty for a page root and for a detached node, whose chain never
+/// reaches [`NodeId::root`]. Bounded like `is_under`, for the same
+/// reason: a corrupt parent map must not hang the caller, and one that
+/// exceeds the bound answers empty rather than a truncated chain.
+pub fn ancestors_below_page(workspace: &Workspace, node: NodeId) -> Vec<NodeId> {
+    let mut chain = Vec::new();
+    let mut current = node;
+    for _ in 0..MAX_ANCESTOR_WALK {
+        let Some(parent) = workspace.tree().parent(current) else {
+            return Vec::new();
+        };
+        if parent == NodeId::root() {
+            // `current` is the page root: it is the last thing pushed
+            // (or `node` itself), and neither belongs in the answer.
+            if current != node {
+                chain.pop();
+            }
+            return chain;
+        }
+        chain.push(parent);
+        current = parent;
+    }
+    Vec::new()
+}
+
 /// The slug of the page hosting `node`, or `None` when the node is
 /// detached (or is itself the root).
 ///

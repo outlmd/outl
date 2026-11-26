@@ -25,6 +25,7 @@ const PAIR_ARMS: &[&str] = &[
     r#"('g', KeyCode::Char('r'))"#,
     r#"('g', KeyCode::Char('R'))"#,
     r#"('g', KeyCode::Char('s'))"#,
+    r#"('g', KeyCode::Char('o'))"#,
     r#"('g', KeyCode::Char('n'))"#,
     r#"('y', KeyCode::Char('y'))"#,
     r#"('y', KeyCode::Char('r'))"#,

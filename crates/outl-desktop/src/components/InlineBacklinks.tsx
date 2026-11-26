@@ -27,6 +27,7 @@ import { resetForNavigation } from "../lib/page-change";
 import { applyPageState, resolveBacklinkTransclusions } from "../lib/page-view";
 import { trackBacklinks } from "../lib/backlinks-fetch";
 import { appState, setAppState } from "../lib/store";
+import { openBacklinkContext } from "../lib/backlink-jump";
 import { BacklinkRowItem } from "./BacklinkRow";
 import type { BodyCallbacks } from "./block-callbacks";
 
@@ -268,7 +269,8 @@ export function InlineBacklinks() {
 
   /**
    * Open the source page from a group header (jumps to the page, no
-   * per-block positioning).
+   * per-block positioning). The other door is a row's breadcrumb line,
+   * which lands on the block it names (`openBacklinkContext`).
    *
    * **Through `applyPageState`, like every other reply.** That function
    * is the single writer of what a `PageView` says about the page —
@@ -286,7 +288,8 @@ export function InlineBacklinks() {
    *
    * Pre-existing, and this branch is what made it reachable in one
    * gesture: `Enter` and the row click both became edit gestures, so
-   * the group header is now the **only** door to the source page.
+   * the group header was the only door to the source page until the
+   * breadcrumb line became the second one.
    *
    * `resetForNavigation()` first, the shape `<RemindersPanel />`'s own
    * `jumpTo` uses: this is a navigation, so the zoom and any backlink
@@ -480,6 +483,7 @@ export function InlineBacklinks() {
                                 )
                               }
                               bodyCallbacks={backlinkBodyCallbacks}
+                              onCrumbClick={(l) => void openBacklinkContext(l)}
                             />
                           )}
                         </For>

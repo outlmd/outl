@@ -315,6 +315,7 @@ pub fn support(action: Action) -> ClientSupport {
 
         // ── page operations ──────────────────────────────────────
         Action::DeletePage => row!(Full, Full, Full),
+        Action::OpenBacklinkContext => row!(Full, Full, Missing(why::TAP_BREADCRUMB)),
 
         // ── reminders ────────────────────────────────────────────
         Action::InsertRemind => row!(Full, Full, Full),
@@ -539,7 +540,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 87, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 88, "Action::ALL changed size");
     }
 
     #[test]

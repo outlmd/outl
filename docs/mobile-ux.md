@@ -255,6 +255,12 @@ So adding a sheet row is a caller rather than a feature, and it needs no TS stri
 Recorded as `Capability::BlockquoteToggle` → `❌` on mobile in [`client-parity.md`](client-parity.md); the nudge names the marker to type instead.
 Convention (three-surface parity): [`docs/client-editing.md` → Blockquote convention](client-editing.md#blockquote-convention).
 
+**Tap the breadcrumb above a row to open its page at the parent block.**
+The line is a 44 pt tap target (`min-h-11`, borrowing the row's top padding so it never overlaps the row's own tap area) with the text still at 12 px.
+The page opens through the same route as the card header (`onOpenPage`, `openJournalFor` for a journal), folds on the path are opened (that writes ops and syncs), the view is painted once, and the parent is scrolled to the centre with a short highlight (`lib/landed.ts`, `Journal.landing.ts`).
+A tap on a `[[ref]]` or `#tag` inside the line navigates to it instead; an orphan row's line is inert.
+Contract: [`client-backlinks.md` → The breadcrumb opens the page at its parent](client-backlinks.md#the-breadcrumb-opens-the-page-at-its-parent).
+
 ## Zoom / focus on a block
 
 Tap a block's plain bullet dot to zoom in — it becomes the outline root (Roam/Workflowy focus); `← Back` + breadcrumb zoom out.

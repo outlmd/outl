@@ -10,11 +10,13 @@ use outl_actions::{
     create_after_or_append, create_before_or_append, delete, edit_text, enclosing_page_id, indent,
     move_after, move_down, move_up, outdent, render_block_md,
     set_block_collapsed as action_set_block_collapsed, split_block as action_split_block,
-    toggle_quote as action_toggle_quote, toggle_todo as action_toggle_todo, ActionError,
+    toggle_quote as action_toggle_quote, toggle_todo as action_toggle_todo,
+    unfold_ancestors as action_unfold_ancestors, ActionError,
 };
 use outl_md::index::WorkspaceIndex;
 use tracing::warn;
 
+use crate::commands::backlink_edit::row_is_live_on;
 use crate::commit::{announce_after_commit, finish_in_page, finish_in_page_with};
 use crate::helpers::{build_page_view, parse_node_id, with_ws, with_ws_mut};
 use crate::host::AppHost;
@@ -391,6 +393,42 @@ pub fn set_block_collapsed<S: AppHost>(
         // it like any other commit (this path bypasses `finish_in_page`,
         // which is where the announce normally lives).
         announce_after_commit(state, ws, page);
+        build_page_view(ws, &root, page).map_err(|e| e.to_string())
+    })
+}
+
+/// Open every folded ancestor between block `id` and `page_id`, and
+/// return the page's view.
+///
+/// The reveal half of "open this page at that block": a fold is op-log
+/// state (`Op::SetCollapsed`), so the unfold is a real write that syncs,
+/// not a view-only expansion that the next commit reply would fold shut
+/// again. Only the folded blocks are written (`outl_actions::unfold_ancestors`
+/// owns that), so a client that finds nothing folded pays zero ops.
+///
+/// Refuses, **writing nothing**, a block that is not live on `page_id`
+/// (trashed, unknown, or moved to another page by a peer): the same
+/// `row_is_live_on` gate every cross-page row op takes.
+///
+/// Like [`set_block_collapsed`] it skips `finish_in_page`: a fold changes
+/// neither the `.md` nor the sidecar, so reprojecting would only bump
+/// file-transport upload metadata. It announces only when it wrote.
+pub fn unfold_ancestors<S: AppHost>(
+    state: &S,
+    page_id: String,
+    id: String,
+) -> Result<PageView, String> {
+    let root = state.storage_root()?;
+    let page = parse_node_id(&page_id)?;
+    let node = parse_node_id(&id)?;
+    with_ws_mut(state, |ws| {
+        if !row_is_live_on(ws, page, node) {
+            return Err(ActionError::NotInTree(id.clone()).to_string());
+        }
+        let opened = action_unfold_ancestors(ws, state.hlc(), node).map_err(|e| e.to_string())?;
+        if !opened.is_empty() {
+            announce_after_commit(state, ws, page);
+        }
         build_page_view(ws, &root, page).map_err(|e| e.to_string())
     })
 }

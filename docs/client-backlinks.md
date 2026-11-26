@@ -21,14 +21,14 @@ Those children are rows too, on all three clients: you move onto them, edit them
 Ten operations reach a row, and each lands on the block the row draws, on **its own** page: the text edit, task state, mark done (`g D`), delete, indent, outdent, move up, move down, and create a sibling below and above.
 Mobile's long-press sheet has no mark-done row today (`Action::MarkDone` is `Missing` there in [`client-parity.md`](client-parity.md)), so it offers nine.
 `Capability::BacklinkInlineEdit` covers exactly those nine, leaving mark done to the action row that owns it rather than claiming an operation one client has nowhere.
-Opening the source page stays reachable on the desktop and mobile, on the group header rather than on the row; the TUI has no gesture for it at all, which is the whole of why its column reads `Partial`.
-Per-client reach is `Capability::BacklinkInlineEdit` in [`client-parity.md`](client-parity.md), which is generated from `outl_shortcuts::capability_support`.
+Opening the source page is its own capability, `Capability::BacklinkOpenContext`: the breadcrumb above a row opens the page at the block the trail ends on (see [Backlink breadcrumbs](#backlink-breadcrumbs)), and `Full` on all three clients.
+Per-client reach of both is in [`client-parity.md`](client-parity.md), which is generated from `outl_shortcuts::capability_support`.
 
 | Client | Edit in place | Everything else | Open the source page |
 |---|---|---|---|
-| TUI | `i` / `Enter` on the focused row; `j` / `k` walk the citing block, then its children, then the next citing block | the same Normal-mode chords the outline uses | nothing in the panel opens it — `Ctrl+P`, then the page name from the row's header |
-| Desktop | click the row, or `i` / `Enter` on it; `j` / `k` walk children like any other row | the same chords, consulted on the row first | the group header (a `<button>`, so a keyboard stop) |
-| Mobile | tap the row; each child is its own tap and long-press target (44 pt minimum), outside the parent's container | long-press for the same sheet the outline raises, per node | the card header |
+| TUI | `i` / `Enter` on the focused row; `j` / `k` walk the citing block, then its children, then the next citing block | the same Normal-mode chords the outline uses | `g o` on the row (opens at the block above the citing one) |
+| Desktop | click the row, or `i` / `Enter` on it; `j` / `k` walk children like any other row | the same chords, consulted on the row first | click the breadcrumb, or `g o` on the row; the group header opens the page without landing anywhere |
+| Mobile | tap the row; each child is its own tap and long-press target (44 pt minimum), outside the parent's container | long-press for the same sheet the outline raises, per node | tap the breadcrumb; the card header opens the page without landing anywhere |
 
 Four rules hold across all three, and each was the alternative:
 
@@ -163,13 +163,43 @@ Consecutive references from the same branch collapse: the trail renders once, an
 A crumb carries inline tokens beside its text, so `#alinhamento [[buser/team/vendas]] internet 0800 [email](https://mail.google.com/...)` reads as a tag, a page name and a link label — the same way that block reads on its own page.
 It shipped as raw text until then, which made the one line describing *where* a reference lives the one line written in markup, with a URL swallowing the rest of a trail that is truncated to a single line anyway.
 
-*Dimmed* stays a styling rule: the trail is inert on every client (nothing in it opens a page — the row already has one destination, the citing block), and the dimming composes with the token colours underneath.
+*Dimmed* stays a styling rule, and it composes with the token colours underneath.
 `@outl/shared/markdown::CrumbTrail` is the one renderer both GUI clients use, with `crumbTrailText` for the plain reading a `title=` tooltip can hold; the TUI's `render_crumb_trail` puts the dim on the ratatui `Line` so prose inherits it while a ref keeps its hue.
+
+### The breadcrumb opens the page at its parent
+
+The line is a link to the source page, landing on the citing block's **immediate parent** (`ancestors.at(-1).id`, which is why `BacklinkCrumb.id` is on the wire).
+A click anywhere on the line goes to the parent; per-segment links (`A › B › C`) are a follow-up, because the TUI has no way to point at one segment.
+`CrumbTrail` stays inert unless the client opts in: with no handler a ref or tag looks pressable and goes nowhere, and with a handler on the container it would fall through to it.
+So a client that makes the line a target also passes `onRefClick` / `onTagClick`, and those navigate and stop there.
+`onLinkClick` stays unwired: an external URL in a breadcrumb is a footnote, and opening a browser from the line that means "go to the block" would be a surprise.
+A row whose source page is gone (an orphan) keeps an inert line.
+
+What happens on arrival is the same everywhere:
+
+- **The target is picked by a cascade**, owned by `@outl/shared/outline::landingTarget`: the crumb's id if it is on the opened page, else the parent of the citing block, else nothing.
+  Nothing means the page opens with a status line saying the block is gone.
+- **Folds are opened, and that writes.**
+  If the target or any ancestor of the citing block is collapsed, `outl_actions::unfold_ancestors` writes `SetCollapsed(false)` for the folded ones, in one batch and nothing else (never the page root, never the citing block's own fold).
+  Fold is op log state ([invariant 7](../CLAUDE.md#critical-invariants-never-violate)), so this syncs, the same as pressing the chevron or `zR`.
+  The GUI clients ask first with `needsUnfold`, so a page with nothing folded on the path makes no second IPC and writes no op.
+- **The parent ends up selected**, then centered, and the GUI clients flash it (see [`DESIGN.md` Motion](../DESIGN.md#motion)).
+  The TUI's selection is its visible focus, with no animation, and the status line names the page.
+- **The source page opens through the door the group header already uses** (`openRef` on desktop, `onOpenPage` on mobile, with a journal going through `openJournalFor`), not `openPageBySlug`, which makes a plain page on a miss and would turn a deleted journal day into an ordinary page.
+  The TUI opens it by kind and slug and creates nothing.
+
+The shared Tauri command is `unfold_ancestors(page_id, id) -> PageView` (TS: `unfoldAncestors` in `@outl/shared/api/commands`).
+It refuses a block that is not live on `page_id` and writes nothing, and it announces to sync only when it wrote.
+Desktop's sequence is `openBacklinkContext` in `lib/backlink-jump.ts` (not `outline-navigation.ts`, which promises to navigate and never write), mobile's is `createBacklinkLanding` in `Journal.landing.ts`, and both paint the final view once, after every await, and drop the jump if a newer one started or the page changed meanwhile.
+The TUI's is `actions/nav/backlink_context.rs`.
+The shortcut is `Action::OpenBacklinkContext`, chord `g o` ([`shortcuts.md`](shortcuts.md#on-a-backlink-row)), which works from the cursor row even when the crumb is hidden by `sameCrumbTrail`.
+Mobile has no chords, so its verdict is `Missing` with the nudge "tap the breadcrumb above the backlink row".
 
 `outl_actions::backlinks_for_page` / `backlinks_for_target` populate `Backlink::ancestors` (a `Vec<BacklinkCrumb>`) while walking the page tree, so every client reads the same data — nothing is recomputed client-side, and no client holds a tokenizer to recompute it with.
 `@outl/shared/outline::sameCrumbTrail` (mirrored locally by the TUI as `same_trail`) is the one comparison every client uses to decide whether to collapse consecutive breadcrumbs, comparing trails by block id.
 
 Mobile's `BacklinksSection` groups references by source page and renders the breadcrumb the same way desktop and TUI do — it no longer shows a flat list of blocks.
+`PageSections` now forwards `onRefClick` / `onTagClick` / `onLinkClick` to it, which it did not before: a ref inside a mobile backlink row did not navigate, whatever the table above said.
 
 ## Nested pages (issue #275)
 

@@ -726,6 +726,13 @@ and focus-mode fade 180ms, fade-in 200ms, sheet drag-release 220ms, toast 320ms,
 400ms, sync-dot settle 420ms, skeleton loop 1400ms.
 Press feedback is `scale(0.96)` + `opacity 0.7` — the smallest transform that still reads as a tap.
 
+**One exception to the 200ms rule: the landing flash.**
+A block reached from a backlink's breadcrumb is tinted `accent/[0.14]`, held 1200ms (`landedMarks`, a `createSavedMarks(1200)`) and faded over 400ms.
+Only its opacity moves, on an `aria-hidden` `pointer-events-none` span inside the row, so nothing reflows; under `prefers-reduced-motion` it is a static tint for the same hold.
+It lives in each client's `BlockRow.tsx` rather than in `polish/styles.css`, because it is longer than anything that file allows.
+It is a place marker, not an interaction response, and it is the only motion here that outlasts a second: do not cite it for a new one.
+The terminal has no flash; the selection is the marker there.
+
 ## Components
 
 The component surface is deliberately unequal across clients, and that inequality is a recorded fact,

@@ -222,12 +222,19 @@ export function followSelection(selected: () => string | null): void {
  * {@link followSelection} so a move, which changes the order and not the
  * selection, can ask for the same thing. Deferred a microtask: the row
  * may be rendering in this same tick.
+ *
+ * `block` defaults to `"nearest"`, so every existing caller keeps its
+ * behaviour; a navigation that lands on a block (a backlink's
+ * breadcrumb) asks for `"center"`.
  */
-export function revealBlock(id: string): void {
+export function revealBlock(
+  id: string,
+  block: ScrollLogicalPosition = "nearest",
+): void {
   queueMicrotask(() => {
     document
-      .querySelector<HTMLElement>(`[data-block-id="${id}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+      .querySelector<HTMLElement>(`[data-block-id="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block });
   });
 }
 

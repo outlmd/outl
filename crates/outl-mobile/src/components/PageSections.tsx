@@ -1,6 +1,6 @@
 import { JSX, Show } from "solid-js";
 
-import type { PageBacklinks, PageMeta } from "@outl/shared/api/types";
+import type { Backlink, PageBacklinks, PageMeta } from "@outl/shared/api/types";
 import { NamespaceMentions, NestedPages } from "@outl/shared/namespace";
 import { lateSectionVisible } from "@outl/shared/outline";
 import { FirstRunTips } from "@outl/shared/polish";
@@ -36,6 +36,13 @@ export interface PageSectionsProps {
   onError: (message: string) => void;
   /** Navigate to a page. `kind` routes journals to the journal opener. */
   onOpenPage: (slug: string, kind: PageMeta["kind"]) => void;
+  /** `[[ref]]`, `#tag` and link taps inside a backlink row or its
+   *  breadcrumb: the outline's own handlers, so they navigate. */
+  onRefClick?: (target: string) => void;
+  onTagClick?: (tag: string) => void;
+  onLinkClick?: (href: string) => void;
+  /** Tap on a backlink's breadcrumb: open its page at the crumb's block. */
+  onJumpToCrumb?: (link: Backlink) => void;
   /** The page holds only empty blocks: show the first-run tips. */
   blank?: boolean;
   /** The outline is zoomed into a block, so none of this is on screen
@@ -101,6 +108,10 @@ export function PageSections(props: PageSectionsProps): JSX.Element {
           onToggleOrder={props.onToggleOrder}
           onEditCommitted={props.onEditCommitted}
           onError={props.onError}
+          onRefClick={props.onRefClick}
+          onTagClick={props.onTagClick}
+          onLinkClick={props.onLinkClick}
+          onJumpToCrumb={props.onJumpToCrumb}
           onJump={(link) => {
             const source = link.source_page;
             if (source) props.onOpenPage(source.slug, source.kind);

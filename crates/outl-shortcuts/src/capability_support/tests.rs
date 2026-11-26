@@ -8,20 +8,24 @@ use super::*;
 use crate::support::Client;
 
 #[test]
-fn backlink_inline_edit_is_partial_on_the_tui_and_full_on_the_gui_clients() {
+fn backlink_inline_edit_is_full_on_every_client_and_opening_the_source_is_its_own_row() {
     let s = capability_support(Capability::BacklinkInlineEdit);
-    // The TUI performs all nine operations this row covers and has
-    // no gesture at all that opens the page a row's block lives on,
-    // so the nudge has to name the route that exists. `Full` here
-    // is the state this row already shipped in once, before any
-    // GUI client called `edit_backlink_block` — a wrong verdict is
-    // found by pressing the key.
-    assert!(matches!(s.tui, Partial(_)));
-    assert!(
-        s.tui.nudge().is_some_and(|why| why.contains("Ctrl+P")),
-        "the TUI's only route to a cited block's page is the quick switcher — the nudge \
-         has to name it",
-    );
+    // The TUI used to be `Partial` because nothing in its panel opened
+    // the page a row's block lives on. `g o` is that gesture, and it is
+    // recorded as `BacklinkOpenContext`, so this row is `Full` again.
+    assert!(matches!(s.tui, Full));
+    let open = capability_support(Capability::BacklinkOpenContext);
+    assert!(matches!(open.tui, Full));
+    assert!(matches!(open.desktop, Full));
+    assert!(matches!(open.mobile, Full));
+    // The chord half: mobile has none, and says what to tap instead.
+    let chord = crate::support::support(crate::Action::OpenBacklinkContext);
+    assert!(matches!(chord.tui, Support::Full));
+    assert!(matches!(chord.desktop, Support::Full));
+    assert!(chord
+        .mobile
+        .nudge()
+        .is_some_and(|why| why.contains("breadcrumb")));
     assert!(matches!(s.desktop, Full));
     // `Full` on mobile is a claim about those nine, never about a
     // one-tap finish: `Action::MarkDone` owns that one and says
@@ -82,7 +86,7 @@ fn every_client_declares_support_for_every_capability() {
             let _ = s.get(client);
         }
     }
-    assert_eq!(Capability::ALL.len(), 26, "Capability::ALL changed size");
+    assert_eq!(Capability::ALL.len(), 27, "Capability::ALL changed size");
 }
 
 #[test]

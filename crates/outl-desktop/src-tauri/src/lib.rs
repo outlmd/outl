@@ -88,7 +88,8 @@ use crate::commands::{
     set_backlinks_order, set_block_collapsed, set_block_property, set_block_remind,
     set_page_property, set_reminder_settings, set_telemetry_enabled, set_workspace, snooze_presets,
     snooze_reminder, split_block, today_slug_cmd, toggle_pin, toggle_quote, toggle_todo,
-    undo_merged_edit, undo_page, update_settings, wait_workspace_ready, workspace_stats,
+    undo_merged_edit, undo_page, unfold_ancestors, update_settings, wait_workspace_ready,
+    workspace_stats,
 };
 use crate::deep_link::{
     deep_link_payload, dispatch_deep_link, take_pending_deep_link, PendingDeepLink,
@@ -506,6 +507,7 @@ pub fn run() {
             copy_block_markdown,
             paste_block_after,
             set_block_collapsed,
+            unfold_ancestors,
             paste_markdown_at,
             paste_plain_at,
             copy_markdown,

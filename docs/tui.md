@@ -129,6 +129,9 @@ Pages are ordered by how recently they cited this one, newest first.
 `Ctrl+O` flips the direction and saves the choice to `[display] backlinks_order` in `config.toml`.
 A citing block nested inside an outline shows its ancestors as a dim breadcrumb above it (`Planejamento Q3 › Objetivos`).
 Consecutive references from one branch share a single breadcrumb.
+`g o` on a row opens the page it lives on, with the block above the citing one selected and any fold on the way opened (that writes `SetCollapsed` ops).
+A top-level citing block opens the page alone, and one that was deleted says so and still opens the page.
+Outside the panel the chord only explains itself in the status line.
 A page that cites itself lists that row too.
 On a cold start the header reads `Backlinks · indexing…` so a page that is still loading is not mistaken for a page with no backlinks.
 

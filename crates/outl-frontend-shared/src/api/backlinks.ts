@@ -156,3 +156,22 @@ export function createBacklinkSibling(
     side,
   });
 }
+
+/**
+ * Open every folded block between block `id` and `pageId`, and get the
+ * page's `PageView` back with them open.
+ *
+ * The reveal half of landing on a block ("open this page at the
+ * backlink's parent"). Fold is op-log state, so this **writes** (and
+ * syncs) one `SetCollapsed(false)` per folded ancestor, and nothing when
+ * none is folded; `needsUnfold` (`@outl/shared/outline`) lets a client
+ * skip the call in that case. Pass the block that cites, so the parent
+ * and everything above it open and the reference shows under the parent.
+ *
+ * Rejects, writing nothing, a block that is not live on `pageId`
+ * (trashed, unknown, moved to another page). `outl_actions::unfold_ancestors`
+ * owns which blocks open.
+ */
+export function unfoldAncestors(pageId: string, id: string): Promise<PageView> {
+  return invoke<PageView>("unfold_ancestors", { pageId, id });
+}

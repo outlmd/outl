@@ -36,6 +36,10 @@ export { collectPageEmbedNames, pageEmbedOnlyName } from "./page-embed";
 
 // One block move in flight at a time, for a held chord.
 export { createMoveGate } from "./move-gate";
+
+// Where "open the page at that block" lands, and whether a fold is in
+// the way. Pure walks; the unfold itself is the backend's.
+export { keepOpenedNotices, landingTarget, needsUnfold, type Landing } from "./reveal";
 export { rangeMoveTargets } from "./range-move";
 
 /**

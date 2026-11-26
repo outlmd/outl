@@ -5,6 +5,7 @@ import type { CaretExit } from "@outl/shared/caret-nav";
 import { rawTextWithTodo } from "@outl/shared/outline";
 import { createSettle } from "@outl/shared/polish";
 import { haptic } from "../lib/haptics";
+import { landedMarks } from "../lib/landed";
 import { savedMarks } from "../lib/saved";
 import { BlockBody, rowPadLeft } from "./BlockBody";
 import { SwipeRow } from "./SwipeRow";
@@ -143,7 +144,14 @@ export function BlockRow(props: BlockRowProps): JSX.Element {
     <div class="relative">
       {/* `outl-row` is the hook focus mode dims; it wraps the row only,
           never the children, so nested rows don't compound the fade. */}
-      <div class="outl-row" data-editing={isEditing() ? "true" : "false"}>
+      <div class="outl-row relative" data-editing={isEditing() ? "true" : "false"}>
+      {/* Landed highlight: a backlink breadcrumb opened the page here.
+          Only opacity moves; static under reduced motion. */}
+      <span
+        aria-hidden="true"
+        data-landed={landedMarks.isSaved(props.block.id) ? "" : undefined}
+        class="pointer-events-none absolute inset-0 bg-(--color-outl-accent)/[0.14] opacity-0 transition-opacity duration-[400ms] data-[landed]:opacity-100 motion-reduce:transition-none"
+      />
       <SwipeRow
         leftActionLabel="Delete"
         disabled={selectionMode()}

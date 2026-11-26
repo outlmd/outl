@@ -302,12 +302,23 @@ pub enum Capability {
     /// in `docs/superpowers/specs/2026-11-19-backlink-inline-edit-design.md`
     /// rather than declared `Partial`.
     ///
-    /// The TUI is `Partial` for a different reason, and the only one:
-    /// nothing in its backlinks panel opens the page a row's block
-    /// lives on — not the group header, not a click, not `Enter`. The
-    /// desktop and mobile both have that gesture on the card header,
-    /// so they are `Full`.
+    /// Every client is `Full`. The way to the source page is its own row,
+    /// [`Capability::BacklinkOpenContext`]: the TUI was `Partial` here
+    /// until `g o` gave its panel a gesture that opens it.
     BacklinkInlineEdit,
+
+    /// Opening the page a backlink row's block lives on, **at** that
+    /// block: the page opens with the row's parent selected and
+    /// centred, and any folded ancestor opened (a write, through
+    /// `outl_actions::unfold_ancestors`).
+    ///
+    /// The capability half of `Action::OpenBacklinkContext`: the action
+    /// is the chord (`g o`, TUI and desktop), this is the gesture every
+    /// client has: the TUI's `g o`, the desktop's click or `Enter` on
+    /// the breadcrumb, mobile's tap on it. It is what the TUI's
+    /// `BacklinkInlineEdit` row used to be `Partial` for: nothing in
+    /// its panel opened the source page.
+    BacklinkOpenContext,
 
     /// Turning the selected block into a blockquote, or back, in one
     /// gesture — without typing the `"> "` marker.
@@ -369,6 +380,7 @@ impl Capability {
         Capability::AboutAndSupport,
         Capability::PageEmbed,
         Capability::BacklinkInlineEdit,
+        Capability::BacklinkOpenContext,
         Capability::BlockquoteToggle,
     ];
 }
@@ -381,7 +393,7 @@ mod tests {
     /// what makes forgetting impossible: it will not compile once a
     /// new variant exists until this function's `match` grows an arm
     /// for it too.
-    const EXPECTED_26: usize = 26;
+    const EXPECTED_27: usize = 27;
 
     fn name(cap: Capability) -> &'static str {
         match cap {
@@ -410,6 +422,7 @@ mod tests {
             Capability::AboutAndSupport => "AboutAndSupport",
             Capability::PageEmbed => "PageEmbed",
             Capability::BacklinkInlineEdit => "BacklinkInlineEdit",
+            Capability::BacklinkOpenContext => "BacklinkOpenContext",
             Capability::BlockquoteToggle => "BlockquoteToggle",
         }
     }
@@ -427,9 +440,9 @@ mod tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_26,
-            "Capability::ALL has {} entries but the enum has {EXPECTED_26} variants \
-             : add the new variant to Capability::ALL (and bump EXPECTED_26)",
+            EXPECTED_27,
+            "Capability::ALL has {} entries but the enum has {EXPECTED_27} variants \
+             : add the new variant to Capability::ALL (and bump EXPECTED_27)",
             names.len(),
         );
     }
