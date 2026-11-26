@@ -6,7 +6,11 @@ import WebKit
 /// block is being edited.
 ///
 /// Bear-style: a single rounded-full pill that floats over the
-/// keyboard, no dividers, no edge-to-edge bar. Buttons re-order by
+/// keyboard, no dividers, no edge-to-edge bar. The strip behind the pill
+/// is filled with keyboard-matching chrome (`OutlChrome.keyboardBackdrop`)
+/// and so are the host views iOS puts the accessory in, because a clear
+/// strip showed the hosts' default black around the pill in light mode.
+/// Buttons re-order by
 /// usage — `OutlKit.ToolbarMFU` owns the ordering algorithm,
 /// `OutlKit.ToolbarLock` owns the user's opt-out from it (and both own
 /// their unit tests). This file only does the UIKit rendering and the
@@ -138,7 +142,11 @@ public final class OutlToolbarView: UIView {
             ? CGRect(x: 0, y: 0, width: 0, height: 56)
             : frame
         super.init(frame: resolved)
-        backgroundColor = .clear
+        // Opaque keyboard-chrome fill, not clear: iOS hosts the
+        // accessory in input-window views that default to solid black,
+        // and a clear strip lets that black show around the pill (see
+        // `paintHosts`).
+        backgroundColor = OutlChrome.keyboardBackdrop
         autoresizingMask = .flexibleWidth
         setupViews()
         rebuildButtons()
@@ -169,6 +177,74 @@ public final class OutlToolbarView: UIView {
 
     public override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: 56)
+    }
+
+    // MARK: - Host backdrop
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        paintHosts()
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        // iOS re-parents the accessory between keyboard transitions, so
+        // the chain is checked on layout too. A host already carrying
+        // our colour is skipped by identity, which keeps this cheap.
+        paintHosts()
+    }
+
+    /// Paint the views iOS hosts the accessory in with the same backdrop
+    /// as the accessory itself.
+    ///
+    /// Filling `self` is not enough: the input-set host views behind the
+    /// accessory default to black, and they show around the pill's
+    /// rounded corners and in the wedges at the keyboard's top corners.
+    ///
+    /// Conservative on purpose. Only ancestors are touched, never
+    /// siblings, so key caps and the QuickType bar are out of reach. A
+    /// host is repainted only when its fill is absent, clear or near
+    /// black, and only when it is keyboard-sized: a window-sized view is
+    /// not ours to fill, and an opaque fill there would hide the page
+    /// (`ChromeBackdrop` owns both rules and their tests). The walk is
+    /// short and stops once it has passed a `UIWindow`.
+    private func paintHosts() {
+        guard let window else { return }
+        let backdrop = OutlChrome.keyboardBackdrop
+        let screenHeight = Double(window.screen.bounds.height)
+        var host = superview
+        var depth = 0
+        while let view = host, depth < Self.hostWalkLimit {
+            if view.backgroundColor !== backdrop,
+               ChromeBackdrop.isKeyboardSized(
+                   hostHeight: Double(view.bounds.height),
+                   screenHeight: screenHeight
+               ),
+               Self.hasReplaceableFill(view)
+            {
+                view.backgroundColor = backdrop
+            }
+            if view is UIWindow { break }
+            host = view.superview
+            depth += 1
+        }
+    }
+
+    /// Ancestors checked above the accessory. The real chain is two or
+    /// three views before the keyboard window; the cap is a guard
+    /// against walking into something unrelated.
+    private static let hostWalkLimit = 6
+
+    private static func hasReplaceableFill(_ view: UIView) -> Bool {
+        guard let color = view.backgroundColor else { return true }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        let resolved = color.resolvedColor(with: view.traitCollection)
+        // A colour that cannot be read as RGB (pattern, catalog) is not
+        // one we know to be black, so it stays.
+        guard resolved.getRed(&r, green: &g, blue: &b, alpha: &a) else { return false }
+        return ChromeBackdrop.isReplaceableFill(
+            red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)
+        )
     }
 
     // MARK: - Layout

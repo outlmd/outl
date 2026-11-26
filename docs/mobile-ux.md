@@ -392,6 +392,19 @@ Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToo
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
 Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/client-editing.md` → Keyboard accessory bar](client-editing.md#keyboard-accessory-bar-mobile).
 
+### What sits behind the pill (iOS)
+
+The pill floats over a strip, and the strip has to be something.
+It used to be transparent, so what showed around the pill was whatever iOS hosts the accessory in, which is solid black: in light mode a white pill sat in a black band that leaked into the keyboard's rounded top corners.
+Now the accessory fills itself with `OutlChrome.keyboardBackdrop` (light grey in light mode, dark keyboard grey in dark mode, following `userInterfaceStyle` the way the capsule does), and so do the host views above it.
+The walk in `OutlToolbarView.paintHosts` only touches ancestors, only the ones whose fill is absent, clear or near black, and only the ones that are keyboard-sized, so key caps, the QuickType bar and anything window-sized are left alone.
+The suggester strip reads the same colour, so with `[[` open the two read as one slab.
+The grey levels and the "is this host ours to repaint" rules are pinned by `ChromeBackdropTests`.
+
+`OutlBrandChrome` keeps `#0c0814` on the window and webview for the LaunchScreen handoff, and swaps them to `OutlChrome.pageBackground` (white in light mode, `#0c0814` in dark) once the document has loaded, with a 4 s failsafe, and again on a light/dark flip.
+The swap waits for the load because the webview is non-opaque until then: a white window under the dark LaunchScreen would bring the white flash back.
+Neither colour follows the in-app theme preset; they follow the system appearance, like the capsule, and the page paints its own opaque background over them.
+
 ### The row only changes shape between editing sessions
 
 MFU reorders the middle range, and both bars used to reorder it **on every tap** (`rebuildButtons()` in Swift, a re-read signal in `KeyboardToolbar.tsx`).

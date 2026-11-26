@@ -28,15 +28,10 @@ public final class OutlSuggestView: UIView {
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
-        // Match the formatting toolbar's old background so when both
-        // were stacked they read as one continuous slab. With the new
-        // capsule toolbar this is less load-bearing, but the QuickType-
-        // adjacent color still feels right.
-        backgroundColor = UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(white: 0.11, alpha: 1.0)
-                : UIColor(white: 0.97, alpha: 1.0)
-        }
+        // The same fill the toolbar accessory paints behind its pill
+        // (`OutlChrome.keyboardBackdrop`), so the chip strip and the
+        // toolbar read as one continuous slab above the keyboard.
+        backgroundColor = OutlChrome.keyboardBackdrop
 
         let topLine = UIView()
         topLine.translatesAutoresizingMaskIntoConstraints = false
