@@ -11,7 +11,7 @@ name: Nix Build
 # file below. The nightly cron covers the one gap: a crate that needs a new
 # system library without touching a lockfile.
 #
-# Full reasoning: docs/ci-and-release.md "Why nix-build does not watch crates".
+# Full reasoning: docs/ci-runners.md "Why nix-build does not watch crates".
 on:
   workflow_dispatch:
   schedule:

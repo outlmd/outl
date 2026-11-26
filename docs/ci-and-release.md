@@ -14,16 +14,16 @@ If anything here is wrong or out of date, that's a bug — open an issue or fix 
 
 | Workflow | Triggers | What it runs | Blocks merge? |
 |---|---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only) | `cargo fmt --check`, `cargo clippy -D warnings` (`--all-targets`), `cargo test` (`--lib --bins --tests`, deliberately not `--all-targets`: see [Test scope](#test-scope)), `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` on every event, plus `test (macos)` on pushes to `main` only (see [Runner sizing](#runner-sizing)). | **Yes** |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push / PR to `main` (skipped on docs-only, and on paths no test reads: `scripts/**`, the package manifests, the flake, sibling workflows; the header comment lists them and the rule for adding one) | `cargo fmt --check`, `cargo clippy -D warnings` (`--all-targets`), `cargo test` (`--lib --bins --tests`, deliberately not `--all-targets`: see [Test scope](ci-runners.md#test-scope)), `cargo doc -D warnings`, an **`advisories`** job (`cargo deny --locked check advisories` against `deny.toml`: any RustSec vulnerability fails, the whole graph is checked for unmaintained and unsound crates too, and every ignore carries a reason), plus a dedicated **`sync`** job (`outl-core` + `outl-sync-iroh` with `PROPTEST_CASES=1024`), and a **`frontend`** job (`bun run test` + `bun run typecheck` over every bun workspace package). Excludes `outl-mobile` + `outl-desktop` from the Rust jobs. Test matrix: `test (linux)` on every event, plus `test (macos)` on pushes to `main` only, on a GitHub-hosted runner (see [Runner sizing](ci-runners.md#runner-sizing)). `test (linux)` excludes `outl-core` and `outl-sync-iroh`, which `sync` already runs on Linux at 1024 cases; `test (macos)` still runs them. | **Yes** |
 | [`hygiene.yml`](../.github/workflows/hygiene.yml) | Push / PR to `main`, **including** docs-only changes | `scripts/check-file-size.sh` (the file size ratchet), `scripts/check-docs-index.sh` (every RFC reachable from `docs/SUMMARY.md`), `scripts/tests/test_check_artifact_stripped.py` (the strip gate's own suite), and `scripts/check-release-assets.py --manifest` plus its suite (the three build matrices, `update_tap`'s loops, the Homebrew formula, the cask and the Scoop manifest all name the platforms `scripts/release_assets.py` names), and `scripts/check-ios-flavor.py` (every `$(OUTL_*)` in the iOS project has a definition in `Outl.xcconfig`, and no preview override reached a committed file). Kept out of `ci.yml` on purpose: that workflow skips `docs/**`, which is exactly the change set the index check has to see. | **Yes** |
 | [`docs-reminder.yml`](../.github/workflows/docs-reminder.yml) | PR to `main` (opened, synchronize, reopened, ready for review, labeled, unlabeled), drafts skipped | Lists the PR's files and asks [`scripts/docs_reminder.py`](../scripts/docs_reminder.py) whether a user-visible path changed (CLI, MCP tools, TUI, desktop, mobile, shortcuts, config, themes, plugins, markdown, sync, import, exec) with no `docs/**`, `README.md` or `CHANGELOG.md` in the diff. If so it posts **one** sticky comment (edited in place, found by a hidden marker) with the four-question checklist from [Documentation standard](contributing.md#documentation-standard). Skips the `no-docs-needed` label, dependabot, and `chore(deps)` / `ci:` / `test:` / `refactor:` titles unless `needs-docs` is set. Soft by default, never fails the job; set the repo variable `DOCS_REMINDER_STRICT=true` to make a missing update red. The path map has its own suite, run by `hygiene.yml`. Fork PRs get the text in the job summary, since their token cannot comment. | No (**Yes** with `DOCS_REMINDER_STRICT=true`) |
-| [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths for the guards; **nightly cron at 05:00 UTC** (gated) or manual dispatch for the signed build | A `vite build`, Swift tests and the Rust mobile crate on every push / PR. The signed archive (`ios-release`, which feeds `testflight.yml`) is nightly and gated, never per push: see [Runner cadence](#runner-cadence). The vitest suite is **not** here: `ci.yml::frontend` runs `bun run test` at the repo root, which is `bun --filter '*' test` and already covers this package, so running it here too meant two runners and two red checks for one cause. | Mobile changes only |
-| [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | Tauri build matrix (macOS/Linux/Windows) | Desktop changes only |
-| [`bench.yml`](../.github/workflows/bench.yml) | **Push** to `main` touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron. No `pull_request` trigger: see [Runner cadence](#runner-cadence) | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every push; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
-| [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when `main` moved in the last 24h **and** the newest conclusive `ci.yml` run on `main` is green (beta), `v*` tag (GA), manual. Runs no tests of its own: `ci.yml` owns them, and the gate is what keeps ~20 build legs off a red tree | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
-| [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully, or manual dispatch | Skips the upload (green run, `gate` notice) when the Mobile run has no non-expired `outl-ios-release` artifact; manual dispatch bypasses that check. Otherwise downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API. | n/a |
-| [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` / `v*` tag, PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. `:latest` goes on the newest stable **release**, decided against `gh release list` and not `git tag --list`, because a stray `v1.0.12` left by the Raycast extension's publish outranked every outl version and held `:latest` back from every 0.13.x GA. | No |
-| [`nix-build.yml`](../.github/workflows/nix-build.yml) | PR / push touching `flake.nix`, `flake.lock`, `hm-module.nix`, a lockfile, `rust-toolchain.toml` or the workflow, plus a nightly cron at 04:00 UTC | `nix flake check --no-build`, then builds `.#outl-desktop-node-modules` (the frontend fixed-output derivation, which is how a stale `frontendNodeModulesHash` reports itself), `.#outl`, `.#outl-desktop` and the `home-manager-module` check, on `x86_64-linux` and `aarch64-linux`. **`crates/**` is deliberately not a trigger**, see [Why `nix-build` does not watch `crates/**`](#why-nix-build-does-not-watch-crates). | No |
+| [`mobile.yml`](../.github/workflows/mobile.yml) | Push / PR touching mobile paths for the guards; **nightly cron at 05:00 UTC** (gated) or manual dispatch for the signed build | A `vite build`, Swift tests and the Rust mobile crate on every push / PR. The signed archive (`ios-release`, which feeds `testflight.yml`) is nightly and gated, never per push: see [Runner cadence](ci-runners.md#runner-cadence). The vitest suite is **not** here: `ci.yml::frontend` runs `bun run test` at the repo root, which is `bun --filter '*' test` and already covers this package, so running it here too meant two runners and two red checks for one cause. | Mobile changes only |
+| [`desktop.yml`](../.github/workflows/desktop.yml) | Push / PR touching desktop paths | `check` on Linux: clippy, Rust tests and a debug `tauri build`. Then the same debug build on macOS arm64 and Windows x86_64. Vitest and `tsc` are not here: `ci.yml::frontend` runs both over every package. | Desktop changes only |
+| [`bench.yml`](../.github/workflows/bench.yml) | **Push** to `main` touching `outl-core`, `outl-md`, `outl-actions` or `outl-tauri-shared`, plus weekly cron. No `pull_request` trigger: see [Runner cadence](ci-runners.md#runner-cadence) | Criterion (small/medium/large) + `outl-core`'s `boot` bench at 10k on every push; xlarge, boot at 50k/218k and CLI hyperfine on cron / manual dispatch. A trend line, not a gate: wall clock on a shared runner moves by double digits between identical runs ([boot budgets](boot-performance.md)). Artifacts retained 14–30 days. | No (informational) |
+| [`release.yml`](../.github/workflows/release.yml) | Nightly cron at 06:00 UTC when a commit other than the bot's `packaging: outl …` landed since the last beta was cut **and** the newest conclusive `ci.yml` run on `main` is green (beta), `v*` tag (GA), manual. Runs no tests of its own: `ci.yml` owns them, and the gate is what keeps ~20 build legs off a red tree | Computes version from `Cargo.toml`, builds the CLI + TUI matrix (macOS `arm64`/`x86_64`, Linux `x86_64`/`aarch64`, Windows `x86_64`/`aarch64`), builds the desktop bundles (universal macOS dmg, Linux AppImage/deb/rpm and a Windows NSIS installer per architecture), the Android APK, drafts release, uploads assets, gates the publish on [`scripts/release_assets.py`](../scripts/release_assets.py), bumps the Homebrew formula + cask and the Scoop manifest (`bucket/outl-beta.json`), publishes `@outl/plugin-sdk` to npm and the embedder lib crates to crates.io. | n/a |
+| [`testflight.yml`](../.github/workflows/testflight.yml) | `Mobile` workflow completing successfully, or manual dispatch | Skips the upload (green run, `gate` notice) when the Mobile run has no non-expired `outl-ios-release` artifact; manual dispatch bypasses that check. Otherwise downloads the signed `.ipa`, uploads to App Store Connect via `xcrun altool`, sets "What to Test" notes via App Store Connect API, on a GitHub-hosted `macos-15`. The IPA is not re-uploaded as an artifact: the Mobile run's `outl-ios-release` is the copy, kept 30 days. | n/a |
+| [`docker.yml`](../.github/workflows/docker.yml) | Push to `main` touching what the image is built from (the crates `outl-cli` pulls in, manifests, lockfile, toolchain, `Dockerfile`, `docker/**`), any `v*` tag (`paths:` does not apply to tags), PR touching `Dockerfile` / `docker/**`, manual | Builds `ghcr.io/<owner>/outl-server` once per architecture on a runner of that architecture (`linux/amd64`, `linux/arm64`), pushes each by digest, merges them into one manifest list per tag, and attests that list through Sigstore (`gh attestation verify oci://…`). A PR builds and pushes nothing. `:latest` goes on the newest stable **release**, decided against `gh release list` and not `git tag --list`, because a stray `v1.0.12` left by the Raycast extension's publish outranked every outl version and held `:latest` back from every 0.13.x GA. | No |
+| [`nix-build.yml`](../.github/workflows/nix-build.yml) | PR / push touching `flake.nix`, `flake.lock`, `hm-module.nix`, a lockfile, `rust-toolchain.toml` or the workflow, plus a nightly cron at 04:00 UTC | `nix flake check --no-build`, then builds `.#outl-desktop-node-modules` (the frontend fixed-output derivation, which is how a stale `frontendNodeModulesHash` reports itself), `.#outl`, `.#outl-desktop` and the `home-manager-module` check, on `x86_64-linux` and `aarch64-linux`. **`crates/**` is deliberately not a trigger**, see [Why `nix-build` does not watch `crates/**`](ci-runners.md#why-nix-build-does-not-watch-crates). | No |
 | [`cleanup-tags.yml`](../.github/workflows/cleanup-tags.yml) | Called by `release.yml` from `needs: tag` (once per tag created), or manual | Keeps the 2 most recently generated `vX.Y.Z-beta.N` tags repo-wide and deletes every older one, release and tag together. GA tags are never candidates, and neither is a beta a shipped package manifest still points at. Each deletion is confirmed by re-reading the ref from origin, because a 46-tag drain once printed `- [deleted]` 46 times, left 21 refs in place and still exited 0. Not `on: push: tags:`: the tag is pushed with `GITHUB_TOKEN`, which triggers no workflow. A pruned name is never reusable, which is [its own section](#a-pruned-beta-tag-name-never-comes-back). | n/a |
 
 [`discussions-discord.yml`](../.github/workflows/discussions-discord.yml) is not a CI check: it mirrors new Discussions and comments into a Discord forum, see [Discussions mirror to Discord](discussions-discord.md).
@@ -57,9 +57,9 @@ What it deliberately leaves alone, because none of it is duplication:
   Three callers install it three different ways: `dtolnay/rust-toolchain` with `targets:`, plus two raw `rustup target add` scripts for the universal macOS and the Windows cross build.
   Flattening that is a per-platform behaviour change, not a dedup.
 - **The cargo cache.**
-  `release.yml` uses `actions/cache` with an explicit `path` and `key`, `desktop.yml` uses `Swatinem/rust-cache` with a `shared-key`.
-  They should agree, and picking one costs a cold build per job plus a build-time measurement nobody has taken.
-  Real finding, separate change.
+  Both workflows now use `Swatinem/rust-cache` with a per-job `shared-key` (in `release.yml`: `release-<cli|desktop|android>-<triple>`), so they agree and nothing is left to hoist.
+  `release.yml` used to cache `target` with `actions/cache`, and 54 of 60 legs restored nothing: a cold Windows leg takes 17-29 min against 6-7 warm.
+  Its step sits above the version `sed`, so the nightly `-beta.N` does not enter the key.
 - **The build.**
   `desktop.yml` runs a debug `--no-bundle` compile to answer "does it build".
   `release.yml` bundles, signs, strips, verifies and uploads.
@@ -67,186 +67,23 @@ What it deliberately leaves alone, because none of it is duplication:
 
 ### Runner sizing
 
-Almost every workflow runs on Blacksmith runners (`runs-on: blacksmith-<n>vcpu-<image>`, with `-arm` appended for ARM64 Linux) rather than on GitHub-hosted ones.
-Two places are not, for unrelated reasons, and both are deliberate:
-
-- **`release.yml::publish_npm`** runs on `ubuntu-24.04` because npm trusted publishing (OIDC) does not accept self-hosted runners yet, and Blacksmith registers as self-hosted.
-  Moving it back to Blacksmith breaks the npm publish.
-  Its trusted publisher on npmjs.com (`@outl/plugin-sdk` → Settings → Trusted publishing) must stay configured as owner `outlmd`, repository `outl`, workflow `release.yml`, environment `release`, granting `npm publish`.
-  See [npm trusted publishing](#npm-trusted-publishing) for the three fields that are easy to get wrong.
-- **`nix-build.yml`** runs on `ubuntu-24.04` / `ubuntu-24.04-arm`.
-  This repository is public, so GitHub-hosted Linux minutes are free, and the flake has no binary cache: every run is a full from-scratch compile of the workspace plus the Tauri desktop app, measured at 31 and 29 minutes for the two legs.
-  Putting that on Blacksmith converts the single longest job in the repo into the single most expensive one, for a build whose only product is a signal.
-  What it costs instead is wall clock a contributor waits on, which is why the trigger is narrow rather than the runner fast.
-
-Billing is per vCPU-minute, with a platform multiplier on top: ARM 0.625x, x64 Linux 1x, Windows 2x, macOS 6.67x.
-That multiplier is why job placement matters more than job speed: a 29s macOS job costs more than a 5min Linux one.
-
-Three rules follow from it, and all three are already applied in the workflows:
-
-1. **Only platform-specific work runs on macOS or Windows.**
-   Anything that produces the same result on Linux runs on Linux, once.
-   `mobile.yml::rust-check` builds `outl-mobile` only for this reason — `outl-actions` / `outl-core` / `outl-md` are covered by `ci.yml::test`, and running their suites again on macOS was 55% of a full run's bill.
-2. **An expensive runner also has a cadence, and the cadence is a separate decision from the SKU.**
-   Rule 1 asks whether a job belongs on macOS at all; this one asks how often it has to answer.
-   Two jobs were paying every-event prices for a question that does not change that fast, and the evidence for both is in [Runner cadence](#runner-cadence) below.
-3. **Size the SKU from measured CPU and memory, not from intuition.**
-   `blacksmith jobs stats <job_id>` prints the per-job CPU timeseries, memory peak and OOM count; `blacksmith usage --breakdown-by workflow_job` prints what each job costs.
-
-Sizes as of the Blacksmith migration, from a full run of every workflow:
-
-| Job | SKU | Why |
-|---|---|---|
-| `ci.yml::fmt`, `ci.yml::advisories` | 2 vCPU | rustfmt and cargo-deny compile nothing (16s for fmt) |
-| `mobile.yml::frontend`, `ci.yml::frontend`, `hygiene.yml::hygiene` | 2 vCPU | vitest + Vite build, 12s, never saturated 4 vCPU; the other two are ~4s of vitest and a line-count scan, with no compilation at all |
-| `release.yml` orchestration (`prepare`, `tag`, `create_release`, `publish_*` except `publish_npm`, `update_tap`), `cleanup-tags.yml` | 2 vCPU | shell + `gh` calls, no compilation |
-| `ci.yml::docs`, `ci.yml::sync`, `bench.yml` | 4 vCPU | doc/proptest jobs already finish in ~100s; bench stays fixed so numbers remain comparable run over run |
-| `ci.yml::clippy`, `ci.yml::test (linux)`, `desktop.yml::check`, release builds | 8 vCPU | measured 71–76% average CPU on 4 vCPU with 2.6–4.7 GB of 16 GB used and zero OOM: CPU-bound, so more cores cut wall clock at roughly flat billing |
-| macOS jobs | 6 vCPU | smallest macOS tier Blacksmith offers |
-| `release.yml` Linux legs (CLI `x86_64`/`aarch64`, desktop `x86_64`/`aarch64`), `docker.yml` | 8 vCPU | same CPU-bound release build on either architecture; the ARM legs use the `-arm` suffix of the same SKU, billed at 0.625x |
-
-**The Linux release legs are pinned to `ubuntu-2204`, not `2404`, and that is not a cost decision.**
-A glibc-linked binary runs on the glibc it was built against or newer, never older, so the image the artifact is built on *is* its compatibility floor: 22.04 is glibc 2.35 (Debian 12, every supported Ubuntu LTS), 24.04 is 2.39 (and nothing older than itself).
-`build_desktop_linux` was pinned for this from the start and said so; the CLI leg was built on 24.04 until [#411](https://github.com/outlmd/outl/issues/411), which made `outl-linux-x64.tar.gz` die with `version GLIBC_2.38 not found` on exactly the distros where someone downloads a tarball instead of using a package manager.
-Bumping either to 24.04 raises that floor for everyone; do it on purpose, or not at all.
-
-**The Windows ARM64 desktop leg is a cross-compile, and the target is installed with `rustup target add`.**
-`build_desktop_windows` runs on the x64 `windows-2025` image, which already has stable for `x86_64-pc-windows-msvc` plus the MSVC ARM64 linker.
-`dtolnay/rust-toolchain`'s `targets:` input runs `rustup toolchain install stable --target <triple>`, and on a toolchain the image already has, that does not install the extra target.
-The job then died in `tauri build` with the target not installed, so `outl-desktop-windows-aarch64-setup.exe` never landed on a release.
-`rustup target add` installs it on the toolchain `rust-toolchain.toml` selects.
-The CLI matrix on the same image already did, which is why `outl-windows-arm64.zip` shipped and the installer did not.
-
-**Check names must not contain the runner SKU.**
-Branch protection matches required checks by name, so `test (ubuntu-latest)` becoming `test (blacksmith-8vcpu-ubuntu-2404)` leaves `main` blocked on a check that will never report again.
-Matrix jobs therefore carry a stable `label` (`linux`, `macos`, `macOS arm64`, …) and the SKU lives only in `matrix.os`.
+Moved to [CI runners and cost](ci-runners.md#runner-sizing).
 
 ### Test scope
 
-**`cargo test` runs `--lib --bins --tests`, never `--all-targets`, and that is worth 86% of the job.**
-
-The difference between the two is `--benches`, and `cargo test --benches` does not merely compile a benchmark, it *runs* it in test mode.
-This workspace has six criterion bench targets across `outl-core` and `outl-md`, which expand to 90 benchmarks including three tiers of `boot/replay_memory` and `boot/replay_disk` at 218k ops.
-
-Measured on one machine with a fully warm target dir, so the number is execution only:
-
-| Command | Wall clock | Suites | Tests passed |
-|---|---:|---:|---:|
-| `--all-targets` | 17m34s | 202 | 3818 |
-| `--lib --bins --tests` | 2m52s | 200 | 3818 |
-
-Of the 1054s the first one took, the test binaries' own `finished in` lines accounted for 173s.
-The other 84% was benchmarks, running inside the job whose name says tests, on every pull request, with `sync` paying it a second time because `outl-core` is one of the two crates it names.
-The two missing "suites" are the bench binaries, which reported `0 passed` either way.
-
-Nothing is lost, and each piece has an owner that still runs on the same PR:
-
-- **Running** the benchmarks belongs to `bench.yml`.
-- **Compiling** them is covered by `clippy`, which does pass `--all-targets`, so a benchmark that stops compiling still fails this workflow.
-- There are no `examples/` in the workspace, and all six bench targets are `harness = false`, so none of them holds a `#[test]` that would now go unrun.
-
-`cargo-nextest` is the obvious next question, and the measurement argues against reaching for it yet.
-The run above averaged 1.1 of 14 cores, because `cargo test` serialises *between* binaries, but the real work inside them is only 173s.
-Fix the 881s first.
-
-**One number above is now stale, on purpose rather than by neglect.**
-[Runner sizing](#runner-sizing) puts `ci.yml::test (linux)` on 8 vCPU because it measured 71–76% average CPU on 4 vCPU, and that measurement was taken while the job was spending 84% of its time on benchmarks.
-The right move is to re-measure with `blacksmith jobs stats <job_id>` once this has run a few times on `main` and resize from what it reports, which is the rule that section already states.
-Do not resize it from this paragraph.
+Moved to [CI runners and cost](ci-runners.md#test-scope).
 
 ### Runner cadence
 
-macOS is 6.67x Linux per vCPU-minute and 6 vCPU is the smallest tier offered, so a macOS job has no cheaper SKU to move to.
-The only lever left is how often it runs.
-
-The October 2026 bill is what sized both changes below: 5,657 macOS minutes, $452.56 of a $699.92 gross month, 65% of the bill on one platform.
-Attributing those minutes to jobs put 63% of them in a single place.
-
-| Job | min/month | $ gross | min/run |
-|---|---:|---:|---:|
-| `ci.yml::test (macos)` | 3,259 | $260.75 | 12.8 |
-| `release.yml::build_desktop` (universal) | 525 | $41.96 | 7.9 |
-| `mobile.yml::rust-check` | 352 | $28.18 | 1.7 |
-| `desktop.yml::build` (macOS arm64) | 240 | $19.23 | 1.6 |
-| `release.yml::build` (both Apple targets) | 425 | $34.07 | 3.7 |
-| everything else on macOS | 400 | $32.02 | — |
-
-**`ci.yml::test (macos)` runs on pushes to `main`, not on pull requests.**
-The matrix is built from `github.event_name` rather than written out, so the leg is simply absent on a PR and the check keeps the name `test (macos)` on the runs that have one.
-What justifies it: across July–October 2026, 403 runs where both legs reached a conclusion, the macOS leg caught **zero** failures the Linux leg did not.
-It failed alone twice, both in September, and both were test calibration rather than platform defects — recalibrated in `085303b6` and `8f64fa4b`, after which October ran 254 of these clean.
-Once, the reverse happened and Linux caught what macOS passed.
-That is the expected result, because the two legs run the same crates: `--exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared` leaves exactly one piece of macOS-specific code under test, `platform_host_id` in `outl-core/src/device/host.rs`, which shells out to `ioreg`.
-Every other `cfg` in those crates selects iOS, which this runner is not.
-PRs were 2,672 of the 3,259 minutes, so the change is worth $213.76 a month at gross rates and leaves a macOS-only defect a window of exactly one merge.
-
-**`release.yml` cuts a beta nightly, not on every push to `main`.**
-66 betas in October, 2.1 a day, each spending 15.3 macOS minutes across `build_desktop` and the two CLI legs.
-The cron fires at 06:00 UTC and a `gate` job asks two questions, so an idle night and a broken night both cost nothing.
-First, did anything land in the last 24h.
-Second, does CI already know the tree is red: `release.yml` runs no tests of its own, `ci.yml` owns them, and without the second question the nightly spends 9 to 34 minutes across ~20 build legs producing a beta from a tree whose tests fail.
-A tag push and a manual dispatch both bypass both gates — **if you need a beta right now, Actions → Release → "Run workflow"**, which is unchanged.
-
-**`mobile.yml::ios-release` builds nightly, not on every push to `main`.**
-It archives, signs and hands an IPA to `testflight.yml`, so `on: push` meant one TestFlight build per merge.
-That was 10 pushes in four days, each spending macOS-rate minutes on an archive nobody requested, and each one a build number a tester scrolls past to find the one they were told about.
-The `gate` job is the same shape as `release.yml`'s and asks the same two questions, with one difference that matters: gate 1 counts commits **against this workflow's path list** rather than against `HEAD`.
-A beta ships the whole repo, so any commit justifies one; an IPA is the mobile app, and a night whose only commits were in `docs/` or `outl-cli` has nothing new to put in front of a tester.
-The fast guards (`rust-check`, `frontend`, `swift-tests`) still run per push and per PR, because those are what answer "did this change break mobile" and they are cheap.
-A nightly and a manual dispatch each get a concurrency group keyed on the run id, so a merge landing at 05:10 UTC cannot cancel the night's build.
-**If you need a TestFlight build now: Actions → Mobile → "Run workflow" with `release_build: true`**, which bypasses both gates.
-
-**`bench.yml` has no `pull_request` trigger, and the reason is signal rather than cost.**
-`bench-quick` compiled, measured and uploaded criterion's HTML, comparing against nothing: no baseline from the merge base in the run, no threshold, no step that could fail.
-A PR paid ~3.4 minutes for a number that only becomes a signal if a human downloads two zips and diffs them by hand.
-Adding a percentage comparison is not the fix, because wall clock on a shared 4 vCPU runner moves by double digits between identical runs, so the gate would fail on noise and be muted inside a sprint.
-The gate that would work is deterministic instead: instruction counts via iai-callgrind plus absolute budgets over `bench-cli-xlarge`'s JSON, tracked as open work in [boot performance](boot-performance.md).
-Until that lands, `main` carries the per-commit series and the cron carries the trend.
-
-**What neither of these covers, and nothing covered before.**
-APFS is case-insensitive and ext4 is not, so a slug collision that only reproduces on macOS is a real failure mode that no test in this workspace exercises.
-The macOS CI leg never protected against it, on a PR or anywhere else, because no such test exists to run.
-If that gap matters, the fix is a test for it on either platform, not restoring 12.8 minutes of macOS per pull request.
+Moved to [CI runners and cost](ci-runners.md#runner-cadence).
 
 ### Why `nix-build` does not watch `crates/**`
 
-It did, and it was the largest consumer of runner time in the repo.
-61 minutes per run (31 on `x86_64`, 29 on `aarch64`) across 27 runs in four days, because the flake has no binary cache and each leg compiles the whole Rust workspace plus the Tauri desktop app from nothing.
-
-What that buys is the **packaging**, not the code.
-Take `cargoHash`, `frontendNodeModulesHash`, `buildInputs`, `wrapProgram`, the `.desktop` entry and the home-manager module.
-Every one of those is decided by `flake.nix`, `hm-module.nix`, a lockfile or `rust-toolchain.toml`, which is exactly the trigger list.
-A change under `crates/**` can only break this workflow by failing to compile, and `ci.yml::clippy` reports that in about a minute on the same change, thirty times sooner.
-
-The gap that leaves is narrow and real, so it is covered rather than ignored.
-A change in `crates/**` that needs a **new system library** without touching any lockfile trips nothing in the list.
-The nightly cron at 04:00 UTC catches it within a day, and `workflow_dispatch` catches it on demand, which is what to reach for before tagging a release if the flake matters to you.
+Moved to [CI runners and cost](ci-runners.md#why-nix-build-does-not-watch-crates).
 
 ### Cache budget
 
-A repository gets **10 GB of Actions cache in total**, shared by every workflow, evicted least-recently-used, and entries expire after 7 days without a read.
-That total is a resource with no owner, and it is possible for one workflow to consume all of it without failing.
-
-That happened.
-`docker.yml` exported `cache-to: type=gha,mode=max` under two scopes (`docker-amd64`, `docker-arm64`), which puts every intermediate layer of a multi-stage Rust build into the shared budget.
-A census found 11.00 GB across 242 entries, **202 of them buildkit blobs**, with zero entries left for anything else.
-The `Swatinem/rust-cache` entries in `ci.yml`, the bun caches, and the cargo caches in `bench.yml` and `release-screenshots.yml` had all been evicted, and the two docker legs were evicting each other.
-
-The fix is `cache-to: type=registry`, pointing at `:buildcache-<arch>` next to the image in GHCR.
-It is billed as package storage instead of cache, so it neither competes with the Rust caches nor expires at 7 days.
-`cache-to` is gated on `github.event_name != 'pull_request'` because a fork's PR holds no write token; `cache-from` needs none against a public package.
-
-Two rules follow:
-
-1. **A workflow may not export `mode=max` to `type=gha`.**
-   Intermediate layers of a compile belong in a registry cache.
-   If you need `type=gha`, `mode=min` is the ceiling.
-2. **Check the census before blaming a cold build.**
-   `gh api --paginate "/repos/outlmd/outl/actions/caches?per_page=100"` lists every entry with its size, and `gh api /repos/outlmd/outl/actions/cache/usage` gives the total.
-   A Rust job that suddenly takes 12 minutes instead of 2 is usually not a code change: it is a restore that found nothing.
-
-Blacksmith redirects `actions/cache` to its own colocated cache, so jobs on `blacksmith-*` runners are not what fills this budget.
-Buildx's `type=gha` talks to the GitHub Actions cache API directly and is not redirected, which is why one workflow could fill the whole thing while every other cache in the repo looked fine in its own YAML.
+Moved to [CI runners and cost](ci-runners.md#cache-budget).
 
 ### What blocks merge
 
@@ -285,6 +122,7 @@ Two precautions stay in the workflows regardless, because they cost nothing and 
 
 - Matrix legs carry a stable `label` instead of the runner SKU, because required checks match by name and a SKU bump would silently rename one.
 - `ci.yml::sync` exists as its own job so a convergence regression shows up as its own red check rather than buried in a broad matrix job.
+  It is also the only Linux run of `outl-core` and `outl-sync-iroh`, which `test (linux)` excludes, so filtering or deleting it means dropping that exclude.
 
 The PR template and the policy in [`docs/contributing.md`](contributing.md) describe everything reviewers look at on top of CI.
 
@@ -317,8 +155,8 @@ This is non-negotiable — see `crates/outl-mobile/CLAUDE.md` § "Versioning + T
 
 ### Beta cadence
 
-A beta release is cut automatically **once a night**, at 06:00 UTC, and only when something landed on `main` in the preceding 24h *and* the newest conclusive `ci.yml` run on `main` is green.
-It used to be cut on every push; [Runner cadence](#runner-cadence) has the measurement that changed it and `release.yml`'s `gate` job is where both checks live.
+A beta release is cut automatically **once a night**, at 06:00 UTC, and only when a commit other than the bot's packaging commit landed on `main` since the last beta was cut *and* the newest conclusive `ci.yml` run on `main` is green.
+It used to be cut on every push; [Runner cadence](ci-runners.md#runner-cadence) has the measurement that changed it and `release.yml`'s `gate` job is where both checks live.
 The CI check reads the newest run that actually concluded, so a `cancelled` run is skipped.
 `ci.yml` cancels in progress per ref, which makes a cancelled run an answer about neither commit.
 A gap in CI history reads as "unknown" and proceeds.
@@ -434,8 +272,9 @@ A release asset URL does not redirect, so renaming either family breaks links th
 
 ### TestFlight (iOS)
 
-`mobile.yml` builds + signs the IPA (`ios-release`) on every push, and on a `workflow_dispatch` only with `release_build=true`.
+`mobile.yml` builds and signs the IPA (`ios-release`) nightly, from the 05:00 UTC cron when its `gate` proceeds (a mobile push run in the last 24h, CI on `main` not red), or on a `workflow_dispatch` with `release_build=true`.
 `testflight.yml` runs after `mobile.yml` completes, downloads the IPA artifact, uploads to App Store Connect.
+Its `gate` accepts Mobile runs from `schedule`, `push` and `workflow_dispatch`; it left out `schedule` until November 2026, so a nightly IPA never shipped.
 
 A successful Mobile run does not imply an IPA, so `testflight.yml` starts with a Linux `gate` job.
 It lists the triggering Mobile run's artifacts and lets `upload` run only when a non-expired `outl-ios-release` exists.
@@ -470,10 +309,10 @@ So CI reads the workspace version (`awk` against `Cargo.toml` in `Compute build 
 
 #### CI release flow
 
-A push to `main` triggers in parallel:
+Two nightly crons, an hour apart, neither waiting on the other:
 
-1. **`Release`** (`release.yml`) — auto-bumps `Cargo.toml` locally to `<base>-beta.<run_number>`, cuts a `v<...>-beta.<N>` tag, builds desktop binaries, ships the Homebrew formula (never commits the bump back).
-2. **`Mobile`** (`mobile.yml`) — builds the signed IPA from the *unbumped* `Cargo.toml`, uploads it as `outl-ios-release`, triggers `TestFlight`.
+1. **`Release`** (`release.yml`, 06:00 UTC) — auto-bumps `Cargo.toml` locally to `<base>-beta.<run_number>`, cuts a `v<...>-beta.<N>` tag, builds desktop binaries, ships the Homebrew formula (never commits the bump back).
+2. **`Mobile`** (`mobile.yml`, 05:00 UTC) — builds the signed IPA from the *unbumped* `Cargo.toml`, uploads it as `outl-ios-release`, triggers `TestFlight`.
 3. **`TestFlight`** (`testflight.yml`) — downloads the artifact, uploads to App Store Connect (`xcrun altool`).
 
 #### CFBundleVersion (build number) scheme
@@ -514,7 +353,7 @@ That is also what a missing entry looks like, which is how 13 of 20 nightly rele
 
 **A new entry starts as `Pending validation` and expires.**
 npm gives a deadline (48 hours, when this was last set up) and discards the entry if no publish has validated it by then.
-The nightly cron is normally what validates it, which means `release.yml`'s `gate` has to pass first: `main` must have moved in the last 24h **and** `ci.yml` must be green on `main`.
+The nightly cron is normally what validates it, which means `release.yml`'s `gate` has to pass first: a non-packaging commit must have landed since the last beta **and** `ci.yml` must be green on `main`.
 So a red `main` does not merely skip a beta, it can burn the validation window.
 To validate immediately instead, use Actions → Release → "Run workflow" with `dry_run: false`; a dry run does not validate, because `publish_npm` is gated on that input.
 

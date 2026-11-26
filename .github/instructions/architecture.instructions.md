@@ -65,6 +65,7 @@ If you see a diff in the left column and no matching update in the right column,
 |---|---|
 | `.github/workflows/ci.yml` (jobs, matrix, excluded crates, `RUSTDOCFLAGS`, paths-ignore) | `docs/ci-and-release.md` § 1 (CI walkthrough) |
 | `.github/workflows/release.yml`, `mobile.yml`, `desktop.yml`, `testflight.yml`, `bench.yml`, `cleanup-tags.yml` | `docs/ci-and-release.md` § 1 (CI table) and § 2 (Release process) |
+| Any workflow's `runs-on`, cron cadence, or cache step (`rust-cache`, `actions/cache`, `save-if`, `shared-key`) | `docs/ci-runners.md` (Runner sizing, Runner cadence, Cache budget) |
 | `.github/actions/*/action.yml` (a step shared by more than one workflow) | `docs/ci-and-release.md` § 1 ("Shared build setup") |
 | `.claude/settings.json` hooks, `.claude/agents/*.md`, `.claude/commands/*.md` (any slash command or hook behavior) | `docs/development.md` § 4 (Dev loop) |
 | `rust-toolchain.toml` version bump | `docs/development.md` § 1 and root `CONTRIBUTING.md` |

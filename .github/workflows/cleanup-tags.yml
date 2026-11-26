@@ -94,7 +94,10 @@ jobs:
     # the old gate covered by accident, a Release that tagged but died
     # before bumping the package manifests, is covered on purpose now by
     # the script's manifest guard.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    #
+    # GitHub-hosted: git + gh only, under one billed minute, and free on a
+    # public repo.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

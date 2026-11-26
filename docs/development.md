@@ -479,7 +479,7 @@ Fix: drop the brackets, keep the backticks.
 | Integration | `crates/*/tests/*.rs` | Public surface of one crate. Real `MemoryStorage` (or `tempfile` + `JsonlStorage`). |
 | CRDT invariants | `crates/outl-core/tests/crdt_*.rs` | Convergence, idempotency, cycle no-op, replay determinism. |
 | Roundtrip | `crates/outl-md/tests/roundtrip_*.rs` | `md → parse → render → md` is byte-stable. `md → ops → md` preserves ids via sidecar. |
-| Bench | `crates/outl-md/benches/*.rs` + `crates/outl-core/benches/*.rs` (criterion) + `xtask/src/bin/gen-10k.rs` for CLI hyperfine | Hot-path regression detection. Run weekly + per PR via `bench.yml`. `outl-core`'s `boot` is the one a user feels; budgets in [boot performance](boot-performance.md). |
+| Bench | `crates/outl-md/benches/*.rs` + `crates/outl-core/benches/*.rs` (criterion) + `xtask/src/bin/gen-10k.rs` for CLI hyperfine | Hot-path regression detection. Run per push to `main` + weekly via `bench.yml`. `outl-core`'s `boot` is the one a user feels; budgets in [boot performance](boot-performance.md). |
 | Frontend | `crates/outl-mobile/src/**/*.test.ts`, `crates/outl-desktop/src/**/*.test.ts`, `crates/outl-frontend-shared/**/*.test.ts` (`bun run test`) | Pure helpers and DTO conversions. |
 | Swift (`OutlKit`) | `crates/outl-mobile/swift/OutlKit/Tests/OutlKitTests/` (`swift test`) | Pure native helpers — brand color, suggester chip parser, toolbar MFU, peer-file predicates, JS escape. **Required** for new pure Swift logic. |
 | Native iOS bridges (`gen/apple/.../*.swift`, `main.mm`) | None (yet) — observed via `NSLog` probes on boot | UIKit / Foundation glue that needs the iOS runtime. If you add a piece that *can* be tested without UIKit, extract it into `OutlKit` first. |
@@ -540,7 +540,8 @@ PROPTEST_CASES=1024 cargo test -p outl-core -p outl-sync-iroh --all-targets
 
 CI's dedicated **`sync`** job (in [`ci.yml`](../.github/workflows/ci.yml)) sets `PROPTEST_CASES=1024` for exactly this pair of crates.
 That way the probabilistic convergence bugs (op reordering, cycle no-ops, concurrent moves) actually get generated cases on every PR.
-That job is a required status check: a red convergence run blocks merge.
+No check is required ([What blocks merge](ci-and-release.md#what-blocks-merge)), so a red convergence run is its own red check, not a merge block.
+It is also the only Linux run of this pair: `test (linux)` excludes both, and `test (macos)` still runs them on pushes to `main`.
 Keep the high budget on the `sync` job only — running 1024 across the whole test matrix burns runner minutes for no extra signal.
 
 ### TDD for bug fixes

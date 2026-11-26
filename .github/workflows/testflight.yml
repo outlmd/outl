@@ -41,47 +41,32 @@ permissions:
   contents: read
   actions: read   # download-artifact reaches into another workflow run
 
-concurrency:
-  # Cancel an in-flight upload when a newer one supersedes it on the
-  # same ref. Two commits to main in quick succession otherwise
-  # produce back-to-back TestFlight builds, each labelled with its
-  # parent commit's release notes — testers see the older build land
-  # last because altool finishes both. With cancel-in-progress: true
-  # the in-flight upload is killed mid-flight (altool returns
-  # non-zero, the upload state on App Store Connect is partial), and
-  # only the freshest mobile run reaches TestFlight. We accept the
-  # half-upload window: a duplicate CFBundleVersion is impossible
-  # because the build number scales with the beta tag (one tag per
-  # release run), and ASC silently rejects re-uploads of the same
-  # version anyway.
-  group: testflight-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   # Decides whether there is an IPA to ship, on a cheap Linux runner,
   # before the macOS job and the `release` environment are involved.
-  # Mobile runs `ios-release` only on push or on a dispatch with
-  # `release_build=true`, yet it reports `success` either way, so a
-  # successful `workflow_run` does not imply the artifact exists.
-  # Without this check the upload job failed at download-artifact.
+  # Mobile runs `ios-release` only on the nightly cron (when its own
+  # `gate` proceeds) or on a dispatch with `release_build=true`, yet it
+  # reports `success` either way, so a successful `workflow_run` does
+  # not imply the artifact exists. Without this check the upload job
+  # failed at download-artifact.
   gate:
     name: Check for IPA artifact
     runs-on: ubuntu-latest
     # workflow_run fires on every conclusion; only proceed when:
     #   1. a human triggered us manually (workflow_dispatch), or
     #   2. the Mobile workflow finished `success` AND was triggered
-    #      by an event that actually runs the `ios-release` job —
-    #      `push` or `workflow_dispatch`. On `pull_request` the
-    #      Mobile workflow's `ios-release` step is skipped (PRs
-    #      never sign IPAs), the workflow still reports `success`,
-    #      and we'd come down here to download an artifact that was
-    #      never uploaded. Mirror the `ios-release` gate from
-    #      `mobile.yml` so we only fire when there's actually a
-    #      signed IPA waiting for us.
+    #      by an event that can run the `ios-release` job —
+    #      `schedule` or `workflow_dispatch`. Mobile's `push` and
+    #      `pull_request` runs never sign an IPA; `push` is still
+    #      listed, and harmless, because the artifact check below skips
+    #      a run with no IPA on a free hosted runner. Keep this list in
+    #      step with `ios-release`'s `if:` in `mobile.yml`: leaving
+    #      `schedule` out meant a nightly IPA never shipped.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       (github.event.workflow_run.event == 'push' ||
+       (github.event.workflow_run.event == 'schedule' ||
+        github.event.workflow_run.event == 'push' ||
         github.event.workflow_run.event == 'workflow_dispatch'))
     outputs:
       ship: ${{ steps.check.outputs.ship }}
@@ -115,8 +100,22 @@ jobs:
   upload:
     name: Upload IPA to TestFlight
     needs: gate
-    runs-on: blacksmith-6vcpu-macos-15
+    # GitHub's hosted macOS, free on a public repo. The job compiles
+    # nothing (download, altool upload, an API call: ~3 min, mostly
+    # network), so Blacksmith's cores bought nothing at the macOS rate.
+    runs-on: macos-15
     if: needs.gate.outputs.ship == 'true'
+    # On the job, not the workflow. Every completed Mobile run (PRs
+    # included) starts a run of this workflow, and for `workflow_run`
+    # `github.ref` is always main, so a workflow-level group let any PR
+    # cancel a nightly upload in flight before its own `gate` skipped.
+    # Here only a run that is itself going to upload supersedes one: the
+    # newest IPA wins, so testers never see an older build land last.
+    # The half-upload that leaves is harmless: the build number scales
+    # with the beta tag, and ASC rejects a re-upload of the same version.
+    concurrency:
+      group: testflight-upload
+      cancel-in-progress: true
     # The event / conclusion gate and the artifact check live in `gate`.
     environment:
       name: release
@@ -314,14 +313,8 @@ jobs:
           LOCALE: en-US
         run: python3 .github/scripts/testflight_set_whatsnew.py
 
-      - name: Re-upload IPA as workflow artifact (audit trail)
-        if: always() && steps.ipa.outputs.path != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: outl-ios-testflight-${{ steps.meta.outputs.short_version }}-${{ steps.meta.outputs.build_number }}
-          path: ${{ steps.ipa.outputs.path }}
-          if-no-files-found: warn
-          retention-days: 30
+      # No re-upload of the IPA here: it would duplicate `outl-ios-release`,
+      # which the Mobile run already keeps for 30 days, and nothing reads it.
 
       - name: Cleanup API key
         if: always()

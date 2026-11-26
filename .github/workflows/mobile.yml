@@ -11,7 +11,7 @@ name: Mobile
 # and per PR; only the archive moved. Need one now: Actions -> Mobile -> "Run
 # workflow" with `release_build: true`, which bypasses both gates below.
 #
-# Full reasoning: docs/ci-and-release.md "Runner cadence".
+# Full reasoning: docs/ci-runners.md "Runner cadence".
 
 on:
   schedule:
@@ -127,7 +127,10 @@ jobs:
     name: Is there anything to build tonight?
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # No checkout: both questions are answered by `gh run list`, so this job
-    # needs the API and not the tree.
+    # needs the API and not the tree. Without a checkout `gh` has no git
+    # remote to infer the repo from and ignores `GITHUB_REPOSITORY`, so
+    # `GH_REPO` is load-bearing: without it all 4 scheduled runs after
+    # Nov 21 failed here with `failed to determine base repo`.
     permissions:
       actions: read
     outputs:
@@ -137,6 +140,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -207,11 +211,17 @@ jobs:
       # key hashed **/Cargo.toml, so every manifest edit anywhere in
       # the workspace threw away the whole macOS target dir, and the
       # raw `target/` it stored grew without bound.
+      #
+      # Only `main` saves (here and in every rust-cache step below). A PR
+      # or tag run saved ~1.5 GB per job under a scope no main run can
+      # read, all of it counting against the 25 GB Blacksmith cache and
+      # evicting the entries main needs. PRs still restore main's entry.
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: "v0.8-rust"
           shared-key: mobile-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (mobile)
         run: cargo clippy -p outl-mobile --all-targets -- -D warnings
       - name: cargo test (mobile)
@@ -287,11 +297,17 @@ jobs:
   # NSMetadata is Spotlight — Apple platforms only, absent from
   # swift-corelibs-foundation. `Package.swift` declares `.iOS` +
   # `.macOS` and no Linux platform for exactly that reason. So this
-  # job stays on macOS despite the 6.67x rate; 6 vCPU is already the
-  # smallest macOS SKU.
+  # job stays on macOS, but on GitHub's hosted runner, which is free on
+  # a public repo: a ~24 s job was billed as a full Blacksmith macOS
+  # minute ~270 times a month (~$16.5). `swift-tools-version:5.9`
+  # needs nothing newer than the Xcode `macos-15` ships.
+  #
+  # Not path-gated: `SharedLineParityTests.swift` reads
+  # `crates/outl-actions/tests/shared-line-cases.json`, and a skipped
+  # job would also skip `ios-build`, which needs it.
   swift-tests:
     name: swift (OutlKit unit tests)
-    runs-on: blacksmith-6vcpu-macos-15
+    runs-on: macos-15
     needs: gate
     if: needs.gate.outputs.proceed == 'true'
     defaults:
@@ -329,6 +345,7 @@ jobs:
         with:
           prefix-key: "v0.8-rust"
           shared-key: ios-sim
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # `cargo install tauri-cli` compiles the CLI from source, which
       # is several minutes of macOS-rate build time on every run. The
       # install step is already guarded by `command -v`, so caching
@@ -372,8 +389,10 @@ jobs:
   # so the heavy build only happens once.
   #
   # Triggers:
-  #   - every push to `main` that matches the workflow paths filter
+  #   - the nightly cron, when `gate` finds a mobile push run in the
+  #     last 24h and CI on main is not red
   #   - manual workflow_dispatch with `release_build = true`
+  # Never on push or PR: see the header and `gate`.
   #
   # The job is bound to the `release` environment because that's
   # where the signing secrets live (same set TestFlight uses):
@@ -544,6 +563,7 @@ jobs:
         with:
           prefix-key: "v0.8-rust"
           shared-key: ios-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # See `ios-build`: caching the built binary skips a from-source
       # `cargo install` on macOS-rate minutes.

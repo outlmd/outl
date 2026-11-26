@@ -12,8 +12,10 @@ name: Docker image
 # │ pull request             │ builds, pushes nothing                       │
 # └──────────────────────────┴──────────────────────────────────────────────┘
 #
-# Every commit also gets `:sha-<short>`, which is the only tag that is
-# guaranteed never to move — the one to pin in a compose file you care about.
+# Every commit that changes the server (see the `paths:` filter below) also
+# gets `:sha-<short>`, which is the only tag that is guaranteed never to move
+# — the one to pin in a compose file you care about. `:dev` is the newest
+# such commit, not necessarily the tip of `main`.
 #
 # **Beta tags do not normally land here, and that is on purpose.** `release.yml`
 # tags every push to `main` as `v<version>-beta.<run>`, but it creates that tag
@@ -39,11 +41,42 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    # No `paths:` filter. It would apply to tag pushes too, and a `v1.2.3` tag
-    # landing on a docs-only commit would then skip the release build — the one
-    # run that must never be skipped. Wasted branch builds are cheap instead:
-    # `.dockerignore` excludes docs/, so a docs commit reuses every cached
-    # layer and the job finishes in seconds.
+    # Branch pushes only build when something the image is made of changed.
+    # GitHub does not evaluate `paths:` on tag pushes, so a `v1.2.3` tag on a
+    # docs-only commit still builds the release image — the one run that must
+    # never be skipped. The old assumption that it would skip is why this list
+    # did not exist, and every push then rebuilt ~685 crates cold on both
+    # architectures (the buildkit cache mounts do not survive between runs).
+    #
+    # The crates are exactly the workspace members `outl-cli` pulls in
+    # (`cargo tree -p outl-cli`); a new dependency of the server binary
+    # belongs here too. Every member's `Cargo.toml` is listed because cargo
+    # loads them all, and `docker/**` because the Dockerfile copies the
+    # entrypoint from it. One path per line: brace globs are not a
+    # documented filter pattern.
+    paths:
+      - "crates/outl-actions/**"
+      - "crates/outl-cli/**"
+      - "crates/outl-config/**"
+      - "crates/outl-core/**"
+      - "crates/outl-exec/**"
+      - "crates/outl-import/**"
+      - "crates/outl-md/**"
+      - "crates/outl-plugins/**"
+      - "crates/outl-shortcuts/**"
+      - "crates/outl-sync-iroh/**"
+      - "crates/outl-telemetry/**"
+      - "crates/outl-theme/**"
+      - "crates/outl-tui/**"
+      - "crates/outl-ws/**"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker/**"
+      - ".github/workflows/docker.yml"
   pull_request:
     paths:
       - "Dockerfile"
@@ -139,7 +172,7 @@ jobs:
           # The cache lives in the registry, next to the image, and **not** in
           # `type=gha`: `mode=max` here once filled all 10 GB of the repo's
           # shared Actions cache with buildkit blobs and evicted every Rust
-          # cache in the repo to zero. docs/ci-and-release.md "Cache budget"
+          # cache in the repo to zero. docs/ci-runners.md "Cache budget"
           # has the census and the rule.
           #
           # `cache-to` only on a push: a fork's pull request holds no write
@@ -190,7 +223,9 @@ jobs:
     # architecture then fails with `no matching manifest` and looks like a
     # platform we never built. Both legs land, or the tag stays where it was.
     if: github.event_name != 'pull_request'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # GitHub-hosted: this job compiles nothing (a manifest list, a release
+    # lookup and an attestation), and on a public repo a hosted runner is free.
+    runs-on: ubuntu-24.04
     steps:
       # No `fetch-depth: 0`. It was here for a `git tag --list` scan the
       # `latest` decision no longer does, and `metadata-action` works on a

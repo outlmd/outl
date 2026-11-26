@@ -101,6 +101,7 @@
 * [Performance](performance.md)
 * [Boot performance](boot-performance.md)
 * [CI and release](ci-and-release.md)
+  * [CI runners and cost](ci-runners.md)
 * [Discussions mirror to Discord](discussions-discord.md)
 * [Desktop UX behaviour](desktop-ux.md)
   * [How the desktop resolves a keystroke](desktop-keybindings.md)

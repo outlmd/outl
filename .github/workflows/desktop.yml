@@ -11,14 +11,17 @@ name: Desktop
 # Two jobs split by what's actually platform-specific:
 #
 #   `check`  → runs on Linux (cheapest runner). Owns clippy, rust
-#              tests, Vitest, tsc, and a debug-profile `tauri build`
-#              for Linux. Everything platform-agnostic happens here
-#              once instead of four times.
+#              tests, and a debug-profile `tauri build` for Linux.
+#              Everything platform-agnostic happens here once instead
+#              of four times.
 #   `build`  → matrix of macOS arm64 / Windows x86_64 (macOS
 #              x86_64 is deliberately absent — see the matrix).
 #              Compiles the Tauri app on the dev profile. We don't
-#              repeat clippy/tests/vitest/tsc here because they don't
-#              care which OS they're on.
+#              repeat clippy/tests here because they don't care which
+#              OS they're on.
+#
+# Vitest and `tsc --noEmit` are not run in this workflow at all:
+# `ci.yml::frontend` owns both (see the note in `check`).
 #
 # Both jobs build with `tauri build --debug` (dev profile) on purpose:
 # this is a "does it still compile + assemble?" guard, and the dev
@@ -128,23 +131,26 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: desktop-Linux x86_64
+          # Only `main` writes. A PR's save lands under its own ref scope,
+          # which no later run can restore, and still counts against the
+          # 25 GB Blacksmith cache. PRs keep restoring main's entry.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # ── Platform-agnostic checks: clippy, rust tests, Vitest, tsc
-      # all produce identical results on macOS / Linux / Windows, so
-      # we run them once here instead of four times in the matrix.
+      # ── Platform-agnostic checks: clippy and rust tests produce
+      # identical results on macOS / Linux / Windows, so we run them
+      # once here instead of four times in the matrix.
+      #
+      # **The vitest suite and `tsc` are not run here.** `ci.yml::frontend`
+      # runs `bun run test` and `bun run typecheck` at the repo root, which
+      # fan out over every workspace package and already include this one.
+      # It is also the better owner, having no `paths:` allowlist: the suite
+      # then runs on a change to `@outl/shared` too.
 
       - name: Clippy
         run: cargo clippy -p outl-desktop --all-targets -- -D warnings
 
       - name: Rust tests
         run: cargo test -p outl-desktop
-
-      - name: Frontend tests
-        run: bun --filter outl-desktop test
-
-      - name: Type-check frontend
-        working-directory: crates/outl-desktop
-        run: bunx tsc --noEmit
 
       # ── Platform-specific: compile + assemble the Linux app. Mirrors
       # what the `build` matrix below does for macOS + Windows. `tauri
@@ -162,7 +168,7 @@ jobs:
     name: ${{ matrix.label }}
     # Gate the expensive runners (macOS is 6.67x, Windows 2x Linux billing)
     # behind the Linux `check` job. `check` already compiles the whole
-    # desktop tree + runs clippy/tests/tsc/vitest, so any compile error or
+    # desktop tree + runs clippy/tests, so any compile error or
     # desktop test failure stops the matrix before a single macOS/Windows
     # minute is spent. A `needs` dep runs the dependent only on success, so
     # this is the gate — no extra `if:` required.
@@ -214,6 +220,8 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: desktop-${{ matrix.label }}
+          # Same rule as `check`: only `main` writes the cache.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # `tauri build` compiles the Rust binary itself — no separate
       # `cargo build` step, which only duplicated the link. `--debug`

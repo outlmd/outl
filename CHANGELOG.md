@@ -7,6 +7,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Nightly TestFlight builds ship again.**
+  From Nov 21 every 05:00 UTC Mobile run failed in its `gate` before building anything (`failed to determine base repo`: the job has no checkout, and `gh` needed `GH_REPO` to find the repo).
+  `testflight.yml` also ignored scheduled Mobile runs, so a nightly IPA would not have uploaded either.
+  Both are fixed. A manual run (Actions → Mobile → "Run workflow" with `release_build: true`) was never affected.
+
+- **The nightly beta no longer rebuilds off its own packaging commit.**
+  `release.yml`'s gate counted the bot's `packaging: outl … [skip ci]` commit, so an idle day still cut a beta (beta.292 on Nov 5).
+  It now counts commits since the one the last beta was built from, minus packaging commits, so a cron firing late no longer misses what landed in between either.
+
 - **Desktop: copy and paste a block now work from the keyboard.**
   `y y` and `Y` copy the selected block and its children to the system clipboard as outl markdown, Visual `y` and `Cmd/Ctrl+C` copy the range, and Normal `Cmd/Ctrl+C` copies the block.
   `p` pastes the clipboard as blocks after the selected block (as the last child when zoomed on it), and `Cmd/Ctrl+V` does the same unless a cut is waiting.
@@ -244,6 +253,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   Both lesser states carry one sentence, naming the two characters that stand in for the gesture.
 
 ### Changed
+
+- **`:dev` and `:sha-…` images are built only for commits that change the server.**
+  `docker.yml` used to rebuild ~685 crates cold on both architectures for every push to `main`, docs included.
+  It now builds when a commit touches the crates the `outl` binary is made of, a manifest, the lockfile, the toolchain or the Docker files, so `:dev` is the newest such commit rather than always the tip of `main`.
+  A `v*` tag still always builds ([Self-hosting → tags](docs/self-hosting.md#the-published-image-and-what-its-tags-mean)).
+- **CI moved jobs that compile nothing, and `test (macos)`, to free GitHub-hosted runners.**
+  The repo is public, so `rustfmt`, `cargo-deny`, `frontend`, `hygiene`, the tag prune, the Docker manifest merge, `swift-tests`, the TestFlight upload and the post-merge `test (macos)` cost nothing there.
+  Rust caches save only from `main`, the release legs use `rust-cache`, and `test (linux)` stops repeating the suites `sync` already runs.
+  [CI runners and cost](docs/ci-runners.md) has the numbers.
 
 - **Existing pages were re-checked against the code, and the claims that no longer held were corrected.**
   The CLI, MCP, TUI, desktop, mobile, sync, plugin, theme, shortcut and format pages each went through a pass that ran the command or read the source.

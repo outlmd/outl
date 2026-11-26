@@ -23,11 +23,9 @@ description: >
 #   `dtolnay/rust-toolchain` with `targets:`, and two raw `rustup target
 #   add` scripts for the universal macOS and Windows cross builds).
 #   Flattening that is a behaviour change per platform, not a dedup.
-# - the cargo cache. `release.yml` uses `actions/cache` with an explicit
-#   `path`/`key`, `desktop.yml` uses `Swatinem/rust-cache` with a
-#   `shared-key`. They should agree, and picking one means one cold build
-#   per job plus a build-time measurement nobody has taken yet. It is a
-#   real finding, and its own change.
+# - the cargo cache. Both callers use `Swatinem/rust-cache` now, but each
+#   job has its own `shared-key`, and `release.yml`'s sits above its
+#   version patch on purpose (see the `build` job's cache step there).
 # - the build itself. `desktop.yml` runs a debug `--no-bundle` compile to
 #   answer "does it build"; `release.yml` bundles, signs, strips, verifies
 #   and uploads. Those are different jobs that happen to share a prologue.

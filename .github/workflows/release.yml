@@ -160,16 +160,33 @@ jobs:
   # idle repo rebuilds the previous commit and spends 15.3 macOS minutes
   # to publish a beta identical to last night's.
   #
-  # The question is "did anything land in the last 24h", not "is HEAD the
-  # commit the last beta was cut from". The second reads more precise and
-  # is worse here: it needs the newest `v*-beta.N` tag, and the tags are
+  # The question is "did anything land since the commit the last published
+  # beta was built from". It used to be "did anything land in the last
+  # 24h", and that window erred both ways. It counted the bot's own
+  # `packaging: outl … [skip ci]` commit, so an idle day still cut a full
+  # beta (beta.292 on Nov 5, ~$4 of runners for nothing). And it missed
+  # real commits whenever the cron fired more than 24h after the previous
+  # night's, and it ran 6 to 11 hours late in November.
+  #
+  # The anchor is the head sha of the newest completed scheduled or
+  # dispatched run on `main` whose `create_release` succeeded, i.e. the
+  # last run that actually cut a release. The run as a whole may be red:
+  # a night whose npm publish failed (Nov 2-21) still built that commit,
+  # and filtering on a green run would rebuild it every idle night until
+  # one went fully green. Not a gate-skipped night (that
+  # run is green too but built nothing), not a dry run (it publishes
+  # nothing). Not the newest `v*-beta.N` tag either: the tags are
   # lightweight, so `--sort=-creatordate` orders them by *commit* date
   # (wrong after any rebase) and `--sort=-version:refname` has to compare
-  # `beta.286` against `beta.99` as numbers, which is a property of git's
-  # version sort rather than something this workflow should bet a release
-  # on. The window costs at most one redundant beta a month when a commit
-  # lands within minutes of the cron, and never a missed one — the error
-  # is in the harmless direction.
+  # `beta.286` against `beta.99` as numbers. And not the last packaging
+  # commit: commits that land between a beta's checkout and its packaging
+  # push sit behind it and would be skipped.
+  #
+  # When no anchor is found (API error, no such run in the recent list),
+  # it falls back to the old 24h window, minus packaging commits. When the
+  # anchor is not in the checkout's 100 commits (100+ landed since, or
+  # history was rewritten), it proceeds: a redundant beta is the cheaper
+  # mistake of the two.
   #
   # Every downstream job already gates on `needs.prepare.result ==
   # 'success'` or on `create_release`, so skipping `prepare` skips the
@@ -179,20 +196,22 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read # checkout
-      actions: read # `gh run list` against `ci.yml`
+      actions: read # `gh run list` against `ci.yml` and this workflow
     outputs:
       proceed: ${{ steps.decide.outputs.proceed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Deep enough to answer a 24h question; a full clone of this
-          # history to count a handful of commits is not worth the fetch.
+          # Deep enough to reach the last beta's commit on any normal night;
+          # a full clone of this history to count a handful of commits is
+          # not worth the fetch. Deeper than that is handled in gate 1.
           fetch-depth: 100
 
       - id: decide
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
@@ -200,11 +219,37 @@ jobs:
             exit 0
           fi
 
-          # Gate 1: did anything land worth building?
-          COUNT=$(git rev-list --count --since="24 hours ago" HEAD)
+          # Gate 1: did anything land worth building since the last beta?
+          # See the job comment for why the anchor is this run list.
+          NOT_PACKAGING=(--invert-grep --grep='^packaging: outl ')
+          LAST=""
+          CANDIDATES=$(gh run list --workflow release.yml --branch main --status completed --limit 30 \
+            --json databaseId,headSha,event \
+            --jq '.[] | select(.event == "schedule" or .event == "workflow_dispatch")
+                  | "\(.databaseId) \(.headSha)"' || true)
+          while read -r RUN_ID SHA; do
+            [[ -n "${RUN_ID}" ]] || continue
+            CUT=$(gh run view "${RUN_ID}" --json jobs \
+              --jq '.jobs[] | select(.name == "Create draft release") | .conclusion' || true)
+            if [[ "${CUT}" == "success" ]]; then
+              LAST="${SHA}"
+              break
+            fi
+          done <<< "${CANDIDATES}"
+
+          if [[ -z "${LAST}" ]]; then
+            SINCE="the last 24h (no previous beta run found)"
+            COUNT=$(git rev-list --count --since="24 hours ago" "${NOT_PACKAGING[@]}" HEAD)
+          elif git cat-file -e "${LAST}^{commit}" 2>/dev/null; then
+            SINCE="${LAST:0:12}, the last beta's commit"
+            COUNT=$(git rev-list --count "${NOT_PACKAGING[@]}" "${LAST}..HEAD")
+          else
+            SINCE="${LAST:0:12}, which is outside the 100 fetched commits"
+            COUNT=100
+          fi
           if [[ "${COUNT}" -eq 0 ]]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No commits in the last 24h — skipping tonight's beta. Use Run workflow to force one."
+            echo "::notice::No commits since ${SINCE} — skipping tonight's beta. Use Run workflow to force one."
             exit 0
           fi
 
@@ -239,14 +284,14 @@ jobs:
           case "${VERDICT}" in
             success)
               echo "proceed=true" >> "$GITHUB_OUTPUT"
-              echo "::notice::${COUNT} commit(s) in the last 24h and CI on main is green — cutting tonight's beta."
+              echo "::notice::${COUNT} commit(s) since ${SINCE} and CI on main is green — cutting tonight's beta."
               ;;
             unknown)
               # Unknown is not red. Refusing here would turn any gap in CI
               # history into a silent release freeze, which is the worse
               # failure of the two.
               echo "proceed=true" >> "$GITHUB_OUTPUT"
-              echo "::warning::${COUNT} commit(s) in the last 24h, but no conclusive ci.yml run found on main. Proceeding: unknown is not red."
+              echo "::warning::${COUNT} commit(s) since ${SINCE}, but no conclusive ci.yml run found on main. Proceeding: unknown is not red."
               ;;
             *)
               echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -530,6 +575,31 @@ jobs:
           rustup show
           rustup target add ${{ matrix.target }}
 
+      # `rust-cache`, not the `actions/cache` of `target` + `~/.cargo` this
+      # used to be: in 54 of 60 build legs that restore found nothing, and a
+      # cold Windows leg takes 17-29 min against 6-7 warm. rust-cache keeps
+      # dependency artifacts only (workspace crates rebuild every night
+      # anyway, the version sed below sees to that) and drops `bundle/`,
+      # dSYMs, PDBs and `registry/src`, so each entry is a fraction of the
+      # size. The misses read as eviction from the 25 GB Blacksmith cache;
+      # that is inferred from the logs, not confirmed.
+      #
+      # Above the version patch on purpose, so the key is computed from the
+      # committed manifests. v2.9.3 would survive the sed anyway (it zeroes
+      # member versions and never hashes the root virtual manifest), but
+      # that is the action's detail, not a contract. Its own restore key
+      # drops the lock hash, so a dependency bump still recompiles what
+      # changed instead of the whole tree. Saved from `main`
+      # only: a tag run's entry lives under `refs/tags/*`, which no nightly
+      # can read.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: "v0.8-rust"
+          shared-key: release-cli-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # `cargo set-version` refuses pre-release "downgrades"
@@ -546,20 +616,6 @@ jobs:
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
           grep -n "version" Cargo.toml | head -10
-
-      - name: Cache cargo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # Without a restore-key every bump of Cargo.lock is a cold build on
-          # all eleven build legs at once, on three operating systems. The
-          # prefix drops the lock hash, so a dependency bump recompiles what
-          # changed instead of the whole tree.
-          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-release-
 
       - name: Build release binary
         env:
@@ -837,6 +893,17 @@ jobs:
       - name: Set up the Tauri build
         uses: ./.github/actions/setup-tauri-build
 
+      # Why rust-cache, and why above the version patch: see `build`'s cache
+      # step. `src-tauri` is a workspace member, so both arches build into
+      # the root `target/` and the default `workspaces` covers them.
+      - name: Cache cargo (desktop universal)
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: "v0.8-rust"
+          shared-key: release-desktop-universal-apple-darwin
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # Same sed pass as the CLI/TUI `build` job. We rewrite every
@@ -848,17 +915,6 @@ jobs:
           VERSION='${{ needs.prepare.outputs.version }}'
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
-
-      - name: Cache cargo (desktop universal)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # Prefix without the lock hash: see `build`'s cache step above.
-          key: ${{ runner.os }}-universal-apple-darwin-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-universal-apple-darwin-desktop-release-
 
       - name: Build universal dmg
         # `--target universal-apple-darwin` triggers Tauri's universal
@@ -1133,6 +1189,17 @@ jobs:
           chmod +x "${TOOLS}/AppRun-${APPRUN_ARCH}"
           python3 scripts/check-artifact-stripped.py "${TOOLS}/AppRun-${APPRUN_ARCH}"
 
+      # Why rust-cache, and why above the version patch: see `build`'s cache
+      # step. Builds into the root `target/` (`src-tauri` is a workspace
+      # member), which the default `workspaces` covers.
+      - name: Cache cargo (desktop linux)
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: "v0.8-rust"
+          shared-key: release-desktop-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # Same sed pass as the other build jobs: rewrite every literal
@@ -1144,17 +1211,6 @@ jobs:
           VERSION='${{ needs.prepare.outputs.version }}'
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
-
-      - name: Cache cargo (desktop linux)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # Prefix without the lock hash: see `build`'s cache step above.
-          key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-desktop-release-
 
       - name: Build the Linux desktop binary
         # Compile only. Bundling happens after the symbol upload and the
@@ -1422,6 +1478,17 @@ jobs:
       - name: Set up the Tauri build
         uses: ./.github/actions/setup-tauri-build
 
+      # Why rust-cache, and why above the version patch: see `build`'s cache
+      # step. Both legs build into the root `target/<triple>/`, which the
+      # default `workspaces` covers.
+      - name: Cache cargo (desktop windows)
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: "v0.8-rust"
+          shared-key: release-desktop-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # Same sed pass as the other build jobs. `shell: bash` on the
@@ -1431,17 +1498,6 @@ jobs:
           VERSION='${{ needs.prepare.outputs.version }}'
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
-
-      - name: Cache cargo (desktop windows)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # Prefix without the lock hash: see `build`'s cache step above.
-          key: ${{ runner.os }}-${{ matrix.target }}-desktop-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.target }}-desktop-release-
 
       - name: Build NSIS installer
         working-directory: crates/outl-desktop
@@ -1663,6 +1719,25 @@ jobs:
         with:
           bun-version: latest
 
+      # Why rust-cache, and why above the version patch: see `build`'s cache
+      # step. `cargo tauri android build` compiles the workspace member
+      # `crates/outl-mobile/src-tauri` into the root
+      # `target/aarch64-linux-android/`, which the default `workspaces` covers.
+      #
+      # `cache-bin: false` keeps it off `~/.cargo/bin`, which the
+      # `cargo-tauri` cache above owns. With it on, rust-cache's post step
+      # deletes every binary that was already there when it restored,
+      # `cargo-tauri` included, and it runs before that cache's own post
+      # step, so a miss there would find nothing left to save.
+      - name: Cache cargo (android)
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: "v0.8-rust"
+          shared-key: release-android-aarch64-linux-android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: false
+          cache-bin: false
+
       - name: Patch workspace version to ${{ needs.prepare.outputs.version }}
         shell: bash
         # Same sed pass as the other build jobs (keeps the Rust crate
@@ -1673,17 +1748,6 @@ jobs:
           VERSION='${{ needs.prepare.outputs.version }}'
           sed -i.bak "s|version = \"${BASE}\"|version = \"${VERSION}\"|g" Cargo.toml
           rm Cargo.toml.bak
-
-      - name: Cache cargo (android)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          # Prefix without the lock hash: see `build`'s cache step above.
-          key: ${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-aarch64-linux-android-release-
 
       # `setup-bun` caches the bun binary, not the packages it downloads. This
       # is the same path/key the composite action and every other bun job in the
@@ -1898,8 +1962,8 @@ jobs:
   screenshots:
     name: Release screenshots
     needs: [prepare, create_release]
-    # Only for a version tag pushed by hand (GA), not the beta cut on
-    # every push to main: those also get a tag, but `github.ref` is then
+    # Only for a version tag pushed by hand (GA), not the nightly beta:
+    # that one also gets a tag, but `github.ref` is then
     # `refs/heads/main`. When skipped, `publish_release` still runs: it
     # carries `!cancelled()` and doesn't check this job's result.
     if: >-

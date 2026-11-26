@@ -387,8 +387,8 @@ Pulling a prebuilt image from GHCR is what the quick start does; building from t
 | `ghcr.io/outlmd/outl-server:latest` | The highest **stable** release. Never a pre-release, and never an older release published later as a hotfix. | You want releases and don't want to think about it. |
 | `:1.2` | Newest `1.2.x`. | You want patches but not minor bumps. |
 | `:1.2.3` | Exactly that release. | |
-| `:dev` | The tip of `main`. | You want what is being worked on, and accept that it is. |
-| `:sha-a1b2c3d` | One commit, forever. **The only tag that never moves.** | The setup you would rather upgrade on purpose. |
+| `:dev` | The newest commit on `main` that changed the server, not necessarily the tip. | You want what is being worked on, and accept that it is. |
+| `:sha-a1b2c3d` | One commit that changed the server, forever. **The only tag that never moves.** | The setup you would rather upgrade on purpose. |
 
 > **Every row above is on the registry except `:latest`.**
 > `:dev`, `:sha-…`, `:0.13.5`, `:0.13.6` and `:0.13` are all published, so `docker compose pull` works on each of them.
@@ -396,6 +396,10 @@ Pulling a prebuilt image from GHCR is what the quick start does; building from t
 > [`docker.yml`](../.github/workflows/docker.yml)'s `latest` step is where that decision lives and why it used to get it wrong.
 
 The beta releases that `release.yml` publishes nightly do **not** get their own image — they are tagged by a workflow token, and GitHub does not fire workflows for those, by design. `:dev` is the equivalent, one image per push rather than one per tag.
+
+A push to `main` builds an image only when it changes the server: one of the 14 crates the `outl` binary is built from, any `Cargo.toml`, `Cargo.lock`, `.cargo/`, `rust-toolchain.toml`, `Dockerfile`, `.dockerignore`, `docker/` or `docker.yml` itself.
+A docs-only or client-only commit gets no `:sha-…` of its own, and `:dev` stays on the last one that did.
+A `v*` release tag always builds, whatever it changed.
 
 Every one of those tags is a **manifest list** over `linux/amd64` and `linux/arm64`, so the tag you pull is the same on both and the architecture is resolved by the daemon.
 `docker buildx imagetools inspect <tag>` prints the two entries; a tag showing one is a tag from before [#411](https://github.com/outlmd/outl/issues/411).

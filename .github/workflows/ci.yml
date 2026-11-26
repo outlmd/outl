@@ -5,6 +5,14 @@ name: CI
 # workflow files don't need fmt + clippy + test + doc to run.
 # `Cargo.toml` / `Cargo.lock` stay out of the ignore list on purpose
 # so dependency changes always trigger the full check.
+#
+# A path here must not be read by any Rust/TS test; grep
+# `CARGO_MANIFEST_DIR"/../..` before adding one. Never add
+# `examples/**` (read by outl-plugins `host_tests`), `ci.yml`,
+# `Cargo.*`, `rust-toolchain.toml`, `.cargo/**`, `deny.toml`,
+# `package.json`, `bun.lock`, `extensions/**` or `plugin-sdk/**`.
+# Safe to widen because no check is required and the release gate
+# does not pin to a SHA.
 on:
   push:
     branches: [main]
@@ -15,11 +23,29 @@ on:
       - 'LICENSE'
       - '.editorconfig'
       - '.gitignore'
+      - 'scripts/**'
+      - '.github/scripts/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/dependabot.yml'
+      - 'Casks/**'
+      - 'bucket/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'hm-module.nix'
+      - 'Dockerfile'
       - '.github/workflows/mobile.yml'
       - '.github/workflows/bench.yml'
       - '.github/workflows/hygiene.yml'
       - '.github/workflows/release.yml'
       - '.github/workflows/testflight.yml'
+      - '.github/workflows/desktop.yml'
+      - '.github/workflows/docker.yml'
+      - '.github/workflows/nix-build.yml'
+      - '.github/workflows/roadmap.yml'
+      - '.github/workflows/docs-reminder.yml'
+      - '.github/workflows/discussions-discord.yml'
+      - '.github/workflows/cleanup-tags.yml'
+      - '.github/workflows/release-screenshots.yml'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -29,11 +55,29 @@ on:
       - 'LICENSE'
       - '.editorconfig'
       - '.gitignore'
+      - 'scripts/**'
+      - '.github/scripts/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/dependabot.yml'
+      - 'Casks/**'
+      - 'bucket/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'hm-module.nix'
+      - 'Dockerfile'
       - '.github/workflows/mobile.yml'
       - '.github/workflows/bench.yml'
       - '.github/workflows/hygiene.yml'
       - '.github/workflows/release.yml'
       - '.github/workflows/testflight.yml'
+      - '.github/workflows/desktop.yml'
+      - '.github/workflows/docker.yml'
+      - '.github/workflows/nix-build.yml'
+      - '.github/workflows/roadmap.yml'
+      - '.github/workflows/docs-reminder.yml'
+      - '.github/workflows/discussions-discord.yml'
+      - '.github/workflows/cleanup-tags.yml'
+      - '.github/workflows/release-screenshots.yml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,12 +93,13 @@ concurrency:
 
 jobs:
   # Runner sizing across this file is measured, not guessed: see the
-  # numbers recorded in `docs/development.md` → "Runner sizing".
+  # numbers recorded in `docs/ci-runners.md` → "Runner sizing".
   # `cargo fmt` never compiles anything (16s wall clock, no cargo
-  # build), so the smallest SKU is the right one.
+  # build). Under one billed minute and no compile goes to a free
+  # GitHub-hosted runner, since the repo is public.
   fmt:
     name: rustfmt
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install toolchain (rustfmt)
@@ -66,10 +111,10 @@ jobs:
   # advisories for this workspace (it showed 1 while an OSV scan of
   # Cargo.lock found 17), so `cargo deny check advisories` fails the PR
   # on any known vulnerability in the lockfile. Ignores live in
-  # `deny.toml`, each with a reason. Never compiles, so smallest SKU.
+  # `deny.toml`, each with a reason. Never compiles, so hosted, like fmt.
   advisories:
     name: cargo-deny advisories
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,10 +140,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install toolchain (clippy)
         run: rustup show
+      # Only `main` saves. A PR or tag save lands under its own ref scope,
+      # which no later run can read, and every dependabot Cargo.lock PR
+      # wrote ~1.5 GB per job into the shared 25 GB Blacksmith cache. PRs
+      # still restore main's entries. Same rule on every rust-cache below.
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: "v0.8-rust"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy
         # outl-mobile, outl-desktop and outl-tauri-shared pull Tauri
         # deps (glib-sys, gobject-sys, webkit2gtk) that need system
@@ -133,7 +183,7 @@ jobs:
     # where macOS passed.
     #
     # That is the expected result rather than a surprise, because the two
-    # legs run the same crates. `--exclude outl-mobile --exclude
+    # legs ran the same crates. `--exclude outl-mobile --exclude
     # outl-desktop --exclude outl-tauri-shared` leaves exactly one piece
     # of macOS-specific code in the set under test: `platform_host_id` in
     # `outl-core/src/device/host.rs`, which shells out to `ioreg`. Every
@@ -147,6 +197,14 @@ jobs:
     # So `main` still runs it on every push, and a PR does not. The window
     # a macOS-only defect can live in is one merge, and `test (macos)` on
     # the merge commit is what closes it.
+    #
+    # Since then the leg moved off Blacksmith to GitHub-hosted `macos-15`,
+    # which costs $0 on a public repo: push-only, it was still ~$44 of a
+    # ~$325 30-day bill (Nov 2026). Hosted M1 is 3 vCPU / 7 GB, so expect
+    # 2-3x the wall clock on a check nobody waits on, and its rust-cache
+    # lives in GitHub's 10 GB cache instead of Blacksmith's. If it OOMs at
+    # link time or runs past ~25 min, the fallback is a nightly
+    # `test (macos)` inside `release.yml`, not the paid SKU back here.
     #
     # What this does NOT cover, and did not cover before: APFS is
     # case-insensitive and ext4 is not, so a slug collision is a real
@@ -162,11 +220,17 @@ jobs:
       matrix:
         # 8 vCPU on Linux: measured 76% average CPU and 4.7 GB of 16 GB
         # on 4 vCPU — the same CPU-bound / memory-idle shape as clippy.
-        # 6 vCPU is the smallest macOS SKU Blacksmith offers.
+        # macOS is hosted `macos-15`, see above.
+        #
+        # `skip` on the linux leg: `outl-core` and `outl-sync-iroh` are
+        # covered by `sync`; drop this exclude if `sync` is ever filtered
+        # or deleted. `sync` runs them on Linux at 1024 proptest cases, so
+        # this leg was repeating the same suites at 200. macOS keeps them,
+        # because `platform_host_id` lives in outl-core.
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-          && '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux"}]'
-          || '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux"},{"os":"blacksmith-6vcpu-macos-15","label":"macos"}]') }}
+          && '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux","skip":"--exclude outl-core --exclude outl-sync-iroh"}]'
+          || '[{"os":"blacksmith-8vcpu-ubuntu-2404","label":"linux","skip":"--exclude outl-core --exclude outl-sync-iroh"},{"os":"macos-15","label":"macos"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install toolchain
@@ -175,7 +239,12 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: "v0.8-rust"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo test
+        # `matrix.skip` (linux only): `outl-core` and `outl-sync-iroh` are
+        # covered by `sync`; drop this exclude if `sync` is ever filtered
+        # or deleted. Empty on macOS.
+        #
         # outl-mobile, outl-desktop and outl-tauri-shared depend on
         # Tauri's macOS/iOS-specific surface and on system GTK libs we
         # don't install on Linux. Mobile is covered by `mobile.yml` on
@@ -194,7 +263,7 @@ jobs:
         # still fails this workflow on the same PR. There are no `examples/`
         # in the workspace, and all six bench targets are `harness = false`
         # criterion binaries, so none of them holds a `#[test]`.
-        run: cargo test --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared --lib --bins --tests
+        run: cargo test --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared ${{ matrix.skip }} --lib --bins --tests
 
       # The run above never compiles `scrub_event`, because the `sentry`
       # feature is off by default (RFC 0377 condition 1) and that is the
@@ -227,6 +296,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: "v0.8-rust"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo doc
         env:
           RUSTDOCFLAGS: "-D warnings"
@@ -236,13 +306,14 @@ jobs:
         # shared-crate docs via the `desktop.yml` matrix.
         run: cargo doc --workspace --exclude outl-mobile --exclude outl-desktop --exclude outl-tauri-shared --no-deps
 
-  # Dedicated sync-convergence gate. The `test` job above already
-  # compiles and runs `outl-core` + `outl-sync-iroh` (including their
-  # `tests/` integration + property suites via `--all-targets`), but it
-  # runs proptests at the dev default (200 cases) and buries a sync
-  # regression inside a broad matrix job. This job exists so a sync
-  # regression surfaces as its own obviously-red check, and so the
-  # convergence/chaos proptests actually *explore* in CI.
+  # Dedicated sync-convergence gate, and the only Linux run of
+  # `outl-core` + `outl-sync-iroh` (lib, bins and `tests/` integration +
+  # property suites): `test (linux)` excludes both via `matrix.skip`
+  # rather than repeat them at the dev default (200 cases). `test
+  # (macos)` still runs them on pushes to `main`. This job exists so a
+  # sync regression surfaces as its own obviously-red check instead of
+  # being buried in a broad matrix job, and so the convergence/chaos
+  # proptests actually *explore* in CI.
   #
   # `PROPTEST_CASES` is proptest's built-in override of each suite's
   # `ProptestConfig::with_cases(...)`. Dev runs stay fast at the 200
@@ -252,10 +323,11 @@ jobs:
   # budget on this one job only — running 1024 across the whole
   # `test` matrix would burn runner minutes for no extra signal.
   #
-  # Branch protection: mark **`sync`** as a required status check in
-  # the repo settings so a red convergence run blocks merge. (Required
-  # checks are a GitHub repo setting, not something this file can
-  # declare.)
+  # The `main` ruleset requires no status checks today, so a red `sync`
+  # blocks nothing by itself. If required checks are ever added, `sync`
+  # has to be one of them: `test (linux)` excludes outl-core and
+  # outl-sync-iroh because this job covers them. (Required checks are a
+  # GitHub repo setting, not something this file can declare.)
   sync:
     name: sync
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -272,6 +344,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: "v0.8-rust"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo test (sync convergence)
         # Same reason as the `test` job: `outl-core` carries three criterion
         # bench targets, so `--all-targets` here was replaying 218k ops before
@@ -281,9 +354,10 @@ jobs:
   # Frontend gate for the whole bun workspace, in `ci.yml` rather than
   # in the per-client workflows on purpose.
   #
-  # `desktop.yml` runs `bun --filter outl-desktop test` and `mobile.yml`
-  # runs vitest with `working-directory: crates/outl-mobile`, so each
-  # covers only its own package. That left `@outl/shared` — 22 test
+  # `desktop.yml` ran `bun --filter outl-desktop test` and `mobile.yml`
+  # ran vitest with `working-directory: crates/outl-mobile`, so each
+  # covered only its own package; neither runs vitest or tsc any more,
+  # this job owns both. That left `@outl/shared` — 22 test
   # files, 335 assertions, the library both clients import — with no
   # gate anywhere, and it left every client suite behind a `paths:`
   # filter that does not list the crates it actually depends on
@@ -291,20 +365,24 @@ jobs:
   # to the shared library or to a Rust catalog the TS side mirrors could
   # go green without a single frontend test running.
   #
-  # `ci.yml` has no `paths:` allowlist (only `paths-ignore` for docs and
-  # assets), so this job runs on effectively every code change — which
+  # `ci.yml` has no `paths:` allowlist (only `paths-ignore` for docs,
+  # assets and files no test reads), so this job runs on effectively
+  # every code change — which
   # is the property the parity tests need. `shortcuts.support.test.ts`
   # pins the desktop handler map against `outl_shortcuts::support`
   # (invariant 12) and the theme suites pin the token names against
   # `outl_theme::Palette` (invariant 13); both are worthless if they
   # only run when someone happens to touch the client directory.
   #
-  # Cheapest runner on purpose: vitest across all three packages is
-  # ~4s wall clock and never saturated 2 vCPU. No GTK / Tauri system
-  # deps here — these are happy-dom unit suites, not app builds.
+  # Free hosted runner on purpose: vitest across all three packages is
+  # ~4s wall clock and never saturated 2 vCPU, and nothing compiles, so
+  # like fmt it bills under a minute that a public repo need not pay.
+  # The bun cache below lives in GitHub's 10 GB cache as a result. No
+  # GTK / Tauri system deps here — these are happy-dom unit suites, not
+  # app builds.
   frontend:
     name: frontend
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Bun
