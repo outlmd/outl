@@ -150,9 +150,9 @@ export function chromeHandlers(ctx: HandlerCtx): ActionHandlers {
         return;
       }
       // Normal-mode `Esc` with nothing focused: cancel a pending cut
-      // so the dimmed block snaps back. A copy stays on the clipboard
-      // (it's non-destructive and reusable, like the OS clipboard).
-      if (appState.blockClipboard?.kind === "cut") {
+      // so the dimmed block snaps back. A copy is on the OS clipboard,
+      // which Esc has no business clearing.
+      if (appState.blockClipboard) {
         setAppState("blockClipboard", null);
       }
     },

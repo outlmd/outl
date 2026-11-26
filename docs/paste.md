@@ -9,7 +9,7 @@ The goal is that whatever you copied — a Slack message, a Google Doc paragraph
   In the TUI it becomes one new block ([details](#in-the-tui)).
 
 The chords are per-client; the full table lives in [Shortcuts](shortcuts.md).
-In short: desktop `Cmd/Ctrl+V` (with) and `Cmd/Ctrl+Shift+V` (without); TUI `p` (with) and `Shift+P` (without); mobile is always with formatting.
+In short: desktop `Cmd/Ctrl+V` and, in Normal mode, `p` (with) and `Cmd/Ctrl+Shift+V` (without); TUI `p` (with) and `Shift+P` (without); mobile is always with formatting.
 
 The sections below describe the desktop and mobile behaviour, which share one code path.
 The TUI reads the clipboard itself and differs in a few places, so it has its own section: [In the TUI](#in-the-tui).
@@ -64,6 +64,8 @@ What is deliberately **not** tabular:
 - **Comma-separated text.**
   Prose carries commas, and `a, b` on two lines is far more often two sentences than a 2×2 grid.
   A `.csv` file is an import, not a paste.
+- **Tab-separated text whose first line is a bullet.**
+  `- a<TAB>b` is an outline with tabs in it, so it stays an outline.
 - **Tab-indented code or outlines.**
   They have a consistent field count per line, which is most of what identifies a grid — so the gate also requires that no line *starts* with a tab.
   This costs the rare table whose first column is empty on every row; it re-pastes fine with that column filled.
@@ -74,6 +76,30 @@ What is deliberately **not** tabular:
 
 A `|` inside a pasted cell is escaped to `\|` so it cannot open a column that was never there.
 A cell holding a line break (a spreadsheet allows one) is flattened to a space — the one lossy step, and a visible one.
+
+## Paste after the selected block (desktop Normal mode)
+
+With a block selected and nothing focused, `p` pastes the OS clipboard as blocks **after** the selected block, converted the same way as paste with formatting.
+`Cmd/Ctrl+V` does exactly the same, except that when a block cut with `Cmd/Ctrl+X` is pending it moves that block instead.
+Copying (`y y`, `Y`, `Cmd/Ctrl+C`, Visual `y`) disarms a pending cut, so the next `Cmd/Ctrl+V` pastes what you just copied.
+
+Where the paste lands:
+
+| Situation | Landing |
+|---|---|
+| A block is selected | Right after it, as its next sibling |
+| Zoomed into the selected block | As the last child of the zoom root |
+| The page is empty | At the end of the page |
+| The selected block is a backlink row | Refused, with a status message: a backlink row belongs to another page |
+
+The selection moves to the **last pasted root block**, so `p` again stacks the next paste after the first, and a pasted subtree is never nested inside the copy before it.
+The backend resolves the position once: the parent if it is still on the page, else the block to paste after, else the end of the page, else it refuses.
+A block deleted in the meantime therefore never sends the paste to the wrong place.
+
+A copy and a paste round-trip: `y y` then `p` duplicates the block and its subtree with fresh ids, and copying out of outl and pasting into outl reconstructs the same tree.
+After a Visual `y`, one extra `y` is swallowed, so the habit of typing `y y` then `p` works from Visual mode too.
+
+Plain text pasted this way (a single line, or a clipboard that is not an outline) has trailing newlines and CRLF trimmed, and a clipboard holding only whitespace is ignored.
 
 ## Where the caret lands, and what happens to the block you were in
 
@@ -105,6 +131,14 @@ Mobile has no without-formatting chord; every mobile paste is with formatting.
 When the block you are editing is a fenced code block (a `` ``` `` block), **every** paste is literal — the same as paste-without-formatting — regardless of the chord you use.
 A multi-line or outline-shaped clipboard is spliced in verbatim, with its line breaks intact, instead of being converted into sibling blocks (which would tear the fence apart and strand the closing `` ``` `` on its own line).
 This holds on both GUI clients (desktop and mobile), because the guard lives next to the shared `choosePasteRoute` decision.
+
+## Known losses
+
+A paste is converted before it is parsed, and two conversions drop text without saying so:
+
+- A first line `title:: x` is lifted as a page property and is not kept as a block.
+- An unknown `{{…}}` token outside a fenced code block is stripped (see [External paste](markdown-format.md#external-paste--outl-syntax)).
+  Inside a fence nothing is rewritten, so a code block pasted from anywhere keeps its `{{…}}` and its `- [ ]` lines.
 
 ## In the TUI
 
@@ -167,6 +201,8 @@ The behaviour is shared across clients so it stays identical everywhere:
 The TUI reads the OS clipboard directly (`arboard`) and runs the same `outl_actions` pipeline; it has no `text/html` flavour to convert, so rich-clipboard conversion is a GUI-only capability.
 Tab-separated and markdown tables reach it through `text/plain` like everything else, so a spreadsheet paste works there too.
 What the TUI does with the result is in [In the TUI](#in-the-tui).
-On the desktop, paste-without-formatting (`Cmd/Ctrl+Shift+V`) reads the clipboard through the Tauri clipboard-manager plugin (backend `arboard`), not `navigator.clipboard.readText()`.
-The macOS webview gates that web API behind a native "Paste" permission button when it is called outside a real paste gesture, so the plugin read is what makes the chord work.
+On the desktop every OS clipboard read and write goes through `lib/os-clipboard.ts`, the Tauri clipboard-manager plugin (backend `arboard`), never `navigator.clipboard`: `p`, `y y`, `Cmd/Ctrl+C` and paste-without-formatting all use it.
+The macOS webview gates the read behind a native "Paste" permission button when it is called outside a real paste gesture, and refuses the write outside a user gesture without saying so, so the plugin is what makes the chords work.
+The desktop command is `paste_block_after(page_id, after_id?, parent_id?, text)`; its reply carries `new_id`, the last pasted root.
+The paste code lives in `outl_tauri_shared::commands::paste`, and the TUI lands on the same block through `PasteOutcome::last_root`.
 See the [Shared primitives catalog](shared-primitives.md) — specifically [Markdown pipeline](primitives-markdown.md) — for where each piece lives.

@@ -186,12 +186,14 @@ impl App {
                 self.reload_workspace_from_disk();
                 self.refresh_page_list();
                 self.spawn_index_rebuild();
-                // Land the selection on the bottom of what we just
-                // pasted so the user sees the new tail without
-                // scrolling — nicer than landing wherever the post-
-                // reload flat index happens to fall.
+                // Land the selection on the last root we just pasted
+                // so the user sees the new tail without scrolling. The
+                // last *root*, not the last id minted: those are DFS,
+                // so a payload ending in a block with children would
+                // land on a child, and the next `p` would nest the
+                // second copy inside the first.
                 self.flat_len = outl_md::outline_ops::flat_count(&self.page.blocks);
-                let landed = self.flat_index_for_node(node_id, out.new_blocks.last().copied());
+                let landed = self.flat_index_for_node(node_id, out.last_root);
                 if let Some(idx) = landed {
                     self.selected = idx.min(self.flat_len.saturating_sub(1));
                 }

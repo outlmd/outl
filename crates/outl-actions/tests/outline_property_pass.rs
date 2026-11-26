@@ -344,7 +344,7 @@ fn a_backlink_carries_the_same_properties_the_per_node_scan_did() {
 /// Rejected: `clippy.toml`'s `disallowed-methods`, which would enforce
 /// this at compile time across every crate. It bans the accessor
 /// workspace-wide, and ~15 call sites read one node once and are
-/// correct (`text_properties_of`, the clipboard, the template
+/// correct (a page's own properties, the template
 /// instantiator, `outl page rename`, `outl block prop`). Fifteen
 /// `#[allow]`s, a new workspace-wide lint policy, and a forced verdict
 /// on another crate's pre-existing loop is a bigger change than the
@@ -377,8 +377,8 @@ const FIXTURE: &str = "crates/outl-actions/tests/fixtures/outline-308d2321.rs.tx
 ///
 /// Scoped to the projections rather than swept workspace-wide: reading
 /// one node's properties *once* is what `properties_of` is for, and
-/// `page_properties`, the clipboard and the template instantiator each
-/// do exactly that. Sweeping them in would turn this into an allowlist,
+/// `page_properties` and the template instantiator each do exactly
+/// that. Sweeping them in would turn this into an allowlist,
 /// which is a second copy of the rule.
 const PROJECTIONS: &[&str] = &[
     "crates/outl-actions/src/outline.rs",
@@ -395,7 +395,16 @@ const PROJECTIONS: &[&str] = &[
 /// applies to it. Without this entry, moving the read out of
 /// `project_outline_node_shallow` and into `walk_page` would be
 /// invisible.
-const THREADS_THE_PASS: &[&str] = &["crates/outl-actions/src/backlinks_index.rs"];
+///
+/// The clipboard is here for the other reason a file names no pass of its
+/// own: it hands the whole selection to `journal::render::project_blocks`.
+/// It used to build each copied node with a per-node read, and this
+/// entry is what stops that coming back
+/// (`tests/clipboard_projection.rs` holds the equivalence half).
+const THREADS_THE_PASS: &[&str] = &[
+    "crates/outl-actions/src/backlinks_index.rs",
+    "crates/outl-actions/src/clipboard.rs",
+];
 
 /// The one module allowed to read the map for a set of nodes.
 const OWNER: &str = "crates/outl-actions/src/tree/props.rs";

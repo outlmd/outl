@@ -171,31 +171,24 @@ export interface AppStateShape {
    */
   lastVisualRange: { lo: string; hi: string } | null;
   /**
-   * Yank register — list of block texts copied via `yy` (Y) or `y`
-   * in Visual. `p` / `P` paste these (handlers TBD). One register
-   * cross-block (vim convention).
-   */
-  yankRegister: string[];
-  /**
-   * Block clipboard for the view-mode cut / copy / paste gesture
-   * (`Cmd+X` / `Cmd+C` / `Cmd+V` in Normal mode). A *cut* holds the
-   * id of the block to move — the paste emits an `Op::Move`, so the
-   * block keeps its identity (`((blk-…))` refs and backlinks stay
-   * valid). A *copy* holds rendered markdown the paste re-ingests with
-   * fresh ids (duplicate, not move). `null` when the clipboard is empty.
+   * A pending view-mode cut (`Cmd+X` in Normal mode): the id of the
+   * block the next `Cmd+V` moves (`p` always reads the OS clipboard,
+   * like vim's unnamed register). The paste emits an `Op::Move`,
+   * so the block keeps its identity (`((blk-…))` refs and backlinks
+   * stay valid). `null` when nothing is cut.
+   *
+   * Only a cut lives here. A copy (`yy`, `Y`, `Cmd+C`, Visual `y`) goes
+   * to the OS clipboard through `lib/os-clipboard.ts`, and a paste with
+   * no cut armed reads it back from there — so a copy made in another
+   * app and a copy made here paste the same way. A copy also disarms a
+   * pending cut: the user's latest gesture is what `Cmd+V` should paste.
    *
    * A cross-page paste re-renders the source page too, but the source
    * page is **not** carried here: `move_block_after` derives it from
    * the moved node via `enclosing_page_id`, so a `pageId` on the cut
    * payload would just be a second, drift-prone copy of that fact.
-   *
-   * Distinct from [`yankRegister`], which is the vim `y` text
-   * register; this one moves / duplicates whole blocks structurally.
    */
-  blockClipboard:
-    | { kind: "cut"; nodeId: string }
-    | { kind: "copy"; markdown: string }
-    | null;
+  blockClipboard: { kind: "cut"; nodeId: string } | null;
   /**
    * Sidebar (left pane) visibility. Toggled with `Cmd/Ctrl+Shift+E`
    * (mirrors VS Code's "Show Explorer" — see `outl-shortcuts`).
@@ -397,7 +390,6 @@ const [state, setState] = createStore<AppStateShape>({
   mode: "normal",
   visualAnchorId: null,
   lastVisualRange: null,
-  yankRegister: [],
   blockClipboard: null,
   sidebarOpen: false,
   backlinksOpen: true,

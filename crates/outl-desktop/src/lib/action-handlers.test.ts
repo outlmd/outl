@@ -59,7 +59,6 @@ vi.mock("./api", () => ({
 }));
 
 import {
-  copyBlockMarkdown,
   deleteBlock,
   markBlockDone,
   moveBlockAfter,
@@ -275,15 +274,15 @@ describe("Undo / Redo (Cmd+Z / Cmd+Shift+Z)", () => {
 });
 
 /**
- * Smoke tests for the view-mode block clipboard (cut / copy / paste).
+ * Smoke tests for the view-mode cut (`Cmd+X` then `Cmd+V`).
  *
  * Cut is deferred: it only arms `appState.blockClipboard`; the actual
  * move happens on paste (a single identity-preserving `Op::Move`, so
- * `((blk-…))` refs survive). Copy snapshots the subtree as markdown and
- * its paste duplicates with fresh ids. These pin the cut-vs-copy branch
- * of `PasteBlock` so the two clipboards can't quietly swap behaviour.
+ * `((blk-…))` refs survive). A copy goes to the OS clipboard and a
+ * paste with no cut armed reads it back; that half is pinned by
+ * `clipboard-paste.test.ts`.
  */
-describe("block clipboard (cut / copy / paste)", () => {
+describe("block clipboard (cut / paste)", () => {
   const applyView = vi.fn();
   const setError = vi.fn();
 
@@ -309,17 +308,6 @@ describe("block clipboard (cut / copy / paste)", () => {
     expect(moveBlockAfter).not.toHaveBeenCalled();
   });
 
-  it("copy snapshots the block as markdown", async () => {
-    vi.mocked(copyBlockMarkdown).mockResolvedValue("- a");
-    setAppState("selectedBlockId", "blk-a");
-
-    const handlers = buildHandlers({ applyView, setError });
-    await handlers.CopyBlock?.();
-
-    expect(copyBlockMarkdown).toHaveBeenCalledWith("blk-a");
-    expect(appState.blockClipboard).toEqual({ kind: "copy", markdown: "- a" });
-  });
-
   it("paste after a cut moves by id, consumes the clipboard, follows the block", async () => {
     const view = pageView();
     vi.mocked(moveBlockAfter).mockResolvedValue(view);
@@ -335,22 +323,6 @@ describe("block clipboard (cut / copy / paste)", () => {
     // A cut is consumed by its paste; selection follows the moved block.
     expect(appState.blockClipboard).toBeNull();
     expect(appState.selectedBlockId).toBe("blk-a");
-  });
-
-  it("paste after a copy duplicates and keeps the clipboard armed", async () => {
-    const view = pageView();
-    vi.mocked(pasteBlockAfter).mockResolvedValue(view);
-    setAppState("blockClipboard", { kind: "copy", markdown: "- a" });
-    setAppState("selectedBlockId", "blk-b");
-
-    const handlers = buildHandlers({ applyView, setError });
-    await handlers.PasteBlock?.();
-
-    expect(pasteBlockAfter).toHaveBeenCalledWith("pg-1", "blk-b", "- a");
-    expect(moveBlockAfter).not.toHaveBeenCalled();
-    expect(applyView).toHaveBeenCalledWith(view);
-    // A copy persists so it can be pasted again.
-    expect(appState.blockClipboard).toEqual({ kind: "copy", markdown: "- a" });
   });
 
   it("pasting a cut onto itself is a no-op", async () => {

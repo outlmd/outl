@@ -83,8 +83,21 @@ pub type ChildrenIndex = HashMap<NodeId, Vec<NodeId>>;
 /// `Move(node, TRASH_ROOT)`, invariant 6, and trashed nodes stay in
 /// `iter_nodes`). Pass [`NodeId::trash`] to index the deleted side.
 pub(crate) fn children_index(workspace: &Workspace, root: NodeId) -> ChildrenIndex {
+    children_index_of(workspace, vec![root])
+}
+
+/// [`children_index`] for several subtrees at once, off one scan per
+/// level rather than one per level **per root**.
+///
+/// For a selection (the clipboard copies a Visual range, not one block):
+/// the roots form the first frontier together. They should not nest —
+/// a root inside another root's subtree is indexed once either way, but
+/// the caller would walk it twice.
+pub(crate) fn children_index_of(workspace: &Workspace, roots: Vec<NodeId>) -> ChildrenIndex {
     let mut index = ChildrenIndex::new();
-    let mut frontier: Vec<NodeId> = vec![root];
+    let mut frontier = roots;
+    frontier.sort_unstable();
+    frontier.dedup();
     // The materialised tree is acyclic (`Tree::creates_cycle` is what
     // buys that), so this only guards a corrupt one — without it a cycle
     // would loop here forever where the old recursion blew the stack.

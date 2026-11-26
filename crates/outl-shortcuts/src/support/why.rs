@@ -58,6 +58,12 @@ pub const NO_MOBILE_LINK: &str =
 pub const TUI_NO_CAPTURE: &str =
     "The terminal has no capture box yet; open today's journal and add a block.";
 
+/// Mobile has no selected block to paste after: the system paste
+/// lands wherever the caret is, inside the block being edited.
+pub const MOBILE_PASTE_AT_CARET: &str =
+    "Mobile pastes at the caret, not after a selected block — tap a block, then use the \
+     system paste.";
+
 /// `export_markdown` is wired to the GUI clients only.
 pub const TUI_NO_EXPORT: &str =
     "Export isn't in the terminal yet; the workspace `.md` files are already plain Markdown.";

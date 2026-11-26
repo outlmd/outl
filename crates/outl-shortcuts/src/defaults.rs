@@ -473,6 +473,15 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::ToggleCharCase,
             "Toggle case of char under cursor",
         ),
+        // `y y` sits above `Y`: the desktop palette labels an action
+        // with its first row. Without it the desktop armed `y` for
+        // `y r` and dropped the second `y`, so `yy` copied nothing.
+        Binding::new(
+            pair('y', 'y'),
+            Normal,
+            Action::YankCurrentBlock,
+            "Yank current block (yy)",
+        ),
         Binding::new(
             shift_ch('y'),
             Normal,
@@ -623,6 +632,14 @@ pub fn default_bindings() -> Vec<Binding> {
             Action::PasteBlock,
             "Paste block (Ctrl+V)",
         ),
+        // Vim `p`: the system clipboard, always, after the selection.
+        // `Shift+P` (plain paste) stays TUI-only.
+        Binding::new(
+            ch('p'),
+            Normal,
+            Action::PasteClipboard,
+            "Paste clipboard below",
+        ),
         // `Esc` in view mode cancels a pending cut (snaps the dimmed
         // block back). Reuses `ExitInsert` — a no-op blur otherwise,
         // since Normal mode has no focused textarea.
@@ -712,6 +729,11 @@ pub fn default_bindings() -> Vec<Binding> {
         // ── Visual mode ──────────────────────────────────────────
         Binding::new(key(Key::Esc), Visual, Action::ExitInsert, "Leave Visual"),
         Binding::new(ch('y'), Visual, Action::YankRange, "Yank range"),
+        // Without these, Visual `Ctrl+C` fell through to the Global
+        // `Quit` row and closed the window on Linux / Windows. The TUI
+        // is unaffected: its event loop handles `Ctrl+C` before Visual.
+        Binding::new(meta('c'), Visual, Action::YankRange, "Copy range (Cmd+C)"),
+        Binding::new(ctrl('c'), Visual, Action::YankRange, "Copy range (Ctrl+C)"),
         Binding::new(ch('d'), Visual, Action::DeleteRange, "Delete range"),
         // `Delete` / `Backspace` delete the range too — the vim-free
         // way to erase a multi-selection (a non-vim user never reaches

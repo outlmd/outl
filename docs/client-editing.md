@@ -75,7 +75,7 @@ Every client supports copying blocks as clean outl markdown and pasting markdown
 | Client | How to copy | What is copied |
 |---|---|---|
 | TUI | `yy` / `Y` (Normal) or `y` (Visual range) | Selected block(s) + full subtrees as canonical outl markdown, written to the OS clipboard via arboard (X11/Wayland/macOS) with an OSC 52 fallback for SSH / tmux / Crostini. Status line confirms: `yanked N block(s) → clipboard` or `(clipboard unavailable)`. |
-| Desktop | `Y` (Normal) or `y` (Visual range) | Same serialisation via the `copy_markdown` Tauri command (`outl_actions::copy_markdown`) + `navigator.clipboard.writeText`. |
+| Desktop | `y y` / `Y` / `Cmd/Ctrl+C` (Normal) or `y` / `Cmd/Ctrl+C` (Visual range) | Same serialisation via the `copy_markdown` Tauri command (`outl_actions::copy_markdown`), written to the OS clipboard through the Tauri clipboard plugin. `Cmd/Ctrl+C` with a mouse-dragged text selection copies that text instead. A copy cancels a pending cut. |
 | Mobile | Long-press → "Copy" in the context menu | Block + full subtree via the `copy_markdown` Tauri command, written to the iOS clipboard. |
 
 The serialisation is handled by `outl_actions::copy_markdown` on the Rust side and `copyMarkdown` (`@outl/shared/api/commands`) on the TS side.
@@ -86,7 +86,7 @@ Pasting the result back into any outl client reconstructs the same tree.
 
 Every client distinguishes **paste with formatting** from **paste without formatting**.
 
-**With formatting** (`Cmd/Ctrl+V` on desktop, `p` in the TUI, the default paste on mobile) routes the clipboard through `outl_actions::paste_markdown` when the content looks structured.
+**With formatting** (`Cmd/Ctrl+V` or, in Normal mode, `p` on desktop, `p` in the TUI, the default paste on mobile) routes the clipboard through `outl_actions::paste_markdown` when the content looks structured.
 It applies these conversions:
 
 - Roam `{{[[TODO]]}}` / `{{[[DONE]]}}` → `TODO` / `DONE` prefix.
@@ -108,7 +108,7 @@ Either condition sends the paste to the backend (structured path) on `Cmd/Ctrl+V
 | Client | With formatting | Without formatting |
 |---|---|---|
 | TUI | `p` — routes to backend when outline or multi-paragraph; else native splice | `P` — raw text, single block |
-| Desktop | `Cmd/Ctrl+V` — routes to backend when outline or multi-paragraph; else native splice | `Cmd/Ctrl+Shift+V` — raw text, single block |
+| Desktop | `Cmd/Ctrl+V` while editing — routes to backend when outline or multi-paragraph; else native splice. In Normal mode `p` / `Cmd/Ctrl+V` paste after the selected block ([where it lands](paste.md#paste-after-the-selected-block-desktop-normal-mode)) | `Cmd/Ctrl+Shift+V` — raw text, single block |
 | Mobile | paste — routes to backend when outline or multi-paragraph; else native splice | not available |
 
 A paste at the caret rewrites the block the user is typing in, so both GUI clients re-seed that editor from the reply's `host_text` / `host_caret` instead of only refreshing the page.

@@ -430,7 +430,13 @@ fn stale_row_block(workspace: &Workspace, page: NodeId, node: NodeId) -> Option<
 /// walk is [`outl_actions::enclosing_page_id`], an `O(depth)` climb up
 /// parent pointers with no workspace scan; a block moved elsewhere gets
 /// the "could not be found" sentence, because from this row it is.
-fn row_is_live_on(workspace: &Workspace, page: NodeId, node: NodeId) -> bool {
+///
+/// `pub(crate)` because the open page's block paste asks the same
+/// question of its anchor (`commands::paste`): a block a peer trashed
+/// or moved to another page is not somewhere a paste on *this* page may
+/// land. Asked of the page itself it answers "is the page live", since
+/// [`outl_actions::enclosing_page_id`] of a page root is that root.
+pub(crate) fn row_is_live_on(workspace: &Workspace, page: NodeId, node: NodeId) -> bool {
     is_live(workspace, node) && enclosing_page_id(workspace, node) == Some(page)
 }
 

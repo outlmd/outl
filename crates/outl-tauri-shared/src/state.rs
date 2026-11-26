@@ -434,10 +434,17 @@ pub struct CreateBlockReply {
     pub new_id: String,
 }
 
-/// Reply for `paste_markdown_at` / `paste_plain_at`.
+/// Reply for `paste_markdown_at` / `paste_plain_at` / `paste_block_after`.
 ///
-/// `view` is the refreshed page, as every mutation returns. The other
-/// two fields exist because a caret paste is the one mutation that
+/// `view` is the refreshed page, as every mutation returns.
+///
+/// `new_id` is the last **root-level** block the paste created
+/// (`outl_actions::PasteOutcome::last_root`), absent when it created
+/// none. A view-mode paste selects it, and the next paste anchors on it:
+/// the last id minted is a DFS tail and would nest that second paste
+/// inside the first.
+///
+/// The host fields exist because a caret paste is the one mutation that
 /// rewrites the block the user is **currently typing in**, and a client
 /// holds that block's text in a draft it seeded once ([issue
 /// #488](https://github.com/outlmd/outl/issues/488)).
@@ -459,6 +466,8 @@ pub struct PasteReply {
     pub host_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_caret: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_id: Option<String>,
 }
 
 /// Reply for `cut_block`. `markdown` is the removed block's (and its

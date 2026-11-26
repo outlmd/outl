@@ -51,6 +51,12 @@ vi.mock("@outl/shared/api/commands", () => ({
   toggleTodo: vi.fn(),
 }));
 
+const plugin = vi.hoisted(() => ({
+  readText: vi.fn(),
+  writeText: vi.fn<(text: string) => Promise<void>>(),
+}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => plugin);
+
 vi.mock("./api", () => ({
   redoPage: vi.fn(),
   undoPage: vi.fn(),
@@ -64,16 +70,11 @@ import { setAppState } from "./store";
 describe("the block-handle handlers reach the OS clipboard", () => {
   const applyView = vi.fn();
   const setError = vi.fn();
-  const writeText = vi.fn(() => Promise.resolve());
+  const writeText = plugin.writeText;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Absent under happy-dom, and the handler reads it optionally.
-    Object.defineProperty(globalThis.navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-      writable: true,
-    });
+    writeText.mockResolvedValue(undefined);
     setAppState({ selectedBlockId: "blk-a" });
   });
 
@@ -139,15 +140,17 @@ describe("the block-handle handlers reach the OS clipboard", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it("a webview that refuses the clipboard does not raise", async () => {
+  it("a refused clipboard write does not raise, and reaches the user", async () => {
     vi.mocked(copyBlockRef).mockResolvedValue("((blk-abc123))");
-    writeText.mockReturnValueOnce(Promise.reject(new Error("no permission")));
+    writeText.mockRejectedValueOnce(new Error("no permission"));
 
     const handlers = buildHandlers({ applyView, setError });
     await expect(handlers.CopyBlockRef?.()).resolves.toBeUndefined();
-    await Promise.resolve();
 
-    // Best-effort, like every other clipboard write in this client.
-    expect(setError).not.toHaveBeenCalled();
+    // The clipboard still holds whatever it held before; saying nothing
+    // reads as a ref that was copied.
+    expect(setError).toHaveBeenCalledWith(
+      expect.stringContaining("no permission"),
+    );
   });
 });

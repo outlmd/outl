@@ -1,7 +1,7 @@
 //! The reverse direction of `tui_catalog_divergence.rs`.
 //!
 //! That file walks catalog → TUI, so it cannot see a chord only the
-//! TUI has. 27 of those ship today, which means `docs/shortcuts.md`'s
+//! TUI has. 25 of those ship today, which means `docs/shortcuts.md`'s
 //! generated halves and the desktop's help overlay are blind to them,
 //! and `outl-shortcuts`'s own rule is "No client hardcodes a
 //! `(chord, action)` pair" ([#441](https://github.com/outlmd/outl/issues/441)).
@@ -21,7 +21,7 @@ fn seq(s: &str) -> ChordSequence {
 ///
 /// The reverse direction of [`every_terminal_reachable_binding_has_a_verdict`],
 /// which walks catalog → TUI and therefore cannot see a binding that
-/// only the TUI has. 27 of them ship today, so
+/// only the TUI has. 25 of them ship today, so
 /// `docs/shortcuts.md`'s generated halves and the desktop's help
 /// overlay are blind to them, and `outl-shortcuts`'s own rule is "No
 /// client hardcodes a `(chord, action)` pair".
@@ -39,10 +39,8 @@ fn seq(s: &str) -> ChordSequence {
 /// three per-client verdicts.
 const TUI_ONLY: &[(&str, &str)] = &[
     ("g g", "jump to the first block"),
-    ("y y", "yank the current block"),
     ("Ctrl+d", "half page down"),
     ("Ctrl+u", "half page up"),
-    ("p", "paste the OS clipboard, with formatting"),
     ("Shift+p", "paste the OS clipboard, plain"),
     ("Ctrl+o", "flip the backlinks sort order"),
     ("PageDown", "page down"),
@@ -123,7 +121,7 @@ fn tui_only_rows_parse_and_are_unique() {
 fn the_tui_only_count_matches_the_doc_comment() {
     assert_eq!(
         TUI_ONLY.len(),
-        27,
+        25,
         "TUI_ONLY changed size — update the count in its doc comment and in \
          docs/shortcuts.md, or this number is the next stale one"
     );

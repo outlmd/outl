@@ -13,6 +13,7 @@
     "dialog:default",
     "dialog:allow-open",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "notification:default",
     {
       "identifier": "opener:allow-open-url",

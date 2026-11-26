@@ -25,27 +25,99 @@ pub fn normalize_external_syntax(raw: &str) -> String {
         lines.iter().map(|l| (*l).to_string()).collect()
     };
 
-    // 3 + 4 + 5: per-line text-level conversions.
+    // 3 - 7: per-line text-level conversions, on every line that is
+    //    not inside a fenced code block. A fence is code the user
+    //    copied: `{{ x }}` there is a template, `- [ ]` is a string
+    //    literal, and an `id:: …` line is data. The indent pass above
+    //    still runs on it, because it is structure (where the fence
+    //    sits in the outline), not content.
+    let mut fence = FenceState::default();
     let mut kept: Vec<String> = Vec::with_capacity(normalized_indent.len());
     for line in normalized_indent {
+        if fence.verbatim(&line) {
+            kept.push(line);
+            continue;
+        }
         if is_logseq_id_line(&line) {
             // Drop Logseq's inline `id::` lines — outl forbids ids in
             // markdown (root CLAUDE.md invariant #2).
             continue;
         }
-        kept.push(convert_line(&line));
+        kept.push(normalize_line(&line));
     }
 
+    kept.join("\n")
+}
+
+/// Steps 3 - 7 for one line outside a fence.
+fn normalize_line(line: &str) -> String {
+    // 3 + 4 + 5: known conversions.
+    let converted = convert_line(line);
     // 6. Strip remaining {{…}} and ^^…^^ tokens. After the more
     //    specific replacements had a chance to consume the tokens
     //    they understand, anything still wrapped is unknown to outl.
-    let stripped: Vec<String> = kept.into_iter().map(strip_unknown_tokens).collect();
-
+    let stripped = strip_unknown_tokens(converted);
     // 7. Collapse double spaces left over by the strip, preserving
     //    the leading indent so structural meaning isn't lost.
-    let collapsed: Vec<String> = stripped.into_iter().map(collapse_inner_spaces).collect();
+    collapse_inner_spaces(stripped)
+}
 
-    collapsed.join("\n")
+/// Where the scan stands relative to a fenced code block.
+///
+/// The same rules `outl_md`'s parser and its `unlogged::track_fence`
+/// apply, over `outl_md::fence_marker` and `parse::leading_indent` (the
+/// tracker itself is crate-private, and this pass runs on text that has
+/// not been parsed yet): an opener is ```` ``` ```` or `~~~` at the start
+/// of a line or right after its `- `; the fence closes on a line of its
+/// **own** marker character at **exactly** the body's level (a deeper
+/// one is content, e.g. a code sample quoting a nested fence), or on a
+/// non-blank line outdented below the body. Levels are counted the
+/// parser's way: two spaces or one tab each. An opener with no bullet at
+/// level 0 starts a block, so its body is one level in, like a bullet's;
+/// otherwise a stray closer at column 0 would hold every later line
+/// verbatim. A fence never closed runs until something outdents below
+/// its body, which is what the parser does with it too.
+#[derive(Default)]
+struct FenceState {
+    /// The opener's marker and the level its body sits at.
+    open: Option<(&'static str, usize)>,
+}
+
+impl FenceState {
+    /// Advance over `line` and say whether it passes through untouched:
+    /// an opener, a body line or a closer.
+    fn verbatim(&mut self, line: &str) -> bool {
+        let trimmed = line.trim();
+        let level = outl_md::parse::leading_indent(line);
+        if let Some((marker, body_level)) = self.open {
+            if trimmed.is_empty() {
+                return true;
+            }
+            if level >= body_level {
+                if level == body_level && closes(trimmed, marker) {
+                    self.open = None;
+                }
+                return true;
+            }
+            self.open = None;
+        }
+        let (content, body_indent) = match trimmed.strip_prefix("- ") {
+            Some(rest) => (rest.trim_start(), level + 1),
+            None => (trimmed, level.max(1)),
+        };
+        let Some(marker) = outl_md::fence_marker(content) else {
+            return false;
+        };
+        self.open = Some((marker, body_indent));
+        true
+    }
+}
+
+/// Whether `trimmed` is a closing fence for `marker`: the marker, then
+/// nothing but more of its own character.
+fn closes(trimmed: &str, marker: &str) -> bool {
+    let fence_char = marker.chars().next().unwrap_or('`');
+    trimmed.starts_with(marker) && trimmed.chars().all(|c| c == fence_char)
 }
 
 fn detect_indent_unit(lines: &[&str]) -> usize {

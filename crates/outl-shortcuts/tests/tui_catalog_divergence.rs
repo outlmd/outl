@@ -198,8 +198,8 @@ const KNOWN_DIVERGENCES: &[Divergence] = &[
         catalog: Action::PasteBlock,
         tui_does: "nothing — there is no `Char('v')` arm, only `Char('V')` for Visual",
         harm: Harm::Dead,
-        note: "The TUI pastes with `p` / `P` (OS clipboard), which the catalog does not \
-              bind at all.",
+        note: "The TUI pastes the OS clipboard with `p` (the catalog's `PasteClipboard`) \
+              and `P` (plain, TUI-only).",
     },
     Divergence {
         chord: "Esc",
@@ -332,6 +332,7 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("f", Mode::Normal, Action::FindCharForward),
     ("Shift+f", Mode::Normal, Action::FindCharBackward),
     ("~", Mode::Normal, Action::ToggleCharCase),
+    ("y y", Mode::Normal, Action::YankCurrentBlock),
     ("Shift+y", Mode::Normal, Action::YankCurrentBlock),
     ("e", Mode::Normal, Action::CursorWordEnd),
     ("*", Mode::Normal, Action::SearchWordForward),
@@ -351,6 +352,7 @@ const AGREED: &[(&str, Mode, Action)] = &[
     ("d d", Mode::Normal, Action::DeleteBlock),
     ("c", Mode::Normal, Action::ToggleCollapsed),
     ("y r", Mode::Normal, Action::CopyBlockRef),
+    ("p", Mode::Normal, Action::PasteClipboard),
     ("u", Mode::Normal, Action::Undo),
     ("Ctrl+r", Mode::Normal, Action::Redo),
 ];

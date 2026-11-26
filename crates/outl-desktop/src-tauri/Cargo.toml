@@ -49,11 +49,13 @@ tauri = { workspace = true }
 tauri-plugin-log = { workspace = true }
 log = { workspace = true }
 tauri-plugin-dialog = "2"
-# Backend clipboard read for "paste without formatting" (Cmd+Shift+V).
-# `navigator.clipboard.readText()` in the macOS WKWebview pops the native
-# "Paste" permission button when called outside a paste gesture, so the
-# chord surfaced a "paste" prompt and inserted nothing. Reading via the
-# plugin (backend `arboard`) bypasses that gate.
+# Every OS clipboard read and write in this client (`src/lib/os-clipboard.ts`).
+# `navigator.clipboard` is gated on a user gesture in the macOS WKWebview:
+# a read pops the native "Paste" button and inserts nothing, and a write
+# that follows an IPC round-trip (`yy` serializes on the backend first)
+# is refused. The plugin (backend `arboard`) has neither gate.
+# `capabilities/default.json` must grant both `allow-read-text` and
+# `allow-write-text`; `src/lib/capabilities.test.ts` pins it.
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-os = { workspace = true }

@@ -8,11 +8,9 @@
 use outl_actions::{
     append_block, apply_page_md_with_sidecar_guarded, copy_markdown as action_copy_markdown,
     create_after_or_append, create_before_or_append, delete, edit_text, enclosing_page_id, indent,
-    move_after, move_down, move_up, outdent, paste_markdown as action_paste_markdown,
-    paste_plain as action_paste_plain, render_block_md,
+    move_after, move_down, move_up, outdent, render_block_md,
     set_block_collapsed as action_set_block_collapsed, split_block as action_split_block,
     toggle_quote as action_toggle_quote, toggle_todo as action_toggle_todo, ActionError,
-    PasteAnchor, PasteOutcome,
 };
 use outl_md::index::WorkspaceIndex;
 use tracing::warn;
@@ -20,7 +18,7 @@ use tracing::warn;
 use crate::commit::{announce_after_commit, finish_in_page, finish_in_page_with};
 use crate::helpers::{build_page_view, parse_node_id, with_ws, with_ws_mut};
 use crate::host::AppHost;
-use crate::state::{CreateBlockReply, CutBlockReply, DroppedEdit, PageView, PasteReply};
+use crate::state::{CreateBlockReply, CutBlockReply, DroppedEdit, PageView};
 
 /// Create a block. Precedence: `before_id` (vim `O` /
 /// `Cmd/Ctrl+Shift+Enter` at col 0) wins over `after_id` (vim `o` /
@@ -341,29 +339,11 @@ pub fn move_block_after<S: AppHost>(
 
 /// Render the block `id` and its subtree to clean outl markdown for the
 /// block clipboard (`Cmd+C` in view mode). Read-only — the paste
-/// re-ingests this text via [`paste_block_after`] and mints fresh ids,
-/// so a copy duplicates rather than moves.
+/// re-ingests this text via [`crate::commands::paste::paste_block_after`]
+/// and mints fresh ids, so a copy duplicates rather than moves.
 pub fn copy_block_markdown<S: AppHost>(state: &S, id: String) -> Result<String, String> {
     let node = parse_node_id(&id)?;
     with_ws(state, |ws| Ok(render_block_md(ws, node)))
-}
-
-/// Paste clipboard `text` (clean outl markdown) as the sibling(s)
-/// immediately after `after_id` — the `Cmd+V` of a *copied* block in
-/// view mode. Routes through the same `paste_markdown` pipeline the
-/// external-clipboard paste uses, so the duplicated subtree gets fresh
-/// ids.
-pub fn paste_block_after<S: AppHost>(
-    state: &S,
-    page_id: String,
-    after_id: String,
-    text: String,
-) -> Result<PageView, String> {
-    let page = parse_node_id(&page_id)?;
-    let after = parse_node_id(&after_id)?;
-    finish_in_page(state, page, |ws| {
-        action_paste_markdown(ws, state.hlc(), PasteAnchor::AfterBlock(after), &text).map(|_| ())
-    })
 }
 
 /// Cut the block `id` (and its subtree): renders it to clipboard
@@ -371,8 +351,8 @@ pub fn paste_block_after<S: AppHost>(
 /// `outl_actions::delete` — `Op::Move(node, TRASH_ROOT)`, never a
 /// physical removal (root `CLAUDE.md` invariant 6).
 ///
-/// Paste with [`paste_block_after`], which mints fresh ids for the
-/// pasted copy — a cut+paste round trip duplicates identity rather
+/// Paste with [`crate::commands::paste::paste_block_after`], which mints
+/// fresh ids for the pasted copy — a cut+paste round trip duplicates identity rather
 /// than preserving it. That is deliberately different from the
 /// desktop frontend's own view-mode Cmd+X/Cmd+V (which reparents the
 /// block via [`move_block_after`] and keeps every `((blk-…))` ref
@@ -415,81 +395,12 @@ pub fn set_block_collapsed<S: AppHost>(
     })
 }
 
-/// Paste external clipboard markdown as a tree of blocks. `caret` is a
-/// Unicode codepoint offset into the host block's text — the frontend
-/// converts `textarea.selectionStart` (UTF-16) via
-/// `utf16OffsetToCharOffset` from `@outl/shared/paste` first.
-///
-/// Returns a [`PasteReply`], not a bare `PageView`: the host block's
-/// new text rides along so a client editing it can re-seed its draft
-/// instead of committing the pre-paste string back over the paste
-/// ([issue #488](https://github.com/outlmd/outl/issues/488)).
-pub fn paste_markdown_at<S: AppHost>(
-    state: &S,
-    page_id: String,
-    block_id: String,
-    caret: u32,
-    text: String,
-) -> Result<PasteReply, String> {
-    let page = parse_node_id(&page_id)?;
-    let block = parse_node_id(&block_id)?;
-    finish_in_page_with(state, page, |ws| {
-        action_paste_markdown(
-            ws,
-            state.hlc(),
-            PasteAnchor::AtCaret {
-                block,
-                caret: caret as usize,
-            },
-            &text,
-        )
-    })
-    .map(paste_reply)
-}
-
-/// Paste clipboard text **without formatting**: the raw string is
-/// spliced into the host block at `caret` — no outline detection, no
-/// syntax normalization, no paragraph splitting. The "with formatting"
-/// counterpart is [`paste_markdown_at`].
-pub fn paste_plain_at<S: AppHost>(
-    state: &S,
-    page_id: String,
-    block_id: String,
-    caret: u32,
-    text: String,
-) -> Result<PasteReply, String> {
-    let page = parse_node_id(&page_id)?;
-    let block = parse_node_id(&block_id)?;
-    finish_in_page_with(state, page, |ws| {
-        action_paste_plain(
-            ws,
-            state.hlc(),
-            PasteAnchor::AtCaret {
-                block,
-                caret: caret as usize,
-            },
-            &text,
-        )
-    })
-    .map(paste_reply)
-}
-
-/// Shape a paste's outcome into the wire reply, for both paste commands.
-///
-/// One function because the two differ only in which `outl-actions`
-/// entry point ran; a second copy of this mapping is how one of them
-/// would start forgetting to carry the caret.
-fn paste_reply((outcome, view): (PasteOutcome, PageView)) -> PasteReply {
-    PasteReply {
-        view,
-        host_text: outcome.host_text,
-        host_caret: outcome.host_caret.map(|c| c as u32),
-    }
-}
-
 /// Serialize the given blocks (each with its subtree) to clean outl
-/// markdown for the OS clipboard. Read-only — the frontend writes the
-/// returned string to `navigator.clipboard` itself.
+/// markdown for the OS clipboard. Read-only — the client writes the
+/// returned string to the OS clipboard itself (the desktop through the
+/// clipboard-manager plugin, `src/lib/os-clipboard.ts`, because a
+/// `navigator.clipboard` write after an `await` falls outside the user
+/// gesture and the webview rejects it).
 ///
 /// `block_ids` arrives in document order (a single yank, or a Visual
 /// range top-to-bottom); the markdown preserves that order. A

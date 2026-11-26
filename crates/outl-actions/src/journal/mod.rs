@@ -40,7 +40,7 @@ mod guard;
 mod mutate;
 mod paths;
 mod refresh;
-mod render;
+pub(crate) mod render;
 mod sidecar;
 mod survey;
 pub(crate) mod write;

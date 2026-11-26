@@ -20,10 +20,9 @@ use std::collections::HashSet;
 
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
-use outl_md::parse::{OutlineNode, ParsedPage};
-use outl_md::render::render;
+use outl_md::parse::OutlineNode;
 
-use crate::tree::{children_of, text_properties_of};
+use crate::journal::render::{project_blocks, render_fragment};
 
 /// Serialize `roots` — and their full subtrees — to clean outl markdown
 /// suitable for the OS clipboard.
@@ -38,11 +37,16 @@ use crate::tree::{children_of, text_properties_of};
 /// document order (a single yank, a visual range top-to-bottom). An empty
 /// slice yields an empty string.
 ///
-/// Only textual block properties survive: `PageRef` / `Tag` / `List`
-/// shapes are dropped silently (`tree::text_properties_of` is the shared
-/// owner of this rule). The internal `page-slug` / `page-kind`
-/// book-keeping keys are skipped too, so copying a page node never leaks
-/// them.
+/// The blocks are projected exactly as [`crate::render_block_md`]
+/// projects one — same walk, same property rule — so a block copied
+/// here and the same block copied through the single-block command are
+/// byte-identical. That rule keeps `Text`, `PageRef` and `Tag` values
+/// and drops `List`, which has no `.md` syntax. A selected **page** root
+/// leaves the page model's book-keeping keys behind (`page-slug`,
+/// `page-kind`, …), as a page's `.md` header does.
+///
+/// The whole selection is one property pass, however many roots it has:
+/// see `journal::render::project_blocks`.
 pub fn copy_markdown(workspace: &Workspace, roots: &[NodeId]) -> String {
     // Drop any id whose ancestor is also in the selection: a parent
     // already carries that descendant inside its subtree, so keeping the
@@ -50,17 +54,17 @@ pub fn copy_markdown(workspace: &Workspace, roots: &[NodeId]) -> String {
     // spans a parent and its child is the common trigger. Order of the
     // surviving roots is preserved.
     let selected: HashSet<NodeId> = roots.iter().copied().collect();
-    let blocks: Vec<OutlineNode> = roots
+    let kept: Vec<NodeId> = roots
         .iter()
+        .copied()
         // Skip ids no longer in the tree (a stale/re-minted selection a
-        // client still holds): `build_node` would otherwise emit an empty
-        // `- ` bullet from `block_text(..).unwrap_or_default()`, corrupting
-        // the clipboard with a blank line.
-        .filter(|&&id| workspace.tree().contains(id))
-        .filter(|&&id| !has_selected_ancestor(workspace, id, &selected))
-        .map(|&id| build_node(workspace, id))
+        // client still holds): the projection would otherwise emit an
+        // empty `- ` bullet from `block_text(..).unwrap_or_default()`,
+        // corrupting the clipboard with a blank line.
+        .filter(|&id| workspace.tree().contains(id))
+        .filter(|&id| !has_selected_ancestor(workspace, id, &selected))
         .collect();
-    copy_markdown_nodes(&blocks)
+    render_fragment(project_blocks(workspace, &kept))
 }
 
 /// Walk `node`'s ancestors; return `true` if any is in `selected`.
@@ -88,28 +92,7 @@ fn has_selected_ancestor(workspace: &Workspace, node: NodeId, selected: &HashSet
 /// `text` is the raw block body (TODO/quote prefixes included) — i.e. what
 /// [`outl_md::parse::parse`] produced — so the output round-trips.
 pub fn copy_markdown_nodes(nodes: &[OutlineNode]) -> String {
-    let page = ParsedPage {
-        blocks: nodes.to_vec(),
-        ..Default::default()
-    };
-    render(&page)
-}
-
-/// Build the minimal-AST node for `id`, **including the node itself**,
-/// its textual properties, and its full child subtree.
-///
-/// Unlike `journal::build_outline` (which drops block properties because
-/// the page render carries only page-level props), this keeps per-block
-/// properties so the copied markdown round-trips back to the same tree.
-fn build_node(workspace: &Workspace, id: NodeId) -> OutlineNode {
-    OutlineNode {
-        text: workspace.block_text(id).unwrap_or_default(),
-        properties: text_properties_of(workspace, id),
-        children: children_of(workspace, id)
-            .into_iter()
-            .map(|(child, _)| build_node(workspace, child))
-            .collect(),
-    }
+    render_fragment(nodes.to_vec())
 }
 
 #[cfg(test)]
@@ -117,6 +100,7 @@ mod tests {
     use super::*;
     use crate::block::append_block;
     use crate::paste::{paste_markdown, PasteAnchor};
+    use crate::tree::children_of;
     use outl_core::hlc::HlcGenerator;
     use outl_core::id::ActorId;
 

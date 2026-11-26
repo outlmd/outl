@@ -261,6 +261,11 @@ pub enum Action {
     /// block (desktop `Cmd+V` in view mode). A cut clipboard moves
     /// the original node; a copy clipboard duplicates it.
     PasteBlock,
+    /// Paste the **system** clipboard as blocks after the selected one
+    /// (vim `p`). Distinct from [`Action::PasteBlock`], which reads
+    /// outl's own cut register first: this one always reads the OS
+    /// clipboard, so text copied in another app lands as an outline.
+    PasteClipboard,
 
     // ── insert-mode commits ──────────────────────────────────────
     /// Commit in-flight edit and leave Insert mode (`Esc`).
@@ -398,6 +403,7 @@ impl Action {
         Action::CutBlock,
         Action::CopyBlock,
         Action::PasteBlock,
+        Action::PasteClipboard,
         Action::ExitInsert,
         Action::CommitAndContinue,
         Action::DeleteEmptyBlock,
@@ -500,6 +506,7 @@ mod all_tests {
             Action::CutBlock => "CutBlock",
             Action::CopyBlock => "CopyBlock",
             Action::PasteBlock => "PasteBlock",
+            Action::PasteClipboard => "PasteClipboard",
             Action::ExitInsert => "ExitInsert",
             Action::CommitAndContinue => "CommitAndContinue",
             Action::DeleteEmptyBlock => "DeleteEmptyBlock",
@@ -535,14 +542,14 @@ mod all_tests {
         );
         assert_eq!(
             names.len(),
-            EXPECTED_86,
-            "Action::ALL has {} entries but the enum has {EXPECTED_86} variants \
-             — add the new variant to Action::ALL (and bump EXPECTED_86)",
+            EXPECTED_VARIANTS,
+            "Action::ALL has {} entries but the enum has {EXPECTED_VARIANTS} variants \
+             — add the new variant to Action::ALL (and bump EXPECTED_VARIANTS)",
             names.len(),
         );
     }
 
     /// Bumped together with a new variant. The `name` match above is
     /// what makes forgetting impossible: it will not compile.
-    const EXPECTED_86: usize = 86;
+    const EXPECTED_VARIANTS: usize = 87;
 }

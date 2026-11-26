@@ -10,9 +10,10 @@
  *
  * What matters is the whole round-trip, not the call: the block ids
  * reach `copy_markdown`, and the markdown it answers with reaches the
- * OS clipboard. A `ctx` threaded to the wrong place would still
- * compile and would break exactly there, silently, because both halves
- * are deliberately best-effort and swallow failure.
+ * OS clipboard plugin. A `ctx` threaded to the wrong place would still
+ * compile and would break exactly there — and a failure on either half
+ * has to reach the status line, since a clipboard that silently kept
+ * its old contents reads as a copy that worked.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +52,12 @@ vi.mock("@outl/shared/api/commands", () => ({
   toggleTodo: vi.fn(),
 }));
 
+const plugin = vi.hoisted(() => ({
+  readText: vi.fn(),
+  writeText: vi.fn<(text: string) => Promise<void>>(),
+}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => plugin);
+
 vi.mock("./api", () => ({
   redoPage: vi.fn(),
   undoPage: vi.fn(),
@@ -76,17 +83,11 @@ function block(id: string, text: string): BlockNode {
 describe("yank handlers reach the OS clipboard", () => {
   const applyView = vi.fn();
   const setError = vi.fn();
-  const writeText = vi.fn(() => Promise.resolve());
+  const writeText = plugin.writeText;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // `navigator.clipboard` is absent under happy-dom; the handler
-    // reads it optionally (`?.`) so it has to be installed to observe.
-    Object.defineProperty(globalThis.navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-      writable: true,
-    });
+    writeText.mockResolvedValue(undefined);
     setAppState({
       page: { id: "pg-1", slug: "today", title: "Today", kind: "journal" },
       outline: [
@@ -99,25 +100,26 @@ describe("yank handlers reach the OS clipboard", () => {
       selectedBacklinkBlockId: null,
       visualAnchorId: null,
       lastVisualRange: null,
-      yankRegister: [],
+      blockClipboard: null,
       mode: "vim-normal",
     });
   });
 
-  it("Y copies the selected block's markdown and fills the yank register", async () => {
+  it("Y copies the selected block's markdown and disarms a pending cut", async () => {
     vi.mocked(copyMarkdown).mockResolvedValue("- first block\n");
-    setAppState("selectedBlockId", "blk-a");
+    setAppState({
+      selectedBlockId: "blk-a",
+      blockClipboard: { kind: "cut", nodeId: "blk-c" },
+    });
 
     const handlers = buildHandlers({ applyView, setError });
     await handlers.YankCurrentBlock?.();
-    // The clipboard write is fire-and-forget inside the handler.
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(copyMarkdown).toHaveBeenCalledWith(["blk-a"]);
     expect(writeText).toHaveBeenCalledWith("- first block\n");
-    // The in-app register holds the block text, not the markdown.
-    expect(appState.yankRegister).toEqual(["first block"]);
+    // The latest gesture is what `p` pastes; a stale cut would win.
+    expect(appState.blockClipboard).toBeNull();
+    expect(setError).not.toHaveBeenCalled();
   });
 
   it("Y does nothing when no block is selected", async () => {
@@ -138,31 +140,27 @@ describe("yank handlers reach the OS clipboard", () => {
 
     const handlers = buildHandlers({ applyView, setError });
     await handlers.YankRange?.();
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(copyMarkdown).toHaveBeenCalledWith(["blk-a", "blk-b"]);
     expect(writeText).toHaveBeenCalledWith("- first block\n- second block\n");
-    expect(appState.yankRegister).toEqual(["first block", "second block"]);
     // Every Visual exit captures the range for `g v`.
     expect(appState.lastVisualRange).toEqual({ lo: "blk-a", hi: "blk-b" });
     expect(appState.mode).toBe("vim-normal");
   });
 
-  it("a rejected clipboard write still leaves the yank register filled", async () => {
+  it("a rejected clipboard write reaches the status line", async () => {
     vi.mocked(copyMarkdown).mockResolvedValue("- first block\n");
-    writeText.mockReturnValueOnce(Promise.reject(new Error("no permission")));
+    writeText.mockRejectedValueOnce(new Error("no permission"));
     setAppState("selectedBlockId", "blk-a");
 
     const handlers = buildHandlers({ applyView, setError });
-    await handlers.YankCurrentBlock?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await expect(handlers.YankCurrentBlock?.()).resolves.toBeUndefined();
 
-    // Both halves are best-effort: a webview that refuses the clipboard
-    // must not cost the user `p` / `P`, and must not raise.
-    expect(appState.yankRegister).toEqual(["first block"]);
-    expect(setError).not.toHaveBeenCalled();
+    // Swallowed, this read as a copy that worked while the clipboard
+    // kept its old contents — the bug `yy` shipped with.
+    expect(setError).toHaveBeenCalledWith(
+      expect.stringContaining("no permission"),
+    );
   });
 
   it("a failed copy_markdown never writes to the clipboard", async () => {
@@ -171,8 +169,6 @@ describe("yank handlers reach the OS clipboard", () => {
 
     const handlers = buildHandlers({ applyView, setError });
     await handlers.YankCurrentBlock?.();
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(writeText).not.toHaveBeenCalled();
     // `safeCall` is what surfaces it, which is the `ctx` wiring under test.

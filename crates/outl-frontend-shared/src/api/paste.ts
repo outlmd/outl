@@ -1,6 +1,7 @@
 /**
- * The caret paste: hand the clipboard to the backend and get back both
- * the page and the block the user is typing in.
+ * The paste commands: hand the clipboard to the backend and get back
+ * the page, plus the block the user is typing in (caret paste) or the
+ * block the paste landed on (view-mode paste).
  *
  * Split out of `commands.ts` / `types.ts` under the file-size ratchet,
  * and re-exported from both so `@outl/shared/api/commands` and
@@ -17,9 +18,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PageView } from "./types";
 
 /**
- * Reply of {@link pasteMarkdown} / {@link pastePlain}. Mirrors the Rust
+ * Reply of {@link pasteMarkdown} / {@link pastePlain} /
+ * {@link pasteBlockAfter}. Mirrors the Rust
  * `outl_tauri_shared::state::PasteReply`, which carries the full
  * reasoning.
+ *
+ * `new_id` is the last **root-level** block the paste created, absent
+ * when it created none. Select it after a view-mode paste, and anchor
+ * the next paste on it: the last id minted is a DFS tail, and a second
+ * paste anchored there nests inside the first copy.
  *
  * `view` is the refreshed page, like every other mutation's reply.
  * `host_text` is the new text of the block the caret was in, present
@@ -38,6 +45,36 @@ export interface PasteReply {
   view: PageView;
   host_text?: string;
   host_caret?: number;
+  new_id?: string;
+}
+
+/**
+ * Paste clipboard `text` next to a selected block in view mode — the
+ * desktop's `p` / `Cmd+V`, mobile's block paste. Runs the same pipeline
+ * as {@link pasteMarkdown}, so a copied subtree comes back with fresh
+ * ids and external text is converted.
+ *
+ * Where it lands: under `anchor.parentId` (the zoom root, or a zoom with
+ * nothing in it) as its last child; else right after `anchor.afterId`
+ * (the selected block); else at the end of the page.
+ *
+ * The backend resolves `anchor` once, against the page as it is when the
+ * paste runs: an anchor a peer trashed or moved to another page falls
+ * back to the page end, and a page that is gone refuses with nothing
+ * written. Capture the ids **before** awaiting the OS clipboard, and
+ * read `reply.new_id` for where the paste landed.
+ */
+export function pasteBlockAfter(
+  pageId: string,
+  anchor: { afterId?: string | null; parentId?: string | null },
+  text: string,
+): Promise<PasteReply> {
+  return invoke<PasteReply>("paste_block_after", {
+    pageId,
+    afterId: anchor.afterId ?? null,
+    parentId: anchor.parentId ?? null,
+    text,
+  });
 }
 
 /**

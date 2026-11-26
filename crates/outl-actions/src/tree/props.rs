@@ -74,15 +74,16 @@ pub fn is_page_model_key(key: &str) -> bool {
 /// `.md` parser only ever yields `Text`, so a `PageRef` or `Tag` comes
 /// back as `Text` with the same string. `List` has no syntax and is dropped.
 ///
-/// The single owner of that mapping. It exists because three callers
-/// need it — the page renderer, the block renderer, and the tree-derived
-/// index — and a block's properties must read the same whether they
-/// arrive through the renderer or through the index.
+/// The single owner of that mapping. It exists because four callers
+/// need it — the page renderer, the block renderer, the clipboard and
+/// the tree-derived index — and a block's properties must read the same
+/// whether they arrive through the renderer or through the index.
 ///
-/// Note this is **not** the rule [`text_properties_of`] applies: that
-/// one keeps `Text` only. The two have disagreed since before either was
-/// documented as an owner; whether the clipboard should be dropping
-/// `PageRef` / `Tag` is a separate question from this one.
+/// The clipboard used to keep `Text` only, through a per-node reader of
+/// its own, so a block copied with `yy` and the same block copied with
+/// `Cmd+C` came out different whenever it carried a `PageRef` or `Tag`.
+/// It projects through the renderer now (`journal::render::project_blocks`),
+/// so the two spellings of "copy" cannot disagree.
 pub(crate) fn renderable_prop_value(value: &PropValue) -> Option<String> {
     match value {
         PropValue::Text(s) | PropValue::PageRef(s) | PropValue::Tag(s) => Some(s.clone()),
@@ -190,28 +191,6 @@ where
     grouped
 }
 
-/// Textual properties of `node`, minus the page model's book-keeping
-/// ([`is_page_model_key`]), in [`sort_in_presentation_order`].
-///
-/// Only `PropValue::Text` survives — `PageRef` / `Tag` / `List` shapes
-/// have no `.md` render syntax and are dropped silently. The single
-/// owner of the "which block properties round-trip through the `.md`
-/// dialect" rule; `clipboard::build_node` and any other serializer share
-/// it instead of re-deriving the filter + sort.
-pub(crate) fn text_properties_of(workspace: &Workspace, node: NodeId) -> Vec<(String, String)> {
-    let mut properties: Vec<(String, String)> = workspace
-        .tree()
-        .properties_of(node)
-        .filter(|(k, _)| !is_page_model_key(k))
-        .filter_map(|(k, v)| match v {
-            PropValue::Text(s) => Some((k.to_string(), s.clone())),
-            _ => None,
-        })
-        .collect();
-    sort_in_presentation_order(&mut properties);
-    properties
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,9 +244,11 @@ mod tests {
             .expect("property is set");
         }
 
-        let keys: Vec<String> = text_properties_of(&ws, page)
-            .into_iter()
-            .map(|(k, _)| k)
+        let grouped = group_properties_of(&ws, &[page], renderable_prop_value);
+        let keys: Vec<&str> = grouped[&page]
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .filter(|k| !is_page_model_key(k))
             .collect();
         assert_eq!(keys, ["alpha", "mid", "zeta"]);
     }

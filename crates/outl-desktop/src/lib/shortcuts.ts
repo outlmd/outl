@@ -39,6 +39,7 @@ import { paletteActions } from "./palette-results";
 import { playPluginViews } from "./plugin-views";
 import { actionSlashCommands } from "./slash-commands";
 import { appState, setAppState, setOutline } from "./store";
+import { createYankEcho } from "./yank-echo";
 
 // ---------------------------------------------------------------------------
 // KeyboardEvent → Chord
@@ -314,6 +315,7 @@ export async function installShortcuts(
   /** Buffered chord prefix (e.g. user typed `g`, waiting for `j`). */
   let pending: Chord[] = [];
   let pendingTimer: number | undefined;
+  const yankEcho = createYankEcho();
 
   function resetPending() {
     pending = [];
@@ -333,8 +335,14 @@ export async function installShortcuts(
   const onKey = async (e: KeyboardEvent) => {
     const chord = eventToChord(e);
     if (!chord) return;
-
     const mode = detectMode();
+    // Never in a text field: a `y` typed into a block clicked right
+    // after a Visual yank is a letter, not the echo.
+    if (mode === "insert") yankEcho.reset();
+    else if (yankEcho.swallows(e, chord)) {
+      e.preventDefault();
+      return;
+    }
 
     // Per-keystroke trace at `info` level so it shows up in the
     // default DevTools output (no need to toggle Verbose). One line
@@ -401,6 +409,7 @@ export async function installShortcuts(
         e.preventDefault();
         resetPending();
         console.info(`[shortcuts] ${mode} → ${hit.action.kind}`);
+        if (hit.action.kind === "YankRange" && isPlainChar) yankEcho.arm();
         await dispatch(hit.action, handlers);
       } else {
         // No `preventDefault` on purpose — the textarea or the OS is
@@ -455,6 +464,7 @@ export async function installShortcuts(
   return () => {
     window.removeEventListener("keydown", onKey);
     resetPending();
+    yankEcho.reset();
     liveSlashActions = null;
     liveInsertMoves = null;
   };

@@ -6,6 +6,7 @@ use outl_md::parse::{OutlineNode, ParsedPage};
 use outl_md::render::render;
 
 use crate::outline::ChildrenIndex;
+use crate::page::SLUG_KEY;
 use crate::tree::{
     group_properties_of, is_page_model_key, renderable_prop_value, PropertiesByNode,
 };
@@ -176,20 +177,61 @@ pub(crate) fn render_page_md_with(
 /// ids. Reuses the exact projection [`render_page_md`] writes to disk,
 /// so a copied block reads identically to how it lives in the `.md`.
 pub fn render_block_md(workspace: &Workspace, node: NodeId) -> String {
-    let index = crate::tree::children_index(workspace, node);
-    let (properties, children) = project_subtree(workspace, node, &index);
-    let block = OutlineNode {
-        text: workspace.block_text(node).unwrap_or_default(),
-        properties,
-        children,
-    };
-    let page = ParsedPage {
-        // A block projection is a fragment, not a file: frontmatter is a
-        // page-level fact and there is no page here to own one.
-        frontmatter: None,
-        properties: Vec::new(),
-        blocks: vec![block],
-        warnings: Vec::new(),
-    };
-    render(&page)
+    render_fragment(project_blocks(workspace, &[node]))
+}
+
+/// Render already-projected blocks as a fragment: top-level bullets, no
+/// page properties and no frontmatter fence.
+pub(crate) fn render_fragment(blocks: Vec<OutlineNode>) -> String {
+    // A block projection is a fragment, not a file: frontmatter is a
+    // page-level fact and there is no page here to own one.
+    render(&ParsedPage {
+        blocks,
+        ..Default::default()
+    })
+}
+
+/// Project each of `roots` **including the root itself** — text,
+/// properties and its whole subtree — as one top-level outline node,
+/// in the caller's order.
+///
+/// The projection [`render_block_md`] and `crate::copy_markdown` share,
+/// so `yy` and `Cmd+C` on the same block write the same bytes to the
+/// clipboard. It is [`project_subtree`] for several roots: one children
+/// map built for all of them together, one [`group_properties_of`] pass
+/// over every id the walk reached. A Visual range of N blocks is
+/// therefore one property scan, not N — and not one per block, which is
+/// what the clipboard used to pay through a per-node reader (root
+/// `CLAUDE.md` invariant 15).
+///
+/// The roots must not nest (`copy_markdown` drops a root whose ancestor
+/// is selected before calling this); a nested one would be emitted twice.
+///
+/// A root that is a **page** loses the page model's book-keeping keys
+/// from its own properties, exactly as [`render_page_md`] drops them
+/// from a page's header. Below a root nothing is filtered, for the
+/// reason [`build_outline`] gives.
+pub(crate) fn project_blocks(workspace: &Workspace, roots: &[NodeId]) -> Vec<OutlineNode> {
+    let children = crate::tree::children_index_of(workspace, roots.to_vec());
+    let skeleton: Vec<Skeleton> = roots
+        .iter()
+        .map(|&id| Skeleton {
+            id,
+            text: workspace.block_text(id).unwrap_or_default(),
+            children: walk_subtree(workspace, id, &children),
+        })
+        .collect();
+    let mut ids = Vec::with_capacity(16);
+    collect_ids(&skeleton, &mut ids);
+    ids.sort_unstable();
+
+    let mut properties = group_properties_of(workspace, &ids, renderable_prop_value);
+    for &root in roots {
+        if workspace.tree().property(root, SLUG_KEY).is_some() {
+            if let Some(own) = properties.get_mut(&root) {
+                own.retain(|(k, _)| !is_page_model_key(k));
+            }
+        }
+    }
+    build_outline(skeleton, &properties)
 }

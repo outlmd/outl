@@ -327,6 +327,50 @@ mod tests {
     }
 
     #[test]
+    fn y_y_and_y_r_both_resolve_in_normal() {
+        // `y` is a prefix for two chords. Before `y y` was in the
+        // catalog, the desktop armed `y` waiting for `y r` and threw
+        // the second `y` away, so `yy` copied nothing.
+        let yy = ChordSequence::parse("y y").expect("parse");
+        let yr = ChordSequence::parse("y r").expect("parse");
+        assert_eq!(lookup(Mode::Normal, &yy), Some(Action::YankCurrentBlock));
+        assert_eq!(lookup(Mode::Normal, &yr), Some(Action::CopyBlockRef));
+    }
+
+    #[test]
+    fn the_first_yank_current_block_row_is_y_y() {
+        // The desktop palette labels an action with its first row.
+        let first = default_bindings()
+            .into_iter()
+            .find(|b| b.action == Action::YankCurrentBlock)
+            .map(|b| b.chord);
+        assert_eq!(first, ChordSequence::parse("y y"));
+    }
+
+    #[test]
+    fn p_pastes_the_clipboard_only_in_normal() {
+        // A letter in Insert would eat typing; in Visual `p` has no
+        // meaning yet, so it must not fall through to a paste.
+        let p = ChordSequence::parse("p").expect("parse");
+        assert_eq!(lookup(Mode::Normal, &p), Some(Action::PasteClipboard));
+        assert_eq!(lookup(Mode::Insert, &p), None);
+        assert_eq!(lookup(Mode::Visual, &p), None);
+    }
+
+    #[test]
+    fn visual_cmd_and_ctrl_c_yank_the_range() {
+        // Visual `Ctrl+C` used to fall through to the Global `Quit`
+        // row and close the window on Linux / Windows. Insert and
+        // Overlay still fall through, which is not asserted here as
+        // correct: the desktop closes the window there too.
+        let cmd_c = ChordSequence::parse("Cmd+c").expect("parse");
+        let ctrl_c = ChordSequence::parse("Ctrl+c").expect("parse");
+        assert_eq!(lookup(Mode::Visual, &cmd_c), Some(Action::YankRange));
+        assert_eq!(lookup(Mode::Visual, &ctrl_c), Some(Action::YankRange));
+        assert_eq!(lookup(Mode::Global, &ctrl_c), Some(Action::Quit));
+    }
+
+    #[test]
     fn zoom_chords_match_the_desktop_adapter_output() {
         // Regression (PR #177 review): the desktop `KeyboardEvent`
         // adapter (`outl-desktop/src/lib/shortcuts.ts::modsOf`) drops

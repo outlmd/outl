@@ -115,6 +115,7 @@ It is the string the client shows when the user reaches for the action, so it is
 | `CutBlock` | ❌ Cutting a whole block isn't in the TUI yet — use `d d`, then paste. | ✅ | ⚠️ Mobile's cut duplicates the block with a fresh id instead of moving it, so any ((blk-…)) refs pointing at it go stale — copy the ref first (long-press → "Copy block ref") if something else links to it. |
 | `CopyBlock` | ❌ Copying a whole block + subtree isn't in the TUI yet — use `y y` for the block alone. | ✅ | ✅ |
 | `PasteBlock` | ❌ Block-clipboard paste isn't in the TUI yet — `p` pastes the OS clipboard. | ✅ | ✅ |
+| `PasteClipboard` | ✅ | ✅ | ⚠️ Mobile pastes at the caret, not after a selected block — tap a block, then use the system paste. |
 | `ExitInsert` | ✅ | ✅ | ✅ |
 | `CommitAndContinue` | ✅ | ✅ | ✅ |
 | `DeleteEmptyBlock` | ✅ | ✅ _native — Backspace in an empty textarea is handled by the editor itself._ | ✅ |

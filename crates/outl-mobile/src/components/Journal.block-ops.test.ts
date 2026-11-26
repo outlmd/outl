@@ -175,11 +175,27 @@ describe("clipboard", () => {
   it("keeps the clipboard armed after a paste, so it can be pasted again", async () => {
     const { state, ops } = harness();
     state.clipboard = "- copied";
-    commands.pasteBlockAfter.mockResolvedValue(pageView([block("blk-1")]));
+    commands.pasteBlockAfter.mockResolvedValue({ view: pageView([block("blk-1")]) });
 
     await ops.pasteBlock("blk-1");
 
     expect(state.clipboard).toBe("- copied");
+  });
+
+  it("pastes after the block and applies the reply's view", async () => {
+    const { state, ops } = harness();
+    state.clipboard = "- copied";
+    const view = pageView([block("blk-1"), block("blk-2")]);
+    commands.pasteBlockAfter.mockResolvedValue({ view, new_id: "blk-2" });
+
+    await ops.pasteBlock("blk-1");
+
+    expect(commands.pasteBlockAfter).toHaveBeenCalledWith(
+      "page-1",
+      { afterId: "blk-1" },
+      "- copied",
+    );
+    expect(state.applied).toEqual([view]);
   });
 
   it("arms the clipboard from a cut and leaves edit mode", async () => {

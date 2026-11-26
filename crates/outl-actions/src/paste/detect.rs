@@ -24,10 +24,25 @@
 /// splice plain text into the live edit buffer instead of going
 /// through the full paste pipeline.
 pub fn looks_like_outline(s: &str) -> bool {
-    s.lines().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed == "-" || trimmed.starts_with("- ")
-    })
+    s.lines().any(is_bullet_line)
+}
+
+/// True when the first non-blank line is a bullet, by the same test
+/// [`looks_like_outline`] applies to every line.
+///
+/// The tabular conversion asks this before it runs: tab-separated rows
+/// never open with `- `, and an outline whose blocks carry a tab (two
+/// blocks copied out of outl, say) would otherwise satisfy the "same
+/// field count on every line" gate and come back as a table.
+pub(super) fn starts_with_bullet(s: &str) -> bool {
+    s.lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(is_bullet_line)
+}
+
+fn is_bullet_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed == "-" || trimmed.starts_with("- ")
 }
 
 /// True when the payload carries a markdown table anywhere in it.

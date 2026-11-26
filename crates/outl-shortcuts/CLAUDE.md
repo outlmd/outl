@@ -96,12 +96,14 @@ A binding that only the TUI cares about still lives here (with `Mode::Normal` / 
   > `reminder_chord_tests` keeps its own pins on chords that agree; those also appear in that test's `AGREED` table.
   >
   >
-  > **And 27 chords go the other way**: bound in `input/normal.rs`, absent from this catalog entirely, so `docs/shortcuts.md`'s generated halves and the desktop help overlay cannot see them.
-  > `h`, `l`, `w`, `b`, `0`, `$`, `G`, `g g`, `y y`, `/`, `n`, `Ctrl+D`, `Ctrl+U`, `Ctrl+B`, `Ctrl+E`, `Ctrl+S`, `Ctrl+L` and the rest.
+  > **And 25 chords go the other way**: bound in `input/normal.rs`, absent from this catalog entirely, so `docs/shortcuts.md`'s generated halves and the desktop help overlay cannot see them.
+  > `h`, `l`, `w`, `b`, `0`, `$`, `G`, `g g`, `P`, `/`, `n`, `Ctrl+D`, `Ctrl+U`, `Ctrl+B`, `Ctrl+E`, `Ctrl+S`, `Ctrl+L` and the rest.
+  > `y y` and `p` left the list when the desktop needed them: they are `YankCurrentBlock` and `PasteClipboard` here now, and the TUI's own arms already did the same thing, so both sit in `AGREED`.
+  > `Shift+P` (plain paste) stayed behind.
   > `Ctrl+B` and `Ctrl+E` are the sharp pair: `docs/shortcuts.md` publishes both as TUI chords today.
   > `TUI_ONLY` in `tests/tui_only_chords.rs` declares them, and `every_tui_only_chord_is_absent_from_the_catalog` fails when one lands in `defaults.rs` — so the list cannot outlive the gap it records ([#441](https://github.com/outlmd/outl/issues/441)).
   > It caught a wrong row on its first run: `Home` is in the catalog as `OpenToday` and was already a `KNOWN_DIVERGENCES` entry, even though the TUI shares one arm between `0` and `Home`.
-  > Migrating the 27 into the catalog is [#293](https://github.com/outlmd/outl/issues/293), not this gate: each needs an `Action` variant, and `support()` is exhaustive, so every addition is also three per-client verdicts.
+  > Migrating the 25 into the catalog is [#293](https://github.com/outlmd/outl/issues/293), not this gate: each needs an `Action` variant, and `support()` is exhaustive, so every addition is also three per-client verdicts.
   > The test covers `Normal` / `Global` chords a terminal can deliver (no `META` — crossterm never emits it).
   > For `Insert` / `Visual` / `Overlay`, grep `input/` yourself; the build will not do it for you.
 - ❌ User-level overrides (rebinding `i` to `a`).
@@ -193,8 +195,12 @@ Both splits are pinned by tests (`cmd_shift_x_splits_between_insert_and_global`,
   Inside a block editor the webview's native text cut / copy / paste must win, so the catalog stays silent and the dispatcher lets the keystroke through.
   A text-editing app that swallowed `Cmd+X` would be hostile, revisiting the old "X for execute" decision.
 - `Normal` (view) mode → `CutBlock` / `CopyBlock` / `PasteBlock` — act on the whole selected block + subtree.
+  Vim `p` is a separate action, `PasteClipboard`: it always reads the system clipboard, while `Cmd+V` honours a pending cut first.
   These are **`Normal`, not `Global`**: a `Global` binding would shadow the native text cut inside a textarea (the desktop's Insert→Global dispatch fallback).
   Keep them out of `Global`.
+- `Visual` mode → `Cmd/Ctrl+C` is `YankRange`.
+  Without the Visual rows, `Ctrl+C` fell through to the `Global` `Quit` row and closed the desktop window on Linux / Windows.
+  The TUI never sees them: its event loop handles `Ctrl+C` before any mode does.
 - The desktop reaches `Normal` via its DOM-detected "nothing focused" state, so these fire in view mode **whether or not `vim_mode` is on (the dispatcher never reads it)** — they're view-mode gestures, not vim gestures.
 - Each is **dual-spelled per OS**: `Cmd+X/C/V` (META) and `Ctrl+X/C/V` (CTRL), plus the move chords, which have their own rows in `defaults/move_block.rs`.
   Both spellings are bound in `Normal` because the desktop adapter never rewrites `Cmd`↔`Ctrl`.

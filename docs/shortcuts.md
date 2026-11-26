@@ -129,8 +129,8 @@ The TUI is vim-style by definition.
 | Enter Insert at end of block (vim `A`) | `A` | `A` | none |
 | Substitute block (clear + Insert at col 0; `S` / `cc`) | `S` | `S` | none |
 | Substitute char under cursor (= `xi`) | `s` | none *(char cursor only)* | none |
-| Yank current block to register + OS clipboard (`Y`, alias of `y y`) | `Y` | `Y` | long-press → "Copy text" |
-| Paste OS clipboard **with** formatting (outline structure / multi-paragraph split) | `p` | `Cmd/Ctrl+V` | paste |
+| Copy current block + subtree to the OS clipboard as outl markdown (`Y`, alias of `y y`) | `y y` / `Y` | `y y` / `Y` / `Cmd/Ctrl+C` | long-press → "Copy text" |
+| Paste OS clipboard **with** formatting, as blocks after the selected block (outline structure / multi-paragraph split) | `p` | `p` / `Cmd/Ctrl+V` *(`Cmd/Ctrl+V` moves a pending cut first)* | paste at the caret |
 | Paste OS clipboard **without** formatting (raw text, single block) | `P` | `Cmd/Ctrl+Shift+V` | none |
 | Open `[[ref]]` / `#tag` / `((blk-…))` under cursor | `Enter` | `Enter` *(= `i`, no char cursor, follow a ref by clicking the token)* | tap |
 | New block below + Insert | `o` | `o` / `Cmd/Ctrl+Shift+Enter` | toolbar `+` |
@@ -140,7 +140,7 @@ The TUI is vim-style by definition.
 | Move block up among siblings | `K` · `Alt+↑` · `Ctrl+Shift+↑` | `Cmd/Ctrl+Shift+↑` · `Alt+↑` · `Shift+K` | long-press menu |
 | Move block down among siblings | `J` · `Alt+↓` · `Ctrl+Shift+↓` | `Cmd/Ctrl+Shift+↓` · `Alt+↓` · `Shift+J` | long-press menu |
 | Cut block + subtree (move-by-id; paste keeps `((blk-…))` refs) | none | `Cmd/Ctrl+X` | long-press → "Cut block" *(fresh id on paste, see note below)* |
-| Copy block + subtree (paste duplicates with fresh ids) | none | `Cmd/Ctrl+C` | long-press → "Copy block" |
+| Copy block + subtree (paste duplicates with fresh ids) | none | `Cmd/Ctrl+C` | long-press → "Copy text" |
 | Paste block after the selection (cut → move, copy → duplicate) | none | `Cmd/Ctrl+V` | long-press → "Paste block" |
 | Cancel a pending cut | none | `Esc` | none |
 | Delete block (chord) | `d d` | `d d` | swipe left |
@@ -165,7 +165,7 @@ The TUI is vim-style by definition.
 
 > **About `a` / `*` / `#` on the desktop.** The desktop's Normal mode has only a selected block id, no character cursor inside the block. So `a` collapses to `i` (the textarea's own caret takes over), and `*` / `#` seed the picker with the first few words of the selected block's text instead of doing a word-under-cursor search. The catalog still ships these chords so muscle memory from the TUI carries over.
 
-> **`Cmd+X` / `Cmd+C` / `Cmd+V` are mode-aware on the desktop.** Inside a block editor (Insert mode, a `<textarea>` is focused) they are the OS-native text cut / copy / paste, the chords aren't in the catalog there, so the keystroke reaches the webview untouched. In **view mode** (Normal, nothing focused) they act on the whole selected block + its subtree: cut marks it to *move by id* (the paste emits a single `Op::Move`, so `((blk-…))` refs and backlinks survive, and the target may live on another page, moving the block across pages), copy snapshots it as markdown (the paste duplicates with fresh ids). This is also why **run code block** moved off `Cmd+X` to `Cmd+Shift+X` (view mode): a text-editing app has to let the OS-wide cut win.
+> **`Cmd+X` / `Cmd+C` / `Cmd+V` are mode-aware on the desktop.** Inside a block editor (Insert mode, a `<textarea>` is focused) they are the OS-native text cut / copy / paste, the chords aren't in the catalog there, so the keystroke reaches the webview untouched. In **view mode** (Normal, nothing focused) they act on the whole selected block + its subtree: cut marks it to *move by id* (the paste emits a single `Op::Move`, so `((blk-…))` refs and backlinks survive, and the target may live on another page, moving the block across pages), copy writes it to the OS clipboard as outl markdown, which `p` or `Cmd/Ctrl+V` pastes back as new blocks with fresh ids, in outl or in any other app. This is also why **run code block** moved off `Cmd+X` to `Cmd+Shift+X` (view mode): a text-editing app has to let the OS-wide cut win.
 
 > **Mobile's "Cut block" mints a fresh id, unlike the desktop's `Cmd/Ctrl+X`.**
 > The desktop's block clipboard tags a cut with `{kind: "cut", nodeId}` and pastes it as a single `Op::Move`, so the block keeps its identity and every `((blk-…))` ref to it stays valid.
@@ -274,7 +274,7 @@ Only the toolbar's **Delete** confirms before erasing a range that contains nest
 |---|---|---|
 | Start / extend selection down | `j` / `↓` | `Shift+↓` (any mode) · `j` / `↓` (vim) |
 | Start / extend selection up | `k` / `↑` | `Shift+↑` (any mode) · `k` / `↑` (vim) |
-| Yank range | `y` | `y` |
+| Yank range (copies the range as outl markdown to the OS clipboard) | `y` | `y` / `Cmd/Ctrl+C` |
 | Delete range (toolbar **Delete** confirms if a block has children; the keys don't) | `d` / `x` | `d` / `x` · `Delete` / `Backspace` · toolbar **Delete** |
 | Indent range (vim `>`) | `Tab` / `>` | `>` · toolbar **Indent** |
 | Outdent range (vim `<`) | `Shift+Tab` / `<` | `<` · toolbar **Outdent** |
@@ -385,8 +385,7 @@ All are Normal mode unless noted.
 | `g g` / `G` | First / last block |
 | `Ctrl+D` / `Ctrl+U` | Half page down / up |
 | `PageDown` / `PageUp` | Page down / up |
-| `y y` | Yank the current block |
-| `p` / `P` | Paste the OS clipboard with / without formatting |
+| `P` | Paste the OS clipboard without formatting |
 | `/` | Open the slash menu |
 | `n` / `N` | Next / previous search hit after `*` or `#` |
 | `V` | Enter Visual mode |
@@ -430,7 +429,7 @@ They disagree on 20 chords, 6 of them destructive.
 `crates/outl-shortcuts/tests/tui_catalog_divergence.rs` pins both halves: the catalog rows through `lookup`, the TUI arms by reading `input/normal.rs`.
 Which side is right is a product decision nobody has made, so the list is pinned rather than resolved: a new divergence, or a change to a listed one, fails the test.
 
-Another 27 TUI chords are bound in `input/normal.rs` and absent from the catalog.
+Another 25 TUI chords are bound in `input/normal.rs` and absent from the catalog.
 They are the table in [Keys only the TUI has](#keys-only-the-tui-has), and `crates/outl-shortcuts/tests/tui_only_chords.rs` declares them.
 That test fails if one lands in the catalog without this page changing.
 
@@ -470,10 +469,13 @@ Written down so the next contributor inherits the decision instead of relitigati
   `createBlock({ beforeId: anchor })` → `create_before` (a floor-slot swap in core).
   Never reintroduce the old create-at-tail plus `moveBlockDown` loop.
   `Cmd/Ctrl+Shift+Enter` is caret-aware inside the editor (col 0 → *before*, past col 0 → *below*), and `stopImmediatePropagation` is what preempts the catalog's create-below binding.
-- **The block clipboard is one tagged value, and cut preserves identity.**
-  `{ kind: "cut", nodeId } | { kind: "copy", markdown }`, with the backend resolving the page via `enclosing_page_id`.
-  Cut emits a single `Op::Move` (cross-page allowed, a self-subtree target rejected); copy duplicates through `paste_block_after` with fresh ids.
-  `Y` and Visual `y` additionally write the OS clipboard via `copy_markdown`; paste-in `p` / `P` is deferred.
+- **The block clipboard is one tagged value for cut, and the OS clipboard is the only copy register.**
+  A pending cut is `{ kind: "cut", nodeId }`, with the backend resolving the page via `enclosing_page_id`, and it emits a single `Op::Move` (cross-page allowed, a self-subtree target rejected).
+  Copy has no in-app register: `y y`, `Y`, Visual `y` and `Cmd/Ctrl+C` write `copy_markdown` to the OS clipboard, and a copy disarms a pending cut.
+  `p` reads the OS clipboard through `paste_block_after` (fresh ids), and `Cmd/Ctrl+V` in Normal moves a pending cut, otherwise does exactly what `p` does.
+  After a Visual `y`, one extra `y` is swallowed so `y y` then `p` works.
+  Every OS clipboard read and write goes through `lib/os-clipboard.ts`.
+  Paste behaviour: [`paste.md`](paste.md#paste-after-the-selected-block-desktop-normal-mode).
 
 ---
 

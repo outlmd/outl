@@ -146,10 +146,15 @@ macro_rules! block_commands {
                 -> ::std::result::Result<String, String>
                 => $crate::commands::block::copy_block_markdown;
 
-            /// Paste a markdown subtree after `after_id`.
-            fn paste_block_after(page_id: String, after_id: String, text: String)
-                -> ::std::result::Result<$crate::state::PageView, String>
-                => $crate::commands::block::paste_block_after;
+            /// Paste a markdown subtree next to a selected block: under
+            /// `parent_id`, else after `after_id`, else at the page end.
+            fn paste_block_after(
+                page_id: String,
+                after_id: Option<String>,
+                parent_id: Option<String>,
+                text: String,
+            ) -> ::std::result::Result<$crate::state::PasteReply, String>
+                => $crate::commands::paste::paste_block_after;
 
             /// Delete a block and return its markdown, so the caller can
             /// hold it in a block clipboard.
@@ -170,7 +175,7 @@ macro_rules! block_commands {
                 caret: u32,
                 text: String,
             ) -> ::std::result::Result<$crate::state::PasteReply, String>
-                => $crate::commands::block::paste_markdown_at;
+                => $crate::commands::paste::paste_markdown_at;
 
             /// Paste plain text into a block at `caret`, no outline parsing.
             fn paste_plain_at(
@@ -179,7 +184,7 @@ macro_rules! block_commands {
                 caret: u32,
                 text: String,
             ) -> ::std::result::Result<$crate::state::PasteReply, String>
-                => $crate::commands::block::paste_plain_at;
+                => $crate::commands::paste::paste_plain_at;
 
             /// Render several blocks' subtrees as one markdown string.
             fn copy_markdown(block_ids: Vec<String>)

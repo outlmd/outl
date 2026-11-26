@@ -147,9 +147,8 @@ impl Tree {
     /// **`O(total properties in the workspace)` per call.** It filters
     /// the same map [`Self::iter_properties`] walks, so the cost tracks
     /// the workspace rather than how many properties `node` carries.
-    /// Right for one node, read once: the clipboard's
-    /// `text_properties_of`, a page's own properties, a template
-    /// instantiation.
+    /// Right for one node, read once: a page's own properties, a
+    /// template instantiation.
     ///
     /// **Wrong inside a walk.** Once per block is
     /// `O(blocks × properties)`, which on a 175k-node / 193k-property

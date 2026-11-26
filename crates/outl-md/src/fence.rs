@@ -26,7 +26,7 @@ use crate::parse::{leading_indent, INDENT_WIDTH};
 /// **own** character: the other one appearing in the body is content, and
 /// treating it as a closer ends the fence early and hands the rest of the
 /// body back to the outline grammar.
-pub(crate) fn fence_marker(stripped: &str) -> Option<&'static str> {
+pub fn fence_marker(stripped: &str) -> Option<&'static str> {
     const MARKERS: [&str; 2] = ["```", "~~~"];
     MARKERS.into_iter().find(|m| stripped.starts_with(m))
 }

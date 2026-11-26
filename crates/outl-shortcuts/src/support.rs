@@ -259,16 +259,7 @@ pub fn support(action: Action) -> ClientSupport {
         Action::ZoomOut => row!(Full, Full, Full),
 
         // ── workspace search from the outline ────────────────────
-        Action::SearchWordForward => row!(
-            Full,
-            Partial("The desktop seeds the quick switcher instead of jumping between hits."),
-            Partial(
-                "Mobile has no word-under-cursor to search from and no forward/backward \
-                 stepping between hits — open the page switcher's Blocks tab (issue #19) \
-                 and type the word instead."
-            )
-        ),
-        Action::SearchWordBackward => row!(
+        Action::SearchWordForward | Action::SearchWordBackward => row!(
             Full,
             Partial("The desktop seeds the quick switcher instead of jumping between hits."),
             Partial(
@@ -383,6 +374,9 @@ pub fn support(action: Action) -> ClientSupport {
             Full,
             Full
         ),
+        // The TUI's own `p` arm already pastes the OS clipboard with
+        // formatting; it keeps its own dispatch (see `tui_only_chords`).
+        Action::PasteClipboard => row!(Full, Full, Partial(why::MOBILE_PASTE_AT_CARET)),
 
         // ── insert-mode commits ──────────────────────────────────
         Action::ExitInsert => row!(Full, Full, Full),
@@ -545,7 +539,7 @@ mod tests {
                 let _ = s.get(client);
             }
         }
-        assert_eq!(Action::ALL.len(), 86, "Action::ALL changed size");
+        assert_eq!(Action::ALL.len(), 87, "Action::ALL changed size");
     }
 
     #[test]

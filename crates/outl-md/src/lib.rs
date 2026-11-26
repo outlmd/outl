@@ -49,6 +49,7 @@ pub use atomic::{read_for_rewrite, write_atomic};
 pub use block_index::{BlockEntry, BlockIndex, BlockReference, IdentifiedNode};
 pub use diff::{diff_to_ops, DiffPlan};
 pub use emoji::{is_valid_shortcode, search as search_emoji, shortcode_to_unicode, EmojiHit};
+pub use fence::fence_marker;
 pub use frontmatter::{
     frontmatter_line_count, render_frontmatter, split_frontmatter, split_frontmatter_counted,
     PAGE_FRONTMATTER_KEY,

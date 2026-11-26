@@ -49,6 +49,7 @@ pub(super) fn paste_as_children(
     apply_properties_forest(workspace, hlc, blocks, &outcomes)?;
     Ok(PasteOutcome {
         new_blocks: collect_ids(&outcomes),
+        last_root: outcomes.last().map(|o| o.id),
         host_text: None,
         host_caret: None,
         root_count: blocks.len(),
@@ -74,6 +75,8 @@ pub(super) fn paste_after(
     }
     Ok(PasteOutcome {
         new_blocks,
+        // `prev` only moves off `after` once a block exists.
+        last_root: (prev != after).then_some(prev),
         host_text: None,
         host_caret: None,
         root_count: blocks.len(),
@@ -127,6 +130,7 @@ pub(super) fn paste_at_caret(
     if !right.trim().is_empty() {
         let id = create_after(workspace, hlc, prev, Some(right.trim_start()))?;
         new_blocks.push(id);
+        prev = id;
     }
 
     // Everything that merged in sits to the left of the caret, and the
@@ -136,6 +140,8 @@ pub(super) fn paste_at_caret(
     let host_caret = host_text.chars().count();
     Ok(PasteOutcome {
         new_blocks,
+        // The host was edited, not created, so it is never the landing.
+        last_root: (prev != block).then_some(prev),
         host_text: Some(host_text),
         host_caret: Some(host_caret),
         root_count: blocks.len(),
@@ -163,39 +169,62 @@ pub(super) fn paste_plain_text(
             let host_caret = left.chars().count() + text.chars().count();
             Ok(PasteOutcome {
                 new_blocks: Vec::new(),
+                last_root: None,
                 host_text: Some(new_text),
                 host_caret: Some(host_caret),
                 root_count: 0,
             })
         }
         PasteAnchor::AfterBlock(after) => {
-            if text.is_empty() {
+            let Some(text) = new_block_text(text) else {
                 return Ok(PasteOutcome::default());
-            }
-            let id = create_after(workspace, hlc, after, Some(text))?;
-            Ok(PasteOutcome {
-                new_blocks: vec![id],
-                host_text: None,
-                host_caret: None,
-                // Plain-text path: see `PasteOutcome::root_count`. The
-                // block exists because of the anchor, not because the
-                // user pasted outline syntax — counter stays at 0 so
-                // the status reads "pasted text".
-                root_count: 0,
-            })
+            };
+            let id = create_after(workspace, hlc, after, Some(&text))?;
+            Ok(single_new_block(id))
         }
         PasteAnchor::AsLastChildOf(parent) => {
-            if text.is_empty() {
+            let Some(text) = new_block_text(text) else {
                 return Ok(PasteOutcome::default());
-            }
-            let id = create_under(workspace, hlc, parent, Some(text))?;
-            Ok(PasteOutcome {
-                new_blocks: vec![id],
-                host_text: None,
-                host_caret: None,
-                root_count: 0,
-            })
+            };
+            let id = create_under(workspace, hlc, parent, Some(&text))?;
+            Ok(single_new_block(id))
         }
+    }
+}
+
+/// The text a plain paste puts in a **new** block, or `None` when there
+/// is nothing worth a block.
+///
+/// Only the anchors that mint a block ask. A caret splice keeps the
+/// payload verbatim, because the user's own text sits on both sides of
+/// it; a new block has no neighbour to protect, and `foo\n` from a
+/// terminal used to land as the block `"foo\n"` — text the `.md` cannot
+/// hold, so the log and the file disagreed from the first projection.
+/// CRLF is folded for the same reason, and so is a trailing line holding
+/// only spaces (a terminal pads the last line it copies): the parser
+/// drops it on read-back. A payload that is only whitespace writes
+/// nothing at all.
+fn new_block_text(raw: &str) -> Option<String> {
+    let text = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// The outcome of a plain paste that created exactly one block.
+fn single_new_block(id: NodeId) -> PasteOutcome {
+    PasteOutcome {
+        new_blocks: vec![id],
+        last_root: Some(id),
+        host_text: None,
+        host_caret: None,
+        // Plain-text path: see `PasteOutcome::root_count`. The block
+        // exists because of the anchor, not because the user pasted
+        // outline syntax — counter stays at 0 so the status reads
+        // "pasted text".
+        root_count: 0,
     }
 }
 

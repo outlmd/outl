@@ -23,9 +23,8 @@ use outl_core::hlc::HlcGenerator;
 use outl_core::id::{ActorId, NodeId};
 use outl_core::workspace::Workspace;
 use outl_exec::RuntimeRegistry;
-use outl_tauri_shared::commands::block::{
-    copy_block_embed, copy_block_ref, cut_block, paste_block_after,
-};
+use outl_tauri_shared::commands::block::{copy_block_embed, copy_block_ref, cut_block};
+use outl_tauri_shared::commands::paste::paste_block_after;
 use outl_tauri_shared::host::AppHost;
 use parking_lot::Mutex;
 // `copy_block_ref` is `async` because it builds a `WorkspaceIndex` from
@@ -138,8 +137,15 @@ fn cut_block_clipboard_round_trips_through_paste_block_after() {
 
     let cut = cut_block(&host, page.to_string(), block.to_string()).expect("cut_block");
 
-    let view = paste_block_after(&host, page.to_string(), anchor.to_string(), cut.markdown)
-        .expect("paste_block_after");
+    let view = paste_block_after(
+        &host,
+        page.to_string(),
+        Some(anchor.to_string()),
+        None,
+        cut.markdown,
+    )
+    .expect("paste_block_after")
+    .view;
 
     let texts: Vec<&str> = view.outline.iter().map(|n| n.text.as_str()).collect();
     assert!(

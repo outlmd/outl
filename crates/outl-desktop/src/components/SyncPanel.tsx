@@ -54,6 +54,7 @@ import {
   onPeerPairFailed,
   onPeerPairingTicket,
 } from "../lib/events";
+import { writeOsClipboard } from "../lib/os-clipboard";
 import { setAppState } from "../lib/store";
 
 /** Pairing sub-flow state machine. */
@@ -219,7 +220,7 @@ export function SyncPanel() {
 
   async function copyTicket(ticket: string) {
     try {
-      await navigator.clipboard.writeText(ticket);
+      await writeOsClipboard(ticket);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (e) {

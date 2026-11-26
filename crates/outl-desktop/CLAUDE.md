@@ -120,7 +120,13 @@ The one rule here: **nothing about when a reminder fires is computed in the fron
   `CopyBlockRef` / `CopyBlockEmbed` therefore ship twice: as handlers in `lib/clipboard-handlers.ts`, and as rows of the bullet's right-click menu (`components/BlockContextMenu.tsx`, built by `menuActions()` in `BlockRow.tsx`).
   Both paths call the same command through the same `copyBlockHandleToClipboard`, so a row and a chord cannot drift — add an option to the array, never a second copy of the round-trip.
   The menu is the client's own chrome and its labels are not: they are mobile's, because one action with two labels reads as two actions ([`docs/desktop-ux.md`](../../docs/desktop-ux.md#right-click-a-bullet--copy-a-block-ref-or-an-embed)).
-  **Clipboard writes in this client go through `navigator.clipboard`, never `@tauri-apps/plugin-clipboard-manager`** — the capability JSON grants `clipboard-manager:allow-read-text` only, so a plugin write is denied at runtime.
+  **Every OS clipboard read and write goes through `lib/os-clipboard.ts`** (the clipboard plugin, backend `arboard`); `navigator.clipboard` is not used.
+  The web API is gated on a user gesture in WKWebView: a write after an IPC round-trip was refused and the refusal swallowed, so `yy` copied nothing.
+  The module keeps one queue for both directions, so a `p` right after `yy` waits for the yank's write, and it rejects instead of swallowing, so a caller hands the failure to `deps.setError`.
+  `capabilities/default.json` grants `allow-read-text` and `allow-write-text`; a missing one fails only at runtime, so `capabilities.test.ts` pins both.
+- **A copy goes to the OS clipboard; only a cut stays in the app.**
+  `appState.blockClipboard` holds a pending cut and nothing else, and `p` / `Cmd+V` with no cut armed paste the OS clipboard through one function, so the two chords cannot paste different things.
+  After a Visual `y`, `lib/yank-echo.ts` swallows one more plain `y` (and a held `y`'s repeats), because a vim hand types `yy` and the stray `y` would otherwise eat the `p` after it.
 - Focus mode is **not an `Action` yet**: `support.rs` and `defaults.rs` sit at their file-size baseline, so a chord waits for that split.
 - Motion, focus mode and the first-run tips come from `@outl/shared/polish`: [`docs/desktop-ux.md`](../../docs/desktop-ux.md#motion-focus-mode-first-run-tips).
 

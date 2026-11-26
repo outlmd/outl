@@ -1024,6 +1024,7 @@ This section is only the **syntax-translation table**; for how paste works as a 
 
 A balanced `^^highlight^^` is rewritten to outl's native `==highlight==`.
 Unknown `{{…}}` tokens that aren't outl-native are stripped on purpose so blocks land clean.
+Fenced code is the exception: nothing inside a ``` fence is converted, so `{{…}}`, task-list syntax and indentation in pasted code stay literal.
 A lone unbalanced `^^` has no pair to convert or strip, so it survives verbatim.
 Block properties parsed off the source (`key:: value` indented under a bullet) become `Op::SetProp` on the newly-created node so they converge across devices like every other op.
 
