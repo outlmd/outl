@@ -22,8 +22,8 @@ import WebKit
 ///
 /// **The brand fill is a launch fill, not an in-session backdrop.**
 /// Left in place it is what shows in light mode wherever the page does
-/// not cover the window (overscroll bounce, a webview shrunk by the
-/// keyboard): an almost-black strip under a white page. So once the
+/// not cover the window (overscroll bounce, a window sliver): an
+/// almost-black strip under a white page. So once the
 /// document has loaded, `settle` swaps all four surfaces to
 /// `OutlChrome.pageBackground`, a dynamic colour (white in light,
 /// `BrandColor.dark` in dark) that UIKit re-resolves on a light/dark
@@ -172,12 +172,11 @@ public final class OutlBrandChrome: NSObject {
 }
 
 
-/// The two surface colours the native chrome shares, so a client file
-/// never spells its own.
+/// The surface colour the native chrome shares, so a client file never
+/// spells its own.
 ///
-/// Both are dynamic, resolved against the trait collection of whatever
-/// draws them, which is how the capsule already follows light/dark.
-/// The numbers that need a test live in `OutlKit.ChromeBackdrop`.
+/// Dynamic, resolved against the trait collection of whatever draws it,
+/// which is how the capsule already follows light/dark.
 enum OutlChrome {
 
     /// The page behind the outline: white in light (`outl` theme `bg`),
@@ -187,14 +186,5 @@ enum OutlChrome {
         trait.userInterfaceStyle == .dark
             ? OutlBrandChrome.brandUIColor()
             : UIColor(white: 1.0, alpha: 1.0)
-    }
-
-    /// The strip behind the toolbar pill, and the suggester strip above
-    /// it: quiet keyboard chrome, so the pill floats on a coherent
-    /// surface instead of on whatever iOS hosts the accessory in.
-    static let keyboardBackdrop = UIColor { trait in
-        trait.userInterfaceStyle == .dark
-            ? UIColor(white: ChromeBackdrop.darkWhite, alpha: 1.0)
-            : UIColor(white: ChromeBackdrop.lightWhite, alpha: 1.0)
     }
 }

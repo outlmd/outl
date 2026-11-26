@@ -17,11 +17,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 ### Fixed
 
 - **iOS: no black band behind the keyboard toolbar in light mode.**
-  The toolbar pill floated over a transparent strip, and iOS hosts that strip in views that default to solid black, so a white pill sat in a black band that also showed in the keyboard's rounded top corners.
-  The strip is now filled with keyboard-matching chrome (light grey in light mode, dark grey in dark mode), the views around it are painted the same when they are clear or near black, and the suggester strip uses the same colour.
-  The window and webview also stop keeping the launch purple once the page has loaded: they follow the page background in light and dark, including after a mid-session appearance flip, so an overscroll or a gap above the keyboard no longer shows `#0c0814` in light mode.
-  The launch purple stays for the LaunchScreen handoff.
-  Both colours follow the system appearance rather than the in-app theme preset, so a light phone running a dark preset still gets the light strip ([Keyboard accessory bar](docs/mobile-ux.md#what-sits-behind-the-pill-ios)).
+  The toolbar pill was the keyboard's accessory view, which iOS hosts on solid black, so a white pill sat in a black band that also showed in the keyboard's rounded top corners.
+  The pill is now a transparent floating overlay in the app window, pinned above the keys: nothing is painted around it and touches outside the capsule go to the page.
+  The `[[` suggestion strip sits above it, the page keeps the caret clear of it, and it fades in and out with the keyboard, only while you are editing a block.
+  The window and webview also stop keeping the launch purple once the page has loaded: they follow the page background in light and dark, including after a mid-session appearance flip, so an overscroll no longer shows `#0c0814` in light mode.
+  The launch purple stays for the LaunchScreen handoff ([Keyboard accessory bar](docs/mobile-ux.md#what-sits-behind-the-pill-ios-nothing)).
 
 - **Backlink rows draw the block the way its page does, and Run and fold work from them.**
   A "Linked from" row on the desktop and mobile used its own renderer, so a `call:` fence (or any code fence) showed as one line of raw backticks, and quotes, images, properties and multi-line text were flattened.

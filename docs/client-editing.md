@@ -210,9 +210,9 @@ Zoom-out is stackless: a `← Back` header button plus a tappable ancestor bread
 ## Keyboard accessory bar (mobile)
 
 The edit toolbar docked above the soft keyboard — a Bear-style pill of `+` / indent / bold / `[[` / TODO / delete / hide-keyboard — plus the ref/emoji chip strip, exist in **two renderings**.
-iOS is native: `OutlToolbarView` supplied as the private `WKContentView`'s `inputAccessoryView` via the `OutlSwizzle` swizzle, suggester in `OutlSuggestOverlay` / `OutlSuggestView`.
+iOS is native: `OutlToolbarView` is a transparent overlay in the key window pinned to `keyboardLayoutGuide` (not an `inputAccessoryView`; `OutlSwizzle` swaps the private `WKContentView`'s accessory for a zero-height stub only to keep the system `up/down/done` bar away), suggester in `OutlSuggestOverlay` / `OutlSuggestView` above it.
 Android (and iOS later) is web: `KeyboardAccessory.tsx` renders `<SuggesterStrip />` + `<KeyboardToolbar />` in the webview, bottom-anchored at `useKeyboardInset()`, gated on `isAndroid && editingId() !== null`.
-There is no web equivalent to iOS's docked accessory view, so the native bar stays until the web one is proven on a device.
+There is no web equivalent to iOS's keyboard-pinned native overlay, so the native bar stays until the web one is proven on a device.
 
 The logic is shared, never triplicated.
 The action catalog + most-frequently-used ordering live in `@outl/shared/toolbar`, a port of `crates/outl-mobile/swift/OutlKit/Toolbar/{ToolbarAction,ToolbarMFU}.swift`.

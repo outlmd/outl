@@ -4,14 +4,23 @@ import UIKit
 import WebKit
 
 /// Replaces the `inputAccessoryView` of WebKit's private `WKContentView`
-/// with our `OutlToolbarView` via method swizzling.
+/// with an invisible zero-height stub via method swizzling, then installs
+/// the real toolbar (`OutlToolbarView`) as a floating overlay in the key
+/// window.
 ///
-/// **Why we have to swizzle:** the iOS form input accessory bar
-/// (`↑ ↓ ✓`) is supplied by `WKContentView`'s default
-/// `inputAccessoryView` getter, and there's no public API to swap it.
+/// **Why we still have to swizzle:** the iOS form input accessory bar
+/// (`up/down/done`) is supplied by `WKContentView`'s default
+/// `inputAccessoryView` getter, and there's no public API to turn it off.
 /// `WKContentView` is a private class in WebKit, so we look it up by
-/// name and replace the method's IMP at runtime with a closure that
-/// returns our toolbar singleton.
+/// name and replace the method's IMP at runtime. Returning `nil` would
+/// bring the system bar straight back, so the getter returns a stub that
+/// is zero tall and draws nothing.
+///
+/// **Why the toolbar is not what the getter returns:** an accessory is
+/// hosted in the keyboard's window on views that default to solid black,
+/// which showed around the white pill in light mode. The pill now lives
+/// in the key window (see `OutlToolbarView`) and the accessory slot is
+/// only a suppressor.
 ///
 /// **Why this lives in Swift now:** the original Obj-C version called
 /// `imp_implementationWithBlock` directly. Swift can do the same via
@@ -21,10 +30,9 @@ import WebKit
 @objc(OutlSwizzle)
 public final class OutlSwizzle: NSObject {
 
-    /// Toolbar singleton handed back to UIKit as the keyboard's
-    /// `inputAccessoryView`. One per app lifetime so the same view
-    /// instance animates with the keyboard across every focus change.
-    private static var sharedToolbar: OutlToolbarView?
+    /// The stub handed back to UIKit as the keyboard's
+    /// `inputAccessoryView`. One per app lifetime.
+    private static var accessoryStub: OutlAccessoryStub?
 
     /// Single entry point called by `OutlBootstrap.+load` in `main.mm`.
     /// Schedules all the steps that have to run after `main()`
@@ -63,14 +71,14 @@ public final class OutlSwizzle: NSObject {
         // builds — you'd get a crash the first time UIKit dispatches
         // to the swizzled IMP.
         let block: @convention(block) (AnyObject) -> UIView? = { _ in
-            if sharedToolbar == nil {
-                sharedToolbar = OutlToolbarView()
+            if accessoryStub == nil {
+                accessoryStub = OutlAccessoryStub(frame: .zero)
             }
-            return sharedToolbar
+            return accessoryStub
         }
         let imp = imp_implementationWithBlock(block)
         method_setImplementation(method, imp)
-        NSLog("[outl] installed native toolbar (with embedded suggester)")
+        NSLog("[outl] system keyboard accessory suppressed (zero-height stub)")
 
         neutralizeSmartPunctuation(on: cls)
         disableInteractiveDismiss()
@@ -142,7 +150,7 @@ public final class OutlSwizzle: NSObject {
         NSLog("[outl] disabled interactive keyboard dismiss")
     }
 
-    // MARK: - Bind WebView into toolbar + suggester overlay
+    // MARK: - Install the floating toolbar + suggester overlay
 
     private static var bindRetries = 0
 
@@ -157,14 +165,37 @@ public final class OutlSwizzle: NSObject {
             }
             return
         }
-        if sharedToolbar == nil {
-            sharedToolbar = OutlToolbarView()
-        }
-        sharedToolbar?.webView = web
+        // Order is z-order: both are subviews of the key window, so the
+        // suggester goes in after the toolbar to sit above it.
+        OutlToolbarView.install(webView: web)
         OutlSuggestOverlay.install(webView: web)
-        NSLog("[outl] bound suggester webview (overlay-driven)")
+        NSLog("[outl] bound floating toolbar + suggester overlay")
     }
 
+}
+
+/// What `WKContentView.inputAccessoryView` returns now: nothing visible.
+///
+/// The slot is not left empty because an empty slot is where WebKit puts
+/// its own `up/down/done` bar. A view with no height and no pixels
+/// occupies the slot without adding a strip to the keyboard.
+private final class OutlAccessoryStub: UIView {
+
+    override init(frame: CGRect) {
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        autoresizingMask = .flexibleWidth
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 0)
+    }
 }
 
 /// Where the app's key window comes from, for every file in this target.

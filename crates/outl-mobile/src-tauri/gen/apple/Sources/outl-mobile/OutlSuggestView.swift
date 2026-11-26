@@ -5,7 +5,7 @@ import WebKit
 /// Floating chip strip rendered when the user is typing inside `[[…]]`.
 ///
 /// Sits inside an `OutlSuggestOverlay` which positions it flush above
-/// the keyboard. Each chip carries a `slug` + `kind` payload that
+/// the floating toolbar. Each chip carries a `slug` + `kind` payload that
 /// fires `window.__outlSuggesterPicked(slug, kind)` on tap; the JS
 /// layer then synchronously rewrites the textarea so the keyboard
 /// stays up.
@@ -28,10 +28,12 @@ public final class OutlSuggestView: UIView {
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
-        // The same fill the toolbar accessory paints behind its pill
-        // (`OutlChrome.keyboardBackdrop`), so the chip strip and the
-        // toolbar read as one continuous slab above the keyboard.
-        backgroundColor = OutlChrome.keyboardBackdrop
+        // A system surface, dynamic in light and dark. This strip lives
+        // in the key window over the page, so it needs a fill of its own
+        // (a clear one would let the page's text show through the chips),
+        // but not the window's black or the launch purple: the system
+        // grouped-surface grey reads as native chrome in both modes.
+        backgroundColor = .secondarySystemBackground
 
         let topLine = UIView()
         topLine.translatesAutoresizingMaskIntoConstraints = false

@@ -37,6 +37,19 @@
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
 }
 
+/* How much of the outline's bottom edge the native keyboard toolbar covers.
+   The toolbar is a UIKit overlay above the keys, not part of the keyboard,
+   so the viewport shrinks to the keys alone and the pill sits on the page.
+   `OutlToolbarView` writes this inline on <html> while the pill is up
+   (`ToolbarLayout.showClearanceScript`, in OutlKit, owns the number) and
+   removes it when the keyboard goes, which falls back to the `0px` here.
+   Android has no native pill and never sets it. Read only by `scroll-padding`
+   below: the outline's own `pb-32` already leaves the tail room, so adding
+   padding too would double the gap. */
+:root {
+  --outl-toolbar-clearance: 0px;
+}
+
 @keyframes outl-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -331,6 +344,12 @@ input {
 .ios-scroll {
   -webkit-overflow-scrolling: touch;
   overflow-y: auto;
+}
+
+/* Keep the caret and a scrolled-to block above the floating toolbar:
+   scrollIntoView and WebKit's own caret reveal both honour this. */
+main.ios-scroll {
+  scroll-padding-bottom: var(--outl-toolbar-clearance);
 }
 
 /*
