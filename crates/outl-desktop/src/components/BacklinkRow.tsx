@@ -4,16 +4,17 @@ import { backlinkEditTargetFor } from "@outl/shared/backlink-edit";
 import {
   CrumbTrail,
   crumbTrailText,
-  EmbeddedSubtree,
-  MarkdownInline,
-  MarkdownTable,
+  isBlockQuoted,
+  QuoteWrap,
 } from "@outl/shared/markdown";
-import { embedOnlyHandle } from "@outl/shared/outline";
 import type { Backlink, BlockNode } from "@outl/shared/api/types";
 
 import { backlinkRowByKey, startBacklinkEdit } from "../lib/cursor-region";
 import { appState } from "../lib/store";
 import { BacklinkRowEditor } from "./BacklinkRowEditor";
+import type { BodyCallbacks } from "./block-callbacks";
+import { BlockBody } from "./BlockBody";
+import { FoldChevron } from "./FoldChevron";
 
 /** What one click on a backlink's bullet does next. The toggle walks
  *  the cycle a step at a time, so the label names the *next* stop,
@@ -35,6 +36,13 @@ interface RowProps {
   cursor: () => string | null;
   showCrumbs: boolean;
   onToggle: (link: Backlink, node: BlockNode) => void;
+  /** The chevron's click: fold or unfold `node` **on its own page**, so
+   *  the fold syncs. `collapse` is the state asked for, never a toggle. */
+  onFold: (link: Backlink, node: BlockNode, collapse: boolean) => void;
+  /** What a click inside the rendered block does — run a fence, follow
+   *  a ref. Built per citing link, because a Run is addressed to the
+   *  page the block lives on, not to the page on screen. */
+  bodyCallbacks: (link: Backlink) => BodyCallbacks;
 }
 
 /**
@@ -57,10 +65,6 @@ function RowBody(props: RowProps) {
         const node = () => r().node;
         const todo = () => (r().depth === 0 ? link().todo : node().todo);
         const selected = () => props.cursor() === props.rowKey;
-        const embedded = () => {
-          const handle = embedOnlyHandle(node().tokens);
-          return handle ? appState.embeds[handle] : undefined;
-        };
         // `null` for an orphan: the row stays read-only.
         const editTarget = () => backlinkEditTargetFor(link(), node());
         const editing = () => {
@@ -69,41 +73,51 @@ function RowBody(props: RowProps) {
             ? editTarget()
             : null;
         };
+        const startEdit = () => {
+          const target = editTarget();
+          if (target) startBacklinkEdit(target, props.rowKey);
+        };
+        // **The outline's own renderer**, not a copy of it: fences (and
+        // their Run), tables, quotes, prose with line breaks, images,
+        // properties and both embed expansions are drawn by the same
+        // `<BlockBody />` the page uses. `BacklinkRow.parity.test.ts`
+        // fails if a second renderer comes back.
+        //
+        // Keyed on the node's **text**, not on the node object.
+        // `<BlockBody />` decides its shape once, at mount, so a body
+        // whose text changed (a Run, a peer edit) has to remount. But a
+        // refetch replaces every node, and keying on identity remounted
+        // every row on every refetch: each image re-read its asset over
+        // IPC and blinked through its loading chip, each `call:` fence
+        // asked `listTemplates` again. The shape is a function of the
+        // text (tokens and table are parsed from it), and everything
+        // else the body reads (properties, embeds) goes through the
+        // live `node()` getter. A click edits in place, on the page the
+        // block lives on; the source page stays on the group header.
+        // No `onMouseEnter`: a pointer crossing the section is not a
+        // cursor move.
         const rowText = () => (
-          <button
-            type="button"
-            // Editing in place, rather than opening the source page,
-            // which stays on the group header. No `onMouseEnter`: a
-            // pointer crossing the section is not a cursor move.
-            onClick={() => {
-              const target = editTarget();
-              if (target) startBacklinkEdit(target, props.rowKey);
-            }}
-            class={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-sm leading-snug opacity-90 hover:bg-(--color-outl-fg)/5 hover:opacity-100 ${
+          <QuoteWrap
+            quoted={isBlockQuoted(node().text)}
+            baseClass={`flex min-w-0 flex-1 rounded px-1 py-0.5 text-sm leading-snug hover:bg-(--color-outl-fg)/5 ${
               todo() === "DONE" ? "line-through opacity-60" : ""
             }`}
+            chromeClass="rounded-r-md border-l-2 border-(--color-outl-fg-dimmer)/50 bg-(--color-outl-fg-dimmer)/[0.06] pl-2"
           >
-            <Show
-              when={node().table}
-              fallback={
-                <MarkdownInline
-                  tokens={node().tokens}
-                  variant="inline"
-                  embeds={appState.embeds}
-                  pageEmbeds={appState.pageEmbeds}
-                />
-              }
-            >
-              {/* Inert table: the row's own click is the edit gesture,
-                  and a table has no cell editor by design (#329). */}
-              <MarkdownTable
-                  table={node().table!}
-                  variant="inline"
-                  embeds={appState.embeds}
-                  pageEmbeds={appState.pageEmbeds}
-                />
-            </Show>
-          </button>
+            <div data-backlink-body class="min-w-0 flex-1">
+              {/* The parameter is load-bearing: `<Show keyed>` only
+                  remounts a child function that declares one. */}
+              <Show when={`${node().id}\u0000${node().text}`} keyed>
+                {(_shape) => (
+                  <BlockBody
+                    block={node()}
+                    cb={props.bodyCallbacks(link())}
+                    onStartEdit={startEdit}
+                  />
+                )}
+              </Show>
+            </div>
+          </QuoteWrap>
         );
         return (
           <div
@@ -124,7 +138,22 @@ function RowBody(props: RowProps) {
                 <CrumbTrail crumbs={link().ancestors} />
               </div>
             </Show>
-            <div class="flex items-start">
+            {/* `group/blrow` scopes the chevron's reveal to this row. */}
+            <div class="group/blrow flex items-start">
+              {/* The outline's chevron. Hidden at rest and shown on hover,
+                  focus or the cursor, the reveal `.outl-row-chrome` gives
+                  an outline row; spelled as `group/blrow` utilities because
+                  that class also carries focus mode's dimming. Inert on an
+                  orphan: there is no page to write the fold to. */}
+              <FoldChevron
+                childCount={node().children.length}
+                collapsed={node().collapsed}
+                enabled={editTarget() !== null}
+                onToggle={(collapse) => props.onFold(link(), node(), collapse)}
+                class={`mt-[3px] transition-opacity group-hover/blrow:opacity-100 group-focus-within/blrow:opacity-100 ${
+                  selected() ? "opacity-100" : "opacity-0"
+                }`}
+              />
               <button
                 type="button"
                 data-todo={todo() ?? "none"}
@@ -157,16 +186,6 @@ function RowBody(props: RowProps) {
                 )}
               </Show>
             </div>
-            {/* A block that is only `!((blk-…))` expands its source,
-                like the outline's `BlockBody`. Read through an
-                accessor: the resolve lands after the row is mounted. */}
-            <Show when={embedded()?.children?.length}>
-              <EmbeddedSubtree
-                nodes={embedded()!.children}
-                embeds={appState.embeds}
-                pageEmbeds={appState.pageEmbeds}
-              />
-            </Show>
           </div>
         );
       }}
@@ -179,10 +198,11 @@ function RowBody(props: RowProps) {
  *
  * **One `<li>` per citing block**, however deep its subtree: the
  * descendants are `div`s inside it, so the count of `li`s is still the
- * count of references the header states. Always expanded — the source
- * page's `collapsed` flag is not read, which is the embed's behaviour
- * too. The rail is a plain border token, not the accent: the accent
- * means "the cursor is here".
+ * count of references the header states. `childKeys` comes from
+ * `flattenBacklinkRows`, which stops under a `collapsed` node, so a fold
+ * made here or on the source page hides the same rows. The rail is a
+ * plain border token, not the accent: the accent means "the cursor is
+ * here".
  */
 export function BacklinkRowItem(
   props: RowProps & { childKeys: readonly string[] },
@@ -204,6 +224,8 @@ export function BacklinkRowItem(
                 cursor={props.cursor}
                 showCrumbs={false}
                 onToggle={props.onToggle}
+                onFold={props.onFold}
+                bodyCallbacks={props.bodyCallbacks}
               />
             </div>
           );

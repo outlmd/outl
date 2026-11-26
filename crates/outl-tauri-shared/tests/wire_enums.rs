@@ -124,6 +124,8 @@ fn backlink_row_op_matches_its_union() {
         O::Outdent => O::Outdent,
         O::MoveUp => O::MoveUp,
         O::MoveDown => O::MoveDown,
+        O::Collapse => O::Collapse,
+        O::Expand => O::Expand,
     );
     assert_string_enum(&variants, "BacklinkRowOp");
 }

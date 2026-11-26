@@ -67,6 +67,8 @@ const EVERY_OP: &[BacklinkRowOp] = &[
     BacklinkRowOp::Outdent,
     BacklinkRowOp::MoveUp,
     BacklinkRowOp::MoveDown,
+    BacklinkRowOp::Collapse,
+    BacklinkRowOp::Expand,
 ];
 
 const EVERY_SIDE: &[BacklinkSide] = &[BacklinkSide::Below, BacklinkSide::Above];
@@ -479,6 +481,9 @@ fn a_structural_chord_on_a_page_ahead_of_its_log_still_lands_its_op() {
         (BacklinkRowOp::MoveUp, true, true),
         (BacklinkRowOp::Outdent, true, false),
         (BacklinkRowOp::MoveDown, true, false),
+        // `Op::SetCollapsed` names a node too, and always lands its op.
+        (BacklinkRowOp::Collapse, false, true),
+        (BacklinkRowOp::Expand, false, true),
     ];
     for (op, aim_at_tail, lands_an_op) in cases {
         let (tmp, host, page, cited, _doomed) = host_with_a_trashed_block();

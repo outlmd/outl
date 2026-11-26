@@ -165,9 +165,10 @@ function mount(links: Backlink[]): HTMLElement {
   return host;
 }
 
-/** The row's own text target — the one carrying the edit gesture. */
+/** The row's own text target — the one carrying the edit gesture: the
+ *  prose of the outline's `<BlockBody />`, which the row renders. */
 function row(host: HTMLElement): HTMLElement {
-  const found = Array.from(host.querySelectorAll("button")).find((b) =>
+  const found = Array.from(host.querySelectorAll<HTMLElement>("[data-backlink-body] .cursor-text")).find((b) =>
     b.textContent?.includes("cites this page"),
   );
   if (!found) throw new Error("backlink row did not render");

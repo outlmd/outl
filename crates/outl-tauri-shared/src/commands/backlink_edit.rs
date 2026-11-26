@@ -8,8 +8,8 @@
 //! therefore be *tolerant* of a stale id, and nothing here may be.
 //! Keeping them in one file is how a later reader "unifies" the two.
 //!
-//! **Ten gestures, one answer to a stale id.** A text edit is
-//! [`edit_backlink_block`]; the other nine are [`backlink_row_op`] and
+//! **Twelve gestures, one answer to a stale id.** A text edit is
+//! [`edit_backlink_block`]; the other eleven are [`backlink_row_op`] and
 //! [`create_backlink_sibling`], and all three take the verdict from
 //! `stale_row_block` so the sentence cannot differ per gesture. Nine
 //! `block.rs` commands each growing a backlink-aware arm was the
@@ -26,15 +26,17 @@ use outl_actions::refusal::{
     ahead_of_log_notice, stale_backlink_block_refusal, stale_backlink_block_unchanged_refusal,
 };
 use outl_actions::{
-    create_after, create_before, delete, edit_text, enclosing_page_id, indent, is_live, mark_done,
-    move_down, move_up, outdent, toggle_todo, ActionError, CrossPageWrite,
+    create_after, create_before, edit_text, enclosing_page_id, is_live, ActionError,
 };
 use outl_core::id::NodeId;
 use outl_core::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 
-use crate::commit::{finish_in_page_with_refresh, BacklinkRefresh};
-use crate::helpers::{parse_node_id, reproject_stale_md, with_ws};
+mod row_op;
+pub use row_op::BacklinkRowOp;
+
+use crate::commit::{announce_after_commit, finish_in_page_with_refresh, BacklinkRefresh};
+use crate::helpers::{build_page_view, parse_node_id, reproject_stale_md, with_ws, with_ws_mut};
 use crate::host::AppHost;
 use crate::state::{CreateBlockReply, PageView};
 use crate::surface::SURFACE;
@@ -127,90 +129,6 @@ pub fn edit_backlink_block<S: AppHost>(
     .map_err(|e| gone.map_or(e, str::to_string))
 }
 
-/// Which cross-page mutation a backlink row is asking for.
-///
-/// An exhaustive `match` in [`backlink_row_op`] is behind it, so a tenth
-/// gesture on a backlink row cannot compile without saying what it does
-/// — and therefore cannot ship printing a raw [`ActionError`] the way
-/// these eight did.
-///
-/// A create is **not** here. It replies with a new block's id
-/// ([`create_backlink_sibling`]), and an `Option<String>` that is
-/// meaningless for seven of nine variants is a claim the type keeps
-/// making.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BacklinkRowOp {
-    /// Cycle the citing block's TODO / DOING / DONE marker (`Ctrl+T`).
-    ToggleTodo,
-    /// Set it DONE outright (`g D`).
-    MarkDone,
-    /// Move it to the trash root (`dd`).
-    Delete,
-    /// Make it the last child of its previous sibling (`Tab`).
-    Indent,
-    /// Move it up one level (`Shift+Tab`).
-    Outdent,
-    /// Swap it with its previous sibling (`Alt+↑`).
-    MoveUp,
-    /// Swap it with its next sibling (`Alt+↓`).
-    MoveDown,
-}
-
-impl BacklinkRowOp {
-    /// Which [`CrossPageWrite`] shape this op is — the mapping, and
-    /// nothing more.
-    ///
-    /// The **answer** (whether a shape's op is computed from the logged
-    /// text, and so is the one the ahead-of-log gate refuses) belongs to
-    /// `outl-actions`, because the TUI gates on it too. It used to be a
-    /// second `computed_from_the_logged_text` here, under the same name,
-    /// over these seven ops — and a drift between the two copies meant
-    /// one client refusing an operation the other performed, which costs
-    /// user text.
-    ///
-    /// Why each arm, since the mapping is the half that can still be
-    /// wrong:
-    ///
-    /// - `ToggleTodo` / `MarkDone` are **not** structural. `toggle_todo`
-    ///   reads `workspace.block_text`, runs `cycle_todo` on it and
-    ///   writes the result back as an `Op::Edit`; `mark_done` does the
-    ///   same through `set_todo` + `edit_text`. Both therefore compute
-    ///   an op from the **logged** text while the row the user tapped
-    ///   rendered the text on **disk**. On a frozen page the commit's
-    ///   projection is withheld (invariant 8), the frontend refetches
-    ///   `pageBacklinks` from disk, and the row comes back unchanged:
-    ///   the tap looks like it did nothing while the task state walks
-    ///   `TODO → DOING → DONE` in the log, and
-    ///   `outl reconcile --ahead-of-log` later drops all of it.
-    /// - The other five are `Op::Move`s naming a node. They read no
-    ///   text, so a stale local `.md` cannot change what they do, and
-    ///   they converge through the op log whatever that file says — the
-    ///   frozen `.md` is the pre-existing condition rather than
-    ///   something the gesture caused (root `CLAUDE.md` invariant 11).
-    ///   What they still lack is a *notice*, which is the open item
-    ///   recorded in
-    ///   [`docs/client-backlinks.md`](https://github.com/outlmd/outl/blob/main/docs/client-backlinks.md),
-    ///   not a reason to withhold their op.
-    ///
-    /// `CrossPageWrite::TypedText` has no arm here on purpose: a text
-    /// edit is [`edit_backlink_block`], not a row op, and these clients
-    /// seed its draft from the `.md` rather than from the log — so it is
-    /// not that shape and asks unconditionally. That variant's own doc
-    /// owns the asymmetry.
-    ///
-    /// Exhaustive on purpose: an eighth variant cannot compile without
-    /// declaring its shape.
-    fn shape(self) -> CrossPageWrite {
-        match self {
-            Self::ToggleTodo | Self::MarkDone => CrossPageWrite::MarkerFromLoggedText,
-            Self::Delete | Self::Indent | Self::Outdent | Self::MoveUp | Self::MoveDown => {
-                CrossPageWrite::Structural
-            }
-        }
-    }
-}
-
 /// Which side of the citing block a new sibling lands on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -238,10 +156,10 @@ pub enum BacklinkSide {
 /// `"block 01J… is not in the tree"`, while the TUI printed *"That
 /// block was deleted, so nothing changed."* for the same keystroke.
 ///
-/// **Two of the seven also refuse a source page ahead of its log,
+/// **Two of the nine also refuse a source page ahead of its log,
 /// before anything is written**, and which two is
 /// `BacklinkRowOp::shape`'s mapping put to
-/// [`CrossPageWrite::computed_from_the_logged_text`] rather than a
+/// [`CrossPageWrite::computed_from_the_logged_text`](outl_actions::CrossPageWrite::computed_from_the_logged_text) rather than a
 /// classification of "structural". `ToggleTodo` and `MarkDone` are text
 /// read-modify-write: they compute an op from the logged text while the
 /// row the user tapped was rendered from the `.md`. The check and the
@@ -250,7 +168,7 @@ pub enum BacklinkSide {
 /// pay a `render_page_md` for the undo snapshot of a mutation that will
 /// not happen.
 ///
-/// Nothing is typed on any of these seven, so a refusal costs the user
+/// Nothing is typed on any of these nine, so a refusal costs the user
 /// nothing to weigh against it — which is why
 /// `outl_actions::refusal::stale_backlink_block_unchanged_refusal` is
 /// the half `stale_row_block` returns.
@@ -287,6 +205,11 @@ pub enum BacklinkSide {
 /// `tests/backlink_commit_cost.rs`, whose `POLICY` census is what stops
 /// the three commands being "unified" onto one policy — no behavioural
 /// test can fail on that, because both policies leave the same `.md`.
+///
+/// `Collapse` / `Expand` take neither policy: they skip the commit
+/// pipeline the way the outline's `set_block_collapsed` does
+/// (`BacklinkRowOp::reprojects`), so `fold_row` writes one
+/// `Op::SetCollapsed`, announces it, and touches no file.
 pub fn backlink_row_op<S: AppHost>(
     state: &S,
     page_id: String,
@@ -309,6 +232,9 @@ pub fn backlink_row_op<S: AppHost>(
             return Err(ahead_of_log_notice(SURFACE, info.lines, &info.sample).one_line());
         }
     }
+    if !op.reprojects() {
+        return fold_row(state, page, node, op);
+    }
     // Worded inside the commit closure for `edit_backlink_block`'s
     // reason: the workspace is in hand, so the verdict describes the
     // state the gesture actually landed on.
@@ -318,24 +244,34 @@ pub fn backlink_row_op<S: AppHost>(
             refused = Some(words);
             return Err(ActionError::NotInTree(node.to_string()));
         }
-        match op {
-            BacklinkRowOp::ToggleTodo => toggle_todo(ws, state.hlc(), node),
-            BacklinkRowOp::MarkDone => mark_done(ws, state.hlc(), node),
-            BacklinkRowOp::Delete => delete(ws, state.hlc(), node),
-            BacklinkRowOp::Indent => match indent(ws, state.hlc(), node) {
-                Err(ActionError::NoPreviousSibling(_)) => Ok(()),
-                other => other,
-            },
-            BacklinkRowOp::Outdent => match outdent(ws, state.hlc(), node) {
-                Err(ActionError::AlreadyAtRoot(_)) => Ok(()),
-                other => other,
-            },
-            BacklinkRowOp::MoveUp => move_up(ws, state.hlc(), node),
-            BacklinkRowOp::MoveDown => move_down(ws, state.hlc(), node),
-        }
+        op.write(ws, state.hlc(), node)
     })
     .map(|((), view)| view)
     .map_err(|e| refused.map_or(e, str::to_string))
+}
+
+/// A fold from a backlink row: the outline's `set_block_collapsed`
+/// shape, aimed at the source page and behind the same in-lock liveness
+/// verdict every other row op asks.
+///
+/// No commit pipeline, so no undo snapshot, no projection and no index
+/// refresh — see [`BacklinkRowOp::reprojects`]. The announce is the one
+/// step it still owes, because `Op::SetCollapsed` has to converge.
+fn fold_row<S: AppHost>(
+    state: &S,
+    page: NodeId,
+    node: NodeId,
+    op: BacklinkRowOp,
+) -> Result<PageView, String> {
+    let root = state.storage_root()?;
+    with_ws_mut(state, |ws| {
+        if let Some(words) = stale_row_block(ws, page, node) {
+            return Err(words.to_string());
+        }
+        op.write(ws, state.hlc(), node).map_err(|e| e.to_string())?;
+        announce_after_commit(state, ws, page);
+        build_page_view(ws, &root, page).map_err(|e| e.to_string())
+    })
 }
 
 /// Create an empty sibling beside the block a backlink row shows, on
@@ -494,52 +430,5 @@ fn refuse_a_dead_row<S: AppHost>(
     })? {
         Some(words) => Err(words.to_string()),
         None => Ok(()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{BacklinkRowOp, CrossPageWrite};
-
-    /// **This client's half of the shared criterion: the mapping.**
-    ///
-    /// The shapes and the verdict are `outl-actions`' (and
-    /// `backlinks_write`'s
-    /// `every_shape_verdict_matches_what_the_action_behind_it_reads` is
-    /// what keeps the verdict honest against the actions both clients
-    /// call). What can still go wrong here is an op mapped onto the
-    /// wrong shape, which is the only way these clients and the TUI can
-    /// now disagree about an operation — so the table is the mapping,
-    /// with the verdict it produces beside it.
-    ///
-    /// `tests/backlink_row_ops.rs` asserts the same split on the op log
-    /// and the `.md` for all seven. This is the cheap, direct net at the
-    /// mapping site; that one is the behavioural one.
-    #[test]
-    fn each_row_op_declares_the_shape_of_the_write_it_performs() {
-        for (op, shape, gated) in [
-            (
-                BacklinkRowOp::ToggleTodo,
-                CrossPageWrite::MarkerFromLoggedText,
-                true,
-            ),
-            (
-                BacklinkRowOp::MarkDone,
-                CrossPageWrite::MarkerFromLoggedText,
-                true,
-            ),
-            (BacklinkRowOp::Delete, CrossPageWrite::Structural, false),
-            (BacklinkRowOp::Indent, CrossPageWrite::Structural, false),
-            (BacklinkRowOp::Outdent, CrossPageWrite::Structural, false),
-            (BacklinkRowOp::MoveUp, CrossPageWrite::Structural, false),
-            (BacklinkRowOp::MoveDown, CrossPageWrite::Structural, false),
-        ] {
-            assert_eq!(op.shape(), shape, "{op:?} is mapped wrong");
-            assert_eq!(
-                op.shape().computed_from_the_logged_text(),
-                gated,
-                "{op:?}: the gate would change for this op",
-            );
-        }
     }
 }

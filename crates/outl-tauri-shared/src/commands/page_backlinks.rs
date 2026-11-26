@@ -11,7 +11,7 @@
 //! derived from the page list phase 1 already read — see
 //! [`finish_lookup`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,6 +22,7 @@ use outl_actions::{
 use outl_core::workspace::Workspace;
 use parking_lot::Mutex;
 
+use crate::helpers::parse_node_id;
 use crate::offload;
 use crate::state::{BacklinksReply, ERR_LOADING};
 
@@ -212,6 +213,8 @@ struct Looked {
     /// Parallel to `split.direct`. The deep copy into the reply is
     /// [`shape_reply`]'s, after the locks drop.
     subtrees: Vec<Option<Arc<[OutlineNode]>>>,
+    /// Ids of the shipped nodes the op log has folded. See [`collapsed_ids`].
+    collapsed: HashSet<String>,
 }
 
 /// The phase-3 lookup. `for_page_split` returns shallow leaves, and
@@ -219,12 +222,68 @@ struct Looked {
 /// hit — together `O(refs)` with no subtree copied under the lock.
 fn look_up(idx: &BacklinkIndex, ws: &Workspace, meta: &PageMeta) -> Looked {
     let split = idx.for_page_split(ws, meta);
-    let subtrees = split
+    let subtrees: Vec<_> = split
         .direct
         .iter()
         .map(|b| idx.subtree(&b.block_id))
         .collect();
-    Looked { split, subtrees }
+    let collapsed = collapsed_ids(ws, &split.direct, &subtrees);
+    Looked {
+        split,
+        subtrees,
+        collapsed,
+    }
+}
+
+/// Which of the direct hits and their stored subtrees are folded.
+///
+/// **The index cannot answer this, and must not try.** It is built from
+/// the `.md`, and `Op::SetCollapsed` lives only in the op log: the fold
+/// was moved out of the sidecar because a per-file write lost flips under
+/// iCloud's last-write-wins (root `CLAUDE.md` invariant 7). So every
+/// `collapsed` the index holds is `false`, and a fold made from a
+/// backlink row never came back on the refetch. The page's own outline
+/// has the same split and the same answer
+/// (`read_page_outline_with_workspace` overlays the tree).
+///
+/// Read under the lookup's lock because the tree is the only place the
+/// flag is. The cost is one `HashSet` probe per shipped node, bounded by
+/// what the lookup already returns, and no node is copied here.
+fn collapsed_ids(
+    ws: &Workspace,
+    direct: &[outl_actions::Backlink],
+    subtrees: &[Option<Arc<[OutlineNode]>>],
+) -> HashSet<String> {
+    fn visit(ws: &Workspace, nodes: &[OutlineNode], out: &mut HashSet<String>) {
+        for node in nodes {
+            note_if_folded(ws, &node.id, out);
+            visit(ws, &node.children, out);
+        }
+    }
+    let mut out = HashSet::new();
+    for b in direct {
+        note_if_folded(ws, &b.block_id, &mut out);
+    }
+    for kids in subtrees.iter().flatten() {
+        visit(ws, kids, &mut out);
+    }
+    out
+}
+
+/// A transient id (a block the sidecar does not cover) parses, but the
+/// tree has never seen it, so it reads as expanded, the outline's rule.
+fn note_if_folded(ws: &Workspace, id: &str, out: &mut HashSet<String>) {
+    if parse_node_id(id).is_ok_and(|n| ws.tree().is_collapsed(n)) {
+        out.insert(id.to_string());
+    }
+}
+
+/// Write the folded flags back onto a node and its shipped subtree.
+fn mark_collapsed(node: &mut OutlineNode, collapsed: &HashSet<String>) {
+    node.collapsed = collapsed.contains(&node.id);
+    for child in &mut node.children {
+        mark_collapsed(child, collapsed);
+    }
 }
 
 /// Shape a [`Looked`] into the reply, **holding no lock**.
@@ -247,7 +306,11 @@ fn shape_reply(
     metas: &[PageMeta],
     backlinks_order: outl_config::BacklinksOrder,
 ) -> BacklinksReply {
-    let Looked { split, subtrees } = looked;
+    let Looked {
+        split,
+        subtrees,
+        collapsed,
+    } = looked;
     // Keyed by block id because the sort below moves the hits: the budget
     // is spent in the order the user sees, not the order the index walked.
     let mut subtrees: HashMap<String, Arc<[OutlineNode]>> = split
@@ -264,6 +327,12 @@ fn shape_reply(
         .map(|b| match subtrees.remove(&b.block_id) {
             Some(kids) if budget.admit(node_count(&kids)) => b.with_children(&kids),
             _ => b,
+        })
+        .map(|mut b| {
+            if !collapsed.is_empty() {
+                mark_collapsed(&mut b.source_block, &collapsed);
+            }
+            b
         })
         .collect();
 

@@ -11,15 +11,10 @@ import {
   deleteBlock,
   editBlock,
   importAssetFile,
-  openAsset,
-  openExternalUrl,
-  openPageBySlug,
-  openRef,
   pasteMarkdown,
   pastePlain,
   pluginRun,
   pluginSyncHooks,
-  runAutoRunBlocks,
   runCodeBlock,
   setBlockCollapsed,
   splitBlock,
@@ -27,10 +22,7 @@ import {
   setBlockProperty,
 } from "@outl/shared/api/commands";
 
-import type { PageView } from "@outl/shared/api/types";
-
 import { PageAheadOfLogBanner, ParseWarningsBanner } from "@outl/shared/warnings";
-import { isAssetLink } from "@outl/shared/links";
 import {
   findBlock,
   rawTextWithTodo,
@@ -55,8 +47,14 @@ import {
 import { BlockRow, type BlockCallbacks } from "./BlockRow";
 import { installBacklinksEffect } from "../lib/backlinks-effect";
 import { copyBlockHandleToClipboard } from "../lib/clipboard-handlers";
-import { installPageChangeEffect, resetForNavigation } from "../lib/page-change";
-import { applyPageState } from "../lib/page-view";
+import {
+  applyView,
+  handleLinkClick,
+  handleOpenPage,
+  handleRefClick,
+  handleTagClick,
+} from "../lib/outline-navigation";
+import { installPageChangeEffect } from "../lib/page-change";
 import { createCaretNavOps } from "./outline-caret-nav";
 import { createPasteOps } from "./outline-paste";
 import { createStructureOps } from "./outline-structure";
@@ -123,21 +121,9 @@ export function OutlineView() {
   // (`AppShell::refreshActivePage`) since it keeps the key.
   installBacklinksEffect();
 
-  /**
-   * Fold a reply into the page's state — `applyPageState`
-   * (`lib/page-view.ts`) owns which fields that is and why the
-   * ahead-of-log notice is sticky — then auto-run the page's query
-   * blocks. The transclusion resolve rides the outline effect above,
-   * so it is not repeated here.
-   */
-  function applyView(view: PageView) {
-    applyPageState(view);
-    void runAutoRunBlocks(view.page.id)
-      .then((reply) => {
-        if (reply.ran > 0) applyPageState(reply.view);
-      })
-      .catch(() => {});
-  }
+  // `applyView` and the ref / tag / link / template-page handlers live
+  // in `lib/outline-navigation.ts`, shared with the backlink rows, so a
+  // click inside a block navigates the same way wherever it is drawn.
 
   /**
    * Memoised Visual-range membership set. Built once per
@@ -233,31 +219,6 @@ export function OutlineView() {
     setSelectedBlockId: (id) => setAppState("selectedBlockId", id),
     setEditingId,
   });
-
-  async function handleRefClick(target: string) {
-    const view = await handleError(openRef(target));
-    if (!view) return;
-    // A navigation, even when the ref points back at the open page —
-    // so the zoom goes, the same way `Cmd+J` drops it.
-    resetForNavigation();
-    applyView(view);
-  }
-
-  function handleTagClick(tag: string) {
-    void handleRefClick(tag);
-  }
-
-  function handleLinkClick(href: string) {
-    // A `[label](assets/…)` link opens the uploaded file in the OS
-    // default app (`open_asset`); everything else is an external
-    // `[label](url)` opened in the system browser (scheme-guarded to
-    // http(s)/mailto). Errors land on the status line instead of
-    // throwing into the click handler.
-    const opening = isAssetLink(href) ? openAsset(href) : openExternalUrl(href);
-    void opening.catch((e) => {
-      setAppState("lastError", e instanceof Error ? e.message : String(e));
-    });
-  }
 
   const cb: BlockCallbacks = {
     onStartEdit: (id) => {
@@ -388,10 +349,7 @@ export function OutlineView() {
     onRefClick: handleRefClick,
     onTagClick: handleTagClick,
     onLinkClick: handleLinkClick,
-    onOpenPage: async (slug) => {
-      const view = await handleError(openPageBySlug(slug));
-      if (view) applyView(view);
-    },
+    onOpenPage: handleOpenPage,
     // The bullet's right-click menu. Same round-trip the `CopyBlockRef`
     // / `CopyBlockEmbed` chords take, down to the clipboard write, so a
     // menu row and a chord cannot drift; only the error sink differs,

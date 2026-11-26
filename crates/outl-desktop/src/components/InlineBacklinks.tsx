@@ -1,8 +1,10 @@
 import { For, Show, createEffect, createMemo } from "solid-js";
 
 import {
+  type BacklinkRowOp,
   backlinkRowOp,
   openRef,
+  runCodeBlock,
   setBacklinksOrder,
 } from "@outl/shared/api/commands";
 import { backlinkCommitPlan } from "@outl/shared/backlink-edit";
@@ -10,12 +12,23 @@ import { lateSectionVisible, sameCrumbTrail } from "@outl/shared/outline";
 import type { Backlink, BlockNode, PageKind } from "@outl/shared/api/types";
 import { PageGlyph } from "@outl/shared/icons";
 
-import { backlinkCursor, backlinkRows } from "../lib/cursor-region";
+import {
+  backlinkCursor,
+  backlinkRowByKey,
+  backlinkRows,
+} from "../lib/cursor-region";
+import {
+  handleLinkClick,
+  handleOpenPage,
+  handleRefClick,
+  handleTagClick,
+} from "../lib/outline-navigation";
 import { resetForNavigation } from "../lib/page-change";
 import { applyPageState, resolveBacklinkTransclusions } from "../lib/page-view";
 import { trackBacklinks } from "../lib/backlinks-fetch";
 import { appState, setAppState } from "../lib/store";
 import { BacklinkRowItem } from "./BacklinkRow";
+import type { BodyCallbacks } from "./block-callbacks";
 
 interface Group {
   key: string;
@@ -120,8 +133,17 @@ export function InlineBacklinks() {
    * command refuses in `outl_actions::refusal`'s words. A click on the
    * bullet of a row a peer has trashed is the commonest way to reach
    * that refusal, because it needs no keyboard.
+   *
+   * The chevron's fold takes the same path with `"collapse"` /
+   * `"expand"`: the mouse twin of `ToggleCollapsed` on a row, written to
+   * the source page so the fold syncs, and refetched because a folded
+   * citing block hides its rows here (`flattenBacklinkRows`).
    */
-  async function toggleBacklinkTodo(link: Backlink, node: BlockNode) {
+  async function backlinkRowCommit(
+    link: Backlink,
+    node: BlockNode,
+    op: BacklinkRowOp,
+  ) {
     const sourcePage = link.source_page;
     const currentSlug = appState.page?.slug;
     if (!sourcePage || !currentSlug) return;
@@ -130,11 +152,7 @@ export function InlineBacklinks() {
       openPageId: appState.page?.id,
     });
     try {
-      const view = await backlinkRowOp(
-        sourcePage.id,
-        node.id,
-        "toggle-todo",
-      );
+      const view = await backlinkRowOp(sourcePage.id, node.id, op);
       if (plan.applyView) applyPageState(view);
       // The mutation lands on the *source* page, so nothing on this page
       // re-renders on its own — and the backlinks effect is keyed on the
@@ -144,9 +162,94 @@ export function InlineBacklinks() {
       if (plan.refetchBacklinks) {
         await trackBacklinks();
       }
+      if (op === "collapse") keepCursorOnFold(node.id);
     } catch (e) {
       setAppState("lastError", e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /**
+   * A chevron fold can hide the row the keyboard cursor is on: the
+   * cursor sits on a descendant (`a>a1`), the click folds `a`, and the
+   * refetch drops `a>a1` from the drawn rows. Left there, the key names
+   * nothing — the highlight vanishes, `j` stays put on `-1`, `k` leaves
+   * for the outline and every row chord answers "row gone". So the
+   * cursor moves up to the row that was folded, the outline's rule for
+   * a selection under a fold.
+   *
+   * A key is the path of ids down to the block, so the folded row is
+   * the cursor key's prefix ending at `foldedId`, in whichever drawn copy
+   * the cursor was in. Only a hidden cursor moves: one the fold did not
+   * touch stays where it is.
+   */
+  function keepCursorOnFold(foldedId: string) {
+    const key = backlinkCursor();
+    if (key === null || backlinkRowByKey(key)) return;
+    const path = key.split(">");
+    const at = path.indexOf(foldedId);
+    if (at < 0 || at === path.length - 1) return;
+    const folded = path.slice(0, at + 1).join(">");
+    if (backlinkRowByKey(folded)) {
+      setAppState("selectedBacklinkBlockId", folded);
+    }
+  }
+
+  /**
+   * A fence's Run, from a backlink row.
+   *
+   * **Addressed to the source page**, the one the block lives on: the
+   * outline's handler runs against the open page, and the block is not
+   * on it. The reply follows `backlinkCommitPlan`, the rule the bullet
+   * above follows — install it only when the source page *is* the open
+   * one (a self-citing page), and always refetch, because the result
+   * children land under a citing block and change this page's own
+   * backlinks.
+   *
+   * An orphan row has no page to run on, so it says so rather than
+   * guessing one.
+   */
+  async function runBacklinkCodeBlock(link: Backlink, blockId: string) {
+    const sourcePage = link.source_page;
+    if (!sourcePage) {
+      setAppState(
+        "lastError",
+        "This block has no page, so it can't run from here",
+      );
+      return;
+    }
+    const plan = backlinkCommitPlan({
+      sourcePageId: sourcePage.id,
+      openPageId: appState.page?.id,
+    });
+    try {
+      const reply = await runCodeBlock(sourcePage.id, blockId);
+      if (plan.applyView) applyPageState(reply.view);
+      if (reply.error) {
+        setAppState("lastError", `${reply.language}: ${reply.error}`);
+      }
+      if (plan.refetchBacklinks) await trackBacklinks();
+    } catch (e) {
+      setAppState("lastError", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /**
+   * What a click inside a backlink row's rendered block does.
+   *
+   * The navigation handlers are the outline's own
+   * (`lib/outline-navigation.ts`): they only navigate, so a cross-page
+   * row can take them unchanged. **No `onSetProperty`, by decision**:
+   * properties are read-only in a row, and `<BlockBody />` draws them
+   * inert without it. Changing one means editing the block's text.
+   */
+  function backlinkBodyCallbacks(link: Backlink): BodyCallbacks {
+    return {
+      onRunCodeBlock: (id) => runBacklinkCodeBlock(link, id),
+      onOpenPage: (slug) => void handleOpenPage(slug),
+      onRefClick: (target) => void handleRefClick(target),
+      onTagClick: handleTagClick,
+      onLinkClick: handleLinkClick,
+    };
   }
 
   /** Flip newest ⇄ oldest, persist it, and swap in the re-sorted view
@@ -355,7 +458,10 @@ export function InlineBacklinks() {
                         </span>
                       </button>
 
-                      <ul class="mt-1 space-y-1 pl-6">
+                      {/* `pl-2`, not `pl-6`: each row now opens with the
+                          16px fold-chevron slot, so the bullets sit where
+                          they always did. */}
+                      <ul class="mt-1 space-y-1 pl-2">
                         <For each={g().rootKeys}>
                           {(key) => (
                             <BacklinkRowItem
@@ -363,7 +469,17 @@ export function InlineBacklinks() {
                               cursor={cursor}
                               showCrumbs={layout().crumbs.has(key)}
                               childKeys={layout().childKeys.get(key) ?? []}
-                              onToggle={(l, n) => void toggleBacklinkTodo(l, n)}
+                              onToggle={(l, n) =>
+                                void backlinkRowCommit(l, n, "toggle-todo")
+                              }
+                              onFold={(l, n, collapse) =>
+                                void backlinkRowCommit(
+                                  l,
+                                  n,
+                                  collapse ? "collapse" : "expand",
+                                )
+                              }
+                              bodyCallbacks={backlinkBodyCallbacks}
                             />
                           )}
                         </For>

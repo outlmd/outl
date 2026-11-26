@@ -103,11 +103,17 @@ export interface BacklinkRow {
  * id one of mine" guards and for rendering, so the three cannot disagree
  * about which rows exist. `O(rows)`; callers memoize it per fetch rather
  * than per render (invariant 15).
+ *
+ * A `collapsed` node keeps its own row and hides its children, the
+ * outline's rule. The flag is the source page's (`Op::SetCollapsed`,
+ * read back by `page_backlinks`), so a fold made here or there shows the
+ * same on both, and a hidden row cannot be reached by `j`/`k` either.
  */
 export function flattenBacklinkRows(links: readonly Backlink[]): BacklinkRow[] {
   const rows: BacklinkRow[] = [];
   const walk = (link: Backlink, node: BlockNode, depth: number, key: string) => {
     rows.push({ key, link, node, depth });
+    if (node.collapsed) return;
     for (const child of node.children) {
       walk(link, child, depth + 1, `${key}>${child.id}`);
     }

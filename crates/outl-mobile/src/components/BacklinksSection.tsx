@@ -13,15 +13,17 @@ import {
 import {
   CrumbTrail,
   type EmbedMap,
-  MarkdownInline,
-  MarkdownTable,
   type PageEmbedMap,
+  QuoteWrap,
+  isBlockQuoted,
 } from "@outl/shared/markdown";
 import { rawTextWithTodo, sameCrumbTrail } from "@outl/shared/outline";
 import { PageGlyph } from "@outl/shared/icons";
 import { createLongPress } from "../lib/long-press";
 import { BacklinkRowEditor } from "./BacklinkRowEditor";
 import { BlockContextMenu } from "./BlockContextMenu";
+import { CollapseTriangle } from "./BlockMarkers";
+import { BlockReadBody } from "./BlockReadBody";
 import { BlockDeleteConfirm } from "./JournalDeleteDialogs";
 import { createEmbedResolver } from "./Journal.embeds";
 import {
@@ -58,6 +60,15 @@ interface BacklinksSectionProps {
    * the same id cannot succeed, so this is a message, never a Retry.
    */
   onError: (message: string) => void;
+  /**
+   * A tap on a `[[ref]]`, a `#tag` or a link inside a row's block. The
+   * outline's own handlers: they only navigate, so a row addressed to
+   * another page can take them unchanged. Omit one and that token is
+   * inert: its tap is the row's, which opens the editor.
+   */
+  onRefClick?: (target: string) => void;
+  onTagClick?: (tag: string) => void;
+  onLinkClick?: (href: string) => void;
 }
 
 /**
@@ -250,6 +261,9 @@ export function BacklinksSection(props: BacklinksSectionProps): JSX.Element {
                               pageEmbeds={embedResolver.pageEmbeds()}
                               bordered={idx() > 0 && row.depth === 0}
                               crumbs={row.depth === 0 && showCrumbs}
+                              onRefClick={props.onRefClick}
+                              onTagClick={props.onTagClick}
+                              onLinkClick={props.onLinkClick}
                             />
                           )}
                         </For>
@@ -324,6 +338,9 @@ function BacklinkRowView(props: {
   pageEmbeds: PageEmbedMap;
   bordered: boolean;
   crumbs: boolean;
+  onRefClick?: (target: string) => void;
+  onTagClick?: (tag: string) => void;
+  onLinkClick?: (href: string) => void;
 }): JSX.Element {
   // Touch has no right-click, so the hold is how this row reaches the
   // structural ops — mobile has no chord surface at all.
@@ -341,6 +358,7 @@ function BacklinkRowView(props: {
     props.row.depth === 0 ? props.row.link.todo : props.row.node.todo;
   const editable = () =>
     backlinkEditTargetFor(props.row.link, props.row.node) !== null;
+  let rowEl: HTMLDivElement | undefined;
   return (
     <div
       class="px-4 py-3"
@@ -369,6 +387,13 @@ function BacklinkRowView(props: {
         </p>
       </Show>
       <div class="flex items-start gap-2">
+        {/* The outline row's own triangle, slot reserved on a leaf so the
+            column holds. Hidden on an orphan: no page to fold it on. */}
+        <CollapseTriangle
+          visible={props.row.node.children.length > 0 && editable()}
+          collapsed={props.row.node.collapsed}
+          onToggle={() => void props.ops.toggleRowCollapsed(props.row)}
+        />
         <Show when={todo() !== null}>
           <BacklinkCheckbox
             todo={todo()}
@@ -384,11 +409,21 @@ function BacklinkRowView(props: {
         <Show
           when={editing()}
           fallback={
-            <button
-              type="button"
+            // A `div`, not a `<button>`: the block inside is drawn by the
+            // outline's own `<BlockReadBody>`, and a fence, a diagram or a
+            // ref is interactive content a button may not contain.
+            <div
+              ref={rowEl}
+              role="button"
+              tabindex="0"
               data-backlink-row={props.row.node.id}
               data-backlink-key={props.row.key}
-              onPointerDown={press.onPointerDown}
+              onPointerDown={(e) => {
+                // A hold that starts on a ref or a link is that token's
+                // gesture, the rule the outline's `BlockBody` keeps.
+                if (pressedChild(e, rowEl)) return;
+                press.onPointerDown(e);
+              }}
               onPointerMove={press.onPointerMove}
               onPointerUp={press.onPointerUp}
               onPointerCancel={press.onPointerUp}
@@ -396,35 +431,48 @@ function BacklinkRowView(props: {
                 // A completed hold produces a click too; without this
                 // every long press would also drop into Insert.
                 if (press.consumedClick()) return;
+                // A tap a child handled never gets here: a ref, a tag, a
+                // link and a diagram's link all `stopPropagation` when
+                // their handler is set. So a tap on a ref navigates and
+                // does not also open the editor.
                 props.ops.openEditor(props.row);
               }}
               // `-my-3 py-3` gives the tap the row's full height back
               // without moving the text the padding positions; the
               // floor keeps a one-line child at 44pt.
-              class="-my-3 min-h-11 flex-1 py-3 text-left active:opacity-60"
+              class="-my-3 min-h-11 min-w-0 flex-1 py-3 text-left active:opacity-60"
             >
-              <p
-                class="text-[15px] leading-snug"
-                classList={{
-                  "text-(--color-outl-fg-dimmer) line-through":
-                    todo() === "DONE",
-                }}
+              <QuoteWrap
+                quoted={isBlockQuoted(props.row.node.text)}
+                baseClass="flex min-w-0 flex-1"
+                chromeClass="rounded-r-md border-l-2 border-(--color-outl-fg-dim)/40 bg-(--color-outl-fg-dim)/[0.05] pl-2"
               >
-                <Show
-                  when={props.row.node.table}
-                  fallback={
-                    <MarkdownInline
-                      tokens={props.row.node.tokens}
-                      variant="inline"
-                      embeds={props.embeds}
-                      pageEmbeds={props.pageEmbeds}
-                    />
-                  }
+                <div
+                  class="min-w-0 flex-1"
+                  classList={{
+                    "text-(--color-outl-fg-dimmer) line-through":
+                      todo() === "DONE",
+                  }}
                 >
-                  <MarkdownTable table={props.row.node.table!} />
-                </Show>
-              </p>
-            </button>
+                  {/* **The outline's own renderer**, not a copy of it:
+                      fences, tables, quotes, line breaks, images, the
+                      property line and page embeds come out as they do
+                      on the block's own page.
+                      `BacklinksSection.parity.test.ts` fails if a second
+                      renderer comes back. No `onOpenProperties`: the
+                      sheet edits the open page's blocks, so the line is
+                      inert here. */}
+                  <BlockReadBody
+                    block={props.row.node}
+                    onRefClick={props.onRefClick}
+                    onTagClick={props.onTagClick}
+                    onLinkClick={props.onLinkClick}
+                    embeds={props.embeds}
+                    pageEmbeds={props.pageEmbeds}
+                  />
+                </div>
+              </QuoteWrap>
+            </div>
           }
         >
           <BacklinkRowEditor
@@ -435,6 +483,21 @@ function BacklinkRowView(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * Did this press start on a control inside the row's block, rather than
+ * on the row itself? The row is `role="button"` too, so it is excluded
+ * by identity: `closest` would otherwise always answer yes.
+ *
+ * `code` is deliberately **not** in the list, unlike the outline's
+ * `BlockBody`: a block that is only a fence is all `<code>`, and the
+ * hold is this row's only way to its structural ops.
+ */
+function pressedChild(e: Event, row: HTMLElement | undefined): boolean {
+  const target = e.target as HTMLElement | null;
+  const hit = target?.closest("a,button,[role='button'],textarea,input");
+  return !!hit && hit !== row;
 }
 
 /**

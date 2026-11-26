@@ -106,20 +106,35 @@ describe("applyPageState", () => {
  */
 describe("one owner for a page view's state", () => {
   function source(file: string): string {
-    return readFileSync(join(import.meta.dirname, "..", "components", file), "utf8");
+    return readFileSync(join(import.meta.dirname, "..", file), "utf8");
   }
 
-  it.each(["AppShell.tsx", "OutlineView.tsx"])(
+  // `OutlineView.tsx`'s `applyView` moved to `lib/outline-navigation.ts`,
+  // shared with the backlink rows, so that file is the writer it reaches.
+  it.each(["components/AppShell.tsx", "lib/outline-navigation.ts"])(
     "%s applies a page view through applyPageState",
     (file) => {
-      const src = source(file);
-      expect(src).toContain("applyPageState(");
-      // A second writer of any of these is the bug coming back.
-      expect(src).not.toMatch(/\bpageProperties:/);
-      expect(src).not.toMatch(/\bparseWarnings:/);
-      expect(src).not.toMatch(/\bmdAheadOfLog:/);
+      expect(source(file)).toContain("applyPageState(");
     },
   );
+
+  it("OutlineView.tsx applies its replies through the shared applyView", () => {
+    expect(source("components/OutlineView.tsx")).toMatch(
+      /import \{[^}]*\bapplyView\b[^}]*\} from "\.\.\/lib\/outline-navigation"/,
+    );
+  });
+
+  it.each([
+    "components/AppShell.tsx",
+    "components/OutlineView.tsx",
+    "lib/outline-navigation.ts",
+  ])("%s writes none of a page view's fields itself", (file) => {
+    const src = source(file);
+    // A second writer of any of these is the bug coming back.
+    expect(src).not.toMatch(/\bpageProperties:/);
+    expect(src).not.toMatch(/\bparseWarnings:/);
+    expect(src).not.toMatch(/\bmdAheadOfLog:/);
+  });
 });
 
 describe("embed maps", () => {

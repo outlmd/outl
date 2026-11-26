@@ -202,6 +202,12 @@ A page with no references never draws anything, so there is no placeholder to ta
 A **refetch** is the opposite case and keeps everything it has, marked `loading…` beside the count — that is the one moment the mark is owed, because the rows are up and about to change.
 `lateSectionVisible` (`@outl/shared/outline`) owns that rule, the measurement behind it and what each case costs.
 
+A backlink row is drawn by the outline's own `<BlockBody>`, so code fences (a `call:x` fence included, with its chip linking to the template page), tables, quotes, images, multi-line text and `![[page]]` expansion look as they do on the block's page, and clicks on a `[[ref]]`, `#tag` or link navigate.
+The **Run** button works from the row: it runs on the source page, the open page does not switch, and the `> **result:**` children appear under the row.
+Property chips are read-only in a row; edit the block's text to change one.
+A row with children shows the outline's fold chevron, and it (or the outline's fold chord on the focused row) folds the **source** block, so the fold syncs and shows on its own page.
+Contract: [`client-backlinks.md` → A row is drawn by the outline's renderer](client-backlinks.md#a-row-is-drawn-by-the-outlines-renderer).
+
 A backlink row carries its own `▢` / `▣` / `•` indicator ahead of the text.
 Clicking the indicator toggles the **source** block's TODO without leaving the page.
 They are two buttons in one flex row, so the gestures cannot collide.
@@ -383,7 +389,7 @@ Template contract: [`client-editing.md` → Structural templates](client-editing
 ## Opening an external `[label](url)` link
 
 `<MarkdownInline />` renders external links clickable through an `onLinkClick(href)` prop, and `OutlineView` wires it to `openExternalUrl`.
-Failures land on the status line; ref and tag clicks still navigate; a backlink row edits in place, and only an orphan row stays inert.
+Failures land on the status line; ref and tag clicks still navigate; a backlink row edits in place and its refs and links navigate too, and only an orphan row stays inert.
 
 An `assets/…` link routes to `openAsset` instead (via `isAssetLink`, `@outl/shared/links`), which opens it in the OS default app.
 Two import paths share the backend `commands::asset`.

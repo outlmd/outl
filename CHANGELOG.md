@@ -7,6 +7,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Backlink rows draw the block the way its page does, and Run and fold work from them.**
+  A "Linked from" row on the desktop and mobile used its own renderer, so a `call:` fence (or any code fence) showed as one line of raw backticks, and quotes, images, properties and multi-line text were flattened.
+  Rows now render through the outline's own body, and refs, tags and links inside them navigate.
+  Run on a code block in a row executes on the source page and the result children show up under the row.
+  The chevron on a row folds the cited block on its own page, so the fold syncs ([Backlinks](docs/client-backlinks.md#a-row-is-drawn-by-the-outlines-renderer)).
+  Property chips stay read-only in a row, and the TUI panel still has no Run or fold.
+
 - **Nightly TestFlight builds ship again.**
   From Nov 21 every 05:00 UTC Mobile run failed in its `gate` before building anything (`failed to determine base repo`: the job has no checkout, and `gh` needed `GH_REPO` to find the repo).
   `testflight.yml` also ignored scheduled Mobile runs, so a nightly IPA would not have uploaded either.

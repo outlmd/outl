@@ -26,7 +26,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const BODY = readFileSync(join(import.meta.dirname, "BlockBody.tsx"), "utf8");
+// The block's read branch, extracted from `BlockBody.tsx` so the
+// backlink rows render it too.
+const BODY = readFileSync(join(import.meta.dirname, "BlockReadBody.tsx"), "utf8");
 const JOURNAL = readFileSync(join(import.meta.dirname, "Journal.tsx"), "utf8");
 const STYLES = readFileSync(
   join(import.meta.dirname, "..", "styles.css"),
@@ -59,7 +61,7 @@ describe("the block's attribute line", () => {
     // land on the container and *work*, which is worse than failing:
     // it puts a second owner on the one fact the component exists to
     // hold, and the two drift at the next design pass.
-    const call = propertiesCall(BODY, "BlockBody");
+    const call = propertiesCall(BODY, "BlockReadBody");
     expect(call).not.toMatch(/text-\[\d/);
   });
 
@@ -67,7 +69,7 @@ describe("the block's attribute line", () => {
     // Editing left the outline: a field is edited in the properties
     // sheet, which is a form. `onCommit` coming back here would mean
     // the pills came back with it.
-    const call = propertiesCall(BODY, "BlockBody");
+    const call = propertiesCall(BODY, "BlockReadBody");
     expect(call).toContain("onOpen");
     expect(call).not.toContain("onCommit");
   });

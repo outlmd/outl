@@ -102,6 +102,44 @@ That list is capped and answers a different question, so it is a different surfa
 **The CLI and MCP stay shallow too.**
 `outl backlinks` and `outl_backlinks` build their index from the `Workspace`, and filling children there is exactly the #179 freeze, so their `source_block.children` is empty by design (pinned by `outl-actions/tests/backlinks_subtree_index.rs`).
 
+## A row is drawn by the outline's renderer
+
+A backlink row draws its block with the **same component the page uses**: `<BlockBody>` on the desktop, `<BlockReadBody>` on mobile (the read-mode branch `BlockBody` itself renders), `emit_block_lines` on the TUI.
+So a `call:` fence, any other code fence, a table, a quote, multi-line prose, images, property chips and `![[page]]` expansion look in a row exactly as they do on the block's own page.
+Before, each GUI client had a second renderer for rows that only knew "table, else inline text", so a fence showed as one line of raw backticks and a ref did nothing when clicked.
+
+**The rule: a row never gets its own renderer.**
+What a row cannot do is a callback it is not handed (`BodyCallbacks` on the desktop), never a second draw path.
+The source-read tests `BacklinkRow.parity.test.ts` (desktop) and `BacklinksSection.parity.test.ts` (mobile) fail if the row file stops importing the shared body, or starts importing `MarkdownInline`, `MarkdownTable` or `EmbeddedSubtree` itself.
+
+| What | TUI | Desktop | Mobile |
+|---|---|---|---|
+| Edit the block | `i` / `Enter` | click the row, or `i` / `Enter` | tap the row |
+| Task state | Normal-mode chord | the indicator, or `Cmd+T` / `g D` | the checkbox |
+| Run a code block | not available in the panel | the Run button in the row, runs on the **source** page and refreshes the rows | the Run button in the row, same |
+| `[[ref]]`, `#tag`, `[label](url)` | no click target | click navigates | tap navigates |
+| `call:` chip | not clickable | opens the template page | opens the template page |
+| Properties | shown | shown, **read-only** | shown, **read-only** |
+| Collapse | not available: fold state is not drawn in the panel | chevron, or the outline's fold chord on the focused row | disclosure control on the row |
+
+Three decisions sit behind the table:
+
+- **Property chips are read-only in a row.**
+  Changing one would write to a page you are not looking at, through a path that is not the audited text edit.
+  To change a property, edit the block's text in the row.
+  `BlockBody` draws the inert shared `<BlockProperties>` whenever `onSetProperty` is absent, because an editor whose commit goes nowhere is a chip that looks edited and is not.
+- **Run executes on the source page.**
+  The reply is applied to the open view only when the source page *is* the open page, then the backlinks are always refetched, because `run_code_block` reindexes the source page and the `> **result:**` children appear under the row.
+  A run from a row never switches the page you are on.
+- **A fold from a row writes to the source page.**
+  The chevron sends `collapse` or `expand` (`BacklinkRowOp`), never a toggle: a toggle aimed at a stale view flips the wrong way, and two devices toggling cancel each other.
+  It lands as `Op::SetCollapsed` on the cited block, so the fold syncs and the block is folded on its own page too.
+  A collapsed citing block shows its own row and hides its children (`flattenBacklinkRows` stops there, so rendering, `j` / `k` and the "is this row mine" guard agree on both clients).
+  Like the other id-naming ops it is not refused on a frozen source page; a dead row (the block left that page) is refused with the stale-row wording, and an orphan row has no page to fold on, so it shows no chevron.
+
+The TUI's panel draws fold state as nothing (`FoldMarker::None`) and has no Run gesture, so its column is a gap in the table above.
+It is not yet declared in `outl_shortcuts::capability_support`.
+
 ## Backlinks order (issue #142)
 
 Every client sorts the "Linked from" list the same way: `outl_actions::sort_backlinks` groups backlinks by source page (each page's blocks stay contiguous, in document order) and orders the pages by how recently each was referenced.

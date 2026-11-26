@@ -164,3 +164,24 @@ export type EditorCallbacks = Pick<
   | "onRunPluginCommand"
 > &
   Partial<Pick<BlockCallbacks, "onPasteMarkdown" | "onPastePlain">>;
+
+/**
+ * The subset of {@link BlockCallbacks} that `<BlockBody />` asks for —
+ * what a block in **read mode** can do: run its fence, follow a ref, a
+ * tag, a link or a `call:` template page.
+ *
+ * Same reasoning as {@link EditorCallbacks}: `<BlockBody />` is mounted
+ * by an outline row and by a backlink row, and the backlink row
+ * addresses another page, so it answers only these. `BlockCallbacks`
+ * satisfies it, so `<BlockRow />` passes its own unchanged.
+ *
+ * `onSetProperty` is **optional on purpose**, and its absence is a
+ * verdict, not a gap: without it `<BlockBody />` draws the property
+ * line read-only instead of mounting an editor whose commit would go
+ * nowhere — a chip that looks edited and isn't.
+ */
+export type BodyCallbacks = Pick<
+  BlockCallbacks,
+  "onRunCodeBlock" | "onOpenPage" | "onRefClick" | "onTagClick" | "onLinkClick"
+> &
+  Partial<Pick<BlockCallbacks, "onSetProperty">>;

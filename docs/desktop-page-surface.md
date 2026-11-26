@@ -137,6 +137,9 @@ Never refresh it by re-opening via `openRef`: `PageView.backlinks` is always emp
 
 ### A backlink row is a place you can work
 
+A row is **drawn** by `<BlockBody>`, handed `BodyCallbacks` (`components/block-callbacks.ts`): run, open page, ref, tag, link, and `onSetProperty` left out on purpose, which makes the property line read-only.
+`BacklinkRow.parity.test.ts` fails if the row grows a renderer of its own; the rule is in [`client-backlinks.md`](client-backlinks.md#a-row-is-drawn-by-the-outlines-renderer).
+
 Every gesture that acts on an outline block acts on a backlink row too — the text edit, task state, `g D`, delete, indent, outdent, both moves, and create below / above — each addressed to the citing block's **own** page.
 User-facing behaviour is [`docs/desktop-ux.md`](desktop-ux.md#backlinks-and-nested-pages-below-the-outline).
 The cross-client contract is [`docs/client-backlinks.md` → Editing a backlink where it is cited](client-backlinks.md#editing-a-backlink-where-it-is-cited).

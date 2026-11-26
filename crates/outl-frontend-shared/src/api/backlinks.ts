@@ -94,7 +94,11 @@ export type BacklinkRowOp =
   | "indent"
   | "outdent"
   | "move-up"
-  | "move-down";
+  | "move-down"
+  // Explicit, never a toggle: a toggle aimed at a stale view flips the
+  // wrong way. Writes `Op::SetCollapsed` on the **source** page.
+  | "collapse"
+  | "expand";
 
 /** Which side of the citing block a new sibling lands on. */
 export type BacklinkSide = "below" | "above";

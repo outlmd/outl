@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use outl_actions::{
     page_meta as page_meta_action, read_page_outline_with_workspace,
-    run_code_block as action_run_code_block, ExecOutputDto, RunCodeBlockOutcome,
+    run_code_block as action_run_code_block, BacklinkIndex, ExecOutputDto, RunCodeBlockOutcome,
 };
 use outl_core::hlc::HlcGenerator;
 use outl_core::id::NodeId;
@@ -43,6 +43,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tracing::warn;
 
+use crate::commit::discard_slot;
 use crate::helpers::{build_page_view, parse_node_id};
 use crate::host::AppHost;
 use crate::offload;
@@ -80,6 +81,9 @@ struct ExecHost {
     root: PathBuf,
     hlc: HlcGenerator,
     registry: Arc<RuntimeRegistry>,
+    /// The host's cached backlink index, so a run refreshes it inside its
+    /// own workspace lock rather than taking that lock a second time.
+    backlinks: Option<Arc<Mutex<Option<BacklinkIndex>>>>,
 }
 
 impl ExecHost {
@@ -89,7 +93,37 @@ impl ExecHost {
             root: state.storage_root()?,
             hlc: state.hlc().clone(),
             registry: state.exec_registry(),
+            backlinks: state.backlink_index(),
         })
+    }
+
+    /// Patch (`patched == true`) or drop the backlink index for a page a
+    /// run just wrote to: `BacklinkRefresh::PatchPage`'s rule, taken by
+    /// hand because a run does not go through the commit pipeline.
+    ///
+    /// Called with the run's own workspace guard still held, which is the
+    /// order every commit takes (workspace → index), so it serializes with
+    /// `page_backlinks`' rebuild. Taking the lock again after the run
+    /// instead parked the reply behind whatever grabbed it in between,
+    /// another fence's whole execution included, on an async worker.
+    ///
+    /// The patch half is `commit::reindex_backlink_page` with the slot in
+    /// hand instead of the host, because this runs on the blocking pool
+    /// where only owned handles reach.
+    fn refresh_backlinks(&self, ws: &Workspace, page: NodeId, patched: bool) {
+        let Some(slot) = &self.backlinks else {
+            return;
+        };
+        if !patched {
+            discard_slot(slot);
+            return;
+        }
+        let Some(meta) = page_meta_action(ws, page) else {
+            return;
+        };
+        if let Some(index) = slot.lock().as_mut() {
+            index.reindex_page_from_disk(&meta, &self.root);
+        }
     }
 
     /// The page as the client renders it, read under a brief lock.
@@ -111,27 +145,46 @@ pub async fn run_code_block<S: AppHost>(
 
     offload::run("run_code_block", move || {
         offload::locked_mut(&host.workspace, |ws| {
-            let RunCodeBlockOutcome {
-                language,
-                result_ok,
-                error,
-            } = action_run_code_block(ws, &host.hlc, &host.root, &host.registry, page, block)
-                .map_err(|e| e.to_string())?;
-
-            if let Some(msg) = error.as_ref() {
-                warn!("run_code_block runtime error: {msg}");
-            }
-
-            let view = build_page_view(ws, &host.root, page).map_err(|e| e.to_string())?;
-            Ok(RunCodeBlockReply {
-                language,
-                result_ok,
-                error,
-                view,
-            })
+            let reply = run_and_view(&host, ws, page, block);
+            // An `Ok` means the result subblock is on disk
+            // (`run_block_at_index` writes the `.md` itself, a `call:`
+            // fence projects inline), so the page is patched from that
+            // file; anything else may have applied ops without the
+            // projection, so the index is dropped. Without this a Run from
+            // a backlink row refetched the cached index and the
+            // `> **result:**` children never appeared.
+            host.refresh_backlinks(ws, page, reply.is_ok());
+            reply
         })
     })
     .await
+}
+
+/// The run itself and the view it hands back, under the caller's lock.
+fn run_and_view(
+    host: &ExecHost,
+    ws: &mut Workspace,
+    page: NodeId,
+    block: NodeId,
+) -> Result<RunCodeBlockReply, String> {
+    let RunCodeBlockOutcome {
+        language,
+        result_ok,
+        error,
+    } = action_run_code_block(ws, &host.hlc, &host.root, &host.registry, page, block)
+        .map_err(|e| e.to_string())?;
+
+    if let Some(msg) = error.as_ref() {
+        warn!("run_code_block runtime error: {msg}");
+    }
+
+    let view = build_page_view(ws, &host.root, page).map_err(|e| e.to_string())?;
+    Ok(RunCodeBlockReply {
+        language,
+        result_ok,
+        error,
+        view,
+    })
 }
 
 /// Wire reply for `run_auto_run_blocks`.
@@ -202,10 +255,8 @@ fn auto_run_on_page(host: &ExecHost, page: NodeId, page_id: &str) -> Result<Auto
         .any(|r| r.needs_workspace_index());
 
     if auto_run_langs.is_empty() {
-        return Ok(AutoRunReply {
-            ran: 0,
-            view: host.view(page)?,
-        });
+        let view = host.view(page)?;
+        return Ok(AutoRunReply { ran: 0, view });
     }
 
     let ran = offload::locked_mut(&host.workspace, |ws| {
@@ -238,6 +289,12 @@ fn auto_run_on_page(host: &ExecHost, page: NodeId, page_id: &str) -> Result<Auto
         let index = (needs_index && !targets.is_empty())
             .then(|| outl_md::index::WorkspaceIndex::build(root));
         let mut count = 0usize;
+        // Any attempt may have rewritten the `.md`. Always a patch, never
+        // a drop: this runs on every page load, and a failing fence there
+        // must not cost every navigation a full index rebuild (invariant
+        // 15). The index is a projection of the `.md`, so reading that
+        // file back is right whether a block wrote it or failed first.
+        let attempted = !targets.is_empty();
         for idx in targets {
             if let Err(e) = run_block_at_index(
                 ws,
@@ -253,13 +310,14 @@ fn auto_run_on_page(host: &ExecHost, page: NodeId, page_id: &str) -> Result<Auto
                 count += 1;
             }
         }
+        if attempted {
+            host.refresh_backlinks(ws, page, true);
+        }
         Ok(count)
     })?;
 
-    Ok(AutoRunReply {
-        ran,
-        view: host.view(page)?,
-    })
+    let view = host.view(page)?;
+    Ok(AutoRunReply { ran, view })
 }
 
 /// Batch-resolve embed handles to their source content.

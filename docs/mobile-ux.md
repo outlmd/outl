@@ -67,7 +67,7 @@ An older answer that lands after a newer one is dropped, since two resolves genu
 
 Two places still show the raw handle, on the desktop too:
 
-- a ref inside a **backlink** row, because the handle collection walks the outline and a backlink's source block is not in it;
+- a ref inside a **backlink** row, because the handle collection walks the outline and a backlink's source block is not in it (it still navigates when tapped);
 - a ref whose source block you are editing **on the page you are looking at**, because that changes neither the slug nor the handle set.
   It settles when you navigate away and back.
 
@@ -148,6 +148,11 @@ Create below / above is the one pair that does **not** raise the keyboard: the n
 Delete asks when the block has children, in the same prompt the outline uses; a citing block's children are drawn under it, so the count is real.
 Each child is its own tap and long-press target (44 pt minimum) with its own sheet.
 
+The row is drawn by `<BlockReadBody>`, the read-mode half of the outline's `<BlockBody>`, so code fences (including `call:`), tables, quotes, images and properties look as they do on the block's own page, and line breaks are kept.
+Property chips are read-only here.
+The disclosure control on a row with children folds the **source** block (`Op::SetCollapsed` on its own page), and a collapsed citing block hides its children.
+Contract: [`client-backlinks.md` → A row is drawn by the outline's renderer](client-backlinks.md#a-row-is-drawn-by-the-outlines-renderer).
+
 **The card takes one write at a time.**
 The acting row dims and goes `aria-busy` while its write is in flight, and a gesture on another row of the card is dropped in that window.
 None of these is idempotent from your seat — a second toggle flips the task back — and a timeout would be worse than no guard, since firing one while the write still lands means the task flips twice on the retry.
@@ -202,7 +207,7 @@ An `assets/…` link routes instead (via `isAssetLink`) to `openAsset` — `open
 The block long-press **Attach file** action picks a file (`@tauri-apps/plugin-dialog`) → `attachAsset` (shared `commands::asset`).
 On iPad, dragging a file onto a block imports it the same way via the shared `installFileDrop` + `importAssetFile` (`@outl/shared/drag-drop`), best-effort — iPhone rarely delivers a webview drop, so long-press stays the only import path there.
 `[[ref]]`/`#tag` taps in the outline still route through `openRef`.
-A **backlink** row's own tokens do not: the row's one gesture is editing the block it shows, so `<MarkdownInline>` there gets no `onRefClick` / `onLinkClick` and a ref inside it renders without navigating.
+A **backlink** row's tokens navigate too: the row draws through `<BlockReadBody>`, which gets the same `onRefClick` / `onLinkClick`, so a tap on a ref, tag or link opens it and only a tap on the rest of the row opens the editor.
 
 ## Properties (`key:: value`) on a block
 

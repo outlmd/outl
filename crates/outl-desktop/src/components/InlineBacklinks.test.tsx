@@ -237,8 +237,9 @@ describe("InlineBacklinks task state — #144", () => {
 
   it("edits the cited block on a text click, without navigating", () => {
     const host = mount([backlink("todo", "TODO")]);
-    const textButton = Array.from(host.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("task"),
+    // The prose of the outline's `<BlockBody />`, which the row renders.
+    const textButton = Array.from(host.querySelectorAll<HTMLElement>("[data-backlink-body] .cursor-text")).find((el) =>
+      el.textContent?.includes("task"),
     );
 
     if (!textButton) throw new Error("backlink text button did not render");

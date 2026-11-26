@@ -37,6 +37,8 @@ const EVERY_OP: &[BacklinkRowOp] = &[
     BacklinkRowOp::Outdent,
     BacklinkRowOp::MoveUp,
     BacklinkRowOp::MoveDown,
+    BacklinkRowOp::Collapse,
+    BacklinkRowOp::Expand,
 ];
 
 const EVERY_SIDE: &[BacklinkSide] = &[BacklinkSide::Below, BacklinkSide::Above];

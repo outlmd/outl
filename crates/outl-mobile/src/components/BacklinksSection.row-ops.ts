@@ -303,6 +303,20 @@ export function createBacklinkRowOps(deps: BacklinkRowOpsDeps) {
       );
     },
 
+    /**
+     * The disclosure triangle: fold or unfold the row's block **on its
+     * own page**, so the fold syncs and the outline there shows it too.
+     * An explicit `"collapse"` / `"expand"` read off the row on screen,
+     * never a toggle: a toggle aimed at a stale view flips the wrong way.
+     * A leaf has nothing to fold.
+     */
+    async toggleRowCollapsed(row: BacklinkRow) {
+      if (row.node.children.length === 0) return;
+      haptic("light");
+      const op = row.node.collapsed ? "expand" : "collapse";
+      await runOnSource(row, (t) => backlinkRowOp(t.pageId, t.blockId, op));
+    },
+
     /** Long press. Refused on an orphan (nothing to offer) and while a
      *  write is in flight (the same concurrent-write defect through a
      *  different door). */

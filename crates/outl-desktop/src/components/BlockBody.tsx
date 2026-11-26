@@ -3,6 +3,7 @@ import { Show } from "solid-js";
 import type { BlockNode } from "@outl/shared/api/types";
 import { detectFence } from "@outl/shared/highlight";
 import {
+  BlockProperties,
   EmbeddedSubtree,
   MarkdownInline,
   MarkdownTable,
@@ -12,7 +13,7 @@ import {
 import { embedOnlyHandle, pageEmbedOnlyName } from "@outl/shared/outline";
 
 import { appState, setAppState } from "../lib/store";
-import type { BlockCallbacks } from "./block-callbacks";
+import type { BodyCallbacks } from "./block-callbacks";
 import { CodeFenceView } from "./CodeFenceView";
 import { PropertyEditor } from "./PropertyEditor";
 
@@ -38,10 +39,15 @@ import { PropertyEditor } from "./PropertyEditor";
  * Every shape routes a click back through the same `onStartEdit`: a
  * table has no cell editor, and a fence has no fence editor. Editing
  * anything means editing the raw markdown.
+ *
+ * Mounted by an outline row and by a backlink row (`<BacklinkRow />`),
+ * which is why it asks for {@link BodyCallbacks} and not the whole
+ * row contract: one renderer, so a backlink can never draw a block
+ * differently from the page it lives on.
  */
 export function BlockBody(props: {
   block: BlockNode;
-  cb: BlockCallbacks;
+  cb: BodyCallbacks;
   /** Enter edit mode on this block. One handler for every "edit this"
    *  affordance — the fence's Edit button, a click on a table, a click
    *  on prose. */
@@ -141,22 +147,32 @@ export function BlockBody(props: {
       </div>
       {/* `remind::` and friends were invisible here: the chord wrote
           the rule and the block looked untouched. Clicking a chip
-          opens the rule for editing. */}
-      <PropertyEditor
-        properties={props.block.properties}
-        onCommit={(key, value) =>
-          props.cb.onSetProperty?.(props.block.id, key, value)
-        }
-        onError={(msg) => setAppState("lastError", msg)}
-        addOpen={appState.addPropertyBlockId === props.block.id}
-        onAddOpenChange={(open) => {
-          if (!open) {
-            setAppState("addPropertyBlockId", null);
-          }
-        }}
-        chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
-        inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
-      />
+          opens the rule for editing.
+
+          A host with no `onSetProperty` (a backlink row) gets the
+          shared read-only line instead, with no `onOpen`, so nothing
+          on it pretends to be editable: an editor whose commit goes
+          nowhere repaints the chip as if the write had landed. */}
+      <Show
+        when={props.cb.onSetProperty}
+        fallback={<BlockProperties properties={props.block.properties} />}
+      >
+        {(setProperty) => (
+          <PropertyEditor
+            properties={props.block.properties}
+            onCommit={(key, value) => setProperty()(props.block.id, key, value)}
+            onError={(msg) => setAppState("lastError", msg)}
+            addOpen={appState.addPropertyBlockId === props.block.id}
+            onAddOpenChange={(open) => {
+              if (!open) {
+                setAppState("addPropertyBlockId", null);
+              }
+            }}
+            chipClass="rounded bg-(--color-outl-fg)/8 px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
+            inputClass="rounded border border-(--color-outl-accent)/50 bg-(--color-outl-bg) px-1.5 py-0.5 text-xs outline-none"
+          />
+        )}
+      </Show>
       <Show when={embedded()?.children?.length}>
         <EmbeddedSubtree
           nodes={embedded()!.children}

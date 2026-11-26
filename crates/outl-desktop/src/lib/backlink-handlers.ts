@@ -120,6 +120,11 @@ export interface BacklinkRowOps {
    *  `MoveBlockUp` / `MoveBlockDown` / `IndentBlock` answered success
    *  while doing nothing. */
   run(op: BacklinkRowOp): Promise<boolean>;
+  /** `ToggleCollapsed` on the row: an explicit `"collapse"` or
+   *  `"expand"`, read off the row the user is looking at, written to the
+   *  block's own page so the fold syncs. A leaf has nothing to fold and
+   *  is a silent no-op, as it is in the outline. */
+  fold(): Promise<boolean>;
   /** Delete it, and step the cursor off the row that is about to vanish. */
   del(): Promise<boolean>;
   /** Create an empty sibling beside it, on its own page. Its own method
@@ -247,11 +252,29 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
     return { kind: "row", key, link, node, depth, page, target };
   }
 
+  /** Send one `backlink_row_op` for the row at `key` and settle it. */
+  async function commit(
+    key: string,
+    target: BacklinkEditTarget,
+    op: BacklinkRowOp,
+  ): Promise<void> {
+    const view = await safeCall(
+      backlinkRowOp(target.pageId, target.blockId, op),
+    );
+    if (!view) return;
+    const { refetched } = settle(target.pageId, view);
+    // Not awaited: the chord returns now and the scan keeps its
+    // fire-and-forget contract (`settle`), so a held key is never
+    // queued behind a scan. The cursor follows when the rows land.
+    void refetched.then(() => followBlock(key, target.blockId));
+  }
+
   /** Hand the focused row to `act`, or report that there is no row here
    *  for the caller to fall through on. */
   async function onRow(
     act: (row: {
       key: string;
+      node: BlockNode;
       depth: number;
       target: BacklinkEditTarget;
       page: PageMeta;
@@ -271,17 +294,12 @@ export function backlinkRowOps(ctx: HandlerCtx): BacklinkRowOps {
       return true;
     },
 
-    run: (op) =>
-      onRow(async ({ key, target }) => {
-        const view = await safeCall(
-          backlinkRowOp(target.pageId, target.blockId, op),
-        );
-        if (!view) return;
-        const { refetched } = settle(target.pageId, view);
-        // Not awaited: the chord returns now and the scan keeps its
-        // fire-and-forget contract (`settle`), so a held key is never
-        // queued behind a scan. The cursor follows when the rows land.
-        void refetched.then(() => followBlock(key, target.blockId));
+    run: (op) => onRow((row) => commit(row.key, row.target, op)),
+
+    fold: () =>
+      onRow(async ({ key, node, target }) => {
+        if (node.children.length === 0) return;
+        await commit(key, target, node.collapsed ? "expand" : "collapse");
       }),
 
     del: () =>

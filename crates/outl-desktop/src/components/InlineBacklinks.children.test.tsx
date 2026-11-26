@@ -98,10 +98,11 @@ afterEach(() => {
   });
 });
 
+/** A row's prose — the outline's `<BlockBody />`, which the row renders. */
 const textButton = (host: HTMLElement, id: string) =>
-  Array.from(host.querySelectorAll("button")).find(
+  Array.from(host.querySelectorAll<HTMLElement>("[data-backlink-body] .cursor-text")).find(
     (b) => b.textContent === `text of ${id}`,
-  ) as HTMLButtonElement;
+  ) as HTMLElement;
 
 describe("the subtree under a citing block", () => {
   it("draws every descendant, with one li per citing block", () => {
@@ -142,7 +143,7 @@ describe("the subtree under a citing block", () => {
   it("a block cited and also nested opens one editor, in the copy clicked", () => {
     const host = mount([link(block("a", [block("x")])), link(block("x"))]);
 
-    const copies = Array.from(host.querySelectorAll("button")).filter(
+    const copies = Array.from(host.querySelectorAll<HTMLElement>("[data-backlink-body] .cursor-text")).filter(
       (b) => b.textContent === "text of x",
     );
     expect(copies).toHaveLength(2);

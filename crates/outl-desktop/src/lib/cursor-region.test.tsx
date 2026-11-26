@@ -132,13 +132,14 @@ function mountPage(): HTMLElement {
   return host;
 }
 
-/** The backlink's text button — the one carrying the row's handlers. */
-function backlinkRow(host: HTMLElement): HTMLButtonElement {
-  const found = Array.from(host.querySelectorAll("button")).find((b) =>
+/** The backlink's text — the outline's `<BlockBody />` prose, which
+ *  carries the row's handlers. */
+function backlinkRow(host: HTMLElement): HTMLElement {
+  const found = Array.from(host.querySelectorAll<HTMLElement>("[data-backlink-body] .cursor-text")).find((b) =>
     b.textContent?.includes("cites this page"),
   );
   if (!found) throw new Error("backlink row not rendered");
-  return found as HTMLButtonElement;
+  return found;
 }
 
 function handlers() {

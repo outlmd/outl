@@ -242,6 +242,8 @@ export function blockHandlers(ctx: HandlerCtx): ActionHandlers {
       await runOn(deleteBlock(pageId, id), prev);
     },
     ToggleCollapsed: async () => {
+      // On a backlink row the fold belongs to the block's own page.
+      if (await onBacklink.fold()) return;
       const pageId = appState.page?.id;
       const id = targetBlockId();
       if (!pageId || !id) return;

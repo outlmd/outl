@@ -238,6 +238,23 @@ describe("flattenBacklinkRows", () => {
   it("is empty for no links", () => {
     expect(flattenBacklinkRows([])).toEqual([]);
   });
+
+  it("does not descend under a collapsed node, at any depth", () => {
+    const folded = (n: BlockNode) => ({ ...n, collapsed: true }) as BlockNode;
+    // `a1` is folded: its own row stays, `a1x` goes. `b` is a folded
+    // citing block: only its row is drawn.
+    const a = withBlock(
+      link({ pageId: "p1", blockId: "a" }),
+      node("a", [folded(node("a1", [node("a1x")])), node("a2")]),
+    );
+    const b = withBlock(link({ pageId: "p2", blockId: "b" }), folded(node("b", [node("b1")])));
+    expect(flattenBacklinkRows([a, b]).map((r) => [r.node.id, r.depth])).toEqual([
+      ["a", 0],
+      ["a1", 1],
+      ["a2", 1],
+      ["b", 0],
+    ]);
+  });
 });
 
 describe("backlinkCreatedElsewhere and subtree rows", () => {

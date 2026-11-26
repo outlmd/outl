@@ -68,6 +68,8 @@ const EVERY_OP: &[BacklinkRowOp] = &[
     BacklinkRowOp::Outdent,
     BacklinkRowOp::MoveUp,
     BacklinkRowOp::MoveDown,
+    BacklinkRowOp::Collapse,
+    BacklinkRowOp::Expand,
 ];
 
 /// Minimal [`AppHost`]: no projection writer, so every projection this

@@ -10,6 +10,7 @@ import { BlockBody } from "./BlockBody";
 import { BlockContextMenu, type BlockMenuAction } from "./BlockContextMenu";
 import { BlockEditor } from "./BlockEditor";
 import type { BlockCallbacks } from "./block-callbacks";
+import { FoldChevron } from "./FoldChevron";
 
 /** The row's contract with `<OutlineView />`. Lives in its own module
  *  (`./block-callbacks`) because `<BlockBody />` and `<BlockEditor />`
@@ -217,37 +218,14 @@ export function BlockRow(props: {
          * rest, 1 on hover / focus-within / selected / visual / editing
          * (see `styles.css`). A chevron on every row at rest is noise;
          * `focus-within` is what keeps it reachable without a mouse. */}
-        <button
-          type="button"
-          class={`outl-row-chrome ml-[6px] mt-[6px] min-w-[16px] select-none whitespace-nowrap text-left text-[9px] font-mono ${
-            props.block.children.length === 0 ? "" : "cursor-pointer"
-          } disabled:cursor-default`}
-          disabled={props.block.children.length === 0}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (props.block.children.length === 0) return;
-            void props.cb.onToggleCollapsed(
-              props.block.id,
-              !props.block.collapsed,
-            );
-          }}
-          aria-label={props.block.collapsed ? "Expand" : "Collapse"}
-        >
-          {props.block.children.length > 0 ? (
-            props.block.collapsed ? (
-              <>
-                <span>▶</span>
-                <span class="ml-1 text-(--color-outl-fg-dimmer)">
-                  {props.block.children.length}
-                </span>
-              </>
-            ) : (
-              "▼"
-            )
-          ) : (
-            ""
-          )}
-        </button>
+        <FoldChevron
+          childCount={props.block.children.length}
+          collapsed={props.block.collapsed}
+          onToggle={(collapse) =>
+            void props.cb.onToggleCollapsed(props.block.id, collapse)
+          }
+          class="outl-row-chrome ml-[6px] mt-[6px]"
+        />
 
         {/* The list marker stays outside quote chrome so a quoted body
           * remains an ordinary outline block. */}

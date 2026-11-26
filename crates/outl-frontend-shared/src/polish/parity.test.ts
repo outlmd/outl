@@ -31,7 +31,9 @@ describe("desktop and mobile rows", () => {
   it("block text and its textarea share one line height token", () => {
     for (const f of [
       "outl-desktop/src/components/BlockRow.tsx",
-      "outl-mobile/src/components/BlockBody.tsx",
+      // The read-mode body: `BlockBody` renders it, and so does a
+      // backlink row, so the token lives where the text is drawn.
+      "outl-mobile/src/components/BlockReadBody.tsx",
       "outl-mobile/src/components/BlockTextarea.tsx",
     ]) {
       expect(read(f), f).toContain("leading-(--outl-block-leading)");
