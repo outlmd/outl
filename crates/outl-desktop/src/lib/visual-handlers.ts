@@ -28,7 +28,7 @@ import {
 } from "@outl/shared/outline";
 
 import { copySelectionToClipboard } from "./clipboard-handlers";
-import { type HandlerCtx, lookupBlock } from "./handler-context";
+import { type HandlerCtx } from "./handler-context";
 import { moveOnce } from "./move-gate";
 import { type ActionHandlers } from "./shortcuts";
 import { appState, setAppState } from "./store";
@@ -156,17 +156,13 @@ export function visualHandlers(ctx: HandlerCtx): ActionHandlers {
         appState.outline,
       );
       if (!rangeIds) return;
-      const texts: string[] = [];
-      for (const id of rangeIds) {
-        const block = lookupBlock(id);
-        if (block) texts.push(block.text);
-      }
-      setAppState("yankRegister", texts);
       exitVisual();
-      // Copy the whole range as markdown; the backend drops any block
-      // whose ancestor is also selected so a parent+child range doesn't
-      // duplicate the child.
-      void copySelectionToClipboard(ctx, rangeIds);
+      // Copy the whole range as markdown to the OS clipboard, where
+      // `p` reads it back; the backend drops any block whose ancestor
+      // is also selected so a parent+child range doesn't duplicate the
+      // child. The write is queued before this returns, so a `p` that
+      // follows waits for it rather than pasting the old clipboard.
+      return copySelectionToClipboard(ctx, rangeIds);
     },
     DeleteRange: async () => {
       const pageId = appState.page?.id;

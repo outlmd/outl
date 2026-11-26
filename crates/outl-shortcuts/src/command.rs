@@ -130,6 +130,7 @@ pub fn command_name(action: Action) -> &'static str {
         Action::CutBlock => "cut-block",
         Action::CopyBlock => "copy-block",
         Action::PasteBlock => "paste-block",
+        Action::PasteClipboard => "paste-clipboard",
         Action::ExitInsert => "exit-insert",
         Action::CommitAndContinue => "commit-and-continue",
         Action::DeleteEmptyBlock => "delete-empty-block",

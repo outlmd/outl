@@ -36,7 +36,7 @@ crates/outl-frontend-shared/
     │   ├── commands-peers.ts      # peer pairing / iroh transport
     │   ├── commands-plugins.ts    # plugin host + marketplace
     │   ├── commands-reminders.ts  # `remind::` + its two display helpers
-    │   ├── paste.ts        # PasteReply + pasteMarkdown / pastePlain (DTO beside its wrappers)
+    │   ├── paste.ts        # PasteReply + pasteMarkdown / pastePlain / pasteBlockAfter (DTO beside its wrappers)
     │   ├── embeds.ts       # ResolvedBlock + PageEmbedContent + resolveEmbeds / resolvePageEmbeds (same arrangement)
     │   ├── page-merge.ts   # rename / merge DTOs + renamePage / mergePages (own file: commands.ts and types.ts are at the ratchet)
     │   └── backlinks.ts    # pageBacklinks / setBacklinksOrder + the cross-page mutation family (editBacklinkBlock / backlinkRowOp / createBacklinkSibling) — the panel's commands, same move for the same reason. In ts_parser::MIRROR_FILES since it gained BacklinkRowOp / BacklinkSide

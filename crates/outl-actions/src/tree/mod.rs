@@ -23,14 +23,13 @@ mod props;
 mod traverse;
 
 pub(crate) use children::{
-    children_index, children_index_unordered, previous_sibling, sort_siblings, subtree_ids,
+    children_index, children_index_of, children_index_unordered, previous_sibling, sort_siblings,
+    subtree_ids,
 };
 pub use children::{children_of, next_sibling, ChildrenIndex};
 pub(crate) use position::interior_between;
 pub use position::{position_after, position_before, position_for_new_last_child};
-pub(crate) use props::{
-    group_properties_of, renderable_prop_value, text_properties_of, PropertiesByNode,
-};
+pub(crate) use props::{group_properties_of, renderable_prop_value, PropertiesByNode};
 pub use props::{is_page_model_key, sort_in_presentation_order};
 pub(crate) use traverse::is_under;
 pub use traverse::{enclosing_page_id, is_live, is_trashed, page_slug_of, walk_subtree};

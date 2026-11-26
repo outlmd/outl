@@ -119,6 +119,9 @@ So a user who selects ten blocks can get nine on the clipboard, with the tenth's
 The dangerous sequence is copy → delete → paste: the clipboard was the only remaining copy, and it is the reduced one.
 This is a known gap, not a solved problem — see Scope.
 
+> **Update 2026-11-25.** `text_properties_of` is gone: `copy_markdown` now shares one projection with `render_block_md`, so `PageRef` / `Tag` properties survive a copy.
+> Only `List`-shaped properties, which the dialect has no syntax for, are still dropped.
+
 **Paste-in is deliberately destructive, and that direction has no undo outside outl.**
 `normalize_external_syntax` strips unknown `{{…}}` tokens and drops Roam block refs, because there is no mapping from a Roam UID to an outl handle.
 Copying out of Roam and pasting into outl therefore loses those tokens permanently unless the Roam graph still exists.

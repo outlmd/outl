@@ -289,6 +289,7 @@ export type Action =
   | { kind: "CutBlock" }
   | { kind: "CopyBlock" }
   | { kind: "PasteBlock" }
+  | { kind: "PasteClipboard" }
   | { kind: "ExitInsert" }
   | { kind: "CommitAndContinue" }
   | { kind: "DeleteEmptyBlock" }

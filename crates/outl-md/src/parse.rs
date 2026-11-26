@@ -538,7 +538,7 @@ pub(crate) fn strip_indent_levels(line: &str, levels: usize) -> &str {
 
 /// Outline depth of a line: leading whitespace divided by the
 /// two-space indent unit. One tab counts as one full level.
-pub(crate) fn leading_indent(line: &str) -> usize {
+pub fn leading_indent(line: &str) -> usize {
     let mut spaces = 0usize;
     for b in line.bytes() {
         if b == b' ' {

@@ -163,6 +163,11 @@ Its doc comment promised the opposite; that sentence is gone, and the accessor n
 `tests/outline_property_pass.rs` is the ratchet and found a third instance while being written.
 The incident and what is still unfixed: [`docs/performance.md`](../../docs/performance.md).
 
+### Copy and paste
+
+`copy_markdown` projects through `journal::render::project_blocks` (one property pass per selection), so `yy` and `Cmd+C` write the same bytes, `PageRef` / `Tag` values included (`tests/clipboard_projection.rs`).
+A paste's landing is `PasteOutcome::last_root`, never `new_blocks.last()`, which is a DFS tail and nests the next paste inside the copy (`tests/paste_landing.rs`).
+
 ## The `tree → .md` executor
 
 `journal::survey_page_projections` is the **single owner** of "where does this page's `.md` stand relative to the op log", and `journal::reproject_stale_pages` is the executor built on it.

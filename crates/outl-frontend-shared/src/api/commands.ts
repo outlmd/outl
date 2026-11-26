@@ -383,18 +383,6 @@ export function copyBlockMarkdown(id: string): Promise<string> {
 }
 
 /**
- * Paste clipboard `text` (clean outl markdown) as the sibling(s)
- * immediately after `afterId` — the `Cmd+V` of a copied block.
- */
-export function pasteBlockAfter(
-  pageId: string,
-  afterId: string,
-  text: string,
-): Promise<PageView> {
-  return invoke<PageView>("paste_block_after", { pageId, afterId, text });
-}
-
-/**
  * Cut block `id` and its subtree: render it to clean outl markdown
  * (like {@link copyBlockMarkdown}) then move it to trash (`Op::Move`,
  * never a physical removal — root `CLAUDE.md` invariant 6). The
@@ -473,12 +461,12 @@ export function redoPage(pageId: string): Promise<PageView> {
   return invoke<PageView>("redo_page", { pageId });
 }
 
-// ── Paste (external clipboard, at the caret) ────────────────────────
+// ── Paste ───────────────────────────────────────────────────────────
 //
 // Moved to `paste.ts` under the file-size ratchet, together with the
 // `PasteReply` they return; re-exported here so the import path is
 // unchanged.
-export { pasteMarkdown, pastePlain } from "./paste";
+export { pasteBlockAfter, pasteMarkdown, pastePlain } from "./paste";
 
 // The backlinks panel's commands live in `./backlinks`, together because
 // two return the same `PageBacklinks` and the rest are the mutations
@@ -503,8 +491,10 @@ export type { BacklinkRowOp, BacklinkSide } from "./backlinks";
  * is also selected is dropped (the ancestor's subtree already carries
  * it), so a range spanning a parent and child never duplicates the child.
  *
- * Read-only — the backend produces the string, the caller writes it to
- * `navigator.clipboard.writeText`.
+ * Read-only — the backend produces the string and the caller writes it
+ * to the OS clipboard. The desktop goes through the clipboard-manager
+ * plugin (`src/lib/os-clipboard.ts`): a `navigator.clipboard` write after
+ * this `await` is outside the user gesture, and the webview rejects it.
  */
 export function copyMarkdown(blockIds: string[]): Promise<string> {
   return invoke<string>("copy_markdown", { blockIds });

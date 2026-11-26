@@ -158,7 +158,7 @@ fn create_block_reply_matches_its_interface() {
 
 #[test]
 fn paste_reply_matches_its_interface() {
-    // Both optionals are `Some` on purpose: they `skip_serializing_if`,
+    // Every optional is `Some` on purpose: they `skip_serializing_if`,
     // so a `None` value would drop the keys and the pin would compare an
     // interface against a reply that never mentions the fields the
     // clients read.
@@ -166,6 +166,7 @@ fn paste_reply_matches_its_interface() {
         view: page_view(),
         host_text: Some("host text after the paste".into()),
         host_caret: Some(25),
+        new_id: Some("01JQ0000000000000000000006".into()),
     };
     assert_wire_shape(&dto, "PasteReply", &[]);
 }

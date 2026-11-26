@@ -278,3 +278,72 @@ fn unbalanced_brackets_dont_panic() {
         "- before [[unclosed",
     );
 }
+
+/// What outl's own copy of a code block looks like: the fence opens on
+/// the bullet line and its body sits one level deeper. Every conversion
+/// in the table would rewrite something in here, and none may.
+#[test]
+fn a_backtick_fence_passes_through_untouched() {
+    let src = "- ```jinja\n  {{ x }}\n  ^^a^^ - [ ] box\n  id:: 01HXY8KJZQ9T8M7VN3P2R6S4A1\n  two  spaces\n  ```\n- {{[[TODO]]}} after";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "- ```jinja\n  {{ x }}\n  ^^a^^ - [ ] box\n  id:: 01HXY8KJZQ9T8M7VN3P2R6S4A1\n  two  spaces\n  ```\n- TODO after",
+    );
+}
+
+#[test]
+fn a_tilde_fence_passes_through_untouched() {
+    let src = "- ~~~\n  - [x] literal\n  {{video: x}}\n  ~~~\n- [x] real";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "- ~~~\n  - [x] literal\n  {{video: x}}\n  ~~~\n- DONE real",
+    );
+}
+
+/// A fence closes only on its own character: a backtick line inside a
+/// tilde fence is content, and treating it as a closer would hand the
+/// rest of the body back to the rewrites.
+#[test]
+fn the_other_fence_character_does_not_close_it() {
+    let src = "- ~~~\n  ```\n  {{ kept }}\n  ~~~\n- {{ stripped }} tail";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "- ~~~\n  ```\n  {{ kept }}\n  ~~~\n- tail",
+    );
+}
+
+/// A closer deeper than the body is content: a markdown sample whose
+/// list item holds its own code block. The parser closes only at the
+/// body's level, and closing early here would rewrite the rest of the
+/// copied code.
+#[test]
+fn a_deeper_closer_does_not_end_the_fence() {
+    let src = "- ```md\n  1. a\n     ```\n     x\n     ```\n  {{ tpl }}  aligned\n  ```\n- {{[[TODO]]}} after";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "- ```md\n  1. a\n     ```\n     x\n     ```\n  {{ tpl }}  aligned\n  ```\n- TODO after",
+    );
+}
+
+/// A selection that starts mid code block carries a stray closer at
+/// column 0. Read as an opener whose body is level 0, nothing could
+/// outdent below it and every bullet after it would skip the rewrites.
+#[test]
+fn a_stray_closer_at_column_zero_does_not_hold_the_rest() {
+    let src = "echo hi\n```\n- {{[[TODO]]}} task\n- [ ] other";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "echo hi\n```\n- TODO task\n- TODO other",
+    );
+}
+
+/// A bullet outdented below the body ends the fence the same way the
+/// parser ends it, so an unclosed fence cannot swallow its siblings.
+#[test]
+fn an_outdented_bullet_ends_an_unclosed_fence() {
+    let src = "- ```\n  {{ kept }}\n- {{[[DONE]]}} sibling";
+    assert_eq!(
+        normalize_external_syntax(src),
+        "- ```\n  {{ kept }}\n- DONE sibling",
+    );
+}

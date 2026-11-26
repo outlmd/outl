@@ -35,6 +35,12 @@
 //! We never invent information; we only delete tokens that aren't
 //! part of our syntax.
 //!
+//! **None of it applies inside a fenced code block** (```` ``` ```` or
+//! `~~~`). A fence is code the user copied, often out of outl itself:
+//! `{{ x }}` there is a template, `- [ ]` a string literal. Only the
+//! indent pass reaches fenced lines, because indentation is where the
+//! fence sits in the outline, not what it says.
+//!
 //! ## Properties
 //!
 //! Lines of the form `key:: value` that the parser attaches to a block
@@ -128,6 +134,15 @@ pub enum PasteAnchor {
 pub struct PasteOutcome {
     /// Ids of newly created blocks, in DFS / sibling order.
     pub new_blocks: Vec<NodeId>,
+    /// The last **root-level** block the paste created, where a caller
+    /// that wants to land on "what I just pasted" should land.
+    ///
+    /// Not `new_blocks.last()`: that list is DFS, so for a payload whose
+    /// last root has children it names a child, and a second paste
+    /// anchored there nests inside the copy instead of following it.
+    /// `None` when the paste created no block (a caret splice, a merge
+    /// into the host, an empty payload).
+    pub last_root: Option<NodeId>,
     /// New text of the host block when `AtCaret` was used and the
     /// host's text changed. `None` for the other anchors.
     ///
@@ -164,7 +179,8 @@ pub struct PasteOutcome {
 ///
 /// `raw` is the clipboard contents verbatim. The function:
 ///
-/// 1. Converts tab-separated rows to a markdown table.
+/// 1. Converts tab-separated rows to a markdown table, unless the
+///    payload opens with a bullet.
 /// 2. Detects, on the raw text, whether it is an outline or table
 ///    (any line starting with `- `). If not, falls back to "plain
 ///    text" behaviour appropriate for the anchor: one block per
@@ -216,7 +232,15 @@ fn paste_markdown_inner(
     // data, and reformatting the user's file is not this function's job
     // (the TUI pads when it paints, the GUI clients hand the cells to
     // `<table>`).
-    let tabular = outl_md::tsv_to_markdown(raw);
+    //
+    // Skipped when the payload opens with a bullet: two outl blocks whose
+    // text carries a tab are already an outline, and reading them as rows
+    // would turn the user's own copy into a one-cell-per-tab table.
+    let tabular = if detect::starts_with_bullet(raw) {
+        None
+    } else {
+        outl_md::tsv_to_markdown(raw)
+    };
     let raw = tabular.as_deref().unwrap_or(raw);
 
     if !looks_like_outline(raw) && !looks_like_table(raw) {

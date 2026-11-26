@@ -211,11 +211,15 @@ Opening any page, including the one already open, leaves the zoom.
 **Move and select several.**
 `Shift+Up` and `Shift+Down` grow a selection.
 A floating bar offers Indent, Outdent, Move up, Move down, Delete and Done.
-`y` copies the range, `d` deletes it.
+`y` (or `Cmd/Ctrl+C`) copies the range as outl markdown, `d` deletes it.
 
 **Cut, copy, paste a block.**
 With a block selected and nothing focused, `Cmd/Ctrl+X` moves it with its children, and every `((reference))` to it keeps working after the paste.
-`Cmd/Ctrl+C` copies it, and `Cmd/Ctrl+V` pastes after the selection.
+`y y`, `Y` or `Cmd/Ctrl+C` copies it, with its children, to the system clipboard as outl markdown, so you can paste it into any other app too.
+`p` pastes the system clipboard as blocks after the selection, and `Cmd/Ctrl+V` does the same unless a cut is waiting, in which case it moves the cut block.
+The selection lands on the last pasted block.
+Copying cancels a pending cut.
+Where a paste lands and what it converts: [Paste](paste.md#paste-after-the-selected-block-desktop-normal-mode).
 
 **Right-click a bullet** for **Copy block ref** and **Copy block embed**.
 A ref, `((blk-…))`, links to the block.

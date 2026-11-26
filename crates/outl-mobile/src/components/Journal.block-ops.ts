@@ -208,8 +208,8 @@ export function createBlockOps(deps: JournalBlockDeps) {
       const pid = deps.pageId();
       const markdown = deps.blockClipboard();
       if (!pid || markdown === null) return;
-      const next = await deps.withError(() => pasteBlockAfter(pid, id, markdown));
-      if (next) deps.applyView(next);
+      const reply = await deps.withError(() => pasteBlockAfter(pid, { afterId: id }, markdown));
+      if (reply) deps.applyView(reply.view);
     },
 
     /**

@@ -9,9 +9,9 @@ import {
   type PasteEditorUpdate,
   utf16OffsetToCharOffset,
 } from "@outl/shared/paste";
-import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { moveOnce, setEditorOwnsHold } from "../lib/move-gate";
+import { readOsClipboard } from "../lib/os-clipboard";
 import { insertMoveFor } from "../lib/shortcuts";
 import { appState, setAppState } from "../lib/store";
 import type { EditorCallbacks } from "./block-callbacks";
@@ -168,18 +168,17 @@ export function BlockEditor(props: {
       e.preventDefault();
       const ta = textareaRef;
       if (!ta) return;
-      let clip = "";
+      let clip: string;
       try {
-        // Read via the Tauri clipboard plugin, NOT
-        // `navigator.clipboard.readText()`: the macOS WKWebview pops a
-        // native "Paste" permission button for a programmatic web-API
-        // read (outside a real paste gesture), which showed a "paste"
-        // prompt and inserted nothing. The plugin reads on the backend.
-        clip = await readClipboardText();
-      } catch {
-        return; // clipboard read denied / empty — nothing to paste
+        // `os-clipboard` owns the read (the plugin, never
+        // `navigator.clipboard`, which pops a native "Paste" button in
+        // the macOS WKWebview and inserts nothing). An empty clipboard
+        // is said on the status line rather than read as a dead chord.
+        clip = await readOsClipboard();
+      } catch (err) {
+        setAppState("lastError", err instanceof Error ? err.message : String(err));
+        return;
       }
-      if (!clip) return;
       const caretChars = utf16OffsetToCharOffset(ta.value, ta.selectionStart ?? 0);
       applyPaste(await route(props.blockId, caretChars, clip, ta.value));
       return;

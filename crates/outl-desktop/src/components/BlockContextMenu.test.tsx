@@ -41,10 +41,15 @@ vi.mock("@outl/shared/plugins/transformer-registry", () => ({
   runTransform: vi.fn(),
   transformerFor: vi.fn(() => null),
 }));
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: vi.fn() }));
+// The OS clipboard is the plugin's (`lib/os-clipboard.ts`), so the
+// write a row ends in is observed there.
+const writeText = vi.hoisted(() => vi.fn((_text: string) => Promise.resolve()));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  readText: vi.fn(),
+  writeText,
+}));
 
 let dispose: (() => void) | undefined;
-const writeText = vi.fn(() => Promise.resolve());
 
 function makeBlock(id: string, text = "hello"): BlockNode {
   return {
@@ -137,11 +142,6 @@ function rowOf(host: HTMLElement, id: string): HTMLButtonElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  Object.defineProperty(globalThis.navigator, "clipboard", {
-    value: { writeText },
-    configurable: true,
-    writable: true,
-  });
   setAppState({ selectedBlockId: null });
 });
 

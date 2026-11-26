@@ -55,6 +55,8 @@ function hintsFor(mode: Mode): HintEntry[] {
         { chord: "i", label: "edit" },
         { chord: "o", label: "new" },
         { chord: "c", label: "fold" },
+        { chord: "yy", label: "copy" },
+        { chord: "p", label: "paste" },
         { chord: "Enter", label: "open ref" },
         { chord: "K/J", label: "move" },
         { chord: "t", label: "today" },

@@ -7,6 +7,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **Desktop: copy and paste a block now work from the keyboard.**
+  `y y` and `Y` copy the selected block and its children to the system clipboard as outl markdown, Visual `y` and `Cmd/Ctrl+C` copy the range, and Normal `Cmd/Ctrl+C` copies the block.
+  `p` pastes the clipboard as blocks after the selected block (as the last child when zoomed on it), and `Cmd/Ctrl+V` does the same unless a cut is waiting.
+  The selection lands on the last pasted block, and a copy cancels a pending cut.
+  Before, `y y` and `p` were not bound, the clipboard write was silently refused by the macOS webview, and `Cmd/Ctrl+C` in Visual mode closed the window on Linux and Windows.
+  The TUI paste also lands on the last pasted block now, not the deepest one.
+
+- **Copying a block keeps its page-link and tag properties, and pasted code is left alone.**
+  A property whose value is a `[[page]]` or `#tag` used to be dropped from the clipboard.
+  Pasted text no longer has `{{…}}` or task-list syntax rewritten inside a fenced code block, trailing blank lines are trimmed from a plain paste, and tab-separated text whose first line is a bullet stays an outline.
+  Known losses stay: a pasted first line `title:: x` becomes a page property and is not kept, and an unknown `{{…}}` outside a fence is still stripped ([Paste](docs/paste.md#known-losses)).
+
 - **A block that is only `---` (or `***`, `___`) draws a horizontal rule.**
   It rendered as the literal dashes in every client.
   The TUI fills the text column with `─`, and desktop and mobile draw an `<hr>`.

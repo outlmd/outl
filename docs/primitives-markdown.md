@@ -35,6 +35,7 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Write a table back as canonical markdown, every column padded to its widest cell — for where outl **creates** one (a tabular paste, the TUI's grid), never to reformat what the user typed | `outl_md::table::render_table` | `crates/outl-md/src/table.rs` |
 | Split one table row into cells (escape-aware: `\|` splits nothing), or resolve a cell for **display** (`\|` → `|`) | `outl_md::table::split_cells` / `unescape_cell` | `crates/outl-md/src/table.rs` |
 | Slugify a user-visible page name into a filesystem-safe slug (NFC, lowercase, folds Latin diacritics `á` → `a`, keeps every other letter or digit so `[[你好]]` is `pages/你好.md`, non-alphanumerics collapse to `-`; capped at `MAX_SLUG_BYTES` with a digest suffix; empty input → `UNTITLED_SLUG`) — never hand-roll an ASCII-only copy | `outl_md::slug::slugify` / `UNTITLED_SLUG` / `MAX_SLUG_BYTES` | `crates/outl-md/src/slug.rs` |
+| Outline depth of a raw line the parser's way (two spaces or one tab per level), or the fence marker (```` ``` ```` / `~~~`) a line opens with — for a pass over text that has not been parsed yet, like paste normalization | `outl_md::parse::leading_indent` / `outl_md::fence_marker` | `crates/outl-md/src/parse.rs`, `fence.rs` |
 
 ---
 
@@ -56,7 +57,7 @@ For the reuse-first rule (why this matters, past drift incidents, what to do whe
 | Collapse external wiki-link variants (`[[Note\|alias]]`, `[[Note#h]]`, `[[Note^blk]]`, `[[folder/Note]]`) to canonical `[[Note]]` | `outl_md::wikilink::rewrite_wikilinks` (whole text) / `clean_wikilink_target` (one target) | `crates/outl-md/src/wikilink.rs` |
 | Convert image wiki-links / embeds (`![[img.png]]`, `[[a/b.jpeg\|cap]]`) into CommonMark links, folder path preserved | `outl_md::wikilink::convert_image_links` (+ `is_image_target` predicate) | `crates/outl-md/src/wikilink.rs` |
 | "Does this clipboard look like an outline?" classifier | `outl_actions::paste::looks_like_outline` | `crates/outl-actions/src/paste/detect.rs` |
-| Convert clipboard markdown into outl ops grafted at a position | `outl_actions::paste::paste_markdown` → `PasteOutcome` (anchor described by `PasteAnchor`) | `crates/outl-actions/src/paste/mod.rs` |
+| Convert clipboard markdown into outl ops grafted at a position | `outl_actions::paste::paste_markdown` → `PasteOutcome` (anchor described by `PasteAnchor`; `last_root` is where the selection lands) | `crates/outl-actions/src/paste/mod.rs` |
 | Paste raw text as a single block with no normalisation or outline parsing (the "without formatting" path) | `outl_actions::paste::paste_plain(workspace, hlc, anchor, raw)` → `PasteOutcome` | `crates/outl-actions/src/paste/mod.rs` |
 | Serialize a block selection (+ subtrees) to clean outl markdown **for the clipboard** (the inverse of `paste_markdown` / `parse`) | `outl_actions::clipboard::copy_markdown` (workspace + `NodeId`s; GUI backends) / `copy_markdown_nodes` (already-projected `OutlineNode`s; the TUI's AST-first yank) | `crates/outl-actions/src/clipboard.rs` |
 

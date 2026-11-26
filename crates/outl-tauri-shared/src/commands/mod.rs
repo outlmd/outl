@@ -9,13 +9,16 @@
 //! Split by responsibility, mirroring the historical per-client layout:
 //!
 //! - [`block`] — every block mutation (create, edit, todo, indent,
-//!   move, paste, collapsed, clipboard). `cut_block` (RFC 0254 phase 4)
+//!   move, collapsed, clipboard). `cut_block` (RFC 0254 phase 4)
 //!   renders the block to markdown then moves it to the trash root;
 //!   `copy_block_ref` (issue #18) produces its `((blk-XXXXXX))` handle.
 //! - [`backlink_edit`] — `edit_backlink_block`, the one mutation aimed
 //!   at a page the client is **not** showing. Apart from [`block`]
 //!   because every body there may be tolerant of a stale id (the text
 //!   stays visible on the open page) and this one must refuse instead.
+//! - [`paste`] — the three paste commands: two caret splices and the
+//!   view-mode `paste_block_after`, whose anchor is resolved once,
+//!   against the open page, before any op.
 //! - [`page`] — navigate pages and journals, search, refs,
 //!   `toggle_pin` (RFC 0254 phase 4: flips the `pinned::` page
 //!   property, already op-log-backed), `delete_page`.
@@ -72,6 +75,7 @@ pub mod page;
 mod page_backlinks;
 pub mod page_merge;
 pub mod page_open;
+pub mod paste;
 pub mod peers;
 pub mod plugin;
 pub mod property;

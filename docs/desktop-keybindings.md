@@ -35,7 +35,7 @@ Three things the split decided on purpose:
 - **The split moved declarations, and a pass after it deduplicated the bodies.**
   Two passes on purpose: a declaration move is reviewable on sight, a body change is not.
   Same net for both: `shortcuts.support.test.ts` pins the **presence** of all 66 keys in both directions, and nothing about what one does.
-  That is why `clipboard-handlers.test.ts` exists for the two it never reached, `YankCurrentBlock` and `YankRange`.
+  That is why `clipboard-handlers.test.ts` exists for the ones it never reached, `YankCurrentBlock`, `YankRange` and `PasteClipboard`.
   `clipboard-handlers.refer.test.ts` is the same gap for `CopyBlockRef` and `CopyBlockEmbed`.
   Both take one block id and answer one string, so a handler calling the other's command copies something that looks right and silently is not.
   The dedup collapsed eight inline copies of `ctx.runOn`, three copies of one batch loop (`ctx.runEach` owns it now), the `Esc` cascade's second list of panels, and seven toggles written two ways.
@@ -103,7 +103,8 @@ Restoring one of those would silently revert the peer's edits; pages the peer di
 Behaviour + routing: [`docs/paste.md`](paste.md).
 Three guards, which mobile mirrors.
 A code-fence host bails `Cmd/Ctrl+V` to the native splice (`detectFence` early-return) so it stays literal.
-`Cmd/Ctrl+Shift+V` reads through `tauri-plugin-clipboard-manager` to dodge the macOS webview "Paste" gate.
+Every clipboard read and write, the copy chords included, goes through `lib/os-clipboard.ts` and `tauri-plugin-clipboard-manager`, which dodges the macOS webview "Paste" gate and its silent write refusal.
+In Normal mode `p` and `Cmd/Ctrl+V` paste after the selected block (`PasteClipboard`), and `Cmd/Ctrl+V` moves a pending cut first.
 And both pass `textarea.value`, so the draft commits first.
 
 `components/outline-paste.ts` (`createPasteOps(deps)`) owns the three steps between the route decision and the workspace: flush the draft, run the command, fold the reply back in.
@@ -200,7 +201,7 @@ This section captures only the **architectural decisions** a contributor needs b
 - **`<BatchToolbar />`** (`src/components/BatchToolbar.tsx`) floats while `mode === "vim-visual"` and fires the **same** `handlers` the keyboard does, so button and chord can't drift.
   Its **Delete** confirms when a selected block has children; keyboard `d` does not (vim convention).
 
-- **The block clipboard is Normal-mode only**, and two neighbours are tried-and-rejected rather than merely true.
+- **The block clipboard is Normal-mode only** (cut is an id, copy and paste go through the OS clipboard), and two neighbours are tried-and-rejected rather than merely true.
   `O` creates with `beforeId` → `create_before`; **never reintroduce** the old create-at-tail plus `moveBlockDown` loop.
   The Visual highlight is a memoised `visualSet` (`Set<id>`) at the parent, because a per-row predicate is O(N²) per keystroke.
   `isInVisualRange` survives in `@outl/shared/outline` for tests only, and mobile's `Journal.tsx` mirrors `visualSet` by that name.
