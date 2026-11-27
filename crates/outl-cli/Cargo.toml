@@ -68,11 +68,6 @@ semver = { workspace = true }
 # handshake from this otherwise-sync binary. Minimal multi-thread feature set.
 tokio = { version = "1", features = ["rt-multi-thread", "signal", "macros"] }
 
-[dev-dependencies]
-# Backdating a binding's mtime is the only way to exercise the device
-# store's staleness TTL without sleeping through it.
-filetime = { workspace = true }
-
 [features]
 default = []
 # Links the Sentry SDK. Set only by the release pipeline. Leave it off and
