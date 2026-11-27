@@ -24,8 +24,7 @@
 
 use std::path::PathBuf;
 
-use iroh_gossip::api::{Event, GossipReceiver, GossipSender};
-use iroh_gossip::Gossip;
+use iroh_gossip::{Event, Gossip, GossipReceiver, GossipSender};
 use n0_future::StreamExt;
 use outl_core::id::ActorId;
 use outl_core::WorkspaceId;
@@ -93,7 +92,7 @@ async fn subscribe(
 
 /// Handle one inbound gossip message: a membership broadcast merges unknown
 /// peers into `peers.json`; an op-announce triggers a delta sync from the sender.
-fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::api::Message) {
+fn handle_message(ctx: &GossipCtx, msg: iroh_gossip::Message) {
     let content = std::str::from_utf8(&msg.content).unwrap_or("");
 
     // Membership broadcast? Merge unknown peers into peers.json; the catch-up

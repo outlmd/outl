@@ -27,7 +27,7 @@ The 1.0.0 surface differs from older tutorials — pin these:
   are async.
 - Gossip: `gossip.subscribe(topic, peers).await?` returns a topic handle;
   `.split()` yields `(GossipSender, GossipReceiver)`.
-  Events are `iroh_gossip::api::Event::Received(message)` with
+  Events are `iroh_gossip::Event::Received(message)` with
   `message.content` and `message.delivered_from`.
   `StreamExt` comes from `n0_future`.
 - `GossipSender::broadcast(&self, msg: bytes::Bytes) -> Result<(), ApiError>`
