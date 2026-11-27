@@ -23,7 +23,10 @@ import WebKit
 /// **The brand fill is a launch fill, not an in-session backdrop.**
 /// Left in place it is what shows in light mode wherever the page does
 /// not cover the window (overscroll bounce, a window sliver): an
-/// almost-black strip under a white page. So once the
+/// almost-black strip under a white page. It is also what showed
+/// through the keyboard toolbar's clear accessory strip and in the
+/// keyboard's rounded top corners: the black band behind the pill was
+/// this fill, not the keyboard. So once the
 /// document has loaded, `settle` swaps all four surfaces to
 /// `OutlChrome.pageBackground`, a dynamic colour (white in light,
 /// `BrandColor.dark` in dark) that UIKit re-resolves on a light/dark
@@ -44,7 +47,6 @@ public final class OutlBrandChrome: NSObject {
     private static var windowRetries = 0
     private static var webRetries = 0
     private static var loadObservation: NSKeyValueObservation?
-    private static var traitRegistration: (any UITraitChangeRegistration)?
     private static var settled = false
 
     /// How long after the webview appears we settle regardless of its
@@ -104,16 +106,16 @@ public final class OutlBrandChrome: NSObject {
     /// once; one that never does is cut off by the failsafe.
     private static func settleWhenLoaded(_ web: WKWebView) {
         if hasLoaded(web) {
-            settle()
+            settle(web)
             return
         }
         loadObservation = web.observe(\.isLoading, options: [.new]) { web, _ in
             if hasLoaded(web) {
-                DispatchQueue.main.async { settle() }
+                DispatchQueue.main.async { settle(web) }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + settleFailsafe) {
-            settle()
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleFailsafe) { [weak web] in
+            if let web { settle(web) }
         }
     }
 
@@ -124,35 +126,27 @@ public final class OutlBrandChrome: NSObject {
     }
 
     /// Replace the launch fill with `OutlChrome.pageBackground` on the
-    /// window, the root view, the webview and its scroll view, and keep
-    /// it fresh across a light/dark flip. Idempotent: the observer and
-    /// the failsafe both call it.
-    private static func settle() {
-        guard let win = OutlWindows.key else { return }
-        paintPage(in: win)
-        guard !settled else { return }
+    /// window, the root view, the webview and its scroll view. Runs once:
+    /// the observer and the failsafe both call it.
+    ///
+    /// Nothing is repainted on a light/dark flip. The colour is dynamic,
+    /// and UIKit re-resolves a dynamic `backgroundColor` on its own. A
+    /// trait handler that repainted would also fight the barcode
+    /// scanner, which clears the webview to show the camera behind it and
+    /// restores the colour it found when the scan ends.
+    /// `underPageBackgroundColor` is left at WebKit's default, which
+    /// follows the page's own CSS background (and is not drawn at all
+    /// while the webview is non-opaque).
+    private static func settle(_ web: WKWebView) {
+        guard !settled, let win = web.window ?? OutlWindows.key else { return }
         settled = true
         loadObservation = nil
-        // The colour is dynamic, so UIKit re-resolves it on its own for
-        // a view's `backgroundColor`; the registration covers the
-        // surfaces that cache a resolved value (`underPageBackgroundColor`).
-        traitRegistration = win.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self]
-        ) { (window: UIWindow, _) in
-            paintPage(in: window)
-        }
-        NSLog("[outl] brand chrome settled on the page background")
-    }
-
-    private static func paintPage(in win: UIWindow) {
         let page = OutlChrome.pageBackground
         win.backgroundColor = page
         win.rootViewController?.view.backgroundColor = page
-        if let web = OutlToolbarView.findWebView(in: win) {
-            web.backgroundColor = page
-            web.scrollView.backgroundColor = page
-            web.underPageBackgroundColor = page
-        }
+        web.backgroundColor = page
+        web.scrollView.backgroundColor = page
+        NSLog("[outl] brand chrome settled on the page background")
     }
 
     /// `BrandColor.dark` as UIKit sees it.

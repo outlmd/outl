@@ -2,22 +2,10 @@ import OutlKit
 import UIKit
 import WebKit
 
-/// Floating UIView added to the key window. Pinned to the top edge of
-/// the floating toolbar (`OutlToolbarView`), so the chip strip sits above
-/// the pill and never on top of it. Polls
-/// `window.__outlSuggesterState` every 150ms while visible, and updates
-/// the embedded `OutlSuggestView` accordingly.
-///
-/// **Position comes from AutoLayout, not keyboard frames.** The toolbar
-/// is pinned to `keyboardLayoutGuide`, so anchoring this overlay's bottom
-/// to the toolbar's top moves both with the keyboard, with one gap (the
-/// toolbar's own top margin, `ToolbarLayout.verticalMargin`) and no
-/// arithmetic about what the keyboard frame includes. It used to read
-/// `keyboardFrameEnd`, which counted the accessory toolbar; with the
-/// accessory gone that math would have put the strip on top of the pill.
-///
-/// **Z-order:** both are subviews of the key window, and `OutlSwizzle`
-/// installs the toolbar first, so this overlay is above it.
+/// Floating UIView added to the key window. Listens to keyboard
+/// notifications to position itself flush above the keyboard, polls
+/// `window.__outlSuggesterState` every 150ms while visible, and
+/// updates the embedded `OutlSuggestView` accordingly.
 ///
 /// **Why outside the `inputAccessoryView`:** a previous version
 /// embedded the chip strip inside the toolbar and the AutoLayout
@@ -33,13 +21,8 @@ public final class OutlSuggestOverlay: UIView {
     private let suggest = OutlSuggestView()
     private var polling = false
     private var keyboardVisible = false
+    private var keyboardFrame: CGRect = .zero
     private var lastStateSignature: String?
-
-    /// The strip's height: 0 when there is nothing to show, the chip
-    /// strip's height otherwise. The only dimension left to update by
-    /// hand; position is constraints.
-    private lazy var heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-    private var windowConstraints: [NSLayoutConstraint] = []
 
     /// Singleton bound to the key window. Reused across WebView
     /// re-binds (the swizzle calls `installInKeyWindow(webView:)`
@@ -57,7 +40,6 @@ public final class OutlSuggestOverlay: UIView {
         if overlay.superview !== win {
             overlay.removeFromSuperview()
             win.addSubview(overlay)
-            overlay.pin(to: win)
         }
         overlay.startPolling()
         NSLog("[outl] suggest overlay installed in key window")
@@ -65,8 +47,6 @@ public final class OutlSuggestOverlay: UIView {
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
-        heightConstraint.isActive = true
         isHidden = true
         isUserInteractionEnabled = true
 
@@ -88,6 +68,12 @@ public final class OutlSuggestOverlay: UIView {
         )
         nc.addObserver(
             self,
+            selector: #selector(keyboardWillChange(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+        nc.addObserver(
+            self,
             selector: #selector(keyboardWillHide(_:)),
             name: UIResponder.keyboardWillHideNotification,
             object: nil
@@ -102,49 +88,44 @@ public final class OutlSuggestOverlay: UIView {
         NotificationCenter.default.removeObserver(self)
     }
 
-    /// Pin to the window's sides and to the toolbar's top edge. Without
-    /// a toolbar (it is installed first, so this is a defensive branch)
-    /// fall back to the keyboard's top, offset by the toolbar's height,
-    /// which is the same place.
-    private func pin(to window: UIWindow) {
-        NSLayoutConstraint.deactivate(windowConstraints)
-        let bottom: NSLayoutConstraint
-        if let toolbar = OutlToolbarView.installed {
-            bottom = bottomAnchor.constraint(equalTo: toolbar.topAnchor)
-        } else {
-            bottom = bottomAnchor.constraint(
-                equalTo: window.keyboardLayoutGuide.topAnchor,
-                constant: -CGFloat(ToolbarLayout.stackHeight)
-            )
-        }
-        windowConstraints = [
-            leadingAnchor.constraint(equalTo: window.leadingAnchor),
-            trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            bottom,
-        ]
-        NSLayoutConstraint.activate(windowConstraints)
-    }
-
     // MARK: - Keyboard notifications
 
     @objc private func keyboardWillShow(_ note: Notification) {
         keyboardVisible = true
-        updateHeight()
+        if let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
+            keyboardFrame = frame
+        }
+        layoutAboveKeyboard()
+    }
+
+    @objc private func keyboardWillChange(_ note: Notification) {
+        guard keyboardVisible else { return }
+        if let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
+            keyboardFrame = frame
+        }
+        layoutAboveKeyboard()
     }
 
     @objc private func keyboardWillHide(_ note: Notification) {
         keyboardVisible = false
         suggest.hide()
-        heightConstraint.constant = 0
         isHidden = true
     }
 
-    /// Size the strip to the chips. Position needs no update: the
-    /// constraints in `pin(to:)` already keep the bottom on the pill.
-    private func updateHeight() {
-        let height = suggest.intrinsicContentSize.height
-        heightConstraint.constant = height
-        isHidden = (height == 0) || !keyboardVisible
+    private func layoutAboveKeyboard() {
+        guard let win = superview as? UIWindow else { return }
+        // `UIKeyboardFrameEndUserInfoKey` already accounts for the
+        // `inputAccessoryView` (the formatting toolbar). `kbTop` is
+        // the top edge of that combined unit. We just sit flush above.
+        let kbTop = keyboardFrame.origin.y
+        let overlayHeight = suggest.intrinsicContentSize.height
+        frame = CGRect(
+            x: 0,
+            y: kbTop - overlayHeight,
+            width: win.bounds.width,
+            height: overlayHeight
+        )
+        isHidden = (overlayHeight == 0)
     }
 
     // MARK: - Polling
@@ -202,6 +183,6 @@ public final class OutlSuggestOverlay: UIView {
         case .hide:
             suggest.hide()
         }
-        updateHeight()
+        layoutAboveKeyboard()
     }
 }

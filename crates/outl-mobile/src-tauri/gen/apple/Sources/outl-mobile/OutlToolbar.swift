@@ -2,35 +2,15 @@ import OutlKit
 import UIKit
 import WebKit
 
-/// Floating toolbar shown above the iOS keyboard while a block is being
-/// edited.
+/// Keyboard accessory toolbar shown above the iOS keyboard while a
+/// block is being edited.
 ///
-/// Bear-style: a single rounded-full pill, no dividers, no edge-to-edge
-/// bar. It is **not** an `inputAccessoryView`. An accessory lives in the
-/// keyboard's own window, on a host that defaults to solid black, so a
-/// pill that floats over a clear strip there shows that black around it
-/// (and painting the host grey only trades one slab for another). This
-/// view is a full-width, fully transparent overlay in the key window,
-/// pinned to `keyboardLayoutGuide.topAnchor`, the same lifetime idea as
-/// `OutlSuggestOverlay` (a singleton, rebound when the webview is
-/// bound). Only the capsule takes touches: `hitTest` hands everything
-/// else back to the page, so scrolling and caret taps work right up to
-/// the pill's edge.
-///
-/// `OutlSwizzle` still replaces `WKContentView.inputAccessoryView`, but
-/// with a zero-height stub, only to keep the system form bar
-/// (`up/down/done`) away.
-///
-/// Because the keyboard no longer carries the pill, the page's viewport
-/// shrinks to the keys alone. `ToolbarLayout.showClearanceScript` tells
-/// the page how much of its bottom edge the pill covers while it is up
-/// (`--outl-toolbar-clearance`, consumed as `scroll-padding-bottom`), and
-/// `hideClearanceScript` takes it back when the keyboard goes.
-///
-/// Buttons re-order by usage: `OutlKit.ToolbarMFU` owns the ordering
-/// algorithm, `OutlKit.ToolbarLock` owns the user's opt-out from it (and
-/// both own their unit tests). This file only does the UIKit rendering
-/// and the JS bridge.
+/// Bear-style: a single rounded-full pill that floats over the
+/// keyboard, no dividers, no edge-to-edge bar. Buttons re-order by
+/// usage — `OutlKit.ToolbarMFU` owns the ordering algorithm,
+/// `OutlKit.ToolbarLock` owns the user's opt-out from it (and both own
+/// their unit tests). This file only does the UIKit rendering and the
+/// JS bridge.
 ///
 /// **The row is rebuilt when the keyboard *appears*, never on a tap
 /// and never while it is already up.** `OutlSwizzle` keeps one
@@ -57,37 +37,15 @@ import WebKit
 /// to the dispatch, which makes `Journal.tsx` the single counter for
 /// both bars.
 ///
-/// Exposed to `OutlSwizzle` via `@objc(OutlToolbarView)`; the swizzle
-/// installs it into the key window once the webview exists.
+/// Exposed to `main.mm` / `OutlSwizzle` via `@objc(OutlToolbarView)`;
+/// the swizzle instantiates this and returns it as the
+/// `inputAccessoryView` for the `WKContentView`.
 @objc(OutlToolbarView)
 public final class OutlToolbarView: UIView {
 
     // MARK: - Public API used by Obj-C / OutlSwizzle
 
     @objc public weak var webView: WKWebView?
-
-    /// Singleton bound to the key window. Reused across re-binds.
-    private static var shared: OutlToolbarView?
-
-    /// The installed overlay, so `OutlSuggestOverlay` can pin itself to
-    /// the pill's top edge instead of guessing at the keyboard's.
-    static var installed: OutlToolbarView? { shared }
-
-    /// Put the toolbar in the key window and bind it to `webView`.
-    /// Idempotent: a second call only rebinds.
-    @objc(installInKeyWindowWithWebView:)
-    public static func install(webView: WKWebView) {
-        guard let win = OutlWindows.key else { return }
-        let bar = shared ?? OutlToolbarView()
-        shared = bar
-        bar.webView = webView
-        if bar.superview !== win {
-            bar.removeFromSuperview()
-            win.addSubview(bar)
-            bar.pin(to: win)
-        }
-        NSLog("[outl] floating toolbar installed in key window")
-    }
 
     @objc(findWebViewIn:)
     public static func findWebView(in view: UIView?) -> WKWebView? {
@@ -149,15 +107,6 @@ public final class OutlToolbarView: UIView {
     /// comment for why the raw notification is not a session boundary.
     private var keyboardVisible = false
 
-    /// Whether the pill is currently presented (or on its way in).
-    /// Distinct from `keyboardVisible`: a keyboard raised for a sheet
-    /// field is up with no pill.
-    private var pillShown = false
-
-    /// Constraints that pin the overlay to its window; replaced when the
-    /// window changes.
-    private var windowConstraints: [NSLayoutConstraint] = []
-
     // MARK: - Subviews
 
     /// Visual capsule background — single rounded pill behind
@@ -185,17 +134,12 @@ public final class OutlToolbarView: UIView {
     // MARK: - Init
 
     public override init(frame: CGRect) {
-        super.init(frame: .zero)
-        // Truly transparent: nothing but the capsule paints, so the
-        // page shows around it (see the type's doc comment).
+        let resolved = frame == .zero
+            ? CGRect(x: 0, y: 0, width: 0, height: 56)
+            : frame
+        super.init(frame: resolved)
         backgroundColor = .clear
-        isOpaque = false
-        translatesAutoresizingMaskIntoConstraints = false
-        isHidden = true
-        alpha = 0
-        heightAnchor.constraint(
-            equalToConstant: CGFloat(ToolbarLayout.stackHeight)
-        ).isActive = true
+        autoresizingMask = .flexibleWidth
         setupViews()
         rebuildButtons()
         // A new editing session starts when the keyboard appears. This
@@ -223,30 +167,8 @@ public final class OutlToolbarView: UIView {
         fatalError("init(coder:) not supported")
     }
 
-    /// Anchor to the window's safe-area edges horizontally (clean in
-    /// portrait and landscape) and to the top of the keyboard vertically.
-    /// `keyboardLayoutGuide` moves with the keyboard, so the pill rides
-    /// the keyboard's animation without any frame bookkeeping here.
-    private func pin(to window: UIWindow) {
-        NSLayoutConstraint.deactivate(windowConstraints)
-        windowConstraints = [
-            leadingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.leadingAnchor),
-            trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor),
-            bottomAnchor.constraint(equalTo: window.keyboardLayoutGuide.topAnchor),
-        ]
-        NSLayoutConstraint.activate(windowConstraints)
-    }
-
-    // MARK: - Hit testing
-
-    /// Only the capsule takes touches. The container is full width and
-    /// transparent, so a hit that lands on it (and not on the capsule or
-    /// a button) belongs to the page underneath: returning `nil` lets
-    /// UIKit move on to the webview, which keeps scroll, taps and the
-    /// caret working beside and around the pill.
-    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        return hit === self ? nil : hit
+    public override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 56)
     }
 
     // MARK: - Layout
@@ -308,9 +230,7 @@ public final class OutlToolbarView: UIView {
             capsule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             capsule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             capsule.centerYAnchor.constraint(equalTo: centerYAnchor),
-            capsule.heightAnchor.constraint(
-                equalToConstant: CGFloat(ToolbarLayout.capsuleHeight)
-            ),
+            capsule.heightAnchor.constraint(equalToConstant: 44),
 
             // Pinned left: flush against the capsule's left edge.
             leftPinned.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 8),
@@ -410,95 +330,15 @@ public final class OutlToolbarView: UIView {
     ///
     /// Guarded on the rising edge: iOS re-posts this while the keyboard
     /// is already up, and rebuilding then is the mid-session reshuffle
-    /// issue #269 was about. The same edge decides whether the pill
-    /// shows at all: only for the editor, never for a sheet's field.
+    /// issue #269 was about.
     @objc private func keyboardWillShow(_ note: Notification) {
         guard !keyboardVisible else { return }
         keyboardVisible = true
-        let timing = KeyboardTiming(note)
-        refreshOrderState { [weak self] in
-            guard let self, self.keyboardVisible else { return }
-            self.rebuildButtons()
-            self.presentIfEditing(timing)
-        }
+        refreshOrderState { [weak self] in self?.rebuildButtons() }
     }
 
     @objc private func keyboardWillHide(_ note: Notification) {
         keyboardVisible = false
-        dismiss(KeyboardTiming(note))
-    }
-
-    // MARK: - Presentation
-
-    /// Show the pill when the keyboard belongs to the editor: the
-    /// webview's content view holds first responder (not a native field
-    /// in a sheet) and the focused element is the outline's textarea
-    /// (not a field in a web sheet). A probe that fails to answer shows
-    /// the pill, see `ToolbarLayout.isEditorFocused`.
-    private func presentIfEditing(_ timing: KeyboardTiming) {
-        guard let web = resolveWebView(), Self.holdsFirstResponder(web) else { return }
-        web.evaluateJavaScript(ToolbarLayout.editorFocusedScript) { [weak self] result, _ in
-            guard let self, self.keyboardVisible, !self.pillShown,
-                  ToolbarLayout.isEditorFocused(result)
-            else { return }
-            self.present(timing)
-        }
-    }
-
-    private func present(_ timing: KeyboardTiming) {
-        pillShown = true
-        // No `bringSubviewToFront`: the suggester overlay is added after
-        // this view and has to stay above it (see `OutlSwizzle.bindWebView`).
-        isHidden = false
-        webView?.evaluateJavaScript(ToolbarLayout.showClearanceScript, completionHandler: nil)
-        UIView.animate(
-            withDuration: timing.duration,
-            delay: 0,
-            options: [timing.curve, .beginFromCurrentState]
-        ) {
-            self.alpha = 1
-        }
-    }
-
-    private func dismiss(_ timing: KeyboardTiming) {
-        guard pillShown else { return }
-        pillShown = false
-        webView?.evaluateJavaScript(ToolbarLayout.hideClearanceScript, completionHandler: nil)
-        UIView.animate(
-            withDuration: timing.duration,
-            delay: 0,
-            options: [timing.curve, .beginFromCurrentState],
-            animations: { self.alpha = 0 },
-            completion: { [weak self] _ in
-                // A new session may have started during the fade; its
-                // `present` owns visibility from then on.
-                guard let self, !self.pillShown else { return }
-                self.isHidden = true
-            }
-        )
-    }
-
-    /// Is some view inside `web` the first responder? `WKContentView` is
-    /// private, so this asks the hierarchy rather than naming it.
-    private static func holdsFirstResponder(_ web: UIView) -> Bool {
-        if web.isFirstResponder { return true }
-        return web.subviews.contains { holdsFirstResponder($0) }
-    }
-
-    /// The keyboard's own animation parameters, so the pill fades on the
-    /// same clock as the keys instead of a made-up one.
-    private struct KeyboardTiming {
-        let duration: TimeInterval
-        let curve: UIView.AnimationOptions
-
-        init(_ note: Notification) {
-            let info = note.userInfo
-            duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
-                .doubleValue ?? 0.25
-            let raw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?
-                .uintValue ?? UInt(UIView.AnimationCurve.easeInOut.rawValue)
-            curve = UIView.AnimationOptions(rawValue: raw << 16)
-        }
     }
 
     /// Pull the tap counts and the lock out of the webview's

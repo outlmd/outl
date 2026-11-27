@@ -5,7 +5,7 @@ import WebKit
 /// Floating chip strip rendered when the user is typing inside `[[…]]`.
 ///
 /// Sits inside an `OutlSuggestOverlay` which positions it flush above
-/// the floating toolbar. Each chip carries a `slug` + `kind` payload that
+/// the keyboard. Each chip carries a `slug` + `kind` payload that
 /// fires `window.__outlSuggesterPicked(slug, kind)` on tap; the JS
 /// layer then synchronously rewrites the textarea so the keyboard
 /// stays up.
@@ -28,12 +28,15 @@ public final class OutlSuggestView: UIView {
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
-        // A system surface, dynamic in light and dark. This strip lives
-        // in the key window over the page, so it needs a fill of its own
-        // (a clear one would let the page's text show through the chips),
-        // but not the window's black or the launch purple: the system
-        // grouped-surface grey reads as native chrome in both modes.
-        backgroundColor = .secondarySystemBackground
+        // Match the formatting toolbar's old background so when both
+        // were stacked they read as one continuous slab. With the new
+        // capsule toolbar this is less load-bearing, but the QuickType-
+        // adjacent color still feels right.
+        backgroundColor = UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0.11, alpha: 1.0)
+                : UIColor(white: 0.97, alpha: 1.0)
+        }
 
         let topLine = UIView()
         topLine.translatesAutoresizingMaskIntoConstraints = false

@@ -387,32 +387,27 @@ Decision shared with the desktop in `@outl/shared/caret-nav`, including the one 
 ## Keyboard accessory bar (Android web bar / iOS native bar)
 
 The keyboard toolbar + suggester strip have two renderings.
-iOS is native (`OutlToolbarView`, a floating overlay in the key window; see below).
+iOS is native (`OutlToolbarView` swizzled onto `WKContentView`), untouched.
 Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToolbar />`, gated in `Journal.tsx` on `isAndroid && editingId()`.
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
 Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/client-editing.md` → Keyboard accessory bar](client-editing.md#keyboard-accessory-bar-mobile).
 
-### What sits behind the pill (iOS): nothing
+### What shows behind the pill (iOS): the page
 
-The pill is a floating overlay in the key window, pinned to `keyboardLayoutGuide.topAnchor`, and everything around the capsule is transparent: the page shows through.
-It used to be the keyboard's `inputAccessoryView`, which iOS hosts in the keyboard window on views that default to solid black.
-A white pill over a clear strip there showed a black band (and black wedges in the keyboard's rounded top corners) in light mode.
-Painting that host grey was tried first and replaced, not kept: it filled the strip instead of removing it, and it needed a walk over private host views.
+The pill is the keyboard's `inputAccessoryView`, and the strip around the capsule is clear, so what shows there is whatever is behind the keyboard: the app's window and the webview's scroll view.
+`OutlBrandChrome` paints those `#0c0814` at launch so the LaunchScreen handoff has no white flash, and it used to keep that fill for the whole session.
+In light mode that was the black band around the white pill, and the black wedges in the keyboard's rounded top corners.
 
-How the pieces fit:
-
-- **Suppressing the system bar.** `OutlSwizzle` still replaces `WKContentView.inputAccessoryView`, but the getter returns a zero-height, invisible stub. Returning `nil` would bring back the system `up/down/done` bar, and the real pill must not go in the keyboard window.
-- **Touches.** `OutlToolbarView.hitTest` returns `nil` for anything that is not the capsule, so scrolling, taps and the caret work beside and around the pill. The buttons are plain `UIButton`s, which do not take first responder, so the keyboard stays up.
-- **When it shows.** On the keyboard's rising edge (the same edge as the #269 rebuild below), and only if the webview's content view is the first responder and the focused element is the outline's `<textarea>` (not a field in a `role="dialog"` sheet; see `ToolbarLayout.editorFocusedScript`). On keyboard hide it fades out on the keyboard's own duration and curve, and the overlay is hidden, so no empty strip is left.
-- **The suggester.** `OutlSuggestOverlay` bottom-anchors to the pill's top edge and is added to the window after it, so with `[[` open the chips sit above the pill in layout and in z-order, with one gap (the pill's own 6 pt top margin). It no longer reads `keyboardFrameEnd`, which counted the old accessory. Its fill is `UIColor.secondarySystemBackground`, a dynamic system colour, so it brings back neither the window's black nor the launch purple.
-- **Bottom clearance.** The pill is not part of the keyboard now, so `interactive-widget=resizes-content` shrinks the viewport to the keys and the pill covers the bottom 56 pt of the page. While the pill is up, native writes `--outl-toolbar-clearance` (`ToolbarLayout.stackHeight`, 56) on `<html>`; `styles.css` reads it as `scroll-padding-bottom` on the outline, which `scrollIntoView` and WebKit's caret reveal honour. The outline's existing `pb-32` already leaves the tail room, so no padding is added on top. The property is removed on hide. Android never sets it.
-
-`OutlBrandChrome` keeps `#0c0814` on the window and webview for the LaunchScreen handoff, and swaps them to `OutlChrome.pageBackground` (white in light mode, `#0c0814` in dark) once the document has loaded, with a 4 s failsafe, and again on a light/dark flip.
-That swap is still needed with no accessory: it is what keeps a light-mode overscroll or a window sliver from showing `#0c0814`.
+Once the document has loaded (4 s failsafe), `OutlBrandChrome.settle` swaps the window, the root view, the webview and its scroll view to `OutlChrome.pageBackground`: white in light mode, `#0c0814` in dark.
+The colour is dynamic, so a light/dark flip re-resolves it with no repaint code.
+There is deliberately no trait handler: the barcode scanner clears the webview to show the camera behind it and restores the colour it found, and a repaint on a flip mid-scan would cover the camera.
+`underPageBackgroundColor` stays at WebKit's default, which follows the page's CSS background.
 The swap waits for the load because the webview is non-opaque until then: a white window under the dark LaunchScreen would bring the white flash back.
-Neither colour follows the in-app theme preset; they follow the system appearance, like the capsule, and the page paints its own opaque background over them.
+Neither colour follows an in-app theme preset (mobile has none today, see [theming](theming.md)); they are the `bg` of the `outl-light` / `outl` pair.
 
-Only a device settles the rest: the animation with the keyboard, the clearance and the caret reveal, hit testing, and the hand-over in light and dark.
+A floating overlay in the key window was tried instead of the accessory and dropped.
+The keyboard frame then stopped including the pill, so WebKit's caret reveal parked the caret under it, the iPad floating keyboard left it at the bottom of the screen, and it could cover a sheet's buttons.
+None of that happens with the accessory, and the band was never the accessory's.
 
 ### The row only changes shape between editing sessions
 
@@ -421,7 +416,7 @@ That moved the button the user had just hit out from under their finger before t
 Now the order is resolved once per editing session and held: the web bar reads it at mount (its parent gates it on `editingId()`, so a mount *is* a session), and the native bar reads it when the keyboard **appears** — `OutlSwizzle` keeps one `OutlToolbarView` for the whole app lifetime, so a keyboard notification is the only thing that marks a session boundary there.
 
 `keyboardWillShowNotification` is not one-per-session, which is the trap: iOS re-posts it while the keyboard is already up (input-mode switch, emoji, the QuickType bar appearing — which this app keeps on).
-Acting on every post puts the mid-session reshuffle straight back, so `OutlToolbarView` tracks `keyboardVisible` and rebuilds only on the rising edge (it presents the pill on that edge too, never on a mid-session post).
+Acting on every post puts the mid-session reshuffle straight back, so `OutlToolbarView` tracks `keyboardVisible` and rebuilds only on the rising edge.
 `OutlSuggestOverlay` already kept the same flag for the same reason.
 Taps are still counted the moment they happen; MFU just gets to act on the count at the next session rather than mid-gesture.
 
