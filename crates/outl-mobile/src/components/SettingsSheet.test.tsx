@@ -57,6 +57,7 @@ function mount() {
   const onClose = vi.fn();
   const onOpenDevices = vi.fn();
   const onOpenGuide = vi.fn();
+  const onOpenTrash = vi.fn();
   dispose = render(
     () => (
       <SettingsSheet
@@ -64,11 +65,12 @@ function mount() {
         onClose={onClose}
         onOpenDevices={onOpenDevices}
         onOpenGuide={onOpenGuide}
+        onOpenTrash={onOpenTrash}
       />
     ),
     host,
   );
-  return { onClose, onOpenDevices, onOpenGuide };
+  return { onClose, onOpenDevices, onOpenGuide, onOpenTrash };
 }
 
 /** The row that reaches pairing, found by its label rather than by
@@ -161,6 +163,16 @@ describe("SettingsSheet", () => {
   it("closes itself when it hands over to the devices sheet", () => {
     const { onClose } = mount();
     devicesRow()!.click();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("closes itself when it hands over to the trash sheet", () => {
+    const { onClose, onOpenTrash } = mount();
+    const row = [...document.body.querySelectorAll("button")].find(
+      (b) => b.textContent?.includes("Trash"),
+    ) as HTMLButtonElement;
+    row.click();
+    expect(onOpenTrash).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalled();
   });
 });

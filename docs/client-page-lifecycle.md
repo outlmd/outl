@@ -54,11 +54,13 @@ Delete is `Move(node, TRASH_ROOT)` ([invariant 6](../CLAUDE.md#critical-invarian
 | MCP | `outl_trash_list`, `outl_trash_restore` — an agent that can delete a block can undo it. |
 | Desktop | `TrashPanel`, from the trash button in the top-right capsule. See [`desktop-ux.md`](desktop-ux.md#trash-panel). |
 | TUI | `/trash` (and `:trash`), `r` to restore, `Enter` to open the page a deleted block came from. See [`tui.md`](tui-overlays.md#trash-trash-trash). |
-| Mobile | Not yet — the commands are registered, no sheet calls them. |
+| Mobile | `TrashSheet`, from **Settings → Trash** or the search palette's "Open trash". |
+
+The client-side rules (the in-flight gate, the reset on each opening, notice versus refusal, the refetch after a restore) are owned by `@outl/shared/trust`'s `createTrashRestore`, which both GUIs consume.
 
 Both GUI commands are `list_trash` / `restore_trash_entry` (`outl_tauri_shared::commands::trash`), which neither client may second-guess: `refusal` rides each row, and `restore_trash_entry` re-asks under its own lock.
 
-Neither surface has a chord. A chord needs an `Action` in `outl-shortcuts`, whose `support()` match is at its frozen size baseline, so it waits on that split — the per-client verdicts it would force are the mechanism, not the cost. The desktop's affordance is a button and the TUI's is its command registry, which is what `Capability::Trash` records (it was the one row in `CLI_ONLY`, now empty). [Issue #287](https://github.com/outlmd/outl/issues/287).
+No surface has a chord. A chord needs an `Action` in `outl-shortcuts`, whose `support()` match is at its frozen size baseline, so it waits on that split — the per-client verdicts it would force are the mechanism, not the cost. The desktop's affordance is a button, mobile's is a Settings row plus a palette row, and the TUI's is its command registry, which is what `Capability::Trash` records (it was the one row in `CLI_ONLY`, now empty). [Issue #287](https://github.com/outlmd/outl/issues/287).
 
 Related but different: **undo / redo** is this session's mutations and does not survive a restart; this reaches a deletion from any device, on any day, because it reads the op log.
 

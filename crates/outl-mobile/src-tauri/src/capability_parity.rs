@@ -48,6 +48,15 @@ mod tests {
         // `Missing` is worse than an undeclared gap, because the
         // sentence is shown to the user: it sent someone who had the
         // feature to another device to go and find it.
+        let _ = crate::commands::list_trash;
+        let _ = crate::commands::restore_trash_entry;
+        assert_eq!(
+            capability_support(Capability::Trash).mobile,
+            Support::Full,
+            "outl-mobile registers list_trash and restore_trash_entry and mounts \
+             TrashSheet.tsx from Settings (and the palette's \"Open trash\") — the \
+             catalog must not tell the user the phone cannot restore a block",
+        );
         let _ = crate::commands::page_timeline;
         assert_eq!(
             capability_support(Capability::PageHistory).mobile,

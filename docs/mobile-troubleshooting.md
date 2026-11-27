@@ -172,11 +172,10 @@ Other schemes are refused.
 **Settings → Diagrams** is set to **Off**.
 Set it to **Pele**.
 
-### I deleted a block and cannot restore it from the phone
+### I deleted a block and want it back
 
-The trash is not on the phone yet.
-Sync to a computer and restore it there.
-In the meantime **Undo** in the keyboard toolbar steps back through recent edits.
+Open **Settings → Trash** (or "Open trash" in the search palette) and restore it from the list.
+For a fresh edit, **Undo** in the keyboard toolbar steps back through recent edits.
 
 ### I need my notes as plain files
 

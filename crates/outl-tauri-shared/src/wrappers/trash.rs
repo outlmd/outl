@@ -4,10 +4,10 @@
 //! than `catalog.rs` alone, so a client dropping this module fails the
 //! build instead of quietly shipping without a recycle bin.
 //!
-//! **Both** GUI clients register it. The desktop has a panel; mobile has
-//! no surface yet, and that difference is recorded as `Capability::Trash`
-//! rather than left to a user hunting for it — registering a command is
-//! not shipping a feature (see [`super`]).
+//! **Both** GUI clients register it. The desktop has `TrashPanel.tsx` and mobile
+//! has `TrashSheet.tsx`; `Capability::Trash` records each client's verdict,
+//! because registering a command is not shipping a feature (see
+//! [`super`]).
 
 /// `list_trash` / `restore_trash_entry`: read a deletion back.
 #[macro_export]

@@ -31,7 +31,7 @@ A page you write on the phone is a plain `.md` file that syncs to your other dev
 | Plugins from the official registry | yes |
 | Add a line from the Home Screen, Lock Screen, share sheet or a Shortcut | yes, see [capture](mobile-capture.md) |
 | Vim keys, chords, a sidebar | no, the phone is touch-first and single pane |
-| Restore a deleted block from the trash | not yet, do it on a computer |
+| Restore a deleted block from the trash | yes, Settings → Trash, or "Open trash" in the search palette |
 | Opening a `.md` file from another app into outl | not yet |
 
 The per-action verdicts for every client are in [`client-parity.md`](client-parity.md), which is generated from the code.
@@ -377,6 +377,7 @@ The gear in the header opens one sheet.
 | Row | What it does |
 |---|---|
 | Devices and sync | Pair, see devices, sync now, export. |
+| Trash | Deleted blocks from any device, and restore. |
 | What's what | The first-run walkthrough again. |
 | Diagrams | **Pele** draws Mermaid fences as diagrams, **Off** leaves them as highlighted source. Shared with the desktop on the same machine. |
 | Lock button order, Reset button order | The keyboard toolbar, see [Edit a block](#edit-a-block). |
@@ -429,7 +430,7 @@ The folder layout and the file format are the same everywhere: [markdown-format.
 | Keys | Touch. A keyboard toolbar instead of chords. | Chords and vim modes. |
 | Selecting blocks | Long press, **Select blocks**, tap to stretch. | `v` and `j`/`k`. |
 | Slash menu | None. | `/`. |
-| Deleted blocks | Not restorable from the phone yet. | Trash. |
+| Deleted blocks | Trash sheet, from Settings or the palette. | Trash panel. |
 | Automatic backups | No. Another device you sync with takes them. | Yes. |
 | Open a file from the OS in outl | Not yet. | Yes. |
 | About screen with the version | Not yet. See the build in the App Store, TestFlight or Android Settings. | Yes. |

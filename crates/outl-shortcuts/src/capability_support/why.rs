@@ -11,21 +11,6 @@
 //! writes its own sentence is a second copy of the fact (root
 //! `CLAUDE.md` invariant 12).
 
-/// Mobile is the one client left without a trash surface: the
-/// `list_trash` / `restore_trash_entry` commands are registered there
-/// (`trash_commands!`), and no sheet calls them yet.
-///
-/// It does **not** name `outl trash list`, the way this string did
-/// while all three clients lacked the surface. There is no `outl`
-/// binary on iOS, so telling a phone user to run a command is telling
-/// them nothing — the honest route is the computer that shares the
-/// workspace. Same reason `aheadOfLogNotice` splits its last sentence
-/// by client.
-pub const NO_MOBILE_TRASH_SHEET: &str =
-    "Restoring a deleted block isn't on the phone yet — open this workspace on your computer \
-     and use the trash there. Nothing is lost in the meantime: a delete here is never \
-     permanent.";
-
 /// Snapshots fork the `git` binary (`outl_actions::backup`), and a
 /// phone has no `git` on `PATH` — an App Store app cannot exec one
 /// either. So mobile spawns the same pass every client does and that
@@ -248,7 +233,7 @@ pub const NO_SLASH_MENU_ON_THE_PHONE: &str =
 /// someone already holding a block they want quoted, and a sentence
 /// that sends them to another device to type two characters they can
 /// type here is worse than the gap: the same reason
-/// `NO_MOBILE_TRASH_SHEET` dropped its `outl trash list` clause.
+/// the retired mobile trash nudge dropped its `outl trash list` clause.
 pub const TYPE_THE_QUOTE_MARKER: &str =
     "There's no one-gesture blockquote here yet. Type `> ` at the front of a block to quote \
      it, and delete those two characters to unquote it. On a task block it goes after the \

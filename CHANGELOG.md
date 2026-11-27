@@ -7,6 +7,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Added
 
+- **Restore a deleted block from the phone.**
+  Settings → Trash (or "Open trash" in the search palette) lists what was deleted on any device.
+  It puts a block back where it came from, same as the desktop panel and the TUI's `/trash` ([Trash](docs/client-page-lifecycle.md#restoring-a-deleted-block)).
+
 - **Click a backlink's breadcrumb to open its page at the parent block.**
   The dim line above a "Linked from" row used to do nothing.
   On desktop and mobile it is now a link: it opens the source page with the parent block selected, centered and flashed for a moment.

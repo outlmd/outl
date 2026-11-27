@@ -84,6 +84,7 @@ import { dispatchToolbarAction as dispatch } from "./Journal.toolbar-dispatch";
 import { Calendar } from "./Calendar";
 import { KeyboardAccessory } from "./KeyboardAccessory";
 import { DevicesSheet } from "./DevicesSheet";
+import { TrashSheet } from "./TrashSheet";
 import { RemindersSheet } from "./RemindersSheet";
 import { RemindSheet } from "./RemindSheet";
 import { createRemindAuthoring } from "./Journal.remind";
@@ -196,6 +197,7 @@ export function Journal() {
   const [switcherOpen, setSwitcherOpen] = createSignal(false);
   const [calendarOpen, setCalendarOpen] = createSignal(false);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
+  const [trashOpen, setTrashOpen] = createSignal(false);
   const [remindersOpen, setRemindersOpen] = createSignal(false);
   const [pluginsOpen, setPluginsOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -1323,6 +1325,7 @@ export function Journal() {
     OpenTomorrow: () => void dayNav.tomorrow(),
     QuickCapture: () => setCaptureOpen(true),
     TaskList: () => setTasksOpen(true),
+    OpenTrash: () => setTrashOpen(true),
     OpenReminders: () => setRemindersOpen(true),
     OpenCalendar: () => setCalendarOpen(true),
     SyncNow: () => void handleRefresh(),
@@ -1645,11 +1648,18 @@ export function Journal() {
       />
 
       <DevicesSheet open={devicesOpen()} onClose={() => setDevicesOpen(false)} />
+      <TrashSheet
+        open={trashOpen()}
+        onClose={() => setTrashOpen(false)}
+        onView={(v) => openView(v)}
+        onMessage={(text) => setError(text)}
+      />
 
       <SettingsSheet
         open={settingsOpen()}
         onClose={() => setSettingsOpen(false)}
         onOpenDevices={() => setDevicesOpen(true)}
+        onOpenTrash={() => setTrashOpen(true)}
         onOpenGuide={() => setGuideOpen(true)}
       />
 
