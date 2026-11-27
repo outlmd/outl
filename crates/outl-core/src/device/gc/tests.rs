@@ -42,7 +42,12 @@ fn binding(store: &DeviceStore, name: &str, root: &Path, age: Duration) -> PathB
 
 fn backdate(path: &Path, age: Duration) {
     let when = SystemTime::now() - age;
-    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(when)).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(when))
+        .unwrap();
 }
 
 fn verdict(store: &DeviceStore, path: &Path) -> BindingVerdict {

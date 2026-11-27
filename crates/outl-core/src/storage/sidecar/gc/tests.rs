@@ -23,7 +23,12 @@ fn touch(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
 /// Backdate a file so the TTL sees it as abandoned.
 fn age(path: &std::path::Path, by: Duration) {
     let when = SystemTime::now() - by;
-    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(when)).expect("set mtime");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open for set_times")
+        .set_times(std::fs::FileTimes::new().set_modified(when))
+        .expect("set mtime");
 }
 
 fn verdict_of(survey: &Survey, name: &str) -> Option<SidecarVerdict> {

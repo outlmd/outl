@@ -31,11 +31,12 @@ fn with_stale_binding(age: std::time::Duration) -> (TempDir, PathBuf, TempDir, P
         ),
     )
     .unwrap();
-    filetime::set_file_mtime(
-        &record,
-        filetime::FileTime::from_system_time(std::time::SystemTime::now() - age),
-    )
-    .unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&record)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now() - age))
+        .unwrap();
 
     (dir, root, store_dir, record)
 }

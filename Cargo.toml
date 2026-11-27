@@ -210,10 +210,7 @@ tauri-plugin-os = "2"
 # Dev
 proptest = "1"
 tempfile = "3"
-libc = "0.2"
-# Test-only: backdating a file's mtime is the only way to exercise a TTL
-# without sleeping through it (`outl-core`'s device-store GC).
-filetime = "0.2"
+libc = "=0.2.189"
 
 [profile.release]
 lto = "thin"

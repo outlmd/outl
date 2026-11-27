@@ -35,7 +35,6 @@ lru = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 libc = { workspace = true }
-filetime = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["html_reports"] }
 
 # `outl-core` had no benchmarks at all until this branch, which made

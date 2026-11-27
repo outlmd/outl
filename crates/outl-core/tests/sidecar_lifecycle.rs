@@ -221,13 +221,14 @@ fn compaction_leaves_no_index_sidecar_behind() {
     std::fs::write(ops.join(format!("ops-{actor}.nodes.idx")), "stale\n").unwrap();
     let old_tmp = ops.join(format!(".ops-{actor}.idx.tmp.{}", ulid::Ulid::generate()));
     std::fs::write(&old_tmp, "half written\n").unwrap();
-    filetime::set_file_mtime(
-        &old_tmp,
-        filetime::FileTime::from_system_time(
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&old_tmp)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(
             std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 60 * 48),
-        ),
-    )
-    .unwrap();
+        ))
+        .unwrap();
 
     let plan = plan_compaction(&root, &CompactOptions { horizon_ms: 0 }).unwrap();
     assert!(!plan.is_empty(), "the fixture must produce droppable ops");
