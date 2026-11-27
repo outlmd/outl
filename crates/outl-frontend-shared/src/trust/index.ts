@@ -14,4 +14,4 @@ export { DeviceActivityList } from "./DeviceActivityList";
 export { ExportCard } from "./ExportCard";
 export { MergedEditsList, MergedEditsPanel } from "./MergedEditsList";
 export { visibleMerges, withoutMerge } from "./merges";
-export { createTrashRestore, deletedAgo, type TrashRestore } from "./trash";
+export { createTrashRestore, deletedAgo, TRASH_EMPTY_TEXT, type TrashRestore } from "./trash";

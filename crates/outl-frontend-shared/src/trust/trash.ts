@@ -66,6 +66,10 @@ export function deletedAgo(ms: number | null, nowMs: number = Date.now()): strin
   return new Date(ms).toLocaleDateString();
 }
 
+/** What an empty trash says, on every client: one owner, so the two GUIs cannot drift. */
+export const TRASH_EMPTY_TEXT =
+  "Nothing has been deleted in this workspace. A deleted block comes here instead of disappearing, from any of your devices.";
+
 export interface TrashRestore {
   rows: Resource<TrashEntry[] | undefined>;
   /** The id a restore is in flight for. */

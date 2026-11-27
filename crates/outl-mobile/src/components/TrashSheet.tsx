@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 import type { TrashEntry } from "@outl/shared/api/trash";
 import type { PageView } from "@outl/shared/api/types";
-import { createTrashRestore, deletedAgo } from "@outl/shared/trust";
+import { createTrashRestore, deletedAgo, TRASH_EMPTY_TEXT } from "@outl/shared/trust";
 
 import { haptic } from "../lib/haptics";
 import { createSheetDrag } from "../lib/sheet-drag";
@@ -28,7 +28,6 @@ export function TrashSheet(props: {
     onView: (v) => props.onView(v),
     onError: (m) => props.onMessage(m),
   });
-  const data = t.rows;
   const drag = createSheetDrag(() => props.onClose());
 
   async function restore(entry: TrashEntry) {
@@ -65,7 +64,7 @@ export function TrashSheet(props: {
           </span>
           <div class="mt-2 flex items-baseline justify-between">
             <h2 class="text-[22px] font-semibold tracking-tight">Trash</h2>
-            <Show when={data()}>
+            <Show when={t.rows()}>
               {(rows) => (
                 <span class="text-[13px] text-(--color-outl-fg-dim) tabular-nums">
                   {rows().length} deleted
@@ -76,18 +75,17 @@ export function TrashSheet(props: {
         </header>
         <div class="ios-scroll flex-1 overflow-y-auto px-4 pb-6">
           <Show
-            when={(data()?.length ?? 0) > 0}
+            when={(t.rows()?.length ?? 0) > 0}
             fallback={
-              <Show when={!data.loading}>
+              <Show when={!t.rows.loading}>
                 <p class="py-16 text-center text-[15px] text-(--color-outl-fg-dim)">
-                  Nothing has been deleted in this workspace. A deleted block comes
-                  here instead of disappearing, from any of your devices.
+                  {TRASH_EMPTY_TEXT}
                 </p>
               </Show>
             }
           >
             <ul class="mt-2 overflow-hidden rounded-xl bg-(--color-outl-bg-elev)">
-              <For each={data()}>
+              <For each={t.rows()}>
                 {(entry) => (
                   <li class="flex items-start gap-3 border-b border-(--color-outl-border)/50 px-3 py-2.5 last:border-b-0">
                     <div class="min-w-0 flex-1">

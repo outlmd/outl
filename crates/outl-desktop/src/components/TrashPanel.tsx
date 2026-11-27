@@ -41,7 +41,7 @@
 import { For, Show } from "solid-js";
 
 import type { TrashEntry } from "@outl/shared/api/trash";
-import { createTrashRestore, deletedAgo } from "@outl/shared/trust";
+import { createTrashRestore, deletedAgo, TRASH_EMPTY_TEXT } from "@outl/shared/trust";
 import type { PageView } from "@outl/shared/api/types";
 
 import { appState, setAppState } from "../lib/store";
@@ -60,12 +60,11 @@ export function TrashPanel(props: TrashPanelDeps) {
     onView: (v) => props.applyView(v),
     onError: (m) => props.setError(m),
   });
-  const data = t.rows;
 
   const close = () => setAppState("trashOpen", false);
 
   let list: HTMLDivElement | undefined;
-  focusFirstRowOnOpen(() => appState.trashOpen, data, () => list, "[data-trash-row]");
+  focusFirstRowOnOpen(() => appState.trashOpen, t.rows, () => list, "[data-trash-row]");
 
   async function restore(entry: TrashEntry) {
     if (await t.restore(entry)) close();
@@ -84,7 +83,7 @@ export function TrashPanel(props: TrashPanelDeps) {
           <header class="flex items-baseline justify-between border-b border-(--color-outl-border) px-5 py-3">
             <h2 class="text-lg font-semibold">Trash</h2>
             <span class="text-xs opacity-50">
-              <Show when={data()}>
+              <Show when={t.rows()}>
                 {(rows) => <>{rows().length} deleted · </>}
               </Show>
               Esc to close
@@ -106,17 +105,16 @@ export function TrashPanel(props: TrashPanelDeps) {
             }}
           >
             <Show
-              when={(data()?.length ?? 0) > 0}
+              when={(t.rows()?.length ?? 0) > 0}
               fallback={
-                <Show when={!data.loading}>
+                <Show when={!t.rows.loading}>
                   <p class="py-6 text-center text-sm opacity-60">
-                    Nothing has been deleted in this workspace. A deleted block comes
-                    here instead of disappearing, from any of your devices.
+                    {TRASH_EMPTY_TEXT}
                   </p>
                 </Show>
               }
             >
-              <For each={data()}>
+              <For each={t.rows()}>
                 {(entry) => (
                   <div class="flex items-start gap-3 border-b border-(--color-outl-border)/40 py-2 last:border-b-0">
                     {/* The **row** is the roving-focus item, not the
