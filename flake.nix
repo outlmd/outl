@@ -150,8 +150,8 @@
           # The hash is per-system because node_modules carries native
           # binaries (esbuild, tailwind-oxide) built for the build machine.
           frontendNodeModulesHash = {
-            x86_64-linux = "sha256-Sibc8YY2b+SbvjM8KXA6ZCxgUoRFGY4vPDTbKAKaV0U=";
-            aarch64-linux = "sha256-o4OetK45qmD1E3UKWlOEYG5Irh7uaos5P4pLfNaRAzY=";
+            x86_64-linux = "sha256-1f6qAncRNgowuG4foRAGp6GHR8sKHl8p5RR/TuEgimw=";
+            aarch64-linux = "sha256-kSPkOTi8o+3EUaaTK8tuYZPY8aJv6T0Y7dkFmVQgSp8=";
           };
 
           mkDesktopNodeModules =
