@@ -136,7 +136,7 @@ Deleting is a move to the trash, so it is recoverable.
   TUI: `/trash` or `:trash`, select the row, press `r`.
   CLI: `outl trash list`, then `outl trash restore`.
   The desktop has a Trash panel too.
-  The phone cannot restore a block yet, so open the workspace on a computer.
+  On the phone: **Settings → Trash**, or "Open trash" in the search palette.
 - **A page.**
   Open it again by name (`Ctrl+P` in the TUI) and it comes back.
 - **Just now.**

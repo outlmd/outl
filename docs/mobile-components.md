@@ -29,6 +29,7 @@ User-facing behaviour lives in [`mobile.md`](mobile.md); the rules a contributor
 | Range selection and its bar | `SelectionToolbar.tsx`, `lib/block-selection.ts`, `Journal.selection-ops.ts` | this page |
 | Keyboard toolbar | iOS: `swift/OutlKit/Toolbar`; Android: `KeyboardAccessory.tsx`, `KeyboardToolbar.tsx`; catalog in `@outl/shared/toolbar` | [mobile-ux.md → Keyboard accessory bar](mobile-ux.md#keyboard-accessory-bar-android-web-bar--ios-native-bar) |
 | Properties and page history | `PropertiesSheet.tsx`, `HistorySheet.tsx` | [mobile-internals.md](mobile-internals.md#properties-key-value--the-sheet-issue-13) |
+| Trash, restore a deleted block | `TrashSheet.tsx`, `commands/trash.rs` | [client-page-lifecycle.md](client-page-lifecycle.md) |
 | Pairing, devices, export | `DevicesSheet.tsx`, `commands/peers.rs` | [mobile-internals.md → Peer / device management](mobile-internals.md#peer--device-management-outl_peer_list--outl_peer_remove) |
 | Settings | `SettingsSheet.tsx` | [mobile-internals.md → Settings](mobile-internals.md#settings-settingssheettsx--the-first-preferences-surface) |
 | First run | `Onboarding.tsx`, `GuideSheet.tsx`, `lib/chrome-tour.ts` | [mobile-internals.md → First-run onboarding](mobile-internals.md#first-run-onboarding) |

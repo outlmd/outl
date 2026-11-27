@@ -219,11 +219,6 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
         // button order" freezes the row, "Reset button order" drops
         // the MFU counts. The other two clients have no soft-keyboard
         // bar for the setting to act on.
-        // Nobody has this yet. `outl trash list` / `outl trash restore`
-        // and the matching MCP tools shipped first because the primitives
-        // were already there (`doctor` walks the trash, restore is a
-        // `Move`); a surface in each client is the follow-up. Recorded
-        // here rather than discovered by a user hunting for a recycle bin.
         // All three read the grid through `outl_md::table`, so the
         // cells and the alignment cannot disagree. The desktop and
         // mobile hand them to `<table>` inside an `overflow-x-auto`
@@ -235,21 +230,23 @@ pub fn capability_support(cap: Capability) -> ClientSupport {
             desktop: Full,
             mobile: Full,
         },
-        // Desktop `TrashPanel.tsx` and the TUI's `/trash` overlay both
-        // read `outl_actions::trash::list` and restore through
-        // `trash::restore`, so neither decides for itself what can come
-        // back. Mobile registers the same two commands
-        // (`trash_commands!`) and has no sheet in front of them —
-        // which is exactly the distinction this catalog exists to
-        // record: a registered command is not a shipped capability.
+        // Desktop `TrashPanel.tsx`, mobile `TrashSheet.tsx` (from
+        // Settings and the palette's "Open trash") and the TUI's
+        // `/trash` overlay all read `outl_actions::trash::list` and
+        // restore through `trash::restore`, so no surface decides for
+        // itself what can come back. The two GUIs also share their
+        // restore rules through `@outl/shared/trust`.
         //
         // This row read `Missing` on all three, with a nudge telling a
         // TUI user to open a second terminal against a workspace their
-        // own client already holds locked (issue #287).
+        // own client already holds locked (issue #287). Mobile stayed
+        // `Missing` after that, with its two commands registered and no
+        // sheet in front of them: a registered command is not a shipped
+        // capability.
         Capability::Trash => ClientSupport {
             tui: Full,
             desktop: Full,
-            mobile: Missing(why::NO_MOBILE_TRASH_SHEET),
+            mobile: Full,
         },
         // Every client spawns `outl_actions::backup::spawn_auto_pass` at
         // startup — the TUI in `runtime::run_with_theme_override`, the

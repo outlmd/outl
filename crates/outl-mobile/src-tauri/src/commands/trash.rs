@@ -1,7 +1,6 @@
 //! Reading a deletion back (issue #287).
 //!
-//! Registered here with no sheet in front of it yet: an unregistered
-//! command costs a feature, an unused one costs a symbol. Which clients
-//! a user can actually reach the trash from is `Capability::Trash`, not
-//! this file.
+//! `TrashSheet.tsx` reads these, reached from Settings → Trash and the
+//! palette's "Open trash"; `Capability::Trash` records mobile as `Full`,
+//! and that catalog, not this file, owns which clients reach the trash.
 outl_tauri_shared::trash_commands!(crate::state::AppState);

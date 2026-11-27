@@ -71,6 +71,7 @@ const SHEETS: Sheet[] = [
   { file: "Calendar.tsx", bound: "viewport-calc" },
   { file: "HistorySheet.tsx", bound: "top-anchored" },
   { file: "TasksSheet.tsx", bound: "top-anchored" },
+  { file: "TrashSheet.tsx", bound: "top-anchored" },
   { file: "PageSwitcher.tsx", bound: "top-anchored" },
   { file: "DevicesSheet.tsx", bound: "vh-cap" },
   { file: "PageNameSheet.tsx", bound: "vh-cap" },

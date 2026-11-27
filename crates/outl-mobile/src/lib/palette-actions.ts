@@ -19,6 +19,7 @@ export const MOBILE_ACTIONS = [
   { kind: "action", action: "OpenCalendar", label: "Open calendar", chord: null, keywords: "date month" },
   { kind: "action", action: "SyncNow", label: "Sync now", chord: null, keywords: "refresh pull" },
   { kind: "action", action: "OpenDevices", label: "Devices and sync", chord: null, keywords: "pending merged peers trust history" },
+  { kind: "action", action: "OpenTrash", label: "Open trash", chord: null, keywords: "deleted restore recycle bin" },
   { kind: "action", action: "OpenPlugins", label: "Plugins", chord: null, keywords: "marketplace extensions" },
   { kind: "action", action: "OpenSettings", label: "Open settings", chord: null, keywords: "preferences theme focus export" },
   { kind: "action", action: "FoldAll", label: "Fold all blocks", chord: null, keywords: "collapse" },

@@ -476,8 +476,8 @@ pub fn run() {
             list_action_support,
             // Page history out of the op log (read-only). New on mobile.
             page_timeline,
-            // Trash: registered, no sheet in front of it yet
-            // (`Capability::Trash`).
+            // Trash: read by `TrashSheet.tsx` (Settings and the palette);
+            // `Capability::Trash` records mobile as `Full`.
             list_trash,
             restore_trash_entry,
             device_activity,

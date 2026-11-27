@@ -87,6 +87,15 @@
 #     tests) is a sibling module, same split as the existing page_merge
 #     and page_repair siblings, so page.rs only pays for the call site.
 #
+#   outl-mobile/src/components/Journal.tsx  1790 -> 1800  (issue 455)
+#     Ten lines of call site for the mobile trash sheet: one import, a
+#     signal, a palette handler, the Settings prop and the six-line mount.
+#     The logic is not here. The sheet is TrashSheet.tsx, and the restore
+#     rules (what a refusal says, the retry, the busy row) are
+#     createTrashRestore in @outl/shared/trust, shared with the desktop
+#     panel, so the component holds no state for the feature beyond
+#     whether the sheet is open.
+#
 #   outl-mobile/src/components/Journal.tsx  1798 -> 1804  (issue 16)
 #     Six lines to wire a ((blk-...)) ref resolver: one import, two
 #     comment lines, the const, the resolve call in applyView, and the
@@ -123,7 +132,7 @@
 #     its own plan.
 #
 # None of these arguments generalises. A further raise makes its own case.
-640 crates/outl-actions/src/backlinks.rs
+638 crates/outl-actions/src/backlinks.rs
 689 crates/outl-actions/src/page.rs
 683 crates/outl-actions/src/sync.rs
 679 crates/outl-actions/tests/ref_extraction_divergence.rs
@@ -134,18 +143,17 @@
 725 crates/outl-core/src/workspace/batch.rs
 712 crates/outl-core/tests/tree_unit.rs
 620 crates/outl-desktop/src-tauri/src/settings.rs
-627 crates/outl-desktop/src/components/OutlineView.tsx
-849 crates/outl-frontend-shared/src/api/commands.ts
+840 crates/outl-frontend-shared/src/api/commands.ts
 707 crates/outl-frontend-shared/src/api/types.ts
 621 crates/outl-md/src/diff.rs
 657 crates/outl-md/src/matching.rs
 662 crates/outl-md/tests/inline.rs
 743 crates/outl-md/tests/mixed_version_sidecar.rs
-1790 crates/outl-mobile/src/components/Journal.tsx
+1800 crates/outl-mobile/src/components/Journal.tsx
 733 crates/outl-plugins/src/engine.rs
 636 crates/outl-plugins/src/host_tests.rs
-805 crates/outl-shortcuts/src/defaults.rs
-719 crates/outl-shortcuts/src/support.rs
+786 crates/outl-shortcuts/src/defaults.rs
+714 crates/outl-shortcuts/src/support.rs
 759 crates/outl-sync-iroh/src/engine_pairing.rs
 855 crates/outl-sync-iroh/src/engine.rs
 1245 crates/outl-sync-iroh/src/pairing.rs
@@ -157,6 +165,5 @@
 627 crates/outl-tui/src/actions/overlay.rs
 985 crates/outl-tui/src/actions/plugins.rs
 612 crates/outl-tui/src/actions/properties.rs
-698 crates/outl-tui/src/input/normal.rs
 984 crates/outl-tui/src/state.rs
 1115 crates/outl-tui/src/view/overlays.rs

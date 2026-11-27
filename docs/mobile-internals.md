@@ -146,8 +146,9 @@ scope, the `[[` picker) and `lib/properties.test.ts`.
 
 The header capsule's gear opens `components/SettingsSheet.tsx`.
 It is the client's **only** preferences screen: every other sheet here (`DevicesSheet`, `TemplateSheet`, `RemindersSheet`, `PropertiesSheet`) shows workspace content, which is why the toolbar lock ([#271](https://github.com/outlmd/outl/issues/271)) had nowhere to live before it.
-Its first two rows are the exception, and both are navigation rather than preferences.
+Its first three rows are the exception, and all are navigation rather than preferences.
 **Devices and sync** hands over to `<DevicesSheet />`, closing this sheet first since this one is `z-[55]` and that one `z-50`.
+**Trash** hands over to `<TrashSheet />` the same way, the way back for a block deleted on any device ([#455](https://github.com/outlmd/outl/issues/455)).
 **What's what** re-opens `<GuideSheet />`, the chrome walkthrough that otherwise only appears once per device ([#574](https://github.com/outlmd/outl/issues/574)).
 It is here because pairing otherwise had no name anywhere on the phone — the sync dot's press-and-hold is a gesture nothing announces, and a user looking for P2P looks where the desktop keeps it, in Settings.
 The gesture stays as the shortcut.
@@ -321,6 +322,8 @@ See [`outl-sync-iroh/CLAUDE.md`](../crates/outl-sync-iroh/CLAUDE.md) for what th
   The export lands in the **parent of the workspace folder**, which on the default local root is inside the app's own storage.
   `Info.plist` sets neither `UIFileSharingEnabled` nor `LSSupportsOpeningDocumentsInPlace`, so the Files app does not list it.
   The old line here said it shows up in Files through iCloud Drive; that only held when the workspace lived in an iCloud container, which no build offers now.
+- **Trash**: `components/TrashSheet.tsx`, opened from Settings → Trash and the search palette's "Open trash".
+  The restore rules come from `@outl/shared/trust`'s `createTrashRestore`, shared with the desktop `TrashPanel`.
 - **Saved mark**: `lib/saved.ts`; `Journal`'s commit marks a block only after `edit_block` resolves, `BlockRow` renders the dot.
 
 ## Polish: motion, focus mode, first-run tips
