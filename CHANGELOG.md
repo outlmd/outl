@@ -16,6 +16,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **iOS: no black band behind the keyboard toolbar in light mode.**
+  The strip around the toolbar pill is clear, and what showed through it (and in the keyboard's rounded top corners) was the launch purple `#0c0814`, which the window and webview kept for the whole session.
+  They now hand over to the page background once the page has loaded: white in light mode, `#0c0814` in dark, and they follow a light/dark flip.
+  An overscroll in light mode no longer shows the purple either.
+  The launch purple stays for the LaunchScreen handoff ([Keyboard accessory bar](docs/mobile-ux.md#what-shows-behind-the-pill-ios-the-page)).
+
 - **Backlink rows draw the block the way its page does, and Run and fold work from them.**
   A "Linked from" row on the desktop and mobile used its own renderer, so a `call:` fence (or any code fence) showed as one line of raw backticks, and quotes, images, properties and multi-line text were flattened.
   Rows now render through the outline's own body, and refs, tags and links inside them navigate.

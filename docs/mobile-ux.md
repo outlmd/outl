@@ -392,6 +392,23 @@ Android is web: `KeyboardAccessory.tsx` → `<SuggesterStrip />` + `<KeyboardToo
 Catalog + MFU are shared in `@outl/shared/toolbar` (port of `swift/OutlKit/Toolbar/*`); the action ids are the `window.__outlToolbar(action)` wire contract, so the Swift and TS catalogs stay byte-identical until the native bar retires.
 Convention (shared `dispatchToolbarAction`, the two invariants): [`docs/client-editing.md` → Keyboard accessory bar](client-editing.md#keyboard-accessory-bar-mobile).
 
+### What shows behind the pill (iOS): the page
+
+The pill is the keyboard's `inputAccessoryView`, and the strip around the capsule is clear, so what shows there is whatever is behind the keyboard: the app's window and the webview's scroll view.
+`OutlBrandChrome` paints those `#0c0814` at launch so the LaunchScreen handoff has no white flash, and it used to keep that fill for the whole session.
+In light mode that was the black band around the white pill, and the black wedges in the keyboard's rounded top corners.
+
+Once the document has loaded (4 s failsafe), `OutlBrandChrome.settle` swaps the window, the root view, the webview and its scroll view to `OutlChrome.pageBackground`: white in light mode, `#0c0814` in dark.
+The colour is dynamic, so a light/dark flip re-resolves it with no repaint code.
+There is deliberately no trait handler: the barcode scanner clears the webview to show the camera behind it and restores the colour it found, and a repaint on a flip mid-scan would cover the camera.
+`underPageBackgroundColor` stays at WebKit's default, which follows the page's CSS background.
+The swap waits for the load because the webview is non-opaque until then: a white window under the dark LaunchScreen would bring the white flash back.
+Neither colour follows an in-app theme preset (mobile has none today, see [theming](theming.md)); they are the `bg` of the `outl-light` / `outl` pair.
+
+A floating overlay in the key window was tried instead of the accessory and dropped.
+The keyboard frame then stopped including the pill, so WebKit's caret reveal parked the caret under it, the iPad floating keyboard left it at the bottom of the screen, and it could cover a sheet's buttons.
+None of that happens with the accessory, and the band was never the accessory's.
+
 ### The row only changes shape between editing sessions
 
 MFU reorders the middle range, and both bars used to reorder it **on every tap** (`rebuildButtons()` in Swift, a re-read signal in `KeyboardToolbar.tsx`).
