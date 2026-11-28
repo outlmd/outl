@@ -172,6 +172,12 @@ targets:
       - sdk: SystemConfiguration.framework
       - sdk: Network.framework
       - sdk: CoreFoundation.framework
+      # netdev >= 0.47 reads the system DNS servers through `res_9_ninit` /
+      # `res_9_getservers`, behind a `#[link(name = "resolv")]` that Xcode
+      # never sees either. Without it the device link fails on
+      # `_res_9_getservers`. Not mirrored in tauri.conf.json, so a
+      # `tauri ios init` regeneration has to put this line back by hand.
+      - sdk: libresolv.tbd
     preBuildScripts:
       - script: cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code

@@ -27,6 +27,7 @@
 		5C0F1A2B3C4D5E6F70819A01 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0F1A2B3C4D5E6F70819A02 /* SystemConfiguration.framework */; };
 		5C0F1A2B3C4D5E6F70819A03 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0F1A2B3C4D5E6F70819A04 /* Network.framework */; };
 		5C0F1A2B3C4D5E6F70819A05 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0F1A2B3C4D5E6F70819A06 /* CoreFoundation.framework */; };
+		5C0F1A2B3C4D5E6F70819A07 /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C0F1A2B3C4D5E6F70819A08 /* libresolv.tbd */; };
 		5F0FD147F41FB12EAA83E1D8 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 44DED8F4CED1FB65709229F9 /* assets */; };
 		6EFC1DCB30D31F90E237FA6F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 626BD1839E141625CCF789B9 /* LaunchScreen.storyboard */; };
 		72340C9E89B1D4A168619465 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DD70FC14ABF9CACE5230D2F8 /* libapp.a */; };
@@ -104,6 +105,7 @@
 		5C0F1A2B3C4D5E6F70819A02 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		5C0F1A2B3C4D5E6F70819A04 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
 		5C0F1A2B3C4D5E6F70819A06 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
+		5C0F1A2B3C4D5E6F70819A08 /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 		5C8E3F12D04E4A00B1C2D3E4 /* OutlToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlToolbar.swift; sourceTree = "<group>"; };
 		626BD1839E141625CCF789B9 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		6B1DBE6C01DBA911F071B23C /* outl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = outl.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -163,6 +165,7 @@
 				5C0F1A2B3C4D5E6F70819A01 /* SystemConfiguration.framework in Frameworks */,
 				5C0F1A2B3C4D5E6F70819A03 /* Network.framework in Frameworks */,
 				5C0F1A2B3C4D5E6F70819A05 /* CoreFoundation.framework in Frameworks */,
+				5C0F1A2B3C4D5E6F70819A07 /* libresolv.tbd in Frameworks */,
 				8A4C1F2E5B7D6C90A1B2C3D5 /* OutlKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -236,6 +239,7 @@
 				5C0F1A2B3C4D5E6F70819A02 /* SystemConfiguration.framework */,
 				5C0F1A2B3C4D5E6F70819A04 /* Network.framework */,
 				5C0F1A2B3C4D5E6F70819A06 /* CoreFoundation.framework */,
+				5C0F1A2B3C4D5E6F70819A08 /* libresolv.tbd */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
