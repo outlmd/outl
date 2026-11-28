@@ -6433,6 +6433,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "gtk",
  "libc",
  "log",
  "notify",

@@ -295,7 +295,11 @@ On Windows the webview is a separate, user-installable runtime, so two failures 
 | **No WebView2 runtime installed.** `tauri::webview_version()` returns `Err`, which is the same reading `tauri-runtime-wry` turns into `Error::WebviewRuntimeNotInstalled` while creating the main window, so `App::run` panics with `Failed to setup app: {e}` | Tauri's own dialog, then a panic — which the crash reporter files | `webview_boot::webview_boot` runs **before** `outl_telemetry::init`, prints a Windows message box naming the Evergreen WebView2 runtime and Microsoft's download page, and `process::exit(1)`. The probe is before `init` so the reporter is not running on the path that exists to avoid a report |
 | **Runtime present, controller creation times out** (OUTL-4): a COM `ERROR_TIMEOUT` while `App::run` auto-created the configured window | The same `Failed to setup app: {e}` panic, with no retry | `tauri.windows.conf.json` adds `"create": false` to the same `"main"` entry, so `App::run` parses the window without building it. `setup` then builds it via `webview_boot::open_main_window`, retrying up to `WEBVIEW_CREATE_MAX_ATTEMPTS` before the same message-box-and-exit |
 
-Five things about that are easy to undo by accident:
+Linux has one failure of the same shape, and `src-tauri/src/display_boot.rs` owns it (OUTL-6): with no usable display, `gtk::init()` returns `Err`, and `tao`'s `EventLoop::new` turns that into a `Failed to initialize gtk backend!` panic.
+`run()` calls `gtk::init()` itself, before `outl_telemetry::init`, and on `Err` prints that outl needs a graphical session (naming `DISPLAY` / `WAYLAND_DISPLAY` when one is set) and exits with status 1.
+`tao`'s later `gtk::init()` is then a no-op, because GTK is already initialized on the main thread.
+
+Five things about the Windows half are easy to undo by accident:
 
 - **`Ok("")` is success.**
   Tauri's gate is `is_ok()`, so an empty version string must boot; a second reading of that `Result` is how the two answers drift apart.

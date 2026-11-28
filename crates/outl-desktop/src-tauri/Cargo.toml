@@ -85,6 +85,12 @@ tauri-plugin-global-shortcut = "2"
 # `run` repeats SIG_IGN for SIGPIPE. Direct, not transitive: the call is ours.
 libc = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# `run` calls `gtk::init` before the crash reporter starts, so a machine with no
+# display exits with a message instead of tao's panic (OUTL-6). Already in the
+# tree through tao / wry; tao's own later `gtk::init` is then a no-op.
+gtk = "0.18"
+
 [features]
 default = []
 # Links the Sentry SDK. Set only by the release pipeline. Leave it off and

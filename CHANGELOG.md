@@ -27,6 +27,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
   The sync request and response now carry the sender's own actor id (additive, no protocol bump; an older peer behaves as before), and a peer's own actor is never selected for it.
   A skipped gap is logged once per process as a warning: sync cannot restore that history; see [Vector-clock delta sync](docs/sync.md).
 
+- **Linux desktop: no display is a message, not a crash.**
+  Started over SSH, from a headless session or with a `DISPLAY` that points at a dead X server, outl panicked with `Failed to initialize gtk backend!` and filed a crash report.
+  It now prints what is missing and exits with status 1, before crash reporting starts.
+  The terminal client `outl` does not need a display ([Linux](docs/getting-started.md#linux)).
+
 - **iOS: no black band behind the keyboard toolbar in light mode.**
   The strip around the toolbar pill is clear, and what showed through it (and in the keyboard's rounded top corners) was the launch purple `#0c0814`, which the window and webview kept for the whole session.
   They now hand over to the page background once the page has loaded: white in light mode, `#0c0814` in dark, and they follow a light/dark flip.
