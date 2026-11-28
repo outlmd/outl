@@ -136,12 +136,17 @@ The effect layer, the toolbar and the view surfaces: [`docs/plugins.md`](../../d
 
 ## Logging
 
-`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, probes the Windows webview runtime, calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
+`run()` in `src-tauri/src/lib.rs` ignores `SIGPIPE`, probes the Windows webview runtime and the Linux display, calls `outl_telemetry::init`, then installs a `tracing_subscriber` fmt subscriber.
 
 **The Windows probe comes before `init` on purpose**, so the crash reporter is not running on the path that exists to avoid a report.
 `src-tauri/src/webview_boot.rs` owns both Windows boot failures: a missing WebView2 runtime, and a present runtime that times out handing Tauri a controller (OUTL-4).
 Those, the sentences the user gets, and the rules that are easy to undo: [`docs/development.md`](../../docs/development.md#why-the-desktop-crate-has-windows-only-boot-code).
 Both decisions are taken against traits, not `tauri::AppHandle` — the only reason either is testable off Windows, so do not inline them back.
+
+**The Linux display check sits in the same place for the same reason** (OUTL-6).
+`src-tauri/src/display_boot.rs` runs `gtk::init()` — the call `tao`'s `EventLoop::new` makes, and `expect`s on — and turns an `Err` into a message and `exit(1)`.
+The `gtk::init` result decides, never `DISPLAY` / `WAYLAND_DISPLAY`: those only word the message, so `GDK_BACKEND=broadway` keeps working.
+Calling it early is safe because `gtk::init` returns `Ok` at once when the main thread is already initialized, which is what `tao` then sees.
 
 The subscriber writes through `outl_telemetry::lossy_stderr` with `log_internal_errors(false)`.
 A closed stderr — a desktop launched with no terminal — must not panic, and `eprintln!` turns `EPIPE` into `failed printing to stderr`, including in the fmt layer's own error report.

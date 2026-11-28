@@ -109,6 +109,8 @@ Each release has three formats for `x86_64` and `aarch64`:
 The builds need glibc 2.35 or newer: Ubuntu 22.04+, Debian 12+ (Raspberry Pi OS bookworm included), Fedora 36+, RHEL 10+.
 `ldd --version` tells you which side of the line you are on.
 Older than that, [build from source](#from-source).
+The desktop app needs a graphical session (X11 or Wayland).
+Without one (over SSH, a headless box) it prints what is missing and exits with status 1; the terminal client `outl` works there.
 
 On Nix: `nix profile add github:outlmd/outl#outl-desktop`.
 

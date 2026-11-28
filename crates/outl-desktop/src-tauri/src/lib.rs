@@ -30,6 +30,7 @@
 //! - `helpers` — argument parsers, workspace-lock acquisition,
 //!   `finish_in_page` (the mutation funnel).
 //! - `webview_boot` — Windows WebView2 checks: exit on missing runtime, retry a window that fails to create (OUTL-4).
+//! - `display_boot` — Linux: exit with a message when GTK cannot open a display (OUTL-6).
 //! - `open_with` — the OS "Open With → outl" gesture (macOS
 //!   `RunEvent::Opened`, `argv` elsewhere) turned into one import.
 //! - `workspace_open` — open / reconcile / boot opener primitives.
@@ -39,6 +40,7 @@
 mod about;
 mod commands;
 mod deep_link;
+mod display_boot;
 mod fs_watcher;
 mod helpers;
 mod iroh_sync;
@@ -129,6 +131,11 @@ pub fn run() {
     // is the setup panic; here it is a message and an exit.
     #[cfg(windows)]
     webview_boot::exit_if_runtime_missing(tauri::webview_version().map_err(|err| err.to_string()));
+
+    // Linux only, same place for the same reason: no display is tao's
+    // `Failed to initialize gtk backend!` panic (OUTL-6), not a crash.
+    #[cfg(target_os = "linux")]
+    display_boot::exit_if_display_unavailable();
 
     // Crash reporting (RFC 0377) goes up next, before the subscriber and
     // before the crypto provider, because the crashes worth the most are the
