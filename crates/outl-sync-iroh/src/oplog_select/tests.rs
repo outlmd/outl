@@ -25,12 +25,12 @@ use std::path::{Path, PathBuf};
 /// The production callers read one per exchange and hand it to both the
 /// clock and the selection; a test re-reads it per assertion so each one
 /// states the log it is selecting against.
-fn census(ops_dir: &Path) -> Census {
+pub(super) fn census(ops_dir: &Path) -> Census {
     Census::read(ops_dir).expect("census")
 }
 
 /// Write one actor's `ops-<actor>.jsonl` by hand, returning its ops.
-fn write_log(ops_dir: &Path, actor: ActorId, count: usize) -> Vec<LogOp> {
+pub(super) fn write_log(ops_dir: &Path, actor: ActorId, count: usize) -> Vec<LogOp> {
     let gen = HlcGenerator::new(actor);
     let ops: Vec<LogOp> = (0..count)
         .map(|_| {
@@ -58,13 +58,13 @@ fn write_log(ops_dir: &Path, actor: ActorId, count: usize) -> Vec<LogOp> {
 /// The two index sidecars for `actor`. Their absence is what the tests
 /// below watch: a path that goes through `JsonlStorage::open` rebuilds
 /// and persists both, so "still missing" means "no full open happened".
-fn sidecars(ops_dir: &Path, actor: ActorId) -> [PathBuf; 2] {
+pub(super) fn sidecars(ops_dir: &Path, actor: ActorId) -> [PathBuf; 2] {
     [SidecarKind::Offset, SidecarKind::Node]
         .map(|kind| sidecar::path_for(ops_dir, actor, &PageScope::Global, kind))
 }
 
 /// The vector clock a peer would report after holding exactly `held`.
-fn clock_of(held: &BTreeSet<Hlc>) -> ActorClock {
+pub(super) fn clock_of(held: &BTreeSet<Hlc>) -> ActorClock {
     ActorClock {
         max: *held.last().expect("a non-empty holding"),
         count: held.len() as u64,
@@ -83,7 +83,7 @@ fn a_peer_that_is_current_costs_no_op_read() {
     write_log(&ops_dir, actor, 6);
 
     let theirs = local_vector_clock(&ops_dir).expect("clock");
-    assert!(ops_missing_for(&ops_dir, &census(&ops_dir), &theirs)
+    assert!(ops_missing_for(&ops_dir, &census(&ops_dir), &theirs, None)
         .expect("delta")
         .is_empty());
     for path in sidecars(&ops_dir, actor) {
@@ -117,7 +117,7 @@ fn a_peer_behind_us_still_gets_every_op_it_lacks() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, None).expect("delta");
     let sent_ts: BTreeSet<Hlc> = sent.iter().map(|op| op.ts).collect();
     let expected: BTreeSet<Hlc> = ops_a[2..].iter().chain(&ops_b).map(|op| op.ts).collect();
     assert_eq!(sent_ts, expected);
@@ -149,7 +149,7 @@ fn a_gap_below_the_peers_watermark_still_sends_what_the_peer_lacks() {
     .into_iter()
     .collect();
 
-    let sent: BTreeSet<Hlc> = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock)
+    let sent: BTreeSet<Hlc> = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, None)
         .expect("delta")
         .iter()
         .map(|op| op.ts)
@@ -185,8 +185,8 @@ fn a_first_sync_is_capped_so_one_exchange_cannot_exhaust_memory() {
     let actor = ActorId::new();
     let ops = write_log(&ops_dir, actor, 50);
 
-    let sent =
-        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &HashMap::new(), 10).expect("delta");
+    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &HashMap::new(), None, 10)
+        .expect("delta");
 
     assert_eq!(sent.len(), 10, "one exchange must carry at most the budget");
     let sent_ts: Vec<Hlc> = sent.iter().map(|op| op.ts).collect();
@@ -218,8 +218,8 @@ fn a_capped_first_sync_still_converges_over_repeated_exchanges() {
             .iter()
             .map(|(actor, hlcs)| (*actor, clock_of(hlcs)))
             .collect();
-        let sent =
-            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
+        let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 7)
+            .expect("delta");
         if sent.is_empty() {
             let got: BTreeSet<Hlc> = held.values().flatten().copied().collect();
             assert_eq!(
@@ -278,7 +278,8 @@ fn a_gap_resend_obeys_the_budget_so_the_frame_is_always_sendable() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 5).expect("delta");
+    let sent =
+        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5).expect("delta");
     assert!(
         sent.len() <= 5,
         "a gap resend that cannot be framed is a repair that never runs"
@@ -311,7 +312,8 @@ fn the_window_opens_on_the_ops_the_peer_is_actually_missing() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 5).expect("delta");
+    let sent =
+        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5).expect("delta");
     let first = sent.first().expect("a window").ts;
     assert_eq!(
         first, ops[20].ts,
@@ -339,8 +341,8 @@ fn a_budgeted_gap_resend_converges_over_repeated_exchanges() {
     for round in 0..100 {
         let peer_clock: HashMap<ActorId, ActorClock> =
             [(actor, clock_of(&held))].into_iter().collect();
-        let sent =
-            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
+        let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 7)
+            .expect("delta");
         if sent.is_empty() {
             assert_eq!(
                 held, everything,
@@ -384,8 +386,8 @@ fn a_window_that_teaches_the_peer_nothing_moves_on() {
     for round in 0..100 {
         let peer_clock: HashMap<ActorId, ActorClock> =
             [(actor, clock_of(&held))].into_iter().collect();
-        let sent =
-            ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, 7).expect("delta");
+        let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 7)
+            .expect("delta");
         if sent.is_empty() {
             assert_eq!(held, everything, "a quiet round must mean convergence");
             return;
@@ -475,7 +477,7 @@ fn a_selection_with_ops_to_send_still_costs_no_open() {
     let held: BTreeSet<Hlc> = ops[..3].iter().map(|op| op.ts).collect();
     let peer_clock = HashMap::from([(actor, clock_of(&held))]);
 
-    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, None).expect("delta");
     assert_eq!(sent.len(), 6, "the ops the peer lacks still cross");
     assert_eq!(
         sent.iter().map(|op| op.ts).collect::<BTreeSet<_>>(),
@@ -509,7 +511,7 @@ fn a_gap_resend_also_costs_no_open() {
         },
     )]);
 
-    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock).expect("delta");
+    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, None).expect("delta");
     assert!(
         !sent.is_empty(),
         "a gap resends a window of that actor's log"

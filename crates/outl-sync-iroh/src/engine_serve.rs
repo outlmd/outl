@@ -204,13 +204,14 @@ impl SyncProtocolHandler {
         let census = Census::read(&ops_dir)?;
         let response = SyncResponse {
             vector_clock: census.vector_clock(),
+            origin: Some(self.actor),
         };
         send.write_all(&encode_response(&response)?)
             .await
             .context("send sync response")?;
 
         // 3. send the ops the initiator is missing under A.
-        let to_push = ops_missing_for(&ops_dir, &census, &request.vector_clock)?;
+        let to_push = ops_missing_for(&ops_dir, &census, &request.vector_clock, request.origin)?;
         let blob = encode_ops_blob(&to_push)?;
         send.write_all(&blob).await.context("send our ops blob")?;
         // Deliberately NOT finished here. The durable-ingest confirmation goes

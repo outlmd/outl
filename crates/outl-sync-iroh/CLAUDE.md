@@ -374,7 +374,12 @@ In all three, **deny cases outnumber allow cases on purpose**, and the allows ar
   A bare max-HLC watermark assumes gapless delivery; an op landing ahead of a pending backlog made everything below the watermark permanently invisible (the Mac↔iPhone non-convergence).
   If the sender holds more distinct ops `<= max_r` than the receiver's `count`, that actor is resent from below its watermark — a rotating window, see above; it used to be the full log.
   The receiver's ingest dedup (present-set read under the append locks) absorbs the overlap and never appends an op twice.
-  Accepted limit: equal counts over different subsets are indistinguishable — convergence still lands via each op's origin device, which always holds its own actor's complete log.
+  Accepted limit: equal counts over different subsets are indistinguishable — convergence still lands via each op's origin device, which normally holds its own actor's complete log.
+  **A device that lost part of its own log is the exception, and sync cannot repair it.**
+  The receiver refuses every op claiming its own actor (`write_deduped_batch`, anti-spoof), so a sender that kept resending that actor's gap window looped forever: 70 refusals in 12 minutes on a restored headless node.
+  `SyncRequest.origin` / `SyncResponse.origin` (`Option<ActorId>`, absent from an old peer, which keeps the old selection) carry the sender's own actor, and `ops_missing_for` / `ops_missing_for_capped` take it as `peer_origin` and select **nothing** for that actor, gap and fast path alike.
+  The skipped gap is named once per actor per process by `warn_peer_short_of_own_log`; the state is in memory only, like the gap cursor.
+  Regressions: `the_peers_own_actor_is_not_gap_resent_but_other_gaps_still_are`, `without_an_origin_the_same_gap_is_still_resent`, `the_peers_own_actor_is_not_sent_on_the_fast_path_either`, `skipping_the_peers_own_actor_still_costs_no_open` (`oplog_select/own_actor_tests.rs`), the serde pins in `protocol/delta.rs`, and `tests/own_actor_skip.rs` over a real exchange.
 - Ops from actor C received via peer B are stored as `ops-<C>.jsonl` locally.
   A can get C's ops via A↔B sync even if A never connects to C directly.
 - HLC sanity gate: ops with timestamps more than 24h in the future are

@@ -20,6 +20,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
 
 ### Fixed
 
+- **A device missing part of its own history no longer makes every peer resend it forever.**
+  A headless node restored on a new machine had lost some of its own ops while a paired desktop kept them.
+  The desktop saw a gap for the node's actor on every exchange and shipped a 20,000-op window of the node's own log (about 6.5 MB), and the node refused all of it by design, because a device is the only writer of its own log.
+  The loop ran about every 10 s for as long as the peer was online and showed up as 70 `refused ... claiming THIS device's actor id` lines in 12 minutes, plus relay capacity drops.
+  The sync request and response now carry the sender's own actor id (additive, no protocol bump; an older peer behaves as before), and a peer's own actor is never selected for it.
+  A skipped gap is logged once per process as a warning: sync cannot restore that history; see [Vector-clock delta sync](docs/sync.md).
+
 - **iOS: no black band behind the keyboard toolbar in light mode.**
   The strip around the toolbar pill is clear, and what showed through it (and in the keyboard's rounded top corners) was the launch purple `#0c0814`, which the window and webview kept for the whole session.
   They now hand over to the page background once the page has loaded: white in light mode, `#0c0814` in dark, and they follow a light/dark flip.
