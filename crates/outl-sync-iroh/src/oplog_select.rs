@@ -56,12 +56,45 @@ pub(crate) const MAX_OPS_PER_EXCHANGE: usize = 20_000;
 
 /// Collect the ops the peer is missing, given the peer's vector clock,
 /// bounded to [`MAX_OPS_PER_EXCHANGE`] where bounding is safe.
+///
+/// `peer_origin` is the peer's own actor id when it told us (see
+/// [`ops_missing_for_capped`]), `None` from a peer that predates the field.
 pub(crate) fn ops_missing_for(
     ops_dir: &std::path::Path,
     census: &Census,
     peer_clock: &HashMap<ActorId, ActorClock>,
+    peer_origin: Option<ActorId>,
 ) -> Result<Vec<LogOp>> {
-    ops_missing_for_capped(ops_dir, census, peer_clock, MAX_OPS_PER_EXCHANGE)
+    ops_missing_for_capped(ops_dir, census, peer_clock, peer_origin, MAX_OPS_PER_EXCHANGE)
+}
+
+/// Say, once per actor per process, that a peer is short of its own log.
+///
+/// The peer refuses every op claiming its own actor (it is the only writer
+/// of that log), so a gap there cannot be repaired over sync and we send
+/// nothing. That is correct and also invisible, so it is named here: the
+/// gap is real, and the user's only remedy is outside the protocol.
+///
+/// Once per actor, not per exchange: the catch-up loop asks every few
+/// seconds per peer, and the loop this replaces was itself 70 log lines in
+/// twelve minutes. In memory, like the gap cursor: a restart costs one
+/// repeat of one line.
+fn warn_peer_short_of_own_log(actor: ActorId, below: u64, peer_count: u64) {
+    static WARNED: OnceLock<Mutex<HashSet<ActorId>>> = OnceLock::new();
+    let first = WARNED
+        .get_or_init(Mutex::default)
+        .lock()
+        .map(|mut warned| warned.insert(actor))
+        .unwrap_or(false);
+    if first {
+        warn!(
+            actor = %actor,
+            our_count = below,
+            peer_count,
+            "peer is missing part of its own op history and will not accept it over sync; \
+             not resending that actor's ops"
+        );
+    }
 }
 
 /// The slice of a gapped actor's log one exchange carries, and where it
@@ -200,6 +233,15 @@ fn fit_in_frame(ops: Vec<LogOp>, limit: usize) -> Vec<LogOp> {
 /// [`ops_missing_for`] with the budget spelled out, so a test can reach a
 /// cut without writing twenty thousand ops.
 ///
+/// **The peer's own actor (`peer_origin`) is never selected**: no gap
+/// window and no ops above its watermark. A device is the only writer of
+/// its own log and refuses any op claiming its actor
+/// (`write_deduped_batch`), so every one of those ops crosses the wire to
+/// be refused, and a peer short of its own history looped a 20,000-op
+/// window at every exchange, in both directions, forever. A gap we skip is
+/// named once by [`warn_peer_short_of_own_log`]. Every other actor is
+/// selected as below.
+///
 /// Per actor in OUR log:
 /// - peer has a GAP below its watermark (it holds fewer distinct ops `<=
 ///   max_r` than we do) → send a budgeted [`gap_resend_window`];
@@ -223,6 +265,7 @@ pub(crate) fn ops_missing_for_capped(
     ops_dir: &std::path::Path,
     census: &Census,
     peer_clock: &HashMap<ActorId, ActorClock>,
+    peer_origin: Option<ActorId>,
     budget: usize,
 ) -> Result<Vec<LogOp>> {
     let gap_resend: HashSet<ActorId> = census
@@ -230,6 +273,12 @@ pub(crate) fn ops_missing_for_capped(
         .filter_map(|(actor_id, index)| {
             let peer = peer_clock.get(actor_id)?;
             let below = index.count_up_to(peer.max) as u64;
+            if peer_origin == Some(*actor_id) {
+                if below > peer.count {
+                    warn_peer_short_of_own_log(*actor_id, below, peer.count);
+                }
+                return None;
+            }
             (below > peer.count).then(|| {
                 info!(
                     actor = %actor_id,
@@ -248,6 +297,9 @@ pub(crate) fn ops_missing_for_capped(
     let mut gapped: Vec<Pick> = Vec::new();
     let mut budgeted: Vec<Pick> = Vec::new();
     for (actor_id, index) in census.iter() {
+        if peer_origin == Some(*actor_id) {
+            continue;
+        }
         if gap_resend.contains(actor_id) {
             let peer = peer_clock
                 .get(actor_id)
@@ -298,5 +350,7 @@ pub(crate) fn ops_missing_for_capped(
     Ok(fit_in_frame(ops, MAX_FRAME_BODY))
 }
 
+#[cfg(test)]
+mod own_actor_tests;
 #[cfg(test)]
 mod tests;

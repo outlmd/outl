@@ -241,6 +241,7 @@ async fn delta_sync_inner(
     let request = SyncRequest {
         workspace_id: workspace_id.as_str().to_string(),
         vector_clock,
+        origin: Some(actor),
     };
     let encoded = encode_request(&request)?;
 
@@ -288,6 +289,7 @@ async fn delta_sync_inner(
         }
     };
     let peer_clock = response.vector_clock;
+    let peer_origin = response.origin;
 
     // 3. read the peer's ops blob (ops we lack) and persist.
     let received = read_ops_blob(&mut recv).await.context("read peer ops")?;
@@ -310,7 +312,7 @@ async fn delta_sync_inner(
     // selection must range over what we hold *now*, or an op that arrived
     // from a third peer via this one would wait for the next exchange.
     let census = Census::read(&ops_dir)?;
-    let to_push = ops_missing_for(&ops_dir, &census, &peer_clock)?;
+    let to_push = ops_missing_for(&ops_dir, &census, &peer_clock, peer_origin)?;
     let blob = encode_ops_blob(&to_push)?;
     send.write_all(&blob).await.context("send our ops blob")?;
     send.finish().context("finish send")?;

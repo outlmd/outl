@@ -114,6 +114,7 @@ impl iroh::protocol::ProtocolHandler for HalfResponder {
         // all the way through pushing its own ops.
         let response = crate::protocol::SyncResponse {
             vector_clock: std::collections::HashMap::new(),
+            origin: None,
         };
         if let Ok(bytes) = crate::protocol::encode_response(&response) {
             let _ = send.write_all(&bytes).await;

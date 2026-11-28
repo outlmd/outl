@@ -45,6 +45,12 @@ pub(crate) struct SyncRequest {
     /// Per-actor max-HLC + distinct-op count. Missing actors imply "never
     /// seen" (HLC zero, zero ops).
     pub(crate) vector_clock: HashMap<ActorId, ActorClock>,
+    /// The sender's own actor id, so the receiver knows which log in
+    /// `vector_clock` the sender alone writes and refuses to take from
+    /// anyone else (see [`SyncResponse::origin`]). `None` from a peer that
+    /// predates the field, which keeps the old selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) origin: Option<ActorId>,
 }
 
 /// Serialize a `SyncRequest` with a 4-byte big-endian length prefix.
@@ -74,6 +80,17 @@ pub(crate) struct SyncResponse {
     /// Per-actor max-HLC + distinct-op count the responder holds. Missing
     /// actors imply "never seen" (HLC zero, zero ops).
     pub(crate) vector_clock: HashMap<ActorId, ActorClock>,
+    /// The responder's own actor id.
+    ///
+    /// A device is the only writer of its own `ops-<actor>.jsonl` and
+    /// refuses any op claiming its actor that arrives over sync, so the
+    /// other side can never make progress by sending it that actor's ops.
+    /// Carrying the id lets the sender skip them instead of resending a
+    /// gap window the receiver is guaranteed to refuse. `None` from a peer
+    /// that predates the field, which keeps the old selection. Additive on
+    /// the wire: no ALPN bump, an old peer ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) origin: Option<ActorId>,
 }
 
 /// Serialize a `SyncResponse` with a 4-byte big-endian length prefix.
@@ -192,6 +209,7 @@ mod tests {
         let req = SyncRequest {
             workspace_id: "demo".into(),
             vector_clock: vc,
+            origin: None,
         };
         let encoded = encode_request(&req).unwrap();
         let decoded = decode_request(&encoded).unwrap();
@@ -199,6 +217,88 @@ mod tests {
         let clock = decoded.vector_clock.get(&actor).unwrap();
         assert_eq!(clock.max.physical_ms, 42);
         assert_eq!(clock.count, 12);
+    }
+
+    #[test]
+    fn request_origin_roundtrips() {
+        let actor = ActorId::new();
+        let req = SyncRequest {
+            workspace_id: "demo".into(),
+            vector_clock: HashMap::new(),
+            origin: Some(actor),
+        };
+        let decoded = decode_request(&encode_request(&req).unwrap()).unwrap();
+        assert_eq!(decoded.origin, Some(actor));
+    }
+
+    #[test]
+    fn request_without_origin_omits_the_key_and_decodes_to_none() {
+        let req = SyncRequest {
+            workspace_id: "demo".into(),
+            vector_clock: HashMap::new(),
+            origin: None,
+        };
+        let encoded = encode_request(&req).unwrap();
+        let body = std::str::from_utf8(&encoded[4..]).unwrap();
+        assert!(!body.contains("origin"), "an old peer sees the old shape");
+        assert_eq!(decode_request(&encoded).unwrap().origin, None);
+    }
+
+    /// What an old peer sends: no `origin` key at all.
+    #[test]
+    fn request_from_an_old_peer_decodes_with_no_origin() {
+        let json = br#"{"workspace_id":"demo","vector_clock":{}}"#;
+        let req: SyncRequest = serde_json::from_slice(json).unwrap();
+        assert_eq!(req.workspace_id, "demo");
+        assert_eq!(req.origin, None);
+    }
+
+    /// What an old peer does with a new message: unknown keys are ignored,
+    /// because neither struct denies them.
+    #[test]
+    fn an_old_peers_shape_ignores_the_origin_key() {
+        #[derive(Deserialize)]
+        struct OldRequest {
+            workspace_id: String,
+        }
+        #[derive(Deserialize)]
+        struct OldResponse {
+            vector_clock: HashMap<ActorId, ActorClock>,
+        }
+        let req = SyncRequest {
+            workspace_id: "demo".into(),
+            vector_clock: HashMap::new(),
+            origin: Some(ActorId::new()),
+        };
+        let old: OldRequest = serde_json::from_slice(&encode_request(&req).unwrap()[4..]).unwrap();
+        assert_eq!(old.workspace_id, "demo");
+        let resp = SyncResponse {
+            vector_clock: HashMap::new(),
+            origin: Some(ActorId::new()),
+        };
+        let old: OldResponse =
+            serde_json::from_slice(&encode_response(&resp).unwrap()[4..]).unwrap();
+        assert!(old.vector_clock.is_empty());
+    }
+
+    #[test]
+    fn response_origin_roundtrips_and_is_optional() {
+        let actor = ActorId::new();
+        let with = SyncResponse {
+            vector_clock: HashMap::new(),
+            origin: Some(actor),
+        };
+        let decoded = decode_response(&encode_response(&with).unwrap()).unwrap();
+        assert_eq!(decoded.origin, Some(actor));
+        let without = SyncResponse {
+            vector_clock: HashMap::new(),
+            origin: None,
+        };
+        let encoded = encode_response(&without).unwrap();
+        assert!(!std::str::from_utf8(&encoded[4..]).unwrap().contains("origin"));
+        assert_eq!(decode_response(&encoded).unwrap().origin, None);
+        let old: SyncResponse = serde_json::from_slice(br#"{"vector_clock":{}}"#).unwrap();
+        assert_eq!(old.origin, None);
     }
 
     #[test]
@@ -217,7 +317,10 @@ mod tests {
                 count: 2000,
             },
         );
-        let resp = SyncResponse { vector_clock: vc };
+        let resp = SyncResponse {
+            vector_clock: vc,
+            origin: None,
+        };
         let encoded = encode_response(&resp).unwrap();
         let decoded = decode_response(&encoded).unwrap();
         let clock = decoded.vector_clock.get(&actor).unwrap();

@@ -379,6 +379,11 @@ What it gives you:
 - **Vector-clock delta sync, both directions.**
   On connect, each side exchanges a per-actor clock — max HLC plus a distinct-op count — and streams only the ops the other hasn't seen.
   The count is a gap detector: a peer holding fewer ops below its own watermark than the sender (an op arrived ahead of a pending backlog) gets that actor's full log resent, and the receiver deduplicates on ingest so nothing is applied twice.
+  **The one exception is the peer's own actor.**
+  Both the request and the response carry an optional `origin`, the sender's own actor id, and the selection sends nothing at all for the origin actor: no gap window and no ops above its watermark.
+  A device is the only writer of its own `ops-<actor>.jsonl` and refuses any op claiming its actor, so sending it that actor's ops can never make progress; before this, a device that had lost part of its own history (a data dir restored on a new machine) made every paired peer resend a 20,000-op window of it, every exchange, forever.
+  When that skip hides a gap, the log carries one warning per actor per process saying the peer is missing part of its own history and will not take it back over sync.
+  The field is additive (no ALPN bump): an old peer ignores it, and a message without it means "unknown", which keeps the old selection.
   This is the offline catch-up path: the op log (`ops-<actor>.jsonl`) *is* the buffer, so a device that was off for a week reconnects and pulls exactly the missing ops, no full resync.
 - **Transitive relay of ops.**
   Ops authored by actor C and received via peer B are stored locally as `ops-<C>.jsonl`.
