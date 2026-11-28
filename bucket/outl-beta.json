@@ -14,18 +14,18 @@
     "these blocks against the release build matrix and fails on a `$version`",
     "that got back in."
   ],
-  "version": "0.13.0-beta.323",
+  "version": "0.13.0-beta.325",
   "description": "Local-first outliner with CRDT sync: TUI, CLI and MCP server (beta channel, rebuilt on every push to main)",
   "homepage": "https://outl.app",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.323/outl-windows-x64.zip",
-      "hash": "97a1d384534b153d1a5efa3e54bf3b691d55632cad7bcf46a18b3dc5efc219de"
+      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.325/outl-windows-x64.zip",
+      "hash": "5946d3510218b8b8938d89fce051c013efb0651b4787a471eec0e228a12f4a89"
     },
     "arm64": {
-      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.323/outl-windows-arm64.zip",
-      "hash": "bf966e332345434217834dc4833291031972239880fc4e315720bc04710c6fe8"
+      "url": "https://github.com/outlmd/outl/releases/download/v0.13.0-beta.325/outl-windows-arm64.zip",
+      "hash": "8b513e6c452c484176b13c89857c98811ab722ce460643980208353836965b27"
     }
   },
   "bin": "outl.exe",
