@@ -35,10 +35,7 @@ fn the_peers_own_actor_is_not_gap_resent_but_other_gaps_still_are() {
     let (p, q) = (ActorId::new(), ActorId::new());
     let p_ops = write_log(&ops_dir, p, 12);
     let q_ops = write_log(&ops_dir, q, 12);
-    let peer_clock = HashMap::from([
-        (p, gapped_clock(&p_ops, 3)),
-        (q, gapped_clock(&q_ops, 3)),
-    ]);
+    let peer_clock = HashMap::from([(p, gapped_clock(&p_ops, 3)), (q, gapped_clock(&q_ops, 3))]);
 
     let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, Some(p)).expect("delta");
 
@@ -61,10 +58,7 @@ fn without_an_origin_the_same_gap_is_still_resent() {
     let (p, q) = (ActorId::new(), ActorId::new());
     let p_ops = write_log(&ops_dir, p, 12);
     let q_ops = write_log(&ops_dir, q, 12);
-    let peer_clock = HashMap::from([
-        (p, gapped_clock(&p_ops, 3)),
-        (q, gapped_clock(&q_ops, 3)),
-    ]);
+    let peer_clock = HashMap::from([(p, gapped_clock(&p_ops, 3)), (q, gapped_clock(&q_ops, 3))]);
 
     let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &peer_clock, None).expect("delta");
 
@@ -105,8 +99,8 @@ fn a_peer_with_no_clock_for_its_own_actor_is_not_sent_that_log() {
     write_log(&ops_dir, p, 5);
     let q_ops = write_log(&ops_dir, q, 5);
 
-    let sent = ops_missing_for(&ops_dir, &census(&ops_dir), &HashMap::new(), Some(p))
-        .expect("delta");
+    let sent =
+        ops_missing_for(&ops_dir, &census(&ops_dir), &HashMap::new(), Some(p)).expect("delta");
 
     assert_eq!(
         sent.iter().map(|op| op.ts).collect::<BTreeSet<_>>(),

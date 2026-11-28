@@ -65,7 +65,13 @@ pub(crate) fn ops_missing_for(
     peer_clock: &HashMap<ActorId, ActorClock>,
     peer_origin: Option<ActorId>,
 ) -> Result<Vec<LogOp>> {
-    ops_missing_for_capped(ops_dir, census, peer_clock, peer_origin, MAX_OPS_PER_EXCHANGE)
+    ops_missing_for_capped(
+        ops_dir,
+        census,
+        peer_clock,
+        peer_origin,
+        MAX_OPS_PER_EXCHANGE,
+    )
 }
 
 /// Say, once per actor per process, that a peer is short of its own log.

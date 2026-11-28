@@ -278,8 +278,8 @@ fn a_gap_resend_obeys_the_budget_so_the_frame_is_always_sendable() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5)
-        .expect("delta");
+    let sent =
+        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5).expect("delta");
     assert!(
         sent.len() <= 5,
         "a gap resend that cannot be framed is a repair that never runs"
@@ -312,8 +312,8 @@ fn the_window_opens_on_the_ops_the_peer_is_actually_missing() {
     .into_iter()
     .collect();
 
-    let sent = ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5)
-        .expect("delta");
+    let sent =
+        ops_missing_for_capped(&ops_dir, &census(&ops_dir), &peer_clock, None, 5).expect("delta");
     let first = sent.first().expect("a window").ts;
     assert_eq!(
         first, ops[20].ts,

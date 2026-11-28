@@ -295,7 +295,9 @@ mod tests {
             origin: None,
         };
         let encoded = encode_response(&without).unwrap();
-        assert!(!std::str::from_utf8(&encoded[4..]).unwrap().contains("origin"));
+        assert!(!std::str::from_utf8(&encoded[4..])
+            .unwrap()
+            .contains("origin"));
         assert_eq!(decode_response(&encoded).unwrap().origin, None);
         let old: SyncResponse = serde_json::from_slice(br#"{"vector_clock":{}}"#).unwrap();
         assert_eq!(old.origin, None);
